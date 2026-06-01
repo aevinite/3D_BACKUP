@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getStoredSession, getSessionState } from "@/lib/session";
 import { getSettings } from "@/lib/menu";
-import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { formatMoney, getCurrency, type CurrencyMeta } from "@/lib/format";
 
 interface SItem { id: string; title: string; qty: number; status: "received" | "preparing" | "served"; }
 interface SBill { subtotal: number; tax: number; total: number; }
@@ -58,7 +58,7 @@ export default function SessionTableBill() {
   }, []);
 
   if (!active) return null;
-  const show = (n: number) => (currency ? formatPrice(n, currency) : `$${n.toFixed(2)}`);
+  const show = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
   const served = items.filter((i) => i.status === "served").length;
 
   return (

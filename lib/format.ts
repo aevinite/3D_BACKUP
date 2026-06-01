@@ -103,12 +103,29 @@ const niceRound = (value: number, decimals: number): number => {
 
 // formatPrice converts a USD price to the user's chosen currency, rounds
 // it to a nice display value, and returns a string like "₹1,100" or "$12.99".
-export const formatPrice = (price: string | number, currency?: CurrencyMeta): string => {
+// The "confident" price as a USD number (rounds to .95 / .50 / .00). This is the
+// SINGLE source of truth for what a dish costs, so the menu, cart and bill all read
+// the same value, agree, and add up. The pretty rounding is applied once, here, in USD.
+export const prettyUsd = (price: string | number): number => {
+  const n = typeof price === "string" ? parseFloat(price) : price;
+  return niceRound(Number.isFinite(n) ? n : 0, 2);
+};
+
+// Menu/item PRICE: the confident USD price, converted to the chosen currency.
+// (USD display is identical to before; other currencies now mirror the USD price,
+// so the menu and the bill never disagree.)
+export const formatPrice = (price: string | number, currency?: CurrencyMeta): string =>
+  formatMoney(prettyUsd(price), currency);
+
+// formatMoney is for BILLS and TOTALS: it converts to the chosen currency and
+// rounds to that currency's decimals WITHOUT the "nice" menu-price rounding, so a
+// bill always adds up (subtotal + tax = total) and the guest sees what they pay.
+// Use formatPrice for menu/item prices; use formatMoney for anything summed.
+export const formatMoney = (price: string | number, currency?: CurrencyMeta): string => {
   const cur = currency || getCurrency();
   const n = typeof price === "string" ? parseFloat(price) : price;
-  if (!Number.isFinite(n)) return `${cur.symbol}0`;
-  const rounded = niceRound(n * cur.rate, cur.decimals);
-  const formatted = rounded.toLocaleString("en-US", {
+  const safe = Number.isFinite(n) ? n : 0;
+  const formatted = (safe * cur.rate).toLocaleString("en-US", {
     minimumFractionDigits: cur.decimals,
     maximumFractionDigits: cur.decimals,
   });

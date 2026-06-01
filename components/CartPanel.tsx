@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { formatMoney, prettyUsd, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 import { validateTable, flagTableInput } from "@/lib/table";
@@ -192,14 +192,14 @@ export default function CartPanel() {
     return () => clearInterval(iv);
   }, [open]);
 
-  const showPrice = (n: number) => (currency ? formatPrice(n, currency) : `$${n.toFixed(2)}`);
+  const showPrice = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
   // Orders shown live up top are hidden from the history list below, so the
   // same order never appears twice in the same tab.
   const liveIds = new Set(liveOrders.map((o) => o.id));
   const pastOrders = history.filter((h) => !liveIds.has(h.id));
   // Red dot on the Previous-orders tab: a live order whose floating strip was hidden.
   const hiddenLive = liveOrders.some((o) => o.stripHidden && !isFinalStatus(o.status));
-  const subtotal = cart.reduce((sum, it) => sum + parseFloat(it.price) * it.qty, 0);
+  const subtotal = cart.reduce((sum, it) => sum + prettyUsd(it.price) * it.qty, 0);
   const itemCount = cart.reduce((sum, it) => sum + it.qty, 0);
   const tax = subtotal * TAX_RATE;
   const total = subtotal + tax;
@@ -263,7 +263,7 @@ export default function CartPanel() {
     if (sessionsEnabled) {
       setPlacing(true);
       const allergiesS = [...declared, ...(otherAllergy.trim() ? [otherAllergy.trim()] : [])];
-      const itemsS = cart.map((it) => ({ id: it.id, title: it.title, price: parseFloat(it.price) || 0, qty: it.qty, options: it.options, removed: it.removed, note: it.note }));
+      const itemsS = cart.map((it) => ({ id: it.id, title: it.title, price: prettyUsd(it.price), qty: it.qty, options: it.options, removed: it.removed, note: it.note }));
       const trackS = cart.map((it) => ({ title: it.title, qty: it.qty }));
       const histS = cart.map((it) => ({ title: it.title, qty: it.qty, price: it.price }));
       const totalS = total, countS = itemCount;
@@ -522,7 +522,7 @@ export default function CartPanel() {
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                    <div className="cart-item-price">{showPrice(parseFloat(item.price) * item.qty)}</div>
+                    <div className="cart-item-price">{showPrice(prettyUsd(item.price) * item.qty)}</div>
                     <button type="button" className="remove-item" aria-label={`Remove ${item.title}`} onClick={() => removeFromCart(idx)} style={{ background: "transparent", border: "none", padding: "8px" }}>
                       <i className="fas fa-trash" style={{ fontSize: "18px" }}></i>
                     </button>

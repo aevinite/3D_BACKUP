@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { formatMoney, getCurrency, type CurrencyMeta } from "@/lib/format";
 import type { OptionGroup } from "@/lib/menu";
 import { allergenIcon, allergenLabel } from "@/lib/allergens";
 
@@ -90,7 +90,7 @@ export default function OrderConfirmModal() {
 
   if (!open || !item) return null;
 
-  const fmt = (n: number) => (currency ? formatPrice(n, currency) : `$${n.toFixed(2)}`);
+  const fmt = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
 
   // Chosen options as a flat list + the per-unit price (base + add-ons).
   const chosen: { group: string; label: string; price: number }[] = [];

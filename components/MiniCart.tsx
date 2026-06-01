@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { formatMoney, prettyUsd, getCurrency, type CurrencyMeta } from "@/lib/format";
 
 // A sticky bottom pill on phones: "🛍 N items · ₹X · View bill". Tapping opens
 // the cart. Hidden when the cart is empty, when the cart panel is open, and on
@@ -20,7 +20,7 @@ export default function MiniCart() {
       const arr = raw ? JSON.parse(raw) : [];
       const list = Array.isArray(arr) ? arr : [];
       setCount(list.reduce((s, it) => s + (it.qty || 1), 0));
-      setSubtotal(list.reduce((s, it) => s + (parseFloat(it.price) || 0) * (it.qty || 1), 0));
+      setSubtotal(list.reduce((s, it) => s + prettyUsd(it.price) * (it.qty || 1), 0));
     } catch {
       setCount(0);
       setSubtotal(0);
@@ -49,7 +49,7 @@ export default function MiniCart() {
   if (count === 0 || cartOpen) return null;
   if (pathname && pathname.startsWith("/view")) return null;
 
-  const price = currency ? formatPrice(subtotal, currency) : `$${subtotal.toFixed(2)}`;
+  const price = currency ? formatMoney(subtotal, currency) : `$${subtotal.toFixed(2)}`;
   return (
     <button
       type="button"

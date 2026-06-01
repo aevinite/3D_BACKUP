@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
 import { getOrderStatus, updateOrderTableNumber, type OrderStatus } from "@/lib/menu";
-import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { formatMoney, getCurrency, type CurrencyMeta } from "@/lib/format";
 import {
   STEPS,
   STATUS_COPY as COPY,
@@ -140,7 +140,7 @@ export default function OrderTracker() {
   const c = COPY[order.status];
   const stepIndex = STEPS.indexOf(order.status);
   const canEditTable = order.status === "received" || order.status === "preparing";
-  const showPrice = (n: number) => (currency ? formatPrice(n, currency) : `$${n.toFixed(2)}`);
+  const showPrice = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
 
   const openDetail = () => {
     setTableDraft(order.tableNumber || "");
