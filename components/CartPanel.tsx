@@ -61,6 +61,7 @@ export default function CartPanel() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [tableNumber, setTableNumber] = useState("");
   const [tableCount, setTableCount] = useState(0); // how many tables exist; 0 = no limit known
+  const [sessionsEnabled, setSessionsEnabled] = useState(false); // v2 dining-session system
   const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null);
   const [allergenMap, setAllergenMap] = useState<Record<string, string[]>>({});
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -122,7 +123,7 @@ export default function CartPanel() {
       .catch(() => {});
     // How many tables exist, so we can reject an out-of-range table number.
     getSettings()
-      .then((s) => setTableCount(s.tableCount))
+      .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); })
       .catch(() => {});
 
     const loadHistory = () => {
@@ -254,6 +255,45 @@ export default function CartPanel() {
       return;
     }
     const tableTrim = check.value;
+
+    // v2: when the dining-session system is ON, route the order through the
+    // SessionGate (location -> join -> OTP -> the server places it). On success
+    // we still record it locally so the existing tracker follows its status.
+    if (sessionsEnabled) {
+      setPlacing(true);
+      const allergiesS = [...declared, ...(otherAllergy.trim() ? [otherAllergy.trim()] : [])];
+      const itemsS = cart.map((it) => ({ id: it.id, title: it.title, price: parseFloat(it.price) || 0, qty: it.qty, options: it.options, removed: it.removed, note: it.note }));
+      const trackS = cart.map((it) => ({ title: it.title, qty: it.qty }));
+      const histS = cart.map((it) => ({ title: it.title, qty: it.qty, price: it.price }));
+      const totalS = total, countS = itemCount;
+      const onDone = (e: Event) => {
+        window.removeEventListener("lfh:session-done", onDone);
+        setPlacing(false);
+        const d = (e as CustomEvent).detail as { ok?: boolean; action?: string; orderId?: string };
+        if (!d?.ok || d.action !== "order" || !d.orderId) return; // the gate showed its own message
+        try {
+          const raw = localStorage.getItem("lfh_active_orders");
+          const arr = (() => { const p = raw ? JSON.parse(raw) : []; return Array.isArray(p) ? p : []; })();
+          arr.push({ id: d.orderId, tableNumber: tableTrim, total: totalS, itemCount: countS, items: trackS, status: "received", placedAt: Date.now() });
+          localStorage.setItem("lfh_active_orders", JSON.stringify(arr));
+          window.dispatchEvent(new Event("lfh:order-placed"));
+        } catch {}
+        try {
+          const rawH = localStorage.getItem("lfh_order_history");
+          const hist = (() => { const p = rawH ? JSON.parse(rawH) : []; return Array.isArray(p) ? p : []; })();
+          hist.unshift({ id: d.orderId, tableNumber: tableTrim, total: totalS, items: histS, placedAt: Date.now() });
+          localStorage.setItem("lfh_order_history", JSON.stringify(hist.slice(0, 50)));
+          setHistory(hist.slice(0, 50));
+        } catch {}
+        setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
+        window.dispatchEvent(new Event("lfh:cart-updated"));
+        window.dispatchEvent(new Event("lfh:close-all"));
+      };
+      window.addEventListener("lfh:session-done", onDone);
+      window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "order", table: tableTrim, payload: { items: itemsS, subtotal, tax, total, allergies: allergiesS } } }));
+      return;
+    }
+
     setPlacing(true);
     try {
       const allergies = [...declared, ...(otherAllergy.trim() ? [otherAllergy.trim()] : [])];

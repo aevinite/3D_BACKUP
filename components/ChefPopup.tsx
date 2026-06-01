@@ -8,6 +8,7 @@ export default function ChefPopup() {
   const [open, setOpen] = useState(false);
   const [tableNumber, setTableNumber] = useState("");
   const [tableCount, setTableCount] = useState(0); // how many tables exist; 0 = no limit known
+  const [sessionsEnabled, setSessionsEnabled] = useState(false); // v2 dining-session system
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
@@ -16,7 +17,7 @@ export default function ChefPopup() {
 
     // How many tables exist, so we can reject an out-of-range table number.
     getSettings()
-      .then((s) => setTableCount(s.tableCount))
+      .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); })
       .catch(() => {});
 
     window.addEventListener("lfh:chef-call", handleOpen);
@@ -43,6 +44,14 @@ export default function ChefPopup() {
     const check = validateTable(tableNumber, tableCount);
     if (!check.ok) {
       flagTableInput("chef-table", check.message!);
+      return;
+    }
+    // v2: when sessions are ON, route the waiter call through the SessionGate
+    // (location + session membership) instead of the open call.
+    if (sessionsEnabled) {
+      window.dispatchEvent(new Event("lfh:close-all"));
+      window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "call", table: check.value, payload: { reason } } }));
+      setTableNumber("");
       return;
     }
     setSending(true);
