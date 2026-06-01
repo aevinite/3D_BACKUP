@@ -209,6 +209,8 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 }
 .table-input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-glow); }
 .table-input-error { border-color: #ef4444 !important; box-shadow: 0 0 0 4px rgba(239,68,68,0.25) !important; animation: tableShake 0.4s; }
+/* note shown above the table field when it was pre-filled from a table's QR */
+.table-scanned-note { margin: 18px 0 -8px; text-align: center; font-size: 13px; font-weight: 600; color: var(--accent); line-height: 1.4; }
 /* quick service-request reasons in the "Need something?" popup */
 .chef-reasons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
 .chef-reason {

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { formatMoney, prettyUsd, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
-import { validateTable, flagTableInput } from "@/lib/table";
+import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
 import SessionTableBill from "@/components/SessionTableBill";
 import {
   STEPS,
@@ -61,6 +61,7 @@ export default function CartPanel() {
   const [open, setOpen] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [tableNumber, setTableNumber] = useState("");
+  const [scannedTable, setScannedTableState] = useState(""); // table from a QR deep-link, if any
   const [tableCount, setTableCount] = useState(0); // how many tables exist; 0 = no limit known
   const [sessionsEnabled, setSessionsEnabled] = useState(false); // v2 dining-session system
   const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null);
@@ -143,12 +144,21 @@ export default function CartPanel() {
       const d = JSON.parse(localStorage.getItem("lfh_declared") || "[]");
       if (Array.isArray(d) && d.length) setDeclared(d);
     } catch {}
+    // Pre-fill the table from a scanned QR (?table=N stored in lib/table). Only
+    // fills an empty field, so it never clobbers what the guest typed.
+    const prefillScanned = () => {
+      const scanned = getScannedTable();
+      setScannedTableState(scanned);
+      if (scanned) setTableNumber((cur) => cur || scanned);
+    };
+    prefillScanned();
     const handleOpen = () => {
-      setOpen(true); loadCart(); loadHistory(); loadLive(); setShowHistory(false);
+      setOpen(true); loadCart(); loadHistory(); loadLive(); setShowHistory(false); prefillScanned();
       // re-read settings on open so a freshly-toggled sessions mode is always respected
       getSettings().then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
     };
     const handleClose = () => setOpen(false);
+    const handleScanned = prefillScanned;
     const handleCartUpdated = loadCart;
     const handleCurrency = () => setCurrencyState(getCurrency());
     // Re-read live orders whenever one is placed or its status changes.
@@ -159,6 +169,7 @@ export default function CartPanel() {
     };
     window.addEventListener("lfh:open-cart", handleOpen);
     window.addEventListener("lfh:close-all", handleClose);
+    window.addEventListener("lfh:table-scanned", handleScanned);
     window.addEventListener("lfh:cart-updated", handleCartUpdated);
     window.addEventListener("lfh:currency-changed", handleCurrency);
     window.addEventListener("lfh:avoid-all", handleAvoidAll);
@@ -169,6 +180,7 @@ export default function CartPanel() {
       window.removeEventListener("lfh:avoid-all", handleAvoidAll);
       window.removeEventListener("lfh:open-cart", handleOpen);
       window.removeEventListener("lfh:close-all", handleClose);
+      window.removeEventListener("lfh:table-scanned", handleScanned);
       window.removeEventListener("lfh:cart-updated", handleCartUpdated);
       window.removeEventListener("lfh:currency-changed", handleCurrency);
       window.removeEventListener("lfh:order-placed", handleOrdersChanged);
@@ -598,6 +610,9 @@ export default function CartPanel() {
               )}
             </div>
 
+            {scannedTable && tableNumber === scannedTable && (
+              <div className="table-scanned-note">📍 Table {scannedTable} — from your table&apos;s QR. Tap to change if that&apos;s not right.</div>
+            )}
             <input
               type="text" inputMode="numeric" pattern="[0-9]*"
               id="cart-table" className="table-input" placeholder="Enter Table Number (required)"

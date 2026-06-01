@@ -44,3 +44,25 @@ export function flagTableInput(inputId: string, message: string) {
   el?.classList.add("table-input-error");
   setTimeout(() => el?.classList.remove("table-input-error"), 1500);
 }
+
+// ── "scanned" table from a per-table QR ────────────────────────────────────
+// Each table gets a sticker linking to `/menu?table=N`. When the guest opens
+// that link, the menu page stores N here, and the cart + chef pre-fill from it
+// so nobody has to type their table. It stays editable (a QR can be mis-scanned
+// or shared), and clears when the guest scans a different table.
+export const SCANNED_TABLE_KEY = "lfh_table";
+
+export function getScannedTable(): string {
+  try {
+    return localStorage.getItem(SCANNED_TABLE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function setScannedTable(value: string) {
+  try {
+    if (value) localStorage.setItem(SCANNED_TABLE_KEY, value);
+    else localStorage.removeItem(SCANNED_TABLE_KEY);
+  } catch {}
+}

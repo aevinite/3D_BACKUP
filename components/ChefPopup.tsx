@@ -2,18 +2,26 @@
 
 import { useEffect, useState } from "react";
 import { callWaiter, getSettings } from "@/lib/menu";
-import { validateTable, flagTableInput } from "@/lib/table";
+import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
 
 export default function ChefPopup() {
   const [open, setOpen] = useState(false);
   const [tableNumber, setTableNumber] = useState("");
+  const [scannedTable, setScannedTableState] = useState(""); // table from a QR deep-link, if any
   const [tableCount, setTableCount] = useState(0); // how many tables exist; 0 = no limit known
   const [sessionsEnabled, setSessionsEnabled] = useState(false); // v2 dining-session system
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
+    // Pre-fill the table from a scanned QR (?table=N). Only fills an empty field.
+    const prefillScanned = () => {
+      const scanned = getScannedTable();
+      setScannedTableState(scanned);
+      if (scanned) setTableNumber((cur) => cur || scanned);
+    };
+    prefillScanned();
     const handleOpen = () => {
-      setOpen(true);
+      setOpen(true); prefillScanned();
       // re-read settings on open so a freshly-toggled sessions mode is always respected
       getSettings().then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
     };
@@ -26,10 +34,12 @@ export default function ChefPopup() {
 
     window.addEventListener("lfh:chef-call", handleOpen);
     window.addEventListener("lfh:close-all", handleClose);
+    window.addEventListener("lfh:table-scanned", prefillScanned);
 
     return () => {
       window.removeEventListener("lfh:chef-call", handleOpen);
       window.removeEventListener("lfh:close-all", handleClose);
+      window.removeEventListener("lfh:table-scanned", prefillScanned);
     };
   }, []);
 
@@ -90,6 +100,9 @@ export default function ChefPopup() {
         <p style={{ color: "var(--muted)", fontSize: "14px", margin: "0 0 16px" }}>
           Enter your table number, then tap what you need
         </p>
+        {scannedTable && tableNumber === scannedTable && (
+          <div className="table-scanned-note">📍 Table {scannedTable} — from your table&apos;s QR</div>
+        )}
         <input
           type="text"
           inputMode="numeric"

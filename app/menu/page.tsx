@@ -14,6 +14,7 @@ import {
   type Category,
 } from "@/lib/menu";
 import { useTranslation, useLanguage } from "@/lib/i18n";
+import { setScannedTable } from "@/lib/table";
 
 // The card list works with the full MenuItem shape from the data layer.
 type FoodItem = MenuItem;
@@ -48,6 +49,22 @@ export default function MenuPage() {
   // Only show skeletons if loading is actually slow — avoids a flash on fast /
   // cached loads where the data is ready almost immediately.
   const [showSkeleton, setShowSkeleton] = useState(false);
+
+  // QR deep-link: a table's sticker opens /menu?table=N. Capture it once (also
+  // accept ?t=N) so the cart + chef can pre-fill the table — the guest never
+  // types it. Reading window.location avoids needing a useSearchParams Suspense
+  // boundary. Stays editable downstream in case a sticker was mis-scanned.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const raw = params.get("table") || params.get("t");
+      const digits = (raw || "").replace(/\D/g, "");
+      if (digits) {
+        setScannedTable(digits);
+        window.dispatchEvent(new Event("lfh:table-scanned"));
+      }
+    } catch {}
+  }, []);
 
   // Category bar — the DB categories, then a curated "Chef's Special" tab
   // (backed by the chef-special tag, not a real category), and a "Favorites"
