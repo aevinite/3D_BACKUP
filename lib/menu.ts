@@ -203,6 +203,14 @@ export interface Settings {
   bubblesEnabled: boolean;
   serviceMode: boolean;
   tableCount: number; // how many tables exist; 0 = unknown (don't enforce an upper bound)
+  // v2 dining-session system (all editor-configurable). sessionsEnabled OFF =>
+  // the app behaves exactly like today (no session gating).
+  sessionsEnabled: boolean;
+  requireLocation: boolean;
+  requireOtp: boolean;
+  geoLat: number | null;   // café centre; null => location check bypassed (stub)
+  geoLng: number | null;
+  geoRadiusM: number;      // how far from the centre still counts as "at the café"
 }
 export async function getSettings(): Promise<Settings> {
   const { data, error } = await supabase
@@ -211,12 +219,19 @@ export async function getSettings(): Promise<Settings> {
     .eq("id", "site")
     .maybeSingle();
   if (error) throw new Error(`Failed to load settings: ${error.message}`);
+  const num = (v: unknown): number | null => (v === null || v === undefined || v === "" || isNaN(Number(v)) ? null : Number(v));
   return {
     bubblesEnabled: data ? data.bubbles_enabled !== false : true,
     serviceMode: data ? data.service_mode === true : false,
     // Number(...) || 0 so a missing/NaN value disables the upper-bound check
     // rather than blocking every order.
     tableCount: data ? Number(data.table_count) || 0 : 0,
+    sessionsEnabled: data ? data.sessions_enabled === true : false,
+    requireLocation: data ? data.require_location !== false : true,
+    requireOtp: data ? data.require_otp !== false : true,
+    geoLat: data ? num(data.geo_lat) : null,
+    geoLng: data ? num(data.geo_lng) : null,
+    geoRadiusM: data ? Number(data.geo_radius_m) || 250 : 250,
   };
 }
 
