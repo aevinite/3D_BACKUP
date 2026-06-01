@@ -5,6 +5,7 @@ import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 import { validateTable, flagTableInput } from "@/lib/table";
+import SessionTableBill from "@/components/SessionTableBill";
 import {
   STEPS,
   STATUS_COPY,
@@ -397,6 +398,7 @@ export default function CartPanel() {
 
         {showHistory ? (
           <div className="order-history">
+            <SessionTableBill />
             {liveOrders.length > 0 && (
               <div className="live-orders">
                 <div className="live-orders-head">

@@ -658,6 +658,23 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 .bill-rows { margin: 4px 0 14px; }
 .bill-line { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); padding: 4px 0; }
 .bill-line.grand { color: var(--text); font-weight: 700; font-size: 16px; border-top: 1px solid rgba(212,165,116,0.2); margin-top: 6px; padding-top: 10px; }
+
+/* Live shared table bill (v2 dining sessions) — shown in the cart's Previous-orders tab */
+.stb { border: 1px solid rgba(212,165,116,0.34); border-radius: 14px; padding: 14px; margin-bottom: 18px; background: rgba(212,165,116,0.06); }
+.stb-head { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text); }
+.stb-dot { width: 9px; height: 9px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 0 0 rgba(74,222,128,0.6); animation: livePulse 1.6s ease-out infinite; }
+.stb-members { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: none; letter-spacing: 0; }
+.stb-empty { font-size: 13px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+.stb-progress { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.stb-items { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.stb-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--text); }
+.stb-item-name { min-width: 0; }
+.stb-qty { color: var(--muted); }
+.stb-pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.stb-pill.received { background: rgba(212,165,116,0.2); color: #d4a574; }
+.stb-pill.preparing { background: rgba(79,157,255,0.18); color: #4f9dff; }
+.stb-pill.served { background: rgba(74,222,128,0.18); color: #4ade80; }
+.stb-bill { margin-top: 14px; }
 .filter-chip {
   padding: 6px 10px;
   min-width: 48px;
