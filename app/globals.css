@@ -914,6 +914,37 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 @keyframes favHintIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .fav-hint { animation: none; } }
 
+/* ── v2 dining-session screens (SessionGate) ── */
+.sg-overlay {
+  position: fixed; inset: 0; z-index: 7000;
+  display: flex; align-items: center; justify-content: center; padding: 22px;
+  background: rgba(15,8,5,0.6); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  animation: favHintIn .2s ease;
+}
+.sg-box {
+  position: relative; width: min(380px, 100%); text-align: center; padding: 30px 26px 24px;
+  background: var(--card); color: var(--text); border: var(--border); border-radius: 22px;
+  box-shadow: 0 30px 70px rgba(0,0,0,0.5); animation: sgPop .26s cubic-bezier(0.22,1,0.36,1);
+}
+@keyframes sgPop { from { opacity: 0; transform: scale(0.94) translateY(8px); } to { opacity: 1; transform: none; } }
+.sg-x { position: absolute; top: 12px; right: 14px; background: transparent; border: none; color: var(--muted); font-size: 15px; cursor: pointer; }
+.sg-emoji { font-size: 34px; margin-bottom: 10px; }
+.sg-title { font-size: 19px; font-weight: 800; color: var(--text); margin: 0 0 8px; }
+.sg-sub { font-size: 14px; color: var(--muted); line-height: 1.5; margin: 0 0 18px; }
+.sg-input { width: 100%; box-sizing: border-box; margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; border: var(--border); background: rgba(128,90,60,0.08); color: var(--text); font-size: 15px; font-family: inherit; }
+.sg-input:focus { outline: none; border-color: var(--accent); }
+.sg-actions { display: flex; gap: 10px; }
+.sg-btn { flex: 1; padding: 13px 16px; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; border: 1px solid transparent; transition: transform .12s var(--ease), filter .15s var(--ease); }
+.sg-btn:active { transform: translateY(1px); }
+.sg-btn.gold { background: var(--accent-grad); color: #2a1d0c; }
+.sg-btn.gold:hover { filter: brightness(1.05); }
+.sg-btn.ghost { background: transparent; color: var(--text); border: var(--border); }
+.sg-links { display: flex; justify-content: center; gap: 16px; margin-top: 14px; }
+.sg-link { background: none; border: none; color: var(--muted); font-size: 13px; text-decoration: underline; cursor: pointer; }
+.sg-link:hover { color: var(--text); }
+.sg-dev { font-size: 12px; color: var(--muted); margin: 4px 0 10px; }
+.sg-dev b { color: var(--accent); letter-spacing: 1px; }
+
 /* ── Notifications: the café "order ticket" (centred, torn top/bottom) ── */
 .toast-stack {
   position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
