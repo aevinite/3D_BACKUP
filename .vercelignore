@@ -1,0 +1,3 @@
+# The menu editor is a PRIVATE local tool. It must never be deployed — it uses
+# the Supabase service-role key. Keep it out of the Vercel build entirely.
+editor

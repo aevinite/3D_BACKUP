@@ -1,0 +1,57 @@
+{
+  "modelUrl": "/models/croissant_small.glb",
+  "smallUrl": "/models/croissant_small.glb",
+  "optimizedUrl": "/models/croissant-optimized.glb",
+  "title": "Croissant Sandwich",
+  "subtitle": "Freshly Made · Signature Item",
+  "stats": {
+    "calories": "480",
+    "protein": "24g",
+    "carbs": "42g",
+    "price": "₹320"
+  },
+  "tags": [
+    {
+      "id": "croissant",
+      "emoji": "🥐",
+      "name": "Croissant",
+      "b1": "Rich in Carbs",
+      "b2": "Buttery & Flaky",
+      "x": -0.1438,
+      "y": 0.1532,
+      "z": -0.1388,
+      "nx": 0,
+      "ny": 1,
+      "nz": 0,
+      "tagPosition": "-0.1699 0.3578 -0.1457"
+    },
+    {
+      "id": "sauce",
+      "emoji": "🫙",
+      "name": "Sauce",
+      "b1": "Creamy texture",
+      "b2": "Special Blend",
+      "x": 0,
+      "y": -0.0382,
+      "z": 0.2754,
+      "nx": 0,
+      "ny": -0.2,
+      "nz": 1,
+      "tagPosition": "-0.2427 0.2268 0.2889"
+    },
+    {
+      "id": "tag101",
+      "emoji": "🥗",
+      "name": "Salad",
+      "b1": "Light & healthy",
+      "b2": "Fresh & crunchy",
+      "x": 0.2545,
+      "y": -0.0278,
+      "z": -0.0008,
+      "nx": 0,
+      "ny": 1,
+      "nz": 0,
+      "tagPosition": "0.4853 0.2463 0.0000"
+    }
+  ]
+}
