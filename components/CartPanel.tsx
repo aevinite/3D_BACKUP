@@ -143,7 +143,11 @@ export default function CartPanel() {
       const d = JSON.parse(localStorage.getItem("lfh_declared") || "[]");
       if (Array.isArray(d) && d.length) setDeclared(d);
     } catch {}
-    const handleOpen = () => { setOpen(true); loadCart(); loadHistory(); loadLive(); setShowHistory(false); };
+    const handleOpen = () => {
+      setOpen(true); loadCart(); loadHistory(); loadLive(); setShowHistory(false);
+      // re-read settings on open so a freshly-toggled sessions mode is always respected
+      getSettings().then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
+    };
     const handleClose = () => setOpen(false);
     const handleCartUpdated = loadCart;
     const handleCurrency = () => setCurrencyState(getCurrency());

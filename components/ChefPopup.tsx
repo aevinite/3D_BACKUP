@@ -12,7 +12,11 @@ export default function ChefPopup() {
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    const handleOpen = () => setOpen(true);
+    const handleOpen = () => {
+      setOpen(true);
+      // re-read settings on open so a freshly-toggled sessions mode is always respected
+      getSettings().then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
+    };
     const handleClose = () => setOpen(false);
 
     // How many tables exist, so we can reject an out-of-range table number.
