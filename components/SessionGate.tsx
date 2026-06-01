@@ -125,6 +125,7 @@ export default function SessionGate() {
     if (!r.ok) { toast(r.reason === "blocked" ? "This table is blocked" : "Couldn't join", "table", "error"); close(); return; }
     const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
     sess.current = s; storeSession(s);
+    window.dispatchEvent(new Event("lfh:session-changed")); // wake the owner-approve poller if we just became owner
     if (r.approved) await ensureReadyAndAct();
     else { setStep("waiting_approval"); startApprovalPoll(); }
   };

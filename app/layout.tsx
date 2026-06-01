@@ -8,6 +8,7 @@ import MiniCart from "@/components/MiniCart";
 import CartPanel from "@/components/CartPanel";
 import ToastHost from "@/components/ToastHost";
 import SessionGate from "@/components/SessionGate";
+import SessionOwner from "@/components/SessionOwner";
 
 export const metadata: Metadata = {
   title: "Little French House - 4D Menu",
@@ -49,6 +50,7 @@ export default function RootLayout({
         <CartPanel />
         <ToastHost />
         <SessionGate />
+        <SessionOwner />
       </body>
     </html>
   );
