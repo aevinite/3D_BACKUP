@@ -46,9 +46,21 @@ export default function SessionGate() {
   const pending = useRef<Pending | null>(null);
   const sess = useRef<{ table: string; token: string; memberId: string; role: "owner" | "guest" } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const settled = useRef(false); // whether we've already reported how this action ended
 
   const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
-  const close = useCallback(() => { stopPoll(); setOpen(false); setStep("idle"); setName(""); setPhone(""); setCode(""); setDevCode(null); setNote(""); }, []);
+  // Report how this action ended to the cart/chef — exactly once. If the sheet is
+  // dismissed before the action completes (table not open, request sent, X tapped),
+  // we send a cancel so the caller's button never gets stuck on "Placing…".
+  const fireDone = (detail: Record<string, unknown>) => {
+    if (settled.current) return;
+    settled.current = true;
+    window.dispatchEvent(new CustomEvent("lfh:session-done", { detail }));
+  };
+  const close = useCallback(() => {
+    fireDone({ ok: false, reason: "cancelled" });
+    stopPoll(); setOpen(false); setStep("idle"); setName(""); setPhone(""); setCode(""); setDevCode(null); setNote(""); pending.current = null;
+  }, []);
 
   // ── perform the queued action once the session is fully ready ──────────────
   const act = useCallback(async () => {
@@ -58,11 +70,11 @@ export default function SessionGate() {
     if (p.action === "order") {
       const pl = p.payload as { items: unknown[]; subtotal: number; tax: number; total: number; allergies: string[] };
       const r = await placeSessionOrder(s.token, pl.items, pl.subtotal, pl.tax, pl.total, pl.allergies || []);
-      if (r.ok) { window.dispatchEvent(new CustomEvent("lfh:session-done", { detail: { ok: true, action: "order", orderId: r.order_id } })); toast("Order placed", "to the kitchen"); close(); }
-      else { setStep("working"); toast("Couldn't place order", "order", "error"); window.dispatchEvent(new CustomEvent("lfh:session-done", { detail: { ok: false, reason: r.reason } })); close(); }
+      if (r.ok) { fireDone({ ok: true, action: "order", orderId: r.order_id }); toast("Order placed", "to the kitchen"); close(); }
+      else { setStep("working"); toast("Couldn't place order", "order", "error"); fireDone({ ok: false, reason: r.reason }); close(); }
     } else {
       const r = await callWaiterSession(s.token, (p.payload?.reason as string) || "");
-      if (r.ok) { window.dispatchEvent(new CustomEvent("lfh:session-done", { detail: { ok: true, action: "call" } })); toast("On our way!", "service"); close(); }
+      if (r.ok) { fireDone({ ok: true, action: "call" }); toast("On our way!", "service"); close(); }
       else { toast("Couldn't reach staff", "service", "error"); close(); }
     }
   }, [close]);
@@ -106,6 +118,7 @@ export default function SessionGate() {
       const detail = (e as CustomEvent).detail as Pending;
       if (!detail?.action || !detail?.table) return;
       pending.current = detail;
+      settled.current = false;
       settingsRef.current = settingsRef.current || (await getSettings());
       setOpen(true);
       // reuse an existing session for this table if we have one
