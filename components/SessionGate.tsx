@@ -26,7 +26,7 @@ import {
 
 type Step =
   | "idle" | "locating" | "location_help" | "join" | "joining"
-  | "otp" | "waiting_approval" | "not_open" | "request_sent" | "working";
+  | "otp" | "waiting_approval" | "not_open" | "request_sent" | "working" | "blocked";
 
 interface Pending { action: "order" | "call"; table: string; payload: Record<string, unknown>; }
 
@@ -70,10 +70,12 @@ export default function SessionGate() {
     if (p.action === "order") {
       const pl = p.payload as { items: unknown[]; subtotal: number; tax: number; total: number; allergies: string[] };
       const r = await placeSessionOrder(s.token, pl.items, pl.subtotal, pl.tax, pl.total, pl.allergies || []);
+      if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked" }); setStep("blocked"); return; }
       if (r.ok) { fireDone({ ok: true, action: "order", orderId: r.order_id }); toast("Order placed", "to the kitchen"); close(); }
       else { setStep("working"); toast("Couldn't place order", "order", "error"); fireDone({ ok: false, reason: r.reason }); close(); }
     } else {
       const r = await callWaiterSession(s.token, (p.payload?.reason as string) || "");
+      if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked" }); setStep("blocked"); return; }
       if (r.ok) { fireDone({ ok: true, action: "call" }); toast("On our way!", "service"); close(); }
       else { toast("Couldn't reach staff", "service", "error"); close(); }
     }
@@ -135,7 +137,8 @@ export default function SessionGate() {
     const p = pending.current!; setStep("joining");
     const r = await joinSession(p.table, name.trim() || null, true);
     if (r.reason === "no_open_session") { setStep("not_open"); return; }
-    if (!r.ok) { toast(r.reason === "blocked" ? "This table is blocked" : "Couldn't join", "table", "error"); close(); return; }
+    if (r.reason === "blocked") { setStep("blocked"); return; }
+    if (!r.ok) { toast("Couldn't join", "table", "error"); close(); return; }
     const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
     sess.current = s; storeSession(s);
     window.dispatchEvent(new Event("lfh:session-changed")); // wake the owner-approve poller if we just became owner
@@ -214,6 +217,12 @@ export default function SessionGate() {
           <div className="sg-emoji">✅</div><h3 className="sg-title">Request sent</h3>
           <p className="sg-sub">A staff member will be with you shortly — it usually takes about 5 minutes. You can keep browsing the menu meanwhile.</p>
           <div className="sg-actions"><button className="sg-btn gold" onClick={close}>Okay</button></div>
+        </>)}
+
+        {step === "blocked" && (<>
+          <div className="sg-emoji">🚫</div><h3 className="sg-title">Access blocked</h3>
+          <p className="sg-sub">This table or number has been blocked by the restaurant. Please speak to a staff member if you think this is a mistake.</p>
+          <div className="sg-actions"><button className="sg-btn ghost" onClick={close}>Close</button></div>
         </>)}
 
         {step === "otp" && (<>
