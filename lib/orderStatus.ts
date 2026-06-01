@@ -18,7 +18,7 @@ export const STATUS_COPY: Record<OrderStatus, { label: string; sub: string; icon
 // --- Live order tracking (localStorage) -----------------------------------
 
 export const ACTIVE_ORDERS_KEY = "lfh_active_orders";
-export const POLL_MS = 3000; // how often a guest re-checks their order's status (lowered from 8s)
+export const POLL_MS = 1500; // how often a guest re-checks their order's status (snappy near-real-time)
 export const SERVED_LINGER_MS = 60 * 1000; // a served/cancelled card lingers one minute, then goes
 export const MAX_AGE_MS = 3 * 60 * 60 * 1000; // stop following an order after 3h
 

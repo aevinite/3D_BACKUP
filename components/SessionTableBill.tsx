@@ -52,7 +52,7 @@ export default function SessionTableBill() {
         setMembers(Array.isArray(st.members) ? (st.members as unknown[]).length : 0);
       };
       poll();
-      iv = setInterval(poll, 5000);
+      iv = setInterval(poll, 2000);
     })();
     return () => { alive = false; if (iv) clearInterval(iv); };
   }, []);

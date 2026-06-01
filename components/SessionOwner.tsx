@@ -20,7 +20,7 @@ import {
 
 interface PendingMember { id: string; name: string | null; }
 
-const POLL_MS = 5000;
+const POLL_MS = 1500; // owner sees "X wants to join" within ~1.5s
 const SNOOZE_MS = 20000; // "Later" hides the prompt briefly so the owner isn't trapped
 
 export default function SessionOwner() {

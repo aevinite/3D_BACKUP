@@ -102,7 +102,7 @@ export default function SessionGate() {
       const state = await getSessionState(s.token);
       const member = state.member as { approved?: boolean } | undefined;
       if (state.ok && member?.approved) { stopPoll(); ensureReadyAndAct(); }
-    }, 3000);
+    }, 1200); // poll fast so the guest moves on within ~1s of the owner approving
   }, [ensureReadyAndAct]);
 
   // ── kick off the flow for a queued action ──────────────────────────────────
