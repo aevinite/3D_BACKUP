@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { callWaiter, getSettings } from "@/lib/menu";
 import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
+import { getStoredSession } from "@/lib/session";
 
 export default function ChefPopup() {
   const [open, setOpen] = useState(false);
   const [tableNumber, setTableNumber] = useState("");
   const [scannedTable, setScannedTableState] = useState(""); // table from a QR deep-link, if any
+  const [lockedTable, setLockedTable] = useState<string | null>(null); // when in a session, locked to that table
   const [tableCount, setTableCount] = useState(0); // how many tables exist; 0 = no limit known
   const [sessionsEnabled, setSessionsEnabled] = useState(false); // v2 dining-session system
   const [sending, setSending] = useState(false);
@@ -19,9 +21,16 @@ export default function ChefPopup() {
       setScannedTableState(scanned);
       if (scanned) setTableNumber((cur) => cur || scanned);
     };
+    // Locked to your session's table while you're seated.
+    const syncSession = () => {
+      const ss = getStoredSession();
+      setLockedTable(ss?.table || null);
+      if (ss?.table) setTableNumber(ss.table);
+    };
     prefillScanned();
+    syncSession();
     const handleOpen = () => {
-      setOpen(true); prefillScanned();
+      setOpen(true); prefillScanned(); syncSession();
       // re-read settings on open so a freshly-toggled sessions mode is always respected
       getSettings().then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
     };
@@ -35,11 +44,13 @@ export default function ChefPopup() {
     window.addEventListener("lfh:chef-call", handleOpen);
     window.addEventListener("lfh:close-all", handleClose);
     window.addEventListener("lfh:table-scanned", prefillScanned);
+    window.addEventListener("lfh:session-changed", syncSession);
 
     return () => {
       window.removeEventListener("lfh:chef-call", handleOpen);
       window.removeEventListener("lfh:close-all", handleClose);
       window.removeEventListener("lfh:table-scanned", prefillScanned);
+      window.removeEventListener("lfh:session-changed", syncSession);
     };
   }, []);
 
@@ -100,9 +111,11 @@ export default function ChefPopup() {
         <p style={{ color: "var(--muted)", fontSize: "14px", margin: "0 0 16px" }}>
           Enter your table number, then tap what you need
         </p>
-        {scannedTable && tableNumber === scannedTable && (
+        {lockedTable ? (
+          <div className="table-scanned-note">🔒 You&apos;re at table {lockedTable} — leave the table to use another</div>
+        ) : (scannedTable && tableNumber === scannedTable && (
           <div className="table-scanned-note">📍 Table {scannedTable} — from your table&apos;s QR</div>
-        )}
+        ))}
         <input
           type="text"
           inputMode="numeric"
@@ -110,8 +123,8 @@ export default function ChefPopup() {
           id="chef-table"
           className="table-input"
           placeholder="Table No."
-          value={tableNumber}
-          maxLength={4}
+          value={lockedTable || tableNumber}
+          maxLength={4} disabled={!!lockedTable} readOnly={!!lockedTable}
           // Keep only digits so letters/symbols can never reach the field.
           onChange={(e) => setTableNumber(e.target.value.replace(/\D/g, ""))}
         />

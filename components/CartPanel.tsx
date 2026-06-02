@@ -5,6 +5,7 @@ import { formatMoney, prettyUsd, getCurrency, type CurrencyMeta } from "@/lib/fo
 import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
+import { getStoredSession } from "@/lib/session";
 import SessionTableBill from "@/components/SessionTableBill";
 import {
   STEPS,
@@ -62,6 +63,7 @@ export default function CartPanel() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [tableNumber, setTableNumber] = useState("");
   const [scannedTable, setScannedTableState] = useState(""); // table from a QR deep-link, if any
+  const [lockedTable, setLockedTable] = useState<string | null>(null); // when in a session you can ONLY order for that table
   const [tableCount, setTableCount] = useState(0); // how many tables exist; 0 = no limit known
   const [sessionsEnabled, setSessionsEnabled] = useState(false); // v2 dining-session system
   const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null);
@@ -151,9 +153,17 @@ export default function CartPanel() {
       setScannedTableState(scanned);
       if (scanned) setTableNumber((cur) => cur || scanned);
     };
+    // While you hold a session, lock the table to it — you can only order for the
+    // table you're seated at (leave the table to order elsewhere).
+    const syncSession = () => {
+      const ss = getStoredSession();
+      setLockedTable(ss?.table || null);
+      if (ss?.table) setTableNumber(ss.table);
+    };
     prefillScanned();
+    syncSession();
     const handleOpen = () => {
-      setOpen(true); loadCart(); loadHistory(); loadLive(); setShowHistory(false); prefillScanned();
+      setOpen(true); loadCart(); loadHistory(); loadLive(); setShowHistory(false); prefillScanned(); syncSession();
       // re-read settings on open so a freshly-toggled sessions mode is always respected
       getSettings().then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
     };
@@ -170,6 +180,7 @@ export default function CartPanel() {
     window.addEventListener("lfh:open-cart", handleOpen);
     window.addEventListener("lfh:close-all", handleClose);
     window.addEventListener("lfh:table-scanned", handleScanned);
+    window.addEventListener("lfh:session-changed", syncSession);
     window.addEventListener("lfh:cart-updated", handleCartUpdated);
     window.addEventListener("lfh:currency-changed", handleCurrency);
     window.addEventListener("lfh:avoid-all", handleAvoidAll);
@@ -181,6 +192,7 @@ export default function CartPanel() {
       window.removeEventListener("lfh:open-cart", handleOpen);
       window.removeEventListener("lfh:close-all", handleClose);
       window.removeEventListener("lfh:table-scanned", handleScanned);
+      window.removeEventListener("lfh:session-changed", syncSession);
       window.removeEventListener("lfh:cart-updated", handleCartUpdated);
       window.removeEventListener("lfh:currency-changed", handleCurrency);
       window.removeEventListener("lfh:order-placed", handleOrdersChanged);
@@ -610,14 +622,16 @@ export default function CartPanel() {
               )}
             </div>
 
-            {scannedTable && tableNumber === scannedTable && (
+            {lockedTable ? (
+              <div className="table-scanned-note">🔒 You&apos;re at table {lockedTable} — orders go here. Leave the table (top-right) to order elsewhere.</div>
+            ) : (scannedTable && tableNumber === scannedTable && (
               <div className="table-scanned-note">📍 Table {scannedTable} — from your table&apos;s QR. Tap to change if that&apos;s not right.</div>
-            )}
+            ))}
             <input
               type="text" inputMode="numeric" pattern="[0-9]*"
               id="cart-table" className="table-input" placeholder="Enter Table Number (required)"
-              aria-label="Table number" value={tableNumber}
-              maxLength={4}
+              aria-label="Table number" value={lockedTable || tableNumber}
+              maxLength={4} disabled={!!lockedTable} readOnly={!!lockedTable}
               // Keep only digits so letters/symbols can never reach the field.
               onChange={(e) => setTableNumber(e.target.value.replace(/\D/g, ""))}
             />
