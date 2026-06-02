@@ -44,7 +44,9 @@ export default function SessionOwner() {
     tokenRef.current = token;
     if (!token) { setPending([]); return; }
     const state = await getSessionState(token);
-    if (!state.ok) { clearStoredSession(); setPending([]); return; } // token gone → forget it
+    // Only forget the token if it's CONFIRMED dead — a network blip (ok:false with
+    // any other reason) must not disconnect the head mid-meal.
+    if (!state.ok) { if (state.reason === "invalid_token") { clearStoredSession(); setPending([]); } return; }
     const session = state.session as { table_number?: string; status?: string } | undefined;
     if (session?.status !== "open") { clearStoredSession(); setPending([]); return; } // meal ended
     setTable(session?.table_number || "");

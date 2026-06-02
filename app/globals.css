@@ -2755,6 +2755,75 @@ a:focus:not(:focus-visible) { outline: none; }
   color: var(--accent);
 }
 
+/* --- SESSION STATUS WIDGET (draggable "you're on table N" card) ---
+   Uses the site's theme tokens so it adapts to light & dark and reads as part of
+   the café UI, not a bolted-on box. */
+.ssw-card {
+  position: fixed; z-index: 61; width: 244px;
+  background: color-mix(in srgb, var(--card) 90%, transparent);
+  backdrop-filter: blur(20px) saturate(1.2); -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  border: var(--border); border-radius: 18px;
+  box-shadow: 0 16px 44px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.05);
+  color: var(--text); overflow: hidden;
+  animation: sswRise 0.42s var(--ease) both;
+}
+@keyframes sswRise { from { opacity: 0; transform: translateY(-10px) scale(0.96); } to { opacity: 1; transform: none; } }
+.ssw-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 6px 5px 12px; cursor: grab; touch-action: none;
+  border-bottom: var(--border); border-bottom-color: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.ssw-head:active { cursor: grabbing; }
+.ssw-grip { color: var(--accent-dim); font-size: 11px; letter-spacing: 1px; }
+.ssw-collapse {
+  background: none; border: none; color: var(--muted); font-size: 12px;
+  cursor: pointer; width: 26px; height: 26px; border-radius: 8px; transition: 0.18s var(--ease);
+  display: flex; align-items: center; justify-content: center;
+}
+.ssw-collapse:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.ssw-body { padding: 13px 14px 14px; }
+.ssw-status { display: flex; align-items: center; gap: 11px; margin-bottom: 13px; }
+.ssw-avatar {
+  flex: 0 0 auto; width: 38px; height: 38px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-grad); color: #1a0f0a; font-size: 16px;
+  box-shadow: 0 6px 16px var(--accent-glow);
+}
+.ssw-text { min-width: 0; }
+.ssw-title {
+  display: flex; align-items: center; gap: 7px;
+  font-weight: 700; font-size: 14px; letter-spacing: 0.2px; line-height: 1.2;
+}
+.ssw-live { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 0 0 rgba(74,222,128,0.5); animation: sswPulse 2s ease-in-out infinite; }
+.ssw-live.pending { background: var(--accent); animation-duration: 1.3s; }
+@keyframes sswPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.45); } 50% { box-shadow: 0 0 0 5px rgba(74,222,128,0); } }
+.ssw-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+.ssw-actions { display: flex; gap: 8px; }
+.ssw-btn {
+  flex: 1; padding: 8px 6px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  cursor: pointer; border: var(--border); background: transparent; color: var(--text);
+  transition: 0.18s var(--ease);
+}
+.ssw-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.ssw-btn.danger { color: color-mix(in srgb, #ef4444 80%, var(--text)); }
+.ssw-btn.danger:hover:not(:disabled) { border-color: #ef4444; color: #ef4444; background: rgba(239,68,68,0.10); }
+.ssw-btn:disabled { opacity: 0.45; cursor: default; }
+.ssw-bubble {
+  position: fixed; z-index: 61; width: 48px; height: 48px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 18px;
+  background: var(--accent-grad); color: #1a0f0a; border: none;
+  box-shadow: 0 12px 30px var(--accent-glow); cursor: grab; touch-action: none;
+  animation: sswRise 0.42s var(--ease) both;
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+.ssw-bubble:hover { transform: scale(1.07); box-shadow: 0 16px 40px var(--accent-glow); }
+.ssw-bubble:active { cursor: grabbing; transform: scale(1.02); }
+.ssw-bubble-dot {
+  position: absolute; top: 3px; right: 3px; width: 9px; height: 9px; border-radius: 50%;
+  background: #4ade80; border: 2px solid var(--card); animation: sswPulse 2s ease-in-out infinite;
+}
+.ssw-bubble.waiting .ssw-bubble-dot { background: var(--accent); }
+
 /* --- GUEST ORDER TRACKER (live status strip) --- */
 .order-tracker {
   position: fixed;
