@@ -20,11 +20,11 @@ import { getSettings } from "@/lib/menu";
 import { setScannedTable } from "@/lib/table";
 import { getStoredSession, clearStoredSession, getSessionState, leaveSession } from "@/lib/session";
 
-const POS_KEY = "lfh_sess_widget_pos";
+const POS_KEY = "lfh_sess_widget_pos_v2"; // v2: dropped older saved spots that sat too low
 const COLLAPSED_KEY = "lfh_sess_widget_collapsed";
-// Default resting spot: right edge, a little below the header controls so it never
-// covers the $/EN/theme/cart buttons.
-const DEFAULT_POS = { right: 16, top: 140 };
+// Default resting spot: top-right, tucked just under the header controls
+// ($/EN/theme/cart) — close to the cart, not drifting toward the middle.
+const DEFAULT_POS = { right: 16, top: 88 };
 
 interface SState { table: string; role: "owner" | "guest"; approved: boolean; count: number; }
 const toast = (message: string, kicker = "table", variant = "success") =>
