@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent as RPE, type CSSProperties } from "react";
 import { getSettings } from "@/lib/menu";
+import { setScannedTable } from "@/lib/table";
 import { getStoredSession, clearStoredSession, getSessionState, leaveSession } from "@/lib/session";
 
 const POS_KEY = "lfh_sess_widget_pos";
@@ -37,6 +38,8 @@ export default function SessionStatusWidget() {
   const [pos, setPos] = useState<{ right: number; top: number } | null>(null);
   const tokenRef = useRef<string | null>(null);
   const wasActive = useRef(false);
+  const introToken = useRef<string | null>(null); // session we've already played the open-then-shrink intro for
+  const introTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragRef = useRef<{ sx: number; sy: number; or: number; ot: number; pid: number; moved: boolean } | null>(null);
 
   // Disconnect this device locally: drop the token AND the (now-shared) cart, so a
@@ -44,7 +47,9 @@ export default function SessionStatusWidget() {
   const clearLocal = () => {
     clearStoredSession();
     try { localStorage.removeItem("lfh_cart"); } catch {}
+    setScannedTable("");                                    // stop pre-filling the table you just left
     window.dispatchEvent(new Event("lfh:cart-updated"));
+    window.dispatchEvent(new Event("lfh:table-scanned"));
     window.dispatchEvent(new Event("lfh:session-changed"));
   };
 
@@ -94,11 +99,19 @@ export default function SessionStatusWidget() {
           approved: !!m?.approved,
           count: Array.isArray(state.members) ? (state.members as unknown[]).length : 1,
         });
+        // First time we see this session (you just got the table): show the full
+        // card for 2s, then auto-shrink to the circle.
+        if (introToken.current !== s.token) {
+          introToken.current = s.token;
+          setCollapsed(false);
+          if (introTimer.current) clearTimeout(introTimer.current);
+          introTimer.current = setTimeout(() => setCollapsed(true), 2000);
+        }
       };
       poll();
       iv = setInterval(poll, 3000);
     })();
-    return () => { alive = false; if (iv) clearInterval(iv); };
+    return () => { alive = false; if (iv) clearInterval(iv); if (introTimer.current) clearTimeout(introTimer.current); };
   }, []);
 
   // ── actions ────────────────────────────────────────────────────────────────

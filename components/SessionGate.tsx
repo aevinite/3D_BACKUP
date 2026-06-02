@@ -19,11 +19,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSettings, type Settings } from "@/lib/menu";
+import { setScannedTable } from "@/lib/table";
 import {
   getStoredSession, storeSession, clearStoredSession,
   checkLocation, tableStatus, joinSession, getSessionState, requestAccess,
   placeSessionOrder, callWaiterSession,
 } from "@/lib/session";
+
+// Once you're in a session, that table becomes your default everywhere (cart +
+// call-waiter prefill from the scanned-table key, and re-read on lfh:table-scanned).
+const rememberTable = (table: string) => {
+  setScannedTable(table);
+  window.dispatchEvent(new Event("lfh:table-scanned"));
+};
 
 type Step =
   | "idle" | "locating" | "location_help" | "not_open" | "guest_name" | "joining"
@@ -93,7 +101,7 @@ export default function SessionGate() {
     if (r.reason === "no_open_session") { setStep("not_open"); return; } // staff hasn't opened it
     if (!r.ok) { toast("Couldn't join the table", "table", "error"); close(); return; }
     const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
-    sess.current = s; storeSession(s);
+    sess.current = s; storeSession(s); rememberTable(s.table);
     window.dispatchEvent(new Event("lfh:session-changed")); // wake the owner-approve poller
     await act();
   }, [act, close]);
@@ -193,7 +201,7 @@ export default function SessionGate() {
     if (r.reason === "no_open_session") { setStep("not_open"); return; }
     if (!r.ok) { toast("Couldn't join", "table", "error"); close(); return; }
     const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
-    sess.current = s; storeSession(s);
+    sess.current = s; storeSession(s); rememberTable(s.table);
     window.dispatchEvent(new Event("lfh:session-changed"));
     if (r.approved) await ensureReadyAndAct();
     else { setStep("waiting_approval"); startApprovalPoll(); }
