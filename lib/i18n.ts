@@ -1,6 +1,12 @@
+// i18n = "internationalization": the system that lets the menu speak 6 languages.
+// This file holds the dictionary of UI words (buttons, labels) per language, plus
+// two small React "hooks" that tell a component which language is currently active.
+
 import { useState, useEffect } from "react";
 import { type LanguageCode } from "./format";
 
+// The list of every UI phrase the app needs to translate. Think of it as the
+// "keys" in our dictionary — each language below must fill in all of these.
 export interface Translations {
   greeting: string;
   heroTitle: string;
@@ -48,6 +54,8 @@ export interface Translations {
   prepTime: string;
 }
 
+// The dictionary itself: one complete set of phrases per language code.
+// To translate a button, find its key (e.g. "addToCart") under every language.
 const translations: Record<LanguageCode, Translations> = {
   en: {
     greeting: "BONSOIR",
@@ -331,20 +339,29 @@ const translations: Record<LanguageCode, Translations> = {
 // is NOT in the static translations table — e.g. database-driven category and
 // filter names, which carry their own per-language strings.
 export const useLanguage = (): LanguageCode => {
+  // "state" is a value React watches; when it changes, the component re-draws.
+  // We start by assuming English, then correct it once we're in the browser.
   const [lang, setLang] = useState<LanguageCode>("en");
 
+  // useEffect runs after the component appears on screen (only in the browser).
   useEffect(() => {
+    // Read the saved language from localStorage (key "lfh_language").
     setLang((localStorage.getItem("lfh_language") as LanguageCode) || "en");
+    // This little function re-reads the language whenever it changes elsewhere.
     const onLang = () => {
       setLang((localStorage.getItem("lfh_language") as LanguageCode) || "en");
     };
+    // Listen for the "lfh:language-changed" announcement fired by setLanguage().
     window.addEventListener("lfh:language-changed", onLang);
+    // Clean up the listener when the component goes away, so we don't leak it.
     return () => window.removeEventListener("lfh:language-changed", onLang);
-  }, []);
+  }, []); // empty [] means "set this up just once"
 
   return lang;
 };
 
+// useTranslation is the easy one components actually call: it gives back the
+// whole phrase-set for the current language (falling back to English if missing).
 export const useTranslation = (): Translations => {
   const lang = useLanguage();
   return translations[lang] || translations.en;

@@ -1,11 +1,24 @@
+// "use client" means this whole page runs in the visitor's browser (not on the
+// server). We need that because the menu is interactive: searching, filtering,
+// remembering scroll position, reacting to taps — all live, in the browser.
 "use client";
 
+// React's built-in tools: useState (remember a value), useEffect (run code at
+// certain times, like after the page appears), useRef (a value that survives
+// re-draws without causing one).
 import { useEffect, useRef, useState } from "react";
+// Link = Next's fast, no-full-reload navigation between pages.
 import Link from "next/link";
+// AppShell = the shared outer frame/chrome around the menu content.
 import AppShell from "@/components/AppShell";
+// FoodCard = one dish tile in the list/grid.
 import FoodCard from "@/components/FoodCard";
+// HeroTitle = the big animated greeting at the top.
 import HeroTitle from "@/components/HeroTitle";
+// The 3D-model download manager (so models are ready before you open them).
 import { modelLoader } from "@/lib/modelLoader";
+// Our data layer: fetch the dishes + categories from the database, plus a
+// helper to pick the right-language label, and the data "shapes" (types).
 import {
   getMenuItems,
   getCategories,
@@ -13,7 +26,9 @@ import {
   type MenuItem,
   type Category,
 } from "@/lib/menu";
+// Language helpers: t = translated text strings; lang = the current language.
 import { useTranslation, useLanguage } from "@/lib/i18n";
+// Remembers the table number scanned from a QR code, for the cart/waiter.
 import { setScannedTable } from "@/lib/table";
 
 // The card list works with the full MenuItem shape from the data layer.
@@ -32,18 +47,23 @@ const DIETS = [
   { slug: "non-veg", label: "🍖 Non-Veg" },
 ];
 
+// Small helper: turn a dish's rating (stored as text) into a number so we can
+// sort by it. If it's missing/garbled, treat it as 0.
 const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
 
+// This is the menu page, shown at "/menu". It's the main browsing screen.
 export default function MenuPage() {
-  const t = useTranslation();
-  const lang = useLanguage();
-  const [menuData, setMenuData] = useState<FoodItem[]>([]);
-  const [dbCategories, setDbCategories] = useState<Category[]>([]);
-  const [currentCategory, setCurrentCategory] = useState("");
+  const t = useTranslation();   // translated text for the current language
+  const lang = useLanguage();   // which language is active right now
+  // Each useState below is a piece of memory this page keeps. The first value
+  // is the current value; the "set..." function changes it (and redraws).
+  const [menuData, setMenuData] = useState<FoodItem[]>([]);        // all dishes
+  const [dbCategories, setDbCategories] = useState<Category[]>([]); // all categories
+  const [currentCategory, setCurrentCategory] = useState("");       // which tab is selected
   const [currentSort, setCurrentSort] = useState(""); // "" = recommended (menu order)
   const [currentDiet, setCurrentDiet] = useState(""); // "" | "veg" | "non-veg"
   const [layout, setLayout] = useState("gallery"); // gallery is the default first-visit view
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(""); // what's typed in the search box
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
   const restoredRef = useRef(false); // skip persisting UI state until after the restore
   // Only show skeletons if loading is actually slow — avoids a flash on fast /
@@ -54,16 +74,21 @@ export default function MenuPage() {
   // accept ?t=N) so the cart + chef can pre-fill the table — the guest never
   // types it. Reading window.location avoids needing a useSearchParams Suspense
   // boundary. Stays editable downstream in case a sticker was mis-scanned.
+  // This effect runs once, right after the page first appears (the empty []
+  // at the end means "only on first load").
   useEffect(() => {
     try {
+      // Read the bits after "?" in the web address.
       const params = new URLSearchParams(window.location.search);
+      // Accept either ?table=5 or ?t=5.
       const raw = params.get("table") || params.get("t");
+      // Keep only the digits (strip anything that isn't a number).
       const digits = (raw || "").replace(/\D/g, "");
       if (digits) {
-        setScannedTable(digits);
-        window.dispatchEvent(new Event("lfh:table-scanned"));
+        setScannedTable(digits);                                // remember it
+        window.dispatchEvent(new Event("lfh:table-scanned"));   // tell the app
       }
-    } catch {}
+    } catch {}  // if anything goes wrong, just carry on without a table number
   }, []);
 
   // Category bar — the DB categories, then a curated "Chef's Special" tab
@@ -83,11 +108,13 @@ export default function MenuPage() {
   // A category is ALWAYS selected — clicking just switches, never clears.
   // Picking a category also clears any active search: search is a global "all
   // view", so clicking a category drops you straight into that category.
+  // Called when a guest taps a category tab.
   const selectCategory = (slug: string) => {
     setCurrentCategory(slug);
     setSearchQuery("");
   };
   // Sort DOES toggle: clicking the active sort returns to the recommended order.
+  // (Tapping the already-active sort sets it back to "" = the default order.)
   const toggleSort = (slug: string) =>
     setCurrentSort((cur) => (cur === slug ? "" : slug));
   // Diet filter toggles too (veg / non-veg are mutually exclusive).
@@ -95,6 +122,7 @@ export default function MenuPage() {
     setCurrentDiet((cur) => (cur === slug ? "" : slug));
 
   // Read the hearted dishes from localStorage (written by the dish detail page).
+  // localStorage is the browser's little notebook that survives page reloads.
   const loadFavorites = () => {
     try {
       const raw = localStorage.getItem("lfh-favorites");
@@ -103,10 +131,15 @@ export default function MenuPage() {
     } catch { setFavorites([]); }
   };
 
+  // The main "load everything" effect — runs once when the page first appears.
+  // It fetches the dishes and categories, restores where you last were, and
+  // starts listening for favorite changes.
   useEffect(() => {
+    // Fetch all dishes from the database, then store them.
     getMenuItems()
       .then((items) => setMenuData(items))
       .catch((err) => console.error("Error loading menu data:", err));
+    // Fetch all categories from the database.
     getCategories()
       .then((cats) => {
         setDbCategories(cats);
@@ -135,11 +168,13 @@ export default function MenuPage() {
       if (sq) setSearchQuery(sq);
     } catch {}
 
-    loadFavorites();
+    loadFavorites();  // load the hearted dishes for the Favorites tab
     // Keep favorites fresh if the guest hearts a dish in another tab/route.
     const onFav = () => loadFavorites();
-    window.addEventListener("lfh:favorites-updated", onFav);
-    window.addEventListener("storage", onFav);
+    window.addEventListener("lfh:favorites-updated", onFav);  // same-tab signal
+    window.addEventListener("storage", onFav);                // other-tab signal
+    // The returned function is "cleanup": React runs it when leaving the page,
+    // so we stop listening and don't leak. Here we remove both listeners.
     return () => {
       window.removeEventListener("lfh:favorites-updated", onFav);
       window.removeEventListener("storage", onFav);
@@ -149,7 +184,10 @@ export default function MenuPage() {
   // Persist the browse state so it survives a navigate-away + Back. Skip the
   // first run: on mount these still hold the defaults while the restore (above)
   // is being applied, so writing now would clobber the saved values with defaults.
+  // This effect re-runs whenever layout/sort/diet/search change (see the list
+  // at the bottom), saving the new values so Back returns you to them.
   useEffect(() => {
+    // On the very first run, just mark "restored" and skip saving (see above).
     if (!restoredRef.current) { restoredRef.current = true; return; }
     try {
       sessionStorage.setItem("lfh_menu_layout", layout);
@@ -160,6 +198,8 @@ export default function MenuPage() {
   }, [layout, currentSort, currentDiet, searchQuery]);
 
   // If the data hasn't arrived within a moment, reveal the skeleton.
+  // (Wait 200ms first; if it's still loading, show the grey placeholder boxes.
+  // cleanup cancels that timer if we leave early.)
   useEffect(() => {
     const t = setTimeout(() => setShowSkeleton(true), 200);
     return () => clearTimeout(t);
@@ -167,25 +207,33 @@ export default function MenuPage() {
 
   // Remember how far down the list the guest scrolled, so Back returns them to
   // the same spot instead of the top. The scroll lives on <main id="main-scroll">.
-  const scrollRestored = useRef(false);
+  const scrollRestored = useRef(false);  // have we already jumped back? (do it once)
+  // This effect attaches a "listen for scrolling" handler when the page loads.
   useEffect(() => {
-    const el = document.getElementById("main-scroll");
-    if (!el) return;
+    const el = document.getElementById("main-scroll");  // the scrolling area
+    if (!el) return;  // nothing to do if it isn't on the page
     let raf = 0;
+    // Runs every time the guest scrolls.
     const onScroll = () => {
+      // Don't save on every single scroll tick — wait for the next animation
+      // frame, so we save at most once per frame (gentler on performance).
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
+        // Remember how far down we are, in this browsing session.
         try { sessionStorage.setItem("lfh_menu_scroll", String(el.scrollTop)); } catch {}
       });
     };
     el.addEventListener("scroll", onScroll, { passive: true });
+    // Cleanup: stop listening and cancel any pending save when leaving.
     return () => { el.removeEventListener("scroll", onScroll); cancelAnimationFrame(raf); };
   }, []);
 
   // Restore that scroll position once the list has actually painted.
+  // Re-runs when menuData arrives; only does the jump one time.
   useEffect(() => {
+    // Skip if we already jumped, or if the dishes aren't loaded yet.
     if (scrollRestored.current || !menuData.length) return;
-    scrollRestored.current = true;
+    scrollRestored.current = true;  // mark done so we never jump twice
     try {
       const y = parseInt(sessionStorage.getItem("lfh_menu_scroll") || "0", 10);
       if (y > 0) {
@@ -197,6 +245,7 @@ export default function MenuPage() {
   }, [menuData]);
 
   // Remember the active category so navigating away and Back returns you here.
+  // Re-runs whenever the selected category changes.
   useEffect(() => {
     if (!currentCategory) return;
     try {
@@ -204,13 +253,17 @@ export default function MenuPage() {
     } catch {}
   }, [currentCategory]);
 
+  // This effect pre-downloads the small 3D models so the viewer opens fast.
+  // Re-runs when the dishes load or the category changes.
   useEffect(() => {
-    if (!menuData.length) return;
+    if (!menuData.length) return;  // wait until dishes have loaded
 
+    // Only dishes that have a working 3D model (both file sizes present).
     const fourD = menuData.filter(
       (i) => i.is4d && i.modelSmallUrl && i.modelOptimizedUrl
     );
 
+    // Dishes in the current category (preload first) vs. everything else.
     const inCat = !currentCategory
       ? fourD
       : fourD.filter((i) => i.category === currentCategory);
@@ -218,6 +271,8 @@ export default function MenuPage() {
       ? []
       : fourD.filter((i) => i.category !== currentCategory);
 
+    // For a dish: if the heavy model is already loaded, no need to fetch the
+    // small one; otherwise give back the small model's address to download.
     const smallIfNeeded = (i: FoodItem) =>
       modelLoader.isLoaded(i.modelOptimizedUrl) ? null : i.modelSmallUrl!;
 
@@ -235,15 +290,21 @@ export default function MenuPage() {
   // Search matches the dish name OR its category (slug + translated name), so
   // typing "croissant" finds the croissant-category dishes even though their
   // display names don't contain the word.
+  // q = the search text, tidied up (no spaces, all lowercase) for comparing.
   const q = searchQuery.trim().toLowerCase();
+  // Get a category's display name (in the current language), lowercased.
   const catNameOf = (slug: string) =>
     localized(dbCategories.find((c) => c.slug === slug)?.name, lang).toLowerCase();
+  // True if a dish matches the search — by name, category slug, category name,
+  // or a hidden search alias. (|| means "or".)
   const matchesSearch = (i: FoodItem) =>
     i.title.toLowerCase().includes(q) ||
     i.category.toLowerCase().includes(q) ||
     catNameOf(i.category).includes(q) ||
     (i.searchAlias || "").toLowerCase().includes(q);
 
+  // Decide which dishes to show, given the search/category/diet choices.
+  // .filter keeps only the dishes where this function returns true.
   const visibleItems = menuData.filter((item) => {
     // While searching, the list becomes a global "all view" (every category),
     // ignoring the selected category. Clear the search to fall back to it.
@@ -256,13 +317,14 @@ export default function MenuPage() {
     } else if (currentCategory && item.category !== currentCategory) {
       return false;
     }
+    // Diet filter: hide non-veg when "veg" is on, and vice versa.
     if (currentDiet === "veg" && !item.veg) return false;
     if (currentDiet === "non-veg" && item.veg) return false;
-    return true;
+    return true;  // passed every check — show this dish
   });
 
   // The search dropdown — top matches across all categories. Name-starts-with
-  // first, then by rating.
+  // first, then by rating. (Only built when there's something typed.)
   const searchResults = q
     ? menuData
         .filter(matchesSearch)
@@ -275,7 +337,9 @@ export default function MenuPage() {
     : [];
 
   // Apply the chosen sort (a stable copy so the menu order stays the default).
+  // [...visibleItems] makes a copy first so we don't reorder the original list.
   const filteredItems = [...visibleItems].sort((a, b) => {
+    // Compare two dishes (a and b) based on the selected sort option.
     switch (currentSort) {
       case "popular": {
         const pa = a.tags.includes("bestseller") ? 1 : 0;
@@ -291,20 +355,29 @@ export default function MenuPage() {
     }
   });
 
+  // Everything below is the actual on-screen layout (JSX = HTML-like markup).
+  // Curly braces { } drop a value or a bit of logic into the markup.
   return (
+    // AppShell = the shared outer frame (header, footer, etc.).
     <AppShell>
+      {/* The scrolling content area. Its id is used to save/restore scroll. */}
       <main id="main-scroll">
+        {/* The big animated greeting banner up top. */}
         <div className="hero">
           <HeroTitle greeting={t.greeting} title={t.heroTitle} />
         </div>
 
+        {/* "Categories" heading plus a small "slide →" hint. */}
         <div className="section-header">
           <span className="section-title">{t.categories}</span>
           <span className="browse-hint" aria-hidden="true">
             {t.slide} <i className="fas fa-arrow-right"></i>
           </span>
         </div>
+        {/* The horizontal row of category tabs. */}
         <div className="cat-scroller" id="cat-scroller" role="tablist" aria-label="Menu categories">
+          {/* If categories haven't loaded yet, maybe show placeholders;
+              otherwise draw a tab button for each category. */}
           {dbCategories.length === 0
             ? // Still loading: show empty placeholder boxes (only once it's clearly
               // slow — not the lone Chef's Special star, and not a flash when cached).
@@ -316,7 +389,8 @@ export default function MenuPage() {
                     </div>
                   ))
                 : null)
-            : categories.map((cat) => (
+            : // .map turns each category into a tab button on screen.
+              categories.map((cat) => (
                 <button
                   key={cat.slug}
                   type="button"
@@ -334,14 +408,19 @@ export default function MenuPage() {
               ))}
         </div>
 
+        {/* The sticky bar: search box on top, then the filter/sort/layout
+            controls. It stays pinned as you scroll the dishes. */}
         <div className="items-header" id="sticky-header">
           <div className="search-container">
+            {/* The little logo tucked inside the search box. */}
             <img
               className="search-logo"
               src="https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png"
               alt=""
               aria-hidden="true"
             />
+            {/* The search box. value shows what's typed; onChange updates our
+                searchQuery memory every keystroke. */}
             <input
               type="search"
               id="search-input"
@@ -351,8 +430,12 @@ export default function MenuPage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
+            {/* When there are matches, show the dropdown of quick results.
+                (&& means "only render this when the left side is true".) */}
             {searchResults.length > 0 && (
               <div className="search-dropdown" role="listbox">
+                {/* One tappable result row per matching dish. Tapping it
+                    opens the dish and clears the search. */}
                 {searchResults.map((r) => (
                   <Link
                     key={r.id}
@@ -370,9 +453,11 @@ export default function MenuPage() {
               </div>
             )}
           </div>
+          {/* The row of sort chips, diet chips, and the list/gallery toggle. */}
           <div className="header-controls">
             <div className="controls-group">
               <div className="filter-row" role="group" aria-label="Filter and sort dishes">
+                {/* One chip per sort option (Popular / Top Rated / Low Price). */}
                 {SORTS.map((s) => (
                   <button
                     key={s.slug}
@@ -384,7 +469,9 @@ export default function MenuPage() {
                     {s.label}
                   </button>
                 ))}
+                {/* A thin divider between the sort chips and the diet chips. */}
                 <span className="chip-divider" aria-hidden="true"></span>
+                {/* One chip per diet option (Veg / Non-Veg). */}
                 {DIETS.map((d) => (
                   <button
                     key={d.slug}
@@ -397,7 +484,9 @@ export default function MenuPage() {
                   </button>
                 ))}
               </div>
+              {/* The two-way switch between list view and gallery view. */}
               <div className="layout-switch" role="group" aria-label="Layout">
+                {/* List view button. */}
                 <button
                   type="button"
                   className={`switch-opt ${layout === "list" ? "active" : ""}`}
@@ -407,6 +496,7 @@ export default function MenuPage() {
                 >
                   <i className="fas fa-list" aria-hidden="true"></i>
                 </button>
+                {/* Gallery (grid) view button. */}
                 <button
                   type="button"
                   className={`switch-opt ${layout === "gallery" ? "active" : ""}`}
@@ -421,10 +511,16 @@ export default function MenuPage() {
           </div>
         </div>
 
+        {/* The dishes themselves. The class switches to gallery-mode when the
+            gallery layout is picked. */}
         <div
           id="items-container"
           className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}
         >
+          {/* Three cases, in order:
+              1) dishes not loaded yet  -> maybe show grey placeholder cards
+              2) on Favorites with none -> show the friendly "how to favorite" tip
+              3) otherwise              -> draw a FoodCard for each dish */}
           {menuData.length === 0
             ? (showSkeleton
                 ? Array.from({ length: 6 }).map((_, i) => (
@@ -458,7 +554,8 @@ export default function MenuPage() {
                   </p>
                 </div>
               )
-            : filteredItems.map((item, index) => (
+            : // Normal case: one FoodCard tile per dish in the filtered list.
+              filteredItems.map((item, index) => (
                 <FoodCard key={item.id} item={item} index={index} viewingCategory={currentCategory} />
               ))}
         </div>

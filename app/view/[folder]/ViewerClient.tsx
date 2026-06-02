@@ -1,16 +1,20 @@
+// "use client" = runs in the browser. The 3D viewer is fully interactive
+// (spinning the model, hotspots, AR), so it has to run here.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import PublicModelViewer from "@/components/PublicModelViewer";
-import InfinityLoader from "@/components/InfinityLoader";
-import { modelLoader } from "@/lib/modelLoader";
-import { modelWatchlist } from "@/lib/modelWatchlist";
-import { getMenuItem, type MenuItem } from "@/lib/menu";
-import { allergenIcon, allergenLabel } from "@/lib/allergens";
-import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { useSearchParams } from "next/navigation"; // reads the "?from=..." in the address
+import PublicModelViewer from "@/components/PublicModelViewer"; // wraps the <model-viewer> 3D element
+import InfinityLoader from "@/components/InfinityLoader";       // loading spinner
+import { modelLoader } from "@/lib/modelLoader";     // 3D model download manager
+import { modelWatchlist } from "@/lib/modelWatchlist"; // tracks who's waiting on a model (for toasts)
+import { getMenuItem, type MenuItem } from "@/lib/menu"; // fetch one dish's details
+import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
+import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // money formatting
 
+// Describes the "config.json" file each dish folder has — the 3D model URLs,
+// the title/subtitle/stats, and the hotspot "tags" pinned onto the model.
 interface PublicConfig {
   modelUrl?: string;
   smallUrl?: string;
@@ -39,30 +43,36 @@ interface PublicConfig {
   }>;
 }
 
+// The 3D viewer component. `folder` tells us which dish's model + config to load.
 export default function ViewerClient({ folder }: { folder: string }) {
-  const [config, setConfig] = useState<PublicConfig | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [barVisible, setBarVisible] = useState(false);
-  const [loaderVisible, setLoaderVisible] = useState(true);
-  const [activeUrl, setActiveUrl] = useState<string | null>(null);
-  const [showTryAgain, setShowTryAgain] = useState(false);
-  const [menuItem, setMenuItem] = useState<MenuItem | null>(null);
-  const [currency, setCurrency] = useState<CurrencyMeta | null>(null);
-  const [showInfo, setShowInfo] = useState(false);
-  const [hintVisible, setHintVisible] = useState(false);
-  const mvRef = useRef<ModelViewerElement>(null);
-  const startedRef = useRef(false);
-  const requestRef = useRef<number>(0);
-  const modelSeenRef = useRef(false);
-  const searchParams = useSearchParams();
-  const fromSlug = searchParams.get("from") || "";
+  // The pieces of memory this screen keeps:
+  const [config, setConfig] = useState<PublicConfig | null>(null);  // the loaded config.json
+  const [loading, setLoading] = useState(true);          // still loading the config?
+  const [error, setError] = useState<string | null>(null); // an error message, if loading failed
+  const [barVisible, setBarVisible] = useState(false);   // has the bottom info bar slid in?
+  const [loaderVisible, setLoaderVisible] = useState(true); // is the spinner showing?
+  const [activeUrl, setActiveUrl] = useState<string | null>(null); // which model file to actually show
+  const [showTryAgain, setShowTryAgain] = useState(false); // show the "taking longer" overlay?
+  const [menuItem, setMenuItem] = useState<MenuItem | null>(null); // the dish's menu details
+  const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // currency for prices
+  const [showInfo, setShowInfo] = useState(false);       // is the details sheet open?
+  const [hintVisible, setHintVisible] = useState(false); // is the "triple-tap to replay" hint showing?
+  // Refs hold values across redraws without triggering one:
+  const mvRef = useRef<ModelViewerElement>(null); // a handle to the actual <model-viewer> element
+  const startedRef = useRef(false);   // has the reveal animation started yet?
+  const requestRef = useRef<number>(0); // id of the running animation loop (so we can stop it)
+  const modelSeenRef = useRef(false);  // has the model actually appeared on screen?
+  const searchParams = useSearchParams();        // the address's "?..." part
+  const fromSlug = searchParams.get("from") || ""; // which dish we came from
+  // Where the Back button goes: to that dish if we know it, else the menu.
   const backHref = fromSlug ? `/item/${fromSlug}` : "/menu";
 
   // The bar's name/stats/price come from the actual MENU item, not config.json
   // (config is only the hotspots/tags). Falls back to config if the item is missing.
+  // Runs when we arrive (and if the source dish changes).
   useEffect(() => {
-    setCurrency(getCurrency());
+    setCurrency(getCurrency());  // figure out the currency for prices
+    // If we know which dish we came from, fetch its menu details for the bar.
     if (fromSlug) getMenuItem(fromSlug).then(setMenuItem).catch(() => {});
   }, [fromSlug]);
 
@@ -86,19 +96,23 @@ export default function ViewerClient({ folder }: { folder: string }) {
     );
   };
 
+  // Format a price for the current currency (falls back to $ if not loaded yet).
   const showPrice = (p: string) => (currency ? formatPrice(p, currency) : `$${p}`);
 
   // The replay hint gently pops in shortly after the dish appears, lingers ~3s,
   // fades, then repeats every 7s — a soft reminder, never forced on screen.
+  // Re-runs whenever the bottom bar becomes visible/hidden.
   useEffect(() => {
-    if (!barVisible) return;
+    if (!barVisible) return;  // only run the hint once the dish is shown
     let hideTimer: ReturnType<typeof setTimeout>;
+    // Show the hint, then hide it again after 3 seconds.
     const pop = () => {
       setHintVisible(true);
       hideTimer = setTimeout(() => setHintVisible(false), 3000);
     };
-    const first = setTimeout(pop, 1200);
-    const loop = setInterval(pop, 7000);
+    const first = setTimeout(pop, 1200);  // first pop ~1.2s in
+    const loop = setInterval(pop, 7000);  // then repeat every 7s
+    // Cleanup: stop all the timers when leaving / when the bar hides.
     return () => {
       clearTimeout(first);
       clearTimeout(hideTimer);
@@ -106,39 +120,49 @@ export default function ViewerClient({ folder }: { folder: string }) {
     };
   }, [barVisible]);
 
+  // Load this dish folder's config.json (the model URLs + hotspot tags).
+  // Re-runs if the folder changes.
   useEffect(() => {
     const normalizedFolder = (folder || "");
     fetch(`/content/items/${normalizedFolder}/config.json`)
       .then((res) => {
+        // If the file isn't there, treat it as an error.
         if (!res.ok) {
           throw new Error("Failed to load config");
         }
-        return res.json();
+        return res.json();  // turn the response into a usable object
       })
       .then((data) => {
-        setConfig(data);
-        setLoading(false);
+        setConfig(data);     // store the config
+        setLoading(false);   // done loading
       })
       .catch((err) => {
-        setError(err.message);
+        setError(err.message);  // remember the error to show it
         setLoading(false);
       });
   }, [folder]);
 
+  // Once the config is loaded, decide which model file to actually display:
+  // prefer the high-quality "optimized" one, but show the small one first if
+  // that's what's ready, and upgrade when the better one finishes loading.
   useEffect(() => {
-    if (!config) return;
-    const small = config.smallUrl;
-    const opt = config.optimizedUrl;
+    if (!config) return;  // wait for the config
+    const small = config.smallUrl;       // the fast ~2MB model
+    const opt = config.optimizedUrl;     // the high-quality ~9MB model
+    // Old-style config with a single URL? Just use it and stop.
     if (!small && !opt) {
       if (config.modelUrl) setActiveUrl(config.modelUrl);
       return;
     }
 
+    // Ask the loader to download these (small first), as a priority.
     const urls: string[] = [];
     if (small) urls.push(small);
     if (opt) urls.push(opt);
     modelLoader.prioritize(urls);
 
+    // If neither model is ready yet, add this dish to the "watchlist" so a
+    // toast can notify the guest when it finishes loading.
     const somethingReady =
       (opt && modelLoader.isLoaded(opt)) ||
       (small && modelLoader.isLoaded(small));
@@ -152,6 +176,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
       });
     }
 
+    // Pick the best model that's ready right now (optimized beats small).
     const pick = () => {
       if (opt && modelLoader.isLoaded(opt)) {
         return modelLoader.getCachedUrl(opt) ?? opt;
@@ -159,48 +184,59 @@ export default function ViewerClient({ folder }: { folder: string }) {
       if (small && modelLoader.isLoaded(small)) {
         return modelLoader.getCachedUrl(small) ?? small;
       }
-      return null;
+      return null;  // nothing ready yet
     };
 
+    // Set the chosen model as the active one (only if it actually changed).
     const apply = () => {
       const best = pick();
       if (best) setActiveUrl((prev) => (prev === best ? prev : best));
     };
 
-    apply();
+    apply();  // try once now
+    // ...and re-try every time the loader reports progress, so we upgrade from
+    // small to optimized automatically. subscribe returns an "unsubscribe"
+    // function, which we return so React stops listening when we leave.
     const unsub = modelLoader.subscribe(apply);
     return unsub;
   }, [config, folder, fromSlug]);
 
+  // Wire up what happens once the 3D model element is on the page: when it
+  // finishes loading, hide the spinner, slide in the bar, and play the reveal.
   useEffect(() => {
-    if (loading || error || !mvRef.current || !activeUrl) return;
+    if (loading || error || !mvRef.current || !activeUrl) return;  // not ready yet
 
-    const mv = mvRef.current;
+    const mv = mvRef.current;  // the <model-viewer> element
 
+    // The model finished loading and is now visible.
     const handleLoad = () => {
-      modelSeenRef.current = true;
-      modelWatchlist.unwatchByFolder(folder);
-      setShowTryAgain(false);
-      setLoaderVisible(false);
+      modelSeenRef.current = true;             // remember it appeared
+      modelWatchlist.unwatchByFolder(folder);  // no need to notify anymore
+      setShowTryAgain(false);                  // hide any "taking longer" overlay
+      setLoaderVisible(false);                 // hide the spinner
       setTimeout(() => {
-        setBarVisible(true);
+        setBarVisible(true);                   // slide in the bottom info bar after 1s
       }, 1000);
       // keep the "triple-tap to replay" hint visible as a persistent cue
+      // Play the reveal animation once, shortly after the model appears.
       if (!startedRef.current) {
         startedRef.current = true;
         setTimeout(runFullSequence, 800);
       }
     };
 
+    // When the guest enters AR mode, replay the reveal animation.
     const handleARStatus = (e: any) => {
       if (e.detail?.status === "session-started") {
         runFullSequence();
       }
     };
 
+    // Start listening for those two events on the model element.
     mv.addEventListener("load", handleLoad);
     mv.addEventListener("ar-status", handleARStatus);
 
+    // Safety net: if "load" never fires within 4s, play the reveal anyway.
     const startTimeout = setTimeout(() => {
       if (!startedRef.current) {
         startedRef.current = true;
@@ -208,6 +244,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
       }
     }, 4000);
 
+    // Cleanup: stop listening and cancel timers/animation when leaving.
     return () => {
       mv.removeEventListener("load", handleLoad);
       mv.removeEventListener("ar-status", handleARStatus);
@@ -221,6 +258,8 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, error, activeUrl, folder]);
 
+  // A patience timer: if the model still hasn't shown after 15 seconds, show
+  // the friendly "still preparing" overlay instead of leaving them guessing.
   useEffect(() => {
     if (loading || error) return;
     // Only fall back to the "taking longer" overlay if the model genuinely
@@ -236,11 +275,14 @@ export default function ViewerClient({ folder }: { folder: string }) {
     return () => clearTimeout(t);
   }, [loading, error]);
 
+  // Redraws the thin connector line from a hotspot dot to its floating label
+  // card, so the line stays attached as the model spins. (One line per tag.)
   const _updateLine = (ing: any) => {
     const line = document.getElementById(`hs-line-${ing.id}`) as SVGLineElement | null;
-    const anchorBtn = document.getElementById(`hs-${ing.id}`);
-    const cardWrap = document.getElementById(`hs-card-${ing.id}`);
+    const anchorBtn = document.getElementById(`hs-${ing.id}`);   // the dot on the model
+    const cardWrap = document.getElementById(`hs-card-${ing.id}`); // the label card
     if (!line || !anchorBtn || !cardWrap) return;
+    // Work out the card's position relative to the dot and point the line there.
     const aRect = anchorBtn.getBoundingClientRect();
     const cRect = cardWrap.getBoundingClientRect();
     const cx = cRect.left + cRect.width / 2;
@@ -249,42 +291,50 @@ export default function ViewerClient({ folder }: { folder: string }) {
     line.setAttribute("y2", (cy - aRect.top).toFixed(1));
   };
 
+  // A continuous loop that keeps every connector line updated, frame by frame.
   const _loop = () => {
     config?.tags?.forEach(ing => _updateLine(ing));
-    requestRef.current = requestAnimationFrame(_loop);
+    requestRef.current = requestAnimationFrame(_loop);  // schedule the next frame
   };
 
+  // The opening "cinematic": spins the model a full turn while scaling it up
+  // from small to full size over ~2.6s, then calls onComplete when done.
   const animateModelCinematic = (onComplete: () => void) => {
     const model = mvRef.current;
     if (!model) {
-      onComplete();
+      onComplete();  // no model element — just finish immediately
       return;
     }
-    const duration = 2600;
+    const duration = 2600;  // milliseconds
     const startTime = performance.now();
+    // An easing curve so the motion starts fast and settles gently.
     function ease(t: number) {
       return 1 - Math.pow(1 - t, 3);
     }
+    // Called every frame; computes how far through the animation we are.
     function animate(time: number) {
-      const p = Math.min((time - startTime) / duration, 1);
-      const e = ease(p);
-      (model as any).orientation = `0deg 0deg ${(e * 360).toFixed(2)}deg`;
-      const scale = (0.3 + e * 0.7).toFixed(4);
+      const p = Math.min((time - startTime) / duration, 1);  // progress 0→1
+      const e = ease(p);                                      // eased progress
+      (model as any).orientation = `0deg 0deg ${(e * 360).toFixed(2)}deg`;  // spin
+      const scale = (0.3 + e * 0.7).toFixed(4);               // grow 0.3→1
       (model as any).scale = `${scale} ${scale} ${scale}`;
       if (p < 1) {
-        requestAnimationFrame(animate);
+        requestAnimationFrame(animate);  // not done — next frame
       } else {
+        // Done: snap to the final upright, full-size pose and finish.
         (model as any).orientation = "0deg 0deg 0deg";
         (model as any).scale = "1 1 1";
         onComplete();
       }
     }
-    requestAnimationFrame(animate);
+    requestAnimationFrame(animate);  // kick off the first frame
   };
 
+  // After the model settles, reveal the hotspot lines and label cards one by
+  // one (staggered), each line "drawing" itself then its card fading/scaling in.
   const startTagAnimation = () => {
     config?.tags?.forEach((ing, index) => {
-      const delay = index * 400;
+      const delay = index * 400;  // stagger each tag by 0.4s so they appear in turn
       const line = document.getElementById(`hs-line-${ing.id}`) as SVGLineElement | null;
       const card = document.querySelector(`#hs-card-${ing.id} .hs-card`);
       const cardWrap = document.getElementById(`hs-card-${ing.id}`);
@@ -326,7 +376,11 @@ export default function ViewerClient({ folder }: { folder: string }) {
     });
   };
 
+  // The whole reveal, start to finish: first RESET every line and card back to
+  // hidden, then run the cinematic spin, then play the staggered tag animation
+  // and start the line-tracking loop. Called on first load and on triple-tap.
   const runFullSequence = () => {
+    // Reset all the connector lines to invisible.
     config?.tags?.forEach(ing => {
       const line = document.getElementById(`hs-line-${ing.id}`) as SVGLineElement | null;
       if (!line) return;
@@ -337,6 +391,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
         line.style.strokeDashoffset = line.style.strokeDasharray;
       }
     });
+    // Reset all the label cards to their hidden starting state.
     document.querySelectorAll(".hs-card").forEach((el) =>
       (el as HTMLElement).classList.remove("card-animate", "content-animate")
     );
@@ -347,7 +402,8 @@ export default function ViewerClient({ folder }: { folder: string }) {
       htmlEl.style.opacity = "0";
       htmlEl.style.transform = "translate(-50%,-50%) scale(0.8)";
     });
-    void document.body.offsetWidth;
+    void document.body.offsetWidth;  // force the browser to apply the reset before animating
+    // Now play the cinematic spin; when it's done, reveal the tags + start the loop.
     animateModelCinematic(() =>
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
@@ -358,6 +414,8 @@ export default function ViewerClient({ folder }: { folder: string }) {
     );
   };
 
+  // The AR (augmented reality) button: place the dish in the real room via the
+  // phone camera. Only works on a secure (HTTPS) page, so warn if it can't.
   const handleLaunchAR = () => {
     if (mvRef.current?.canActivateAR && mvRef.current.activateAR) {
       mvRef.current.activateAR();
@@ -370,17 +428,19 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // (AR replays it automatically on entry via the ar-status handler above.)
   useEffect(() => {
     if (loading || error) return;
-    const target = mvRef.current;
+    const target = mvRef.current;  // the model element to listen on
     if (!target) return;
-    let clicks = 0;
+    let clicks = 0;  // how many taps so far
     let timer: ReturnType<typeof setTimeout> | null = null;
     const onTap = () => {
       clicks += 1;
       if (clicks >= 3) {
+        // Three taps within the window — replay the reveal.
         clicks = 0;
         if (timer) { clearTimeout(timer); timer = null; }
         runFullSequence();
       } else {
+        // Otherwise wait up to 0.6s for more taps, then reset the counter.
         if (timer) clearTimeout(timer);
         timer = setTimeout(() => { clicks = 0; }, 600);
       }
@@ -394,6 +454,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, error, activeUrl]);
 
+  // While the config is loading, show just the spinner.
   if (loading) {
     return (
       <div className="viewer-wrapper">
@@ -404,6 +465,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
     );
   }
 
+  // If loading the config failed, show an error message with a Back link.
   if (error) {
     return (
       <div className="viewer-wrapper flex flex-col items-center justify-center min-h-screen p-4">
@@ -417,14 +479,19 @@ export default function ViewerClient({ folder }: { folder: string }) {
     );
   }
 
+  // The main viewer screen.
   return (
     <div className="viewer-wrapper">
+      {/* The spinner stays up until the model appears (and not while showing
+          the "taking longer" overlay). */}
       {loaderVisible && !showTryAgain && (
         <div id="load">
           <InfinityLoader label="Loading 3D Model" size={110} />
         </div>
       )}
 
+      {/* The friendly "still preparing" overlay (only after the long wait,
+          and only if the model still hasn't shown). */}
       {showTryAgain && !modelSeenRef.current && (
         <div id="try-again-overlay">
           <div className="try-again-card">
@@ -441,8 +508,10 @@ export default function ViewerClient({ folder }: { folder: string }) {
         </div>
       )}
 
+      {/* A small badge used during AR placement. */}
       <div className="placing-badge" id="placing-badge"></div>
 
+      {/* The top bar: Back on the left, the AR button on the right. */}
       <div id="topbar">
         <Link href={backHref} className="tbtn back-btn">
           <i className="fas fa-arrow-left"></i> Back
@@ -454,8 +523,11 @@ export default function ViewerClient({ folder }: { folder: string }) {
         </div>
       </div>
 
+      {/* The "triple-tap to replay" hint; the "show" class fades it in/out. */}
       <div id="dbl-hint" className={hintVisible ? "show" : ""}>👆 Triple-tap to replay</div>
 
+      {/* The actual 3D model element — only once we have a config AND a chosen
+          model file. We pass the chosen file in as modelUrl. */}
       {config && activeUrl && (
         <PublicModelViewer
           config={{ ...config, modelUrl: activeUrl }}
@@ -463,6 +535,9 @@ export default function ViewerClient({ folder }: { folder: string }) {
         />
       )}
 
+      {/* The bottom info bar (name, stats, price, Add to Order). It slides up
+          once "on" is added. Values prefer the live menu item, falling back
+          to the config. */}
       <div id="bar" className={barVisible ? "on" : ""}>
         <div className="dname" id="dish-title">
           {menuItem?.title || config?.title || ""}
@@ -488,14 +563,20 @@ export default function ViewerClient({ folder }: { folder: string }) {
             <div className="sl">Price</div>
           </div>
         </div>
+        {/* Add-to-order button (disabled until the menu item loads) and the
+            "i" button that opens the full details sheet. */}
         <div className="brow">
           <button className="badd" onClick={addToOrder} disabled={!menuItem}>🛒 Add to Order</button>
           <button className="binfo" onClick={() => setShowInfo(true)} aria-label="Dish details">ℹ</button>
         </div>
       </div>
 
+      {/* The slide-up details sheet: description, ingredients, allergens.
+          Shown only when the "i" was tapped and we have the menu item. */}
       {showInfo && menuItem && (
+        // Tapping the dark backdrop closes the sheet.
         <div className="vinfo-overlay" onClick={() => setShowInfo(false)}>
+          {/* stopPropagation here means tapping INSIDE the sheet doesn't close it. */}
           <div className="vinfo-sheet" onClick={(e) => e.stopPropagation()}>
             <button className="vinfo-close" aria-label="Close" onClick={() => setShowInfo(false)}>
               <i className="fas fa-times"></i>

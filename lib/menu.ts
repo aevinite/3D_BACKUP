@@ -8,8 +8,12 @@
 // The DB stores columns in snake_case; the app works in camelCase. The mapping
 // happens in `mapRow` so the rest of the app doesn't change shape.
 
+// Grab the shared database connection we set up in supabase.ts.
 import { supabase } from "./supabase";
 
+// The shape of one dish in the app. Every field a menu card / detail page might
+// need lives here. Some fields are optional (marked with "?") because not every
+// dish has, say, a 3D model.
 export interface MenuItem {
   id: string;
   slug: string;
@@ -57,12 +61,20 @@ export interface Category {
 
 // Pick the label for a language, falling back to English, then to whatever
 // exists, so the UI never shows a blank.
+// Example: localized({ en: "Burgers", de: "Burger" }, "de") -> "Burger".
 export function localized(text: LocalizedText | undefined, lang: string): string {
+  // Nothing to translate — give back an empty string.
   if (!text) return "";
+  // Try the asked-for language; if missing, fall back to English; if that's
+  // missing too, use the first translation we have. "||" picks the first
+  // non-empty option in that order.
   return text[lang] || text.en || Object.values(text)[0] || "";
 }
 
 // One DB row (snake_case) -> one app object (camelCase).
+// The database names columns like `model_folder`; the app prefers `modelFolder`.
+// This function does that rename, and fills in safe defaults for any missing
+// field so the rest of the app never has to worry about empty/null data.
 function mapRow(row: any): MenuItem {
   return {
     id: row.id,
@@ -71,8 +83,11 @@ function mapRow(row: any): MenuItem {
     price: row.price,
     image: row.image,
     category: row.category,
+    // "!!" forces the value into a strict true/false (e.g. turns 1 into true).
     veg: !!row.veg,
     is4d: !!row.is4d,
+    // "??" means "use the left side, but if it's null/undefined use the right".
+    // So here: keep the DB value, otherwise leave it unset.
     modelFolder: row.model_folder ?? undefined,
     modelSmallUrl: row.model_small_url ?? undefined,
     modelOptimizedUrl: row.model_optimized_url ?? undefined,
@@ -87,6 +102,8 @@ function mapRow(row: any): MenuItem {
     tags: row.tags ?? [],
     allergens: row.allergens ?? [],
     searchAlias: row.search_alias ?? "",
+    // Only keep `options` if it really is a list; otherwise use an empty list
+    // so code that loops over options never breaks.
     options: Array.isArray(row.options) ? row.options : [],
   };
 }
@@ -102,11 +119,15 @@ export interface OrderInput {
   allergies: string[];
 }
 // Guest taps "Call a Waiter" — inserts a row the restaurant sees live in the editor.
+// `async` means this talks to the database and we wait for it to finish.
 export async function callWaiter(tableNumber: string, note?: string): Promise<void> {
+  // Add a new row to the `waiter_calls` table. "|| null" stores an empty value
+  // as a proper blank in the database rather than an empty string.
   const { error } = await supabase.from("waiter_calls").insert({
     table_number: tableNumber || null,
     note: note || null,
   });
+  // If the database refused, raise a clear error the caller can show/handle.
   if (error) throw new Error(`Call failed: ${error.message}`);
 }
 
@@ -117,10 +138,14 @@ export type OrderStatus = "received" | "preparing" | "served" | "cancelled";
 // device can follow ONLY its own order later (the table is insert-only for the
 // public, so we can't read the id back via .select()).
 export async function createOrder(o: OrderInput): Promise<string> {
+  // Make a unique id for this order. If the browser supports the modern
+  // `crypto.randomUUID()`, use it; otherwise build a fallback id from the
+  // current time plus a random chunk so two orders never clash.
   const id =
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  // Save the order. We pass the id we just made so the device can track it.
   const { error } = await supabase.from("orders").insert({
     id,
     table_number: o.tableNumber || null,
@@ -132,6 +157,7 @@ export async function createOrder(o: OrderInput): Promise<string> {
     status: "received",
   });
   if (error) throw new Error(`Order failed: ${error.message}`);
+  // Hand the id back so the guest's screen can poll its own order's status.
   return id;
 }
 
@@ -141,10 +167,14 @@ export async function updateOrderTableNumber(
   id: string,
   tableNumber: string
 ): Promise<boolean> {
+  // `.rpc(...)` calls a database FUNCTION (a bit of logic that lives in the DB)
+  // by name, here "set_order_table_number", passing the order id and new table.
   const { data, error } = await supabase.rpc("set_order_table_number", {
     order_id: id,
     new_table: tableNumber,
   });
+  // Success means: no error AND the function returned at least one row (proof a
+  // matching, still-open order was actually updated).
   return !error && Array.isArray(data) && data.length > 0;
 }
 
@@ -153,30 +183,39 @@ export async function updateOrderTableNumber(
 export async function getOrderStatus(
   id: string
 ): Promise<{ status: OrderStatus; tableNumber: string | null; createdAt: string } | null> {
+  // Ask the database function for just this one order's status.
   const { data, error } = await supabase.rpc("get_order_status", { order_id: id });
+  // Anything wrong or no matching order -> return null (caller treats as "unknown").
   if (error || !Array.isArray(data) || data.length === 0) return null;
+  // Take the first (only) row. "as { ... }" just tells TypeScript its shape.
   const row = data[0] as { status: OrderStatus; table_number: string | null; created_at: string };
+  // Re-label the snake_case DB fields into the camelCase the app expects.
   return { status: row.status, tableNumber: row.table_number, createdAt: row.created_at };
 }
 
 // All menu items, in the order set by `sort_order`.
+// This is the main "fetch the whole menu from the database" function.
 export async function getMenuItems(): Promise<MenuItem[]> {
   const { data, error } = await supabase
-    .from("menu_items")
-    .select("*")
-    .order("sort_order");
+    .from("menu_items")     // from the menu_items table
+    .select("*")            // grab every column
+    .order("sort_order");   // sorted by the owner's chosen display order
   if (error) throw new Error(`Failed to load menu: ${error.message}`);
+  // "data ?? []" -> if nothing came back, use an empty list. Then convert each
+  // raw DB row into a tidy MenuItem with mapRow.
   return (data ?? []).map(mapRow);
 }
 
 // A single item by slug, or null if it doesn't exist.
+// A "slug" is the short URL-friendly name, e.g. "classic-burger".
 export async function getMenuItem(slug: string): Promise<MenuItem | null> {
   const { data, error } = await supabase
     .from("menu_items")
     .select("*")
-    .eq("slug", slug)
-    .maybeSingle();
+    .eq("slug", slug)   // .eq = "where slug equals this value"
+    .maybeSingle();     // expect 0 or 1 row (null if none, no error if missing)
   if (error) throw new Error(`Failed to load item "${slug}": ${error.message}`);
+  // Found it -> tidy it up; not found -> hand back null.
   return data ? mapRow(data) : null;
 }
 
@@ -185,9 +224,10 @@ export async function getCategories(): Promise<Category[]> {
   const { data, error } = await supabase
     .from("categories")
     .select("*")
-    .eq("active", true)
+    .eq("active", true)    // only categories the owner has switched on
     .order("sort_order");
   if (error) throw new Error(`Failed to load categories: ${error.message}`);
+  // Same snake_case -> camelCase tidy-up as mapRow, but for category rows.
   return (data ?? []).map((r) => ({
     slug: r.slug,
     name: r.name ?? {},
@@ -212,14 +252,20 @@ export interface Settings {
   geoLng: number | null;
   geoRadiusM: number;      // how far from the centre still counts as "at the café"
 }
+// Reads the single site-wide settings row and returns it with safe defaults,
+// so the app still works even if settings haven't been configured yet.
 export async function getSettings(): Promise<Settings> {
   const { data, error } = await supabase
     .from("settings")
     .select("*")
-    .eq("id", "site")
+    .eq("id", "site")   // all settings live in one row whose id is "site"
     .maybeSingle();
   if (error) throw new Error(`Failed to load settings: ${error.message}`);
+  // Small helper: turn a value into a number, or null if it's blank/not a number.
   const num = (v: unknown): number | null => (v === null || v === undefined || v === "" || isNaN(Number(v)) ? null : Number(v));
+  // For each setting: if we have a row, read its value; otherwise use a default.
+  // Note "!== false" means "treat anything except an explicit false as on" —
+  // that's how these flags default to ON unless the owner turned them off.
   return {
     bubblesEnabled: data ? data.bubbles_enabled !== false : true,
     serviceMode: data ? data.service_mode === true : false,

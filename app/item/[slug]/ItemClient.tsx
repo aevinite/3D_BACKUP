@@ -1,16 +1,23 @@
+// "use client" = this runs in the visitor's browser, because the dish page is
+// highly interactive (favoriting, zooming the photo, posting reviews, etc.).
 "use client";
 
+// React's tools. useMemo = remember the result of a calculation so we don't
+// redo it on every redraw (used here so the "related dishes" don't reshuffle).
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import StarRating from "@/components/StarRating";
-import InfinityLoader from "@/components/InfinityLoader";
-import { modelLoader } from "@/lib/modelLoader";
-import { getMenuItems } from "@/lib/menu";
-import { allergenIcon, allergenLabel } from "@/lib/allergens";
-import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format";
-import { useTranslation } from "@/lib/i18n";
-import VegIcon from "@/components/VegIcon";
+import Link from "next/link";              // fast page-to-page navigation
+import { useRouter } from "next/navigation"; // lets us send the user to another page in code
+import StarRating from "@/components/StarRating";   // the tappable star picker
+import InfinityLoader from "@/components/InfinityLoader"; // the loading spinner
+import { modelLoader } from "@/lib/modelLoader";     // 3D model download manager
+import { getMenuItems } from "@/lib/menu";           // fetch all dishes from the DB
+import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
+import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // money formatting
+import { useTranslation } from "@/lib/i18n";         // translated text strings
+import VegIcon from "@/components/VegIcon";           // the little veg/non-veg dot
+
+// This describes the "shape" of one dish — every field a dish object can have.
+// It's a TypeScript guide so the editor can catch typos; it doesn't run.
 
 interface FoodItem {
   id: string;
@@ -48,60 +55,78 @@ interface FoodItem {
   options?: { name: string; type: "single" | "multi"; choices: { label: string; price: number }[] }[];
 }
 
+// The dish detail component. It receives `slug` (which dish to show) and
+// `fromCat` (which category the guest came from, for prev/next arrows).
 export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: string }) {
-  const t = useTranslation();
-  const [allItems, setAllItems] = useState<FoodItem[]>([]);
-  const [item, setItem] = useState<FoodItem | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [favorited, setFavorited] = useState(false);
+  const t = useTranslation();  // translated text for the current language
+  // All the little pieces of memory this page keeps (current value + setter):
+  const [allItems, setAllItems] = useState<FoodItem[]>([]);  // every dish (for related/next/prev)
+  const [item, setItem] = useState<FoodItem | null>(null);   // THIS dish (null until found)
+  const [loading, setLoading] = useState(true);              // still fetching?
+  const [favorited, setFavorited] = useState(false);         // is this dish hearted?
   const [showFavHint, setShowFavHint] = useState(false); // one-time "tap to save" coachmark
-  const [descExpanded, setDescExpanded] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
-  const [selectedRating, setSelectedRating] = useState(0);
-  const [reviewName, setReviewName] = useState("");
-  const [reviewText, setReviewText] = useState("");
-  const [localReviews, setLocalReviews] = useState<{name: string; rating: number; text: string}[]>([]);
-  const [reviewTab, setReviewTab] = useState<"rate" | "reviews">("reviews");
-  const [imgZoom, setImgZoom] = useState(false);
-  const [lbScale, setLbScale] = useState(1);
-  const [lbPos, setLbPos] = useState({ x: 0, y: 0 });
-  const pinchRef = useRef<number | null>(null);
-  const lastTouchRef = useRef<{ x: number; y: number } | null>(null);
-  const [theme, setTheme] = useState<'dark' | 'light'>('light');
-  const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null);
-  const router = useRouter();
+  const [descExpanded, setDescExpanded] = useState(false);   // is the description expanded?
+  const [imageLoaded, setImageLoaded] = useState(false);     // has the photo faded in?
+  const [selectedRating, setSelectedRating] = useState(0);   // stars chosen in the review form
+  const [reviewName, setReviewName] = useState("");          // reviewer's typed name
+  const [reviewText, setReviewText] = useState("");          // reviewer's typed comment
+  const [localReviews, setLocalReviews] = useState<{name: string; rating: number; text: string}[]>([]); // reviews shown (incl. ones just added)
+  const [reviewTab, setReviewTab] = useState<"rate" | "reviews">("reviews"); // which review tab is open
+  const [imgZoom, setImgZoom] = useState(false);             // is the full-screen photo open?
+  const [lbScale, setLbScale] = useState(1);                 // zoom level in the lightbox (1 = normal)
+  const [lbPos, setLbPos] = useState({ x: 0, y: 0 });        // pan offset while zoomed in
+  // useRef holds a value across redraws WITHOUT causing a redraw — handy for
+  // tracking finger gestures mid-pinch.
+  const pinchRef = useRef<number | null>(null);              // distance between two fingers
+  const lastTouchRef = useRef<{ x: number; y: number } | null>(null); // last finger position
+  const [theme, setTheme] = useState<'dark' | 'light'>('light'); // dark or light mode
+  const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null); // currency for prices
+  const router = useRouter();  // used below to navigate to the 3D view / menu
 
   // First-time-only nudge so guests learn the top-right heart saves a dish to
   // Favorites. Shows briefly, then never again (localStorage flag).
+  // Runs once when the page appears.
   useEffect(() => {
     let seen = true;
+    // Have we shown this tip before? (stored in the browser's notebook)
     try { seen = !!localStorage.getItem("lfh-fav-hint-seen"); } catch {}
-    if (seen) return;
+    if (seen) return;  // already shown — don't show again
+    // Pop the hint after 0.7s...
     const show = setTimeout(() => setShowFavHint(true), 700);
+    // ...then hide it after 5.5s and remember we've shown it.
     const hide = setTimeout(() => {
       setShowFavHint(false);
       try { localStorage.setItem("lfh-fav-hint-seen", "1"); } catch {}
     }, 5500);
+    // Cleanup: cancel both timers if we leave before they fire.
     return () => { clearTimeout(show); clearTimeout(hide); };
   }, []);
 
+  // Keep the displayed currency in sync. Reads it once, then listens for a
+  // "currency changed" signal (e.g. the guest switched currency elsewhere).
   useEffect(() => {
     setCurrencyState(getCurrency());
     const onCur = () => setCurrencyState(getCurrency());
     window.addEventListener("lfh:currency-changed", onCur);
-    return () => window.removeEventListener("lfh:currency-changed", onCur);
+    return () => window.removeEventListener("lfh:currency-changed", onCur);  // stop listening on leave
   }, []);
 
+  // Watch for dark/light theme changes so the ingredient-tag colors adapt.
   useEffect(() => {
-    if (typeof document === "undefined") return;
-    const root = document.documentElement;
+    if (typeof document === "undefined") return;  // safety: skip if no page (server)
+    const root = document.documentElement;  // the <html> element holds the theme
+    // Read the current theme into our state.
     const read = () => setTheme(root.getAttribute("data-theme") === "dark" ? "dark" : "light");
     read();
+    // A MutationObserver watches the <html> tag and re-reads if the theme attribute changes.
     const observer = new MutationObserver(read);
     observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
-    return () => observer.disconnect();
+    return () => observer.disconnect();  // stop watching on leave
   }, []);
   
+  // A lookup table of colors for ingredient tags, keyed by emoji. Each emoji
+  // has two color choices so repeated emojis don't look identical; some include
+  // separate light-mode colors so they stay readable on a light background.
   const colorMap = {
     '🧀': [
       { bg: 'rgba(255, 215, 0, 0.15)', border: '#FFD700', glow: 'rgba(255, 215, 0, 0.4)' },
@@ -197,42 +222,51 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     ]
   };
   
+  // Counts how many times we've used each emoji, so we can alternate between
+  // its two color choices as the ingredient tags are drawn.
   const emojiIndexMap: Record<string, number> = {};
-  
+
+  // Open the 3D viewer for this dish (only if it actually has a 3D model).
+  // The "?from=" tells the viewer which dish to link back to.
   const goToViewer = () => {
     if (item?.is4d && item?.modelFolder) {
       router.push(`/view/${item.modelFolder}?from=${encodeURIComponent(item.slug)}`);
     }
   };
-  
+
+  // Go back to the menu.
   const goToMenu = () => router.push("/menu");
 
+  // Fetch the dishes and find the one matching this page's slug.
+  // Re-runs if the slug changes (e.g. navigating to a different dish).
   useEffect(() => {
     getMenuItems()
       .then((items) => {
+        // Compare ignoring upper/lowercase so "Croissant" and "croissant" match.
         const normalizedSlug = (slug || "").toLowerCase();
         const found = items.find(
           (it) => it.slug?.toLowerCase() === normalizedSlug
         );
 
-        setAllItems(items);
-        setItem(found || null);
-        setLocalReviews(found?.reviews || []);
-        setLoading(false);
-        setTimeout(() => setImageLoaded(true), 50);
+        setAllItems(items);                 // keep the full list for related/nav
+        setItem(found || null);             // this dish (or null if not found)
+        setLocalReviews(found?.reviews || []); // seed the reviews list
+        setLoading(false);                  // done loading
+        setTimeout(() => setImageLoaded(true), 50); // trigger the photo fade-in
 
         // Load favorite state
         try {
           const savedFavorites = localStorage.getItem('lfh-favorites');
           if (savedFavorites) {
-            const favorites = JSON.parse(savedFavorites);
-            setFavorited(favorites.includes(found?.id));
+            const favorites = JSON.parse(savedFavorites);  // text back into a list
+            setFavorited(favorites.includes(found?.id));    // is this dish in it?
           }
         } catch (e) {
           console.error('Failed to load favorites', e);
         }
       })
       .catch((err) => {
+        // If the fetch failed, log it and stop the spinner.
         console.error(err);
         setLoading(false);
       });
@@ -241,62 +275,74 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
   // Background preload: this dish's model first, then the next & previous dishes
   // in the category (their GLBs + images), so moving between dishes — and opening
   // the 3D view — feels instant. Downloads run through the singleton loader.
+  // Re-runs when the dish, the full list, or the source category changes.
   useEffect(() => {
-    if (!item) return;
-    const urls: string[] = [];
+    if (!item) return;  // nothing to preload until we know the dish
+    const urls: string[] = [];  // the model files we'll queue for download
+    // Add a dish's 3D model files (small + optimized) to the download list.
     const queue4d = (it?: FoodItem | null) => {
-      if (!it?.is4d) return;
+      if (!it?.is4d) return;  // skip dishes without a 3D model
       if (it.modelSmallUrl) urls.push(it.modelSmallUrl);
       if (it.modelOptimizedUrl) urls.push(it.modelOptimizedUrl);
     };
+    // Quietly start loading a dish's PHOTO in the background.
     const preloadImg = (it?: FoodItem | null) => {
       if (it?.image) {
-        const im = new window.Image();
+        const im = new window.Image();  // an off-screen image just to warm the cache
         im.src = it.image;
       }
     };
     queue4d(item); // current dish first
     if (allItems.length) {
+      // Figure out the dish's "neighbors" in the same category, so we can
+      // preheat whatever the guest is most likely to open next.
       const navCat = fromCat || item.category;
       const sibs = navCat === "all" ? allItems : allItems.filter((it) => it.category === navCat);
-      const i = sibs.findIndex((it) => it.slug === item.slug);
+      const i = sibs.findIndex((it) => it.slug === item.slug);  // where we are in that list
       if (i >= 0) {
-        const next = i < sibs.length - 1 ? sibs[i + 1] : null;
-        const prev = i > 0 ? sibs[i - 1] : null;
+        const next = i < sibs.length - 1 ? sibs[i + 1] : null;  // dish after this one
+        const prev = i > 0 ? sibs[i - 1] : null;                // dish before this one
         queue4d(next); // next is the most likely move
         queue4d(prev);
         preloadImg(next);
         preloadImg(prev);
       }
     }
+    // Hand the collected model URLs to the loader to download first.
     if (urls.length) modelLoader.prioritize(urls);
   }, [item, allItems, fromCat]);
 
+  // Builds the "You might like" row: a mix of same-category and other dishes,
+  // picked by rating, then shuffled so they're interleaved rather than grouped.
   const getRelatedItems = (): FoodItem[] => {
-    if (!item || !allItems.length) return [];
-    const TOTAL = 10;
+    if (!item || !allItems.length) return [];  // nothing to suggest yet
+    const TOTAL = 10;       // how many suggestions to show
     const SAME_TARGET = 5; // 5 same-category + 5 related — then shuffle so they interleave
-    const rating = (it: FoodItem) => parseFloat(it.rating) || 0;
-    const byRating = (a: FoodItem, b: FoodItem) => rating(b) - rating(a);
+    const rating = (it: FoodItem) => parseFloat(it.rating) || 0;  // rating as a number
+    const byRating = (a: FoodItem, b: FoodItem) => rating(b) - rating(a);  // sort high→low
 
-    const others = allItems.filter((it) => it.slug !== item.slug);
-    const same = others.filter((it) => it.category === item.category).sort(byRating);
-    const diff = others.filter((it) => it.category !== item.category).sort(byRating);
+    const others = allItems.filter((it) => it.slug !== item.slug);  // every dish except this one
+    const same = others.filter((it) => it.category === item.category).sort(byRating);  // same category
+    const diff = others.filter((it) => it.category !== item.category).sort(byRating);  // other categories
 
-    const samePick = same.slice(0, SAME_TARGET);
-    const diffPick = diff.slice(0, TOTAL - samePick.length);
+    const samePick = same.slice(0, SAME_TARGET);            // top few from same category
+    const diffPick = diff.slice(0, TOTAL - samePick.length); // fill the rest from others
     let picked = [...samePick, ...diffPick];
+    // If we still don't have enough, top up with more from the same category.
     if (picked.length < TOTAL) picked = picked.concat(same.slice(samePick.length));
-    picked = picked.slice(0, TOTAL);
+    picked = picked.slice(0, TOTAL);  // never more than TOTAL
 
     // Shuffle so same- and other-category dishes are interleaved, not grouped.
+    // (This is the Fisher–Yates shuffle: swap each item with a random earlier one.)
     for (let i = picked.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [picked[i], picked[j]] = [picked[j], picked[i]];
+      [picked[i], picked[j]] = [picked[j], picked[i]];  // swap the two
     }
     return picked;
   };
 
+  // Heart / un-heart this dish. Saves the updated list to the browser and
+  // tells the menu to refresh its Favorites tab.
   const toggleFavorite = () => {
     if (!item) return;
     // Any tap on the heart means the hint did its job — retire it for good.
@@ -306,15 +352,17 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
       let favorites: string[] = [];
       const savedFavorites = localStorage.getItem('lfh-favorites');
       if (savedFavorites) {
-        favorites = JSON.parse(savedFavorites);
+        favorites = JSON.parse(savedFavorites);  // read the current list
       }
       if (favorited) {
+        // It was hearted — remove it.
         favorites = favorites.filter(id => id !== item.id);
       } else {
+        // It wasn't — add it.
         favorites.push(item.id);
       }
-      localStorage.setItem('lfh-favorites', JSON.stringify(favorites));
-      setFavorited(!favorited);
+      localStorage.setItem('lfh-favorites', JSON.stringify(favorites));  // save back
+      setFavorited(!favorited);  // flip the heart on screen
       // Tell the menu's Favorites tab to refresh (same-tab; storage event covers others).
       window.dispatchEvent(new Event("lfh:favorites-updated"));
     } catch (e) {
@@ -322,6 +370,8 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     }
   };
 
+  // "Add to Cart" — instead of adding directly, it opens the shared confirm
+  // popup (quantity + total) by broadcasting an event the modal listens for.
   const addToCart = () => {
     if (!item) return;
     window.dispatchEvent(
@@ -340,7 +390,10 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     );
   };
 
+  // Post a review. Checks all three fields are filled, then adds it to the top
+  // of the list and clears the form. (Reviews stay local to this visit.)
   const submitReview = () => {
+    // If name, text, or rating is missing, show a gentle nudge and stop.
     if (!reviewName.trim() || !reviewText.trim() || selectedRating === 0) {
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Almost there", subtitle: "add a name, note & rating", kicker: "review", variant: "error" } }));
       return;
@@ -350,10 +403,11 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
       rating: selectedRating,
       text: reviewText.trim(),
     };
-    setLocalReviews([newReview, ...localReviews]);
-    setReviewName("");
+    setLocalReviews([newReview, ...localReviews]);  // put the new review first
+    setReviewName("");        // clear the form
     setReviewText("");
     setSelectedRating(0);
+    // Show a friendly success toast.
     window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Review posted", subtitle: "thanks for sharing", kicker: "review", variant: "success" } }));
   };
 
@@ -362,6 +416,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const relatedItems = useMemo(() => getRelatedItems(), [item, allItems]);
 
+  // While the dish is still loading, show only the spinner.
   if (loading) {
     return (
       <div id="detail-page" className="page active item-detail-page flex items-center justify-center min-h-screen">
@@ -370,6 +425,8 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     );
   }
 
+  // If loading finished but no matching dish was found, show a friendly
+  // "not found" message with a link back to the menu.
   if (!item) {
     return (
       <div id="detail-page" className="page active item-detail-page flex flex-col items-center justify-center min-h-screen p-4">
@@ -383,23 +440,31 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     );
   }
 
+  // The shown rating: average of the on-screen reviews if there are any,
+  // otherwise the dish's stored rating.
   const rating = localReviews.length > 0
     ? localReviews.reduce((sum, r) => sum + r.rating, 0) / localReviews.length
     : parseFloat(item.rating);
-  const reviewCount = localReviews.length;
+  const reviewCount = localReviews.length;  // how many reviews to show in "(N reviews)"
 
+  // From here down is the actual dish page layout (the markup).
   return (
     <div id="detail-page" className="page active item-detail-page">
+      {/* The floating top bar: a back arrow on the left, the heart on the right. */}
       <div className="nav" style={{ position: 'fixed', top: 0, left: 0, width: '100%', background: 'transparent', backdropFilter: 'none', WebkitBackdropFilter: 'none', borderBottom: 'none', zIndex: 51 }}>
+        {/* Back to the menu. */}
         <Link href="/menu" className="nav-btn" style={{ textDecoration: 'none' }}>
           <i className="fas fa-arrow-left"></i>
         </Link>
+        {/* A flexible spacer that pushes the heart to the right edge. */}
         <div style={{ flex: 1 }}></div>
+        {/* The favorite heart. "fas" = solid (hearted), "far" = outline (not). */}
         <button id="detail-fav" className="nav-btn" onClick={toggleFavorite}>
           <i className={`${favorited ? 'fas' : 'far'} fa-heart`} style={{ color: favorited ? '#ef4444' : '' }}></i>
         </button>
       </div>
 
+      {/* The one-time "tap the heart to save" coachmark, shown only briefly. */}
       {showFavHint && (
         <div className="fav-hint" role="status">
           <span className="fav-hint-tip" aria-hidden="true"></span>
@@ -407,7 +472,9 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
         </div>
       )}
 
+      {/* The big dish photo. Tapping it opens the full-screen zoom view. */}
       <div className="detail-visual" onClick={() => setImgZoom(true)} style={{ cursor: 'zoom-in' }}>
+        {/* The photo fades in (the "show" class is added once it's loaded). */}
         <img
           id="detail-img"
           className={`detail-img ${imageLoaded ? 'show' : ''}`}
@@ -415,24 +482,34 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
           alt={item.title}
           decoding="async"
         />
+        {/* A subtle gradient overlay on top of the photo. */}
         <div className="detail-img-overlay"></div>
+        {/* The little "expand" icon hinting you can tap to zoom. */}
         <span className="img-zoom-hint"><i className="fas fa-expand-alt"></i></span>
+        {/* The veg / non-veg badge in the corner. */}
         <span className="detail-diet-badge">
           <VegIcon isVeg={item.veg} size={28} />
         </span>
       </div>
 
+      {/* The full-screen zoom view ("lightbox"), shown only when imgZoom is on.
+          It supports pinch-to-zoom and dragging once zoomed in. */}
+      {/* The dark full-screen backdrop below. Tapping it closes the view (but
+          only when not zoomed in — the onClick checks lbScale). */}
       {imgZoom && (
         <div
           className="img-lightbox"
           onClick={() => { if (lbScale <= 1) { setImgZoom(false); setLbScale(1); setLbPos({ x: 0, y: 0 }); } }}
         >
+          {/* The X button — closes and resets the zoom/pan. */}
           <button
             className="img-lightbox-close"
             onClick={(e) => { e.stopPropagation(); setImgZoom(false); setLbScale(1); setLbPos({ x: 0, y: 0 }); }}
           >
             <i className="fas fa-times"></i>
           </button>
+          {/* The zoomable image. The style applies the current zoom + pan, and
+              the touch handlers below implement pinch-to-zoom and dragging. */}
           <img
             src={item.image}
             alt={item.title}
@@ -478,12 +555,17 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
         </div>
       )}
       
+      {/* Everything below the photo: title, rating, price, stats, description,
+          buttons, reviews, related dishes, and prev/next navigation. */}
       <div className="detail-body">
+        {/* The dish name. */}
         <h2 id="detail-title" className="detail-title">{item.title}</h2>
+        {/* The star rating row. */}
         <div className="rating-row" id="detail-rating-row">
           <div className="stars">
+            {/* Draw 5 stars: full, a partial one, or empty, based on the rating. */}
             {Array.from({ length: 5 }, (_, i) => {
-              const full = i + 1 <= Math.floor(rating);
+              const full = i + 1 <= Math.floor(rating);  // is this whole star filled?
               const frac = rating - Math.floor(rating);
               if (full) return <span key={i} className="star">★</span>;
               if (i === Math.floor(rating) && frac > 0) {
@@ -497,16 +579,19 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
               return <span key={i} className="star" style={{ color: "var(--muted2, rgba(212,165,116,0.3))" }}>★</span>;
             })}
           </div>
+          {/* The numeric rating (e.g. "4.5") and the review count. */}
           <span className="rating-value">{rating.toFixed(1)}</span>
           <span className="rating-count">({reviewCount} {reviewCount === 1 ? t.review : t.reviews})</span>
         </div>
-        
+
         <div className="divider"></div>
 
+        {/* The price, formatted for the current currency (falls back to $). */}
         <div className="price-row">
           <span className="detail-price" id="detail-price">{currency ? formatPrice(item.price, currency) : `$${item.price}`}</span>
         </div>
-        
+
+        {/* The nutrition stats row: calories, protein, carbs, sugar. */}
         <div className="stats-row" id="stats-row">
           <div className="stat-box">
             <div className="stat-num">{item.nutrition.calories}</div>
@@ -526,21 +611,29 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
           </div>
         </div>
 
+        {/* The "About this dish" section. */}
         <div className="section-label">{t.aboutDish}</div>
         <div className="desc-box">
+          {/* The description. The "expanded" class shows the full text. */}
           <p id="detail-desc" className={`detail-desc ${descExpanded ? 'expanded' : ''}`}>
             {item.longDescription}
           </p>
+          {/* The Read more / Read less toggle. */}
           <span id="desc-toggle" className="desc-toggle" onClick={() => setDescExpanded(!descExpanded)}>
             {descExpanded ? t.readLess : t.readMore}
           </span>
+          {/* When expanded, also reveal the ingredients list and allergens. */}
           {descExpanded && <div className="ing-inside-label">{t.ingredients}</div>}
           {descExpanded && <div className="ingredients-row" id="tags-row">
+            {/* Draw a colored chip for each ingredient. */}
             {item.ingredients.map((ingItem, i) => {
+              // Pick a color for this ingredient's emoji (alternating between
+              // its two choices), falling back to a default beige if unknown.
               if (!emojiIndexMap[ingItem.emoji]) emojiIndexMap[ingItem.emoji] = 0;
               const colorOptions = colorMap[ingItem.emoji as keyof typeof colorMap] || [{ bg: 'rgba(212, 165, 116, 0.15)', border: '#D4A574', glow: 'rgba(212, 165, 116, 0.4)' }];
               const colors = colorOptions[emojiIndexMap[ingItem.emoji] % colorOptions.length];
-              emojiIndexMap[ingItem.emoji]++;
+              emojiIndexMap[ingItem.emoji]++;  // next time, use the other color
+              // In light mode, some colors swap to a darker, readable variant.
               const isLightTheme = theme === 'light';
               let textColor = colors.border;
               let borderColor = colors.border;
@@ -561,6 +654,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
               );
             })}
           </div>}
+          {/* When expanded and the dish has allergens, list them too. */}
           {descExpanded && item.allergens.length > 0 && (
             <>
               <div className="ing-inside-label">Contains</div>
@@ -573,10 +667,13 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
           )}
         </div>
 
+        {/* The action buttons: Add to Cart, plus View in 3D (or a disabled
+            placeholder when this dish has no 3D model). */}
         <div className="btn-row">
           <button className="btn btn-gold" onClick={addToCart}>
             <i className="fas fa-shopping-bag"></i> {t.addToCart}
           </button>
+          {/* Show the live 3D button only if a model exists; otherwise a greyed-out one. */}
           {item.is4d && item.modelFolder ? (
             <button id="view-3d-btn" className="btn btn-cyan" onClick={goToViewer}>
               <i className="fas fa-cube"></i> {t.viewIn3D}
@@ -588,14 +685,17 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
           )}
         </div>
 
+        {/* The customer reviews area: two tabs (write one / read them). */}
         <div className="section-label" style={{ marginTop: '24px' }}>{t.customerReviews}</div>
         <div className="review-tabs">
+          {/* Tab 1: the "rate this dish" form. */}
           <button
             className={`review-tab-btn ${reviewTab === "rate" ? "active" : ""} ${reviewTab === "reviews" ? "tab-glow" : ""}`}
             onClick={() => setReviewTab("rate")}
           >
             ⭐ {t.tabRate}
           </button>
+          {/* Tab 2: the list of existing reviews. */}
           <button
             className={`review-tab-btn ${reviewTab === "reviews" ? "active" : ""}`}
             onClick={() => setReviewTab("reviews")}
@@ -604,6 +704,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
           </button>
         </div>
 
+        {/* The review form — shown only when the "rate" tab is active. */}
         {reviewTab === "rate" && (
           <div className="review-form" id="review-form">
             <div className="form-title">{t.rateThisDish}</div>
@@ -630,13 +731,16 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
           </div>
         )}
 
+        {/* The list of reviews — shown only when the "reviews" tab is active. */}
         {reviewTab === "reviews" && (
           <div className="reviews-section" id="reviews-section">
+            {/* If there are no reviews, show an encouraging empty message. */}
             {localReviews.length === 0 ? (
               <p style={{ color: "var(--muted)", fontSize: 13, textAlign: "center", padding: "24px 0" }}>
                 No reviews yet. Be the first to review!
               </p>
             ) : (
+              // Otherwise, draw a card for each review.
               localReviews.map((review, i) => (
                 <div key={i} className="review-card">
                   <div className="review-stars">
@@ -654,10 +758,12 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
           </div>
         )}
         
+        {/* The "You might like" row — only shown if there are suggestions. */}
         {relatedItems.length > 0 && (
           <>
             <div className="section-label" style={{ marginTop: 0 }}>{t.youMightLike}</div>
             <div className="related-section" id="related-section">
+              {/* One tappable card per suggested dish. */}
               {relatedItems.map((related) => (
                 <Link key={related.slug} href={`/item/${related.slug}`} className="related-card-link" style={{ textDecoration: 'none' }}>
                   <div className="related-card">
@@ -677,19 +783,24 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
           </>
         )}
         
+        {/* The previous / next dish arrows down the sides. This little inline
+            function works out the neighbors and only shows arrows that exist. */}
         {(() => {
-          if (!allItems.length || !item) return null;
+          if (!allItems.length || !item) return null;  // nothing to navigate yet
+          // The list we step through: the same category we came from.
           const navCat = fromCat || item.category;
           const siblings = navCat === "all" ? allItems : allItems.filter((it) => it.category === navCat);
-          const idx = siblings.findIndex((it) => it.slug === item.slug);
+          const idx = siblings.findIndex((it) => it.slug === item.slug);  // our spot in it
           if (idx < 0) return null;
           // No wrap-around: hide the arrow when there's nothing before/after.
           const prev = idx > 0 ? siblings[idx - 1] : null;
           const next = idx < siblings.length - 1 ? siblings[idx + 1] : null;
-          if (!prev && !next) return null;
+          if (!prev && !next) return null;  // only one dish — no arrows
+          // Carry the category in the link so the next page keeps the same nav list.
           const catParam = navCat !== item.category ? `?cat=${navCat}` : "";
           return (
             <>
+              {/* Left strip: go to the previous dish (only if there is one). */}
               {prev && (
                 <Link
                   href={`/item/${prev.slug}${catParam}`}
@@ -701,6 +812,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
                   <i className="fas fa-chevron-left"></i>
                 </Link>
               )}
+              {/* Right strip: go to the next dish (only if there is one). */}
               {next && (
                 <Link
                   href={`/item/${next.slug}${catParam}`}
@@ -716,6 +828,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
           );
         })()}
 
+        {/* A final "Back to menu" button at the bottom. */}
         <div className="btn-row" style={{ marginTop: '8px' }}>
           <button className="btn btn-secondary" onClick={goToMenu}>
             <i className="fas fa-arrow-left"></i> {t.backToMenu}

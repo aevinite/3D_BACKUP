@@ -1,3 +1,4 @@
+// Runs in the browser so it can poll the kitchen and handle drag gestures.
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
@@ -21,23 +22,31 @@ import {
 // fires in OTHER tabs, so we need our own in-tab signal.
 const broadcast = () => window.dispatchEvent(new Event("lfh:orders-updated"));
 
+// OrderTracker: the floating strip that shows a guest's order status
+// ("Received" -> "Preparing" -> "Served"). It quietly polls the kitchen for
+// updates, lets you tap to see details/edit the table, and lets you drag it
+// onto an X to hide it (the order stays alive in the cart's history).
 export default function OrderTracker() {
-  const [orders, setOrders] = useState<ActiveOrder[]>([]);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [tableDraft, setTableDraft] = useState("");
-  const [savingTable, setSavingTable] = useState(false);
-  const [currency, setCurrency] = useState<CurrencyMeta | null>(null);
-  const lastStatus = useRef<Record<string, OrderStatus>>({});
+  // useState boxes (re-draw the strip when changed):
+  const [orders, setOrders] = useState<ActiveOrder[]>([]); // all orders this device is following
+  const [detailOpen, setDetailOpen] = useState(false); // is the details sheet open?
+  const [tableDraft, setTableDraft] = useState(""); // table number being typed in the sheet
+  const [savingTable, setSavingTable] = useState(false); // true while saving a table change
+  const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // currency for prices
+  // useRef boxes (remembered values that DON'T trigger a re-draw):
+  const lastStatus = useRef<Record<string, OrderStatus>>({}); // last status we toasted, per order, to avoid repeat toasts
   // Drag-to-dismiss: hold the strip, drag it onto the cross target to hide it.
-  const stripRef = useRef<HTMLButtonElement | null>(null);
-  const dragRef = useRef<{ sx: number; sy: number; pid: number; moved: boolean } | null>(null);
-  const [drag, setDrag] = useState<{ dx: number; dy: number; over: boolean } | null>(null);
-  const [snapping, setSnapping] = useState(false);
-  const [dismissing, setDismissing] = useState<{ tx: number; ty: number } | null>(null);
+  const stripRef = useRef<HTMLButtonElement | null>(null); // points at the strip's DOM element
+  const dragRef = useRef<{ sx: number; sy: number; pid: number; moved: boolean } | null>(null); // live drag bookkeeping (start point, pointer id, whether it actually moved)
+  const [drag, setDrag] = useState<{ dx: number; dy: number; over: boolean } | null>(null); // how far it's been dragged + whether it's over the X
+  const [snapping, setSnapping] = useState(false); // true while it springs back after a missed drop
+  const [dismissing, setDismissing] = useState<{ tx: number; ty: number } | null>(null); // the fly-into-the-X animation offsets
   // The order being animated into the cross — frozen so a newly-arrived order
   // can't swap into the strip mid-animation and play the fly-out on the wrong one.
   const dismissingOrderRef = useRef<ActiveOrder | null>(null);
 
+  // refresh(): re-read the saved orders into state. Also patches any already-
+  // finished order that's missing a "finished at" time so it can auto-clear.
   const refresh = () => {
     // Backfill a finalize time for any already-final order missing one (e.g. it was
     // cancelled in a past session) so it auto-clears instead of getting stuck.
@@ -49,17 +58,19 @@ export default function OrderTracker() {
         changed = true;
       }
     });
-    if (changed) write(list);
+    if (changed) write(list); // save back only if we patched something
     setOrders(list);
   };
 
+  // Runs once on mount: load orders + currency, then listen for "order placed"
+  // (refresh) and "currency changed" messages.
   useEffect(() => {
     refresh();
     setCurrency(getCurrency());
-    const onPlaced = () => refresh();
+    const onPlaced = () => refresh(); // a new order arrived (this tab or another)
     const onCur = () => setCurrency(getCurrency());
     window.addEventListener("lfh:order-placed", onPlaced);
-    window.addEventListener("storage", onPlaced);
+    window.addEventListener("storage", onPlaced); // "storage" fires when another tab changes localStorage
     window.addEventListener("lfh:currency-changed", onCur);
     return () => {
       window.removeEventListener("lfh:order-placed", onPlaced);
@@ -69,22 +80,26 @@ export default function OrderTracker() {
   }, []);
 
   // Poll the kitchen for each order we're still following.
+  // "Polling" = asking the server "any update?" on a repeating timer, because
+  // the server can't push to us directly here.
   useEffect(() => {
-    let cancelled = false;
+    let cancelled = false; // flag so an in-flight check can bail if we unmount
     const poll = async () => {
       const list = read();
+      // Only check orders that are still in progress and not too old.
       const live = list.filter(
         (o) => !o.dismissed && !isFinal(o.status) && Date.now() - o.placedAt < MAX_AGE_MS
       );
-      if (live.length === 0) return;
+      if (live.length === 0) return; // nothing to ask about
       let changed = false;
       for (const o of live) {
-        const res = await getOrderStatus(o.id);
+        const res = await getOrderStatus(o.id); // ask the server for this order's status
         if (!res || cancelled) continue;
         if (res.status !== o.status) {
-          o.status = res.status;
-          if (isFinal(res.status) && !o.finalizedAt) o.finalizedAt = Date.now();
+          o.status = res.status; // status moved forward — update our copy
+          if (isFinal(res.status) && !o.finalizedAt) o.finalizedAt = Date.now(); // stamp the finish time
           changed = true;
+          // Show a toast the FIRST time we see each new status (not on every poll).
           if (lastStatus.current[o.id] !== res.status) {
             lastStatus.current[o.id] = res.status;
             window.dispatchEvent(
@@ -99,14 +114,16 @@ export default function OrderTracker() {
           }
         }
       }
+      // If anything changed, save it, re-draw, and tell the open cart to refresh.
       if (changed && !cancelled) {
         write(list);
         refresh();
         broadcast();
       }
     };
-    poll();
-    const iv = setInterval(poll, POLL_MS);
+    poll(); // check immediately on mount
+    const iv = setInterval(poll, POLL_MS); // then keep checking every POLL_MS milliseconds
+    // Cleanup: mark cancelled and stop the timer when this effect tears down.
     return () => {
       cancelled = true;
       clearInterval(iv);
@@ -114,45 +131,52 @@ export default function OrderTracker() {
   }, [orders.length]);
 
   // Auto-hide a served/cancelled strip one minute after it finishes.
+  // We set a single timer for whichever finished order is due to disappear soonest.
   useEffect(() => {
     const finals = orders.filter((o) => isFinal(o.status) && o.finalizedAt && !o.dismissed);
     if (finals.length === 0) return;
     const soonest = Math.min(...finals.map((o) => (o.finalizedAt as number) + SERVED_LINGER_MS));
-    const delay = Math.max(0, soonest - Date.now());
-    const t = setTimeout(refresh, delay + 100);
-    return () => clearTimeout(t);
+    const delay = Math.max(0, soonest - Date.now()); // how long until that moment
+    const t = setTimeout(refresh, delay + 100); // refresh just after it's due
+    return () => clearTimeout(t); // cancel the timer if things change first
   }, [orders]);
 
   // Hide only the floating strip — the order stays live and visible in the
   // cart's "Live now" list (it is NOT cancelled or removed).
   const hideStrip = (id: string) => {
-    write(read().map((o) => (o.id === id ? { ...o, stripHidden: true } : o)));
+    write(read().map((o) => (o.id === id ? { ...o, stripHidden: true } : o))); // mark this one's strip hidden
     setDetailOpen(false);
     refresh();
-    broadcast();
+    broadcast(); // tell the cart to update its dot/list
   };
 
+  // Which order does the strip actually show right now?
   const visible = liveActiveOrders(orders).filter((o) => !o.stripHidden);
   // While dismissing, keep showing the SAME order that's flying into the cross.
   const order = (dismissing && dismissingOrderRef.current) || visible[0];
-  if (!order) return null;
+  if (!order) return null; // nothing live to show -> draw nothing
 
-  const c = COPY[order.status];
-  const stepIndex = STEPS.indexOf(order.status);
+  const c = COPY[order.status]; // the label/sub/icon text for this status
+  const stepIndex = STEPS.indexOf(order.status); // which step of the progress bar we're on
+  // The table can only be corrected while the order is early (not yet served).
   const canEditTable = order.status === "received" || order.status === "preparing";
+  // showPrice(): format a number as a price string in the chosen currency.
   const showPrice = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
 
+  // openDetail(): open the details sheet, pre-filling the table input.
   const openDetail = () => {
     setTableDraft(order.tableNumber || "");
     setDetailOpen(true);
   };
 
+  // saveTable(): send a corrected table number to the server, then update locally.
   const saveTable = async () => {
-    if (savingTable) return;
+    if (savingTable) return; // ignore double taps
     setSavingTable(true);
-    const ok = await updateOrderTableNumber(order.id, tableDraft);
+    const ok = await updateOrderTableNumber(order.id, tableDraft); // tell the server
     setSavingTable(false);
     if (ok) {
+      // Save succeeded: update our stored copy, re-draw, and confirm with a toast.
       write(read().map((o) => (o.id === order.id ? { ...o, tableNumber: tableDraft.trim() } : o)));
       refresh();
       broadcast();
@@ -173,24 +197,31 @@ export default function OrderTracker() {
   // "Previous orders → Live" list. Works with touch and mouse (pointer events).
   const CROSS_Y = 0.68; // vertical position of the cross (0=top, 1=bottom)
   const HIT = 90;       // generous hit radius around the cross
+  // crossXY(): the cross's centre point on screen (middle, lower half).
   const crossXY = () => ({ x: window.innerWidth / 2, y: window.innerHeight * CROSS_Y });
 
+  // onPointerDown: finger/mouse pressed the strip. Remember the start point and
+  // "capture" the pointer so we keep getting move/up events even if it leaves the strip.
   const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
-    if (dismissing) return;
+    if (dismissing) return; // ignore presses mid fly-out
     dragRef.current = { sx: e.clientX, sy: e.clientY, pid: e.pointerId, moved: false };
     // Capture immediately so a fast flick that leaves the small strip still
     // delivers move/up here (and so a stray pointerdown can't wedge dragRef).
     try { stripRef.current?.setPointerCapture(e.pointerId); } catch {}
   };
+  // onPointerMove: finger/mouse is moving while pressed. Track how far it moved
+  // and whether it's currently hovering over the X target.
   const onPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
     const d = dragRef.current;
     if (!d || dismissing) return;
-    const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
+    const dx = e.clientX - d.sx, dy = e.clientY - d.sy; // distance from the start point
     if (!d.moved && Math.hypot(dx, dy) < 8) return; // ignore tiny jitters (tap)
-    if (!d.moved) d.moved = true;
+    if (!d.moved) d.moved = true; // past the threshold -> it's a real drag now
     const { x, y } = crossXY();
+    // "over" is true when the pointer is within HIT pixels of the cross centre.
     setDrag({ dx, dy, over: Math.hypot(e.clientX - x, e.clientY - y) < HIT });
   };
+  // endDrag: finger/mouse lifted. Decide: was it a tap, a drop on the X, or a miss?
   const endDrag = (e: ReactPointerEvent<HTMLButtonElement>) => {
     const d = dragRef.current;
     dragRef.current = null;
@@ -200,13 +231,15 @@ export default function OrderTracker() {
     const { x, y } = crossXY();
     if (Math.hypot(e.clientX - x, e.clientY - y) < HIT) {
       // dropped on the cross → fly into it, then hide
+      // Work out exactly how far to slide so the strip lands on the cross.
       const r = stripRef.current?.getBoundingClientRect();
       const tx = r ? x - (r.left + r.width / 2) : 0;
       const ty = r ? y - (r.top + r.height / 2) : 0;
       const id = order.id;
       dismissingOrderRef.current = order; // freeze the strip we're animating out
       setDrag(null);
-      setDismissing({ tx, ty });
+      setDismissing({ tx, ty }); // triggers the fly-into-the-cross animation
+      // After the animation finishes, toast and actually hide the strip.
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
           message: "Tracker hidden", subtitle: "still in Previous orders",
@@ -215,14 +248,15 @@ export default function OrderTracker() {
         hideStrip(id);
         setDismissing(null);
         dismissingOrderRef.current = null;
-      }, 340);
+      }, 340); // matches the 0.34s CSS transition
     } else {
       // released away from the cross → spring back into place
       setSnapping(true);
-      setDrag({ dx: 0, dy: 0, over: false });
+      setDrag({ dx: 0, dy: 0, over: false }); // animate back to offset 0,0
       setTimeout(() => { setSnapping(false); setDrag(null); }, 260);
     }
   };
+  // onPointerCancel: the OS yanked the gesture (e.g. a phone call). Reset cleanly.
   const onPointerCancel = (e: ReactPointerEvent<HTMLButtonElement>) => {
     dragRef.current = null;
     try { stripRef.current?.releasePointerCapture(e.pointerId); } catch {}
@@ -243,6 +277,8 @@ export default function OrderTracker() {
 
   return (
     <>
+      {/* The X "drop zone" target, only shown while a drag is in progress. It
+          highlights when the strip is hovering over it. */}
       {drag && (
         <div className={`ot-dropzone ${drag.over ? "over" : ""}`} aria-hidden="true">
           <div className="ot-dropzone-circle"><i className="fas fa-times"></i></div>
@@ -250,6 +286,8 @@ export default function OrderTracker() {
         </div>
       )}
 
+      {/* The floating status strip itself. It's a button so tapping works for
+          keyboards too. The onPointer* handlers drive the drag-to-hide gesture. */}
       <button
         type="button"
         ref={stripRef}
@@ -262,15 +300,19 @@ export default function OrderTracker() {
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(); } }}
         aria-label="Order status — tap to view, drag onto the cross to hide"
       >
+        {/* The status icon (changes with the status: received/preparing/served). */}
         <div className="ot-icon" aria-hidden="true">
           <i className={`fas ${c.icon}`}></i>
         </div>
         <div className="ot-body">
           <div className="ot-top">
+            {/* The status label, e.g. "Preparing your order". */}
             <span className="ot-label">{c.label}</span>
+            {/* Show the table number if we have one. */}
             {order.tableNumber && <span className="ot-table">Table {order.tableNumber}</span>}
           </div>
           <div className="ot-sub">{c.sub}</div>
+          {/* The little progress dots: filled up to the current step. */}
           {stepIndex >= 0 && (
             <div className="ot-steps" aria-hidden="true">
               {STEPS.map((s, i) => (
@@ -279,11 +321,14 @@ export default function OrderTracker() {
             </div>
           )}
         </div>
+        {/* The grip lines hint that the strip can be dragged. */}
         <span className="ot-grip" aria-hidden="true"><i className="fas fa-grip-lines"></i></span>
       </button>
 
+      {/* The details sheet that slides up when the strip is tapped. */}
       {detailOpen && (
         <>
+          {/* Dark backdrop; tapping it closes the sheet. */}
           <div className="overlay active" onClick={() => setDetailOpen(false)} />
           <div className="ot-sheet" role="dialog" aria-modal="true" aria-label="Order status">
             <button className="ot-sheet-close" aria-label="Close" onClick={() => setDetailOpen(false)}>
@@ -308,6 +353,7 @@ export default function OrderTracker() {
               </div>
             )}
 
+            {/* The list of dishes in this order, plus the total at the bottom. */}
             {order.items && order.items.length > 0 && (
               <div className="ot-items">
                 {order.items.map((it, i) => (
@@ -323,6 +369,7 @@ export default function OrderTracker() {
               </div>
             )}
 
+            {/* The "fix my table number" area (locked once the order is served). */}
             <div className="ot-table-edit">
               <label htmlFor="ot-table-input">Table number</label>
               <div className="ot-table-row">
@@ -351,6 +398,7 @@ export default function OrderTracker() {
               </p>
             </div>
 
+            {/* A plain link to hide the strip (same result as dropping it on the X). */}
             <button type="button" className="ot-hide-link" onClick={() => hideStrip(order.id)}>
               Hide this tracker — it stays in Previous orders
             </button>
