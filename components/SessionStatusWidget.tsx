@@ -216,15 +216,18 @@ export default function SessionStatusWidget() {
     : st.approved ? "You’re in — let in by the host" : "Waiting for the host to let you in…";
 
   // Default to the top-right, tucked under the header controls; once dragged, the
-  // saved x/y wins. Right-anchored so it never collides with the centred hero.
-  const style: CSSProperties = pos ? { right: pos.right, top: pos.top } : DEFAULT_POS;
+  // saved right/top wins. When NOT dragged yet (pos === null), we let CSS place it
+  // via the `.ssw-anchor` class — that uses the safe-area inset so a notched phone's
+  // taller header can never sit on top of the cart button / the widget.
+  const style: CSSProperties | undefined = pos ? { right: pos.right, top: pos.top } : undefined;
+  const anchor = pos ? "" : " ssw-anchor";
 
   // When collapsed, draw just the small round bubble (tap or drag it).
   if (collapsed) {
     return (
       <button
         type="button"
-        className={`ssw-bubble${waiting ? " waiting" : ""}`}
+        className={`ssw-bubble${waiting ? " waiting" : ""}${anchor}`}
         style={style}
         onPointerDown={onDown}
         onPointerMove={onMove}
@@ -240,7 +243,7 @@ export default function SessionStatusWidget() {
   // Otherwise draw the full card: a drag handle on top, then the status and the
   // Change-table / Leave buttons.
   return (
-    <div className="ssw-card" style={style} role="dialog" aria-label="Your table">
+    <div className={`ssw-card${anchor}`} style={style} role="dialog" aria-label="Your table">
       {/* The top bar: grip to drag, and a chevron to collapse back to the bubble. */}
       <div className="ssw-head" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}>
         <span className="ssw-grip" aria-hidden="true"><i className="fas fa-grip-lines"></i></span>

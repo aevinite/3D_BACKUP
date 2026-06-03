@@ -207,23 +207,24 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
           </div>
           {/* Price, formatted to the chosen currency (falls back to a $ amount) */}
           <div className="dish-price">{currency ? formatPrice(item.price, currency) : `$${item.price}`}</div>
+          {/* Sold out: show the "Not available" pill INLINE here, under the price,
+              so it can never overlap the rating/time/price (the old version was
+              absolutely positioned and overlapped them on narrow mobile cards). */}
+          {soldOut && (
+            <span className="sold-out-pill" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+              Not available
+            </span>
+          )}
         </div>
 
         {/* The veg / non-veg marker in the corner */}
         <div className="diet-badge" aria-hidden="true">
           <VegIcon isVeg={item.veg} size={18} />
         </div>
-        {/* The bottom-right control changes depending on the dish's state: */}
-        {soldOut ? (
-          // 1) Sold out: a non-clickable "Not available" pill.
-          <span
-            className="sold-out-pill"
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          >
-            Not available
-          </span>
-        ) : hasOptions ? (
-          // 2) Has options: a "sliders" button that opens the Customize popup.
+        {/* The bottom-right control. Hidden when sold out (the "Not available"
+            pill sits inline under the price instead, so nothing overlaps). */}
+        {!soldOut && (hasOptions ? (
+          // 1) Has options: a "sliders" button that opens the Customize popup.
           <button
             type="button"
             className="cart-add-btn customize-btn"
@@ -234,7 +235,7 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
             <i className="fas fa-sliders"></i>
           </button>
         ) : cartQty === 0 ? (
-          // 3) Not in cart yet: a simple "+" button to quick-add one.
+          // 2) Not in cart yet: a simple "+" button to quick-add one.
           <button
             type="button"
             className="cart-add-btn"
@@ -244,7 +245,7 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
             <i className="fas fa-plus"></i>
           </button>
         ) : (
-          // 4) Already in cart: a "− [count] +" stepper to change the amount.
+          // 3) Already in cart: a "− [count] +" stepper to change the amount.
           <div
             className="cart-qty-row"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -257,7 +258,7 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
               <i className="fas fa-plus"></i>
             </button>
           </div>
-        )}
+        ))}
       </div>
     </Link>
   );

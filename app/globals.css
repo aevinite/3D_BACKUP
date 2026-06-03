@@ -759,9 +759,11 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 }
 @media (prefers-reduced-motion: reduce) { .item-card.sold-out { animation: none; } }
 .item-card.sold-out .dish-price { color: var(--muted); }
+/* "Not available" pill — now sits INLINE under the price (was absolutely
+   positioned, which overlapped the rating/time/price on narrow mobile cards). */
 .sold-out-pill {
-  position: absolute; bottom: 14px; right: 14px;
-  padding: 7px 13px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  display: inline-block; margin-top: 8px;
+  padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
   background: rgba(120,120,120,0.18); color: var(--muted);
   border: 1px solid rgba(150,150,150,0.3); white-space: nowrap;
 }
@@ -2758,6 +2760,11 @@ a:focus:not(:focus-visible) { outline: none; }
 /* --- SESSION STATUS WIDGET (draggable "you're on table N" card) ---
    Uses the site's theme tokens so it adapts to light & dark and reads as part of
    the café UI, not a bolted-on box. */
+/* Default resting spot (before the user drags it): top-right, BELOW the header.
+   The header is min-height 64px + 12px padding + safe-area-inset-top, so on a
+   notched phone it can grow tall — we add that inset here so the widget never sits
+   on top of the cart button. Once dragged, an inline right/top overrides this. */
+.ssw-anchor { top: calc(env(safe-area-inset-top, 0px) + 84px) !important; right: 16px !important; left: auto !important; }
 .ssw-card {
   position: fixed; z-index: 61; width: 244px;
   background: color-mix(in srgb, var(--card) 90%, transparent);
