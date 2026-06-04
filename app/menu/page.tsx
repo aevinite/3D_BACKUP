@@ -158,7 +158,10 @@ export default function MenuPage() {
     // Restore the rest of the browse state so Back from a dish lands you exactly
     // where you left: view mode, sort, diet, search. (Category is handled above.)
     try {
-      const sl = sessionStorage.getItem("lfh_menu_layout");
+      // Layout (list vs gallery) is a lasting PREFERENCE, so it lives in
+      // localStorage and survives closing the browser (sessionStorage fallback
+      // for anyone who set it under the old build).
+      const sl = localStorage.getItem("lfh_menu_layout") ?? sessionStorage.getItem("lfh_menu_layout");
       if (sl === "list" || sl === "gallery") setLayout(sl);
       const ss = sessionStorage.getItem("lfh_menu_sort");
       if (ss !== null) setCurrentSort(ss);
@@ -190,7 +193,7 @@ export default function MenuPage() {
     // On the very first run, just mark "restored" and skip saving (see above).
     if (!restoredRef.current) { restoredRef.current = true; return; }
     try {
-      sessionStorage.setItem("lfh_menu_layout", layout);
+      localStorage.setItem("lfh_menu_layout", layout); // lasting preference (survives browser close)
       sessionStorage.setItem("lfh_menu_sort", currentSort);
       sessionStorage.setItem("lfh_menu_diet", currentDiet);
       sessionStorage.setItem("lfh_menu_search", searchQuery);

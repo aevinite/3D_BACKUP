@@ -869,10 +869,12 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 .gallery-mode .diet-badge { right: 14px; top: 14px; }
 .gallery-mode .badge-4d { right: 14px; bottom: 14px; }
 .dish-info { flex: 1; position: relative; z-index: 1; }
-/* Gallery (grid) cards stack the control at the bottom-right corner; reserve a
-   clear strip under the price so the +/−[n]+ stepper or the "Not available" pill
-   sits in its own space and never overlaps the rating/price on narrow phones. */
-.gallery-mode .dish-info { padding-bottom: 46px; }
+/* The small +/sliders button (and the −[n]+ stepper) sit bottom-right and don't
+   reach the short, left-aligned price, so gallery cards need only a tiny clearance.
+   Only the WIDE "Not available" pill actually overlaps on narrow phones, so we
+   reserve a strip for that case alone (below) — keeping normal cards tight. */
+.gallery-mode .dish-info { padding-bottom: 6px; }
+.gallery-mode .item-card.sold-out .dish-info { padding-bottom: 40px; }
 .dish-name {
   font-weight: 700; font-size: 18px; margin-bottom: 6px; color: var(--text);
   padding-right: 32px; /* reserve space so the name + 4D cube never slide under the top-right veg badge on mobile */
