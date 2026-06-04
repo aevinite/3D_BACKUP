@@ -34,8 +34,19 @@ const COLLAPSED_KEY = "lfh_sess_widget_collapsed";
 const DEFAULT_POS = { right: 16, top: 88 };
 
 // A snapshot of the table connection we display: table number, your role, whether
-// you've been approved, and how many people are at the table.
-interface SState { table: string; role: "owner" | "guest"; approved: boolean; count: number; }
+// you've been approved, how many people are at the table, and any active waiter
+// calls (so we can show "You called: Water").
+interface SState { table: string; role: "owner" | "guest"; approved: boolean; count: number; calls: { note: string }[]; }
+// Turn a waiter-call reason into a little emoji for the "you called" row.
+const callIcon = (note: string) => {
+  const n = (note || "").toLowerCase();
+  if (n.includes("water")) return "💧";
+  if (n.includes("napkin")) return "🧻";
+  if (n.includes("clean")) return "🧹";
+  if (n.includes("cutlery") || n.includes("fork")) return "🍴";
+  if (n.includes("bill") || n.includes("check")) return "🧾";
+  return "🔔";
+};
 // Tiny helper to pop a notification toast.
 const toast = (message: string, kicker = "table", variant = "success") =>
   window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message, kicker, variant } }));
@@ -48,6 +59,7 @@ export default function SessionStatusWidget() {
   const [st, setSt] = useState<SState | null>(null); // the live table info, or null when not connected
   const [collapsed, setCollapsed] = useState(false); // shrunk to the little bubble?
   const [busy, setBusy] = useState(false); // true while a leave/change is in flight
+  const [confirming, setConfirming] = useState(false); // showing the "are you sure you want to leave?" step
   const [pos, setPos] = useState<{ right: number; top: number } | null>(null); // where the card sits on screen
   const tokenRef = useRef<string | null>(null); // our session token
   const wasActive = useRef(false); // were we connected last check? (used to detect the session ending)
@@ -124,6 +136,7 @@ export default function SessionStatusWidget() {
           role: m?.role || "guest",
           approved: !!m?.approved,
           count: Array.isArray(state.members) ? (state.members as unknown[]).length : 1,
+          calls: Array.isArray(state.calls) ? (state.calls as { note: string }[]) : [],
         });
         // First time we see this session (you just got the table): show the full
         // card for 2s, then auto-shrink to the circle.
@@ -260,11 +273,34 @@ export default function SessionStatusWidget() {
             <div className="ssw-sub">{sub}</div>
           </div>
         </div>
-        {/* The two action buttons. */}
-        <div className="ssw-actions">
-          <button type="button" className="ssw-btn" disabled={busy} onClick={doChange}>Change table</button>
-          <button type="button" className="ssw-btn danger" disabled={busy} onClick={doLeave}>{isHost ? "Leave" : "Leave / own cart"}</button>
-        </div>
+        {/* If you've asked for things (water, napkins…), show them here so you
+            know the staff have been told. */}
+        {st.calls.length > 0 && (
+          <div className="ssw-called">
+            <span className="ssw-called-label">You called for</span>
+            <span className="ssw-called-list">
+              {st.calls.map((c, i) => (
+                <span key={i} className="ssw-called-chip">{callIcon(c.note)} {c.note}</span>
+              ))}
+            </span>
+          </div>
+        )}
+        {/* Actions. Leaving goes through a quick "are you sure?" so you don't drop
+            the table by accident — your placed order stays with the table either way. */}
+        {confirming ? (
+          <>
+            <div className="ssw-confirm-q">Leave this table? Your order stays with the table for the bill.</div>
+            <div className="ssw-actions">
+              <button type="button" className="ssw-btn" disabled={busy} onClick={() => setConfirming(false)}>Stay</button>
+              <button type="button" className="ssw-btn danger" disabled={busy} onClick={doLeave}>Yes, leave</button>
+            </div>
+          </>
+        ) : (
+          <div className="ssw-actions">
+            <button type="button" className="ssw-btn" disabled={busy} onClick={doChange}>Change table</button>
+            <button type="button" className="ssw-btn danger" disabled={busy} onClick={() => setConfirming(true)}>{isHost ? "Leave" : "Leave / own cart"}</button>
+          </div>
+        )}
       </div>
     </div>
   );

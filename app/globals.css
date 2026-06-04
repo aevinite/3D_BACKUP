@@ -759,14 +759,16 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 }
 @media (prefers-reduced-motion: reduce) { .item-card.sold-out { animation: none; } }
 .item-card.sold-out .dish-price { color: var(--muted); }
-/* "Not available" pill — now sits INLINE under the price (was absolutely
-   positioned, which overlapped the rating/time/price on narrow mobile cards). */
+/* "Not available" pill — bottom-right, same spot as the +/stepper control.
+   The card reserves space for it (see .dish-info padding-bottom below) so it
+   never overlaps the rating/price. */
 .sold-out-pill {
-  display: inline-block; margin-top: 8px;
-  padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  position: absolute; bottom: 10px; right: 10px;
+  padding: 7px 13px; border-radius: 999px; font-size: 12px; font-weight: 700;
   background: rgba(120,120,120,0.18); color: var(--muted);
   border: 1px solid rgba(150,150,150,0.3); white-space: nowrap;
 }
+.gallery-mode .sold-out-pill { bottom: 12px; right: 12px; }
 .item-card.is-4d:hover { 
   box-shadow: 0 0 30px var(--accent-glow), 0 16px 40px rgba(0,0,0,0.4);
   border-color: var(--accent);
@@ -857,6 +859,10 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 .gallery-mode .diet-badge { right: 14px; top: 14px; }
 .gallery-mode .badge-4d { right: 14px; bottom: 14px; }
 .dish-info { flex: 1; position: relative; z-index: 1; }
+/* Gallery (grid) cards stack the control at the bottom-right corner; reserve a
+   clear strip under the price so the +/−[n]+ stepper or the "Not available" pill
+   sits in its own space and never overlaps the rating/price on narrow phones. */
+.gallery-mode .dish-info { padding-bottom: 46px; }
 .dish-name {
   font-weight: 700; font-size: 18px; margin-bottom: 6px; color: var(--text);
   padding-right: 32px; /* reserve space so the name + 4D cube never slide under the top-right veg badge on mobile */
@@ -2805,6 +2811,12 @@ a:focus:not(:focus-visible) { outline: none; }
 .ssw-live.pending { background: var(--accent); animation-duration: 1.3s; }
 @keyframes sswPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.45); } 50% { box-shadow: 0 0 0 5px rgba(74,222,128,0); } }
 .ssw-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
+/* "You called for: 💧 Water · 🧻 Napkins" — shows the guest their active requests. */
+.ssw-called { margin: 0 0 11px; padding-top: 10px; border-top: 1px solid color-mix(in srgb, var(--accent) 12%, transparent); }
+.ssw-called-label { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 5px; }
+.ssw-called-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.ssw-called-chip { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); white-space: nowrap; }
+.ssw-confirm-q { font-size: 12px; color: var(--text); margin-bottom: 9px; line-height: 1.35; }
 .ssw-actions { display: flex; gap: 8px; }
 .ssw-btn {
   flex: 1; padding: 8px 6px; border-radius: 999px; font-size: 12px; font-weight: 600;
