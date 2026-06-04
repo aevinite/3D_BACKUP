@@ -2,7 +2,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
-import { getOrderStatus, updateOrderTableNumber, type OrderStatus } from "@/lib/menu";
+import { getOrderStatus, updateOrderTableNumber, getSettings, type OrderStatus } from "@/lib/menu";
+import { getStoredSession, getSessionState } from "@/lib/session";
 import { formatMoney, getCurrency, type CurrencyMeta } from "@/lib/format";
 import {
   STEPS,
@@ -129,6 +130,54 @@ export default function OrderTracker() {
       clearInterval(iv);
     };
   }, [orders.length]);
+
+  // ── SHARED order tracking across the table ───────────────────────────────
+  // An order placed by ANY member should show its live timeline for EVERY member
+  // (so the head sees a partner's order being prepared, not just the person who
+  // ordered). When we're in a dining session, pull the table's orders and add any
+  // we aren't already following into our local tracker; the kitchen poll above
+  // then keeps their status fresh. The device that placed an order already has it,
+  // so this only fills in the ones others placed.
+  useEffect(() => {
+    let alive = true;
+    let iv: ReturnType<typeof setInterval> | null = null;
+    (async () => {
+      let on = false;
+      try { on = (await getSettings()).sessionsEnabled; } catch {}
+      if (!alive || !on) return;
+      const pull = async () => {
+        const s = getStoredSession();
+        if (!s) return; // not in a session -> nothing shared to follow
+        const st = await getSessionState(s.token);
+        if (!alive || !st.ok) return;
+        const sessOrders = (st.orders as Array<{ id: string; status: OrderStatus; total: number; items?: { title: string; qty: number }[]; created_at: string }>) || [];
+        if (!sessOrders.length) return;
+        const sess = st.session as { table_number?: string } | undefined;
+        const table = sess?.table_number || s.table;
+        const list = read();
+        const have = new Set(list.map((o) => o.id));
+        let changed = false;
+        for (const o of sessOrders) {
+          if (have.has(o.id)) continue; // already following it (e.g. we placed it)
+          const items = Array.isArray(o.items) ? o.items.map((i) => ({ title: i.title, qty: i.qty })) : [];
+          list.push({
+            id: o.id,
+            tableNumber: String(table),
+            total: Number(o.total) || 0,
+            itemCount: items.reduce((a, i) => a + (Number(i.qty) || 1), 0),
+            items,
+            status: o.status,
+            placedAt: Date.parse(o.created_at) || Date.now(),
+          });
+          changed = true;
+        }
+        if (changed) { write(list); refresh(); broadcast(); }
+      };
+      pull();
+      iv = setInterval(pull, 3000);
+    })();
+    return () => { alive = false; if (iv) clearInterval(iv); };
+  }, []);
 
   // Auto-hide a served/cancelled strip one minute after it finishes.
   // We set a single timer for whichever finished order is due to disappear soonest.
