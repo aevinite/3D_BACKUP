@@ -27,6 +27,11 @@ interface PublicConfig {
     carbs?: string;
     price?: string;
   };
+  // The camera angle + distance the editor's "Set front view" button captured,
+  // stored as a model-viewer camera-orbit string: "<theta>deg <phi>deg <radius>m"
+  // (e.g. "519.36deg 71.39deg 1.937m"). When present, the reveal spin lands
+  // exactly on this pose so the menu matches what was set in the editor.
+  frontView?: string;
   tags?: Array<{
     id: string;
     emoji: string;
@@ -41,6 +46,23 @@ interface PublicConfig {
     nz: number;
     tagPosition?: string;
   }>;
+}
+
+// Turn a saved "front view" string from config.json into numbers the viewer can
+// use. The string looks like "519.36deg 71.39deg 1.937m" (theta phi radius).
+// Returns null when nothing was saved (so callers fall back to default framing).
+// parseFloat happily ignores the trailing "deg"/"m", e.g. parseFloat("519.36deg") → 519.36.
+function parseFrontView(
+  raw: string | undefined,
+): { theta: number; phi: number; radius: number } | null {
+  if (!raw) return null;
+  const parts = String(raw).trim().split(/\s+/);
+  const theta = parseFloat(parts[0]);
+  const phi = parseFloat(parts[1]);
+  const radius = parseFloat(parts[2]);
+  // Need all three to be real numbers, otherwise treat as "not set".
+  if (isNaN(theta) || isNaN(phi) || isNaN(radius)) return null;
+  return { theta, phi, radius };
 }
 
 // The 3D viewer component. `folder` tells us which dish's model + config to load.
@@ -311,7 +333,47 @@ export default function ViewerClient({ folder }: { folder: string }) {
     function ease(t: number) {
       return 1 - Math.pow(1 - t, 3);
     }
-    // Called every frame; computes how far through the animation we are.
+
+    // Did the editor capture a "front view" for this dish? If so, the reveal
+    // spin should ORBIT THE CAMERA and land exactly on that saved pose, so the
+    // menu stops where the editor said it should. If not, we keep the original
+    // behaviour (spin the MODEL itself, camera stays at the default framing) so
+    // existing dishes look exactly as before.
+    const fv = parseFrontView(config?.frontView);
+
+    if (fv) {
+      // --- frontView path: animate the camera one full lap, ending on the pose.
+      const endTheta = fv.theta;          // where the camera should finish (deg)
+      const startTheta = endTheta - 360;  // start a full turntable lap behind it
+      // Build a camera-orbit string at a given horizontal angle (theta), holding
+      // the saved vertical angle (phi) and distance (radius) fixed.
+      const orbitStr = (th: number) =>
+        `${th.toFixed(2)}deg ${fv.phi.toFixed(2)}deg ${fv.radius.toFixed(3)}m`;
+      // Turn OFF model-viewer's own camera smoothing so our easing fully owns the
+      // motion; remember the old value to restore it when we're done.
+      const prevDecay = (model as any).interpolationDecay;
+      (model as any).interpolationDecay = 0;
+      (model as any).orientation = "0deg 0deg 0deg";  // keep the model upright/still
+      function animate(time: number) {
+        const p = Math.min((time - startTime) / duration, 1);  // progress 0→1
+        const e = ease(p);                                      // eased progress
+        (model as any).cameraOrbit = orbitStr(startTheta + (endTheta - startTheta) * e);
+        const scale = (0.3 + e * 0.7).toFixed(4);               // grow 0.3→1
+        (model as any).scale = `${scale} ${scale} ${scale}`;
+        if (p < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          (model as any).cameraOrbit = orbitStr(endTheta);  // land exactly on the front view
+          (model as any).scale = "1 1 1";
+          (model as any).interpolationDecay = prevDecay || 50;  // restore smoothing
+          onComplete();
+        }
+      }
+      requestAnimationFrame(animate);
+      return;
+    }
+
+    // --- default path (no frontView saved): original model-orientation spin.
     function animate(time: number) {
       const p = Math.min((time - startTime) / duration, 1);  // progress 0→1
       const e = ease(p);                                      // eased progress

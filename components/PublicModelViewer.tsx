@@ -9,6 +9,9 @@ import Script from "next/script";
 // callouts pointing at parts of the dish).
 interface PublicConfig {
   modelUrl?: string;
+  // Camera angle + distance the editor saved ("<theta>deg <phi>deg <radius>m").
+  // Used as the model's starting framing so it opens on the intended pose.
+  frontView?: string;
   tags?: Array<{
     id: string;
     emoji: string;
@@ -82,7 +85,9 @@ export default function PublicModelViewer({
           // With "pan-y" the browser kept vertical gestures for page-scroll, so
           // you had to drag horizontally first before vertical orbit responded.
           "touch-action": "none",
-          "camera-orbit": "0deg 75deg 2.2m", // starting camera angle and distance
+          // Starting camera angle + distance. If the editor saved a front view,
+          // open on exactly that pose; otherwise use the default framing.
+          "camera-orbit": config.frontView || "0deg 75deg 2.2m",
           "min-camera-orbit": "auto 20deg auto", // how far down the visitor can tilt
           "max-camera-orbit": "auto 160deg auto", // how far up the visitor can tilt
           "shadow-intensity": "1",      // strength of the model's shadow
