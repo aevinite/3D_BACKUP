@@ -104,3 +104,18 @@ via `ToolSearch` BEFORE planning around it.
 - If the change touches 3D model loading, `verify-cache.mjs` still passes.
 - If the change touches UI, run the page in Chrome MCP and screenshot or
   describe what's now visible. Don't claim "it works" from source alone.
+
+## Deployment (TWO separate targets — `aevinite` has access to both)
+
+There are two git repos that deploy to two different places. "Push" means push
+BOTH, each to its own remote:
+
+- **Main menu app** = the root repo → GitHub `aevinite/3D_BACKUP` (branch `main`).
+  Vercel project **3-d-backup** auto-deploys from it:
+  https://vercel.com/aevinite1/3-d-backup . Deploy with `git push origin main`.
+- **Admin editor** = the `editor/` folder, which is its OWN git repo (`editor/.git`)
+  → GitHub `INFINITESTUDIOIF/ADMIN_PANEL_3D_MENU` (branch `main`), Vercel-deployable,
+  password-locked via `EDITOR_PASSWORD`. Deploy with `git -C editor push origin main`.
+- The GitHub login `aevinite` (Vercel handle `aevinite1`) has access to BOTH repos
+  and BOTH Vercel projects. Secrets live in `.env.local` (gitignored in both repos —
+  never committed); local `*.bat` launchers are gitignored too.
