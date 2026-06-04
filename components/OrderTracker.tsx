@@ -207,13 +207,24 @@ export default function OrderTracker() {
 
   const c = COPY[order.status]; // the label/sub/icon text for this status
   const stepIndex = STEPS.indexOf(order.status); // which step of the progress bar we're on
+  // When the table has SEVERAL live orders, the strip becomes a table-level
+  // summary ("2 of 3 served") with one segment per order, instead of a single
+  // order's status steps. (Not while an item is mid dismiss-animation.)
+  const multi = visible.length >= 2 && !dismissing;
+  const servedCount = visible.filter((o) => o.status === "served").length;
   // The table can only be corrected while the order is early (not yet served).
   const canEditTable = order.status === "received" || order.status === "preparing";
   // showPrice(): format a number as a price string in the chosen currency.
   const showPrice = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
 
-  // openDetail(): open the details sheet, pre-filling the table input.
+  // openDetail(): tapping the strip. With several orders, open the cart's
+  // "Previous orders" (the full per-dish table view); with one, the details sheet.
   const openDetail = () => {
+    if (multi) {
+      window.dispatchEvent(new Event("lfh:open-cart"));
+      window.dispatchEvent(new Event("lfh:show-previous-orders"));
+      return;
+    }
     setTableDraft(order.tableNumber || "");
     setDetailOpen(true);
   };
@@ -285,16 +296,19 @@ export default function OrderTracker() {
       const tx = r ? x - (r.left + r.width / 2) : 0;
       const ty = r ? y - (r.top + r.height / 2) : 0;
       const id = order.id;
+      const wasMulti = multi;                       // hide all orders if it was the combined strip
+      const allIds = visible.map((o) => o.id);
       dismissingOrderRef.current = order; // freeze the strip we're animating out
       setDrag(null);
       setDismissing({ tx, ty }); // triggers the fly-into-the-cross animation
-      // After the animation finishes, toast and actually hide the strip.
+      // After the animation finishes, toast and actually hide the strip(s).
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
           message: "Tracker hidden", subtitle: "still in Previous orders",
           kicker: "order update", icon: "🧾", variant: "success",
         } }));
-        hideStrip(id);
+        if (wasMulti) { write(read().map((o) => (allIds.includes(o.id) ? { ...o, stripHidden: true } : o))); setDetailOpen(false); refresh(); broadcast(); }
+        else { hideStrip(id); }
         setDismissing(null);
         dismissingOrderRef.current = null;
       }, 340); // matches the 0.34s CSS transition
@@ -340,7 +354,7 @@ export default function OrderTracker() {
       <button
         type="button"
         ref={stripRef}
-        className={`order-tracker status-${order.status}`}
+        className={`order-tracker status-${multi ? (servedCount === visible.length ? "served" : "preparing") : order.status}`}
         style={stripStyle}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -349,25 +363,37 @@ export default function OrderTracker() {
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetail(); } }}
         aria-label="Order status — tap to view, drag onto the cross to hide"
       >
-        {/* The status icon (changes with the status: received/preparing/served). */}
+        {/* The icon: a receipt for the multi-order table summary, otherwise the
+            per-order status icon (received/preparing/served). */}
         <div className="ot-icon" aria-hidden="true">
-          <i className={`fas ${c.icon}`}></i>
+          <i className={`fas ${multi ? "fa-receipt" : c.icon}`}></i>
         </div>
         <div className="ot-body">
           <div className="ot-top">
-            {/* The status label, e.g. "Preparing your order". */}
-            <span className="ot-label">{c.label}</span>
+            {/* Multi: "Your table" summary. Single: the status label. */}
+            <span className="ot-label">{multi ? "Your table" : c.label}</span>
             {/* Show the table number if we have one. */}
             {order.tableNumber && <span className="ot-table">Table {order.tableNumber}</span>}
           </div>
-          <div className="ot-sub">{c.sub}</div>
-          {/* The little progress dots: filled up to the current step. */}
-          {stepIndex >= 0 && (
-            <div className="ot-steps" aria-hidden="true">
-              {STEPS.map((s, i) => (
-                <span key={s} className={`ot-step ${i <= stepIndex ? "done" : ""} ${i === stepIndex ? "active" : ""}`} />
+          {/* Multi: "X of N orders served". Single: the status subtitle. */}
+          <div className="ot-sub">{multi ? `${servedCount} of ${visible.length} orders served` : c.sub}</div>
+          {multi ? (
+            /* One segment per order, green once that order is fully served — so the
+               table can watch its orders complete (3 orders, 1 left = 2 green). */
+            <div className="ot-orderbar" aria-hidden="true">
+              {visible.map((o) => (
+                <span key={o.id} className={`ot-oseg ${o.status}`} />
               ))}
             </div>
+          ) : (
+            /* Single order: the little received → preparing → served step dots. */
+            stepIndex >= 0 && (
+              <div className="ot-steps" aria-hidden="true">
+                {STEPS.map((s, i) => (
+                  <span key={s} className={`ot-step ${i <= stepIndex ? "done" : ""} ${i === stepIndex ? "active" : ""}`} />
+                ))}
+              </div>
+            )
           )}
         </div>
         {/* The grip lines hint that the strip can be dragged. */}

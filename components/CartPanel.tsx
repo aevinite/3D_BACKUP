@@ -190,6 +190,9 @@ export default function CartPanel() {
       // re-read settings on open so a freshly-toggled sessions mode is always respected
       getSettings().then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
     };
+    // handleShowPrev: open straight to the "Previous orders" tab (the live table
+    // view with the served-progress bar). Fired when the multi-order tracker is tapped.
+    const handleShowPrev = () => { setOpen(true); setShowHistory(true); loadHistory(); loadLive(); };
     const handleClose = () => setOpen(false); // "lfh:close-all" -> slide shut
     const handleScanned = prefillScanned; // a QR table scan arrived -> pre-fill table
     const handleCartUpdated = loadCart; // cart changed elsewhere -> re-read it
@@ -204,6 +207,7 @@ export default function CartPanel() {
     };
     // Start listening for all the app-wide messages above.
     window.addEventListener("lfh:open-cart", handleOpen);
+    window.addEventListener("lfh:show-previous-orders", handleShowPrev);
     window.addEventListener("lfh:close-all", handleClose);
     window.addEventListener("lfh:table-scanned", handleScanned);
     window.addEventListener("lfh:session-changed", syncSession);
@@ -217,6 +221,7 @@ export default function CartPanel() {
     return () => {
       window.removeEventListener("lfh:avoid-all", handleAvoidAll);
       window.removeEventListener("lfh:open-cart", handleOpen);
+      window.removeEventListener("lfh:show-previous-orders", handleShowPrev);
       window.removeEventListener("lfh:close-all", handleClose);
       window.removeEventListener("lfh:table-scanned", handleScanned);
       window.removeEventListener("lfh:session-changed", syncSession);

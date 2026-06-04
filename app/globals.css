@@ -2901,6 +2901,15 @@ a:focus:not(:focus-visible) { outline: none; }
 .ot-step.done { background: var(--ot-accent); }
 .ot-step.active { animation: otStep 1.4s ease-in-out infinite; }
 @keyframes otStep { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+/* Multi-order summary: one segment per ORDER, green once that order is served,
+   blue while preparing, grey when just received. Scales to any number of orders. */
+.ot-orderbar { display: flex; gap: 5px; margin-top: 9px; }
+.ot-oseg { flex: 1; height: 5px; min-width: 4px; border-radius: 999px; background: rgba(245,236,221,0.16); transition: background 0.4s ease; }
+.ot-oseg.received { background: rgba(245,236,221,0.22); }
+.ot-oseg.preparing { background: #4f9dff; }
+.ot-oseg.served { background: #4ade80; }
+[data-theme="light"] .ot-oseg { background: rgba(60,42,30,0.16); }
+[data-theme="light"] .ot-oseg.received { background: rgba(60,42,30,0.24); }
 /* Grip hint — shows the strip can be picked up and dragged away to hide it. */
 .ot-grip {
   flex: 0 0 auto; align-self: center; color: rgba(245,236,221,0.4);
