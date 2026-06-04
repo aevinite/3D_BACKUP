@@ -52,6 +52,7 @@ interface FoodItem {
   }[];
   relatedSlugs: string[];
   allergens: string[];
+  tags: string[];  // filter slugs this dish matches; "sold-out" means it can't be ordered
   options?: { name: string; type: "single" | "multi"; choices: { label: string; price: number }[] }[];
 }
 
@@ -321,7 +322,10 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     const rating = (it: FoodItem) => parseFloat(it.rating) || 0;  // rating as a number
     const byRating = (a: FoodItem, b: FoodItem) => rating(b) - rating(a);  // sort high→low
 
-    const others = allItems.filter((it) => it.slug !== item.slug);  // every dish except this one
+    // Every dish except this one — and NEVER suggest a sold-out dish (you can't
+    // order it, so recommending it is a dead end / the "you might also like a
+    // dish you can't have" bug).
+    const others = allItems.filter((it) => it.slug !== item.slug && !(it.tags || []).includes("sold-out"));
     const same = others.filter((it) => it.category === item.category).sort(byRating);  // same category
     const diff = others.filter((it) => it.category !== item.category).sort(byRating);  // other categories
 
@@ -373,7 +377,9 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
   // "Add to Cart" — instead of adding directly, it opens the shared confirm
   // popup (quantity + total) by broadcasting an event the modal listens for.
   const addToCart = () => {
-    if (!item) return;
+    // No item, or it's sold out -> do nothing (the button is disabled too; this is
+    // the belt-and-braces guard so a sold-out dish can never reach the cart).
+    if (!item || (item.tags || []).includes("sold-out")) return;
     window.dispatchEvent(
       new CustomEvent("lfh:open-order-confirm", {
         detail: {
@@ -670,9 +676,17 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
         {/* The action buttons: Add to Cart, plus View in 3D (or a disabled
             placeholder when this dish has no 3D model). */}
         <div className="btn-row">
-          <button className="btn btn-gold" onClick={addToCart}>
-            <i className="fas fa-shopping-bag"></i> {t.addToCart}
-          </button>
+          {/* Sold-out dishes show a disabled "Not available" button instead of
+              Add to Cart — matching the menu card, so you can't order one here. */}
+          {(item.tags || []).includes("sold-out") ? (
+            <button className="btn btn-gold" disabled style={{ opacity: 0.5, cursor: "not-allowed" }}>
+              <i className="fas fa-ban"></i> Not available
+            </button>
+          ) : (
+            <button className="btn btn-gold" onClick={addToCart}>
+              <i className="fas fa-shopping-bag"></i> {t.addToCart}
+            </button>
+          )}
           {/* Show the live 3D button only if a model exists; otherwise a greyed-out one. */}
           {item.is4d && item.modelFolder ? (
             <button id="view-3d-btn" className="btn btn-cyan" onClick={goToViewer}>

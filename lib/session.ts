@@ -170,9 +170,11 @@ export const verifyOtp = (token: string, phone: string, code: string) =>
 // writes it (approved members only — the RPC enforces that).
 export const getSessionCart = (token: string) => rpc("lfh_get_cart", { p_token: token });
 export const setSessionCart = (token: string, cart: unknown[]) => rpc("lfh_set_cart", { p_token: token, p_cart: cart });
-// Place the whole table's order, with the money totals and any allergy notes.
-export const placeSessionOrder = (token: string, items: unknown[], subtotal: number, tax: number, total: number, allergies: string[]) =>
-  rpc("lfh_place_order", { p_token: token, p_items: items, p_subtotal: subtotal, p_tax: tax, p_total: total, p_allergies: allergies });
+// Place the whole table's order. We send ONLY the item lines (id + qty + chosen
+// options) and any allergy notes — NEVER prices. The server looks up every price
+// from menu_items and decides the bill itself, so the totals can't be tampered with.
+export const placeSessionOrder = (token: string, items: unknown[], allergies: string[]) =>
+  rpc("lfh_place_order", { p_token: token, p_items: items, p_allergies: allergies });
 // Call a waiter from within a live session, with a reason (e.g. "need help").
 export const callWaiterSession = (token: string, reason: string) =>
   rpc("lfh_call_waiter", { p_token: token, p_reason: reason });

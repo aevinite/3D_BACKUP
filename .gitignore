@@ -42,6 +42,9 @@ editor/
 # vercel
 .vercel
 
+# local launcher scripts (machine-specific — never commit)
+*.bat
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

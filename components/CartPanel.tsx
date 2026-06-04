@@ -305,7 +305,15 @@ export default function CartPanel() {
   const pairing =
     cart.length > 0
       ? menuItems
-          .filter((i) => !cartIds.has(i.id) && PAIR_CATS.includes(i.category))
+          // Only suggest things the guest can actually order: not already on the
+          // bill, in a pairing category, and NOT flagged sold-out (sold-out lives
+          // in the dish's tags, same as the "Not available" pill on the cards).
+          .filter(
+            (i) =>
+              !cartIds.has(i.id) &&
+              PAIR_CATS.includes(i.category) &&
+              !(i.tags || []).includes("sold-out"),
+          )
           .sort((a, b) => (parseFloat(b.rating) || 0) - (parseFloat(a.rating) || 0))[0] || null
       : null;
   // addPairing(): tap the "+ Add" on the suggested pairing. Add it to the cart
@@ -340,7 +348,10 @@ export default function CartPanel() {
       // Bundle up everything the session flow will need, captured now (before we
       // clear the cart), so it's all still here when the gate finishes.
       const allergiesS = [...declared, ...(otherAllergy.trim() ? [otherAllergy.trim()] : [])];
-      const itemsS = cart.map((it) => ({ id: it.id, title: it.title, price: prettyUsd(it.price), qty: it.qty, options: it.options, removed: it.removed, note: it.note }));
+      // What we send the server: id + qty + chosen options (group/label only) +
+      // removed allergens + note. NO prices and NO title — the server looks those
+      // up from menu_items and prices the bill itself, so nothing here is trusted.
+      const itemsS = cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note }));
       const trackS = cart.map((it) => ({ title: it.title, qty: it.qty })); // slim list for the tracker
       const histS = cart.map((it) => ({ title: it.title, qty: it.qty, price: it.price })); // list for history
       const totalS = total, countS = itemCount;
@@ -374,7 +385,7 @@ export default function CartPanel() {
       };
       // Listen for the gate's result, then kick off the session flow.
       window.addEventListener("lfh:session-done", onDone);
-      window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "order", table: tableTrim, payload: { items: itemsS, subtotal, tax, total, allergies: allergiesS } } }));
+      window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "order", table: tableTrim, payload: { items: itemsS, allergies: allergiesS } } }));
       return; // the rest below is the non-session path
     }
 
@@ -382,12 +393,11 @@ export default function CartPanel() {
     setPlacing(true);
     try {
       const allergies = [...declared, ...(otherAllergy.trim() ? [otherAllergy.trim()] : [])];
-      const orderId = await createOrder({ // send to Supabase, get back the new order's id
+      // Send ONLY id + qty + options (group/label) + removed + note — no prices.
+      // The server prices and stores the order, then hands back its id to track.
+      const orderId = await createOrder({
         tableNumber: tableTrim,
-        items: cart.map((it) => ({ id: it.id, title: it.title, price: it.price, qty: it.qty, options: it.options, removed: it.removed, note: it.note })),
-        subtotal,
-        tax,
-        total,
+        items: cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note })),
         allergies,
       });
       // Remember this order on THIS device so the guest can follow its status.

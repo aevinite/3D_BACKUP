@@ -108,14 +108,13 @@ function mapRow(row: any): MenuItem {
   };
 }
 
-// Record a placed order. Public (anon) insert is allowed by RLS; the order is
-// write-only for the public — only the owner (service role) can read orders back.
+// Record a placed order. The browser sends ONLY item id + qty + chosen options
+// (group/label) — never prices. The server (lfh_place_order_public) looks up every
+// price from menu_items, recomputes the bill, rejects sold-out/unknown items, and
+// stores the order. So nothing money-related here is trusted.
 export interface OrderInput {
   tableNumber: string;
-  items: { id: string; title: string; price: string; qty: number; options?: { group: string; label: string; price: number }[]; removed?: string[]; note?: string }[];
-  subtotal: number;
-  tax: number;
-  total: number;
+  items: { id: string; qty: number; options?: { group: string; label: string }[]; removed?: string[]; note?: string }[];
   allergies: string[];
 }
 // Guest taps "Call a Waiter" — inserts a row the restaurant sees live in the editor.
@@ -138,27 +137,21 @@ export type OrderStatus = "received" | "preparing" | "served" | "cancelled";
 // device can follow ONLY its own order later (the table is insert-only for the
 // public, so we can't read the id back via .select()).
 export async function createOrder(o: OrderInput): Promise<string> {
-  // Make a unique id for this order. If the browser supports the modern
-  // `crypto.randomUUID()`, use it; otherwise build a fallback id from the
-  // current time plus a random chunk so two orders never clash.
-  const id =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  // Save the order. We pass the id we just made so the device can track it.
-  const { error } = await supabase.from("orders").insert({
-    id,
-    table_number: o.tableNumber || null,
-    items: o.items,
-    subtotal: o.subtotal,
-    tax: o.tax,
-    total: o.total,
-    allergies: o.allergies,
-    status: "received",
+  // Call the server function that prices and stores the order. It returns the
+  // new order's id (the SERVER generates it) so the device can poll its status.
+  const { data, error } = await supabase.rpc("lfh_place_order_public", {
+    p_table: o.tableNumber || "",
+    p_items: o.items,
+    p_allergies: o.allergies,
   });
   if (error) throw new Error(`Order failed: ${error.message}`);
-  // Hand the id back so the guest's screen can poll its own order's status.
-  return id;
+  // The function answers { ok, order_id } on success, or { ok:false, reason }
+  // (e.g. a sold-out or unknown dish slipped through) which we surface as an error.
+  const res = (data ?? {}) as { ok?: boolean; reason?: string; item?: string; order_id?: string };
+  if (!res.ok || !res.order_id) {
+    throw new Error(`Order failed: ${res.reason || "unknown"}${res.item ? ` (${res.item})` : ""}`);
+  }
+  return res.order_id;
 }
 
 // A guest corrects only their own order's table number (migration 007). Only

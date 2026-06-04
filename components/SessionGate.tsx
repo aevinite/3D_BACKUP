@@ -41,8 +41,13 @@ const rememberTable = (table: string) => {
 
 // The named screens this gate can show. Think of it as "which page are we on".
 type Step =
-  | "idle" | "locating" | "location_help" | "not_open" | "guest_name" | "joining"
+  | "idle" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "joining"
   | "waiting_approval" | "request_sent" | "working" | "blocked";
+
+// Remember (per device) that the guest has already seen the "why we check your
+// location" consent screen, so we only show it the FIRST time and go straight to
+// the check on later visits.
+const LOC_CONSENT_KEY = "lfh_loc_consent";
 
 // The job we were asked to do: place an order or call a waiter, for which table,
 // with whatever data that action needs.
@@ -96,9 +101,11 @@ export default function SessionGate() {
     setStep("working"); // show the "One moment…" screen
     if (p.action === "order") {
       // EMAIL SEAM: when email verification lands, gate this on a verified member.
-      const pl = p.payload as { items: unknown[]; subtotal: number; tax: number; total: number; allergies: string[] };
+      // Only the item lines + allergies travel to the server — no prices. The
+      // server prices the whole bill itself (see lfh_place_order).
+      const pl = p.payload as { items: unknown[]; allergies: string[] };
       // Send the order to the kitchen against this table's shared bill.
-      const r = await placeSessionOrder(s.token, pl.items, pl.subtotal, pl.tax, pl.total, pl.allergies || []);
+      const r = await placeSessionOrder(s.token, pl.items, pl.allergies || []);
       if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked" }); setStep("blocked"); return; } // table was blocked by staff
       if (r.ok) { fireDone({ ok: true, action: "order", orderId: r.order_id }); toast("Order placed", "to the kitchen"); close(); } // success
       else { toast("Couldn't place order", "order", "error"); fireDone({ ok: false, reason: r.reason }); close(); } // failed
@@ -162,11 +169,11 @@ export default function SessionGate() {
     setStep("guest_name"); // someone's there -> ask to join
   }, [joinAsHead, proceedWhenOpen]);
 
-  // Step 1 of the flow: confirm the guest is physically at the café (if the
-  // restaurant requires it). If they're near, continue; if not, offer help.
-  const beginLocation = useCallback(async () => {
+  // Phase 2: actually ask the browser for the location and judge the result. This
+  // is where the OS permission prompt appears, so we only reach it AFTER the guest
+  // has agreed on the intro screen (or on later visits, where they already have).
+  const runLocation = useCallback(async () => {
     const st = settingsRef.current!;
-    if (!st.requireLocation) { coords.current = { lat: null, lng: null }; return afterLocation(); } // location not required -> skip
     setStep("locating"); // show the "Confirming you're at the café…" screen
     const loc = await checkLocation(st.geoLat, st.geoLng, st.geoRadiusM);
     coords.current = { lat: loc.lat, lng: loc.lng };
@@ -175,6 +182,26 @@ export default function SessionGate() {
     setNote(loc.reason === "denied" ? "Location was blocked." : loc.reason === "far" ? "You seem too far from the café." : "Couldn't read your location.");
     setStep("location_help");
   }, [afterLocation]);
+
+  // Step 1 of the flow: confirm the guest is physically at the café (if the
+  // restaurant requires it). Two-phase: the FIRST time on this device we show a
+  // friendly consent screen explaining why, and only request the location once the
+  // guest taps "I'm here". On later visits we skip straight to the check.
+  const beginLocation = useCallback(async () => {
+    const st = settingsRef.current!;
+    if (!st.requireLocation) { coords.current = { lat: null, lng: null }; return afterLocation(); } // location not required -> skip
+    let consented = false;
+    try { consented = localStorage.getItem(LOC_CONSENT_KEY) === "1"; } catch {}
+    if (!consented) { setStep("location_intro"); return; } // first time -> explain before prompting
+    await runLocation(); // returning guest -> straight to the check
+  }, [afterLocation, runLocation]);
+
+  // The intro's "I'm here — continue" button: remember the consent so we don't ask
+  // again on this device, then run the real location check (which prompts the OS).
+  const continueFromIntro = useCallback(async () => {
+    try { localStorage.setItem(LOC_CONSENT_KEY, "1"); } catch {}
+    await runLocation();
+  }, [runLocation]);
 
   // poll until the head approves this guest, then act
   // While waiting for the host's OK, we re-check about once a second; the moment
@@ -281,27 +308,46 @@ export default function SessionGate() {
       <div className="sg-box" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <button type="button" className="sg-x" aria-label="Close" onClick={close}>✕</button>
 
-        {/* "Checking you're at the café" screen. */}
-        {step === "locating" && (<><div className="sg-emoji">📍</div><h3 className="sg-title">Confirming you&apos;re at the café…</h3><p className="sg-sub">We use your location only to make sure orders and waiter calls are real. Please tap Allow if your browser asks.</p></>)}
+        {/* PHASE 1 (first visit only): explain WHY we check location, before the
+            browser prompt. Tapping continue records consent and runs the check. */}
+        {step === "location_intro" && (<>
+          <div className="sg-badge"><i className="fas fa-location-dot"></i></div>
+          <div className="sg-kicker">My Little French House</div>
+          <h3 className="sg-title">You&apos;re at table {pending.current?.table}</h3>
+          <p className="sg-sub">Before you order, we quickly confirm you&apos;re here at the restaurant — so every order is genuine. Your location is used once, just for this. We never store or share it.</p>
+          <div className="sg-actions">
+            <button className="sg-btn gold" onClick={continueFromIntro}>I&apos;m here — continue</button>
+          </div>
+          <div className="sg-links">
+            <button className="sg-link" onClick={() => doRequest("access")}>Not at the restaurant? Call a waiter</button>
+          </div>
+        </>)}
+
+        {/* PHASE 2: "Checking you're at the café" — the OS prompt appears here. */}
+        {step === "locating" && (<>
+          <div className="sg-badge spin"><i className="fas fa-location-crosshairs"></i></div>
+          <h3 className="sg-title">Confirming you&apos;re at the café…</h3>
+          <p className="sg-sub">We use your location only to make sure orders and waiter calls are real. Please tap Allow if your browser asks.</p>
+        </>)}
 
         {/* Brief "joining the table" waiting screen. */}
-        {step === "joining" && (<><div className="sg-emoji">⏳</div><h3 className="sg-title">One moment…</h3></>)}
+        {step === "joining" && (<><div className="sg-badge spin"><i className="fas fa-hourglass-half"></i></div><h3 className="sg-title">One moment…</h3></>)}
         {/* Brief "carrying out your action" waiting screen. */}
-        {step === "working" && (<><div className="sg-emoji">⏳</div><h3 className="sg-title">One moment…</h3></>)}
+        {step === "working" && (<><div className="sg-badge spin"><i className="fas fa-hourglass-half"></i></div><h3 className="sg-title">One moment…</h3></>)}
 
         {/* Location couldn't be confirmed -> offer to retry or send a waiter. */}
         {step === "location_help" && (<>
-          <div className="sg-emoji">🛎️</div><h3 className="sg-title">Let us bring a waiter over</h3>
+          <div className="sg-badge"><i className="fas fa-bell-concierge"></i></div><h3 className="sg-title">Let us bring a waiter over</h3>
           <p className="sg-sub">{note} No problem — we&apos;ll send a staff member to your table. It usually takes about 5 minutes.</p>
           <div className="sg-actions">
-            <button className="sg-btn ghost" onClick={() => beginLocation()}>Try location again</button>
+            <button className="sg-btn ghost" onClick={() => runLocation()}>Try location again</button>
             <button className="sg-btn gold" onClick={() => doRequest("access")}>Request a waiter</button>
           </div>
         </>)}
 
         {/* Table not opened by staff yet -> offer to scan another or request a waiter. */}
         {step === "not_open" && (<>
-          <div className="sg-emoji">🔔</div><h3 className="sg-title">Your table isn&apos;t open yet</h3>
+          <div className="sg-badge"><i className="fas fa-bell"></i></div><h3 className="sg-title">Your table isn&apos;t open yet</h3>
           <p className="sg-sub">A waiter opens your table once you&apos;re seated. We can let them know you&apos;re ready at table {pending.current?.table} — it usually takes a few minutes.</p>
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={rescan}>Scan another table</button>
@@ -311,7 +357,7 @@ export default function SessionGate() {
 
         {/* Someone already holds the table -> ask for the guest's name to join. */}
         {step === "guest_name" && (<>
-          <div className="sg-emoji">🤝</div><h3 className="sg-title">This table&apos;s already open</h3>
+          <div className="sg-badge"><i className="fas fa-handshake"></i></div><h3 className="sg-title">This table&apos;s already open</h3>
           <p className="sg-sub">Someone at table {pending.current?.table} started this tab. Add your name so they can confirm it&apos;s you, then ask to join.</p>
           <input className="sg-input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           <div className="sg-actions">
@@ -325,21 +371,21 @@ export default function SessionGate() {
 
         {/* Waiting for the host to approve this guest. */}
         {step === "waiting_approval" && (<>
-          <div className="sg-emoji">⏳</div><h3 className="sg-title">Waiting for the table to let you in…</h3>
+          <div className="sg-badge spin"><i className="fas fa-hourglass-half"></i></div><h3 className="sg-title">Waiting for the table to let you in…</h3>
           <p className="sg-sub">The person who opened table {pending.current?.table} needs to confirm you. This usually takes a moment.</p>
           <div className="sg-actions"><button className="sg-btn ghost" onClick={() => doRequest("access")}>Call a waiter instead</button></div>
         </>)}
 
         {/* We've notified staff -> keep open so we auto-continue when they act. */}
         {step === "request_sent" && (<>
-          <div className="sg-emoji">🛎️</div><h3 className="sg-title">We&apos;ve let the staff know</h3>
+          <div className="sg-badge"><i className="fas fa-bell-concierge"></i></div><h3 className="sg-title">We&apos;ve let the staff know</h3>
           <p className="sg-sub">Keep this open — the moment a waiter opens your table you&apos;ll be brought in and your order sent automatically. Tap cancel to stop.</p>
           <div className="sg-actions"><button className="sg-btn ghost" onClick={close}>Cancel</button></div>
         </>)}
 
         {/* The restaurant has blocked this table -> dead end with an explanation. */}
         {step === "blocked" && (<>
-          <div className="sg-emoji">🚫</div><h3 className="sg-title">Access blocked</h3>
+          <div className="sg-badge danger"><i className="fas fa-ban"></i></div><h3 className="sg-title">Access blocked</h3>
           <p className="sg-sub">This table has been blocked by the restaurant. Please speak to a staff member if you think this is a mistake.</p>
           <div className="sg-actions"><button className="sg-btn ghost" onClick={close}>Close</button></div>
         </>)}

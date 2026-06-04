@@ -34,6 +34,11 @@ export default function OrderTracker() {
   const [tableDraft, setTableDraft] = useState(""); // table number being typed in the sheet
   const [savingTable, setSavingTable] = useState(false); // true while saving a table change
   const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // currency for prices
+  // Per-dish progress across the whole table (from the session's order_items):
+  // segs is one status per dish ("received"|"preparing"|"served") so the strip can
+  // draw a segment per dish, and served is how many are done. Lets the guest see
+  // WHICH dishes are out vs. still cooking — not just an order-level "preparing".
+  const [dishProg, setDishProg] = useState<{ served: number; segs: string[] }>({ served: 0, segs: [] });
   // useRef boxes (remembered values that DON'T trigger a re-draw):
   const lastStatus = useRef<Record<string, OrderStatus>>({}); // last status we toasted, per order, to avoid repeat toasts
   // Drag-to-dismiss: hold the strip, drag it onto the cross target to hide it.
@@ -147,9 +152,14 @@ export default function OrderTracker() {
       if (!alive || !on) return;
       const pull = async () => {
         const s = getStoredSession();
-        if (!s) return; // not in a session -> nothing shared to follow
+        if (!s) { if (alive) setDishProg({ served: 0, segs: [] }); return; } // not in a session -> no per-dish bar
         const st = await getSessionState(s.token);
-        if (!alive || !st.ok) return;
+        if (!alive) return;
+        if (!st.ok) { setDishProg({ served: 0, segs: [] }); return; } // session ended -> drop the per-dish bar
+        // Per-dish progress across the whole table — one status per dish — so the
+        // strip can show "2 of 3 dishes served" + a segment per dish.
+        const sItems = (st.items as Array<{ status: string }>) || [];
+        setDishProg({ served: sItems.filter((i) => i.status === "served").length, segs: sItems.map((i) => i.status) });
         const sessOrders = (st.orders as Array<{ id: string; status: OrderStatus; total: number; items?: { title: string; qty: number }[]; created_at: string }>) || [];
         if (!sessOrders.length) return;
         const sess = st.session as { table_number?: string } | undefined;
@@ -212,6 +222,11 @@ export default function OrderTracker() {
   // order's status steps. (Not while an item is mid dismiss-animation.)
   const multi = visible.length >= 2 && !dismissing;
   const servedCount = visible.filter((o) => o.status === "served").length;
+  // Per-dish mode: when we have the table's dish-level statuses, the strip shows a
+  // segment per dish (which are served vs. still cooking) instead of a coarse
+  // order-level bar. Hidden during a dismiss animation to keep that clean.
+  const dishMode = dishProg.segs.length > 0 && !dismissing;
+  const allDishesServed = dishMode && dishProg.served === dishProg.segs.length;
   // The table can only be corrected while the order is early (not yet served).
   const canEditTable = order.status === "received" || order.status === "preparing";
   // showPrice(): format a number as a price string in the chosen currency.
@@ -354,7 +369,7 @@ export default function OrderTracker() {
       <button
         type="button"
         ref={stripRef}
-        className={`order-tracker status-${multi ? (servedCount === visible.length ? "served" : "preparing") : order.status}`}
+        className={`order-tracker status-${dishMode ? (allDishesServed ? "served" : "preparing") : multi ? (servedCount === visible.length ? "served" : "preparing") : order.status}`}
         style={stripStyle}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -375,9 +390,24 @@ export default function OrderTracker() {
             {/* Show the table number if we have one. */}
             {order.tableNumber && <span className="ot-table">Table {order.tableNumber}</span>}
           </div>
-          {/* Multi: "X of N orders served". Single: the status subtitle. */}
-          <div className="ot-sub">{multi ? `${servedCount} of ${visible.length} orders served` : c.sub}</div>
-          {multi ? (
+          {/* Per-dish: "X of N dishes served". Multi: "X of N orders served".
+              Single: the status subtitle. */}
+          <div className="ot-sub">
+            {dishMode
+              ? `${dishProg.served} of ${dishProg.segs.length} dishes served`
+              : multi
+              ? `${servedCount} of ${visible.length} orders served`
+              : c.sub}
+          </div>
+          {dishMode ? (
+            /* One segment per DISH — grey (received) → amber (preparing) → green
+               (served) — so the table sees exactly which dishes are still cooking. */
+            <div className="ot-dishbar" aria-hidden="true">
+              {dishProg.segs.map((s, i) => (
+                <span key={i} className={`ot-dseg ${s}`} />
+              ))}
+            </div>
+          ) : multi ? (
             /* One segment per order, green once that order is fully served — so the
                table can watch its orders complete (3 orders, 1 left = 2 green). */
             <div className="ot-orderbar" aria-hidden="true">
