@@ -107,6 +107,22 @@ export default function SessionTableBill() {
         <>
           {/* How many dishes are served out of the total. */}
           <div className="stb-progress">{served} of {items.length} served</div>
+          {/* A segmented progress bar: one segment per dish, so it scales to any
+              number of orders (1 dish = one wide bar, 20 = 20 thin ticks). Each
+              segment turns amber while preparing and green once served, so the
+              table can see its progress fill up at a glance. */}
+          <div
+            className="stb-bar"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={items.length}
+            aria-valuenow={served}
+            aria-label={`${served} of ${items.length} dishes served`}
+          >
+            {items.map((it) => (
+              <span key={it.id} className={`stb-seg ${it.status}`} />
+            ))}
+          </div>
           {/* The list of ordered dishes, each with its name, quantity and status. */}
           <div className="stb-items">
             {items.map((it) => (

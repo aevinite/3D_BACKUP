@@ -668,6 +668,16 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 .stb-members { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: none; letter-spacing: 0; }
 .stb-empty { font-size: 13px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
 .stb-progress { font-size: 12px; color: var(--muted); margin-top: 8px; }
+/* Segmented served-progress bar: one segment per dish. Scales to any count
+   (flex:1 each), turns amber while preparing and green once served. */
+.stb-bar { display: flex; gap: 3px; margin: 6px 0 4px; }
+.stb-seg {
+  flex: 1; height: 7px; min-width: 3px; border-radius: 4px;
+  background: color-mix(in srgb, var(--text) 14%, transparent); /* received / not started */
+  transition: background 0.45s var(--ease);
+}
+.stb-seg.preparing { background: #e8a13c; }  /* amber = being prepared */
+.stb-seg.served    { background: #4ade80; }  /* green = done */
 .stb-items { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .stb-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--text); }
 .stb-item-name { min-width: 0; }
