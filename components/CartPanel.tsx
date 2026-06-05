@@ -252,6 +252,36 @@ export default function CartPanel() {
     return () => clearInterval(iv);
   }, [open]);
 
+  // Scroll hand-off between the two scrollbars on the Current-bill tab.
+  // The inner items list (.cart-list) has its own scrollbar; the whole panel
+  // (.cart-panel) has another. We WANT two scrollbars, but once the inner list
+  // reaches its top/bottom the scroll should continue the outer panel (down to
+  // the total + Place Order). CSS overscroll-behavior:auto alone doesn't do this
+  // reliably because Chrome "latches" the wheel to the inner element at its edge,
+  // which feels like the bill dead-stops. So when the list is already at its
+  // boundary in the wheel's direction, we forward the leftover delta to the panel
+  // ourselves. (Touch already chains fine; this is the wheel/trackpad fix.)
+  useEffect(() => {
+    if (!open || showHistory) return; // only the Current-bill list needs this
+    const list = document.getElementById("cart-list");
+    const panel = document.getElementById("cart-panel");
+    if (!list || !panel) return;
+    const onWheel = (e: WheelEvent) => {
+      const goingDown = e.deltaY > 0;
+      const atBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 1;
+      const atTop = list.scrollTop <= 0;
+      // Only take over once the inner list can't scroll further this way.
+      if ((goingDown && atBottom) || (!goingDown && atTop)) {
+        // Normalise wheel units (0=pixels, 1=lines, 2=pages) before passing on.
+        const factor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? panel.clientHeight : 1;
+        panel.scrollTop += e.deltaY * factor;
+        e.preventDefault();
+      }
+    };
+    list.addEventListener("wheel", onWheel, { passive: false });
+    return () => list.removeEventListener("wheel", onWheel);
+  }, [open, showHistory]);
+
   // showPrice(): format a number as a price string in the chosen currency.
   const showPrice = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
   // Orders shown live up top are hidden from the history list below, so the
