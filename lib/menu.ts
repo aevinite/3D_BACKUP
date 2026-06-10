@@ -28,7 +28,8 @@ export interface MenuItem {
   modelOptimizedUrl?: string;
   description: string;
   longDescription: string;
-  rating: string;
+  rating: string;       // average of REAL reviews ("" when there are none yet -> UI shows "New")
+  reviewCount: number;  // how many real reviews exist (from the item_ratings view)
   time: string;
   nutrition: { calories: string; protein: string; carbs: string; sugar?: string };
   ingredients: { emoji: string; name: string }[];
@@ -75,7 +76,12 @@ export function localized(text: LocalizedText | undefined, lang: string): string
 // The database names columns like `model_folder`; the app prefers `modelFolder`.
 // This function does that rename, and fills in safe defaults for any missing
 // field so the rest of the app never has to worry about empty/null data.
-function mapRow(row: any): MenuItem {
+// The aggregate row for one dish from the `item_ratings` view (migration 030):
+// the average stars + count of REAL customer reviews. Both the menu cards and
+// the dish page read this same view, so the two can never disagree.
+type RatingAgg = { item_slug: string; avg_rating: number | string | null; review_count: number | null };
+
+function mapRow(row: any, agg?: RatingAgg): MenuItem {
   return {
     id: row.id,
     slug: row.slug,
@@ -93,7 +99,10 @@ function mapRow(row: any): MenuItem {
     modelOptimizedUrl: row.model_optimized_url ?? undefined,
     description: row.description ?? "",
     longDescription: row.long_description ?? "",
-    rating: row.rating ?? "0",
+    // Rating comes ONLY from real reviews now (the old per-dish seed number was
+    // fake). Empty string = no reviews yet; the UI shows a "New" badge instead.
+    rating: agg?.avg_rating != null ? String(agg.avg_rating) : "",
+    reviewCount: agg?.review_count ?? 0,
     time: row.time ?? "",
     nutrition: row.nutrition ?? { calories: "", protein: "", carbs: "", sugar: "" },
     ingredients: row.ingredients ?? [],
@@ -189,27 +198,49 @@ export async function getOrderStatus(
 // All menu items, in the order set by `sort_order`.
 // This is the main "fetch the whole menu from the database" function.
 export async function getMenuItems(): Promise<MenuItem[]> {
-  const { data, error } = await supabase
-    .from("menu_items")     // from the menu_items table
-    .select("*")            // grab every column
-    .order("sort_order");   // sorted by the owner's chosen display order
-  if (error) throw new Error(`Failed to load menu: ${error.message}`);
-  // "data ?? []" -> if nothing came back, use an empty list. Then convert each
-  // raw DB row into a tidy MenuItem with mapRow.
-  return (data ?? []).map(mapRow);
+  // Fetch the dishes AND the real-review aggregates at the same time (parallel
+  // requests — no extra waiting). Ratings failing must never hide the menu, so
+  // its error is swallowed and dishes just show as unrated.
+  const [items, ratings] = await Promise.all([
+    supabase.from("menu_items").select("*").order("sort_order"),
+    supabase.from("item_ratings").select("*"),
+  ]);
+  if (items.error) throw new Error(`Failed to load menu: ${items.error.message}`);
+  // Index the aggregates by slug for a quick lookup while mapping each dish.
+  const aggBySlug = new Map<string, RatingAgg>(((ratings.data as RatingAgg[] | null) ?? []).map((r) => [r.item_slug, r]));
+  return (items.data ?? []).map((row) => mapRow(row, aggBySlug.get(row.slug)));
 }
 
 // A single item by slug, or null if it doesn't exist.
 // A "slug" is the short URL-friendly name, e.g. "classic-burger".
 export async function getMenuItem(slug: string): Promise<MenuItem | null> {
-  const { data, error } = await supabase
-    .from("menu_items")
-    .select("*")
-    .eq("slug", slug)   // .eq = "where slug equals this value"
-    .maybeSingle();     // expect 0 or 1 row (null if none, no error if missing)
-  if (error) throw new Error(`Failed to load item "${slug}": ${error.message}`);
-  // Found it -> tidy it up; not found -> hand back null.
-  return data ? mapRow(data) : null;
+  // Three parallel reads: the dish, its rating aggregate, and its newest
+  // real reviews (capped at 20 so a popular dish can't flood the page).
+  const [item, agg, revs] = await Promise.all([
+    supabase.from("menu_items").select("*").eq("slug", slug).maybeSingle(),
+    supabase.from("item_ratings").select("*").eq("item_slug", slug).maybeSingle(),
+    supabase.from("reviews").select("name, stars, comment, created_at").eq("item_slug", slug).order("created_at", { ascending: false }).limit(20),
+  ]);
+  if (item.error) throw new Error(`Failed to load item "${slug}": ${item.error.message}`);
+  if (!item.data) return null;
+  const mapped = mapRow(item.data, (agg.data as RatingAgg | null) ?? undefined);
+  // Replace the (now always-empty) seeded reviews with the real ones, reshaped
+  // to the { name, rating, text } shape the dish page already renders.
+  mapped.reviews = ((revs.data as { name: string | null; stars: number; comment: string | null }[] | null) ?? [])
+    .map((r) => ({ name: r.name || "Guest", rating: r.stars, text: r.comment || "" }));
+  return mapped;
+}
+
+// Save (or update) this device's rating for a dish. The server function
+// validates stars/device/dish and upserts, so re-rating never duplicates.
+export async function submitReview(
+  slug: string, deviceId: string, stars: number, name: string, comment: string
+): Promise<{ ok: boolean; reason?: string }> {
+  const { data, error } = await supabase.rpc("lfh_submit_review", {
+    p_slug: slug, p_device: deviceId, p_stars: stars, p_name: name, p_comment: comment,
+  });
+  if (error) return { ok: false, reason: error.message };
+  return (data ?? { ok: false, reason: "no response" }) as { ok: boolean; reason?: string };
 }
 
 // Active categories, in display order. The virtual "All" tab is added by the UI.
