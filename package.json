@@ -8,6 +8,7 @@
     "prebuild": "node scripts/set-glb-cache.mjs || exit 0",
     "start": "next start -p 4000",
     "lint": "eslint",
+    "test:money": "node --test tests/money.test.mjs",
     "cache-models": "node scripts/set-glb-cache.mjs"
   },
   "dependencies": {
