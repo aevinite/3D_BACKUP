@@ -153,7 +153,9 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
     setCartQty(Math.max(0, newQty));
     // Notify on add (so the toast fires from the menu too, not just the popup).
     if (delta > 0) {
-      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `${item.title} added`, kicker: "your order" } }));
+      // Tappable confirmation: tapping the toast opens the bill (the quick "+"
+      // skips the customize popup, so this is its version of the success step).
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `${item.title} added`, subtitle: "tap to view your bill", kicker: "your order", event: "lfh:open-cart" } }));
     }
   };
 

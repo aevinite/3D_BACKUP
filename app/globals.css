@@ -3086,6 +3086,18 @@ a:focus:not(:focus-visible) { outline: none; }
   .order-tracker, .order-tracker .ot-icon, .ot-step.active, .ot-sheet { animation: none !important; }
 }
 
+/* The customize popup's SUCCESS step ("Added to your bill") — step 2 of the
+   two-step add flow. Reuses .order-confirm for the box; these are extras. */
+.order-confirm-done { text-align: center; padding: 32px 24px; }
+.order-confirm-done .done-check {
+  width: 56px; height: 56px; margin: 0 auto 12px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; color: #fff; background: var(--accent, #d4a574);
+}
+.order-confirm-done .done-title { margin: 0 0 6px; font-size: 20px; }
+.order-confirm-done .done-line { margin: 0; color: var(--muted); font-size: 14px; }
+.order-confirm-done .done-actions { display: flex; gap: 12px; justify-content: center; margin-top: 22px; }
+
 /* Small pill shown wherever a dish has no real reviews yet ("New" instead of
    an invented star number). Used on menu cards and the dish page. */
 .new-dish-badge {

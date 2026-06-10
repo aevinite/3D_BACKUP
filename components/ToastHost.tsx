@@ -33,6 +33,8 @@ interface ToastData {
   variant: Variant; // success / error / info
   mark: string;     // the symbol shown (✓, ✕, • or a custom emoji)
   href?: string;    // optional link — if set, tapping the ticket navigates
+  event?: string;   // optional app event — if set, tapping fires it instead
+                    // of navigating (e.g. "lfh:open-cart" opens the bill)
 }
 
 // When a caller doesn't name the action, pick a neutral café-receipt header.
@@ -86,10 +88,10 @@ export default function ToastHost() {
       const kicker = d.kicker ? String(d.kicker) : KICKER_FALLBACK[variant];
       const id = ++counter;
       // Add the new toast, keeping only the last 3 on screen (slice(-3)).
-      setToasts((t) => [...t, { id, kicker, title, subtitle, variant, mark: d.icon || MARK[variant], href: d.href }].slice(-3));
-      // How long it stays: tappable links linger longest, errors a bit longer
-      // than normal, everything else briefest.
-      const ttl = d.href ? 6000 : variant === "error" ? 4400 : 3200;
+      setToasts((t) => [...t, { id, kicker, title, subtitle, variant, mark: d.icon || MARK[variant], href: d.href, event: d.event }].slice(-3));
+      // How long it stays: tappable tickets (link or action) linger longest,
+      // errors a bit longer than normal, everything else briefest.
+      const ttl = d.href || d.event ? 6000 : variant === "error" ? 4400 : 3200;
       // After that delay, remove this toast by its id.
       setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ttl);
     };
@@ -109,10 +111,11 @@ export default function ToastHost() {
         <button
           key={t.id}
           type="button"
-          className={`toast-ticket toast-print toast-${t.variant} ${t.href ? "toast-tappable" : ""}`}
+          className={`toast-ticket toast-print toast-${t.variant} ${t.href || t.event ? "toast-tappable" : ""}`}
           onClick={() => {
-            // If this toast carries a link, go there when tapped...
-            if (t.href) router.push(t.href);
+            // A toast can carry an app event (e.g. open the bill) or a link.
+            if (t.event) window.dispatchEvent(new Event(t.event));
+            else if (t.href) router.push(t.href);
             // ...and either way, dismiss it once clicked.
             setToasts((s) => s.filter((x) => x.id !== t.id));
           }}
@@ -129,8 +132,8 @@ export default function ToastHost() {
           {/* The small subtitle line, only if we have one */}
           {t.subtitle && <div className="toast-sub">{t.subtitle}</div>}
           <div className="toast-rule" aria-hidden="true" />
-          {/* The footer: a "tap to view" hint for links, or a friendly "merci" */}
-          <div className="toast-foot">{t.href ? "tap to view →" : "· merci ·"}</div>
+          {/* The footer: a "tap to view" hint for tappable tickets, else "merci" */}
+          <div className="toast-foot">{t.href || t.event ? "tap to view →" : "· merci ·"}</div>
         </button>
       ))}
     </div>
