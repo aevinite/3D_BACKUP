@@ -88,11 +88,14 @@ function toRow(item, index) {
     model_optimized_url: item.modelOptimizedUrl ?? null,
     description: item.description ?? null,
     long_description: item.longDescription ?? null,
-    rating: item.rating ?? null,
+    // rating + reviews intentionally NOT seeded — real customer ratings live in
+    // the `reviews` table (migration 030); seeding the old fake ones back in
+    // would resurrect the Daniel/Diego/Priya reviews on every dish.
+    rating: null,
     time: item.time ?? null,
     nutrition: item.nutrition ?? null,
     ingredients: item.ingredients ?? null,
-    reviews: item.reviews ?? null,
+    reviews: [],
     related_slugs: item.relatedSlugs ?? null,
     // Filter tags. Fall back to deriving from the veg flag so older menu.json
     // files without a `tags` field still seed sensibly.
