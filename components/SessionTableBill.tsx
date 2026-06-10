@@ -17,7 +17,7 @@ import { getStoredSession, getSessionState } from "@/lib/session";
 // Reads the restaurant's on/off settings (e.g. is the session system turned on).
 import { getSettings } from "@/lib/menu";
 // Money-formatting helpers so prices show in the right currency.
-import { formatMoney, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 
 // The shape of one dish on the bill: an id, its name, how many, and where it is
 // in the kitchen (just received, being prepared, or already served).
@@ -84,8 +84,10 @@ export default function SessionTableBill() {
 
   // If we're not in a live session, show nothing at all.
   if (!active) return null;
-  // Formats a number as money (falls back to a simple dollar amount if needed).
-  const show = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
+  // Formats a SERVER-computed USD total in the guest's currency. These are the
+  // authoritative amounts the kitchen charges, so they only get minor-unit
+  // rounding (whole ₹ / cents) — never the ₹10 menu snapping.
+  const show = (n: number) => (currency ? formatAmount(toMinor(n * currency.rate, currency), currency) : `$${n.toFixed(2)}`);
   // Counts how many dishes have already been served (for the "X of Y served" line).
   const served = items.filter((i) => i.status === "served").length;
 

@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatMoney, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { formatMoney, prettyUsd, getCurrency, type CurrencyMeta } from "@/lib/format";
 import type { OptionGroup } from "@/lib/menu";
 import { allergenIcon, allergenLabel } from "@/lib/allergens";
 
@@ -120,7 +120,9 @@ export default function OrderConfirmModal() {
     });
   });
   // Price math: one unit = the dish's base price plus every add-on's price.
-  const unit = parseFloat(item.price) + chosen.reduce((s, c) => s + c.price, 0);
+  // The base goes through prettyUsd so this popup's number matches the menu
+  // card / dish page exactly (raw parseFloat was the ₹546-vs-₹545 bug).
+  const unit = prettyUsd(item.price) + chosen.reduce((s, c) => s + c.price, 0);
   // The popup's total = price of one unit times the quantity.
   const total = unit * qty;
 

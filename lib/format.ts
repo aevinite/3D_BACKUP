@@ -103,62 +103,44 @@ export const setLanguage = (code: LanguageCode) => {
   }
 };
 
-// Round a converted price to a "nice" customer-facing number.
-// We round to the nearest 5 / 10 / 100 depending on magnitude so we never
-// show fractions like ₹1091 or AED 47.67 — restaurant menu prices look
-// confident when they end in .00, .50, .95, or 0/5 in whole-number currencies.
-const niceRound = (value: number, decimals: number): number => {
-  // Guard against bad input (e.g. NaN); a price should never be "not a number".
-  if (!Number.isFinite(value)) return 0;
-  if (decimals === 0) {
-    // For ₹ and other whole-number currencies, snap to the nearest pleasing step.
-    // Trick: divide, round, multiply back. e.g. round 1091 to nearest 50 -> 1100.
-    if (value >= 500) return Math.round(value / 50) * 50;
-    if (value >= 100) return Math.round(value / 10) * 10;
-    if (value >= 20)  return Math.round(value / 5) * 5;
-    return Math.round(value);
-  }
-  // For $/€/AED etc, end prices in .95 if close, otherwise nearest .50.
-  const whole = Math.floor(value); // the dollars part (everything before the dot)
-  const frac = value - whole;      // the cents part (the leftover after the dot)
-  // If we're already very close to .99, just make it .99 (a confident menu price).
-  if (Math.abs(frac - 0.99) < 0.07) return whole + 0.99;
-  if (frac < 0.25) return whole;        // cents are tiny -> round down to a whole number
-  if (frac < 0.75) return whole + 0.5;  // cents are middling -> land on .50
-  return whole + 0.99;                  // cents are high -> push up to .99
-};
+// ---------------------------------------------------------------------------
+// Price display. The actual MATH lives in lib/money.mjs (pure functions shared
+// with `npm run test:money`). This section only ties that math to the
+// currency the guest picked.
+// ---------------------------------------------------------------------------
+import { niceUsd, displayAmount, minorRound } from "./money.mjs";
 
-// formatPrice converts a USD price to the user's chosen currency, rounds
-// it to a nice display value, and returns a string like "₹1,100" or "$12.99".
-// The "confident" price as a USD number (rounds to .95 / .50 / .00). This is the
-// SINGLE source of truth for what a dish costs, so the menu, cart and bill all read
-// the same value, agree, and add up. The pretty rounding is applied once, here, in USD.
-export const prettyUsd = (price: string | number): number => {
-  // The price might arrive as text ("12.5") or a real number; turn it into a number.
-  const n = typeof price === "string" ? parseFloat(price) : price;
-  // Apply the "nice" rounding once, in USD, so everywhere downstream agrees.
-  return niceRound(Number.isFinite(n) ? n : 0, 2);
-};
+// Display step per currency: INR prices snap to ₹10 (owner's decision,
+// 2026-06-10 — "round figures for Indian rupees only"); 2-decimal currencies
+// keep their cents. Tax uses MINOR below so it doesn't jump in ₹10 hops.
+const STEP: Record<CurrencyCode, number> = { USD: 0.01, INR: 10, EUR: 0.01, AED: 0.01, SAR: 0.01, QAR: 0.01 };
+const MINOR: Record<CurrencyCode, number> = { USD: 0.01, INR: 1, EUR: 0.01, AED: 0.01, SAR: 0.01, QAR: 0.01 };
 
-// Menu/item PRICE: the confident USD price, converted to the chosen currency.
-// (USD display is identical to before; other currencies now mirror the USD price,
-// so the menu and the bill never disagree.)
-export const formatPrice = (price: string | number, currency?: CurrencyMeta): string =>
-  formatMoney(prettyUsd(price), currency);
+// The "confident" USD unit price (.00/.50/.99 endings) — single source of
+// truth, mirrors the server's lfh_nice_usd (migration 029). Old name kept so
+// existing callers don't need to change.
+export const prettyUsd = (price: string | number): number => niceUsd(price);
 
-// formatMoney is for BILLS and TOTALS: it converts to the chosen currency and
-// rounds to that currency's decimals WITHOUT the "nice" menu-price rounding, so a
-// bill always adds up (subtotal + tax = total) and the guest sees what they pay.
-// Use formatPrice for menu/item prices; use formatMoney for anything summed.
-export const formatMoney = (price: string | number, currency?: CurrencyMeta): string => {
-  // Use the currency passed in, or fall back to whatever the guest picked.
+// USD -> guest currency as a NUMBER, snapped to the currency's step.
+// All bill math must happen on these numbers so what's summed is what's shown.
+export const toDisplay = (usd: string | number, currency?: CurrencyMeta): number => {
   const cur = currency || getCurrency();
-  // Accept text or number for the price, and guard against bad values.
-  const n = typeof price === "string" ? parseFloat(price) : price;
-  const safe = Number.isFinite(n) ? n : 0;
-  // Convert USD -> chosen currency (multiply by rate), then add thousands commas
-  // and the right number of decimal places. toLocaleString does the comma/decimal work.
-  const formatted = (safe * cur.rate).toLocaleString("en-US", {
+  return displayAmount(usd, cur.rate, STEP[cur.code]);
+};
+
+// Round an already-display-domain amount (e.g. the 5% tax) to the currency's
+// minor unit: whole rupees for INR, cents for everything else.
+export const toMinor = (amount: number, currency?: CurrencyMeta): number => {
+  const cur = currency || getCurrency();
+  return minorRound(amount, MINOR[cur.code]);
+};
+
+// Format an already-display-domain NUMBER with symbol + thousands separators.
+// No rounding happens here — the number must already be snapped by
+// toDisplay/toMinor, so the string always matches the math.
+export const formatAmount = (amount: number, currency?: CurrencyMeta): string => {
+  const cur = currency || getCurrency();
+  const formatted = (Number.isFinite(amount) ? amount : 0).toLocaleString("en-US", {
     minimumFractionDigits: cur.decimals,
     maximumFractionDigits: cur.decimals,
   });
@@ -167,3 +149,14 @@ export const formatMoney = (price: string | number, currency?: CurrencyMeta): st
   const tight = cur.symbol.length === 1;
   return tight ? `${cur.symbol}${formatted}` : `${cur.symbol} ${formatted}`;
 };
+
+// Menu/dish PRICE: confident USD -> converted -> snapped -> formatted.
+export const formatPrice = (price: string | number, currency?: CurrencyMeta): string =>
+  formatAmount(toDisplay(prettyUsd(price), currency), currency);
+
+// Bill-line money: a USD number (already includes add-ons) -> converted ->
+// snapped EXACTLY like formatPrice, so a dish can never show two different
+// prices on two screens (the old version skipped snapping — that was the
+// ₹546-on-the-page vs ₹545-in-the-popup bug).
+export const formatMoney = (price: string | number, currency?: CurrencyMeta): string =>
+  formatAmount(toDisplay(price, currency), currency);

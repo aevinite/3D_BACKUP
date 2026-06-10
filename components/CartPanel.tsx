@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatMoney, prettyUsd, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { formatMoney, prettyUsd, toDisplay, toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
@@ -282,18 +282,28 @@ export default function CartPanel() {
     return () => list.removeEventListener("wheel", onWheel);
   }, [open, showHistory]);
 
-  // showPrice(): format a number as a price string in the chosen currency.
+  // showPrice(): format a USD number as a price string in the chosen currency.
   const showPrice = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
+  // fmtDisp(): format a number that is ALREADY in the display currency
+  // (no conversion — just symbol + separators).
+  const fmtDisp = (n: number) => (currency ? formatAmount(n, currency) : `$${n.toFixed(2)}`);
+  // One cart line's value in the guest's DISPLAY currency: the unit price is
+  // converted + snapped FIRST, then multiplied by quantity — so the line, the
+  // subtotal and the total are all sums of exactly what's printed.
+  const lineDisp = (it: CartItem) => toDisplay(prettyUsd(it.price), currency || undefined) * it.qty;
   // Orders shown live up top are hidden from the history list below, so the
   // same order never appears twice in the same tab.
   const liveIds = new Set(liveOrders.map((o) => o.id));
   const pastOrders = history.filter((h) => !liveIds.has(h.id));
   // Red dot on the Previous-orders tab: a live order whose floating strip was hidden.
   const hiddenLive = liveOrders.some((o) => o.stripHidden && !isFinalStatus(o.status));
-  // Bill math: subtotal = sum of (each line's price × its quantity).
-  const subtotal = cart.reduce((sum, it) => sum + prettyUsd(it.price) * it.qty, 0);
+  // Bill math — in the guest's DISPLAY currency, not USD, so the printed
+  // lines visibly add up: subtotal = sum of the printed line values.
+  const subtotal = cart.reduce((sum, it) => sum + lineDisp(it), 0);
   const itemCount = cart.reduce((sum, it) => sum + it.qty, 0); // total number of items
-  const tax = subtotal * TAX_RATE; // 5% of the subtotal
+  // 5% tax, rounded to the currency's minor unit (whole ₹ / cents) so it
+  // doesn't jump in ₹10 hops like the menu prices do.
+  const tax = toMinor(subtotal * TAX_RATE, currency || undefined);
   const total = subtotal + tax; // what the guest pays
 
   // itemAllergens(): the allergens a given dish contains.
@@ -670,7 +680,7 @@ export default function CartPanel() {
                   </div>
                   {/* Right side of the line: this line's price (price × qty) and a trash button. */}
                   <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                    <div className="cart-item-price">{showPrice(prettyUsd(item.price) * item.qty)}</div>
+                    <div className="cart-item-price">{fmtDisp(lineDisp(item))}</div>
                     <button type="button" className="remove-item" aria-label={`Remove ${item.title}`} onClick={() => removeFromCart(idx)} style={{ background: "transparent", border: "none", padding: "8px" }}>
                       <i className="fas fa-trash" style={{ fontSize: "18px" }}></i>
                     </button>
@@ -692,7 +702,8 @@ export default function CartPanel() {
                   {pairing.image && <img src={pairing.image} alt="" className="pairing-img" />}
                   <div className="pairing-info">
                     <div className="pairing-name">{pairing.title}</div>
-                    <div className="pairing-price">{showPrice(parseFloat(pairing.price))}</div>
+                    {/* prettyUsd first — raw parseFloat made this show ₹402 while the menu said ₹419. */}
+                    <div className="pairing-price">{showPrice(prettyUsd(pairing.price))}</div>
                   </div>
                   <button type="button" className="pairing-add" onClick={() => addPairing(pairing)}>
                     + Add
@@ -765,9 +776,9 @@ export default function CartPanel() {
 
             {/* The bill summary: subtotal, tax, and grand total. */}
             <div className="bill-rows">
-              <div className="bill-line"><span>Subtotal</span><span>{showPrice(subtotal)}</span></div>
-              <div className="bill-line"><span>Tax (5%)</span><span>{showPrice(tax)}</span></div>
-              <div className="bill-line grand"><span>Total</span><span>{showPrice(total)}</span></div>
+              <div className="bill-line"><span>Subtotal</span><span>{fmtDisp(subtotal)}</span></div>
+              <div className="bill-line"><span>Tax (5%)</span><span>{fmtDisp(tax)}</span></div>
+              <div className="bill-line grand"><span>Total</span><span>{fmtDisp(total)}</span></div>
             </div>
 
             {/* The Place Order button. Disabled while an order is being sent. */}
