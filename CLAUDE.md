@@ -91,6 +91,15 @@ via `ToolSearch` BEFORE planning around it.
   4001). The code default and the launch script now agree on 4001.
 - **Service-role Supabase keys must never be committed or echoed.** If the user
   pastes one in chat, warn them loudly and treat it as compromised.
+- **ABSOLUTE RULE — secrets never appear in chat, ever.** This includes the Supabase
+  access token (`sbp_`), service-role key, Vercel/Sentry tokens — whole OR partial.
+  It has been violated before and the user's patience is spent. Operationally:
+  (1) ANY `claude mcp ...` command echoes resolved secrets — ALWAYS redirect its
+  output to null (`cmd /c "claude mcp ... >nul 2>&1"`); (2) never `cat`/`Get-Content`/
+  `Select-String` a secret's VALUE into output — scripts read `.env.local` and write
+  config directly, printing only presence/length; (3) verify configs via masked
+  reads (node/jq printing everything EXCEPT the secret). No exceptions, no "just
+  this once".
 - **MCP servers are NOT read from `.claude/settings.json`.** Claude Code loads
   them from `~/.claude.json` (via `claude mcp add ... -s local`) or a root
   `.mcp.json`. The supabase MCP is registered in `~/.claude.json` and uses
