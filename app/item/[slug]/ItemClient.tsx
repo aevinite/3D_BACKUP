@@ -705,14 +705,12 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
               <i className="fas fa-shopping-bag"></i> {t.addToCart}
             </button>
           )}
-          {/* Show the live 3D button only if a model exists; otherwise a greyed-out one. */}
-          {item.is4d && item.modelFolder ? (
+          {/* Show the 3D button only when a model actually exists; dishes
+              without one simply don't mention 3D at all (no greyed-out
+              "unavailable" banner advertising a missing feature). */}
+          {item.is4d && item.modelFolder && (
             <button id="view-3d-btn" className="btn btn-cyan" onClick={goToViewer}>
               <i className="fas fa-cube"></i> {t.viewIn3D}
-            </button>
-          ) : (
-            <button className="btn btn-cyan" style={{ opacity: 0.5, cursor: 'not-allowed' }} disabled>
-              <i className="fas fa-cube"></i> {t.preview3dUnavailable}
             </button>
           )}
         </div>
