@@ -375,7 +375,10 @@ export default function CartPanel() {
     const next = [...cart];
     const idx = next.findIndex((c) => c.id === it.id);
     if (idx >= 0) next[idx] = { ...next[idx], qty: next[idx].qty + 1 };
-    else next.push({ id: it.id, title: it.title, price: it.price, image: it.image, qty: 1 });
+    // Stored price is the CONFIDENT unit (prettyUsd) — the same convention as
+    // the quick "+" and the customize popup, so the bill never re-rounds it.
+    // sig "[]" marks it as a plain line so the menu card's +/- can manage it.
+    else next.push({ id: it.id, title: it.title, price: prettyUsd(it.price).toFixed(2), image: it.image, qty: 1, sig: "[]" });
     commit(next);
     window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `${it.title} added`, kicker: "your order" } }));
   };
