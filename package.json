@@ -9,6 +9,7 @@
     "start": "next start -p 4000",
     "lint": "eslint",
     "test:money": "node --test tests/money.test.mjs",
+    "test:totals": "node --test tests/order-totals.e2e.mjs",
     "cache-models": "node scripts/set-glb-cache.mjs"
   },
   "dependencies": {

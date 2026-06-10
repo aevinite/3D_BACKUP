@@ -72,7 +72,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
   const [selectedRating, setSelectedRating] = useState(0);   // stars chosen in the review form
   const [reviewName, setReviewName] = useState("");          // reviewer's typed name
   const [reviewText, setReviewText] = useState("");          // reviewer's typed comment
-  const [localReviews, setLocalReviews] = useState<{name: string; rating: number; text: string}[]>([]); // reviews shown (incl. ones just added)
+  const [localReviews, setLocalReviews] = useState<{name: string; rating: number; text: string; deviceId?: string}[]>([]); // reviews shown (incl. ones just added)
   const [reviewTab, setReviewTab] = useState<"rate" | "reviews">("reviews"); // which review tab is open
   const [imgZoom, setImgZoom] = useState(false);             // is the full-screen photo open?
   const [lbScale, setLbScale] = useState(1);                 // zoom level in the lightbox (1 = normal)
@@ -409,7 +409,8 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     }
     if (!item) return; // no dish loaded -> nothing to review
     // Server-side save: validates stars/device/dish, upserts on repeat ratings.
-    const res = await submitReviewRpc(item.slug, getDeviceId(), selectedRating, reviewName.trim(), reviewText.trim());
+    const myDevice = getDeviceId();
+    const res = await submitReviewRpc(item.slug, myDevice, selectedRating, reviewName.trim(), reviewText.trim());
     if (!res.ok) {
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't save review", subtitle: "please try again", kicker: "review", variant: "error" } }));
       return;
@@ -418,8 +419,12 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
       name: reviewName.trim() || "Guest",
       rating: selectedRating,
       text: reviewText.trim(),
+      deviceId: myDevice,
     };
-    setLocalReviews([newReview, ...localReviews]);  // put the new review first
+    // The DB upserts (one review per device per dish) — mirror that on screen:
+    // drop this device's previous review before prepending the new one, so
+    // re-rating never shows two reviews or skews the average.
+    setLocalReviews([newReview, ...localReviews.filter((r) => r.deviceId !== myDevice)]);
     setReviewName("");        // clear the form
     setReviewText("");
     setSelectedRating(0);

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
-import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { formatPrice, prettyUsd, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { useTranslation } from "@/lib/i18n";
 import type { OptionGroup } from "@/lib/menu";
 import VegIcon from "./VegIcon";
@@ -146,8 +146,10 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
       cart[idx].qty = newQty;
       writeCart(cart);
     } else {
-      // Not in the cart yet: add it as a new plain line (sig "[]").
-      writeCart([...cart, { id: item.id, title: item.title, price: item.price, image: item.image, qty: newQty, sig: "[]" }]);
+      // Not in the cart yet: add it as a new plain line (sig "[]"). The price
+      // stored is the CONFIDENT (prettyUsd) unit — the same convention the
+      // customize popup uses — so the bill never re-rounds a stored price.
+      writeCart([...cart, { id: item.id, title: item.title, price: prettyUsd(item.price).toFixed(2), image: item.image, qty: newQty, sig: "[]" }]);
     }
     // Update the on-card counter (never show a negative number).
     setCartQty(Math.max(0, newQty));

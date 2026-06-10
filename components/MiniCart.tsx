@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { prettyUsd, toDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 
 // A sticky bottom pill on phones: "🛍 N items · ₹X · View bill". Tapping opens
 // the cart. Hidden when the cart is empty, when the cart panel is open, and on
@@ -14,10 +14,11 @@ export default function MiniCart() {
   // These four "useState" lines are the pill's little memory boxes. Each holds a
   // value, and changing it re-draws the pill automatically.
   const [count, setCount] = useState(0); // how many items are in the cart
-  // Each line's confident USD unit price + quantity. We keep the LINES (not a
-  // pre-summed total) because the subtotal must be summed in the guest's
-  // display currency — each line converted+snapped first — to match the bill.
-  const [lines, setLines] = useState<{ usd: number; qty: number }[]>([]);
+  // Each line's USD unit price, its add-on prices, and quantity. We keep the
+  // LINES (not a pre-summed total) because the subtotal must be summed in the
+  // guest's display currency — each line converted+snapped first, add-ons
+  // minor-rounded — exactly like the bill, so the two always match.
+  const [lines, setLines] = useState<{ usd: number; addons: number[]; qty: number }[]>([]);
   const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // which currency to show (₹, $, etc.)
   const [cartOpen, setCartOpen] = useState(false); // is the full cart panel currently open?
 
@@ -31,9 +32,14 @@ export default function MiniCart() {
       const list = Array.isArray(arr) ? arr : [];
       // Add up the quantities of every line to get the total item count.
       setCount(list.reduce((s, it) => s + (it.qty || 1), 0));
-      // Remember each line's USD unit price + qty; the display subtotal is
-      // computed at draw time in the guest's currency.
-      setLines(list.map((it: { price: string; qty?: number }) => ({ usd: prettyUsd(it.price), qty: it.qty || 1 })));
+      // Remember each line's USD unit price (already "pretty" — both add paths
+      // store it that way), its add-on prices, and qty; the display subtotal
+      // is computed at draw time in the guest's currency.
+      setLines(list.map((it: { price: string; qty?: number; options?: { price?: number }[] }) => ({
+        usd: parseFloat(it.price) || 0,
+        addons: (it.options || []).map((o) => o.price || 0),
+        qty: it.qty || 1,
+      })));
     } catch {
       // If the saved data is broken somehow, just show an empty cart.
       setCount(0);
@@ -71,9 +77,9 @@ export default function MiniCart() {
   // Also hide it on the 3D viewer page, which has its own bottom bar.
   if (pathname && pathname.startsWith("/view")) return null;
 
-  // Sum the lines in the DISPLAY currency (each converted + snapped first),
-  // then format — this matches the bill's subtotal to the rupee.
-  const dispSubtotal = lines.reduce((s, l) => s + toDisplay(l.usd, currency || undefined) * l.qty, 0);
+  // Sum the lines in the DISPLAY currency (each converted + snapped first,
+  // add-ons minor-rounded) — this matches the bill's subtotal to the rupee.
+  const dispSubtotal = lines.reduce((s, l) => s + unitDisplay(l.usd, l.addons, currency || undefined) * l.qty, 0);
   const price = currency ? formatAmount(dispSubtotal, currency) : `$${dispSubtotal.toFixed(2)}`;
   return (
     // The whole pill is one big button. Tapping it broadcasts "lfh:open-cart",

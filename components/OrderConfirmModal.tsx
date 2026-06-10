@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatMoney, prettyUsd, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { prettyUsd, unitDisplay, minorDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import type { OptionGroup } from "@/lib/menu";
 import { allergenIcon, allergenLabel } from "@/lib/allergens";
 
@@ -147,8 +147,8 @@ export default function OrderConfirmModal() {
     );
   }
 
-  // fmt(): turn a number into a nicely formatted price string in the chosen currency.
-  const fmt = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
+  // fmtDisp(): format a number that's ALREADY in the display currency.
+  const fmtDisp = (n: number) => (currency ? formatAmount(n, currency) : `$${n.toFixed(2)}`);
 
   // Chosen options as a flat list + the per-unit price (base + add-ons).
   // We walk every group and collect the choices the guest actually selected.
@@ -163,8 +163,11 @@ export default function OrderConfirmModal() {
   // The base goes through prettyUsd so this popup's number matches the menu
   // card / dish page exactly (raw parseFloat was the ₹546-vs-₹545 bug).
   const unit = prettyUsd(item.price) + chosen.reduce((s, c) => s + c.price, 0);
-  // The popup's total = price of one unit times the quantity.
-  const total = unit * qty;
+  // DISPLAY math happens per-unit in the guest's currency, then × qty — the
+  // same order the bill uses, so the popup and the bill always agree (snapping
+  // the unit×qty product instead gave ₹1,090 vs the bill's ₹1,100 for 2×$6.50).
+  const unitDisp = unitDisplay(unit, chosen.map((c) => c.price), currency || undefined);
+  const totalDisp = unitDisp * qty;
 
   // toggle(): tap a choice on/off. "single" groups (like Size) keep only one
   // selection; "multi" groups (like Extras) can have several at once.
@@ -261,7 +264,8 @@ export default function OrderConfirmModal() {
         <div className="order-confirm-scroll">
         <img src={item.image} alt={item.title} className="order-confirm-img" />
         <h3 className="order-confirm-title">{item.title}</h3>
-        <div className="order-confirm-unit">{fmt(parseFloat(item.price))} base</div>
+        {/* prettyUsd first so "base" matches the menu card to the rupee. */}
+        <div className="order-confirm-unit">{fmtDisp(unitDisplay(prettyUsd(item.price), [], currency || undefined))} base</div>
 
         {/* One block per option group (e.g. "Size", "Extras"). */}
         {groups.map((g, i) => (
@@ -278,7 +282,9 @@ export default function OrderConfirmModal() {
                     onClick={() => toggle(i, c.label, g.type)}
                   >
                     <span>{c.label}</span>
-                    {c.price > 0 && <span className="oc-price">+{fmt(c.price)}</span>}
+                    {/* Add-ons are minor-rounded (₹/cents, never ₹10-snapped) so
+                        base + chips always equals the total shown below. */}
+                    {c.price > 0 && <span className="oc-price">+{fmtDisp(minorDisplay(c.price, currency || undefined))}</span>}
                   </button>
                 );
               })}
@@ -356,7 +362,7 @@ export default function OrderConfirmModal() {
         <div className="order-confirm-foot">
           <div className="order-confirm-total">
             <span>Total</span>
-            <span className="order-confirm-total-val">{fmt(total)}</span>
+            <span className="order-confirm-total-val">{fmtDisp(totalDisp)}</span>
           </div>
 
           <div className="order-confirm-actions">

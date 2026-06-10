@@ -100,6 +100,10 @@ via `ToolSearch` BEFORE planning around it.
   config directly, printing only presence/length; (3) verify configs via masked
   reads (node/jq printing everything EXCEPT the secret). No exceptions, no "just
   this once".
+- **`scripts/seed-supabase.mjs` overwrites editor-made DB changes.** It upserts every
+  column from menu.json, silently reverting anything the owner changed in the admin
+  editor (3D configs, titles, sold-out tags…). To apply a new migration, prefer running
+  just the migration via the Management API; full reseeds need a DB-vs-menu.json diff first.
 - **MCP servers are NOT read from `.claude/settings.json`.** Claude Code loads
   them from `~/.claude.json` (via `claude mcp add ... -s local`) or a root
   `.mcp.json`. The supabase MCP is registered in `~/.claude.json` and uses

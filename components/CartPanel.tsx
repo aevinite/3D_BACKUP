@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { formatMoney, prettyUsd, toDisplay, toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
@@ -282,15 +282,22 @@ export default function CartPanel() {
     return () => list.removeEventListener("wheel", onWheel);
   }, [open, showHistory]);
 
-  // showPrice(): format a USD number as a price string in the chosen currency.
-  const showPrice = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
+  // showPrice(): format a stored USD ORDER TOTAL in the chosen currency.
+  // Minor-unit rounding only (whole ₹ / cents) — order records hold the
+  // authoritative server-style totals, never ₹10-snapped. Matches the tracker
+  // and SessionTableBill so the same order reads identically everywhere.
+  const showPrice = (n: number) => (currency ? formatAmount(toMinor(n * currency.rate, currency), currency) : `$${n.toFixed(2)}`);
   // fmtDisp(): format a number that is ALREADY in the display currency
   // (no conversion — just symbol + separators).
   const fmtDisp = (n: number) => (currency ? formatAmount(n, currency) : `$${n.toFixed(2)}`);
-  // One cart line's value in the guest's DISPLAY currency: the unit price is
-  // converted + snapped FIRST, then multiplied by quantity — so the line, the
-  // subtotal and the total are all sums of exactly what's printed.
-  const lineDisp = (it: CartItem) => toDisplay(prettyUsd(it.price), currency || undefined) * it.qty;
+  // One cart line's value in the guest's DISPLAY currency. The stored price is
+  // ALREADY the final USD unit (pretty base + add-ons — both the quick "+" and
+  // the customize popup write it that way), so no prettyUsd here: re-prettying
+  // 6.50+1.25=7.75 would bump it to 7.99 (the popup-vs-bill mismatch).
+  // unitDisplay snaps the base part and minor-rounds the add-ons, matching the
+  // popup chip by chip; then × qty, so lines sum to exactly what's printed.
+  const lineDisp = (it: CartItem) =>
+    unitDisplay(parseFloat(it.price), (it.options || []).map((o) => o.price || 0), currency || undefined) * it.qty;
   // Orders shown live up top are hidden from the history list below, so the
   // same order never appears twice in the same tab.
   const liveIds = new Set(liveOrders.map((o) => o.id));
@@ -304,7 +311,13 @@ export default function CartPanel() {
   // 5% tax, rounded to the currency's minor unit (whole ₹ / cents) so it
   // doesn't jump in ₹10 hops like the menu prices do.
   const tax = toMinor(subtotal * TAX_RATE, currency || undefined);
-  const total = subtotal + tax; // what the guest pays
+  const total = subtotal + tax; // what the guest pays (display currency, for the BILL UI only)
+  // ORDER RECORDS are stored in USD — the tracker, history list and the
+  // session pull (which saves the server's USD totals) all share one storage,
+  // and they convert at render time. Storing the display number here once put
+  // ₹578 through a ×84 conversion and showed ₹48,550. One domain only.
+  const subtotalUsd = cart.reduce((sum, it) => sum + parseFloat(it.price) * it.qty, 0);
+  const totalUsd = Math.round(subtotalUsd * (1 + TAX_RATE) * 100) / 100;
 
   // itemAllergens(): the allergens a given dish contains.
   const itemAllergens = (id: string) => allergenMap[id] || [];
@@ -394,7 +407,7 @@ export default function CartPanel() {
       const itemsS = cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note }));
       const trackS = cart.map((it) => ({ title: it.title, qty: it.qty })); // slim list for the tracker
       const histS = cart.map((it) => ({ title: it.title, qty: it.qty, price: it.price })); // list for history
-      const totalS = total, countS = itemCount;
+      const totalS = totalUsd, countS = itemCount; // USD — order records convert at render
       // onDone: runs once the SessionGate finishes (after location/join/OTP). If the
       // server actually placed the order, we record it locally so the tracker follows it.
       const onDone = (e: Event) => {
@@ -448,7 +461,7 @@ export default function CartPanel() {
         active.push({ // add this order to the live-tracking list
           id: orderId,
           tableNumber: tableTrim,
-          total,
+          total: totalUsd, // USD — converted at render time like all order records
           itemCount,
           items: cart.map((it) => ({ title: it.title, qty: it.qty })),
           status: "received",
@@ -464,7 +477,7 @@ export default function CartPanel() {
         hist.unshift({
           id: orderId,
           tableNumber: tableTrim,
-          total,
+          total: totalUsd, // USD — converted at render time like all order records
           items: cart.map((it) => ({ title: it.title, qty: it.qty, price: it.price })),
           placedAt: Date.now(),
         });
@@ -702,8 +715,9 @@ export default function CartPanel() {
                   {pairing.image && <img src={pairing.image} alt="" className="pairing-img" />}
                   <div className="pairing-info">
                     <div className="pairing-name">{pairing.title}</div>
-                    {/* prettyUsd first — raw parseFloat made this show ₹402 while the menu said ₹419. */}
-                    <div className="pairing-price">{showPrice(prettyUsd(pairing.price))}</div>
+                    {/* This is a MENU price, so it gets the full menu treatment
+                        (pretty USD + ₹10 snap) — matching the card exactly. */}
+                    <div className="pairing-price">{fmtDisp(unitDisplay(prettyUsd(pairing.price), [], currency || undefined))}</div>
                   </div>
                   <button type="button" className="pairing-add" onClick={() => addPairing(pairing)}>
                     + Add

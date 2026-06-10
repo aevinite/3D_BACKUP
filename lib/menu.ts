@@ -33,7 +33,9 @@ export interface MenuItem {
   time: string;
   nutrition: { calories: string; protein: string; carbs: string; sugar?: string };
   ingredients: { emoji: string; name: string }[];
-  reviews: { name: string; rating: number; text: string }[];
+  // deviceId lets the UI replace THIS device's previous review when the guest
+  // re-rates (the DB upserts; the on-screen list must do the same).
+  reviews: { name: string; rating: number; text: string; deviceId?: string }[];
   relatedSlugs: string[];
   tags: string[];
   allergens: string[];
@@ -220,30 +222,28 @@ export async function getMenuItem(slug: string): Promise<MenuItem | null> {
   const [item, agg, revs] = await Promise.all([
     supabase.from("menu_items").select("*").eq("slug", slug).maybeSingle(),
     supabase.from("item_ratings").select("*").eq("item_slug", slug).maybeSingle(),
-    supabase.from("reviews").select("name, stars, comment, created_at").eq("item_slug", slug).order("created_at", { ascending: false }).limit(20),
+    getItemReviews(slug),
   ]);
   if (item.error) throw new Error(`Failed to load item "${slug}": ${item.error.message}`);
   if (!item.data) return null;
   const mapped = mapRow(item.data, (agg.data as RatingAgg | null) ?? undefined);
-  // Replace the (now always-empty) seeded reviews with the real ones, reshaped
-  // to the { name, rating, text } shape the dish page already renders.
-  mapped.reviews = ((revs.data as { name: string | null; stars: number; comment: string | null }[] | null) ?? [])
-    .map((r) => ({ name: r.name || "Guest", rating: r.stars, text: r.comment || "" }));
+  // Replace the (now always-empty) seeded reviews with the real ones.
+  mapped.reviews = revs;
   return mapped;
 }
 
 // The newest real reviews for one dish (capped at 20), reshaped to the
 // { name, rating, text } shape the dish page renders.
-export async function getItemReviews(slug: string): Promise<{ name: string; rating: number; text: string }[]> {
+export async function getItemReviews(slug: string): Promise<{ name: string; rating: number; text: string; deviceId?: string }[]> {
   const { data, error } = await supabase
     .from("reviews")
-    .select("name, stars, comment, created_at")
+    .select("name, stars, comment, device_id, created_at")
     .eq("item_slug", slug)
     .order("created_at", { ascending: false })
     .limit(20);
   // Reviews failing to load must never break the dish page — show none instead.
   if (error) return [];
-  return (data ?? []).map((r) => ({ name: r.name || "Guest", rating: r.stars, text: r.comment || "" }));
+  return (data ?? []).map((r) => ({ name: r.name || "Guest", rating: r.stars, text: r.comment || "", deviceId: r.device_id }));
 }
 
 // Save (or update) this device's rating for a dish. The server function

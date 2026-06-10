@@ -135,6 +135,28 @@ export const toMinor = (amount: number, currency?: CurrencyMeta): number => {
   return minorRound(amount, MINOR[cur.code]);
 };
 
+// A small USD amount (an add-on like "+$1.25") converted and rounded to the
+// currency's MINOR unit — add-ons never get the ₹10 menu snapping, otherwise
+// the chips couldn't add up to the line total.
+export const minorDisplay = (usd: string | number, currency?: CurrencyMeta): number => {
+  const cur = currency || getCurrency();
+  const n = typeof usd === "string" ? parseFloat(usd) : usd;
+  return minorRound((Number.isFinite(n) ? n : 0) * cur.rate, MINOR[cur.code]);
+};
+
+// Display value of ONE cart-line unit: the snapped base price PLUS each
+// add-on minor-rounded. Built this way so what the guest sees always adds up:
+//   base chip (₹550) + add-on chips (+₹105) = unit (₹655) = bill line ÷ qty.
+// `unitUsd` is the full unit (base + add-ons) as stored on the cart line;
+// `addonUsds` are the add-on prices, so base = unit − Σ add-ons.
+export const unitDisplay = (unitUsd: number, addonUsds: number[], currency?: CurrencyMeta): number => {
+  const cur = currency || getCurrency();
+  const addonSumUsd = addonUsds.reduce((s, a) => s + (Number.isFinite(a) ? a : 0), 0);
+  const baseDisp = displayAmount(unitUsd - addonSumUsd, cur.rate, STEP[cur.code]);
+  const addonsDisp = addonUsds.reduce((s, a) => s + minorDisplay(a, cur), 0);
+  return baseDisp + addonsDisp;
+};
+
 // Format an already-display-domain NUMBER with symbol + thousands separators.
 // No rounding happens here — the number must already be snapped by
 // toDisplay/toMinor, so the string always matches the math.

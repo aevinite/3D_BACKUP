@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
 import { getOrderStatus, updateOrderTableNumber, getSettings, type OrderStatus } from "@/lib/menu";
 import { getStoredSession, getSessionState } from "@/lib/session";
-import { formatMoney, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import {
   STEPS,
   STATUS_COPY as COPY,
@@ -229,8 +229,10 @@ export default function OrderTracker() {
   const allDishesServed = dishMode && dishProg.served === dishProg.segs.length;
   // The table can only be corrected while the order is early (not yet served).
   const canEditTable = order.status === "received" || order.status === "preparing";
-  // showPrice(): format a number as a price string in the chosen currency.
-  const showPrice = (n: number) => (currency ? formatMoney(n, currency) : `$${n.toFixed(2)}`);
+  // showPrice(): format a stored USD ORDER TOTAL in the chosen currency.
+  // Order totals are authoritative amounts, so they get minor-unit rounding
+  // (whole ₹ / cents) — never the ₹10 menu snapping. Matches SessionTableBill.
+  const showPrice = (n: number) => (currency ? formatAmount(toMinor(n * currency.rate, currency), currency) : `$${n.toFixed(2)}`);
 
   // openDetail(): tapping the strip. With several orders, open the cart's
   // "Previous orders" (the full per-dish table view); with one, the details sheet.
