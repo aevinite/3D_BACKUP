@@ -172,6 +172,13 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   box-shadow: 0 -20px 60px rgba(0,0,0,0.5);
 }
 .panel.open { transform: translateY(0); }
+/* On wider screens the bottom sheet (cart, bill, etc.) shouldn't stretch the
+   full width — its inputs and rows would become absurdly wide. Cap it and
+   centre it horizontally with margin (NOT transform — transform drives the
+   slide-up animation and must stay untouched). */
+@media (min-width: 760px) {
+  .panel { width: 480px; left: 50%; margin-left: -240px; }
+}
 /* Bill panel: cap height + scroll so the sticky Back bar stays pinned on top.
    padding-top:0 so the sticky bar owns the top spacing (no negative-margin clip). */
 .cart-panel { max-height: 92vh; overflow-y: auto; padding-top: 0; }
@@ -730,8 +737,21 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 
 /* --- ITEMS --- */
 .items-container { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+/* Gallery grid is fluid: 2-up on a phone, more columns as the screen widens —
+   instead of being locked at exactly 2 columns (which became 2 giant cards on
+   desktop). minmax(150px) keeps it 2-up at phone widths and fills in extra
+   columns automatically on tablet/desktop. */
 .items-container.gallery-mode {
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; padding: 14px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding: 14px;
+}
+
+/* WIDE-SCREEN CONTAINMENT — the menu is mobile-first; on tablet/desktop the
+   content used to stretch edge-to-edge (oversized cards, very long lines, a
+   sparse look). Cap the page's content blocks to a comfortable width and centre
+   them. Backgrounds/scroll stay full-bleed; only the content is constrained, so
+   phones are completely unaffected (the cap is wider than any phone). */
+.hero, .cat-scroller, .section-header, .items-header, .items-container {
+  max-width: 1100px; margin-inline: auto; width: 100%;
 }
 .item-card {
   /* THEME-TRIAL: follow --card (frosted) instead of a hardcoded brown, so dish rows match the theme */
@@ -1460,10 +1480,13 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   position:absolute;inset:0;background:linear-gradient(to bottom,rgba(26,15,10,0) 40%,var(--bg) 100%);
   pointer-events:none;
 }
-.detail-body { 
-  padding: 28px; padding-top: 0; 
-  background: var(--bg); border-radius: 32px 32px 0 0; 
+.detail-body {
+  padding: 28px; padding-top: 0;
+  background: var(--bg); border-radius: 32px 32px 0 0;
   margin-top: -35px; position: relative; z-index: 2;
+  /* Cap the reading width so the dish title/description/reviews don't run the
+     full screen width on desktop (very long lines); centred under the hero. */
+  max-width: 760px; margin-inline: auto;
 }
 
 #detail-page {
@@ -1827,8 +1850,11 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 .review-star.empty { fill: none; stroke: var(--muted2); }
 .review-name { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
 .review-comment { font-size: 13px; color: var(--muted); line-height: 1.6; }
-.stats-row { 
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 32px;
+.stats-row {
+  /* Fluid instead of a rigid 4-up row: the stat boxes stay comfortable on a
+     narrow phone (wrapping to 2 when 4 won't fit) and line up 4-across when
+     there's room. */
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 12px; margin-bottom: 32px;
   animation: titleSlide 0.6s var(--ease) 0.3s both;
 }
 .stat-box { 
@@ -2696,6 +2722,12 @@ a *:active,
 }
 .cart-add-btn:hover { transform: scale(1.12); box-shadow: 0 6px 20px var(--accent-glow); }
 .cart-add-btn:active { transform: scale(0.95); }
+/* Touch devices (no hover = phone/tablet): enlarge the cramped add / qty
+   controls so they're comfortable to tap. Desktop sizes are left unchanged. */
+@media (hover: none) {
+  .cart-add-btn { width: 42px; height: 42px; font-size: 15px; }
+  .qty-ctrl { width: 32px; height: 32px; font-size: 12px; }
+}
 .cart-qty-row {
   position: absolute; bottom: 10px; right: 10px;
   display: inline-flex; align-items: center; gap: 2px;
