@@ -101,7 +101,8 @@ function mapRow(row: any, agg?: RatingAgg): MenuItem {
     longDescription: row.long_description ?? "",
     // Rating comes ONLY from real reviews now (the old per-dish seed number was
     // fake). Empty string = no reviews yet; the UI shows a "New" badge instead.
-    rating: agg?.avg_rating != null ? String(agg.avg_rating) : "",
+    // toFixed(1) so the card says "5.0" exactly like the dish page does.
+    rating: agg?.avg_rating != null ? Number(agg.avg_rating).toFixed(1) : "",
     reviewCount: agg?.review_count ?? 0,
     time: row.time ?? "",
     nutrition: row.nutrition ?? { calories: "", protein: "", carbs: "", sugar: "" },
@@ -229,6 +230,20 @@ export async function getMenuItem(slug: string): Promise<MenuItem | null> {
   mapped.reviews = ((revs.data as { name: string | null; stars: number; comment: string | null }[] | null) ?? [])
     .map((r) => ({ name: r.name || "Guest", rating: r.stars, text: r.comment || "" }));
   return mapped;
+}
+
+// The newest real reviews for one dish (capped at 20), reshaped to the
+// { name, rating, text } shape the dish page renders.
+export async function getItemReviews(slug: string): Promise<{ name: string; rating: number; text: string }[]> {
+  const { data, error } = await supabase
+    .from("reviews")
+    .select("name, stars, comment, created_at")
+    .eq("item_slug", slug)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  // Reviews failing to load must never break the dish page — show none instead.
+  if (error) return [];
+  return (data ?? []).map((r) => ({ name: r.name || "Guest", rating: r.stars, text: r.comment || "" }));
 }
 
 // Save (or update) this device's rating for a dish. The server function

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { useTranslation } from "@/lib/i18n";
 import type { OptionGroup } from "@/lib/menu";
 import VegIcon from "./VegIcon";
 
@@ -17,7 +18,8 @@ interface FoodItem {
   veg: boolean;          // vegetarian? drives the VegIcon
   is4d: boolean;         // does this dish have a 3D model to view?
   modelFolder?: string;
-  rating?: string;
+  rating?: string;       // average of REAL reviews ("" = none yet -> "New" badge)
+  reviewCount?: number;  // how many real reviews exist
   time?: string;
   tags?: string[];       // labels like "sold-out" or filter slugs
   options?: OptionGroup[]; // size/extras choices that open the Customize popup
@@ -61,6 +63,7 @@ const writeCart = (cart: CartItem[]) => {
 // add/customise button. `index` is its position (used to stagger the fade-in);
 // `viewingCategory` is the current filter, remembered in the link.
 export default function FoodCard({ item, index, viewingCategory }: { item: FoodItem; index: number; viewingCategory?: string }) {
+  const t = useTranslation(); // translated labels (e.g. the "New" badge)
   // How many of this (plain) dish are in the cart — shows on the +/- counter.
   const [cartQty, setCartQty] = useState(0);
   // The currency to format the price in (e.g. $, €). Loaded on screen.
@@ -201,9 +204,14 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
             {/* A small cube icon beside the name for 4D dishes */}
             {item.is4d ? <i className="fas fa-cube dish-4d-icon"></i> : null}
           </div>
-          {/* Rating and prep time, with sensible defaults if missing */}
+          {/* Rating (real average) and prep time. No reviews yet -> "New" badge
+              instead of an invented star number (the old "4.8" fallback). */}
           <div className="dish-meta">
-            {item.rating || "4.8"} ★ • {item.time || "25-30 min"}
+            {item.reviewCount && item.reviewCount > 0 ? (
+              <>{item.rating} ★</>
+            ) : (
+              <span className="new-dish-badge">{t.newDish}</span>
+            )}{" "}• {item.time || "25-30 min"}
           </div>
           {/* Price, formatted to the chosen currency (falls back to a $ amount) */}
           <div className="dish-price">{currency ? formatPrice(item.price, currency) : `$${item.price}`}</div>

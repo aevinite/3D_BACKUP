@@ -10,7 +10,8 @@ import { useRouter } from "next/navigation"; // lets us send the user to another
 import StarRating from "@/components/StarRating";   // the tappable star picker
 import InfinityLoader from "@/components/InfinityLoader"; // the loading spinner
 import { modelLoader } from "@/lib/modelLoader";     // 3D model download manager
-import { getMenuItems } from "@/lib/menu";           // fetch all dishes from the DB
+import { getMenuItems, getItemReviews, submitReview as submitReviewRpc } from "@/lib/menu"; // dishes + reviews + the review-saving RPC
+import { getDeviceId } from "@/lib/device";          // stable per-browser id (one rating per dish per device)
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
 import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // money formatting
 import { useTranslation } from "@/lib/i18n";         // translated text strings
@@ -251,7 +252,9 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
 
         setAllItems(items);                 // keep the full list for related/nav
         setItem(found || null);             // this dish (or null if not found)
-        setLocalReviews(found?.reviews || []); // seed the reviews list
+        // Real reviews load separately (getMenuItems carries only the rating
+        // average); a failure here just leaves the list empty.
+        if (found) getItemReviews(found.slug).then(setLocalReviews).catch(() => {});
         setLoading(false);                  // done loading
         setTimeout(() => setImageLoaded(true), 50); // trigger the photo fade-in
 
@@ -396,16 +399,23 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     );
   };
 
-  // Post a review. Checks all three fields are filled, then adds it to the top
-  // of the list and clears the form. (Reviews stay local to this visit.)
-  const submitReview = () => {
-    // If name, text, or rating is missing, show a gentle nudge and stop.
-    if (!reviewName.trim() || !reviewText.trim() || selectedRating === 0) {
-      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Almost there", subtitle: "add a name, note & rating", kicker: "review", variant: "error" } }));
+  // Post a review. Saves it to the DATABASE (one live rating per device per
+  // dish — re-rating updates your previous one) and shows it immediately.
+  // The name is optional now; stars + a note are required.
+  const submitReview = async () => {
+    if (!reviewText.trim() || selectedRating === 0) {
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Almost there", subtitle: "add a note & star rating", kicker: "review", variant: "error" } }));
+      return;
+    }
+    if (!item) return; // no dish loaded -> nothing to review
+    // Server-side save: validates stars/device/dish, upserts on repeat ratings.
+    const res = await submitReviewRpc(item.slug, getDeviceId(), selectedRating, reviewName.trim(), reviewText.trim());
+    if (!res.ok) {
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't save review", subtitle: "please try again", kicker: "review", variant: "error" } }));
       return;
     }
     const newReview = {
-      name: reviewName.trim(),
+      name: reviewName.trim() || "Guest",
       rating: selectedRating,
       text: reviewText.trim(),
     };
@@ -446,11 +456,12 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     );
   }
 
-  // The shown rating: average of the on-screen reviews if there are any,
-  // otherwise the dish's stored rating.
+  // The shown rating: the average of the REAL reviews on screen (the list
+  // starts as the database's reviews and grows when this guest posts one).
+  // Zero reviews -> rating 0 and the UI shows a "New" badge instead of stars.
   const rating = localReviews.length > 0
     ? localReviews.reduce((sum, r) => sum + r.rating, 0) / localReviews.length
-    : parseFloat(item.rating);
+    : 0;
   const reviewCount = localReviews.length;  // how many reviews to show in "(N reviews)"
 
   // From here down is the actual dish page layout (the markup).
@@ -566,28 +577,35 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
       <div className="detail-body">
         {/* The dish name. */}
         <h2 id="detail-title" className="detail-title">{item.title}</h2>
-        {/* The star rating row. */}
+        {/* The star rating row — real reviews only. With none yet, show a
+            "New" badge instead of inventing a star number. */}
         <div className="rating-row" id="detail-rating-row">
-          <div className="stars">
-            {/* Draw 5 stars: full, a partial one, or empty, based on the rating. */}
-            {Array.from({ length: 5 }, (_, i) => {
-              const full = i + 1 <= Math.floor(rating);  // is this whole star filled?
-              const frac = rating - Math.floor(rating);
-              if (full) return <span key={i} className="star">★</span>;
-              if (i === Math.floor(rating) && frac > 0) {
-                return (
-                  <span key={i} className="star-half-wrap">
-                    <span className="star" style={{ color: "var(--muted2, rgba(212,165,116,0.3))" }}>★</span>
-                    <span className="star-half-fill" style={{ width: `${frac * 100}%` }}>★</span>
-                  </span>
-                );
-              }
-              return <span key={i} className="star" style={{ color: "var(--muted2, rgba(212,165,116,0.3))" }}>★</span>;
-            })}
-          </div>
-          {/* The numeric rating (e.g. "4.5") and the review count. */}
-          <span className="rating-value">{rating.toFixed(1)}</span>
-          <span className="rating-count">({reviewCount} {reviewCount === 1 ? t.review : t.reviews})</span>
+          {reviewCount === 0 ? (
+            <span className="new-dish-badge">{t.newDish}</span>
+          ) : (
+            <>
+              <div className="stars">
+                {/* Draw 5 stars: full, a partial one, or empty, based on the rating. */}
+                {Array.from({ length: 5 }, (_, i) => {
+                  const full = i + 1 <= Math.floor(rating);  // is this whole star filled?
+                  const frac = rating - Math.floor(rating);
+                  if (full) return <span key={i} className="star">★</span>;
+                  if (i === Math.floor(rating) && frac > 0) {
+                    return (
+                      <span key={i} className="star-half-wrap">
+                        <span className="star" style={{ color: "var(--muted2, rgba(212,165,116,0.3))" }}>★</span>
+                        <span className="star-half-fill" style={{ width: `${frac * 100}%` }}>★</span>
+                      </span>
+                    );
+                  }
+                  return <span key={i} className="star" style={{ color: "var(--muted2, rgba(212,165,116,0.3))" }}>★</span>;
+                })}
+              </div>
+              {/* The numeric rating (e.g. "4.5") and the review count. */}
+              <span className="rating-value">{rating.toFixed(1)}</span>
+              <span className="rating-count">({reviewCount} {reviewCount === 1 ? t.review : t.reviews})</span>
+            </>
+          )}
         </div>
 
         <div className="divider"></div>

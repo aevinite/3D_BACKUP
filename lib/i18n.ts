@@ -52,6 +52,7 @@ export interface Translations {
   review: string;
   reviews: string;
   prepTime: string;
+  newDish: string; // badge for dishes with no real reviews yet
 }
 
 // The dictionary itself: one complete set of phrases per language code.
@@ -99,6 +100,7 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "The item you're looking for doesn't exist.",
     tabRate: "Rate Dish",
     tabReviews: "Reviews",
+    newDish: "New",
     review: "review",
     reviews: "reviews",
     prepTime: "Prep",
@@ -145,6 +147,7 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "Der gesuchte Artikel existiert nicht.",
     tabRate: "Bewerten",
     tabReviews: "Bewertungen",
+    newDish: "Neu",
     review: "Bewertung",
     reviews: "Bewertungen",
     prepTime: "Prep",
@@ -191,6 +194,7 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "L'article que vous cherchez n'existe pas.",
     tabRate: "Évaluer",
     tabReviews: "Avis",
+    newDish: "Nouveau",
     review: "avis",
     reviews: "avis",
     prepTime: "Prép",
@@ -237,6 +241,7 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "العنصر الذي تبحث عنه غير موجود.",
     tabRate: "قيّم",
     tabReviews: "التقييمات",
+    newDish: "جديد",
     review: "تقييم",
     reviews: "تقييمات",
     prepTime: "وقت",
@@ -283,6 +288,7 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "आप जिस आइटम की तलाश में हैं वह मौजूद नहीं है।",
     tabRate: "रेट करें",
     tabReviews: "समीक्षाएं",
+    newDish: "नया",
     review: "समीक्षा",
     reviews: "समीक्षाएं",
     prepTime: "समय",
@@ -329,6 +335,7 @@ const translations: Record<LanguageCode, Translations> = {
     itemNotFoundDesc: "찾으시는 항목이 존재하지 않습니다.",
     tabRate: "평가하기",
     tabReviews: "리뷰",
+    newDish: "신메뉴",
     review: "리뷰",
     reviews: "리뷰",
     prepTime: "시간",
