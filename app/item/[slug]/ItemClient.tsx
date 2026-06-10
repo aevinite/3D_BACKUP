@@ -582,12 +582,11 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
       <div className="detail-body">
         {/* The dish name. */}
         <h2 id="detail-title" className="detail-title">{item.title}</h2>
-        {/* The star rating row — real reviews only. With none yet, show a
-            "New" badge instead of inventing a star number. */}
+        {/* The star rating row — real reviews only. With none yet, the row
+            stays empty: no invented stars, no badges (the owner rejected a
+            "New" badge on 2026-06-10). */}
         <div className="rating-row" id="detail-rating-row">
-          {reviewCount === 0 ? (
-            <span className="new-dish-badge">{t.newDish}</span>
-          ) : (
+          {reviewCount === 0 ? null : (
             <>
               <div className="stars">
                 {/* Draw 5 stars: full, a partial one, or empty, based on the rating. */}
@@ -710,12 +709,17 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
               <i className="fas fa-shopping-bag"></i> {t.addToCart}
             </button>
           )}
-          {/* Show the 3D button only when a model actually exists; dishes
-              without one simply don't mention 3D at all (no greyed-out
-              "unavailable" banner advertising a missing feature). */}
-          {item.is4d && item.modelFolder && (
+          {/* Show the live 3D button if a model exists; otherwise the greyed-out
+              "3D preview unavailable" status. The owner WANTS the status visible
+              (2026-06-10): it tells guests 3D previews are a feature of this
+              menu, just not ready for this dish yet. Do not remove it. */}
+          {item.is4d && item.modelFolder ? (
             <button id="view-3d-btn" className="btn btn-cyan" onClick={goToViewer}>
               <i className="fas fa-cube"></i> {t.viewIn3D}
+            </button>
+          ) : (
+            <button className="btn btn-cyan" style={{ opacity: 0.5, cursor: 'not-allowed' }} disabled>
+              <i className="fas fa-cube"></i> {t.preview3dUnavailable}
             </button>
           )}
         </div>
