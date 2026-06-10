@@ -3100,3 +3100,12 @@ a:focus:not(:focus-visible) { outline: none; }
 
 /* (The "New" badge that briefly lived here was removed on the owner's
    request 2026-06-10 — unreviewed dishes simply show no rating.) */
+
+/* "View more / Show less" toggle under the Previous-orders list. */
+.hist-more-btn {
+  display: block; width: 100%; margin: 6px 0 2px; padding: 10px;
+  background: transparent; border: 1px dashed var(--line, rgba(212,165,116,0.35));
+  border-radius: 12px; color: var(--accent, #d4a574);
+  font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.hist-more-btn:hover { border-style: solid; }

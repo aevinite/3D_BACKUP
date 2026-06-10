@@ -83,6 +83,9 @@ export default function CartPanel() {
   const [history, setHistory] = useState<HistoryOrder[]>([]); // this device's past orders
   const [liveOrders, setLiveOrders] = useState<ActiveOrder[]>([]); // orders still in progress
   const [showHistory, setShowHistory] = useState(false); // which tab: false=current bill, true=previous orders
+  // Previous orders show only the 2 newest by default; "View more" reveals the rest
+  // (owner request 2026-06-10 — the long list buried the useful recent ones).
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const [declared, setDeclared] = useState<string[]>([]); // allergens the diner avoids
   const [otherAllergy, setOtherAllergy] = useState(""); // free-text allergy not in the list
   const [otherOpen, setOtherOpen] = useState(false); // reveal the free-text field
@@ -610,11 +613,12 @@ export default function CartPanel() {
               </div>
             )}
 
-            {/* The finished/older orders list. */}
+            {/* The finished/older orders list — only the 2 newest by default,
+                the rest behind a "View more" tap so the tab stays short. */}
             {pastOrders.length > 0 && (
               <>
                 {liveOrders.length > 0 && <div className="hist-earlier-head">Earlier orders</div>}
-                {pastOrders.map((h) => (
+                {(showAllHistory ? pastOrders : pastOrders.slice(0, 2)).map((h) => (
                   <div key={h.id} className="hist-order">
                     <div className="hist-top">
                       <span className="hist-table">{h.tableNumber ? `Table ${h.tableNumber}` : "Order"}</span>
@@ -628,6 +632,11 @@ export default function CartPanel() {
                     <div className="hist-total"><span>Total</span><span>{showPrice(h.total)}</span></div>
                   </div>
                 ))}
+                {pastOrders.length > 2 && (
+                  <button type="button" className="hist-more-btn" onClick={() => setShowAllHistory((v) => !v)}>
+                    {showAllHistory ? "Show less ↑" : `View ${pastOrders.length - 2} more ↓`}
+                  </button>
+                )}
               </>
             )}
           </div>
