@@ -273,6 +273,7 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   background: color-mix(in srgb, var(--ot-accent) 7%, transparent);
   --ot-accent: #d4a574; /* "received" gold by default */
 }
+.live-order.status-received { --ot-accent: #e8a13c; } /* amber — not accepted yet */
 .live-order.status-preparing { --ot-accent: #4f9dff; }
 .live-order.status-served { --ot-accent: #4ade80; }
 .live-order.status-cancelled { --ot-accent: #ef4444; }
@@ -2956,7 +2957,8 @@ a:focus:not(:focus-visible) { outline: none; }
   font: inherit; text-align: left; cursor: pointer;
 }
 .order-tracker:hover { border-color: color-mix(in srgb, var(--ot-accent) 55%, transparent); }
-.order-tracker.status-preparing { --ot-accent: #4f9dff; } /* blue, distinct from gold "received" */
+.order-tracker.status-received { --ot-accent: #e8a13c; } /* amber — NOT accepted yet (distinct from blue preparing) */
+.order-tracker.status-preparing { --ot-accent: #4f9dff; } /* blue — accepted & cooking */
 .order-tracker.status-served { --ot-accent: #4ade80; }
 .order-tracker.status-cancelled { --ot-accent: #ef4444; }
 .order-tracker { border-color: color-mix(in srgb, var(--ot-accent) 38%, transparent); }
@@ -3082,6 +3084,7 @@ a:focus:not(:focus-visible) { outline: none; }
   color: var(--text); cursor: pointer; font-size: 15px;
 }
 .ot-sheet-head { display: flex; align-items: center; gap: 13px; margin-bottom: 16px; padding-right: 36px; }
+.ot-sheet-head.status-received { --ot-accent: #e8a13c; } /* amber — not accepted yet */
 .ot-sheet-head.status-preparing { --ot-accent: #4f9dff; }
 .ot-sheet-head.status-served { --ot-accent: #4ade80; }
 .ot-sheet-head.status-cancelled { --ot-accent: #ef4444; }

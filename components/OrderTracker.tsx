@@ -355,6 +355,13 @@ export default function OrderTracker() {
     ? { transform: `translate(${drag.dx}px, ${drag.dy}px) scale(${drag.over ? 0.9 : 1})`, transition: "none", animation: "none", zIndex: 80, cursor: "grabbing", touchAction: "none" }
     : { touchAction: "none" };
 
+  // The strip's colour status. Crucially, an order with NOTHING accepted yet
+  // stays "received" (amber) instead of being shown as "preparing" (blue) — the
+  // per-item/summary views used to collapse a not-yet-accepted order into blue.
+  const dishStatus = allDishesServed ? "served" : (dishProg.segs.some((s) => s !== "received") ? "preparing" : "received");
+  const multiStatus = servedCount === visible.length ? "served" : (visible.some((o) => o.status !== "received") ? "preparing" : "received");
+  const stripStatus = dishMode ? dishStatus : multi ? multiStatus : order.status;
+
   return (
     <>
       {/* The X "drop zone" target, only shown while a drag is in progress. It
@@ -371,7 +378,7 @@ export default function OrderTracker() {
       <button
         type="button"
         ref={stripRef}
-        className={`order-tracker status-${dishMode ? (allDishesServed ? "served" : "preparing") : multi ? (servedCount === visible.length ? "served" : "preparing") : order.status}`}
+        className={`order-tracker status-${stripStatus}`}
         style={stripStyle}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
