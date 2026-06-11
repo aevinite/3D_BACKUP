@@ -34,12 +34,85 @@ interface CartItem {
 }
 
 // A past order kept in this device's history (for the "Previous orders" tab).
+// Items now carry their customizations so a past bill shows exactly what was
+// ordered (extras, removed/allergens, notes), and `status` lets a cancelled
+// order render greyed-out with a label.
+interface HistoryItem { title: string; qty: number; price: string; options?: CartOption[]; removed?: string[]; note?: string }
 interface HistoryOrder {
   id: string;
   tableNumber: string;
   total: number;
-  items: { title: string; qty: number; price: string }[];
+  items: HistoryItem[];
   placedAt: number;
+  status?: string; // "received" | "preparing" | "served" | "cancelled"
+}
+
+// Build the history item list from cart lines, keeping the customizations.
+const histItemsOf = (lines: CartItem[]): HistoryItem[] =>
+  lines.map((it) => ({ title: it.title, qty: it.qty, price: it.price, options: it.options, removed: it.removed, note: it.note }));
+
+// Split past orders into Today / Yesterday / Earlier so the list reads like a
+// dated statement instead of one long pile.
+function partitionByDate(orders: HistoryOrder[]): { label: string; orders: HistoryOrder[] }[] {
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startYesterday = startToday - 86_400_000;
+  const today: HistoryOrder[] = [], yest: HistoryOrder[] = [], earlier: HistoryOrder[] = [];
+  for (const o of orders) {
+    if (o.placedAt >= startToday) today.push(o);
+    else if (o.placedAt >= startYesterday) yest.push(o);
+    else earlier.push(o);
+  }
+  return [
+    { label: "Today", orders: today },
+    { label: "Yesterday", orders: yest },
+    { label: "Earlier", orders: earlier },
+  ].filter((g) => g.orders.length);
+}
+
+// One past bill. Dish name on the left, quantity on the right; each line can
+// show its customizations (extras · NO allergen · note). Long bills collapse to
+// 5 lines with a "show more". A cancelled order renders greyed with a label.
+function HistoryBill({ order, showPrice }: { order: HistoryOrder; showPrice: (n: number) => string }) {
+  const [expanded, setExpanded] = useState(false);
+  const cancelled = order.status === "cancelled";
+  const shown = expanded ? order.items : order.items.slice(0, 5);
+  const extra = (it: HistoryItem) => {
+    const parts: string[] = [];
+    if (it.options?.length) parts.push(it.options.map((o) => o.label).join(" · "));
+    if (it.removed?.length) parts.push(it.removed.map((r) => "No " + r).join(" · "));
+    if (it.note) parts.push(`“${it.note}”`);
+    return parts.join(" · ");
+  };
+  return (
+    <div className={`hist-order${cancelled ? " hist-cancelled" : ""}`}>
+      <div className="hist-top">
+        <span className="hist-table">{order.tableNumber ? `Table ${order.tableNumber}` : "Order"}</span>
+        {cancelled && <span className="hist-cancel-tag">Order cancelled</span>}
+        <span className="hist-when">{new Date(order.placedAt).toLocaleString()}</span>
+      </div>
+      <div className="hist-lines">
+        {shown.map((it, i) => {
+          const ex = extra(it);
+          return (
+            <div key={i} className="hist-line">
+              <div className="hist-line-main">
+                <span className="hist-line-name">{it.title}</span>
+                {ex && <span className="hist-line-opts">{ex}</span>}
+              </div>
+              <span className="hist-line-qty">×{it.qty}</span>
+            </div>
+          );
+        })}
+      </div>
+      {order.items.length > 5 && (
+        <button type="button" className="hist-line-more" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "Show less ↑" : `Show ${order.items.length - 5} more items ↓`}
+        </button>
+      )}
+      <div className="hist-total"><span>Total</span><span>{showPrice(order.total)}</span></div>
+    </div>
+  );
 }
 
 const TAX_RATE = 0.05; // 5% — shown as a line on the bill
@@ -84,9 +157,9 @@ export default function CartPanel() {
   const [history, setHistory] = useState<HistoryOrder[]>([]); // this device's past orders
   const [liveOrders, setLiveOrders] = useState<ActiveOrder[]>([]); // orders still in progress
   const [showHistory, setShowHistory] = useState(false); // which tab: false=current bill, true=previous orders
-  // Previous orders show only the 2 newest by default; "View more" reveals the rest
-  // (owner request 2026-06-10 — the long list buried the useful recent ones).
-  const [showAllHistory, setShowAllHistory] = useState(false);
+  // Previous orders are now grouped by date (Today / Yesterday / Earlier) and each
+  // bill collapses long item lists itself, so the old list-level "view 2 more"
+  // toggle is gone — the partitioning keeps the tab tidy.
   const [declared, setDeclared] = useState<string[]>([]); // allergens the diner avoids
   const [otherAllergy, setOtherAllergy] = useState(""); // free-text allergy not in the list
   const [otherOpen, setOtherOpen] = useState(false); // reveal the free-text field
@@ -159,7 +232,19 @@ export default function CartPanel() {
       try {
         const r = localStorage.getItem("lfh_order_history");
         const p = r ? JSON.parse(r) : [];
-        setHistory(Array.isArray(p) ? p : []);
+        let hist: HistoryOrder[] = Array.isArray(p) ? p : [];
+        // Keep each past bill's status fresh from the live/active record (which
+        // the tracker polls), so an order that ended up cancelled/served shows
+        // that here too. Persist it so the status sticks once the live row is gone.
+        const liveById = new Map(readActiveOrders().map((o) => [o.id, o.status]));
+        let changed = false;
+        hist = hist.map((h) => {
+          const live = liveById.get(h.id);
+          if (live && live !== h.status) { changed = true; return { ...h, status: live }; }
+          return h;
+        });
+        if (changed) { try { localStorage.setItem("lfh_order_history", JSON.stringify(hist.slice(0, 50))); } catch {} }
+        setHistory(hist);
       } catch { setHistory([]); }
     };
     // Live orders are written/polled by OrderTracker; we just read them here.
@@ -416,7 +501,7 @@ export default function CartPanel() {
       // up from menu_items and prices the bill itself, so nothing here is trusted.
       const itemsS = cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note }));
       const trackS = cart.map((it) => ({ title: it.title, qty: it.qty })); // slim list for the tracker
-      const histS = cart.map((it) => ({ title: it.title, qty: it.qty, price: it.price })); // list for history
+      const histS = histItemsOf(cart); // list for history (keeps options/removed/note)
       const totalS = totalUsd, countS = itemCount; // USD — order records convert at render
       // onDone: runs once the SessionGate finishes (after location/join/OTP). If the
       // server actually placed the order, we record it locally so the tracker follows it.
@@ -441,7 +526,7 @@ export default function CartPanel() {
           // Also add it to the browser-only permanent history (newest first, max 50).
           const rawH = localStorage.getItem("lfh_order_history");
           const hist = (() => { const p = rawH ? JSON.parse(rawH) : []; return Array.isArray(p) ? p : []; })();
-          hist.unshift({ id: d.orderId, tableNumber: tableTrim, total: totalS, items: histS, placedAt: Date.now() });
+          hist.unshift({ id: d.orderId, tableNumber: tableTrim, total: totalS, items: histS, placedAt: Date.now(), status: "received" });
           localStorage.setItem("lfh_order_history", JSON.stringify(hist.slice(0, 50)));
           setHistory(hist.slice(0, 50));
         } catch {}
@@ -492,8 +577,9 @@ export default function CartPanel() {
           id: orderId,
           tableNumber: tableTrim,
           total: totalUsd, // USD — converted at render time like all order records
-          items: cart.map((it) => ({ title: it.title, qty: it.qty, price: it.price })),
+          items: histItemsOf(cart),
           placedAt: Date.now(),
+          status: "received",
         });
         // Kept only in the guest's own browser (never Supabase); persists across visits.
         localStorage.setItem("lfh_order_history", JSON.stringify(hist.slice(0, 50)));
@@ -571,8 +657,11 @@ export default function CartPanel() {
           /* ── HISTORY TAB ── */
           <div className="order-history">
             <SessionTableBill />
-            {/* "Live now": orders still in progress, shown with their status + steps. */}
-            {liveOrders.length > 0 && (
+            {/* "Live now": the coarse order-level status strip. When dining-sessions
+                are ON, SessionTableBill above already shows live per-DISH progress,
+                so this duplicate is hidden — it only appears in plain (sessions-off)
+                mode where there's no per-dish bill. */}
+            {!sessionsEnabled && liveOrders.length > 0 && (
               <div className="live-orders">
                 <div className="live-orders-head">
                   <span className="live-dot" aria-hidden="true"></span>
@@ -621,32 +710,17 @@ export default function CartPanel() {
               </div>
             )}
 
-            {/* The finished/older orders list — only the 2 newest by default,
-                the rest behind a "View more" tap so the tab stays short. */}
-            {pastOrders.length > 0 && (
-              <>
-                {liveOrders.length > 0 && <div className="hist-earlier-head">Earlier orders</div>}
-                {(showAllHistory ? pastOrders : pastOrders.slice(0, 2)).map((h) => (
-                  <div key={h.id} className="hist-order">
-                    <div className="hist-top">
-                      <span className="hist-table">{h.tableNumber ? `Table ${h.tableNumber}` : "Order"}</span>
-                      <span className="hist-when">{new Date(h.placedAt).toLocaleString()}</span>
-                    </div>
-                    <div className="hist-items">
-                      {h.items.map((it, i) => (
-                        <span key={i}>{it.title} ×{it.qty}{i < h.items.length - 1 ? ", " : ""}</span>
-                      ))}
-                    </div>
-                    <div className="hist-total"><span>Total</span><span>{showPrice(h.total)}</span></div>
-                  </div>
+            {/* Past bills, grouped into Today / Yesterday / Earlier. Each bill
+                lists its dishes (name left, qty right, with customizations) and
+                collapses long ones to 5 lines; cancelled bills show greyed. */}
+            {pastOrders.length > 0 && partitionByDate(pastOrders).map((group) => (
+              <div key={group.label} className="hist-group">
+                <div className="hist-group-head">{group.label}</div>
+                {group.orders.map((h) => (
+                  <HistoryBill key={h.id} order={h} showPrice={showPrice} />
                 ))}
-                {pastOrders.length > 2 && (
-                  <button type="button" className="hist-more-btn" onClick={() => setShowAllHistory((v) => !v)}>
-                    {showAllHistory ? "Show less ↑" : `View ${pastOrders.length - 2} more ↓`}
-                  </button>
-                )}
-              </>
-            )}
+              </div>
+            ))}
           </div>
         ) : (
         /* ── CURRENT BILL TAB ── */

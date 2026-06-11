@@ -238,11 +238,29 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 .cart-tabs button.active { background: var(--accent); border-color: var(--accent); color: #2a1d0c; }
 .order-history { display: flex; flex-direction: column; gap: 12px; }
 .hist-order { border: 1px solid var(--border-color, rgba(212,165,116,0.2)); border-radius: 14px; padding: 14px; }
-.hist-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.hist-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
 .hist-table { font-weight: 700; color: var(--text); }
-.hist-when { font-size: 11px; color: var(--muted); }
-.hist-items { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; }
+.hist-when { font-size: 11px; color: var(--muted); margin-left: auto; }
+
+/* date partitions (Today / Yesterday / Earlier) */
+.hist-group { display: flex; flex-direction: column; gap: 12px; }
+.hist-group + .hist-group { margin-top: 6px; }
+.hist-group-head { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 2px 2px -2px; }
+
+/* one bill line: dish name (+ its options) on the left, quantity on the right */
+.hist-lines { display: flex; flex-direction: column; gap: 7px; margin-bottom: 10px; }
+.hist-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.hist-line-main { min-width: 0; }
+.hist-line-name { font-size: 14px; color: var(--text); }
+.hist-line-opts { display: block; font-size: 12px; color: var(--muted); margin-top: 1px; }
+.hist-line-qty { flex: none; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.hist-line-more { background: none; border: none; color: var(--accent); font-size: 12.5px; font-weight: 600; cursor: pointer; padding: 0 0 8px; align-self: flex-start; }
 .hist-total { display: flex; justify-content: space-between; font-weight: 700; color: var(--text); border-top: 1px solid var(--border-color, rgba(212,165,116,0.15)); padding-top: 8px; }
+
+/* cancelled bill: greyed + a clear label */
+.hist-order.hist-cancelled { opacity: 0.6; }
+.hist-order.hist-cancelled .hist-line-name { text-decoration: line-through; }
+.hist-cancel-tag { font-size: 11px; font-weight: 700; color: #ef4444; background: rgba(239,68,68,0.14); border: 1px solid rgba(239,68,68,0.4); border-radius: 999px; padding: 2px 9px; }
 
 /* "Live now" section at the top of the Previous-orders tab — shows every order
    this device is still following, so 2+ simultaneous orders are each tracked. */
