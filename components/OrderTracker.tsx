@@ -459,6 +459,21 @@ export default function OrderTracker() {
               </div>
             </div>
 
+            {/* If the order was cancelled (e.g. staff closed the table), explain it
+                and offer a quick way to get a waiter — so the guest isn't stranded. */}
+            {order.status === "cancelled" && (
+              <div className="ot-cancelled-note">
+                <p>This table was closed, so your order was cancelled. Need a hand?</p>
+                <button
+                  type="button"
+                  className="btn btn-gold ot-call-waiter"
+                  onClick={() => { setDetailOpen(false); window.dispatchEvent(new CustomEvent("lfh:chef-call")); }}
+                >
+                  <i className="fas fa-bell"></i> Call a waiter
+                </button>
+              </div>
+            )}
+
             {stepIndex >= 0 && (
               <div className="ot-steps big" aria-hidden="true">
                 {STEPS.map((s, i) => (

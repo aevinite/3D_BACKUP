@@ -173,6 +173,12 @@ export default function SessionStatusWidget() {
     setBusy(true);
     await leaveSession(token);
     clearLocal();
+    // You CHOSE to leave, so stop following this table's orders — drop the live
+    // tracker records so the "order served / preparing" notifications disappear
+    // for you (they keep going for whoever's still at the table). (A staff CLOSE
+    // is different: that path keeps them so the guest sees "Order cancelled".)
+    try { localStorage.removeItem("lfh_active_orders"); } catch {}
+    window.dispatchEvent(new Event("lfh:order-placed")); // make the tracker re-read + hide
     wasActive.current = false;
     setSt(null);
     setBusy(false);
@@ -185,6 +191,7 @@ export default function SessionStatusWidget() {
     setBusy(true);
     await leaveSession(token);
     clearLocal();
+    try { localStorage.removeItem("lfh_active_orders"); } catch {} // stop following the old table's orders
     window.location.href = "/menu"; // go pick / scan another table
   };
 

@@ -3117,6 +3117,10 @@ a:focus:not(:focus-visible) { outline: none; }
   color: var(--text); cursor: pointer; font-size: 15px;
 }
 .ot-sheet-head { display: flex; align-items: center; gap: 13px; margin-bottom: 16px; padding-right: 36px; }
+/* cancelled-order notice + call-waiter button inside the tracker sheet */
+.ot-cancelled-note { margin: 14px 0 4px; text-align: center; }
+.ot-cancelled-note p { margin: 0 0 12px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.ot-cancelled-note .ot-call-waiter { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .ot-sheet-head.status-received { --ot-accent: #e8a13c; } /* amber — not accepted yet */
 .ot-sheet-head.status-preparing { --ot-accent: #4f9dff; }
 .ot-sheet-head.status-served { --ot-accent: #4ade80; }
