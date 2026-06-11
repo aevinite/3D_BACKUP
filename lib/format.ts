@@ -63,14 +63,20 @@ export const LANGUAGES: LanguageMeta[] = [
 const CURRENCY_KEY = "lfh_currency";
 const LANGUAGE_KEY = "lfh_language";
 
-// Read back which currency the guest picked last time (defaults to USD).
+// The default currency is RUPEES (₹) — everything shows in INR unless a guest
+// explicitly picks another from the currency switcher. setCurrency only ever
+// writes on an explicit pick, so a guest who never chose (new OR existing) gets
+// INR; one who deliberately chose another currency keeps their choice.
+const DEFAULT_CURRENCY: CurrencyMeta = CURRENCIES.find((c) => c.code === "INR") || CURRENCIES[0];
+
+// Read back which currency the guest picked last time (defaults to INR).
 // localStorage only exists in the browser, so if it's missing we just return
-// the first currency in the list so nothing crashes on the server.
+// the default so nothing crashes on the server.
 export const getCurrency = (): CurrencyMeta => {
-  if (typeof localStorage === "undefined") return CURRENCIES[0];
-  const code = (localStorage.getItem(CURRENCY_KEY) || "USD") as CurrencyCode;
-  // Find the matching row; if somehow not found, fall back to the first one.
-  return CURRENCIES.find((c) => c.code === code) || CURRENCIES[0];
+  if (typeof localStorage === "undefined") return DEFAULT_CURRENCY;
+  const stored = localStorage.getItem(CURRENCY_KEY);
+  if (!stored) return DEFAULT_CURRENCY;
+  return CURRENCIES.find((c) => c.code === stored) || DEFAULT_CURRENCY;
 };
 
 // Remember the guest's chosen currency, then shout out an announcement so any

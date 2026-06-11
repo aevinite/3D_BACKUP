@@ -59,18 +59,11 @@ function wireResume() {
 export function gateAddToCart(run: () => void): void {
   // Sessions off, or already connected + approved -> add immediately.
   if (!state.sessionsEnabled || state.connected) { run(); return; }
-  // Sessions on but not connected: we need a table to join.
-  const table = intendedTable();
-  if (!table) {
-    // No session and no scanned table — they haven't been seated. Point them to the
-    // QR code; there's no table to join without it.
-    window.dispatchEvent(new CustomEvent("lfh:toast", {
-      detail: { message: "Scan the QR code at your table to start ordering", kicker: "join a table", variant: "error" },
-    }));
-    return;
-  }
-  // Hold this add, then open the join flow; it runs once we're connected + approved.
+  // Sessions on but not connected: hold this add and open the join flow. We pass
+  // the table we already know (stored session, or a scanned QR); if none is known
+  // the gate asks the guest to type their table number. The add runs once they're
+  // connected + approved.
   wireResume();
   queue.push(run);
-  window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "connect", table, payload: {} } }));
+  window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "connect", table: intendedTable() || "", payload: {} } }));
 }

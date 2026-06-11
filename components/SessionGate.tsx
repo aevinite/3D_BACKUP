@@ -41,7 +41,7 @@ const rememberTable = (table: string) => {
 
 // The named screens this gate can show. Think of it as "which page are we on".
 type Step =
-  | "idle" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "joining"
+  | "idle" | "ask_table" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "joining"
   | "waiting_approval" | "request_sent" | "working" | "blocked";
 
 // Remember (per device) that the guest has already seen the "why we check your
@@ -67,6 +67,7 @@ export default function SessionGate() {
   // What the on-screen pop-up needs to remember:
   const [open, setOpen] = useState(false); // is the pop-up showing?
   const [step, setStep] = useState<Step>("idle"); // which screen we're on (see Step above)
+  const [tableInput, setTableInput] = useState(""); // typed table number when no QR scan yet
   const [name, setName] = useState(""); // the name the guest types when asking to join
   const [note, setNote] = useState(""); // a small explanatory message (e.g. "too far")
 
@@ -257,25 +258,33 @@ export default function SessionGate() {
     // Runs when something asks us to order / call a waiter through a session.
     const onDo = async (e: Event) => {
       const detail = (e as CustomEvent).detail as Pending;
-      if (!detail?.action || !detail?.table) return; // ignore malformed events
+      // Need an action. A TABLE is required too — EXCEPT for "connect", which can
+      // ask the guest for their table number when one isn't known yet (no QR scan).
+      if (!detail?.action) return;
+      if (!detail.table && detail.action !== "connect") return;
       // Remember the job, reset the "reported result" flag and any old coords.
       pending.current = detail;
       settled.current = false;
       coords.current = { lat: null, lng: null };
       // Load settings once and reuse them after.
       settingsRef.current = settingsRef.current || (await getSettings());
-      // SILENT FAST-PATH for the Add-to-cart gate: if the guest is already in an
-      // open session AND approved, finish "connect" WITHOUT ever showing the popup
-      // (the cache the gate reads can lag by a poll, so we double-check here). Only
-      // when they're genuinely not connected do we open the join sheet below.
       if (detail.action === "connect") {
-        const stored = getStoredSession(detail.table);
-        if (stored) {
-          sess.current = stored;
-          const state = await getSessionState(stored.token);
-          const sObj = state.session as { status?: string } | undefined;
-          const member = state.member as { approved?: boolean } | undefined;
-          if (state.ok && sObj?.status === "open" && member?.approved) { await act(); return; }
+        // SILENT FAST-PATH: already in an open session AND approved → finish without
+        // ever showing the popup (the gate's cache can lag a poll, so re-check here).
+        if (detail.table) {
+          const stored = getStoredSession(detail.table);
+          if (stored) {
+            sess.current = stored;
+            const state = await getSessionState(stored.token);
+            const sObj = state.session as { status?: string } | undefined;
+            const member = state.member as { approved?: boolean } | undefined;
+            if (state.ok && sObj?.status === "open" && member?.approved) { await act(); return; }
+          }
+        } else {
+          // No table known yet → ASK for the table number first (QR scan will fill
+          // this automatically once that's built). Once entered, the flow continues.
+          setNote(""); setTableInput(""); setOpen(true); setStep("ask_table");
+          return;
         }
       }
       setOpen(true);
@@ -287,6 +296,16 @@ export default function SessionGate() {
   }, [beginFlow, act]);
 
   // ── screen actions ─────────────────────────────────────────────────────────
+  // The guest typed their table number (no QR scan yet). Validate it, remember it
+  // so the cart + future adds prefill it (no re-asking), then run the join flow.
+  const submitTable = () => {
+    const t = (tableInput || "").trim();
+    if (!/^\d+$/.test(t) || Number(t) < 1) { setNote("Please enter your table number."); return; }
+    pending.current = { ...(pending.current as Pending), table: t };
+    rememberTable(t);
+    setNote("");
+    beginFlow();
+  };
   // This runs when the guest taps "Ask to join this table": send their name to
   // the host. If auto-approved, act now; otherwise wait for the host's OK.
   const doJoinAsGuest = async () => {
@@ -331,6 +350,21 @@ export default function SessionGate() {
       {/* The card itself — stopPropagation keeps taps inside from closing it. */}
       <div className="sg-box" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <button type="button" className="sg-x" aria-label="Close" onClick={close}>✕</button>
+
+        {/* No QR scan yet → ask for the table number before anything else. Once a
+            QR scanner is added it will fill this in and skip straight past. */}
+        {step === "ask_table" && (<>
+          <div className="sg-badge"><i className="fas fa-chair"></i></div>
+          <div className="sg-kicker">My Little French House</div>
+          <h3 className="sg-title">Which table are you at?</h3>
+          <p className="sg-sub">Enter your table number to start your order. (Scanning the QR code on your table will fill this in for you.)</p>
+          <input className="sg-input" type="number" inputMode="numeric" min={1} placeholder="Table number" value={tableInput}
+            onChange={(e) => setTableInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitTable(); }} autoFocus />
+          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          <div className="sg-actions">
+            <button className="sg-btn gold" onClick={submitTable}>Continue</button>
+          </div>
+        </>)}
 
         {/* PHASE 1 (first visit only): explain WHY we check location, before the
             browser prompt. Tapping continue records consent and runs the check. */}
