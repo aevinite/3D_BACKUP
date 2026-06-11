@@ -24,6 +24,9 @@ import { getSettings } from "@/lib/menu";
 import { setScannedTable } from "@/lib/table";
 // Helpers that talk to the server about the table's dining session.
 import { getStoredSession, clearStoredSession, getSessionState, leaveSession } from "@/lib/session";
+// Publish the live "can this guest order?" answer so the Add-to-cart gate can read
+// it synchronously (this widget already polls the session, so we reuse that poll).
+import { setTableConnection } from "@/lib/tableConnection";
 
 // localStorage keys for remembering where the user dragged the card and whether
 // they collapsed it to the small bubble.
@@ -154,6 +157,13 @@ export default function SessionStatusWidget() {
     // Cleanup when the component disappears: stop the poll and the intro timer.
     return () => { alive = false; if (iv) clearInterval(iv); if (introTimer.current) clearTimeout(introTimer.current); };
   }, []);
+
+  // Publish the live "is this guest allowed to add to the cart?" answer for the
+  // Add-to-cart gate (lib/tableConnection). Connected = sessions ON, in an open
+  // table, AND approved (a partner still waiting for the head does NOT count).
+  useEffect(() => {
+    setTableConnection({ sessionsEnabled: enabled, connected: !!st && !!st.approved });
+  }, [enabled, st]);
 
   // ── actions ────────────────────────────────────────────────────────────────
   // This runs when the guest taps "Leave": tell the server, clean up locally,

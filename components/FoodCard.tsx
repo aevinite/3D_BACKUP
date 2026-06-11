@@ -5,6 +5,9 @@ import Link from "next/link";
 import { formatPrice, prettyUsd, getCurrency, type CurrencyMeta } from "@/lib/format";
 import type { OptionGroup } from "@/lib/menu";
 import VegIcon from "./VegIcon";
+// The "must be at a table to order" gate. When dining-sessions are on and the
+// guest isn't connected, this opens the join flow and runs the add afterwards.
+import { gateAddToCart } from "@/lib/tableConnection";
 
 // The full set of details one dish can have. The "?" ones are optional.
 interface FoodItem {
@@ -114,15 +117,20 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
   const openCustomize = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    popThumb();
-    // Tell the app to open the Customize popup, pre-filled with this dish.
-    window.dispatchEvent(new CustomEvent("lfh:open-order-confirm", {
-      detail: {
-        item: { id: item.id, title: item.title, price: item.price, image: item.image },
-        options: item.options,
-        allergens: item.allergens,
-      },
-    }));
+    // Customising IS an intent to order, so it goes through the same table gate:
+    // if the guest isn't connected, the join flow opens first and the Customize
+    // popup opens once they're in.
+    gateAddToCart(() => {
+      popThumb();
+      // Tell the app to open the Customize popup, pre-filled with this dish.
+      window.dispatchEvent(new CustomEvent("lfh:open-order-confirm", {
+        detail: {
+          item: { id: item.id, title: item.title, price: item.price, image: item.image },
+          options: item.options,
+          allergens: item.allergens,
+        },
+      }));
+    });
   };
 
   // Adds or removes one of this dish from the cart. `delta` is +1 (the "+"
@@ -130,6 +138,15 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
   const updateQty = (e: MouseEvent, delta: number) => {
     e.preventDefault();
     e.stopPropagation();
+    // Removing (delta < 0) is always allowed; ADDING goes through the table gate so
+    // a not-yet-seated guest is sent to join their table first (then the add runs).
+    if (delta > 0) { gateAddToCart(() => applyQty(delta)); return; }
+    applyQty(delta);
+  };
+
+  // The actual cart mutation, split out so the gate can run it before OR after the
+  // join flow without duplicating the logic.
+  const applyQty = (delta: number) => {
     if (delta > 0) popThumb(); // little bounce only when adding
     const cart = readCart();
     // Find this dish's plain line in the cart (if it's already there).

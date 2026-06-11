@@ -49,9 +49,12 @@ type Step =
 // the check on later visits.
 const LOC_CONSENT_KEY = "lfh_loc_consent";
 
-// The job we were asked to do: place an order or call a waiter, for which table,
-// with whatever data that action needs.
-interface Pending { action: "order" | "call"; table: string; payload: Record<string, unknown>; }
+// The job we were asked to do, for which table, with whatever data it needs:
+//  • "order" / "call" — the original server actions.
+//  • "connect" — just get the guest connected + approved to the table, then report
+//    back. Used by the Add-to-cart gate (lib/tableConnection): no server call, the
+//    caller does the actual cart add once we confirm they're in.
+interface Pending { action: "order" | "call" | "connect"; table: string; payload: Record<string, unknown>; }
 
 // Tiny helper to pop a notification toast.
 const toast = (message: string, kicker = "table", variant = "success") =>
@@ -88,7 +91,11 @@ export default function SessionGate() {
   // Closes the pop-up. If the action never finished, report it as cancelled so the
   // button that started it (Place Order, etc.) doesn't get stuck on "Placing…".
   const close = useCallback(() => {
-    fireDone({ ok: false, reason: "cancelled" });
+    // Tag the cancel with WHICH action was abandoned. The Add-to-cart gate listens
+    // for { action:"connect", ok:false } to DROP the held add when the guest backs
+    // out — without this tag the gate couldn't tell its cancel apart and would keep
+    // the abandoned item, adding it later on the next successful connect.
+    fireDone({ ok: false, reason: "cancelled", action: pending.current?.action });
     stopPoll(); setOpen(false); setStep("idle"); setName(""); setNote(""); pending.current = null;
   }, []);
 
@@ -98,6 +105,9 @@ export default function SessionGate() {
   const act = useCallback(async () => {
     const p = pending.current, s = sess.current;
     if (!p || !s) return close(); // nothing queued or no session — bail out
+    // "connect" has no server work: we only needed to get the guest in. Report
+    // success so the Add-to-cart gate can carry out the held add, then close.
+    if (p.action === "connect") { fireDone({ ok: true, action: "connect" }); close(); return; }
     setStep("working"); // show the "One moment…" screen
     if (p.action === "order") {
       // EMAIL SEAM: when email verification lands, gate this on a verified member.
@@ -254,13 +264,27 @@ export default function SessionGate() {
       coords.current = { lat: null, lng: null };
       // Load settings once and reuse them after.
       settingsRef.current = settingsRef.current || (await getSettings());
+      // SILENT FAST-PATH for the Add-to-cart gate: if the guest is already in an
+      // open session AND approved, finish "connect" WITHOUT ever showing the popup
+      // (the cache the gate reads can lag by a poll, so we double-check here). Only
+      // when they're genuinely not connected do we open the join sheet below.
+      if (detail.action === "connect") {
+        const stored = getStoredSession(detail.table);
+        if (stored) {
+          sess.current = stored;
+          const state = await getSessionState(stored.token);
+          const sObj = state.session as { status?: string } | undefined;
+          const member = state.member as { approved?: boolean } | undefined;
+          if (state.ok && sObj?.status === "open" && member?.approved) { await act(); return; }
+        }
+      }
       setOpen(true);
       await beginFlow();
     };
     window.addEventListener("lfh:session-do", onDo);
     // Cleanup when the component disappears: stop listening and stop any timer.
     return () => { window.removeEventListener("lfh:session-do", onDo); stopPoll(); };
-  }, [beginFlow]);
+  }, [beginFlow, act]);
 
   // ── screen actions ─────────────────────────────────────────────────────────
   // This runs when the guest taps "Ask to join this table": send their name to

@@ -7,6 +7,7 @@ import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/men
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
 import { getStoredSession } from "@/lib/session";
+import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
 import SessionTableBill from "@/components/SessionTableBill";
 import {
   STEPS,
@@ -375,15 +376,18 @@ export default function CartPanel() {
   // addPairing(): tap the "+ Add" on the suggested pairing. Add it to the cart
   // (or bump its quantity if it's already there) and pop a confirmation toast.
   const addPairing = (it: MenuItem) => {
-    const next = [...cart];
-    const idx = next.findIndex((c) => c.id === it.id);
-    if (idx >= 0) next[idx] = { ...next[idx], qty: next[idx].qty + 1 };
-    // Stored price is the CONFIDENT unit (prettyUsd) — the same convention as
-    // the quick "+" and the customize popup, so the bill never re-rounds it.
-    // sig "[]" marks it as a plain line so the menu card's +/- can manage it.
-    else next.push({ id: it.id, title: it.title, price: prettyUsd(it.price).toFixed(2), image: it.image, qty: 1, sig: "[]" });
-    commit(next);
-    window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `${it.title} added`, kicker: "your order" } }));
+    // Same table gate as every other Add: not connected -> join first, then add.
+    gateAddToCart(() => {
+      const next = [...cart];
+      const idx = next.findIndex((c) => c.id === it.id);
+      if (idx >= 0) next[idx] = { ...next[idx], qty: next[idx].qty + 1 };
+      // Stored price is the CONFIDENT unit (prettyUsd) — the same convention as
+      // the quick "+" and the customize popup, so the bill never re-rounds it.
+      // sig "[]" marks it as a plain line so the menu card's +/- can manage it.
+      else next.push({ id: it.id, title: it.title, price: prettyUsd(it.price).toFixed(2), image: it.image, qty: 1, sig: "[]" });
+      commit(next);
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `${it.title} added`, kicker: "your order" } }));
+    });
   };
 
   // placeOrder(): the big "Place Order" button. Validates the table number, then
@@ -417,10 +421,14 @@ export default function CartPanel() {
       // onDone: runs once the SessionGate finishes (after location/join/OTP). If the
       // server actually placed the order, we record it locally so the tracker follows it.
       const onDone = (e: Event) => {
+        const d = (e as CustomEvent).detail as { ok?: boolean; action?: string; orderId?: string };
+        // Only react to OUR order's result. Other gate completions (e.g. the
+        // Add-to-cart "connect" flow) also fire lfh:session-done — ignore those
+        // WITHOUT deregistering, so a gated add mid-placement can't steal our listener.
+        if (d?.action !== "order") return;
         window.removeEventListener("lfh:session-done", onDone);
         setPlacing(false);
-        const d = (e as CustomEvent).detail as { ok?: boolean; action?: string; orderId?: string };
-        if (!d?.ok || d.action !== "order" || !d.orderId) return; // the gate showed its own message
+        if (!d?.ok || !d.orderId) return; // order cancelled / failed — the gate showed its own message
         try {
           // Save into the "active orders" list so the OrderTracker shows it.
           const raw = localStorage.getItem("lfh_active_orders");

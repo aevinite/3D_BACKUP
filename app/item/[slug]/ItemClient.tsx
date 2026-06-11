@@ -14,6 +14,7 @@ import { getMenuItems, getItemReviews, submitReview as submitReviewRpc } from "@
 import { getDeviceId } from "@/lib/device";          // stable per-browser id (one rating per dish per device)
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
 import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // money formatting
+import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
 import { useTranslation } from "@/lib/i18n";         // translated text strings
 import VegIcon from "@/components/VegIcon";           // the little veg/non-veg dot
 
@@ -383,20 +384,24 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     // No item, or it's sold out -> do nothing (the button is disabled too; this is
     // the belt-and-braces guard so a sold-out dish can never reach the cart).
     if (!item || (item.tags || []).includes("sold-out")) return;
-    window.dispatchEvent(
-      new CustomEvent("lfh:open-order-confirm", {
-        detail: {
-          item: {
-            id: item.id,
-            title: item.title,
-            price: item.price,
-            image: item.image,
+    // Same table gate as the menu cards: if dining-sessions are on and the guest
+    // isn't connected, send them to join first; the popup opens once they're in.
+    gateAddToCart(() => {
+      window.dispatchEvent(
+        new CustomEvent("lfh:open-order-confirm", {
+          detail: {
+            item: {
+              id: item.id,
+              title: item.title,
+              price: item.price,
+              image: item.image,
+            },
+            options: item.options,
+            allergens: item.allergens,
           },
-          options: item.options,
-          allergens: item.allergens,
-        },
-      })
-    );
+        })
+      );
+    });
   };
 
   // Post a review. Saves it to the DATABASE (one live rating per device per
