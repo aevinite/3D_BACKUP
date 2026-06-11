@@ -1282,6 +1282,17 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   animation:lineBreath 1.5s ease-in-out infinite;
   animation-play-state: paused;
 }
+/* On a phone the 3D hotspot cards (anchored to points on the model) are much
+   more likely to run off the screen edge. Shrink them and let their text wrap,
+   and cap the width to a fraction of the screen, so a card near the model's
+   edge stays mostly on-screen instead of being clipped. */
+@media (max-width: 600px) {
+  .viewer-wrapper .hs-card-wrap { max-width: 44vw; white-space: normal; }
+  .viewer-wrapper .hs-card { min-width: 0; padding: 9px 11px 8px 11px; }
+  .viewer-wrapper .hs-title { font-size: 11px; white-space: normal; }
+  .viewer-wrapper .hs-bullets li { font-size: 10px; }
+  .viewer-wrapper .hs-icon { width: 26px; height: 26px; font-size: 13px; top: -11px; left: -8px; }
+}
 .viewer-wrapper .hs-line-el.line-visible {
   animation-play-state: running;
 }
@@ -1504,8 +1515,12 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   background: var(--bg); border-radius: 32px 32px 0 0;
   margin-top: -35px; position: relative; z-index: 2;
   /* Cap the reading width so the dish title/description/reviews don't run the
-     full screen width on desktop (very long lines); centred under the hero. */
-  max-width: 760px; margin-inline: auto;
+     full screen width on desktop (very long lines); centred under the hero.
+     width:100% is REQUIRED — #detail-page is a centring flex column, and the
+     margin-inline:auto cancels the flex stretch, so without width:100% the body
+     sizes to its 760px max and overflows (clips) on a phone. With it, the body
+     is the container width on mobile (≤390) and caps at 760 centred on desktop. */
+  width: 100%; max-width: 760px; margin-inline: auto; box-sizing: border-box;
 }
 
 #detail-page {

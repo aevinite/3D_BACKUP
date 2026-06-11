@@ -304,6 +304,17 @@ export default function ViewerClient({ folder }: { folder: string }) {
     const anchorBtn = document.getElementById(`hs-${ing.id}`);   // the dot on the model
     const cardWrap = document.getElementById(`hs-card-${ing.id}`); // the label card
     if (!line || !anchorBtn || !cardWrap) return;
+    // Keep the card ON-SCREEN. A hotspot anchored near the model's left/right edge
+    // (common on a narrow phone) would otherwise push its card off the viewport and
+    // clip it. We nudge the card inward with a left margin so it's never cut off;
+    // the connector line below re-reads the card's real position and stays attached.
+    const edge = 8;
+    const wr = cardWrap.getBoundingClientRect();
+    const curM = parseFloat(cardWrap.style.marginLeft || "0");
+    let targetM = curM;
+    if (wr.right > window.innerWidth - edge) targetM = curM - (wr.right - (window.innerWidth - edge));
+    else if (wr.left < edge) targetM = curM + (edge - wr.left);
+    if (Math.abs(targetM - curM) > 0.5) cardWrap.style.marginLeft = targetM.toFixed(1) + "px";
     // Work out the card's position relative to the dot and point the line there.
     const aRect = anchorBtn.getBoundingClientRect();
     const cRect = cardWrap.getBoundingClientRect();
