@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kitchen — live orders</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Top bar: title, the live clock, sound toggle, and the 86 (sold-out) board. -->
+  <header class="topbar">
+    <div class="brand">🍳 Kitchen <span class="sub">live orders</span></div>
+    <div class="top-actions">
+      <span id="clock" class="clock"></span>
+      <button id="muteBtn" class="btn" title="New-order sound on/off">🔔</button>
+      <button id="boardBtn" class="btn">🚫 86 board</button>
+    </div>
+  </header>
+
+  <!-- The three columns every kitchen thinks in: New → Cooking → Ready. -->
+  <main class="cols">
+    <section class="col" id="col-new"><h2>🆕 New <span class="count" id="count-new"></span></h2><div class="tickets" id="list-new"></div></section>
+    <section class="col" id="col-cooking"><h2>🔥 Cooking <span class="count" id="count-cooking"></span></h2><div class="tickets" id="list-cooking"></div></section>
+    <section class="col" id="col-ready"><h2>✅ Ready <span class="count" id="count-ready"></span></h2><div class="tickets" id="list-ready"></div></section>
+  </main>
+
+  <!-- The 86 board drawer: mark dishes sold-out / available without leaving the kitchen. -->
+  <div class="drawer-overlay" id="drawerOverlay" hidden>
+    <aside class="drawer">
+      <div class="drawer-head"><h3>🚫 86 board <span class="sub">· mark dishes sold out</span></h3><button class="btn" id="drawerClose">✕</button></div>
+      <input type="search" id="dishSearch" class="dish-search" placeholder="Find a dish…">
+      <div id="dishList" class="dish-list"></div>
+    </aside>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>

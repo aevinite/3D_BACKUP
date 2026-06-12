@@ -1,0 +1,16 @@
+{
+  "name": "lfh-waiter-tablet",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Waiter tablet (captain app) for the Little French House — live floor, calls/joiners, and taking orders for a table with server-side pricing. Runs locally on :4003, or hosted with a TABLET_PASSWORD set.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build": "node -e \"console.log('No build step needed — Express server runs as-is.')\""
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "express": "^4.21.2"
+  }
+}
