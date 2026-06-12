@@ -65,7 +65,7 @@ export default function MenuPage() {
   const [layout, setLayout] = useState("gallery"); // gallery is the default first-visit view
   const [searchQuery, setSearchQuery] = useState(""); // what's typed in the search box
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
-  const [collapsedCats, setCollapsedCats] = useState<string[]>([]); // "All" view: which dropdowns the guest collapsed (absent = open)
+  const [openCats, setOpenCats] = useState<string[]>([]); // "All" view: which dropdowns the guest expanded (default: none — they start folded)
   const restoredRef = useRef(false); // skip persisting UI state until after the restore
   // Only show skeletons if loading is actually slow — avoids a flash on fast /
   // cached loads where the data is ready almost immediately.
@@ -118,10 +118,10 @@ export default function MenuPage() {
     const isRealCat = dbCategories.some((c) => c.slug === slug);
     setCurrentCategory((cur) => (cur === slug && isRealCat ? "all" : slug));
   };
-  // In the "All" view every dropdown starts OPEN; this records which ones the guest
-  // collapsed (a slug in the list = that category is collapsed).
+  // In the "All" view every dropdown starts FOLDED (a tidy category index); this
+  // records which ones the guest expanded (a slug in the list = that one is open).
   const toggleCatGroup = (slug: string) =>
-    setCollapsedCats((cur) => (cur.includes(slug) ? cur.filter((s) => s !== slug) : [...cur, slug]));
+    setOpenCats((cur) => (cur.includes(slug) ? cur.filter((s) => s !== slug) : [...cur, slug]));
   // Sort DOES toggle: clicking the active sort returns to the recommended order.
   // (Tapping the already-active sort sets it back to "" = the default order.)
   const toggleSort = (slug: string) =>
@@ -160,7 +160,9 @@ export default function MenuPage() {
         } catch {}
         const valid =
           saved === "all" || saved === "chef-special" || saved === "favorites" || cats.some((c) => c.slug === saved);
-        setCurrentCategory((cur) => cur || (valid ? saved : cats[0]?.slug || ""));
+        // New visitors land on the "All" view (every category as a folded dropdown);
+        // returning visitors resume wherever they left off.
+        setCurrentCategory((cur) => cur || (valid ? saved : "all"));
       })
       .catch((err) => console.error("Error loading categories:", err));
 
@@ -564,11 +566,12 @@ export default function MenuPage() {
           </div>
         ) : currentCategory === "all" && !q ? (
           // B) "All" view: each category is its own collapsible dropdown. The header
-          // shows the name + dish count + a chevron; tapping it folds that category
-          // away. Every dropdown starts open (collapsedCats records the closed ones).
+          // shows the name + dish count + a chevron; tapping it expands that category.
+          // Every dropdown starts FOLDED (openCats records the expanded ones), so the
+          // landing reads as a clean menu index, not an endless scroll.
           <div className="cat-groups">
             {allGroups.map((g) => {
-              const open = !collapsedCats.includes(g.slug);
+              const open = openCats.includes(g.slug);
               return (
                 <section key={g.slug} className="cat-group">
                   <button
