@@ -51,3 +51,4 @@ next-env.d.ts
 
 # health-nudge hook state (per-machine prompt counter — not code)
 .claude/hooks/health-nudge-state.json
+verify-*.png
