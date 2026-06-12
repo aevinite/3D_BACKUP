@@ -25,7 +25,11 @@ export default function IntroSplash() {
   // builds the animation timeline; always cleans up afterwards.
   useEffect(() => {
     // Marks the intro as over and tells the rest of the app it's done.
+    // `finished` guards against running twice (timer AND visibility can both fire).
+    let finished = false;
     const finish = () => {
+      if (finished) return;
+      finished = true;
       setDone(true);
       window.dispatchEvent(new Event("lfh:intro-done")); // cue the hero text
     };
@@ -64,9 +68,21 @@ export default function IntroSplash() {
     // mount/cleanup/mount in dev can't leave the splash stuck in the DOM.
     // Safety net: hide the splash after 2.3s no matter what the animation does.
     const timer = setTimeout(finish, 2300);
-    // Cleanup: cancel the timer and undo all the GSAP animations.
+    // MOBILE FIX: on phones, backgrounding the tab freezes both setTimeout and
+    // GSAP's ticker. If the user switches apps during the 2.3s intro and comes
+    // back, the timer never fires and the full-screen splash (z-index 9999) stays
+    // mounted, swallowing every tap until a manual refresh. Catch the return-to-
+    // foreground and finish immediately so the curtain can never get stuck.
+    const onVisible = () => { if (!document.hidden) finish(); };
+    document.addEventListener("visibilitychange", onVisible);
+    // pageshow also fires when the page is restored from the bfcache (iOS Safari
+    // swipe-back / app switch), which visibilitychange can miss.
+    window.addEventListener("pageshow", onVisible);
+    // Cleanup: cancel the timer, drop the listeners, and undo all the GSAP animations.
     return () => {
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onVisible);
       ctx.revert();
     };
   }, []);
