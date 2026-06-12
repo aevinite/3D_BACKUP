@@ -42,7 +42,7 @@ const rememberTable = (table: string) => {
 // The named screens this gate can show. Think of it as "which page are we on".
 type Step =
   | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "joining"
-  | "waiting_approval" | "denied" | "table_closed" | "request_sent" | "working" | "blocked";
+  | "waiting_approval" | "denied" | "table_closed" | "net_error" | "request_sent" | "working" | "blocked";
 
 // Remember (per device) that the guest has already seen the "why we check your
 // location" consent screen, so we only show it the FIRST time and go straight to
@@ -157,14 +157,16 @@ export default function SessionGate() {
       if (r.reason === "blocked") { setStep("blocked"); return; }
       if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
       if (r.reason === "no_open_session") { setStep("not_open"); return; } // staff hasn't opened it
-      if (!r.ok) { toast("Couldn't join the table", "table", "error"); close(); return; }
+      // Unknown failure (usually a network blip): don't slam the popup shut and
+      // lose their place — pre-fill the table and let them tap Continue again.
+      if (!r.ok) { setTableInput(p.table); setNote("Couldn't reach the café's system — check your internet and try again."); setStep("ask_table"); return; }
       // Save the new session and make this table our default everywhere.
       const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
       sess.current = s; storeSession(s); rememberTable(s.table);
       window.dispatchEvent(new Event("lfh:session-changed")); // wake the owner-approve poller
       await act();
     } finally { joining.current = false; }
-  }, [act, close]);
+  }, [act]);
 
   // While the guest waits for staff to open the table, poll until it opens — then
   // continue automatically (become head & place the queued order, or ask to join).
@@ -192,6 +194,12 @@ export default function SessionGate() {
     const p = pending.current!;
     const st = await tableStatus(p.table);
     if (st.reason === "blocked") { setStep("blocked"); return; }
+    // No answer ≠ "table not open" — don't mislabel a network blip; offer a retry.
+    if (!st.ok) {
+      setNote("We can't reach the café's system right now — check your internet and retry.");
+      setStep("net_error");
+      return;
+    }
     if (!st.open) { setStep("not_open"); proceedWhenOpen(); return; } // wait for staff to open it
     if ((st.members as number) === 0) { await joinAsHead(); return; } // empty table -> you're the host
     setStep("guest_name"); // someone's there -> ask to join
@@ -267,10 +275,23 @@ export default function SessionGate() {
     const s = sess.current;
     if (!s) return;
     const state = await getSessionState(s.token);
-    // token died OR the table was closed -> drop it and rerun the flow (which, for
-    // a now-free table, makes us the head again).
+    if (!state.ok) {
+      const reason = (state as { reason?: string }).reason;
+      // DEFINITIVE ends (token truly dead / kicked / table closed) -> drop the
+      // session and rerun the flow (for a now-free table that makes us head again).
+      if (reason === "invalid_token" || reason === "removed" || reason === "session_closed") {
+        clearStoredSession(); sess.current = null; return beginLocation();
+      }
+      // NETWORK BLIP: the membership is still perfectly valid on the server —
+      // forgetting it here would throw the guest off their table (and could cost
+      // a head their role) over one second of bad Wi-Fi. Keep it; offer a retry.
+      setNote("We can't reach the café's system right now — your spot at the table is safe. Check your internet and retry.");
+      setStep("net_error");
+      return;
+    }
+    // the table was closed -> drop the session and start over
     const sessionObj = state.session as { status?: string } | undefined;
-    if (!state.ok || sessionObj?.status !== "open") { clearStoredSession(); sess.current = null; return beginLocation(); } // token dead/table closed -> start over
+    if (sessionObj?.status !== "open") { clearStoredSession(); sess.current = null; return beginLocation(); }
     const member = state.member as { approved?: boolean } | undefined;
     if (!member?.approved) { setStep("waiting_approval"); startApprovalPoll(); return; } // not yet approved -> wait
     await act();
@@ -299,8 +320,17 @@ export default function SessionGate() {
       pending.current = detail;
       settled.current = false;
       coords.current = { lat: null, lng: null };
-      // Load settings once and reuse them after.
-      settingsRef.current = settingsRef.current || (await getSettings());
+      // Load settings once and reuse them after. OFFLINE GUARD: this fetch THROWS
+      // with no internet, which used to kill the whole flow before any screen
+      // opened — tapping Add-to-cart while offline just did nothing, silently.
+      // Now the guest gets the connection-trouble screen with a working Retry.
+      try {
+        settingsRef.current = settingsRef.current || (await getSettings());
+      } catch {
+        setNote("We can't reach the café's system right now — check your internet and retry.");
+        setOpen(true); setStep("net_error");
+        return;
+      }
       if (detail.action === "connect") {
         // SILENT FAST-PATH: already in an open session AND approved → finish without
         // ever showing the popup (the gate's cache can lag a poll, so re-check here).
@@ -324,8 +354,10 @@ export default function SessionGate() {
       await beginFlow();
     };
     window.addEventListener("lfh:session-do", onDo);
-    // Cleanup when the component disappears: stop listening and stop any timer.
-    return () => { window.removeEventListener("lfh:session-do", onDo); stopPoll(); };
+    // Cleanup when the component disappears: stop listening, stop any timer, and
+    // RELEASE THE CAMERA — navigating away mid-QR-scan would otherwise leave the
+    // camera (and its little indicator light) running with no UI attached to it.
+    return () => { window.removeEventListener("lfh:session-do", onDo); stopPoll(); stopScan(); };
   }, [beginFlow, act]);
 
   // ── screen actions ─────────────────────────────────────────────────────────
@@ -358,7 +390,9 @@ export default function SessionGate() {
       if (r.reason === "blocked") { setStep("blocked"); return; }
       if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
       if (r.reason === "no_open_session") { setStep("not_open"); return; }
-      if (!r.ok) { toast("Couldn't join", "table", "error"); close(); return; }
+      // Unknown failure (usually a network blip): keep their typed name and let
+      // them tap "Ask to join" again instead of closing and losing everything.
+      if (!r.ok) { setNote("Couldn't reach the café's system — check your internet and try again."); setStep("guest_name"); return; }
       // Save the session and make this our default table.
       const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
       sess.current = s; storeSession(s); rememberTable(s.table);
@@ -380,6 +414,20 @@ export default function SessionGate() {
   const doRequestOpen = async () => {
     const p = pending.current!; await requestAccess(p.table, "open", null, null);
     setStep("request_sent");
+  };
+
+  // Retry from the connection-trouble screen. Settings may STILL be missing
+  // (the guest was fully offline when the flow started), so fetch them first
+  // if needed, then resume the normal flow from wherever it can pick up.
+  const retryFlow = async () => {
+    if (!settingsRef.current) {
+      try { settingsRef.current = await getSettings(); } catch {
+        setNote("Still can't reach the café's system — check your internet and try again.");
+        return;
+      }
+    }
+    setNote("");
+    await beginFlow();
   };
 
   // Lets the guest pick a DIFFERENT table: forget the remembered table number
@@ -538,6 +586,8 @@ export default function SessionGate() {
           <div className="sg-badge"><i className="fas fa-handshake"></i></div><h3 className="sg-title">This table&apos;s already open</h3>
           <p className="sg-sub">Someone at table {pending.current?.table} started this tab. Add your name so they can confirm it&apos;s you, then ask to join.</p>
           <input className="sg-input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          {/* e.g. "couldn't reach the café's system" after a failed join attempt */}
+          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn gold" onClick={doJoinAsGuest}>Ask to join this table</button>
           </div>
@@ -563,6 +613,19 @@ export default function SessionGate() {
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={rescan}>Another table</button>
             <button className="sg-btn gold" onClick={() => doRequest("access")}>Call a waiter</button>
+          </div>
+        </>)}
+
+        {/* The café's system couldn't be reached (bad Wi-Fi / mobile data blip).
+            Crucially: the guest's table membership was KEPT — only the action
+            needs retrying once the connection is back. */}
+        {step === "net_error" && (<>
+          <div className="sg-badge"><i className="fas fa-wifi"></i></div>
+          <h3 className="sg-title">Connection trouble</h3>
+          <p className="sg-sub">{note || "We can't reach the café's system right now. Check your internet and retry."}</p>
+          <div className="sg-actions">
+            <button className="sg-btn ghost" onClick={close}>Close</button>
+            <button className="sg-btn gold" onClick={retryFlow}>Retry</button>
           </div>
         </>)}
 
