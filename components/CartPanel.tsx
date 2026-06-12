@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
-import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
+import { getMenuItems, getSettings, createOrder, leaveFeedback, type MenuItem } from "@/lib/menu";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 // Per-restaurant feature switches: the allergy section can be turned off.
 import { useFeatures } from "@/lib/features";
@@ -113,6 +113,56 @@ function HistoryBill({ order, showPrice }: { order: HistoryOrder; showPrice: (n:
         </button>
       )}
       <div className="hist-total"><span>Total</span><span>{showPrice(order.total)}</span></div>
+      {/* Rate-your-visit: one tap per bill (not for cancelled ones). */}
+      {!cancelled && <BillFeedback orderId={order.id} />}
+    </div>
+  );
+}
+
+// BillFeedback — the little "How was it?" star row under a past bill. Tapping a
+// star sends the rating right away (holding the order id proves the visit);
+// a comment box appears after, for anyone who wants to say more. Each bill is
+// rated once per device (remembered in localStorage).
+function BillFeedback({ orderId }: { orderId: string }) {
+  const KEY = "lfh_fb_" + orderId;
+  const [done, setDone] = useState<number>(() => { try { return Number(localStorage.getItem(KEY)) || 0; } catch { return 0; } });
+  const [picked, setPicked] = useState(0);   // a just-tapped rating awaiting the optional comment
+  const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
+
+  // Send (or re-send with a comment) the rating for this bill.
+  const send = async (rating: number, text: string) => {
+    setSending(true);
+    const r = await leaveFeedback(orderId, rating, text);
+    setSending(false);
+    if (!r.ok) {
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't send your rating", kicker: "feedback", variant: "error" } }));
+      return;
+    }
+    try { localStorage.setItem(KEY, String(rating)); } catch {}
+    setDone(rating);
+    window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Thanks for the feedback!", kicker: "feedback", variant: "success" } }));
+  };
+
+  if (done) return <div className="fb-done">You rated this visit {"★".repeat(done)} — thank you!</div>;
+  return (
+    <div className="fb-box">
+      <span className="fb-ask">How was it?</span>
+      <span className="fb-starrow">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button key={n} type="button" className={`fb-star ${picked >= n ? "on" : ""}`} disabled={sending}
+            aria-label={`${n} star${n > 1 ? "s" : ""}`}
+            onClick={() => { setPicked(n); send(n, comment); }}>★</button>
+        ))}
+      </span>
+      {/* After a tap the rating is already sent; the box below upgrades it with words. */}
+      {picked > 0 && (
+        <span className="fb-comment">
+          <input type="text" placeholder="Add a comment (optional)" value={comment} maxLength={300}
+            onChange={(e) => setComment(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && comment.trim()) send(picked, comment); }} />
+        </span>
+      )}
     </div>
   );
 }

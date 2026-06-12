@@ -12,11 +12,13 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // The /editor app is a SEPARATE private tool: a Node (Express, CommonJS)
-    // server + a vanilla-browser UI. Next's React/TypeScript web rules don't
-    // apply to it (it isn't bundled into the site), so linting it only produces
-    // noise (require() imports, etc.). It has its own runtime.
+    // The /editor, /kitchen and /tablet apps are SEPARATE staff tools: Node
+    // (Express, CommonJS) servers + vanilla-browser UIs. Next's React/TS web
+    // rules don't apply to them (they aren't bundled into the site), so
+    // linting them only produces noise (require() imports, etc.).
     "editor/**",
+    "kitchen/**",
+    "tablet/**",
   ]),
   {
     // Deliberate rule choices for this codebase. NONE of these change runtime

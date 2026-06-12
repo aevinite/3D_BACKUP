@@ -5,7 +5,6 @@
 // so no confirm dialog; a 6-second undo is safer than a popup mid-rush) and a
 // chime when a brand-new order lands (mutable, remembered per device).
 
-/* eslint-disable no-undef */
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 

@@ -7,7 +7,6 @@
 // with a KOT number). The cart survives the 2.5s floor refresh because we only
 // redraw the panel when the waiter ISN'T mid-order.
 
-/* eslint-disable no-undef */
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const inr = (n) => "₹" + (Math.round(Number(n) * 100) / 100).toFixed(2);

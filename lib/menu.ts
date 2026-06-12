@@ -328,3 +328,20 @@ export async function getSettings(): Promise<Settings> {
   };
 }
 
+// Leave feedback for one past order (rating 1–5 + optional comment). Holding
+// the order id is the proof of visit; the server stores ONE feedback per order
+// (re-sending updates it, which is how the optional comment gets added after
+// the star tap). Returns { ok } or { ok:false, reason }.
+export async function leaveFeedback(
+  orderId: string,
+  rating: number,
+  comment?: string,
+  name?: string
+): Promise<{ ok: boolean; reason?: string }> {
+  const { data, error } = await supabase.rpc("lfh_leave_feedback", {
+    p_order: orderId, p_rating: rating, p_comment: comment || null, p_name: name || null,
+  });
+  if (error) return { ok: false, reason: error.message };
+  return (data as { ok: boolean; reason?: string }) ?? { ok: false, reason: "empty" };
+}
+
