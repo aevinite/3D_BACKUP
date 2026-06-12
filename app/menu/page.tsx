@@ -65,6 +65,7 @@ export default function MenuPage() {
   const [layout, setLayout] = useState("gallery"); // gallery is the default first-visit view
   const [searchQuery, setSearchQuery] = useState(""); // what's typed in the search box
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
+  const [collapsedCats, setCollapsedCats] = useState<string[]>([]); // "All" view: which dropdowns the guest collapsed (absent = open)
   const restoredRef = useRef(false); // skip persisting UI state until after the restore
   // Only show skeletons if loading is actually slow — avoids a flash on fast /
   // cached loads where the data is ready almost immediately.
@@ -110,9 +111,17 @@ export default function MenuPage() {
   // view", so clicking a category drops you straight into that category.
   // Called when a guest taps a category tab.
   const selectCategory = (slug: string) => {
-    setCurrentCategory(slug);
     setSearchQuery("");
+    // Tapping the ALREADY-selected real category flips to the "All" view — every
+    // category shown as a collapsible dropdown. Tapping a different category just
+    // opens that one. Favorites / Chef's Special don't toggle to All (not groupable).
+    const isRealCat = dbCategories.some((c) => c.slug === slug);
+    setCurrentCategory((cur) => (cur === slug && isRealCat ? "all" : slug));
   };
+  // In the "All" view every dropdown starts OPEN; this records which ones the guest
+  // collapsed (a slug in the list = that category is collapsed).
+  const toggleCatGroup = (slug: string) =>
+    setCollapsedCats((cur) => (cur.includes(slug) ? cur.filter((s) => s !== slug) : [...cur, slug]));
   // Sort DOES toggle: clicking the active sort returns to the recommended order.
   // (Tapping the already-active sort sets it back to "" = the default order.)
   const toggleSort = (slug: string) =>
@@ -150,7 +159,7 @@ export default function MenuPage() {
           saved = sessionStorage.getItem("lfh_menu_cat") || "";
         } catch {}
         const valid =
-          saved === "chef-special" || saved === "favorites" || cats.some((c) => c.slug === saved);
+          saved === "all" || saved === "chef-special" || saved === "favorites" || cats.some((c) => c.slug === saved);
         setCurrentCategory((cur) => cur || (valid ? saved : cats[0]?.slug || ""));
       })
       .catch((err) => console.error("Error loading categories:", err));
@@ -266,11 +275,13 @@ export default function MenuPage() {
       (i) => i.is4d && i.modelSmallUrl && i.modelOptimizedUrl
     );
 
-    // Dishes in the current category (preload first) vs. everything else.
-    const inCat = !currentCategory
+    // Dishes in the current category (preload first) vs. everything else. The "All"
+    // view shows every category, so treat it like no filter — preload them all.
+    const isAllView = !currentCategory || currentCategory === "all";
+    const inCat = isAllView
       ? fourD
       : fourD.filter((i) => i.category === currentCategory);
-    const outCat = !currentCategory
+    const outCat = isAllView
       ? []
       : fourD.filter((i) => i.category !== currentCategory);
 
@@ -317,7 +328,9 @@ export default function MenuPage() {
       if (!favorites.includes(item.id)) return false;
     } else if (currentCategory === "chef-special") {
       if (!item.tags.includes("chef-special")) return false;
-    } else if (currentCategory && item.category !== currentCategory) {
+    } else if (currentCategory && currentCategory !== "all" && item.category !== currentCategory) {
+      // In the "All" view we keep every category's dishes (they're grouped into
+      // dropdowns below); only a specific category narrows down to itself.
       return false;
     }
     // Diet filter: hide non-veg when "veg" is on, and vice versa.
@@ -357,6 +370,20 @@ export default function MenuPage() {
         return 0; // recommended = original menu order
     }
   });
+
+  // For the "All" view: split the (already diet-filtered, sorted) dishes into one
+  // group per real category, in the categories' own order, dropping any that end up
+  // empty. Each group becomes a collapsible dropdown in the list below.
+  const allGroups =
+    currentCategory === "all" && !q
+      ? dbCategories
+          .map((c) => ({
+            slug: c.slug,
+            name: localized(c.name, lang),
+            items: filteredItems.filter((it) => it.category === c.slug),
+          }))
+          .filter((g) => g.items.length > 0)
+      : [];
 
   // Everything below is the actual on-screen layout (JSX = HTML-like markup).
   // Curly braces { } drop a value or a bit of logic into the markup.
@@ -514,54 +541,93 @@ export default function MenuPage() {
           </div>
         </div>
 
-        {/* The dishes themselves. The class switches to gallery-mode when the
-            gallery layout is picked. */}
-        <div
-          id="items-container"
-          className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}
-        >
-          {/* Three cases, in order:
-              1) dishes not loaded yet  -> maybe show grey placeholder cards
-              2) on Favorites with none -> show the friendly "how to favorite" tip
-              3) otherwise              -> draw a FoodCard for each dish */}
-          {menuData.length === 0
-            ? (showSkeleton
-                ? Array.from({ length: 6 }).map((_, i) => (
-                    <div key={`sk-${i}`} className="item-card skeleton-card" aria-hidden="true">
-                      <div className="sk-thumb"></div>
-                      <div className="sk-lines">
-                        <div className="sk-line w70"></div>
-                        <div className="sk-line w40"></div>
-                        <div className="sk-line w50"></div>
-                      </div>
+        {/* The dishes. Three shapes:
+            A) still loading            -> grey placeholder cards
+            B) the "All" view           -> one collapsible dropdown PER category
+            C) a single category/search -> the normal flat grid (with the
+                                           Favorites-empty tip when relevant) */}
+        {menuData.length === 0 ? (
+          // A) loading skeleton
+          <div className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}>
+            {showSkeleton
+              ? Array.from({ length: 6 }).map((_, i) => (
+                  <div key={`sk-${i}`} className="item-card skeleton-card" aria-hidden="true">
+                    <div className="sk-thumb"></div>
+                    <div className="sk-lines">
+                      <div className="sk-line w70"></div>
+                      <div className="sk-line w40"></div>
+                      <div className="sk-line w50"></div>
                     </div>
-                  ))
-                : null)
-            : currentCategory === "favorites" && !q && filteredItems.length === 0
-            ? (
-                <div className="fav-empty" role="status">
-                  {/* Little how-to: a mock dish card with the heart pinned at its
-                      top-right, so guests can SEE where to tap to favorite. */}
-                  <div className="fav-howto" aria-hidden="true">
-                    <div className="fav-howto-card">
-                      <i className="fas fa-mug-saucer fav-howto-pic"></i>
-                      <span className="fav-howto-heart"><i className="fas fa-heart"></i></span>
-                    </div>
-                    <span className="fav-howto-cue">tap to save</span>
                   </div>
-                  <h3 className="fav-empty-title">No favorites yet</h3>
-                  <p className="fav-empty-sub">
-                    Open any dish, then tap the{" "}
-                    <i className="fas fa-heart" aria-hidden="true"></i> at the{" "}
-                    <b>top-right</b> — it stays saved here for next time.
-                  </p>
+                ))
+              : null}
+          </div>
+        ) : currentCategory === "all" && !q ? (
+          // B) "All" view: each category is its own collapsible dropdown. The header
+          // shows the name + dish count + a chevron; tapping it folds that category
+          // away. Every dropdown starts open (collapsedCats records the closed ones).
+          <div className="cat-groups">
+            {allGroups.map((g) => {
+              const open = !collapsedCats.includes(g.slug);
+              return (
+                <section key={g.slug} className="cat-group">
+                  <button
+                    type="button"
+                    className="cat-group-head"
+                    aria-expanded={open}
+                    onClick={() => toggleCatGroup(g.slug)}
+                  >
+                    <span className="cat-group-title">
+                      {g.name} <span className="cat-group-count">({g.items.length})</span>
+                    </span>
+                    <i
+                      className={`fas fa-chevron-${open ? "up" : "down"} cat-group-chev`}
+                      aria-hidden="true"
+                    ></i>
+                  </button>
+                  {open && (
+                    <div className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}>
+                      {g.items.map((item, index) => (
+                        <FoodCard key={item.id} item={item} index={index} viewingCategory={g.slug} />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        ) : (
+          // C) single category / search / favorites — the normal flat grid.
+          <div
+            id="items-container"
+            className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}
+          >
+            {currentCategory === "favorites" && !q && filteredItems.length === 0 ? (
+              <div className="fav-empty" role="status">
+                {/* Little how-to: a mock dish card with the heart pinned at its
+                    top-right, so guests can SEE where to tap to favorite. */}
+                <div className="fav-howto" aria-hidden="true">
+                  <div className="fav-howto-card">
+                    <i className="fas fa-mug-saucer fav-howto-pic"></i>
+                    <span className="fav-howto-heart"><i className="fas fa-heart"></i></span>
+                  </div>
+                  <span className="fav-howto-cue">tap to save</span>
                 </div>
-              )
-            : // Normal case: one FoodCard tile per dish in the filtered list.
+                <h3 className="fav-empty-title">No favorites yet</h3>
+                <p className="fav-empty-sub">
+                  Open any dish, then tap the{" "}
+                  <i className="fas fa-heart" aria-hidden="true"></i> at the{" "}
+                  <b>top-right</b> — it stays saved here for next time.
+                </p>
+              </div>
+            ) : (
+              // Normal case: one FoodCard tile per dish in the filtered list.
               filteredItems.map((item, index) => (
                 <FoodCard key={item.id} item={item} index={index} viewingCategory={currentCategory} />
-              ))}
-        </div>
+              ))
+            )}
+          </div>
+        )}
       </main>
     </AppShell>
   );

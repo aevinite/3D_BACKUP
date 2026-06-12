@@ -764,6 +764,26 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding: 14px;
 }
 
+/* --- "ALL" VIEW: collapsible category dropdowns --- */
+/* Each category becomes a section: a tappable header (name + count + chevron) and,
+   when open, its normal grid of dish cards underneath. Capped + centred on wide
+   screens like the rest of the menu content. */
+.cat-group { max-width: 1100px; margin-inline: auto; width: 100%; }
+.cat-group-head {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 16px 20px; background: transparent; border: none;
+  border-top: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  cursor: pointer; color: var(--text); font: inherit; text-align: left;
+}
+.cat-group:first-child .cat-group-head { border-top: none; }
+.cat-group-head:hover .cat-group-title { color: var(--accent, #d4a574); }
+.cat-group-title { font-size: 18px; font-weight: 700; letter-spacing: -0.2px; }
+.cat-group-count { color: var(--muted); font-weight: 600; font-size: 14px; }
+.cat-group-chev { color: var(--muted); font-size: 15px; flex: 0 0 auto; }
+/* When a dropdown is open its cards keep the normal grid/list spacing, but trim the
+   top padding so they sit snug under the header. */
+.cat-group .items-container { padding-top: 4px; }
+
 /* WIDE-SCREEN CONTAINMENT — the menu is mobile-first; on tablet/desktop the
    content used to stretch edge-to-edge (oversized cards, very long lines, a
    sparse look). Cap the page's content blocks to a comfortable width and centre
