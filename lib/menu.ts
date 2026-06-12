@@ -290,6 +290,10 @@ export interface Settings {
   geoLat: number | null;   // café centre; null => location check bypassed (stub)
   geoLng: number | null;
   geoRadiusM: number;      // how far from the centre still counts as "at the café"
+  // Per-restaurant feature switches (migration 035). RAW overrides only — the
+  // app merges these over code-side defaults in lib/features.ts, so an absent
+  // key simply means "default behavior".
+  features: Record<string, boolean>;
 }
 // Reads the single site-wide settings row and returns it with safe defaults,
 // so the app still works even if settings haven't been configured yet.
@@ -317,6 +321,10 @@ export async function getSettings(): Promise<Settings> {
     geoLat: data ? num(data.geo_lat) : null,
     geoLng: data ? num(data.geo_lng) : null,
     geoRadiusM: data ? Number(data.geo_radius_m) || 250 : 250,
+    // Keep only honest boolean overrides; anything malformed is ignored.
+    features: data && data.features && typeof data.features === "object"
+      ? Object.fromEntries(Object.entries(data.features as Record<string, unknown>).filter(([, v]) => typeof v === "boolean")) as Record<string, boolean>
+      : {},
   };
 }
 

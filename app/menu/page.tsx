@@ -30,6 +30,8 @@ import {
 import { useTranslation, useLanguage } from "@/lib/i18n";
 // Remembers the table number scanned from a QR code, for the cart/waiter.
 import { setScannedTable } from "@/lib/table";
+// Per-restaurant feature switches (search/favorites/3D/scroll-spy on-off).
+import { useFeatures } from "@/lib/features";
 
 // The card list works with the full MenuItem shape from the data layer.
 type FoodItem = MenuItem;
@@ -55,6 +57,7 @@ const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
 export default function MenuPage() {
   const t = useTranslation();   // translated text for the current language
   const lang = useLanguage();   // which language is active right now
+  const features = useFeatures(); // which restaurant features are switched on
   // Each useState below is a piece of memory this page keeps. The first value
   // is the current value; the "set..." function changes it (and redraws).
   const [menuData, setMenuData] = useState<FoodItem[]>([]);        // all dishes
@@ -104,7 +107,8 @@ export default function MenuPage() {
       color: c.color || "#d4a574",
     })),
     { slug: "chef-special", name: "Chef's Special", icon: "fa-star", color: "#e8b884" },
-    { slug: "favorites", name: "Favorites", icon: "fa-heart", color: "#ef4444" },
+    // The Favorites tab only exists while the favorites feature is switched on.
+    ...(features.favorites ? [{ slug: "favorites", name: "Favorites", icon: "fa-heart", color: "#ef4444" }] : []),
   ];
 
   // A category is ALWAYS selected — clicking just switches, never clears.
@@ -329,6 +333,7 @@ export default function MenuPage() {
   // Re-runs when the dishes load or the category changes.
   useEffect(() => {
     if (!menuData.length) return;  // wait until dishes have loaded
+    if (!features.model3d) return; // 3D switched off -> don't download a single model byte
 
     // Only dishes that have a working 3D model (both file sizes present).
     const fourD = menuData.filter(
@@ -359,7 +364,7 @@ export default function MenuPage() {
       [],
       []
     );
-  }, [menuData, currentCategory]);
+  }, [menuData, currentCategory, features.model3d]);
 
   // Search matches the dish name OR its category (slug + translated name), so
   // typing "croissant" finds the croissant-category dishes even though their
@@ -504,6 +509,8 @@ export default function MenuPage() {
         {/* The sticky bar: search box on top, then the filter/sort/layout
             controls. It stays pinned as you scroll the dishes. */}
         <div className="items-header" id="sticky-header">
+          {/* The search box — gone when the search feature is switched off. */}
+          {features.search && (
           <div className="search-container">
             {/* The little logo tucked inside the search box. */}
             <img
@@ -546,6 +553,7 @@ export default function MenuPage() {
               </div>
             )}
           </div>
+          )}
           {/* The row of sort chips, diet chips, and the list/gallery toggle. */}
           <div className="header-controls">
             <div className="controls-group">
@@ -607,7 +615,7 @@ export default function MenuPage() {
               (it lives inside this sticky header). Shows only in the "All" view:
               the active chip follows the scroll (see the scroll-spy above), and
               tapping a chip smooth-scrolls straight to that category's section. */}
-          {currentCategory === "all" && !q && allGroups.length > 0 && (
+          {features.scrollspy && currentCategory === "all" && !q && allGroups.length > 0 && (
             <div className="spy-strip" id="spy-strip" role="tablist" aria-label="Jump to category">
               {allGroups.map((g) => (
                 <button

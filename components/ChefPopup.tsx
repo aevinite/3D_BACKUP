@@ -8,10 +8,13 @@ import { callWaiter, getSettings } from "@/lib/menu";
 import { validateTable, flagTableInput, getScannedTable, setScannedTable } from "@/lib/table";
 // Reads the saved dining session (if the guest is seated at a table).
 import { getStoredSession } from "@/lib/session";
+// Per-restaurant feature switches: waiter calls can be turned off entirely.
+import { useFeatures } from "@/lib/features";
 
 // ChefPopup — the little "Need something?" pop-up where a guest picks a request
 // (water, cutlery, the bill, etc.) and it gets sent to the staff for their table.
 export default function ChefPopup() {
+  const features = useFeatures(); // which restaurant features are switched on
   // Tracks each piece of what the pop-up needs to remember:
   const [open, setOpen] = useState(false); // is the pop-up showing right now?
   const [tableNumber, setTableNumber] = useState(""); // the table number typed/filled in
@@ -122,6 +125,9 @@ export default function ChefPopup() {
   };
 
   // If the pop-up isn't open, draw nothing.
+  // Waiter calls switched off for this restaurant -> the popup can never open,
+  // even if a stray event asks it to (the bell button is gated separately).
+  if (!features.waiter_calls) return null;
   if (!open) return null;
 
   // What the guest sees when the pop-up is open:

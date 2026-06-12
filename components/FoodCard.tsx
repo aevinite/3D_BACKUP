@@ -8,6 +8,8 @@ import VegIcon from "./VegIcon";
 // The "must be at a table to order" gate. When dining-sessions are on and the
 // guest isn't connected, this opens the join flow and runs the add afterwards.
 import { gateAddToCart } from "@/lib/tableConnection";
+// Per-restaurant feature switches: ratings / 3D badges can be turned off.
+import { useFeatures } from "@/lib/features";
 
 // The full set of details one dish can have. The "?" ones are optional.
 interface FoodItem {
@@ -65,6 +67,7 @@ const writeCart = (cart: CartItem[]) => {
 // add/customise button. `index` is its position (used to stagger the fade-in);
 // `viewingCategory` is the current filter, remembered in the link.
 export default function FoodCard({ item, index, viewingCategory }: { item: FoodItem; index: number; viewingCategory?: string }) {
+  const features = useFeatures(); // which restaurant features are switched on
   // How many of this (plain) dish are in the cart — shows on the +/- counter.
   const [cartQty, setCartQty] = useState(0);
   // The currency to format the price in (e.g. $, €). Loaded on screen.
@@ -210,8 +213,9 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
             decoding="async"
             onLoad={() => setImgLoaded(true)}
           />
-          {/* Show a little "4D" cube badge only if this dish has a 3D model */}
-          {item.is4d ? (
+          {/* Show a little "4D" cube badge only if this dish has a 3D model
+              (and the restaurant hasn't switched the 3D feature off). */}
+          {item.is4d && features.model3d ? (
             <div className="badge-4d">
               <i className="fas fa-cube"></i> 4D
             </div>
@@ -221,13 +225,14 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
           <div className="dish-name">
             {item.title}
             {/* A small cube icon beside the name for 4D dishes */}
-            {item.is4d ? <i className="fas fa-cube dish-4d-icon"></i> : null}
+            {item.is4d && features.model3d ? <i className="fas fa-cube dish-4d-icon"></i> : null}
           </div>
           {/* Rating (real average) and prep time. Dishes with no reviews yet
               show only the prep time — no invented stars, no extra badges
-              (the owner rejected a "New" badge here on 2026-06-10). */}
+              (the owner rejected a "New" badge here on 2026-06-10). The whole
+              rating disappears when the restaurant switches ratings off. */}
           <div className="dish-meta">
-            {item.reviewCount && item.reviewCount > 0 ? (
+            {features.ratings && item.reviewCount && item.reviewCount > 0 ? (
               <>{item.rating} ★ • </>
             ) : null}{item.time || "25-30 min"}
           </div>

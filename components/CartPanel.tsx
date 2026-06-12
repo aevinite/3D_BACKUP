@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
+// Per-restaurant feature switches: the allergy section can be turned off.
+import { useFeatures } from "@/lib/features";
 import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
 import { getStoredSession } from "@/lib/session";
 import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
@@ -143,6 +145,7 @@ const normalize = (raw: unknown): CartItem[] => {
 // the guest change quantities, flag allergies, enter their table number, and
 // place the order. It also has a "Previous orders" tab with live + past orders.
 export default function CartPanel() {
+  const features = useFeatures(); // which restaurant features are switched on
   // Each useState below is a memory box; changing it re-draws the panel:
   const [open, setOpen] = useState(false); // is the panel slid open?
   const [cart, setCart] = useState<CartItem[]>([]); // the current cart lines
@@ -830,7 +833,9 @@ export default function CartPanel() {
               </div>
             )}
 
-            {/* Order-wide allergy section: tap chips for things to avoid across the whole order. */}
+            {/* Order-wide allergy section: tap chips for things to avoid across
+                the whole order. Gone when the allergy feature is switched off. */}
+            {features.allergies && (
             <div className="allergy-section">
               <h4><i className="fas fa-shield-heart"></i> Any allergies? Tap what you avoid</h4>
               <div className="allergy-chips">
@@ -875,6 +880,7 @@ export default function CartPanel() {
                 </div>
               )}
             </div>
+            )}
 
             {/* A little note above the table field: locked (in a session) or pre-filled from a QR. */}
             {lockedTable ? (

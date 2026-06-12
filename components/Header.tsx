@@ -3,6 +3,8 @@
 
 import { useEffect, useState } from "react";
 import NavPicker from "./NavPicker";
+// Per-restaurant feature switches: currency/language pickers can be turned off.
+import { useFeatures } from "@/lib/features";
 import {
   CURRENCIES,
   LANGUAGES,
@@ -30,6 +32,7 @@ const readTheme = (): Theme => {
 // Header: the top bar with the restaurant name, currency/language pickers, a
 // light/dark toggle, and the cart button (with its item-count badge).
 export default function Header() {
+  const features = useFeatures(); // which restaurant features are switched on
   // Each useState below is a labelled memory box the header keeps:
   const [mounted, setMounted] = useState(false); // has the header finished loading in the browser yet?
   const [theme, setTheme] = useState<Theme>("light"); // current look: dark or light
@@ -130,8 +133,9 @@ export default function Header() {
       {/* Right: all the action buttons (currency, language, theme, cart). */}
       <div className="nav-actions">
         {/* Currency dropdown: button shows the current symbol; the list lets
-            the guest pick another. onSelect calls setCurrency to switch. */}
-        <NavPicker
+            the guest pick another. onSelect calls setCurrency to switch.
+            Gone when the currency feature is off (₹-only menu). */}
+        {features.currency && <NavPicker
           buttonLabel="Currency"
           buttonContent={<span style={{ fontSize: 14 }}>{currency.symbol}</span>}
           options={CURRENCIES.map((c) => ({
@@ -145,9 +149,10 @@ export default function Header() {
             active: currency.code === c.code,
             onSelect: () => setCurrency(c.code),
           }))}
-        />
-        {/* Language dropdown: same idea as currency, but for the menu language. */}
-        <NavPicker
+        />}
+        {/* Language dropdown: same idea as currency, but for the menu language.
+            Gone when the languages feature is off (English-only menu). */}
+        {features.languages && <NavPicker
           buttonLabel="Language"
           buttonContent={<span style={{ fontSize: 12 }}>{language.short}</span>}
           options={LANGUAGES.map((l) => ({
@@ -161,7 +166,7 @@ export default function Header() {
             active: language.code === l.code,
             onSelect: () => setLanguage(l.code),
           }))}
-        />
+        />}
         {/* The light/dark toggle button. Tapping it runs toggleTheme. */}
         <button
           className="nav-btn"

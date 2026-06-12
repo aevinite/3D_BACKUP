@@ -13,6 +13,7 @@ import { modelLoader } from "@/lib/modelLoader";     // 3D model download manage
 import { getMenuItems, getItemReviews, submitReview as submitReviewRpc } from "@/lib/menu"; // dishes + reviews + the review-saving RPC
 import { getDeviceId } from "@/lib/device";          // stable per-browser id (one rating per dish per device)
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
+import { useFeatures } from "@/lib/features"; // per-restaurant feature switches
 import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // money formatting
 import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
 import { useTranslation } from "@/lib/i18n";         // translated text strings
@@ -62,6 +63,7 @@ interface FoodItem {
 // `fromCat` (which category the guest came from, for prev/next arrows).
 export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: string }) {
   const t = useTranslation();  // translated text for the current language
+  const features = useFeatures(); // which restaurant features are switched on
   // All the little pieces of memory this page keeps (current value + setter):
   const [allItems, setAllItems] = useState<FoodItem[]>([]);  // every dish (for related/next/prev)
   const [item, setItem] = useState<FoodItem | null>(null);   // THIS dish (null until found)
@@ -485,14 +487,17 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
         </Link>
         {/* A flexible spacer that pushes the heart to the right edge. */}
         <div style={{ flex: 1 }}></div>
-        {/* The favorite heart. "fas" = solid (hearted), "far" = outline (not). */}
-        <button id="detail-fav" className="nav-btn" onClick={toggleFavorite}>
-          <i className={`${favorited ? 'fas' : 'far'} fa-heart`} style={{ color: favorited ? '#ef4444' : '' }}></i>
-        </button>
+        {/* The favorite heart. "fas" = solid (hearted), "far" = outline (not).
+            Gone entirely when the favorites feature is switched off. */}
+        {features.favorites && (
+          <button id="detail-fav" className="nav-btn" onClick={toggleFavorite}>
+            <i className={`${favorited ? 'fas' : 'far'} fa-heart`} style={{ color: favorited ? '#ef4444' : '' }}></i>
+          </button>
+        )}
       </div>
 
       {/* The one-time "tap the heart to save" coachmark, shown only briefly. */}
-      {showFavHint && (
+      {features.favorites && showFavHint && (
         <div className="fav-hint" role="status">
           <span className="fav-hint-tip" aria-hidden="true"></span>
           Tap the <i className="fas fa-heart" aria-hidden="true"></i> to save this to your Favorites
@@ -591,7 +596,8 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
             stays empty: no invented stars, no badges (the owner rejected a
             "New" badge on 2026-06-10). */}
         <div className="rating-row" id="detail-rating-row">
-          {reviewCount === 0 ? null : (
+          {/* Hidden entirely when the restaurant switches ratings off. */}
+          {!features.ratings || reviewCount === 0 ? null : (
             <>
               <div className="stars">
                 {/* Draw 5 stars: full, a partial one, or empty, based on the rating. */}
@@ -687,8 +693,9 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
               );
             })}
           </div>}
-          {/* When expanded and the dish has allergens, list them too. */}
-          {descExpanded && item.allergens.length > 0 && (
+          {/* When expanded and the dish has allergens, list them too —
+              unless the allergy feature is switched off for this restaurant. */}
+          {features.allergies && descExpanded && item.allergens.length > 0 && (
             <>
               <div className="ing-inside-label">Contains</div>
               <div className="allergens-list">
@@ -717,8 +724,9 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
           {/* Show the live 3D button if a model exists; otherwise the greyed-out
               "3D preview unavailable" status. The owner WANTS the status visible
               (2026-06-10): it tells guests 3D previews are a feature of this
-              menu, just not ready for this dish yet. Do not remove it. */}
-          {item.is4d && item.modelFolder ? (
+              menu, just not ready for this dish yet. Do not remove it.
+              (Both vanish only when the whole 3D FEATURE is switched off.) */}
+          {features.model3d && (item.is4d && item.modelFolder ? (
             <button id="view-3d-btn" className="btn btn-cyan" onClick={goToViewer}>
               <i className="fas fa-cube"></i> {t.viewIn3D}
             </button>
@@ -726,10 +734,13 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
             <button className="btn btn-cyan" style={{ opacity: 0.5, cursor: 'not-allowed' }} disabled>
               <i className="fas fa-cube"></i> {t.preview3dUnavailable}
             </button>
-          )}
+          ))}
         </div>
 
-        {/* The customer reviews area: two tabs (write one / read them). */}
+        {/* The customer reviews area: two tabs (write one / read them).
+            The ENTIRE area (label, tabs, form, list) disappears when the
+            restaurant switches the reviews feature off. */}
+        {features.reviews && (<>
         <div className="section-label" style={{ marginTop: '24px' }}>{t.customerReviews}</div>
         <div className="review-tabs">
           {/* Tab 1: the "rate this dish" form. */}
@@ -801,7 +812,8 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
             )}
           </div>
         )}
-        
+        </>)}
+
         {/* The "You might like" row — only shown if there are suggestions. */}
         {relatedItems.length > 0 && (
           <>
