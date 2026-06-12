@@ -288,6 +288,14 @@ export default function CartPanel() {
     const handleCurrency = () => setCurrencyState(getCurrency()); // currency switched -> refresh
     // Re-read live orders whenever one is placed or its status changes.
     const handleOrdersChanged = () => { loadLive(); loadHistory(); };
+    // TWO-TABS bridge: "lfh:cart-updated" is a same-tab announcement only, so a
+    // cart change made in ANOTHER tab never reached this one — its badge and
+    // open cart panel showed stale items. The browser's "storage" event DOES
+    // cross tabs, so translate a cross-tab lfh_cart change into the local
+    // announcement every cart listener already understands.
+    const handleStorageCart = (e: StorageEvent) => {
+      if (e.key === "lfh_cart") window.dispatchEvent(new Event("lfh:cart-updated"));
+    };
     // handleAvoidAll: someone ticked "avoid X in all my dishes" in the popup —
     // merge those allergens into our order-wide avoid list.
     const handleAvoidAll = (e: Event) => {
@@ -306,8 +314,10 @@ export default function CartPanel() {
     window.addEventListener("lfh:order-placed", handleOrdersChanged);
     window.addEventListener("lfh:orders-updated", handleOrdersChanged);
     window.addEventListener("storage", handleOrdersChanged); // changes from other tabs
+    window.addEventListener("storage", handleStorageCart);   // cross-tab cart changes
     // Cleanup: stop listening when the panel unmounts so we don't leak listeners.
     return () => {
+      window.removeEventListener("storage", handleStorageCart);
       window.removeEventListener("lfh:avoid-all", handleAvoidAll);
       window.removeEventListener("lfh:open-cart", handleOpen);
       window.removeEventListener("lfh:show-previous-orders", handleShowPrev);

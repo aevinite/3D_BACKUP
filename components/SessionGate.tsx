@@ -78,6 +78,7 @@ export default function SessionGate() {
   const sess = useRef<{ table: string; token: string; memberId: string; role: "owner" | "guest" } | null>(null); // our session once we have one
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null); // the active repeating timer, if any
   const settled = useRef(false); // whether we've already reported how this action ended
+  const joining = useRef(false); // blocks DOUBLE-TAPS on the join buttons (a second tap while one join is in flight would create a duplicate membership)
   const videoRef = useRef<HTMLVideoElement | null>(null); // the camera preview on the scan screen
   const scanStream = useRef<MediaStream | null>(null); // the live camera feed while scanning
   const scanTimer = useRef<ReturnType<typeof setInterval> | null>(null); // the repeating "look for a QR" check
@@ -145,17 +146,24 @@ export default function SessionGate() {
   // Become the table's host. No name needed because you're the first one in.
   // After joining, immediately carry out the queued action.
   const joinAsHead = useCallback(async () => {
-    const p = pending.current!; setStep("joining");
-    const r = await joinSession(p.table, null, coords.current.lat, coords.current.lng);
-    if (r.reason === "blocked") { setStep("blocked"); return; }
-    if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
-    if (r.reason === "no_open_session") { setStep("not_open"); return; } // staff hasn't opened it
-    if (!r.ok) { toast("Couldn't join the table", "table", "error"); close(); return; }
-    // Save the new session and make this table our default everywhere.
-    const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
-    sess.current = s; storeSession(s); rememberTable(s.table);
-    window.dispatchEvent(new Event("lfh:session-changed")); // wake the owner-approve poller
-    await act();
+    // Double-fire guard: a double-tapped Continue runs the whole flow twice in
+    // parallel — the second join would create a ghost "guest" copy of this
+    // person (the DB now refuses a second HEAD, but not a stray guest row).
+    if (joining.current) return;
+    joining.current = true;
+    try {
+      const p = pending.current!; setStep("joining");
+      const r = await joinSession(p.table, null, coords.current.lat, coords.current.lng);
+      if (r.reason === "blocked") { setStep("blocked"); return; }
+      if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
+      if (r.reason === "no_open_session") { setStep("not_open"); return; } // staff hasn't opened it
+      if (!r.ok) { toast("Couldn't join the table", "table", "error"); close(); return; }
+      // Save the new session and make this table our default everywhere.
+      const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
+      sess.current = s; storeSession(s); rememberTable(s.table);
+      window.dispatchEvent(new Event("lfh:session-changed")); // wake the owner-approve poller
+      await act();
+    } finally { joining.current = false; }
   }, [act, close]);
 
   // While the guest waits for staff to open the table, poll until it opens — then
@@ -334,19 +342,31 @@ export default function SessionGate() {
   // This runs when the guest taps "Ask to join this table": send their name to
   // the host. If auto-approved, act now; otherwise wait for the host's OK.
   const doJoinAsGuest = async () => {
-    const p = pending.current!; setStep("joining");
-    const r = await joinSession(p.table, name.trim() || null, coords.current.lat, coords.current.lng);
-    if (r.reason === "blocked") { setStep("blocked"); return; }
-    if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
-    if (r.reason === "no_open_session") { setStep("not_open"); return; }
-    if (!r.ok) { toast("Couldn't join", "table", "error"); close(); return; }
-    // Save the session and make this our default table.
-    const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
-    sess.current = s; storeSession(s); rememberTable(s.table);
-    window.dispatchEvent(new Event("lfh:session-changed"));
-    // If the table auto-approves, go straight to acting; else wait for the host.
-    if (r.approved) await ensureReadyAndAct();
-    else { setStep("waiting_approval"); startApprovalPoll(); }
+    // Double-tap guard: two fast taps on "Ask to join" would create the same
+    // person TWICE in the head's approve list (one of them a permanent ghost).
+    if (joining.current) return;
+    joining.current = true;
+    try {
+      const p = pending.current!;
+      // TWO-TABS guard: another tab on this same phone may have JUST joined this
+      // table (they share storage). If a session appeared while this screen was
+      // open, reuse it instead of creating a second membership.
+      const already = getStoredSession(p.table);
+      if (already) { sess.current = already; await ensureReadyAndAct(); return; }
+      setStep("joining");
+      const r = await joinSession(p.table, name.trim() || null, coords.current.lat, coords.current.lng);
+      if (r.reason === "blocked") { setStep("blocked"); return; }
+      if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
+      if (r.reason === "no_open_session") { setStep("not_open"); return; }
+      if (!r.ok) { toast("Couldn't join", "table", "error"); close(); return; }
+      // Save the session and make this our default table.
+      const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
+      sess.current = s; storeSession(s); rememberTable(s.table);
+      window.dispatchEvent(new Event("lfh:session-changed"));
+      // If the table auto-approves, go straight to acting; else wait for the host.
+      if (r.approved) await ensureReadyAndAct();
+      else { setStep("waiting_approval"); startApprovalPoll(); }
+    } finally { joining.current = false; }
   };
 
   // Formal "request a waiter to your table" — used when location can't be

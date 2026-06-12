@@ -131,6 +131,86 @@ try {
     method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
   });
   check(mh.status === 400, `make-head on a closed table is refused (got ${mh.status})`);
+
+  // ── 5. DOUBLE-TAP "Ask to join" must not create the same guest twice ───────
+  sess = await newSession();
+  await sb("POST", "session_members", { session_id: sess.id, name: null, token: tok("dh_"), role: "owner", approved: true });
+  const ctx5 = await browser.newContext();
+  const p5 = await ctx5.newPage();
+  await p5.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await p5.evaluate((t) => localStorage.setItem("lfh_table", t), TABLE);
+  await p5.waitForTimeout(1200);
+  await p5.evaluate((t) => window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "connect", table: t, payload: {} } })), TABLE);
+  await p5.waitForSelector("text=already open", { timeout: 8000 }); // the "add your name" screen
+  await p5.fill(".sg-input", "DoubleTap");
+  // fire the tap TWICE in the same instant — the realistic nervous-thumb case
+  await p5.evaluate(() => {
+    const btn = [...document.querySelectorAll(".sg-btn")].find((b) => /ask to join/i.test(b.textContent));
+    btn.click(); btn.click();
+  });
+  await p5.waitForTimeout(2500);
+  const dupes = await sb("GET", `session_members?session_id=eq.${sess.id}&name=eq.DoubleTap&select=id`);
+  check(dupes.length === 1, `double-tapped Ask-to-join creates exactly ONE membership (got ${dupes.length})`);
+  await ctx5.close();
+  await closeSession(sess.id);
+
+  // ── 6. DOUBLE-FIRED connect on an EMPTY table must not create a ghost ──────
+  sess = await newSession();
+  const ctx6 = await browser.newContext();
+  const p6 = await ctx6.newPage();
+  await p6.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await p6.evaluate((t) => localStorage.setItem("lfh_table", t), TABLE);
+  await p6.waitForTimeout(1200);
+  await p6.evaluate((t) => {
+    const fire = () => window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "connect", table: t, payload: {} } }));
+    fire(); fire(); // two flows race; only one join may reach the database
+  }, TABLE);
+  await p6.waitForTimeout(3000);
+  const m6 = await sb("GET", `session_members?session_id=eq.${sess.id}&removed=eq.false&select=id,role`);
+  check(m6.length === 1 && m6[0].role === "owner", `double-fired connect on an empty table -> exactly one member, the head (got ${m6.length})`);
+  await ctx6.close();
+  await closeSession(sess.id);
+
+  // ── 7. TWO TABS on one phone must not join the same table twice ────────────
+  sess = await newSession();
+  await sb("POST", "session_members", { session_id: sess.id, name: null, token: tok("th_"), role: "owner", approved: true });
+  const ctx7 = await browser.newContext(); // one context = one phone (shared storage)
+  const tabA = await ctx7.newPage();
+  const tabB = await ctx7.newPage();
+  for (const tab of [tabA, tabB]) {
+    await tab.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+    await tab.evaluate((t) => localStorage.setItem("lfh_table", t), TABLE);
+    await tab.waitForTimeout(1000);
+    await tab.evaluate((t) => window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "connect", table: t, payload: {} } })), TABLE);
+    await tab.waitForSelector("text=already open", { timeout: 8000 });
+  }
+  // tab A joins for real…
+  await tabA.fill(".sg-input", "TabPerson");
+  await tabA.click("text=Ask to join this table");
+  await tabA.waitForSelector("text=Waiting for the table", { timeout: 8000 });
+  // …tab B (same phone, stale screen) tries too — it must REUSE tab A's session.
+  await tabB.fill(".sg-input", "TabPerson");
+  await tabB.click("text=Ask to join this table");
+  await tabB.waitForSelector("text=Waiting for the table", { timeout: 8000 });
+  const guests7 = await sb("GET", `session_members?session_id=eq.${sess.id}&role=eq.guest&removed=eq.false&select=id`);
+  check(guests7.length === 1, `two tabs joining the same table create ONE membership, not two (got ${guests7.length})`);
+  await ctx7.close();
+  await closeSession(sess.id);
+
+  // ── 8. a cart change in one tab must show up in the other tab's badge ──────
+  const ctx8 = await browser.newContext();
+  const pgA = await ctx8.newPage();
+  const pgB = await ctx8.newPage();
+  await pgA.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await pgB.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await pgB.waitForTimeout(1200);
+  await pgA.evaluate(() => {
+    localStorage.setItem("lfh_cart", JSON.stringify([{ id: "espresso", title: "Espresso", price: 120, qty: 2 }]));
+  });
+  await pgB.waitForTimeout(1500);
+  const badge = await pgB.locator(".cart-badge").textContent().catch(() => null);
+  check(badge === "2", `cart added in tab A shows on tab B's badge (got ${badge ?? "no badge"})`);
+  await ctx8.close();
 } finally {
   await browser.close();
   await cleanup();
