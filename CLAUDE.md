@@ -5,6 +5,17 @@ selected dishes. The user is a beginner who vibe-codes; teach as you build,
 keep chat in plain language, explain why before how. See user/feedback
 memory for tone and preferences.
 
+## Long-term direction (owner, 2026-06-12 — context only, do NOT build yet)
+
+This becomes a **hybrid SaaS**: one shared backend serving MANY restaurants, where
+every feature (dining sessions, 3D viewer, geofence, waiter calls, allergy system…)
+can be **enabled/disabled PER RESTAURANT** — a per-tenant feature-flag model.
+Frontends may differ completely per restaurant (white-label); the backend stays one
+engine. Implications to keep in mind when building today: keep business rules in the
+backend (RPCs/endpoints, not the UI), keep features cleanly separable, and avoid
+hard-wiring single-restaurant assumptions deeper than necessary. Nothing multi-tenant
+is to be built until the owner says so.
+
 ## Stack at a glance
 
 - Next 16.2.6, App Router, async `params`. React 19.2.4. TS strict.
