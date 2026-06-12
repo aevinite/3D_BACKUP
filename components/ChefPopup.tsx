@@ -144,7 +144,8 @@ export default function ChefPopup() {
         {lockedTable ? (
           <div className="table-scanned-note">🔒 You&apos;re at table {lockedTable} — leave the table to use another</div>
         ) : (scannedTable && tableNumber === scannedTable && (
-          <div className="table-scanned-note">📍 Table {scannedTable} — from your table&apos;s QR</div>
+          // Shows for a QR-scanned AND a hand-typed number (both are remembered).
+          <div className="table-scanned-note">📍 Table {scannedTable} — we&apos;ll remember this is your table</div>
         ))}
         {/* The table-number box. It's locked (read-only) when you're in a session.
             When it's NOT locked, a little ✕ lets the guest wipe an auto-filled
@@ -160,8 +161,17 @@ export default function ChefPopup() {
             placeholder="Table No."
             value={lockedTable || tableNumber}
             maxLength={4} disabled={!!lockedTable} readOnly={!!lockedTable}
-            // Keep only digits so letters/symbols can never reach the field.
-            onChange={(e) => setTableNumber(e.target.value.replace(/\D/g, ""))}
+            onChange={(e) => {
+              // Keep only digits so letters/symbols can never reach the field.
+              const v = e.target.value.replace(/\D/g, "");
+              setTableNumber(v);
+              // Typing your table number HERE counts as telling the app where you
+              // sit (owner, 2026-06-12): remember it device-wide — the same memory
+              // a QR scan writes — so Add-to-cart / the join flow never re-ask.
+              // The ✕ button wipes this same memory; backspacing to empty does too.
+              setScannedTable(v);
+              window.dispatchEvent(new Event("lfh:table-scanned"));
+            }}
           />
           {!lockedTable && (tableNumber || scannedTable) && (
             <button type="button" className="table-input-clear" aria-label="Clear table number"
