@@ -53,7 +53,30 @@ const [head] = await sb("POST", "session_members", { session_id: sess.id, name: 
 const [guest] = await sb("POST", "session_members", { session_id: sess.id, name: "Verify Partner", token: guestTok, role: "guest", approved: false });
 
 const browser = await chromium.launch();
+
+// Dispatch the gate's "connect" event until its popup appears — a freshly-loaded
+// dev page may hydrate a beat after first paint and silently lose earlier events.
+const fireGate = async (page, table) => {
+  await page.waitForSelector(".cat-group-head", { timeout: 20000 }); // menu rendered = React alive
+  for (let i = 0; i < 6; i++) {
+    await page.evaluate((t) => {
+      window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "connect", table: t, payload: {} } }));
+    }, table);
+    if (await page.waitForSelector(".sg-overlay", { timeout: 2000 }).catch(() => null)) return;
+  }
+  throw new Error("session gate never opened after 6 dispatches");
+};
+
 try {
+  // Warm-up: force the dev server to compile /menu before any timed scenario.
+  {
+    const w = await browser.newContext();
+    const wp = await w.newPage();
+    await wp.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+    await wp.waitForSelector(".cat-group-head", { timeout: 60000 });
+    await w.close();
+  }
+
   // ── 1+2: the declined partner's screen ─────────────────────────────────────
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
@@ -64,11 +87,8 @@ try {
     localStorage.setItem("lfh_table", t);
   }, [TABLE, guestTok, guest.id]);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(1500); // let the gate mount + settings load
   // Ask the gate to connect — an unapproved member lands on the waiting screen.
-  await page.evaluate((t) => {
-    window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "connect", table: t, payload: {} } }));
-  }, TABLE);
+  await fireGate(page, TABLE);
   await page.waitForSelector("text=Waiting for the table", { timeout: 8000 });
   check(true, "partner sees the waiting screen while unapproved");
 
