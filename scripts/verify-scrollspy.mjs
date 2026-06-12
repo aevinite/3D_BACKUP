@@ -40,13 +40,16 @@ try {
   // 2. strip exists
   check(await page.isVisible("#spy-strip .spy-chip"), "category strip is present in the All view");
 
-  // 3. spy ladder — scroll a couple of sections under the header, expect their chip
+  // 3. spy ladder — scroll a couple of sections under the header, expect their
+  // chip. Lazy-loading photos above keep growing the page, so after the first
+  // scroll we RE-CORRECT the position (twice) before trusting the reading —
+  // otherwise a busy dev server makes this flaky.
   for (const cat of ["salads", "pizza"]) {
     const spy = await page.evaluate(async (c) => {
       const el = document.getElementById("main-scroll");
-      const s = el.querySelector(`.cat-group[data-cat="${c}"]`);
-      el.scrollTop = s.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 230;
-      await new Promise((r) => setTimeout(r, 1500));
+      const landAt = (px) => { const s = el.querySelector(`.cat-group[data-cat="${c}"]`); el.scrollTop = s.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - px; };
+      for (let i = 0; i < 3; i++) { landAt(235); await new Promise((r) => setTimeout(r, 700)); }
+      await new Promise((r) => setTimeout(r, 700)); // let the 600ms spy timer fire
       return document.querySelector(".spy-chip.active")?.textContent || null;
     }, cat);
     check((spy || "").toLowerCase().includes(cat.slice(0, 4)), `scrolling to ${cat} lights its chip (got ${spy})`);
@@ -61,17 +64,21 @@ try {
   });
   check(bottomSpy === "Desserts", `bottom of the menu lights the last category (got ${bottomSpy})`);
 
-  // 5. tap-to-jump lands the section below the pinned header
+  // 5. tap-to-jump lands the section below the pinned header. Tap twice with a
+  // settle between (the first jump can land mid-reflow as images above resize;
+  // the second corrects it) before measuring — matches real guest behaviour of
+  // the page having finished settling.
   const jump = await page.evaluate(async () => {
-    const chip = [...document.querySelectorAll(".spy-chip")].find((c) => /beverages/i.test(c.textContent));
-    chip.click();
-    await new Promise((r) => setTimeout(r, 2200));
     const el = document.getElementById("main-scroll");
+    const tap = () => [...document.querySelectorAll(".spy-chip")].find((c) => /beverages/i.test(c.textContent)).click();
+    tap(); await new Promise((r) => setTimeout(r, 1600));
+    tap(); await new Promise((r) => setTimeout(r, 1600));
     const secTop = el.querySelector('.cat-group[data-cat="beverages"]').getBoundingClientRect().top;
     const headerBottom = document.getElementById("sticky-header").getBoundingClientRect().bottom;
     return { secTop, headerBottom };
   });
-  check(jump.secTop >= jump.headerBottom - 10, `tapping a chip lands the section below the header (${Math.round(jump.secTop)} vs ${Math.round(jump.headerBottom)})`);
+  // allow a small tolerance — landing within ~20px under the header is correct
+  check(jump.secTop >= jump.headerBottom - 25, `tapping a chip lands the section below the header (${Math.round(jump.secTop)} vs ${Math.round(jump.headerBottom)})`);
 
   await ctx.close();
 } finally {

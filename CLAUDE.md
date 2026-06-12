@@ -24,6 +24,45 @@ is to be built until the owner says so.
 - GLB models on Supabase Storage; two tiers per dish (small ~2 MB, optimized ~9 MB).
 - Dev: `npm run dev` (port 4000). Playwright: `node scripts/verify-cache.mjs`.
 
+## The FOUR apps (2026-06-13 restructure — one repo, one Supabase backend)
+
+- **Guest menu** — the Next app (`app/`), port 4000. Petpooja-style scroll-spy
+  category strip lives in the pinned `#sticky-header` on /menu.
+- **editor/** — the boss panel (own git repo + deploy), port 4001. Tabs now
+  include **Dashboard** (Chart.js via CDN, fed by `/api/stats`), **Customers**
+  (CRM-lite + feedback), **Features** (per-restaurant switches). Table panel:
+  KOT chips, per-order discount, ⇄ Shift table, 🖨 Print bill.
+- **kitchen/** — the KDS, port 4002 (`node kitchen/server.js`). KOT tickets in
+  New→Cooking→Ready columns, 86 board (sold-out = the `sold-out` tag), chime.
+- **tablet/** — the waiter captain app, port 4003 (`node tablet/server.js`).
+  Floor tiles + TAKE ORDER for a table via `lfh_staff_place_order` (service-only).
+- kitchen/ and tablet/ are editor-style Express apps (own package.json, optional
+  `KITCHEN_PASSWORD`/`TABLET_PASSWORD` cookie locks, read root `../.env.local`).
+
+## Feature switches (migration 035)
+
+- `settings.features` JSONB merged over `lib/features.ts` defaults; components
+  call `useFeatures()` and render nothing when a switch is off. Editor →
+  Features tab edits the ten guest-facing switches.
+- **Four BACKEND-ONLY switches stay invisible in every UI** (owner's order):
+  `verification`, `payments`, `aggregators`, `gst_invoice` — default OFF,
+  flippable only by hand in the DB. Their plumbing: migration 037
+  (verification_codes + OTP RPCs that answer `disabled`, payments +
+  aggregator_orders tables, GST settings columns).
+
+## KOT / bills / billing depth (migrations 036–038)
+
+- Every order gets a daily `kot_no`, every session a daily `bill_no`
+  (triggers + `daily_counters`); `get_order_status` returns `kot_no`.
+- `orders.discount` (+note) is stored APART from totals; every due/total view
+  is net of discounts. `lfh_staff_shift_table` moves a party atomically.
+- `feedback` table: one rating per order via anon `lfh_leave_feedback`; the
+  guest UI is the star row on past bills in the cart.
+- **GOTCHA: new Postgres functions are PUBLIC-executable by default.** Every
+  staff-only function MUST get `REVOKE ... FROM PUBLIC, anon, authenticated` +
+  `GRANT ... TO service_role` (see migration 038 — the verify run caught anon
+  calling a staff RPC).
+
 ## Architecture cheat sheet
 
 - `lib/modelLoader.ts` — SINGLETON on `globalThis.__lfh_modelLoader`. Downloads

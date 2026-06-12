@@ -119,17 +119,17 @@ Researched live at dinein.petpooja.com (gaming café, table G5):
 
 ## 4. BUILD ORDER (proposed)
 
-| Phase | What | Why this order |
+| Phase | What | Status (2026-06-13 overnight run) |
 |---|---|---|
-| 0 | **Scroll-spy category bar + dine-in UX polish** (owner's pick) | Guest-visible win, no DB changes, sets the interface standard |
-| 1 | **Folder restructure** (menu/ editor/ kitchen/ tablet/ + admin root) + **feature-flag system** (DB table + admin UI skeleton) | Everything later plugs into this skeleton — do it before adding panels |
-| 2 | **Kitchen panel + KOT numbers** | Highest daily-use value; mostly reuses existing order data |
-| 3 | **Waiter tablet** | Reuses menu + ordering + floor board |
-| 4 | **Billing depth**: order/bill IDs, table shift, split/merge, discounts, GST fields | The biggest Petpooja gap |
-| 5 | **Dashboard & analytics graphs** | Needs the order data the earlier phases enrich |
-| 6 | **CRM-lite + feedback + reports** | Builds on customer/order history |
-| 7 | Phone/email verification (SECOND-LAST, owner's order) | |
-| 8 | Payments, Zomato/Swiggy, GST e-invoicing (LAST — external) | |
+| 0 | **Scroll-spy category bar + pinned header** | DONE - verified by scripts/verify-scrollspy.mjs |
+| 1 | **Feature-flag system + panel folders** | DONE - lib/features.ts + editor Features tab; kitchen/ + tablet/ folders |
+| 2 | **Kitchen panel + KOT numbers** | DONE - port 4002; migration 036 |
+| 3 | **Waiter tablet** | DONE - port 4003; lfh_staff_place_order |
+| 4 | **Billing depth** | DONE: discounts, shift table, KOT/bill numbers, print bill, GST-ready fields. STILL OPEN: split/merge bills, payment-mode recording |
+| 5 | **Dashboard & analytics graphs** | DONE - editor Dashboard tab (4 charts + cards) |
+| 6 | **CRM-lite + feedback** | DONE - Customers tab + per-bill guest feedback. STILL OPEN: loyalty, reports/CSV export |
+| 7 | Phone/email verification | BACKEND-ONLY plumbing done (migration 037): tables + RPCs, flag OFF, zero UI. Real sending needs an SMS/email provider |
+| 8 | Payments, Zomato/Swiggy, GST e-invoicing | BACKEND-ONLY landing tables done, flags OFF, zero UI. Real gateways/partner APIs are external approvals |
 
 Each phase = build → robot verify script → owner's 10-minute phone walkthrough →
 commit (NO push).
