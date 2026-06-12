@@ -217,6 +217,16 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 }
 .table-input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-glow); }
 .table-input-error { border-color: #ef4444 !important; box-shadow: 0 0 0 4px rgba(239,68,68,0.25) !important; animation: tableShake 0.4s; }
+/* wrapper that lets the little ✕ float inside the table-number box */
+.table-input-wrap { position: relative; }
+.table-input-wrap .table-input { padding-right: 48px; }
+.table-input-clear {
+  position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  width: 28px; height: 28px; border-radius: 50%; border: none; cursor: pointer;
+  background: rgba(128,128,128,0.18); color: var(--muted); font-size: 13px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.table-input-clear:hover { background: rgba(239,68,68,0.18); color: #ef4444; }
 /* note shown above the table field when it was pre-filled from a table's QR */
 .table-scanned-note { margin: 18px 0 -8px; text-align: center; font-size: 13px; font-weight: 600; color: var(--accent); line-height: 1.4; }
 /* quick service-request reasons in the "Need something?" popup */
@@ -1074,6 +1084,18 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 .sg-sub { font-size: 14px; color: var(--muted); line-height: 1.5; margin: 0 0 18px; }
 .sg-input { width: 100%; box-sizing: border-box; margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; border: var(--border); background: rgba(128,90,60,0.08); color: var(--text); font-size: 15px; font-family: inherit; }
 .sg-input:focus { outline: none; border-color: var(--accent); }
+/* wrapper that lets the little ✕ float inside the join-flow table box */
+.sg-input-wrap { position: relative; }
+.sg-input-wrap .sg-input { padding-right: 42px; }
+.sg-input-clear {
+  position: absolute; right: 10px; top: calc(50% - 6px); transform: translateY(-50%);
+  width: 26px; height: 26px; border-radius: 50%; border: none; cursor: pointer;
+  background: rgba(128,128,128,0.18); color: var(--muted); font-size: 12px; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.sg-input-clear:hover { background: rgba(239,68,68,0.18); color: #ef4444; }
+/* live camera preview while scanning the table's QR sticker */
+.sg-scan-video { width: 100%; max-height: 280px; border-radius: 12px; margin: 4px 0 12px; background: #000; object-fit: cover; }
 .sg-actions { display: flex; gap: 10px; }
 .sg-btn { flex: 1; padding: 13px 16px; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; border: 1px solid transparent; transition: transform .12s var(--ease), filter .15s var(--ease); }
 .sg-btn:active { transform: translateY(1px); }

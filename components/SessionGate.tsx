@@ -41,8 +41,8 @@ const rememberTable = (table: string) => {
 
 // The named screens this gate can show. Think of it as "which page are we on".
 type Step =
-  | "idle" | "ask_table" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "joining"
-  | "waiting_approval" | "request_sent" | "working" | "blocked";
+  | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "joining"
+  | "waiting_approval" | "denied" | "request_sent" | "working" | "blocked";
 
 // Remember (per device) that the guest has already seen the "why we check your
 // location" consent screen, so we only show it the FIRST time and go straight to
@@ -78,9 +78,18 @@ export default function SessionGate() {
   const sess = useRef<{ table: string; token: string; memberId: string; role: "owner" | "guest" } | null>(null); // our session once we have one
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null); // the active repeating timer, if any
   const settled = useRef(false); // whether we've already reported how this action ended
+  const videoRef = useRef<HTMLVideoElement | null>(null); // the camera preview on the scan screen
+  const scanStream = useRef<MediaStream | null>(null); // the live camera feed while scanning
+  const scanTimer = useRef<ReturnType<typeof setInterval> | null>(null); // the repeating "look for a QR" check
 
   // Stops whatever repeating check is currently running.
   const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  // Turns the camera off and stops looking for QR codes (safe to call any time).
+  const stopScan = () => {
+    if (scanTimer.current) { clearInterval(scanTimer.current); scanTimer.current = null; }
+    scanStream.current?.getTracks().forEach((t) => t.stop());
+    scanStream.current = null;
+  };
   // Report how this action ended to the cart/chef — exactly once. If the sheet is
   // dismissed before the action completes, send a cancel so the caller's button
   // never gets stuck on "Placing…".
@@ -97,7 +106,7 @@ export default function SessionGate() {
     // out — without this tag the gate couldn't tell its cancel apart and would keep
     // the abandoned item, adding it later on the next successful connect.
     fireDone({ ok: false, reason: "cancelled", action: pending.current?.action });
-    stopPoll(); setOpen(false); setStep("idle"); setName(""); setNote(""); pending.current = null;
+    stopPoll(); stopScan(); setOpen(false); setStep("idle"); setName(""); setNote(""); pending.current = null;
   }, []);
 
   // ── perform the queued action once the session is ready ────────────────────
@@ -222,6 +231,16 @@ export default function SessionGate() {
     pollRef.current = setInterval(async () => {
       const s = sess.current; if (!s) return stopPoll();
       const state = await getSessionState(s.token);
+      // The head said NO (our member row was removed): stop waiting and say so,
+      // instead of spinning forever. The token is dead now, so forget it — the
+      // guest can call a waiter or start fresh on another table.
+      if (!state.ok && (state as { reason?: string }).reason === "removed") {
+        stopPoll();
+        clearStoredSession(); sess.current = null;
+        fireDone({ ok: false, reason: "denied", action: pending.current?.action });
+        setStep("denied");
+        return;
+      }
       const member = state.member as { approved?: boolean } | undefined;
       if (state.ok && member?.approved) { stopPoll(); act(); }
     }, 1200); // move on within ~1s of the head approving
@@ -337,8 +356,62 @@ export default function SessionGate() {
     setStep("request_sent");
   };
 
-  // Sends the guest back to the menu so they can scan/pick a different table.
-  const rescan = () => { window.location.href = "/menu"; };
+  // Lets the guest pick a DIFFERENT table: forget the remembered table number
+  // (so nothing pre-fills it any more) and go back to the scan-or-type screen —
+  // no page reload, the queued action stays queued.
+  const rescan = () => {
+    stopPoll(); stopScan();
+    setScannedTable("");
+    window.dispatchEvent(new Event("lfh:table-scanned")); // tell cart/chef the prefill is gone
+    setTableInput(""); setName(""); setNote("");
+    setStep("ask_table");
+  };
+
+  // Open the camera and read the table's QR sticker. Uses the browser's built-in
+  // BarcodeDetector (Chrome / Android phones — no scanning library to download);
+  // phones without it just type the number instead. The sticker holds a menu
+  // link (…?table=N), but a QR with a bare number works too.
+  const startScan = async () => {
+    type Detector = { detect: (v: HTMLVideoElement) => Promise<{ rawValue?: string }[]> };
+    const Ctor = (window as unknown as { BarcodeDetector?: new (o?: { formats?: string[] }) => Detector }).BarcodeDetector;
+    if (!Ctor || !navigator.mediaDevices?.getUserMedia) {
+      setNote("Scanning isn't supported on this phone — please type the table number.");
+      return;
+    }
+    setNote(""); setStep("scan_qr");
+    try {
+      // Ask for the BACK camera (facingMode "environment") — that's the one you
+      // point at a sticker. This is also where the browser shows its permission ask.
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      scanStream.current = stream;
+      // The <video> element only exists once the scan screen has drawn — wait briefly.
+      for (let i = 0; i < 20 && !videoRef.current; i++) await new Promise((r) => setTimeout(r, 50));
+      const video = videoRef.current;
+      if (!video) { stopScan(); setStep("ask_table"); return; }
+      video.srcObject = stream;
+      await video.play();
+      const detector = new Ctor({ formats: ["qr_code"] });
+      // Check a few times a second whether a QR is in view.
+      scanTimer.current = setInterval(async () => {
+        if (!scanStream.current || !videoRef.current) return;
+        try {
+          const codes = await detector.detect(videoRef.current);
+          const raw = codes[0]?.rawValue || "";
+          if (!raw) return;
+          // Pull the table number out of the link (?table=N or ?t=N); if the QR
+          // isn't a link, treat the whole text as the number.
+          let t = "";
+          try { const u = new URL(raw); t = u.searchParams.get("table") || u.searchParams.get("t") || ""; } catch { t = raw; }
+          t = (t || "").replace(/\D/g, "");
+          if (t) { stopScan(); setTableInput(t); setStep("ask_table"); }
+        } catch {} // a frame that fails to decode is normal — just try the next one
+      }, 350);
+    } catch {
+      // Camera refused/unavailable — fall back to typing.
+      stopScan(); setStep("ask_table");
+      setNote("Couldn't open the camera — please type the table number.");
+    }
+  };
 
   // If the pop-up isn't open, draw nothing.
   if (!open) return null;
@@ -357,12 +430,33 @@ export default function SessionGate() {
           <div className="sg-badge"><i className="fas fa-chair"></i></div>
           <div className="sg-kicker">My Little French House</div>
           <h3 className="sg-title">Which table are you at?</h3>
-          <p className="sg-sub">Enter your table number to start your order. (Scanning the QR code on your table will fill this in for you.)</p>
-          <input className="sg-input" type="number" inputMode="numeric" min={1} placeholder="Table number" value={tableInput}
-            onChange={(e) => setTableInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitTable(); }} autoFocus />
+          <p className="sg-sub">Scan the QR sticker on your table, or type the table number to start your order.</p>
+          <div className="sg-input-wrap">
+            <input className="sg-input" type="number" inputMode="numeric" min={1} placeholder="Table number" value={tableInput}
+              onChange={(e) => setTableInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitTable(); }} autoFocus />
+            {/* The little ✕ wipes BOTH the box and the remembered table, so a
+                wrong/old number never sticks around against the guest's will. */}
+            {tableInput !== "" && (
+              <button type="button" className="sg-input-clear" aria-label="Clear table number"
+                onClick={() => { setTableInput(""); setScannedTable(""); window.dispatchEvent(new Event("lfh:table-scanned")); }}>✕</button>
+            )}
+          </div>
           {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
           <div className="sg-actions">
+            <button className="sg-btn ghost" onClick={startScan}><i className="fas fa-qrcode"></i>&nbsp;Scan QR</button>
             <button className="sg-btn gold" onClick={submitTable}>Continue</button>
+          </div>
+        </>)}
+
+        {/* Camera view while scanning the table's QR sticker. */}
+        {step === "scan_qr" && (<>
+          <div className="sg-badge"><i className="fas fa-qrcode"></i></div>
+          <h3 className="sg-title">Scan your table&apos;s QR</h3>
+          <p className="sg-sub">Point the camera at the QR sticker on your table — it fills in the number for you.</p>
+          {/* muted + playsInline keep phone browsers from blocking or fullscreening the preview */}
+          <video ref={videoRef} className="sg-scan-video" muted playsInline />
+          <div className="sg-actions">
+            <button className="sg-btn ghost" onClick={() => { stopScan(); setStep("ask_table"); }}>Type it instead</button>
           </div>
         </>)}
 
@@ -432,6 +526,18 @@ export default function SessionGate() {
           <div className="sg-badge spin"><i className="fas fa-hourglass-half"></i></div><h3 className="sg-title">Waiting for the table to let you in…</h3>
           <p className="sg-sub">The person who opened table {pending.current?.table} needs to confirm you. This usually takes a moment.</p>
           <div className="sg-actions"><button className="sg-btn ghost" onClick={() => doRequest("access")}>Call a waiter instead</button></div>
+        </>)}
+
+        {/* The head DECLINED the join request — say so clearly instead of leaving
+            the guest waiting forever, and give them real ways forward. */}
+        {step === "denied" && (<>
+          <div className="sg-badge danger"><i className="fas fa-user-xmark"></i></div>
+          <h3 className="sg-title">The table didn&apos;t let you in</h3>
+          <p className="sg-sub">The person who opened table {pending.current?.table} declined your request. If you think that&apos;s a mistake, a waiter can sort it out — or try a different table.</p>
+          <div className="sg-actions">
+            <button className="sg-btn ghost" onClick={rescan}>Another table</button>
+            <button className="sg-btn gold" onClick={() => doRequest("access")}>Call a waiter</button>
+          </div>
         </>)}
 
         {/* We've notified staff -> keep open so we auto-continue when they act. */}

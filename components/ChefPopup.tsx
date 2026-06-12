@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 // callWaiter sends a service request; getSettings reads restaurant on/off options.
 import { callWaiter, getSettings } from "@/lib/menu";
 // Helpers for checking/cleaning the table number and reading a scanned-QR table.
-import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
+import { validateTable, flagTableInput, getScannedTable, setScannedTable } from "@/lib/table";
 // Reads the saved dining session (if the guest is seated at a table).
 import { getStoredSession } from "@/lib/session";
 
@@ -146,19 +146,28 @@ export default function ChefPopup() {
         ) : (scannedTable && tableNumber === scannedTable && (
           <div className="table-scanned-note">📍 Table {scannedTable} — from your table&apos;s QR</div>
         ))}
-        {/* The table-number box. It's locked (read-only) when you're in a session. */}
-        <input
-          type="text"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          id="chef-table"
-          className="table-input"
-          placeholder="Table No."
-          value={lockedTable || tableNumber}
-          maxLength={4} disabled={!!lockedTable} readOnly={!!lockedTable}
-          // Keep only digits so letters/symbols can never reach the field.
-          onChange={(e) => setTableNumber(e.target.value.replace(/\D/g, ""))}
-        />
+        {/* The table-number box. It's locked (read-only) when you're in a session.
+            When it's NOT locked, a little ✕ lets the guest wipe an auto-filled
+            number completely (box AND the remembered QR table) — so a wrong or
+            stale number never gets stuck in here. */}
+        <div className="table-input-wrap">
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            id="chef-table"
+            className="table-input"
+            placeholder="Table No."
+            value={lockedTable || tableNumber}
+            maxLength={4} disabled={!!lockedTable} readOnly={!!lockedTable}
+            // Keep only digits so letters/symbols can never reach the field.
+            onChange={(e) => setTableNumber(e.target.value.replace(/\D/g, ""))}
+          />
+          {!lockedTable && (tableNumber || scannedTable) && (
+            <button type="button" className="table-input-clear" aria-label="Clear table number"
+              onClick={() => { setTableNumber(""); setScannedTableState(""); setScannedTable(""); }}>✕</button>
+          )}
+        </div>
         {/* One button per request reason, built from the REASONS list above. */}
         <div className="chef-reasons">
           {REASONS.map((r) => (
