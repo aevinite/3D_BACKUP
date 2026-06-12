@@ -66,6 +66,7 @@ export default function MenuPage() {
   const [searchQuery, setSearchQuery] = useState(""); // what's typed in the search box
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
   const [closedCats, setClosedCats] = useState<string[]>([]); // "All" view: which dropdowns the guest manually FOLDED (default: none — everything starts open)
+  const [spyCat, setSpyCat] = useState(""); // scroll-spy: which category's section is under the header right now (drives the auto-shifting chips)
   const restoredRef = useRef(false); // skip persisting UI state until after the restore
   // Only show skeletons if loading is actually slow — avoids a flash on fast /
   // cached loads where the data is ready almost immediately.
@@ -242,6 +243,25 @@ export default function MenuPage() {
     const el = document.getElementById("main-scroll");  // the scrolling area
     if (!el) return;  // nothing to do if it isn't on the page
     let raf = 0;
+    // SCROLL-SPY (Petpooja-style): work out which category section sits under
+    // the sticky header right now. The chips highlight + follow automatically
+    // (Coffee → Beverages → … as the guest scrolls the "All" view).
+    const computeSpy = () => {
+      const sections = el.querySelectorAll<HTMLElement>(".cat-group[data-cat]");
+      if (!sections.length) return;
+      const headerLine = 240; // a line just below the PINNED search/filter header (it ends ~222px down)
+      let active = sections[0].dataset.cat || "";
+      sections.forEach((s) => {
+        // The LAST section whose top has crossed the line is the one in view.
+        if (s.getBoundingClientRect().top <= headerLine) active = s.dataset.cat || active;
+      });
+      // Edge case: the FINAL section can be too short to ever cross the header
+      // line — when the guest hits the very bottom, give it the highlight anyway.
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) {
+        active = sections[sections.length - 1].dataset.cat || active;
+      }
+      setSpyCat(active); // React skips the re-render when the value didn't change
+    };
     // Runs every time the guest scrolls.
     const onScroll = () => {
       // Don't save on every single scroll tick — wait for the next animation
@@ -250,12 +270,35 @@ export default function MenuPage() {
       raf = requestAnimationFrame(() => {
         // Remember how far down we are, in this browsing session.
         try { sessionStorage.setItem("lfh_menu_scroll", String(el.scrollTop)); } catch {}
+        computeSpy();
       });
     };
     el.addEventListener("scroll", onScroll, { passive: true });
+    // Photos lazy-load and reshape the page WITHOUT firing a scroll event, which
+    // would leave the spy pointing at the wrong section — so also re-check on a
+    // gentle timer (the computation is a handful of rectangle reads, very cheap).
+    const tick = setInterval(computeSpy, 600);
     // Cleanup: stop listening and cancel any pending save when leaving.
-    return () => { el.removeEventListener("scroll", onScroll); cancelAnimationFrame(raf); };
+    return () => { el.removeEventListener("scroll", onScroll); cancelAnimationFrame(raf); clearInterval(tick); };
   }, []);
+
+  // When the spied category changes, slide BOTH category bars sideways so the
+  // active chip stays in view (the big cards up top + the slim sticky strip) —
+  // exactly how Petpooja's dine-in bar follows the guest.
+  useEffect(() => {
+    if (!spyCat) return;
+    const pairs: Array<[string, string]> = [["cat-scroller", ".cat-card.active"], ["spy-strip", ".spy-chip.active"]];
+    for (const [barId, sel] of pairs) {
+      const bar = document.getElementById(barId);
+      const chip = bar?.querySelector<HTMLElement>(sel);
+      if (bar && chip) {
+        // centre the active chip inside its bar (computed against the bar itself,
+        // so this can never scroll the page vertically by accident)
+        const left = chip.getBoundingClientRect().left - bar.getBoundingClientRect().left + bar.scrollLeft;
+        bar.scrollTo({ left: left - bar.clientWidth / 2 + chip.clientWidth / 2, behavior: "smooth" });
+      }
+    }
+  }, [spyCat]);
 
   // Restore that scroll position once the list has actually painted.
   // Re-runs when menuData arrives; only does the jump one time.
@@ -442,8 +485,11 @@ export default function MenuPage() {
                   key={cat.slug}
                   type="button"
                   role="tab"
-                  aria-selected={cat.slug === currentCategory}
-                  className={`cat-card ${cat.slug === currentCategory ? "active" : ""}`}
+                  // A card lights up when its category view is open, OR — in the
+                  // "All" view — when the guest has SCROLLED into its section
+                  // (the scroll-spy), so the bar follows them Petpooja-style.
+                  aria-selected={cat.slug === currentCategory || (currentCategory === "all" && spyCat === cat.slug)}
+                  className={`cat-card ${cat.slug === currentCategory || (currentCategory === "all" && spyCat === cat.slug) ? "active" : ""}`}
                   style={{ ["--cat-color" as string]: cat.color }}
                   onClick={() => selectCategory(cat.slug)}
                 >
@@ -556,6 +602,38 @@ export default function MenuPage() {
               </div>
             </div>
           </div>
+
+          {/* Slim Petpooja-style category strip — always visible while scrolling
+              (it lives inside this sticky header). Shows only in the "All" view:
+              the active chip follows the scroll (see the scroll-spy above), and
+              tapping a chip smooth-scrolls straight to that category's section. */}
+          {currentCategory === "all" && !q && allGroups.length > 0 && (
+            <div className="spy-strip" id="spy-strip" role="tablist" aria-label="Jump to category">
+              {allGroups.map((g) => (
+                <button
+                  key={g.slug}
+                  type="button"
+                  role="tab"
+                  aria-selected={spyCat === g.slug}
+                  className={`spy-chip ${spyCat === g.slug ? "active" : ""}`}
+                  onClick={() => {
+                    // Manual jump (scrollIntoView ignores scroll-margin in this
+                    // nested layout): land the section just below the pinned header.
+                    const sc = document.getElementById("main-scroll");
+                    const sec = sc?.querySelector(`.cat-group[data-cat="${g.slug}"]`);
+                    if (sc && sec) {
+                      // 235 = the pinned header's bottom edge measured from the
+                      // scroll container's top (158px header + the app bar) + air.
+                      const top = sec.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop - 235;
+                      sc.scrollTo({ top, behavior: "smooth" });
+                    }
+                  }}
+                >
+                  {g.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* The dishes. Three shapes:
@@ -588,7 +666,9 @@ export default function MenuPage() {
             {allGroups.map((g) => {
               const open = !closedCats.includes(g.slug);
               return (
-                <section key={g.slug} className="cat-group">
+                // data-cat lets the scroll-spy + the jump-to-category chips find
+                // this section; scroll-margin (CSS) keeps it clear of the header.
+                <section key={g.slug} data-cat={g.slug} className="cat-group">
                   <button
                     type="button"
                     className="cat-group-head"

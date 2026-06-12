@@ -604,8 +604,14 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 /* --- SEARCH & FILTERS --- */
 .items-header {
   padding: 8px 20px 10px; display: flex; flex-direction: column; gap: 8px;
-  background: transparent;
   border-bottom: none;
+  /* PINNED while the dishes scroll (Petpooja-style): search + filters + the
+     category strip stay reachable the whole way down. Needs a real background
+     (frosted) so the cards sliding underneath don't show through. */
+  position: sticky; top: 0; z-index: 50;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 .search-container { position: relative; width: 100%; }
 /* search autocomplete dropdown */
@@ -746,10 +752,29 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 .filter-chip:hover { 
   transform: translateY(-2px); color: var(--text); border-color: var(--accent);
 }
-.filter-chip.active { 
+.filter-chip.active {
   background: var(--accent-grad); color: #1a0f0a; border-color: transparent;
   box-shadow: 0 6px 20px -5px var(--accent-glow);
 }
+/* ── Petpooja-style scroll-spy category strip (lives in the sticky header) ──
+   A slim, always-visible row of category chips: the active one follows the
+   guest's scroll position, and tapping a chip jumps to that section. */
+.spy-strip {
+  display: flex; gap: 8px; overflow-x: auto; padding: 10px 2px 2px;
+  position: relative; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.spy-strip::-webkit-scrollbar { display: none; } /* clean edge-to-edge swipe row */
+.spy-chip {
+  flex: 0 0 auto; border: var(--border); background: transparent; color: var(--muted);
+  font-size: 12.5px; font-weight: 600; padding: 7px 14px; border-radius: 999px;
+  cursor: pointer; transition: all .2s; font-family: inherit; white-space: nowrap;
+}
+.spy-chip.active {
+  background: var(--accent-grad); color: #1a0f0a; border-color: transparent; font-weight: 700;
+  box-shadow: 0 6px 20px -5px var(--accent-glow);
+}
+/* anchored jumps land BELOW the pinned header (≈158px tall) instead of under it */
+.cat-group { scroll-margin-top: 170px; }
 .layout-switch { 
   background: var(--card); border: var(--border); border-radius: 30px; padding: 4px; display: flex; gap: 2px;
 }
