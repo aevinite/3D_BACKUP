@@ -115,11 +115,29 @@ export default function SessionStatusWidget() {
         // Ask the server how this session is doing right now.
         const state = await getSessionState(s.token);
         if (!alive) return;
-        // A network blip returns ok:false with a non-"invalid_token" reason — DON'T
-        // disconnect on that, just retry next tick. Only a confirmed dead token or a
-        // genuinely closed session ends the connection.
+        // Three DEFINITIVE endings (anything else = network blip, retry next tick):
+        //  • 'session_closed' — staff closed the whole table: clean up + tell them.
+        //  • 'removed'        — this guest was kicked/declined: clean up + say so.
+        //  • 'invalid_token'  — the token simply died: clean up quietly.
+        // (Closing a table marks every member removed, so a closed table reports
+        //  'session_closed' here — the ok:true status check below rarely fires.)
         if (!state.ok) {
-          if (state.reason === "invalid_token") { clearStoredSession(); tokenRef.current = null; wasActive.current = false; setSt(null); }
+          const reason = state.reason as string | undefined;
+          if (reason === "session_closed") {
+            const tellThem = wasActive.current; // only toast someone who was actually connected
+            wasActive.current = false; tokenRef.current = null;
+            if (tellThem) { clearLocal(); toast("This table’s session ended", "table"); }
+            else clearStoredSession();
+            setSt(null);
+          } else if (reason === "removed") {
+            const tellThem = wasActive.current;
+            wasActive.current = false; tokenRef.current = null;
+            if (tellThem) { clearLocal(); toast("You’ve been removed from this table", "table"); }
+            else clearStoredSession();
+            setSt(null);
+          } else if (reason === "invalid_token") {
+            clearStoredSession(); tokenRef.current = null; wasActive.current = false; setSt(null);
+          }
           return;
         }
         // If the table is no longer open, the meal ended: if we were connected,

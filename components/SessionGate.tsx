@@ -42,7 +42,7 @@ const rememberTable = (table: string) => {
 // The named screens this gate can show. Think of it as "which page are we on".
 type Step =
   | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "joining"
-  | "waiting_approval" | "denied" | "request_sent" | "working" | "blocked";
+  | "waiting_approval" | "denied" | "table_closed" | "request_sent" | "working" | "blocked";
 
 // Remember (per device) that the guest has already seen the "why we check your
 // location" consent screen, so we only show it the FIRST time and go straight to
@@ -231,14 +231,20 @@ export default function SessionGate() {
     pollRef.current = setInterval(async () => {
       const s = sess.current; if (!s) return stopPoll();
       const state = await getSessionState(s.token);
-      // The head said NO (our member row was removed): stop waiting and say so,
-      // instead of spinning forever. The token is dead now, so forget it — the
-      // guest can call a waiter or start fresh on another table.
-      if (!state.ok && (state as { reason?: string }).reason === "removed") {
-        stopPoll();
-        clearStoredSession(); sess.current = null;
-        fireDone({ ok: false, reason: "denied", action: pending.current?.action });
-        setStep("denied");
+      // Three definitive ends while waiting (anything else = network blip, retry):
+      //  • 'removed'        — the head said NO: show the declined screen.
+      //  • 'session_closed' — staff closed the WHOLE table (nobody declined this
+      //                       guest personally): show the table-ended screen.
+      //  • 'invalid_token'  — the token is simply gone: treat like table-ended.
+      // In every case the token is dead, so forget it and stop spinning forever.
+      if (!state.ok) {
+        const reason = (state as { reason?: string }).reason;
+        if (reason === "removed" || reason === "session_closed" || reason === "invalid_token") {
+          stopPoll();
+          clearStoredSession(); sess.current = null;
+          fireDone({ ok: false, reason: reason === "removed" ? "denied" : "table_closed", action: pending.current?.action });
+          setStep(reason === "removed" ? "denied" : "table_closed");
+        }
         return;
       }
       const member = state.member as { approved?: boolean } | undefined;
@@ -537,6 +543,21 @@ export default function SessionGate() {
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={rescan}>Another table</button>
             <button className="sg-btn gold" onClick={() => doRequest("access")}>Call a waiter</button>
+          </div>
+        </>)}
+
+        {/* Staff closed the table while this guest was waiting — different from a
+            personal decline; say so plainly and offer the ways forward. */}
+        {step === "table_closed" && (<>
+          <div className="sg-badge"><i className="fas fa-door-closed"></i></div>
+          <h3 className="sg-title">This table&apos;s session ended</h3>
+          <p className="sg-sub">The staff closed table {pending.current?.table} while you were waiting — nothing to do with you. You can try the table again, pick another one, or ask a waiter for help.</p>
+          <div className="sg-actions">
+            <button className="sg-btn ghost" onClick={rescan}>Another table</button>
+            <button className="sg-btn gold" onClick={() => beginFlow()}>Try this table again</button>
+          </div>
+          <div className="sg-links">
+            <button className="sg-link" onClick={() => doRequest("access")}>Call a waiter instead</button>
           </div>
         </>)}
 
