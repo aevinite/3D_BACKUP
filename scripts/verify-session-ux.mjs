@@ -123,6 +123,8 @@ try {
     const [name, value] = cookie.split("=");
     await ectx.addCookies([{ name, value, url: "http://localhost:4001" }]);
   }
+  // A fresh UNAPPROVED joiner first, so the Requests card + tile Attend show up.
+  await sb("POST", "session_members", { session_id: sess.id, name: "Second Guest", token: tok("vg2_"), role: "guest", approved: false });
   const ep = await ectx.newPage();
   await ep.goto("http://localhost:4001/", { waitUntil: "domcontentloaded" });
   // Get to the Tables (floor) view — its tab mentions "Tables".
@@ -134,15 +136,28 @@ try {
   // Everyday cards on top, Features last — only when sessions are ON does the
   // bulk card exist, so just demand that "Features" is the LAST card.
   check(/Features/i.test(cardTitles[cardTitles.length - 1] || ""), `Features card is at the bottom (${cardTitles.join(" | ")})`);
+  // The pending joiner must appear in the Requests card with all four actions.
+  await ep.waitForSelector(".floor-side [data-mem-approve]", { timeout: 8000 });
+  const joinerActs = await ep.$eval(".floor-side .sx-req", (row) => ({
+    deny: !!row.querySelector("[data-mem-deny]"),
+    ban: !!row.querySelector("[data-mem-ban]"),
+    transfer: !!row.querySelector("[data-mem-head]"),
+    ok: !!row.querySelector("[data-mem-approve]"),
+    transferLabel: row.querySelector("[data-mem-head]")?.textContent.trim(),
+  }));
+  check(joinerActs.deny && joinerActs.ban && joinerActs.transfer && joinerActs.ok,
+    "Requests card joiner row has ✕ / Ban / Transfer / OK");
+  check(joinerActs.transferLabel === "Transfer", "the transfer button reads exactly 'Transfer'");
+  // The table's TILE must offer a quick Attend while the joiner waits.
+  check(await ep.isVisible(`[data-floor-table="${TABLE}"] [data-quick-requests]`),
+    "tile shows a quick Attend while a partner waits to join");
   await ep.screenshot({ path: "verify-floorside.png", fullPage: false });
-  // Open the test table's panel and look for the 👑 transfer button on a guest.
-  // (Re-add a fresh unapproved guest so the panel has a transferable row.)
-  await sb("POST", "session_members", { session_id: sess.id, name: "Second Guest", token: tok("vg2_"), role: "guest", approved: true });
-  await ep.click(`[data-floor-table="${TABLE}"]`);
+  // The tile's Attend opens the table panel, where the per-guest Transfer lives.
+  await ep.click(`[data-floor-table="${TABLE}"] [data-quick-requests]`);
   await ep.waitForSelector(".tbl-modal", { timeout: 6000 });
   await ep.waitForTimeout(800); // panel refreshes off the live board poll
-  const hasHeadBtn = await ep.isVisible("[data-mem-head]");
-  check(hasHeadBtn, "table panel offers a 👑 Head (transfer) button on a guest");
+  const hasHeadBtn = await ep.isVisible(".tbl-modal [data-mem-head]");
+  check(hasHeadBtn, "table panel offers the Transfer button on a guest");
   await ep.screenshot({ path: "verify-tablepanel.png" });
   await ectx.close();
 } finally {
