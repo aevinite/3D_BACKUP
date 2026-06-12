@@ -65,7 +65,7 @@ export default function MenuPage() {
   const [layout, setLayout] = useState("gallery"); // gallery is the default first-visit view
   const [searchQuery, setSearchQuery] = useState(""); // what's typed in the search box
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
-  const [openCats, setOpenCats] = useState<string[]>([]); // "All" view: which dropdowns the guest expanded (default: none — they start folded)
+  const [closedCats, setClosedCats] = useState<string[]>([]); // "All" view: which dropdowns the guest manually FOLDED (default: none — everything starts open)
   const restoredRef = useRef(false); // skip persisting UI state until after the restore
   // Only show skeletons if loading is actually slow — avoids a flash on fast /
   // cached loads where the data is ready almost immediately.
@@ -118,10 +118,10 @@ export default function MenuPage() {
     const isRealCat = dbCategories.some((c) => c.slug === slug);
     setCurrentCategory((cur) => (cur === slug && isRealCat ? "all" : slug));
   };
-  // In the "All" view every dropdown starts FOLDED (a tidy category index); this
-  // records which ones the guest expanded (a slug in the list = that one is open).
+  // In the "All" view every dropdown starts OPEN (browse everything at a glance);
+  // this records which ones the guest folded shut (a slug in the list = closed).
   const toggleCatGroup = (slug: string) =>
-    setOpenCats((cur) => (cur.includes(slug) ? cur.filter((s) => s !== slug) : [...cur, slug]));
+    setClosedCats((cur) => (cur.includes(slug) ? cur.filter((s) => s !== slug) : [...cur, slug]));
   // Sort DOES toggle: clicking the active sort returns to the recommended order.
   // (Tapping the already-active sort sets it back to "" = the default order.)
   const toggleSort = (slug: string) =>
@@ -180,6 +180,17 @@ export default function MenuPage() {
       if (sd !== null) setCurrentDiet(sd);
       const sq = sessionStorage.getItem("lfh_menu_search");
       if (sq) setSearchQuery(sq);
+      // Which "All view" dropdowns the guest had manually folded — restored only
+      // if saved less than 10 minutes ago. Any older and it's likely a NEW guest
+      // at the table, so they get the default everything-open view instead.
+      const cc = sessionStorage.getItem("lfh_menu_closed_cats");
+      if (cc) {
+        const parsed = JSON.parse(cc); // shape: { cats: ["coffee", ...], ts: when-it-was-saved }
+        const freshEnough = Date.now() - (parsed?.ts || 0) <= 10 * 60 * 1000; // 10 minutes
+        if (freshEnough && Array.isArray(parsed?.cats)) {
+          setClosedCats(parsed.cats.filter((s: unknown): s is string => typeof s === "string"));
+        }
+      }
     } catch {}
 
     loadFavorites();  // load the hearted dishes for the Favorites tab
@@ -198,8 +209,8 @@ export default function MenuPage() {
   // Persist the browse state so it survives a navigate-away + Back. Skip the
   // first run: on mount these still hold the defaults while the restore (above)
   // is being applied, so writing now would clobber the saved values with defaults.
-  // This effect re-runs whenever layout/sort/diet/search change (see the list
-  // at the bottom), saving the new values so Back returns you to them.
+  // This effect re-runs whenever layout/sort/diet/search/open-dropdowns change
+  // (see the list at the bottom), saving the new values so Back returns you to them.
   useEffect(() => {
     // On the very first run, just mark "restored" and skip saving (see above).
     if (!restoredRef.current) { restoredRef.current = true; return; }
@@ -208,8 +219,12 @@ export default function MenuPage() {
       sessionStorage.setItem("lfh_menu_sort", currentSort);
       sessionStorage.setItem("lfh_menu_diet", currentDiet);
       sessionStorage.setItem("lfh_menu_search", searchQuery);
+      // The manually-folded "All view" dropdowns, stamped with the time. The
+      // restore above only trusts this for 10 minutes — after that it's ignored,
+      // so a later guest starts with everything open again.
+      sessionStorage.setItem("lfh_menu_closed_cats", JSON.stringify({ cats: closedCats, ts: Date.now() }));
     } catch {}
-  }, [layout, currentSort, currentDiet, searchQuery]);
+  }, [layout, currentSort, currentDiet, searchQuery, closedCats]);
 
   // If the data hasn't arrived within a moment, reveal the skeleton.
   // (Wait 200ms first; if it's still loading, show the grey placeholder boxes.
@@ -566,12 +581,12 @@ export default function MenuPage() {
           </div>
         ) : currentCategory === "all" && !q ? (
           // B) "All" view: each category is its own collapsible dropdown. The header
-          // shows the name + dish count + a chevron; tapping it expands that category.
-          // Every dropdown starts FOLDED (openCats records the expanded ones), so the
-          // landing reads as a clean menu index, not an endless scroll.
+          // shows the name + dish count + a chevron; tapping it folds that category.
+          // Every dropdown starts OPEN so guests see the whole menu at a glance;
+          // closedCats records the ones they folded shut (remembered for 10 min).
           <div className="cat-groups">
             {allGroups.map((g) => {
-              const open = openCats.includes(g.slug);
+              const open = !closedCats.includes(g.slug);
               return (
                 <section key={g.slug} className="cat-group">
                   <button
