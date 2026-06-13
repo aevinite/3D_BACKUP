@@ -1,11 +1,15 @@
-// Stub for /tablet — the real tablet panel is brought into the app in Phase D.
-export default function TabletStub() {
+// /tablet — the waiter captain app, now hosted INSIDE the one app.
+//
+// Its exact original UI is served from /panels/tablet and embedded full-screen,
+// so it looks/behaves identically to the old standalone tablet. Its data calls
+// go to /api/tablet/* (the ported route handlers). The admin-only floating
+// switcher (in the layout) floats above this.
+export default function TabletPanel() {
   return (
-    <main style={{ minHeight: "100vh", background: "#0b1220", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", display: "grid", placeItems: "center", padding: 24, textAlign: "center" }}>
-      <div>
-        <h1 style={{ margin: 0 }}>📋 Tablet</h1>
-        <p style={{ opacity: 0.7 }}>Being moved into the one app (Phase D). For now it still runs on its own server.</p>
-      </div>
-    </main>
+    <iframe
+      src="/panels/tablet/index.html"
+      title="Waiter tablet"
+      style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", border: 0 }}
+    />
   );
 }
