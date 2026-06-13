@@ -74,12 +74,9 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   padding-left: calc(16px + env(safe-area-inset-left));
   padding-right: calc(16px + env(safe-area-inset-right));
   background: transparent;
-  /* Slide the whole brand bar up out of view once the category bar pins to the
-     top (owner: the brand shouldn't sit there while scrolling). It glides back
-     down when you scroll near the top again. */
-  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  /* The brand bar is LOCKED at the top — always visible. The category+search
+     bar pins right beneath it and merges as you scroll. */
 }
-.nav.nav-hidden { transform: translateY(-100%); }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .brand-title {
   font-family: 'Playfair Display'; margin: 0;
@@ -550,35 +547,37 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   font-size: 11px; color: var(--muted); letter-spacing: 3px; text-transform: uppercase; font-weight: 700;
 }
 .cat-scroller {
-  display: flex; gap: 10px; overflow-x: auto; padding: 14px 20px 12px; scrollbar-width: none;
+  display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none;
+  /* vertical padding tightens as the bar shrinks (scroll-linked via --shrink) */
+  padding: calc(14px - 7px * var(--shrink, 0)) 20px calc(12px - 5px * var(--shrink, 0));
 }
 .cat-scroller::-webkit-scrollbar { display:none; }
+/* SCROLL-LINKED category cards. The menu raises --shrink (0..1) on #menu-sticky
+   as you scroll; these calc()s interpolate the cards big -> small LIVE, frame by
+   frame, so it feels like the scroll itself compresses them (no class snap, no
+   flicker). The SIZE props are deliberately NOT transitioned — they must track
+   the scroll exactly; only colour/hover animate. At --shrink:1 the icon has
+   collapsed to zero height, leaving a small text-only pill. */
 .cat-card {
-  /* THEME-TRIAL: follow --card so category cards match the theme (was a hardcoded brown) */
-  min-width: 82px; height: 86px; background: color-mix(in srgb, var(--card) 78%, transparent); border: var(--border);
-  border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  cursor: pointer; transition: all 0.4s var(--ease);
+  min-width: calc(82px - 14px * var(--shrink, 0));
+  height: calc(86px - 50px * var(--shrink, 0));          /* 86 -> 36 */
+  border-radius: calc(16px + 8px * var(--shrink, 0));    /* 16 -> 24 */
+  background: color-mix(in srgb, var(--card) 78%, transparent); border: var(--border);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  cursor: pointer; overflow: hidden;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), transform 0.2s var(--ease);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
-/* Collapse-on-scroll: once the guest scrolls down, the tall square category
-   cards shrink into a thin pill strip (icon shrinks, the label stays) — like the
-   filter chips. The `transition: all` on .cat-card animates it; scrolling back to
-   the top restores the full cards. Only the height/shape changes, so the bar
-   keeps less of the screen while browsing. */
-.cats-min .cat-scroller { padding-top: 7px; padding-bottom: 7px; }
-.cats-min .cat-card {
-  min-width: auto; height: 36px; flex-direction: row; gap: 0;
-  padding: 0 16px; border-radius: 999px;
-}
-/* When collapsed, the icon disappears completely (its space too) — just the
-   label stays. Scrolling back up restores the full card with its icon. */
-.cats-min .cat-card .cat-icon { display: none; }
-.cats-min .cat-card .cat-name { font-size: 12.5px; white-space: nowrap; }
-.cats-min .cat-card.active { transform: none; }
-/* category icons — accent color inactive, white on active (both modes) */
+/* category icons — accent colour inactive, white on active (both modes). The
+   icon FADES + COLLAPSES its height as the bar shrinks, reclaiming the space so
+   the small state is text-only (like the old pills). Scroll-linked, no snap. */
 .cat-card .cat-icon {
   color: var(--accent);
+  max-height: calc(24px * (1 - var(--shrink, 0)));
+  opacity: calc(1 - var(--shrink, 0));
+  margin-bottom: calc(6px * (1 - var(--shrink, 0)));
+  overflow: hidden;
   transition: color 0.25s var(--ease), transform 0.25s var(--ease), filter 0.25s var(--ease);
 }
 .cat-card.active {
@@ -632,13 +631,14 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
    cards sliding underneath don't show through. */
 .menu-sticky {
   position: sticky;
-  /* Pin to the VERY top of the screen. #main-scroll carries a 64px top padding
-     to clear the fixed brand bar, so a plain `top:0` would pin the block 64px
-     DOWN — leaving a see-through gap once the brand slides away (the "stuck in
-     the middle" bug). Cancelling that padding with a negative top sits it flush
-     at the top. */
-  top: calc(-1 * (64px + env(safe-area-inset-top)));
+  /* Pins right BELOW the LOCKED brand bar. #main-scroll has a 64px top padding
+     that clears the fixed brand, so top:0 lands this block exactly at the
+     brand's bottom edge — where the two merge as you scroll. */
+  top: 0;
   z-index: 50;
+  /* Scroll-linked shrink dial: the menu raises this 0 -> 1 as you scroll, and
+     the category cards/icons interpolate off it (see .cat-card). 0 = full size. */
+  --shrink: 0;
   /* EXACT same frosted glass as the brand bar (.nav): transparent background +
      a 20px backdrop blur, nothing else. Written as a SINGLE unprefixed line that
      mirrors .nav byte-for-byte — the build (Lightning CSS) auto-adds the -webkit

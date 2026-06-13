@@ -36,9 +36,10 @@ import { useFeatures } from "@/lib/features";
 // The card list works with the full MenuItem shape from the data layer.
 type FoodItem = MenuItem;
 
-// Sort options. Each re-orders the list rather than hiding dishes.
+// Sort options. Each re-orders the list rather than hiding dishes. ("Popular"
+// was removed — owner's call; Chef's Special replaced it, but as a FILTER, not
+// a sort, so it lives in the filter group below.)
 const SORTS = [
-  { slug: "popular", label: "🔥 Popular" },
   { slug: "top-rated", label: "⭐ Top Rated" },
   { slug: "price", label: "💲 Low Price" },
 ];
@@ -62,9 +63,11 @@ export default function MenuPage() {
   // is the current value; the "set..." function changes it (and redraws).
   const [menuData, setMenuData] = useState<FoodItem[]>([]);        // all dishes
   const [dbCategories, setDbCategories] = useState<Category[]>([]); // all categories
-  const [currentCategory, setCurrentCategory] = useState("");       // which tab is selected
+  const [currentCategory, setCurrentCategory] = useState("all");    // ALWAYS "all" now — categories only scroll, never narrow the view
   const [currentSort, setCurrentSort] = useState(""); // "" = recommended (menu order)
   const [currentDiet, setCurrentDiet] = useState(""); // "" | "veg" | "non-veg"
+  const [chefOnly, setChefOnly] = useState(false); // Chef's Special filter (dishes tagged "chef-special")
+  const [favOnly, setFavOnly] = useState(false);   // Favorites filter (the guest's hearted dishes)
   const [layout, setLayout] = useState("gallery"); // gallery is the default first-visit view
   const [searchQuery, setSearchQuery] = useState(""); // what's typed in the search box
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
@@ -96,32 +99,37 @@ export default function MenuPage() {
     } catch {}  // if anything goes wrong, just carry on without a table number
   }, []);
 
-  // Category bar — the DB categories, then a curated "Chef's Special" tab
-  // (backed by the chef-special tag, not a real category), and a "Favorites"
-  // tab LAST. One category is ALWAYS selected.
-  const categories = [
-    ...dbCategories.map((c) => ({
-      slug: c.slug,
-      name: localized(c.name, lang),
-      icon: c.icon || "fa-utensils",
-      color: c.color || "#d4a574",
-    })),
-    { slug: "chef-special", name: "Chef's Special", icon: "fa-star", color: "#e8b884" },
-    // The Favorites tab only exists while the favorites feature is switched on.
-    ...(features.favorites ? [{ slug: "favorites", name: "Favorites", icon: "fa-heart", color: "#ef4444" }] : []),
-  ];
+  // Category bar — ONLY the real food categories (Chef's Special + Favorites
+  // moved into the filter row as tag/heart filters; they're no longer tabs).
+  const categories = dbCategories.map((c) => ({
+    slug: c.slug,
+    name: localized(c.name, lang),
+    icon: c.icon || "fa-utensils",
+    color: c.color || "#d4a574",
+  }));
 
-  // A category is ALWAYS selected — clicking just switches, never clears.
-  // Picking a category also clears any active search: search is a global "all
-  // view", so clicking a category drops you straight into that category.
-  // Called when a guest taps a category tab.
-  const selectCategory = (slug: string) => {
-    setSearchQuery("");
-    // Tapping the ALREADY-selected real category flips to the "All" view — every
-    // category shown as a collapsible dropdown. Tapping a different category just
-    // opens that one. Favorites / Chef's Special don't toggle to All (not groupable).
-    const isRealCat = dbCategories.some((c) => c.slug === slug);
-    setCurrentCategory((cur) => (cur === slug && isRealCat ? "all" : slug));
+  // Tapping a category NEVER narrows the menu — it always keeps the full grouped
+  // "all" view and smooth-scrolls to that category's section. If a search was
+  // active we clear it first (so the grouped menu is back), then scroll once the
+  // section has painted.
+  const scrollToCategory = (slug: string) => {
+    const wasSearching = !!q;
+    if (wasSearching) setSearchQuery("");
+    setCurrentCategory("all");
+    const doScroll = () => {
+      const sc = document.getElementById("main-scroll");
+      const sec = sc?.querySelector(`.cat-group[data-cat="${slug}"]`);
+      const stickyEl = document.getElementById("menu-sticky");
+      if (!sc || !sec) return;
+      // Land the section just below the pinned bar, measured live so it stays
+      // correct whatever the bar's current (shrunk/expanded) height is.
+      const barBottom = stickyEl ? stickyEl.getBoundingClientRect().bottom : 220;
+      const delta = sec.getBoundingClientRect().top - (barBottom + 12);
+      sc.scrollTo({ top: sc.scrollTop + delta, behavior: "smooth" });
+    };
+    // If we just cleared a search, the grouped view needs a paint first.
+    if (wasSearching) setTimeout(doScroll, 80);
+    else requestAnimationFrame(doScroll);
   };
   // In the "All" view every dropdown starts OPEN (browse everything at a glance);
   // this records which ones the guest folded shut (a slug in the list = closed).
@@ -157,17 +165,9 @@ export default function MenuPage() {
     getCategories()
       .then((cats) => {
         setDbCategories(cats);
-        // Restore the last-viewed category (e.g. after pressing Back from a dish
-        // page), otherwise default to the first one. One is always selected.
-        let saved = "";
-        try {
-          saved = sessionStorage.getItem("lfh_menu_cat") || "";
-        } catch {}
-        const valid =
-          saved === "all" || saved === "chef-special" || saved === "favorites" || cats.some((c) => c.slug === saved);
-        // New visitors land on the "All" view (every category as a folded dropdown);
-        // returning visitors resume wherever they left off.
-        setCurrentCategory((cur) => cur || (valid ? saved : "all"));
+        // The menu is ALWAYS the full "all" view now — tapping a category just
+        // scrolls to its section, it never narrows to a single category. So
+        // there's no per-category state to restore; we just stay on "all".
       })
       .catch((err) => console.error("Error loading categories:", err));
 
@@ -278,23 +278,25 @@ export default function MenuPage() {
       raf = requestAnimationFrame(() => {
         // Remember how far down we are, in this browsing session.
         try { sessionStorage.setItem("lfh_menu_scroll", String(el.scrollTop)); } catch {}
-        // Work out when the pinned bar is actually STUCK to the top of the
-        // screen — once the hero + the "CATEGORIES" header have scrolled away.
-        // We measure that off the (non-sticky) ".section-header": the moment its
-        // bottom edge passes the top of the scroll area, the bar is stuck.
-        // NOTE: the category cards stay BIG (square) the whole time — owner's
-        // call, no shrink-to-pills on scroll. `stuck` now only drives the brand
-        // slide-away below.
-        const containerTop = el.getBoundingClientRect().top;
+        // SCROLL-LINKED SHRINK. The brand bar (.nav) is LOCKED at the top. As the
+        // category bar pins right under it and you keep scrolling, the cards
+        // shrink SMOOTHLY from big+icons to small text-only — driven frame by
+        // frame by the scroll position, so it feels like the scrolling itself is
+        // compressing them (no snap, no "it shrank by itself", no flicker).
+        // We measure off the NON-sticky ".section-header" (it sits ABOVE the bar,
+        // so it never moves when the bar shrinks → no feedback loop / no big-small
+        // oscillation). `past` = how many px we've scrolled beyond the moment the
+        // bar meets the brand's bottom edge; we map 0..SHRINK_DIST onto 0..1.
+        const nav = document.querySelector<HTMLElement>(".nav");
+        const navBottom = nav ? nav.getBoundingClientRect().bottom : 64;
         const secHeader = el.querySelector<HTMLElement>(".section-header");
-        const stuck = secHeader
-          ? secHeader.getBoundingClientRect().bottom <= containerTop + 1
-          : el.scrollTop > 48; // fallback if the header isn't present
-        // Slide the brand bar (.nav) up out of view while the category bar is
-        // pinned, and bring it back when we return near the top. This is what
-        // makes the brand "scroll away" even though it's a fixed bar — and it
-        // hands the very top of the screen to the frosted category+search bar.
-        document.querySelector(".nav")?.classList.toggle("nav-hidden", stuck);
+        const sticky = document.getElementById("menu-sticky");
+        if (secHeader && sticky) {
+          const past = navBottom - secHeader.getBoundingClientRect().bottom;
+          const SHRINK_DIST = 70; // fully shrink over this many px of scrolling
+          const p = Math.max(0, Math.min(1, past / SHRINK_DIST));
+          sticky.style.setProperty("--shrink", p.toFixed(3));
+        }
         computeSpy();
       });
     };
@@ -303,13 +305,13 @@ export default function MenuPage() {
     // would leave the spy pointing at the wrong section — so also re-check on a
     // gentle timer (the computation is a handful of rectangle reads, very cheap).
     const tick = setInterval(computeSpy, 600);
-    // Cleanup: stop listening, cancel any pending save, and make sure the brand
-    // bar isn't left hidden when we navigate away from the menu.
+    // Run once on mount so the shrink starts at the right value if we restored a
+    // scrolled position. Cleanup: stop listening + cancel the pending frame/timer.
+    onScroll();
     return () => {
       el.removeEventListener("scroll", onScroll);
       cancelAnimationFrame(raf);
       clearInterval(tick);
-      document.querySelector(".nav")?.classList.remove("nav-hidden");
     };
   }, []);
 
@@ -406,22 +408,16 @@ export default function MenuPage() {
     catNameOf(i.category).includes(q) ||
     (i.searchAlias || "").toLowerCase().includes(q);
 
-  // Decide which dishes to show, given the search/category/diet choices.
-  // .filter keeps only the dishes where this function returns true.
+  // Decide which dishes to show. The menu is always the full grouped view; the
+  // filter chips (which STACK) narrow it. .filter keeps only the dishes where
+  // this function returns true.
   const visibleItems = menuData.filter((item) => {
-    // While searching, the list becomes a global "all view" (every category),
-    // ignoring the selected category. Clear the search to fall back to it.
-    if (q) {
-      if (!matchesSearch(item)) return false;
-    } else if (currentCategory === "favorites") {
-      if (!favorites.includes(item.id)) return false;
-    } else if (currentCategory === "chef-special") {
-      if (!item.tags.includes("chef-special")) return false;
-    } else if (currentCategory && currentCategory !== "all" && item.category !== currentCategory) {
-      // In the "All" view we keep every category's dishes (they're grouped into
-      // dropdowns below); only a specific category narrows down to itself.
-      return false;
-    }
+    // While searching, match the query (name / category / alias).
+    if (q && !matchesSearch(item)) return false;
+    // Chef's Special filter: only dishes carrying the "chef-special" tag.
+    if (chefOnly && !item.tags.includes("chef-special")) return false;
+    // Favorites filter: only the dishes this guest hearted.
+    if (favOnly && !favorites.includes(item.id)) return false;
     // Diet filter: hide non-veg when "veg" is on, and vice versa.
     if (currentDiet === "veg" && !item.veg) return false;
     if (currentDiet === "non-veg" && item.veg) return false;
@@ -446,11 +442,6 @@ export default function MenuPage() {
   const filteredItems = [...visibleItems].sort((a, b) => {
     // Compare two dishes (a and b) based on the selected sort option.
     switch (currentSort) {
-      case "popular": {
-        const pa = a.tags.includes("bestseller") ? 1 : 0;
-        const pb = b.tags.includes("bestseller") ? 1 : 0;
-        return pb - pa || ratingOf(b) - ratingOf(a);
-      }
       case "top-rated":
         return ratingOf(b) - ratingOf(a);
       case "price":
@@ -522,27 +513,14 @@ export default function MenuPage() {
                   // A card lights up when its category view is open, OR — in the
                   // "All" view — when the guest has SCROLLED into its section
                   // (the scroll-spy), so the bar follows them Petpooja-style.
-                  aria-selected={cat.slug === currentCategory || (currentCategory === "all" && features.scrollspy && spyCat === cat.slug)}
-                  className={`cat-card ${cat.slug === currentCategory || (currentCategory === "all" && features.scrollspy && spyCat === cat.slug) ? "active" : ""}`}
+                  // The bar highlights the category you've SCROLLED into (the
+                  // scroll-spy) — there's no "selected" category anymore.
+                  aria-selected={features.scrollspy && spyCat === cat.slug}
+                  className={`cat-card ${features.scrollspy && spyCat === cat.slug ? "active" : ""}`}
                   style={{ ["--cat-color" as string]: cat.color }}
-                  onClick={() => {
-                    // In the "All" view a category card SCROLLS to that section
-                    // (Petpooja-style, on this existing bar — no separate strip).
-                    // Elsewhere it selects the category the way it always has.
-                    const sc = document.getElementById("main-scroll");
-                    const sec = sc?.querySelector(`.cat-group[data-cat="${cat.slug}"]`);
-                    const stickyEl = document.getElementById("menu-sticky");
-                    if (currentCategory === "all" && !q && sc && sec) {
-                      // Land the section just below the pinned bar by measuring the
-                      // exact gap between the section and the bar's bottom RIGHT NOW
-                      // (robust against the bar's height changing per language/font).
-                      const barBottom = stickyEl ? stickyEl.getBoundingClientRect().bottom : 220;
-                      const delta = sec.getBoundingClientRect().top - (barBottom + 12);
-                      sc.scrollTo({ top: sc.scrollTop + delta, behavior: "smooth" });
-                    } else {
-                      selectCategory(cat.slug);
-                    }
-                  }}
+                  // Tapping a category just smooth-scrolls to its section — always
+                  // the full grouped menu, never narrowing to one category.
+                  onClick={() => scrollToCategory(cat.slug)}
                 >
                   <div className="cat-icon" aria-hidden="true">
                     <i className={`fas ${cat.icon}`}></i>
@@ -608,22 +586,36 @@ export default function MenuPage() {
           <div className="header-controls">
             <div className="controls-group">
               <div className="filter-row" role="group" aria-label="Filter and sort dishes">
-                {/* One chip per sort option (Popular / Top Rated / Low Price).
-                    Hidden if the admin switched it off (settings.features.chip_<slug> === false). */}
-                {SORTS.filter((s) => (features as Record<string, boolean>)[`chip_${s.slug}`] !== false).map((s) => (
+                {/* LEFT group — attribute filters that SHOW ONLY matching dishes
+                    and STACK together. Order: Chef's Special, Favorites, then
+                    Veg / Non-Veg. */}
+                {/* Chef's Special — dishes carrying the "chef-special" tag (set in
+                    the editor's Tag tab). Toggle on/off. Hidden if the admin
+                    switched this chip off. */}
+                {(features as Record<string, boolean>)["chip_chef-special"] !== false && (
                   <button
-                    key={s.slug}
                     type="button"
-                    className={`filter-chip ${currentSort === s.slug ? "active" : ""}`}
-                    aria-pressed={currentSort === s.slug}
-                    onClick={() => toggleSort(s.slug)}
+                    className={`filter-chip ${chefOnly ? "active" : ""}`}
+                    aria-pressed={chefOnly}
+                    onClick={() => setChefOnly((v) => !v)}
                   >
-                    {s.label}
+                    ⭐ Chef's Special
                   </button>
-                ))}
-                {/* A thin divider between the sort chips and the diet chips. */}
-                <span className="chip-divider" aria-hidden="true"></span>
-                {/* One chip per diet option (Veg / Non-Veg). Hidden if switched off in admin. */}
+                )}
+                {/* Favorites — the dishes this guest hearted (local). Only when
+                    the favorites feature is on. */}
+                {features.favorites && (
+                  <button
+                    type="button"
+                    className={`filter-chip ${favOnly ? "active" : ""}`}
+                    aria-pressed={favOnly}
+                    onClick={() => setFavOnly((v) => !v)}
+                  >
+                    ❤️ Favorites
+                  </button>
+                )}
+                {/* Veg / Non-Veg — mutually exclusive (a dish is one or the other).
+                    Hidden if switched off in admin. */}
                 {DIETS.filter((d) => (features as Record<string, boolean>)[`chip_${d.slug}`] !== false).map((d) => (
                   <button
                     key={d.slug}
@@ -633,6 +625,21 @@ export default function MenuPage() {
                     onClick={() => toggleDiet(d.slug)}
                   >
                     {d.label}
+                  </button>
+                ))}
+                {/* Divider between the attribute filters and the sort chips. */}
+                <span className="chip-divider" aria-hidden="true"></span>
+                {/* RIGHT group — SORTS (re-order the list): Top Rated, Low Price.
+                    Hidden if the admin switched a chip off. */}
+                {SORTS.filter((s) => (features as Record<string, boolean>)[`chip_${s.slug}`] !== false).map((s) => (
+                  <button
+                    key={s.slug}
+                    type="button"
+                    className={`filter-chip ${currentSort === s.slug ? "active" : ""}`}
+                    aria-pressed={currentSort === s.slug}
+                    onClick={() => toggleSort(s.slug)}
+                  >
+                    {s.label}
                   </button>
                 ))}
               </div>
@@ -690,6 +697,32 @@ export default function MenuPage() {
           // shows the name + dish count + a chevron; tapping it folds that category.
           // Every dropdown starts OPEN so guests see the whole menu at a glance;
           // closedCats records the ones they folded shut (remembered for 10 min).
+          allGroups.length === 0 ? (
+            // The active filter(s) matched nothing (e.g. Favorites with none
+            // hearted, or Chef's Special before any dish is tagged) — show a
+            // friendly hint instead of a blank screen.
+            <div className="fav-empty" role="status">
+              {favOnly ? (
+                <>
+                  <div className="fav-howto" aria-hidden="true">
+                    <div className="fav-howto-card">
+                      <i className="fas fa-mug-saucer fav-howto-pic"></i>
+                      <span className="fav-howto-heart"><i className="fas fa-heart"></i></span>
+                    </div>
+                    <span className="fav-howto-cue">tap to save</span>
+                  </div>
+                  <h3 className="fav-empty-title">No favorites yet</h3>
+                  <p className="fav-empty-sub">
+                    Open any dish, then tap the{" "}
+                    <i className="fas fa-heart" aria-hidden="true"></i> at the{" "}
+                    <b>top-right</b> — it stays saved here for next time.
+                  </p>
+                </>
+              ) : (
+                <h3 className="fav-empty-title">No dishes match these filters.</h3>
+              )}
+            </div>
+          ) : (
           <div className="cat-groups">
             {allGroups.map((g) => {
               const open = !closedCats.includes(g.slug);
@@ -722,36 +755,17 @@ export default function MenuPage() {
               );
             })}
           </div>
+          )
         ) : (
-          // C) single category / search / favorites — the normal flat grid.
+          // C) search results — a flat grid of every match across the menu.
           <div
             id="items-container"
             className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}
           >
-            {currentCategory === "favorites" && !q && filteredItems.length === 0 ? (
-              <div className="fav-empty" role="status">
-                {/* Little how-to: a mock dish card with the heart pinned at its
-                    top-right, so guests can SEE where to tap to favorite. */}
-                <div className="fav-howto" aria-hidden="true">
-                  <div className="fav-howto-card">
-                    <i className="fas fa-mug-saucer fav-howto-pic"></i>
-                    <span className="fav-howto-heart"><i className="fas fa-heart"></i></span>
-                  </div>
-                  <span className="fav-howto-cue">tap to save</span>
-                </div>
-                <h3 className="fav-empty-title">No favorites yet</h3>
-                <p className="fav-empty-sub">
-                  Open any dish, then tap the{" "}
-                  <i className="fas fa-heart" aria-hidden="true"></i> at the{" "}
-                  <b>top-right</b> — it stays saved here for next time.
-                </p>
-              </div>
-            ) : (
-              // Normal case: one FoodCard tile per dish in the filtered list.
-              filteredItems.map((item, index) => (
-                <FoodCard key={item.id} item={item} index={index} viewingCategory={currentCategory} />
-              ))
-            )}
+            {/* One FoodCard tile per dish in the filtered list. */}
+            {filteredItems.map((item, index) => (
+              <FoodCard key={item.id} item={item} index={index} viewingCategory={currentCategory} />
+            ))}
           </div>
         )}
       </main>
