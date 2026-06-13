@@ -77,6 +77,29 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok(row[0] || null);
     }
 
+    // members/:id/make-head — transfer the table head to another member (kick the
+    // current head, promote this one). Mirrors the editor's make-head.
+    if (a === "members" && c === "make-head") {
+      const found = must(await sb.from("session_members").select("id,session_id,role,removed").eq("id", b).limit(1));
+      const m = found[0];
+      if (!m) return err("member not found", 404);
+      const sessRows = must(await sb.from("sessions").select("status").eq("id", m.session_id).limit(1));
+      if (!sessRows[0] || sessRows[0].status !== "open") return err("table is not open");
+      if (m.role === "owner" && !m.removed) return ok(m);
+      must(await sb.from("session_members").update({ removed: true }).eq("session_id", m.session_id).eq("role", "owner").eq("removed", false).select());
+      const row = must(await sb.from("session_members").update({ role: "owner", approved: true, removed: false }).eq("id", b).select());
+      return ok(row[0] || null);
+    }
+
+    // sessions/:id/shift — move the whole party (session + orders + calls) to
+    // another table, atomically, via the service-role RPC.
+    if (a === "sessions" && c === "shift") {
+      const to = String((body && body.to) || "").trim();
+      const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
+      if (error) throw new Error(error.message);
+      return ok(data);
+    }
+
     // sessions/open
     if (a === "sessions" && b === "open") {
       const t = String((body && body.table) || "").trim();

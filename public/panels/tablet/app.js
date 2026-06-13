@@ -52,6 +52,11 @@ const joinersOf = (t) => {
   const s = sessionOf(t);
   return s ? state.data.members.filter((m) => m.session_id === s.id && !m.approved) : [];
 };
+// Everyone seated at a table's open session (for the Party list + transfer head).
+const membersOf = (t) => {
+  const s = sessionOf(t);
+  return s ? state.data.members.filter((m) => m.session_id === s.id) : [];
+};
 
 function tileState(t) {
   const os = ordersOf(t), s = sessionOf(t);
@@ -88,21 +93,28 @@ function renderPanel() {
   if (!state.table) { p.innerHTML = `<div class="empty">Tap a table to see it — or to take an order for it.</div>`; return; }
   if (state.ordering) { renderOrderMode(); return; }
   const t = state.table, s = sessionOf(t), os = ordersOf(t), calls = callsOf(t), joiners = joinersOf(t);
+  const members = s ? membersOf(t) : [];
   const callRows = calls.map((c) => `<div class="row"><span>🔔 ${esc(c.note || "Waiter call")}</span><button class="btn small primary" data-attend="${esc(c.id)}">Done</button></div>`).join("");
   const joinRows = joiners.map((m) => `<div class="row"><span>🙋 ${esc(m.name || "Guest")} wants to join</span><button class="btn small primary" data-approve="${esc(m.id)}">Approve</button></div>`).join("");
+  // The seated party: the head shows a crown; tap "Make head" to transfer it.
+  const partyRows = members.map((m) => `<div class="row"><span>${m.role === "owner" ? "👑" : "•"} ${esc(m.name || "Guest")}${m.approved ? "" : ` <span class="muted">(pending)</span>`}</span>${m.role === "owner" ? `<span class="muted small">head</span>` : `<button class="btn small" data-makehead="${esc(m.id)}">Make head</button>`}</div>`).join("");
   const orderRows = os.map((o) => `<div class="row"><span><b>#${esc(o.kot_no ?? "—")}</b> · ${esc(o.status)} · ${inr(o.total)}</span></div>`).join("");
   p.innerHTML = `
     <div class="phead"><h2>Table ${esc(t)}</h2>${s ? `<span class="live">● open${s.bill_no ? ` · bill #${esc(s.bill_no)}` : ""}</span>` : `<span class="off">closed</span>`}</div>
     ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
     ${callRows ? `<div class="sec"><h3>Calls</h3>${callRows}</div>` : ""}
+    ${members.length ? `<div class="sec"><h3>Party</h3>${partyRows}</div>` : ""}
     <div class="sec"><h3>Today's orders</h3>${orderRows || `<div class="muted">No orders yet.</div>`}</div>
     <div class="pactions">
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
       <button class="btn primary big" id="takeOrder">📝 TAKE ORDER</button>
+      ${s ? `<button class="btn" id="shiftTable">⇄ Shift to another table</button>` : ""}
     </div>`;
   document.querySelectorAll("[data-attend]").forEach((b) => (b.onclick = () => act(() => api("POST", `/calls/${b.dataset.attend}/attend`))));
   document.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.approve}/approve`))));
+  document.querySelectorAll("[data-makehead]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.makehead}/make-head`))));
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
+  const shb = $("#shiftTable"); if (shb && s) shb.onclick = async () => { const to = prompt("Shift this table's party to which table number?"); if (!to) return; act(() => api("POST", `/sessions/${s.id}/shift`, { to: String(to).trim() })); };
   $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel(); };
 }
 

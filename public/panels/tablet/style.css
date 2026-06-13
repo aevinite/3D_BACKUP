@@ -1,11 +1,15 @@
-/* tablet/ui/style.css — the waiter tablet. Same BLUE staff theme as the kitchen
-   (owner asked for blue on the new panels). Everything is sized for fingers on
+/* tablet/ui/style.css — the waiter tablet. Matches the EDITOR's dark/gold theme
+   (owner: the tablet should look like the editor, not blue). Sized for fingers on
    a tablet held one-handed in a busy aisle. */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&display=swap');
 
 :root {
-  --bg: #0b1220; --panel: #111a2e; --line: #1f2c49;
-  --text: #dbe7ff; --muted: #7e93bd; --blue: #3b82f6;
-  --green: #4ade80; --amber: #fbbf24; --red: #ef4444;
+  --bg: #14110d; --panel: #1d1812; --panel-2: #251f17; --line: #38301f;
+  --text: #f2e9da; --muted: #a8997f; --gold: #d4a574; --gold-strong: #e8b884;
+  /* The UI was built around a --blue accent; alias it to GOLD so every accent
+     (selected tile, primary buttons, chips, focus rings) matches the editor. */
+  --blue: #d4a574;
+  --green: #22c55e; --amber: #fbbf24; --red: #ef4444;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -30,9 +34,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .b-call { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { transform: scale(1.12); } }
 .t-free { opacity: 0.65; }
-.t-seated { border-color: rgba(59,130,246,0.5); }
+.t-seated { border-color: rgba(212,165,116,0.5); }
 .t-new { border-color: rgba(251,191,36,0.65); box-shadow: 0 0 0 1px rgba(251,191,36,0.3); }
-.t-prep { border-color: rgba(59,130,246,0.65); }
+.t-prep { border-color: rgba(212,165,116,0.65); }
 .t-done { border-color: rgba(74,222,128,0.55); }
 
 /* the right work panel */
@@ -64,7 +68,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .chip.on { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 700; }
 .dishgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; max-height: 320px; overflow-y: auto; padding: 2px; }
 .dish { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; cursor: pointer; color: var(--text); font-family: inherit; }
-.dish.in { border-color: var(--blue); box-shadow: 0 0 0 1px rgba(59,130,246,0.4); }
+.dish.in { border-color: var(--blue); box-shadow: 0 0 0 1px rgba(212,165,116,0.4); }
 .dish.out { opacity: 0.4; cursor: not-allowed; }
 .dname { font-size: 13.5px; font-weight: 600; line-height: 1.3; }
 .dprice { font-size: 12.5px; color: var(--muted); }
