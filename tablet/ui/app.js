@@ -17,6 +17,7 @@ const state = {
   ordering: false,      // true while the waiter is building an order (freezes panel redraws)
   cart: [],             // [{ id, title, price, qty }]
   cat: "",              // active category chip in order mode ("" = all)
+  dishSearch: "",       // the dish-search text in order mode
   note: "",             // one note for the whole order
 };
 
@@ -76,7 +77,7 @@ function renderFloor() {
   $("#tiles").innerHTML = html;
   document.querySelectorAll("[data-t]").forEach((b) => (b.onclick = () => {
     state.table = b.dataset.t;
-    state.ordering = false; state.cart = []; state.note = "";
+    state.ordering = false; state.cart = []; state.note = ""; state.dishSearch = "";
     renderFloor(); renderPanel();
   }));
 }
@@ -102,7 +103,7 @@ function renderPanel() {
   document.querySelectorAll("[data-attend]").forEach((b) => (b.onclick = () => act(() => api("POST", `/calls/${b.dataset.attend}/attend`))));
   document.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.approve}/approve`))));
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
-  $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; renderPanel(); };
+  $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel(); };
 }
 
 const act = async (fn) => { try { await fn(); await load(); renderPanel(); } catch (e) { toast("Failed: " + e.message, false); } };
@@ -110,13 +111,19 @@ const act = async (fn) => { try { await fn(); await load(); renderPanel(); } cat
 // ── order-taking mode ────────────────────────────────────────────────────────
 const dishPrice = (d) => Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
 
-function renderOrderMode() {
-  const p = $("#panel");
-  const cats = state.data.categories.filter((c) => c.active !== false);
-  const dishes = state.data.dishes.filter((d) => !state.cat || d.category === state.cat);
-  const chips = [`<button class="chip ${!state.cat ? "on" : ""}" data-cat="">All</button>`]
-    .concat(cats.map((c) => `<button class="chip ${state.cat === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc((c.name && c.name.en) || c.slug)}</button>`)).join("");
-  const grid = dishes.map((d) => {
+// The dishes shown right now: a search term (matches the name) wins over the
+// category chip so staff can find anything fast; otherwise filter by category.
+function orderDishes() {
+  const q = state.dishSearch.trim().toLowerCase();
+  return state.data.dishes.filter((d) =>
+    q ? (d.title || "").toLowerCase().includes(q) : (!state.cat || d.category === state.cat));
+}
+// Build just the dish-grid HTML (reused by the live search so we can refresh
+// only the grid and keep the search box focused).
+function orderGridHtml() {
+  const dishes = orderDishes();
+  if (!dishes.length) return `<div class="muted" style="padding:14px">No dishes match.</div>`;
+  return dishes.map((d) => {
     const out = (d.tags || []).includes("sold-out");
     const inCart = state.cart.find((l) => l.id === d.id);
     return `<button class="dish ${out ? "out" : ""} ${inCart ? "in" : ""}" data-dish="${esc(d.id)}" ${out ? "disabled" : ""}>
@@ -124,6 +131,25 @@ function renderOrderMode() {
       <span class="dprice">${out ? "SOLD OUT" : inr(dishPrice(d))}${inCart ? ` · ×${inCart.qty}` : ""}</span>
     </button>`;
   }).join("");
+}
+// Bind the dish "+add" buttons (called after the grid is (re)drawn).
+function bindDishButtons() {
+  document.querySelectorAll("[data-dish]").forEach((b) => (b.onclick = () => {
+    const d = state.data.dishes.find((x) => x.id === b.dataset.dish);
+    if (!d) { toast("That dish just changed — refreshing the menu", false); renderOrderMode(); return; } // the poll removed/edited it between render and tap
+    const line = state.cart.find((l) => l.id === d.id);
+    if (line) line.qty = Math.min(99, line.qty + 1);
+    else state.cart.push({ id: d.id, title: d.title, price: dishPrice(d), qty: 1 });
+    renderOrderMode();
+  }));
+}
+
+function renderOrderMode() {
+  const p = $("#panel");
+  const cats = state.data.categories.filter((c) => c.active !== false);
+  // A search term hides the category chips (it searches across everything).
+  const chips = state.dishSearch.trim() ? "" : [`<button class="chip ${!state.cat ? "on" : ""}" data-cat="">All</button>`]
+    .concat(cats.map((c) => `<button class="chip ${state.cat === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc((c.name && c.name.en) || c.slug)}</button>`)).join("");
   const lines = state.cart.map((l, i) => `<div class="cline">
       <span class="cname">${esc(l.title)}</span>
       <span class="cqty"><button class="qbtn" data-minus="${i}">−</button><b>${l.qty}</b><button class="qbtn" data-plus="${i}">+</button></span>
@@ -132,8 +158,9 @@ function renderOrderMode() {
   const total = state.cart.reduce((s, l) => s + l.price * l.qty, 0);
   p.innerHTML = `
     <div class="phead"><h2>Order · Table ${esc(state.table)}</h2><button class="btn small" id="backBtn">← back</button></div>
+    <input type="search" id="dishSearch" class="order-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">
     <div class="chips">${chips}</div>
-    <div class="dishgrid">${grid}</div>
+    <div class="dishgrid">${orderGridHtml()}</div>
     <div class="cart">
       <h3>This order</h3>
       ${lines || `<div class="muted">Tap dishes above to add them.</div>`}
@@ -143,13 +170,15 @@ function renderOrderMode() {
       <button class="btn primary big" id="sendOrder" ${state.cart.length ? "" : "disabled"}>SEND TO KITCHEN</button>
     </div>`;
   document.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => { state.cat = b.dataset.cat; renderOrderMode(); }));
-  document.querySelectorAll("[data-dish]").forEach((b) => (b.onclick = () => {
-    const d = state.data.dishes.find((x) => x.id === b.dataset.dish);
-    const line = state.cart.find((l) => l.id === d.id);
-    if (line) line.qty = Math.min(99, line.qty + 1);
-    else state.cart.push({ id: d.id, title: d.title, price: dishPrice(d), qty: 1 });
-    renderOrderMode();
-  }));
+  bindDishButtons();
+  // Live dish search: refresh ONLY the grid so the search box keeps focus +
+  // the cursor (re-rendering the whole panel would blur it after each keystroke).
+  const search = $("#dishSearch");
+  if (search) search.oninput = (e) => {
+    state.dishSearch = e.target.value;
+    const g = document.querySelector(".dishgrid");
+    if (g) { g.innerHTML = orderGridHtml(); bindDishButtons(); }
+  };
   document.querySelectorAll("[data-plus]").forEach((b) => (b.onclick = () => { state.cart[+b.dataset.plus].qty = Math.min(99, state.cart[+b.dataset.plus].qty + 1); renderOrderMode(); }));
   document.querySelectorAll("[data-minus]").forEach((b) => (b.onclick = () => {
     const i = +b.dataset.minus;
@@ -162,26 +191,56 @@ function renderOrderMode() {
   $("#sendOrder").onclick = sendOrder;
 }
 
+let sendingOrder = false; // blocks a double-tapped SEND from firing two identical kitchen tickets
 async function sendOrder() {
+  if (sendingOrder) return; // already in flight — ignore the second tap
   const count = state.cart.reduce((s, l) => s + l.qty, 0);
   // Two-step confirm: a kitchen ticket is real work — no accidental sends.
   if (!(await confirmDialog(`Send ${count} item${count > 1 ? "s" : ""} to the kitchen for table ${state.table}?`))) return;
+  sendingOrder = true;
+  const sendBtn = document.getElementById("sendOrder");
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }
   try {
     const r = await api("POST", "/order", {
       table: state.table,
       items: state.cart.map((l) => ({ id: l.id, qty: l.qty })),
       note: state.note.trim() || null,
     });
-    if (!r.ok) { toast("Rejected: " + (r.reason || "unknown") + (r.item ? ` (${r.item})` : ""), false); return; }
+    // Treat a non-ok or shapeless response as a failure — but DON'T clear the
+    // cart, so the waiter can retry without rebuilding the order.
+    if (!r || r.ok !== true) { toast("Rejected: " + ((r && r.reason) || "unknown") + (r && r.item ? ` (${r.item})` : ""), false); return; }
     toast(`Sent! Kitchen ticket #${r.kot_no}`);
     state.ordering = false; state.cart = []; state.note = "";
     await load(); renderPanel();
   } catch (e) { toast("Failed: " + e.message, false); }
+  finally {
+    sendingOrder = false;
+    const b = document.getElementById("sendOrder");
+    if (b) { b.disabled = false; b.textContent = "SEND TO KITCHEN"; }
+  }
 }
 
 // ── the poll ─────────────────────────────────────────────────────────────────
+// A compact fingerprint of everything the floor tiles + table panel draw. The
+// poll re-renders ONLY when this changes — otherwise it would rebuild the DOM
+// every 2.5s and a tap landing on a node mid-replacement would be silently
+// eaten ("the button is stuck"). User-driven renders (tapping a tile, taking
+// an action) still redraw immediately because they call render* directly.
+function boardSig(d) {
+  return JSON.stringify([
+    (d.sessions || []).map((s) => [s.id, s.table_number, s.status, s.bill_no]),
+    (d.orders || []).map((o) => [o.id, o.table_number, o.status, o.total, o.kot_no, o.payment_status]),
+    (d.calls || []).map((c) => [c.id, c.table_number]),
+    (d.members || []).map((m) => [m.id, m.session_id, m.approved, m.removed]),
+    (d.settings || {}).table_count,
+  ]);
+}
+let lastSig = null;
 async function load() {
   state.data = await api("GET", "/state");
+  const sig = boardSig(state.data);
+  if (sig === lastSig) return; // nothing the screen shows has changed — leave the live buttons alone
+  lastSig = sig;
   renderFloor();
   // Don't clobber a half-built order — the panel only refreshes in view mode.
   if (!state.ordering) renderPanel();

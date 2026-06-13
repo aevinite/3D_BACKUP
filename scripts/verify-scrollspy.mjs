@@ -27,58 +27,53 @@ try {
     await new Promise((r) => setTimeout(r, 800));
   });
 
-  // 1. pinned header
+  // 1. the ONE category+search bar stays pinned (no separate strip)
   const pinned = await page.evaluate(async () => {
     const el = document.getElementById("main-scroll");
     el.scrollTop = 2500;
     await new Promise((r) => setTimeout(r, 700));
-    const r1 = document.getElementById("sticky-header").getBoundingClientRect();
-    return r1.top >= 0 && r1.top < 200 && r1.bottom > 100; // on screen while deep
+    const r1 = document.getElementById("menu-sticky").getBoundingClientRect();
+    return r1.top >= -2 && r1.top < 130 && r1.bottom > 200; // pinned + on screen while deep
   });
-  check(pinned, "search/filter header stays pinned while scrolling");
+  check(pinned, "the existing category+search bar stays pinned while scrolling");
 
-  // 2. strip exists
-  check(await page.isVisible("#spy-strip .spy-chip"), "category strip is present in the All view");
+  // 2. there is NO separate strip — the existing category bar is the one and only
+  check(!(await page.$("#spy-strip")) && (await page.$("#cat-scroller")) !== null, "no separate category strip — uses the existing bar");
 
-  // 3. spy ladder — scroll a couple of sections under the header, expect their
-  // chip. Lazy-loading photos above keep growing the page, so after the first
-  // scroll we RE-CORRECT the position (twice) before trusting the reading —
-  // otherwise a busy dev server makes this flaky.
+  // 3. spy ladder — scroll a couple of sections under the bar, expect the
+  // matching CATEGORY CARD to light up. Re-correct twice for lazy-image reflow.
   for (const cat of ["salads", "pizza"]) {
     const spy = await page.evaluate(async (c) => {
       const el = document.getElementById("main-scroll");
-      const landAt = (px) => { const s = el.querySelector(`.cat-group[data-cat="${c}"]`); el.scrollTop = s.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - px; };
-      for (let i = 0; i < 3; i++) { landAt(235); await new Promise((r) => setTimeout(r, 700)); }
+      const landAt = () => { const s = el.querySelector(`.cat-group[data-cat="${c}"]`); const bar = document.getElementById("menu-sticky"); el.scrollTop += s.getBoundingClientRect().top - (bar.getBoundingClientRect().bottom + 10); };
+      for (let i = 0; i < 3; i++) { landAt(); await new Promise((r) => setTimeout(r, 700)); }
       await new Promise((r) => setTimeout(r, 700)); // let the 600ms spy timer fire
-      return document.querySelector(".spy-chip.active")?.textContent || null;
+      return document.querySelector(".cat-card.active .cat-name")?.textContent || null;
     }, cat);
-    check((spy || "").toLowerCase().includes(cat.slice(0, 4)), `scrolling to ${cat} lights its chip (got ${spy})`);
+    check((spy || "").toLowerCase().includes(cat.slice(0, 4)), `scrolling to ${cat} lights its category card (got ${spy})`);
   }
 
-  // 4. bottom edge case → last category lights up
+  // 4. bottom edge case → last category card lights up
   const bottomSpy = await page.evaluate(async () => {
     const el = document.getElementById("main-scroll");
     el.scrollTop = el.scrollHeight; await new Promise((r) => setTimeout(r, 1200));
     el.scrollTop = el.scrollHeight; await new Promise((r) => setTimeout(r, 1200));
-    return document.querySelector(".spy-chip.active")?.textContent || null;
+    return document.querySelector(".cat-card.active .cat-name")?.textContent || null;
   });
-  check(bottomSpy === "Desserts", `bottom of the menu lights the last category (got ${bottomSpy})`);
+  check(bottomSpy === "Desserts", `bottom of the menu lights the last category card (got ${bottomSpy})`);
 
-  // 5. tap-to-jump lands the section below the pinned header. Tap twice with a
-  // settle between (the first jump can land mid-reflow as images above resize;
-  // the second corrects it) before measuring — matches real guest behaviour of
-  // the page having finished settling.
+  // 5. tapping a category CARD in the All view jumps to that section, landing
+  // just below the pinned bar. Tap twice (the first can land mid-reflow).
   const jump = await page.evaluate(async () => {
     const el = document.getElementById("main-scroll");
-    const tap = () => [...document.querySelectorAll(".spy-chip")].find((c) => /beverages/i.test(c.textContent)).click();
-    tap(); await new Promise((r) => setTimeout(r, 1600));
-    tap(); await new Promise((r) => setTimeout(r, 1600));
+    const tap = () => [...document.querySelectorAll(".cat-card")].find((c) => /beverages/i.test(c.textContent)).click();
+    tap(); await new Promise((r) => setTimeout(r, 1700));
+    tap(); await new Promise((r) => setTimeout(r, 1700));
     const secTop = el.querySelector('.cat-group[data-cat="beverages"]').getBoundingClientRect().top;
-    const headerBottom = document.getElementById("sticky-header").getBoundingClientRect().bottom;
-    return { secTop, headerBottom };
+    const barBottom = document.getElementById("menu-sticky").getBoundingClientRect().bottom;
+    return { secTop, barBottom };
   });
-  // allow a small tolerance — landing within ~20px under the header is correct
-  check(jump.secTop >= jump.headerBottom - 25, `tapping a chip lands the section below the header (${Math.round(jump.secTop)} vs ${Math.round(jump.headerBottom)})`);
+  check(jump.secTop >= jump.barBottom - 25, `tapping a category card lands its section below the bar (${Math.round(jump.secTop)} vs ${Math.round(jump.barBottom)})`);
 
   await ctx.close();
 } finally {

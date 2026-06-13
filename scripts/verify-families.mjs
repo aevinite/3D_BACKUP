@@ -128,7 +128,7 @@ try {
   const backendOnly = ["verification", "payments", "aggregators", "gst_invoice"];
   check(backendOnly.every((k) => f[k] !== true), `all backend-only flags are off (${backendOnly.map((k) => k + "=" + (f[k] === true)).join(", ")})`);
   // Their RPCs refuse to act while the flag is off (the system "isn't there").
-  const v = await rpc(ANON, "lfh_request_otp", { p_contact: "9876543210", p_channel: "sms" });
+  const v = await rpc(ANON, "lfh_request_verification", { p_contact: "9876543210", p_channel: "sms" });
   check(v.body && v.body.ok === false && v.body.reason === "disabled", "verification RPC answers 'disabled' while its flag is off");
   // A malformed features payload through the editor is sanitised to a clean
   // boolean map (arrays/strings/nested junk dropped) — can't poison gating.

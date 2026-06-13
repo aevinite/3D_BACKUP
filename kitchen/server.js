@@ -90,7 +90,9 @@ app.get("/api/board", wrap(async (req, res) => {
   const since = new Date(); since.setHours(0, 0, 0, 0);
   const [orders, items, dishes] = await Promise.all([
     supabase.from("orders").select("*").gte("created_at", since.toISOString()).eq("archived", false).order("created_at", { ascending: true }),
-    supabase.from("order_items").select("*").order("created_at", { ascending: true }),
+    // Bound order_items to TODAY too — without this it fetched every item row
+    // ever, so the board got slower every day it ran.
+    supabase.from("order_items").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: true }),
     supabase.from("menu_items").select("id,title,category,tags").order("category"),
   ]);
   res.json({ orders: must(orders), items: must(items), dishes: must(dishes) });
@@ -151,4 +153,9 @@ app.post("/api/dishes/:id/sold-out", wrap(async (req, res) => {
 app.use(express.static(path.join(__dirname, "ui")));
 
 const PORT = Number(env.KITCHEN_PORT) || 4002;
-app.listen(PORT, () => console.log(`\n  🍳 Kitchen panel → http://localhost:${PORT}\n`));
+app.listen(PORT, () => {
+  console.log(`\n  🍳 Kitchen panel → http://localhost:${PORT}`);
+  // Loud reminder: this server holds the service-role key, so it MUST be locked
+  // before it's reachable from anywhere but this machine.
+  console.log(KITCHEN_PASSWORD ? "     🔒 password-locked" : "     🔓 OPEN (no KITCHEN_PASSWORD) — fine locally, NEVER deploy it like this\n");
+});

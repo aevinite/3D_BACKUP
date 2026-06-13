@@ -605,13 +605,17 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 .items-header {
   padding: 8px 20px 10px; display: flex; flex-direction: column; gap: 8px;
   border-bottom: none;
-  /* PINNED while the dishes scroll (Petpooja-style): search + filters + the
-     category strip stay reachable the whole way down. Needs a real background
-     (frosted) so the cards sliding underneath don't show through. */
+}
+/* The PINNED block (Petpooja-style): the EXISTING category bar + the search/
+   filter bar stay reachable the whole way down, and the category bar highlights
+   + follows the section you've scrolled into. Frosted background so the dish
+   cards sliding underneath don't show through. */
+.menu-sticky {
   position: sticky; top: 0; z-index: 50;
-  background: color-mix(in srgb, var(--bg) 86%, transparent);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  /* nearly opaque so dish cards scrolling underneath don't bleed through */
+  background: color-mix(in srgb, var(--bg) 97%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 .search-container { position: relative; width: 100%; }
 /* search autocomplete dropdown */
@@ -756,25 +760,8 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   background: var(--accent-grad); color: #1a0f0a; border-color: transparent;
   box-shadow: 0 6px 20px -5px var(--accent-glow);
 }
-/* ── Petpooja-style scroll-spy category strip (lives in the sticky header) ──
-   A slim, always-visible row of category chips: the active one follows the
-   guest's scroll position, and tapping a chip jumps to that section. */
-.spy-strip {
-  display: flex; gap: 8px; overflow-x: auto; padding: 10px 2px 2px;
-  position: relative; scrollbar-width: none; -webkit-overflow-scrolling: touch;
-}
-.spy-strip::-webkit-scrollbar { display: none; } /* clean edge-to-edge swipe row */
-.spy-chip {
-  flex: 0 0 auto; border: var(--border); background: transparent; color: var(--muted);
-  font-size: 12.5px; font-weight: 600; padding: 7px 14px; border-radius: 999px;
-  cursor: pointer; transition: all .2s; font-family: inherit; white-space: nowrap;
-}
-.spy-chip.active {
-  background: var(--accent-grad); color: #1a0f0a; border-color: transparent; font-weight: 700;
-  box-shadow: 0 6px 20px -5px var(--accent-glow);
-}
-/* anchored jumps land BELOW the pinned header (≈158px tall) instead of under it */
-.cat-group { scroll-margin-top: 170px; }
+/* anchored jumps land below the pinned category+search block */
+.cat-group { scroll-margin-top: 200px; }
 
 /* ── rate-your-visit row under a past bill ────────────────────────────────── */
 .fb-box { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(150,140,125,0.25); }
@@ -785,6 +772,7 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 .fb-comment { flex-basis: 100%; }
 .fb-comment input { width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; border: var(--border); background: rgba(128,90,60,0.08); color: var(--text); font-size: 13px; font-family: inherit; }
 .fb-done { margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(150,140,125,0.25); font-size: 12.5px; color: var(--accent); font-weight: 600; }
+.fb-thanks { font-size: 11.5px; color: var(--accent); font-weight: 600; margin-left: 6px; align-self: center; }
 .layout-switch { 
   background: var(--card); border: var(--border); border-radius: 30px; padding: 4px; display: flex; gap: 2px;
 }

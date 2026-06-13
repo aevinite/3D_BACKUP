@@ -135,4 +135,9 @@ app.post("/api/sessions/open", wrap(async (req, res) => {
 app.use(express.static(path.join(__dirname, "ui")));
 
 const PORT = Number(env.TABLET_PORT) || 4003;
-app.listen(PORT, () => console.log(`\n  🧑‍🍳 Waiter tablet → http://localhost:${PORT}\n`));
+app.listen(PORT, () => {
+  console.log(`\n  🧑‍🍳 Waiter tablet → http://localhost:${PORT}`);
+  // Loud reminder: this server holds the service-role key, so it MUST be locked
+  // before it's reachable from anywhere but this machine.
+  console.log(TABLET_PASSWORD ? "     🔒 password-locked" : "     🔓 OPEN (no TABLET_PASSWORD) — fine locally, NEVER deploy it like this\n");
+});

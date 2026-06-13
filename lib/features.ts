@@ -39,26 +39,52 @@ export type FeatureMap = Record<FeatureKey, boolean>;
 let cached: FeatureMap | null = null;
 let inflight: Promise<FeatureMap> | null = null;
 
+// The switches a device last saw, kept in localStorage so a RETURNING guest's
+// very first paint already reflects the real on/off state — no flash of a
+// disabled feature, and (for 3D) no wasted download before the fetch lands.
+// First-ever visit has nothing saved yet, so it falls back to the defaults.
+const LS_KEY = "lfh_features";
+function readSaved(): FeatureMap | null {
+  try {
+    const raw = typeof localStorage !== "undefined" && localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return { ...FEATURE_DEFAULTS, ...parsed } as FeatureMap;
+  } catch { return null; }
+}
+
 export async function getFeatures(): Promise<FeatureMap> {
   if (cached) return cached;
   if (!inflight) {
     inflight = getSettings()
       .then((s) => {
         cached = { ...FEATURE_DEFAULTS, ...(s.features || {}) } as FeatureMap;
+        try { localStorage.setItem(LS_KEY, JSON.stringify(cached)); } catch {}
         return cached;
       })
-      // Offline / settings unreachable -> just use the defaults (never crash).
-      .catch(() => ({ ...FEATURE_DEFAULTS } as FeatureMap));
+      .catch(() => {
+        // Offline / settings unreachable: use the last-known saved switches if we
+        // have them, else the defaults — and CLEAR inflight so the NEXT call
+        // retries (don't cache a failure forever).
+        inflight = null;
+        return readSaved() || ({ ...FEATURE_DEFAULTS } as FeatureMap);
+      });
   }
   return inflight;
 }
 
-// React hook: renders with the defaults instantly (no flash of missing UI for
-// the common all-on case), then refreshes once the real switches arrive.
+// React hook. The initial value MUST match what the server renders (it can't
+// read localStorage), so it starts from the in-memory cache or the defaults —
+// reading localStorage here would cause a hydration mismatch. The effect then
+// (1) applies the saved switches from the last visit right away — one frame, no
+// network wait, so a returning guest barely sees a disabled feature — and
+// (2) refreshes from the live settings.
 export function useFeatures(): FeatureMap {
   const [f, setF] = useState<FeatureMap>(cached || ({ ...FEATURE_DEFAULTS } as FeatureMap));
   useEffect(() => {
     let alive = true;
+    if (!cached) { const saved = readSaved(); if (saved && alive) setF(saved); }
     getFeatures().then((v) => { if (alive) setF(v); });
     return () => { alive = false; };
   }, []);

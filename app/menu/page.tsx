@@ -253,7 +253,11 @@ export default function MenuPage() {
     const computeSpy = () => {
       const sections = el.querySelectorAll<HTMLElement>(".cat-group[data-cat]");
       if (!sections.length) return;
-      const headerLine = 240; // a line just below the PINNED search/filter header (it ends ~222px down)
+      // The "line" is the bottom of the PINNED category+search block, measured
+      // live — so it stays correct if it grows (longer translated labels, bigger
+      // font, wrapped chips) instead of a hardcoded pixel guess.
+      const hdr = document.getElementById("menu-sticky");
+      const headerLine = (hdr ? hdr.getBoundingClientRect().bottom : 240) + 16;
       let active = sections[0].dataset.cat || "";
       sections.forEach((s) => {
         // The LAST section whose top has crossed the line is the one in view.
@@ -286,21 +290,18 @@ export default function MenuPage() {
     return () => { el.removeEventListener("scroll", onScroll); cancelAnimationFrame(raf); clearInterval(tick); };
   }, []);
 
-  // When the spied category changes, slide BOTH category bars sideways so the
-  // active chip stays in view (the big cards up top + the slim sticky strip) —
-  // exactly how Petpooja's dine-in bar follows the guest.
+  // When the spied category changes, slide the (now pinned) category bar
+  // sideways so the active card stays in view — exactly how Petpooja's dine-in
+  // bar follows the guest as they scroll.
   useEffect(() => {
     if (!spyCat) return;
-    const pairs: Array<[string, string]> = [["cat-scroller", ".cat-card.active"], ["spy-strip", ".spy-chip.active"]];
-    for (const [barId, sel] of pairs) {
-      const bar = document.getElementById(barId);
-      const chip = bar?.querySelector<HTMLElement>(sel);
-      if (bar && chip) {
-        // centre the active chip inside its bar (computed against the bar itself,
-        // so this can never scroll the page vertically by accident)
-        const left = chip.getBoundingClientRect().left - bar.getBoundingClientRect().left + bar.scrollLeft;
-        bar.scrollTo({ left: left - bar.clientWidth / 2 + chip.clientWidth / 2, behavior: "smooth" });
-      }
+    const bar = document.getElementById("cat-scroller");
+    const chip = bar?.querySelector<HTMLElement>(".cat-card.active");
+    if (bar && chip) {
+      // centre the active card inside its bar (computed against the bar itself,
+      // so this can never scroll the page vertically by accident)
+      const left = chip.getBoundingClientRect().left - bar.getBoundingClientRect().left + bar.scrollLeft;
+      bar.scrollTo({ left: left - bar.clientWidth / 2 + chip.clientWidth / 2, behavior: "smooth" });
     }
   }, [spyCat]);
 
@@ -469,6 +470,11 @@ export default function MenuPage() {
             {t.slide} <i className="fas fa-arrow-right"></i>
           </span>
         </div>
+        {/* Everything from here to the matching close stays PINNED while the
+            dishes scroll: the existing category bar (which highlights + follows
+            the category you've scrolled into) AND the search/filter bar. This is
+            the one and only category bar — no separate strip. */}
+        <div className="menu-sticky" id="menu-sticky">
         {/* The horizontal row of category tabs. */}
         <div className="cat-scroller" id="cat-scroller" role="tablist" aria-label="Menu categories">
           {/* If categories haven't loaded yet, maybe show placeholders;
@@ -493,10 +499,27 @@ export default function MenuPage() {
                   // A card lights up when its category view is open, OR — in the
                   // "All" view — when the guest has SCROLLED into its section
                   // (the scroll-spy), so the bar follows them Petpooja-style.
-                  aria-selected={cat.slug === currentCategory || (currentCategory === "all" && spyCat === cat.slug)}
-                  className={`cat-card ${cat.slug === currentCategory || (currentCategory === "all" && spyCat === cat.slug) ? "active" : ""}`}
+                  aria-selected={cat.slug === currentCategory || (currentCategory === "all" && features.scrollspy && spyCat === cat.slug)}
+                  className={`cat-card ${cat.slug === currentCategory || (currentCategory === "all" && features.scrollspy && spyCat === cat.slug) ? "active" : ""}`}
                   style={{ ["--cat-color" as string]: cat.color }}
-                  onClick={() => selectCategory(cat.slug)}
+                  onClick={() => {
+                    // In the "All" view a category card SCROLLS to that section
+                    // (Petpooja-style, on this existing bar — no separate strip).
+                    // Elsewhere it selects the category the way it always has.
+                    const sc = document.getElementById("main-scroll");
+                    const sec = sc?.querySelector(`.cat-group[data-cat="${cat.slug}"]`);
+                    const stickyEl = document.getElementById("menu-sticky");
+                    if (currentCategory === "all" && !q && sc && sec) {
+                      // Land the section just below the pinned bar by measuring the
+                      // exact gap between the section and the bar's bottom RIGHT NOW
+                      // (robust against the bar's height changing per language/font).
+                      const barBottom = stickyEl ? stickyEl.getBoundingClientRect().bottom : 220;
+                      const delta = sec.getBoundingClientRect().top - (barBottom + 12);
+                      sc.scrollTo({ top: sc.scrollTop + delta, behavior: "smooth" });
+                    } else {
+                      selectCategory(cat.slug);
+                    }
+                  }}
                 >
                   <div className="cat-icon" aria-hidden="true">
                     <i className={`fas ${cat.icon}`}></i>
@@ -610,39 +633,9 @@ export default function MenuPage() {
               </div>
             </div>
           </div>
-
-          {/* Slim Petpooja-style category strip — always visible while scrolling
-              (it lives inside this sticky header). Shows only in the "All" view:
-              the active chip follows the scroll (see the scroll-spy above), and
-              tapping a chip smooth-scrolls straight to that category's section. */}
-          {features.scrollspy && currentCategory === "all" && !q && allGroups.length > 0 && (
-            <div className="spy-strip" id="spy-strip" role="tablist" aria-label="Jump to category">
-              {allGroups.map((g) => (
-                <button
-                  key={g.slug}
-                  type="button"
-                  role="tab"
-                  aria-selected={spyCat === g.slug}
-                  className={`spy-chip ${spyCat === g.slug ? "active" : ""}`}
-                  onClick={() => {
-                    // Manual jump (scrollIntoView ignores scroll-margin in this
-                    // nested layout): land the section just below the pinned header.
-                    const sc = document.getElementById("main-scroll");
-                    const sec = sc?.querySelector(`.cat-group[data-cat="${g.slug}"]`);
-                    if (sc && sec) {
-                      // 235 = the pinned header's bottom edge measured from the
-                      // scroll container's top (158px header + the app bar) + air.
-                      const top = sec.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop - 235;
-                      sc.scrollTo({ top, behavior: "smooth" });
-                    }
-                  }}
-                >
-                  {g.name}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
+        </div>
+        {/* /menu-sticky — the category bar + search/filters that stay pinned. */}
 
         {/* The dishes. Three shapes:
             A) still loading            -> grey placeholder cards

@@ -131,6 +131,17 @@ function renderDishes() {
   }));
 }
 
+// A fingerprint of everything the board draws — same idea as the tablet: only
+// re-render when it changes, so a tap on ACCEPT / a dish ✓ landing exactly when
+// the poll fires can't be eaten by a DOM rebuild.
+function boardSig(d) {
+  return JSON.stringify([
+    (d.orders || []).map((o) => [o.id, o.status, o.kot_no]),
+    (d.items || []).map((i) => [i.id, i.status]),
+    (d.dishes || []).map((x) => [x.id, (x.tags || []).includes("sold-out")]),
+  ]);
+}
+let lastSig = null;
 // ── the poll ─────────────────────────────────────────────────────────────────
 async function load() {
   const data = await api("GET", "/board");
@@ -142,6 +153,11 @@ async function load() {
   }
   state.knownIds = ids;
   state.orders = data.orders; state.items = data.items; state.dishes = data.dishes;
+  // If the 86-board drawer is open, keep it fresh regardless (its own render).
+  if (!$("#drawerOverlay").hidden) renderDishes();
+  const sig = boardSig(data);
+  if (sig === lastSig) return; // nothing visible changed — don't rebuild the tickets
+  lastSig = sig;
   render();
 }
 
