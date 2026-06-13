@@ -36,8 +36,10 @@ yarn-error.log*
 # IDE/AI tools - NEVER commit these!
 .claude/
 
-# Private local menu editor (uses the service-role key — never push it)
-editor/
+# Private local menu editor (uses the service-role key — never push it).
+# Anchored with a leading slash so it ONLY ignores the ROOT editor/ — NOT the
+# new app/editor/ route that's part of the unified app.
+/editor/
 
 # vercel
 .vercel
