@@ -213,6 +213,18 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && c === "close") {
       const sess = (must(await sb.from("sessions").select("table_number").eq("id", b).limit(1)))[0];
       const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", b).select());
+      // Log any unpaid money, then clean up THIS session's orders (mirrors the
+      // editor close): cancel un-served unpaid work, archive the rest — so a
+      // closed table never leaves phantom unarchived orders behind.
+      const owedRows = must(await sb.from("orders").select("total,discount")
+        .eq("session_id", b).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid"));
+      if (owedRows.length) {
+        const owed = owedRows.reduce((s: number, o: any) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
+        await logAction("tablet", "close_unpaid", { table_number: sess ? sess.table_number : null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${owed} owed`, device_id: dev });
+      }
+      await sb.from("orders").update({ status: "cancelled", archived: true })
+        .eq("session_id", b).eq("archived", false).neq("payment_status", "paid").in("status", ["received", "preparing"]);
+      await sb.from("orders").update({ archived: true }).eq("session_id", b).eq("archived", false);
       await logAction("tablet", "table_close", { table_number: sess ? sess.table_number : null, device_id: dev });
       return ok(row[0] || null);
     }

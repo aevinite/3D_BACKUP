@@ -298,10 +298,22 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && c === "close") {
       const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", b).select());
       const sess = row[0];
-      if (sess && sess.table_number != null) {
-        const t = String(sess.table_number).trim();
-        must(await sb.from("orders").update({ status: "cancelled", archived: true }).eq("table_number", t).eq("archived", false).in("status", ["received", "preparing"]).select());
-        must(await sb.from("orders").update({ archived: true }).eq("table_number", t).eq("archived", false).eq("status", "served").select());
+      if (sess) {
+        // Scope cleanup to THIS session (NOT the bare table number, which could
+        // hit a different party that later sat at the same table). Any money still
+        // owed at close is LOGGED so it's never silently erased; un-served unpaid
+        // work is cancelled (the meal's over); everything else is archived as the
+        // bill record.
+        const owedRows = must(await sb.from("orders").select("total,discount")
+          .eq("session_id", b).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid"));
+        if (owedRows.length) {
+          const owed = owedRows.reduce((s: number, o: any) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
+          await logAction("editor", "close_unpaid", { table_number: sess.table_number ?? null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${owed} owed`, device_id: dev });
+        }
+        must(await sb.from("orders").update({ status: "cancelled", archived: true })
+          .eq("session_id", b).eq("archived", false).neq("payment_status", "paid").in("status", ["received", "preparing"]).select());
+        must(await sb.from("orders").update({ archived: true })
+          .eq("session_id", b).eq("archived", false).select());
       }
       await logAction("editor", "table_close", { table_number: sess?.table_number ?? null, device_id: dev });
       return ok(sess || null);
@@ -452,6 +464,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
       if (patch.payment_status === "paid" && cur.status === "cancelled")
         return err("Can't take payment on a cancelled order.", 409);
+      // Reverting a PAID bill to unpaid is a refund/correction, not a routine edit:
+      // require a reason and ALWAYS log it, so collected cash can't be quietly
+      // un-booked without a trace (theft control).
+      if (patch.payment_status === "pending" && cur.payment_status === "paid") {
+        const reason = String((body && body.revert_reason) || "").trim();
+        if (!reason) return err("Reverting a PAID bill needs a reason (refund/correction).", 409);
+        await logAction("editor", "payment_revert", { order_id: id, detail: reason, device_id: deviceIdFrom(req) });
+      }
       const data = must(await sb.from("orders").update(patch).eq("id", id).select());
       return ok(data[0] || null);
     }

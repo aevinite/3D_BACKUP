@@ -1035,12 +1035,19 @@ async function setOrderPayment(id, paid, opts = {}) {
   }
   const o = (state.data.orders || []).find((x) => x.id === id);
   const prev = o ? o.payment_status : null;
+  // Reverting an ALREADY-PAID bill is a refund/correction — require a reason
+  // (the server logs it). Routine "mark unpaid" on a never-paid order is free.
+  let revertReason = null;
+  if (!paid && prev === "paid") {
+    revertReason = (window.prompt("This bill is PAID. Reason for reverting it to unpaid (refund / wrong entry)?") || "").trim();
+    if (!revertReason) { toast("Revert cancelled — a reason is required.", "err"); return; }
+  }
   if (o) o.payment_status = paid ? "paid" : "pending"; // flip the screen NOW
   opBegin(id);                     // shield this order from the poll meanwhile
   renderEditor();
   renderTablePanel();
   try {
-    await api("PATCH", "/orders/" + id, { payment_status: paid ? "paid" : "pending" });
+    await api("PATCH", "/orders/" + id, { payment_status: paid ? "paid" : "pending", ...(revertReason ? { revert_reason: revertReason } : {}) });
     toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
   } catch (e) {
     if (o && prev !== null) o.payment_status = prev;   // undo on failure
