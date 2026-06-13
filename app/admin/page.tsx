@@ -87,7 +87,7 @@ const card = { background: "#111a2e", border: "1px solid #1f2c49", borderRadius:
 
 // Prices/totals are stored in a USD base; show them in rupees the SAME way the
 // menu/editor/tablet do (× INR_RATE) so every screen shows the identical ₹ amount.
-const INR_RATE = 84;
+const INR_RATE = 1; // prices are stored in rupees now (migration 043) — no conversion
 const inr = (n: number) => "₹" + Math.round((Number(n) || 0) * INR_RATE).toLocaleString("en-US");
 
 export default function AdminHome() {

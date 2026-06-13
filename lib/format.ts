@@ -2,8 +2,8 @@
 
 // Currency + language helpers.
 //
-// Prices in menu.json are stored as USD numbers (the source of truth).
-// The user-facing display is converted via the static `rate` below.
+// Prices are stored in INR (rupees) — the base currency (migration 043).
+// Other currencies are converted from ₹ via the static `rate` below.
 // Rates are intentionally hardcoded — for a live restaurant you should
 // refresh them periodically from a free FX feed (e.g. exchangerate.host).
 // They're declared here so a non-developer can update the numbers without
@@ -26,13 +26,16 @@ export interface CurrencyMeta {
 // The actual table of currencies the menu offers. Each row is one currency.
 // "rate" is how many of that currency equal 1 US dollar (so ₹84 = $1).
 // A non-developer can safely update these rate numbers when exchange rates move.
+// BASE is now INR — prices are stored in rupees (migration 043). `rate` = how
+// many of that currency equal ₹1: INR is 1 (base); others are their old per-USD
+// rate ÷ 84. A non-developer updates these when FX moves.
 export const CURRENCIES: CurrencyMeta[] = [
-  { code: "USD", symbol: "$",   label: "USD", rate: 1,     decimals: 2 },
-  { code: "INR", symbol: "₹",   label: "INR", rate: 84,    decimals: 0 },
-  { code: "EUR", symbol: "€",   label: "EUR", rate: 0.92,  decimals: 2 },
-  { code: "AED", symbol: "AED", label: "AED", rate: 3.67,  decimals: 2 },
-  { code: "SAR", symbol: "SAR", label: "SAR", rate: 3.75,  decimals: 2 },
-  { code: "QAR", symbol: "QAR", label: "QAR", rate: 3.64,  decimals: 2 },
+  { code: "INR", symbol: "₹",   label: "INR", rate: 1,          decimals: 0 },
+  { code: "USD", symbol: "$",   label: "USD", rate: 1 / 84,     decimals: 2 },
+  { code: "EUR", symbol: "€",   label: "EUR", rate: 0.92 / 84,  decimals: 2 },
+  { code: "AED", symbol: "AED", label: "AED", rate: 3.67 / 84,  decimals: 2 },
+  { code: "SAR", symbol: "SAR", label: "SAR", rate: 3.75 / 84,  decimals: 2 },
+  { code: "QAR", symbol: "QAR", label: "QAR", rate: 3.64 / 84,  decimals: 2 },
 ];
 
 // The list of languages the menu can show. Each is a short 2-letter code:
@@ -119,7 +122,9 @@ import { niceUsd, displayAmount, minorRound } from "./money.mjs";
 // Display step per currency: INR prices snap to ₹10 (owner's decision,
 // 2026-06-10 — "round figures for Indian rupees only"); 2-decimal currencies
 // keep their cents. Tax uses MINOR below so it doesn't jump in ₹10 hops.
-const STEP: Record<CurrencyCode, number> = { USD: 0.01, INR: 10, EUR: 0.01, AED: 0.01, SAR: 0.01, QAR: 0.01 };
+// INR is the base now, so its prices show EXACTLY as the owner set them (step 1);
+// other currencies are converted from ₹ and keep their cents.
+const STEP: Record<CurrencyCode, number> = { USD: 0.01, INR: 1, EUR: 0.01, AED: 0.01, SAR: 0.01, QAR: 0.01 };
 const MINOR: Record<CurrencyCode, number> = { USD: 0.01, INR: 1, EUR: 0.01, AED: 0.01, SAR: 0.01, QAR: 0.01 };
 
 // The "confident" USD unit price (.00/.50/.99 endings) — single source of

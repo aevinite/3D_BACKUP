@@ -63,7 +63,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
 // Orders store totals in USD (the menu's source-of-truth currency); the owner
 // wants the editor to read in ₹ (2026-06-10). The rate mirrors CURRENCIES in
 // the menu app's lib/format.ts — update both together when rates move.
-const INR_RATE = 84;
+const INR_RATE = 1; // prices are stored in rupees now (migration 043) — no conversion
 const inr = (usd) => "₹" + Math.round((parseFloat(usd) || 0) * INR_RATE).toLocaleString("en-US");
 // el: turn a string of HTML into a real, clickable page element we can insert.
 const el = (html) => {
