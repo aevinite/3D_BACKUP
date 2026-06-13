@@ -331,6 +331,7 @@ input:disabled { opacity: .55; cursor: not-allowed; }
 }
 .ord-pill.received { background: color-mix(in srgb, var(--gold) 22%, transparent); color: var(--gold); }
 .ord-pill.preparing { background: rgba(232,161,60,0.18); color: #e8a13c; }
+.ord-pill.ready { background: rgba(236,72,153,0.18); color: #f472b6; }
 .ord-pill.served { background: rgba(74,222,128,0.16); color: #4ade80; }
 .ord-pill.cancelled { background: rgba(239,68,68,0.16); color: #ef4444; }
 /* pre-order: in the shared cart, not sent yet. Blackish-grey ON PURPOSE (owner,
@@ -736,6 +737,8 @@ body {
 .ftile:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.4); }
 .ft-free { --c: #6b6253; } .ft-seated { --c: #2dd4bf; } .ft-new { --c: #f59e0b; }
 .ft-prep { --c: #4f9dff; } .ft-done { --c: #6b6253; } /* (ft-bill removed — payment lives in the outline) */
+.ft-ready { --c: #ec4899; } /* cooked, waiting for the waiter — pink, matches the tablet */
+.ftile.ft-ready { box-shadow: 0 0 16px color-mix(in srgb, var(--c) 28%, transparent); }
 .ft-req { --c: #e7b75a; }
 /* Open table, nobody seated yet → bright YELLOW fill so it clearly reads as
    "open & waiting" (not the dark free/off look). Stronger tint than the others. */
