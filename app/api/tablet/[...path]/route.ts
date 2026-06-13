@@ -26,11 +26,14 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "state") {
       const since = new Date(); since.setHours(0, 0, 0, 0);
-      const [settings, sessions, members, orders, calls, dishes, categories, requests] = await Promise.all([
+      const [settings, sessions, members, orders, items, calls, dishes, categories, requests] = await Promise.all([
         sb.from("settings").select("*").eq("id", "site").maybeSingle(),
         sb.from("sessions").select("*").neq("status", "closed"),
         sb.from("session_members").select("*").eq("removed", false),
         sb.from("orders").select("*").gte("created_at", since.toISOString()).eq("archived", false).order("created_at"),
+        // Per-dish rows (the same table the kitchen advances). Lets the tablet show
+        // and advance each dish's status (new → cooking → served), not just the order.
+        sb.from("order_items").select("*").gte("created_at", since.toISOString()).order("created_at").order("id"),
         sb.from("waiter_calls").select("*").eq("resolved", false),
         sb.from("menu_items").select("id,title,price,category,tags,veg,options").order("category"),
         sb.from("categories").select("slug,name,icon,sort_order,active").order("sort_order"),
@@ -38,8 +41,8 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       ]);
       return ok({
         settings: must(settings), sessions: must(sessions), members: must(members),
-        orders: must(orders), calls: must(calls), dishes: must(dishes), categories: must(categories),
-        requests: must(requests),
+        orders: must(orders), items: must(items), calls: must(calls), dishes: must(dishes),
+        categories: must(categories), requests: must(requests),
       });
     }
     return err("unknown GET endpoint", 404);
@@ -116,6 +119,52 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
       return ok(data);
+    }
+
+    // items/:id/status — advance ONE dish (received→preparing→served) from the
+    // tablet, then roll the parent order's overall status up. Mirrors the kitchen
+    // endpoint exactly so kitchen + tablet stay perfectly consistent.
+    if (a === "items" && c === "status") {
+      const status = body && body.status;
+      if (!["received", "preparing", "served"].includes(status)) return err("invalid status");
+      const patch: any = { status };
+      if (status === "served") patch.served_at = nowIso();
+      const updated = must(await sb.from("order_items").update(patch).eq("id", b).select());
+      const item = updated[0];
+      if (item && item.order_id) {
+        const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id));
+        const served = rows.filter((r: any) => r.status === "served").length;
+        const anyActive = rows.some((r: any) => r.status === "preparing" || r.status === "served");
+        const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
+        await sb.from("orders").update({ status: overall }).eq("id", item.order_id);
+      }
+      await logAction("tablet", "item_status", { detail: status });
+      return ok(item || null);
+    }
+
+    // orders/:id/accept — accept a (often phone/online) order: everything not yet
+    // served → preparing, so it shows up on the kitchen pass. Mirrors the kitchen.
+    if (a === "orders" && c === "accept") {
+      const cur = must(await sb.from("orders").select("items").eq("id", b).single());
+      const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
+      must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).select());
+      await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
+      await logAction("tablet", "order_accept", { order_id: b });
+      return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
+    }
+
+    // orders/:id/move — move a SINGLE order (and its dish rows) to another table's
+    // open session. Distinct from sessions/:id/shift (which moves the whole party).
+    if (a === "orders" && c === "move") {
+      const to = String((body && body.to) || "").trim();
+      if (!/^\d+$/.test(to)) return err("valid target table required");
+      // Find (or open) the target table's session, then re-home the order onto it.
+      let target = (must(await sb.from("sessions").select("id").eq("table_number", to).neq("status", "closed").limit(1)))[0];
+      if (!target) target = (must(await sb.from("sessions").insert({ table_number: to, status: "open", opened_by: "waiter", opened_at: nowIso() }).select()))[0];
+      const moved = must(await sb.from("orders").update({ table_number: to, session_id: target.id }).eq("id", b).select());
+      await sb.from("order_items").update({ session_id: target.id }).eq("order_id", b);
+      await logAction("tablet", "order_move", { order_id: b, table_number: to });
+      return ok(moved[0] || null);
     }
 
     // sessions/open

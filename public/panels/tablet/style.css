@@ -24,16 +24,62 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
 
 /* floor tiles — fluid grid, no dead gap */
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; align-items: start; }
 /* Tiles match the editor's floor exactly: a per-state --c accent driving a soft
-   gradient fill + border (editor ft-* colors). */
-.tile { --c: #6b6253; position: relative; aspect-ratio: 1; border-radius: 14px;
+   gradient fill + border (editor ft-* colors). Open tables grow to hold real
+   info (guests, KOT, kitchen progress); free tables stay compact. */
+.tile { --c: #6b6253; position: relative; min-height: 92px; border-radius: 16px;
   border: 1.5px solid color-mix(in srgb, var(--c) 55%, var(--line));
   background: linear-gradient(157deg, color-mix(in srgb, var(--c) 16%, var(--panel)), var(--panel) 78%);
-  color: var(--text); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-family: inherit; }
+  color: var(--text); cursor: pointer; display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+  font-family: inherit; padding: 12px 12px 13px; text-align: left; }
 .tile.sel { outline: 3px solid var(--blue); outline-offset: 1px; }
-.tnum { font-size: 22px; font-weight: 900; }
-.tlabel { font-size: 11px; color: var(--muted); }
+/* OUTLINE = payment (only on tables that have orders) */
+.tile.pay-unpaid { border-color: var(--red); }
+.tile.pay-paid { border-color: var(--green); }
+/* a table that needs you: red ring + glow */
+.tile.called { box-shadow: 0 0 0 2px var(--red), 0 0 18px rgba(239,68,68,.30); }
+.tnum { font-size: 24px; font-weight: 900; line-height: 1; }
+.tlabel { font-size: 12px; font-weight: 800; }
+.t-free .tlabel { color: var(--muted); }
+.t-seated .tlabel { color: #2dd4bf; }
+.t-waiting .tlabel { color: #f5c451; }
+.t-new .tlabel { color: #f59e0b; }
+.t-prep .tlabel { color: #4f9dff; }
+.t-done .tlabel { color: #22c55e; }
+.tsub { font-size: 11px; color: var(--muted); }
+/* kitchen progress strip + dish-count pills on a tile */
+.tstrip { height: 6px; border-radius: 6px; margin-top: 6px; background: #2a2218; overflow: hidden; display: flex; }
+.tstrip i { display: block; height: 100%; }
+.tpills { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+.tpill { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 8px; white-space: nowrap; }
+.tpill.nw { background: rgba(245,158,11,.18); color: #fbbf24; }
+.tpill.ck { background: rgba(79,157,255,.18); color: #7ab4ff; }
+.tpill.sv { background: rgba(34,197,94,.18); color: #4ade80; }
+.tpill.kot { background: #2a2218; color: var(--gold); }
+/* the big editor-style Open button on a free tile */
+.topen { margin-top: 8px; background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c;
+  font-weight: 800; font-size: 14px; text-align: center; padding: 10px; border-radius: 11px; }
+.topen:hover { filter: brightness(1.05); }
+
+/* ── always-on legend ── */
+.legend { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; font-size: 13px;
+  color: var(--muted); padding-bottom: 12px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.leg-grp { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; }
+.leg-key { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #7a6e58; }
+.leg-it { display: flex; align-items: center; gap: 6px; color: #e8ddc8; }
+.legend .sw { width: 14px; height: 14px; border-radius: 5px; }
+.legend .sw.o { background: transparent; border: 2px solid; }
+
+/* ── header count chips (tap to filter) ── */
+.counts { display: inline-flex; gap: 8px; margin-right: 12px; }
+.cchip { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 11px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; color: var(--muted); }
+.cchip b { color: var(--text); font-size: 14px; }
+.cchip.on { border-color: var(--gold); }
+.cchip.needs { border-color: var(--red); background: rgba(239,68,68,.10); }
+.cchip.needs b { color: #ff8a8a; }
+@media (max-width: 760px) { .counts { display: none; } } /* on phones the floor-nav row carries the filters */
 .tbadges { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; }
 .tbadges em { font-style: normal; font-size: 11px; background: rgba(0,0,0,0.45); border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px; }
 .b-call { animation: pulse 1.2s ease-in-out infinite; }
@@ -56,6 +102,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .fnav em { font-style: normal; font-size: 11px; background: var(--bg); border-radius: 999px; padding: 1px 7px; }
 .fnav.on { background: var(--gold); border-color: var(--gold); color: #2a1d0c; }
 .fnav.on em { background: rgba(0,0,0,.2); }
+/* On wide screens the count chips beside the brand are the filter, so the
+   floor-nav row is redundant — hide it. On narrow it's the only filter. */
+@media (min-width: 761px) { .floor-nav { display: none; } }
 /* shift-to-table picker: a grid of free-table buttons */
 .shiftgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
 .shiftpick { padding: 16px 8px; font-size: 16px; font-weight: 800; }
@@ -129,3 +178,58 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .confirm-box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; width: min(92vw, 380px); }
 .confirm-box p { margin: 0 0 16px; font-size: 15px; line-height: 1.5; }
 .confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+/* ── editor-quality detail panel ───────────────────────────────────────────── */
+/* the panel becomes a column so the action row + attend bar can pin to the bottom */
+.panel.has-detail { display: flex; flex-direction: column; padding: 0; }
+.panel.has-detail .phead { padding: 16px 16px 0; }
+.detail-body { padding: 12px 16px; overflow: auto; flex: 1; display: flex; flex-direction: column; gap: 12px; }
+.pmeta { color: var(--muted); font-size: 13px; }
+/* back-to-tables affordance — only useful on the stacked (narrow) layout */
+.backtop { display: none; }
+@media (max-width: 760px) { .backtop { display: inline-flex; } }
+
+/* an order card */
+.ord { background: #211a12; border: 1px solid #34291a; border-radius: 12px; overflow: hidden; }
+.ordh { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 12px; background: #241c12; border-bottom: 1px solid #34291a; }
+.ordh .left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kot { font-family: ui-monospace, monospace; font-weight: 800; color: var(--gold); background: #2e2417; padding: 3px 9px; border-radius: 8px; font-size: 12px; }
+.when { color: var(--muted); font-size: 12px; }
+.viaapp { font-size: 10px; font-weight: 800; color: #7ab4ff; background: rgba(79,157,255,.15); padding: 3px 8px; border-radius: 8px; }
+.ordtotal { font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; }
+.iline { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #2a2114; }
+.iline:last-child { border-bottom: 0; }
+.iqty { font-weight: 800; color: var(--gold); min-width: 26px; }
+.inm { flex: 1; min-width: 0; font-size: 14px; }
+.inm .iopt { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.inm .irem { color: #ff8a8a; font-size: 11px; margin-top: 2px; text-transform: uppercase; letter-spacing: .03em; }
+/* the per-dish status pill — tappable when it's a real DB row (advances new→cooking→served) */
+.ist { font-size: 10px; font-weight: 800; padding: 4px 9px; border-radius: 8px; white-space: nowrap; border: 1px solid transparent; }
+.ist.tap { cursor: pointer; }
+.ist.tap:hover { filter: brightness(1.15); }
+.ist.received { background: rgba(245,158,11,.18); color: #fbbf24; }
+.ist.preparing { background: rgba(79,157,255,.18); color: #7ab4ff; }
+.ist.served { background: rgba(34,197,94,.18); color: #4ade80; }
+.oallergy { margin: 0 12px; margin-top: 10px; background: rgba(239,68,68,.14); border: 1px solid rgba(239,68,68,.5); color: #ff8a8a; font-weight: 800; font-size: 12px; padding: 7px 10px; border-radius: 9px; letter-spacing: .03em; }
+.accept { margin: 10px 12px; display: block; width: calc(100% - 24px); background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; font-weight: 800; text-align: center; padding: 11px; border-radius: 10px; font-size: 13.5px; border: 0; cursor: pointer; }
+
+/* actions row: Take order (primary) + Move table / Move an order (secondary) */
+.dacts { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 16px 12px; }
+.dacts .btn { flex: 1; min-width: 120px; }
+.dacts .btn.primary { flex: 2; }
+
+/* bottom bar: bill + paid/unpaid on the left, ATTEND fills the rest when called */
+.foot { border-top: 1px solid var(--line); padding: 12px 16px; display: flex; align-items: stretch; gap: 12px; }
+.billbox { background: #211a12; border: 1.5px solid var(--line); border-radius: 12px; padding: 9px 14px; display: flex; flex-direction: column; justify-content: center; min-width: 120px; }
+.billbox.unpaid { border-color: var(--red); }
+.billbox.paid { border-color: var(--green); }
+.billbox .bn { font-family: ui-monospace, monospace; font-weight: 800; font-size: 14px; }
+.billbox .due { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.billbox .pay { font-size: 11px; font-weight: 800; margin-top: 2px; }
+.billbox.unpaid .pay { color: var(--red); }
+.billbox.paid .pay { color: var(--green); }
+.attend { flex: 1; background: linear-gradient(180deg, #ff6b6b, #ef4444); color: #fff; border: 0; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 800; font-size: 16px; cursor: pointer;
+  box-shadow: 0 0 0 4px rgba(239,68,68,.16); font-family: inherit; }
+.attend:hover { filter: brightness(1.06); }
+.attend.more { font-size: 13px; }

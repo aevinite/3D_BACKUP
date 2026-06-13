@@ -11,12 +11,34 @@
 <body>
   <header class="topbar">
     <div class="brand">🧑‍🍳 Waiter <span class="sub">live floor</span></div>
-    <div class="top-actions"><span id="clock" class="clock"></span></div>
+    <!-- Live count chips beside the brand (tap to filter) + clock. -->
+    <div class="top-actions"><div class="counts" id="counts"></div><span id="clock" class="clock"></span></div>
   </header>
 
   <main class="layout">
     <!-- LEFT: the live floor — one tile per table, tap to work that table. -->
-    <section class="floor"><div class="floor-nav" id="floorNav"></div><div class="tiles" id="tiles"></div></section>
+    <section class="floor">
+      <!-- Always-on legend (same language as the editor): INSIDE = fill colour,
+           OUTLINE = the bill is paid / unpaid. Never hidden so anyone can read the floor. -->
+      <div class="legend" id="legend">
+        <div class="leg-grp">
+          <span class="leg-key">Inside</span>
+          <span class="leg-it"><i class="sw" style="background:#6b6253"></i>Free</span>
+          <span class="leg-it"><i class="sw" style="background:#2dd4bf"></i>Seated</span>
+          <span class="leg-it"><i class="sw" style="background:#f59e0b"></i>New order</span>
+          <span class="leg-it"><i class="sw" style="background:#4f9dff"></i>Preparing</span>
+          <span class="leg-it"><i class="sw" style="background:#22c55e"></i>Served</span>
+          <span class="leg-it">🔔 called</span>
+        </div>
+        <div class="leg-grp">
+          <span class="leg-key">Outline</span>
+          <span class="leg-it"><i class="sw o" style="border-color:#ef4444"></i>unpaid</span>
+          <span class="leg-it"><i class="sw o" style="border-color:#22c55e"></i>paid</span>
+        </div>
+      </div>
+      <div class="floor-nav" id="floorNav"></div>
+      <div class="tiles" id="tiles"></div>
+    </section>
 
     <!-- RIGHT: the work panel for the selected table (or the order-taking flow). -->
     <aside class="panel" id="panel">
