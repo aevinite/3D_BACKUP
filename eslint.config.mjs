@@ -20,6 +20,13 @@ const eslintConfig = defineConfig([
     "kitchen/**",
     "tablet/**",
     "admin/**",
+    // The frozen pre-rewrite reference copy (old code kept for reference only —
+    // never bundled), and the legacy panel UIs embedded as static assets under
+    // public/ (the editor/kitchen/tablet vanilla JS served in-app via iframes).
+    // Both are vendored/legacy, not active TS/React source — linting them is
+    // just noise (require() imports, unused vars in old code, etc.).
+    "reference/**",
+    "public/**",
   ]),
   {
     // Deliberate rule choices for this codebase. NONE of these change runtime

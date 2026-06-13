@@ -9,12 +9,12 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 export const dynamic = "force-dynamic";
 
 const nowIso = () => new Date().toISOString();
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const must = (r: any) => { if (r.error) throw new Error(r.error.message); return r.data; };
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 async function readBody(req: NextRequest): Promise<any> { try { return await req.json(); } catch { return {}; } }
 
 type Ctx = { params: Promise<{ path?: string[] }> };

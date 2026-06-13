@@ -15,12 +15,12 @@ export const dynamic = "force-dynamic"; // always live, never cached
 const nowIso = () => new Date().toISOString();
 // Unwrap a Supabase { data, error } reply — throw on error so the catch turns it
 // into a clean 500 (mirrors the editor server's `must`).
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const must = (r: any) => {
   if (r.error) throw new Error(r.error.message);
   return r.data;
 };
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 
@@ -33,7 +33,7 @@ const TABLES: Record<string, { name: string; key: string }> = {
   settings: { name: "settings", key: "id" },
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 async function readBody(req: NextRequest): Promise<any> {
   try {
     return await req.json();
@@ -77,7 +77,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       const sessions = must(
         await sb.from("sessions").select("*").neq("status", "closed").order("last_activity_at", { ascending: false })
       );
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const ids = sessions.map((s: any) => s.id);
       const [members, items, requests, blocklist] = await Promise.all([
         ids.length ? sb.from("session_members").select("*").in("session_id", ids).eq("removed", false).order("joined_at") : Promise.resolve({ data: [] }),
@@ -102,7 +102,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
         sb.from("menu_items").select("id,title,category"),
       ]);
       const orders = must(ordersQ), dishes = must(dishesQ);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const catOf: Record<string, string> = Object.fromEntries(dishes.map((d: any) => [d.id, d.category || "other"]));
       const days: Record<string, number> = {}, hours = Array(24).fill(0), topD: Record<string, number> = {}, cats: Record<string, number> = {};
       let paid = 0, unpaid = 0, cancelled = 0, revenue = 0;
@@ -140,7 +140,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
         if (o.status === "cancelled" || !o.member_id) continue;
         spendByMember[o.member_id] = (spendByMember[o.member_id] || 0) + (Number(o.total) || 0) - (Number(o.discount) || 0);
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const map: Record<string, any> = {};
       for (const m of members) {
         const key = (m.phone && m.phone.trim()) || (m.name && m.name.trim().toLowerCase());
@@ -153,7 +153,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
         if (m.joined_at > c.lastSeen) c.lastSeen = m.joined_at;
       }
       const customers = Object.values(map)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         .map((c: any) => ({ name: c.name, phone: c.phone, visits: c.sessions.size, spend: Math.round(c.spend * 100) / 100, lastSeen: c.lastSeen, headCount: c.headCount }))
         .sort((a, b) => (b.lastSeen > a.lastSeen ? 1 : -1));
       return ok({ customers, feedback });
@@ -188,7 +188,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/delete (bulk/clear) — keep settled bills.
     if (a === "orders" && b === "delete") {
       const { ids, all } = body || {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       let candidates: any[];
       if (all) candidates = must(await sb.from("orders").select("id,payment_status,status"));
       else if (Array.isArray(ids) && ids.length) candidates = must(await sb.from("orders").select("id,payment_status,status").in("id", ids));
@@ -210,7 +210,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
     if (a === "orders" && c === "accept") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).select());
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
@@ -218,7 +218,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
     if (a === "orders" && c === "serve-all") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).select());
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).neq("status", "served");
@@ -232,9 +232,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const items = Array.isArray(cur.items) ? cur.items : [];
       if (!items[idx]) return err("bad item index");
       items[idx] = { ...items[idx], status };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const servedCount = items.filter((i: any) => i.status === "served").length;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const orderStatus = servedCount === items.length ? "served"
         : items.some((i: any) => i.status === "preparing" || i.status === "served") ? "preparing" : "received";
       const row = must(await sb.from("orders").update({ items, status: orderStatus }).eq("id", b).select());
@@ -309,7 +309,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "items" && c === "status") {
       const status = body && body.status;
       if (!["received", "preparing", "served"].includes(status)) return err("invalid status");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const patch: any = { status };
       if (status === "served") patch.served_at = nowIso();
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).select());
@@ -317,9 +317,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (item && item.order_id) {
         const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id));
         const total = rows.length;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const served = rows.filter((r: any) => r.status === "served").length;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const anyActive = rows.some((r: any) => r.status === "preparing" || r.status === "served");
         const orderStatus = total > 0 && served === total ? "served" : anyActive ? "preparing" : "received";
         await sb.from("orders").update({ status: orderStatus }).eq("id", item.order_id);
@@ -399,7 +399,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const body = await readBody(req);
 
     if (a === "orders" && id) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const patch: any = {};
       if (body.status !== undefined) {
         if (!ORDER_STATUSES.includes(body.status)) return err("invalid status");

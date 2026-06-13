@@ -9,12 +9,12 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 export const dynamic = "force-dynamic";
 
 const nowIso = () => new Date().toISOString();
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const must = (r: any) => { if (r.error) throw new Error(r.error.message); return r.data; };
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 async function readBody(req: NextRequest): Promise<any> { try { return await req.json(); } catch { return {}; } }
 
 type Ctx = { params: Promise<{ path?: string[] }> };
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/:id/accept — everything not served → preparing
     if (a === "orders" && c === "accept") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).select());
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/:id/ready — everything → served, order complete
     if (a === "orders" && c === "ready") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).select());
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b);
@@ -69,16 +69,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "items" && c === "status") {
       const status = body && body.status;
       if (!["received", "preparing", "served"].includes(status)) return err("invalid status");
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const patch: any = { status };
       if (status === "served") patch.served_at = nowIso();
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).select());
       const item = updated[0];
       if (item && item.order_id) {
         const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id));
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const served = rows.filter((r: any) => r.status === "served").length;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         const anyActive = rows.some((r: any) => r.status === "preparing" || r.status === "served");
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
         await sb.from("orders").update({ status: overall }).eq("id", item.order_id);
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "dishes" && c === "sold-out") {
       const value = !!(body && body.value === true);
       const cur = must(await sb.from("menu_items").select("tags").eq("id", b).single());
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const tags = Array.isArray(cur.tags) ? cur.tags.filter((t: string) => t !== "sold-out") : [];
       if (value) tags.push("sold-out");
       const row = must(await sb.from("menu_items").update({ tags }).eq("id", b).select());
