@@ -1,11 +1,15 @@
-// Stub for /kitchen — the real kitchen panel is brought into the app in Phase C.
-export default function KitchenStub() {
+// /kitchen — the kitchen KDS, now hosted INSIDE the one app.
+//
+// Its exact original UI is served from /panels/kitchen and embedded full-screen,
+// so it looks/behaves identically to the old standalone kitchen. Its data calls
+// go to /api/kitchen/* (the ported route handlers). The admin-only floating
+// switcher (in the layout) floats above this.
+export default function KitchenPanel() {
   return (
-    <main style={{ minHeight: "100vh", background: "#0b1220", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", display: "grid", placeItems: "center", padding: 24, textAlign: "center" }}>
-      <div>
-        <h1 style={{ margin: 0 }}>👨‍🍳 Kitchen</h1>
-        <p style={{ opacity: 0.7 }}>Being moved into the one app (Phase C). For now it still runs on its own server.</p>
-      </div>
-    </main>
+    <iframe
+      src="/panels/kitchen/index.html"
+      title="Kitchen — live orders"
+      style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", border: 0 }}
+    />
   );
 }
