@@ -279,9 +279,21 @@ export default function MenuPage() {
       raf = requestAnimationFrame(() => {
         // Remember how far down we are, in this browsing session.
         try { sessionStorage.setItem("lfh_menu_scroll", String(el.scrollTop)); } catch {}
-        // Once scrolled past a little, collapse the big category cards into a thin
-        // chip strip (and restore them when scrolled back to the top).
-        setCatsMin(el.scrollTop > 48);
+        // Collapse the big SQUARE category cards into a thin PILL strip ONLY once
+        // the bar actually pins to the top of the screen — i.e. when the hero +
+        // the "CATEGORIES" header have scrolled away. We measure that off the
+        // (non-sticky) ".section-header": the moment its bottom edge passes the
+        // top of the scroll area, the sticky bar is now stuck → show pills.
+        // Using that header as the yard-stick (instead of a tiny pixel count)
+        // means a small nudge no longer hides the OG square cards, and because
+        // the header isn't sticky its position moves cleanly with the scroll, so
+        // the square⇄pill switch can't flip-flop at the boundary.
+        const containerTop = el.getBoundingClientRect().top;
+        const secHeader = el.querySelector<HTMLElement>(".section-header");
+        const stuck = secHeader
+          ? secHeader.getBoundingClientRect().bottom <= containerTop + 1
+          : el.scrollTop > 48; // fallback if the header isn't present
+        setCatsMin(stuck);
         computeSpy();
       });
     };
