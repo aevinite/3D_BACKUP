@@ -4,6 +4,22 @@
 // "we'll be right back" screen) without going to the admin. Talks to the shared
 // /api/maintenance endpoint and re-syncs every few seconds.
 (function () {
+  // Per-DEVICE id (no staff login yet): give each device a small, persistent,
+  // random id in a cookie the first time any panel loads. It rides along with
+  // every same-origin API request automatically, so the server can record WHICH
+  // tablet/kitchen screen performed each action (shown in the editor's Operation
+  // log). One year, lax — survives reloads, never blocks taps.
+  (function ensureDeviceId() {
+    try {
+      if (!/(?:^|;\s*)lfh_device_id=/.test(document.cookie)) {
+        const rand = (self.crypto && self.crypto.randomUUID)
+          ? self.crypto.randomUUID().replace(/-/g, "").slice(0, 8)
+          : Math.random().toString(16).slice(2, 10);
+        document.cookie = "lfh_device_id=" + rand + "; path=/; max-age=31536000; samesite=lax";
+      }
+    } catch { /* cookies blocked — log just won't show a device id */ }
+  })();
+
   function init() {
     // Prefer a dedicated actions area (kitchen), else the top bar itself.
     const bar = document.querySelector(".topbar .top-actions") || document.querySelector(".topbar");

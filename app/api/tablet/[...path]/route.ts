@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { logAction } from "@/lib/oplog";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic";
@@ -58,6 +58,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
     const body = await readBody(req);
+    const dev = deviceIdFrom(req); // which tablet/device is acting
 
     // order — server-side priced via lfh_staff_place_order (never trusts prices)
     if (a === "order" && path.length === 1) {
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
       });
       if (error) throw new Error(error.message);
-      await logAction("tablet", "order_place", { table_number: t });
+      await logAction("tablet", "order_place", { table_number: t, device_id: dev });
       return ok(data);
     }
 
@@ -89,7 +90,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // calls/:id/attend
     if (a === "calls" && c === "attend") {
       const row = must(await sb.from("waiter_calls").update({ resolved: true }).eq("id", b).select());
-      await logAction("tablet", "call_attend", { table_number: row[0]?.table_number ?? null });
+      await logAction("tablet", "call_attend", { table_number: row[0]?.table_number ?? null, device_id: dev });
       return ok(row[0] || null);
     }
 
@@ -142,7 +143,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
         await sb.from("orders").update({ status: overall }).eq("id", item.order_id);
       }
-      await logAction("tablet", "item_status", { detail: status });
+      await logAction("tablet", "item_status", { detail: status, device_id: dev });
       return ok(item || null);
     }
 
@@ -153,7 +154,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).select());
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
-      await logAction("tablet", "order_accept", { order_id: b });
+      await logAction("tablet", "order_accept", { order_id: b, device_id: dev });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
     }
 
@@ -173,7 +174,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (tb && tb.bill_no == null) {
         try { const { data: bn } = await sb.rpc("lfh_next_counter", { p_key: "bill" }); if (bn != null) await sb.from("sessions").update({ bill_no: bn }).eq("id", target.id).is("bill_no", null); } catch { /* bill stays lazy if the counter isn't callable */ }
       }
-      await logAction("tablet", "order_move", { order_id: b, table_number: to });
+      await logAction("tablet", "order_move", { order_id: b, table_number: to, device_id: dev });
       return ok(moved[0] || null);
     }
 
@@ -185,7 +186,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (!/^\d+$/.test(t)) return err("valid table required");
       const rows = must(await sb.from("orders").update({ payment_status: "paid" })
         .eq("table_number", t).neq("status", "cancelled").neq("payment_status", "paid").select());
-      await logAction("tablet", "bill_paid", { table_number: t });
+      await logAction("tablet", "bill_paid", { table_number: t, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
 
@@ -194,7 +195,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && c === "close") {
       const sess = (must(await sb.from("sessions").select("table_number").eq("id", b).limit(1)))[0];
       const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", b).select());
-      await logAction("tablet", "table_close", { table_number: sess ? sess.table_number : null });
+      await logAction("tablet", "table_close", { table_number: sess ? sess.table_number : null, device_id: dev });
       return ok(row[0] || null);
     }
 
@@ -205,7 +206,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const existing = must(await sb.from("sessions").select("id").eq("table_number", t).neq("status", "closed").limit(1));
       if (existing.length) return ok(existing[0]);
       const row = must(await sb.from("sessions").insert({ table_number: t, status: "open", opened_by: "waiter", opened_at: nowIso() }).select());
-      await logAction("tablet", "table_open", { table_number: t });
+      await logAction("tablet", "table_open", { table_number: t, device_id: dev });
       return ok(row[0] || null);
     }
 

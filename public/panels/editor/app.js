@@ -270,6 +270,28 @@ function renderList() {
     ul.appendChild(el(`<li class="list-item active"><div class="thumb"><i class="fas fa-users"></i></div><div class="meta"><b>Customers</b><small>visits & feedback</small></div></li>`));
     return;
   }
+  if (state.tab === "log") {
+    // The Log tab's two views live in the LEFT SIDEBAR (like Orders) — not a top
+    // toggle. Clicking a row switches the main panel between the guest log and
+    // the staff operation log.
+    const v = state.logView || "customers";
+    const mk = (key, icon, label, sub) => {
+      const li = el(`<li class="list-item${v === key ? " active" : ""}" data-logview-side="${key}">
+        <div class="thumb">${icon}</div>
+        <div class="meta"><b>${label}</b><small>${sub}</small></div>
+      </li>`);
+      li.onclick = () => {
+        state.logView = key;
+        if (key === "operations") loadOplog(); // fetch (it re-renders when ready)
+        renderList();   // re-highlight the chosen row
+        renderEditor(); // redraw the main panel on the right
+      };
+      return li;
+    };
+    ul.appendChild(mk("customers", '<i class="fas fa-users"></i>', "Customer log", "guests & visits"));
+    ul.appendChild(mk("operations", '<i class="fas fa-list-check"></i>', "Operation log", "staff actions"));
+    return;
+  }
   const q = state.search.toLowerCase();
   // On the Dishes tab, also narrow to the chosen category (if any).
   const catF = state.tab === "items" ? state.catFilter : "";
@@ -1884,6 +1906,7 @@ function tableTileState(t) {
   const items = os.flatMap((o) => orderItemRows(o));
   const anyReceived = items.some((i) => i.status === "received");
   const anyPreparing = items.some((i) => i.status === "preparing");
+  const anyReady = items.some((i) => i.status === "ready"); // cooked, waiting for the waiter
   // An order only becomes an "unpaid bill" (red outline) once it's ACCEPTED. A
   // brand-new order still sitting at "received" hasn't been confirmed by staff
   // yet, so it shouldn't flag the table red — that starts when you accept it.
@@ -1895,6 +1918,8 @@ function tableTileState(t) {
   if (os.length) {
     if (anyReceived) { st = "new"; label = "New order"; }
     else if (anyPreparing) { st = "prep"; label = "Preparing"; }
+    else if (anyReady) { st = "ready"; label = "Ready to serve"; } // food cooked, not yet carried out
+
     // No separate "Bill due" fill anymore (owner, 2026-06-10): payment is
     // already told by the OUTLINE (red = unpaid, green = paid), so a fully
     // served table just says "Served" until it's paid, then "Cleared".
@@ -2161,7 +2186,8 @@ function closeTablePanel() { state.openSess = null; document.querySelector(".sx-
 function itemRowHtml(row) {
   // After the whole order is accepted, each dish is served one at a time.
   let btn = `<span class="sx-wait">waiting</span>`;
-  if (row.status === "preparing") {
+  // A dish that's cooking OR ready (kitchen finished it) can be served from here.
+  if (row.status === "preparing" || row.status === "ready") {
     const attr = row.kind === "session"
       ? `data-item-next="${esc(row.id)}" data-item-status="served"`
       : `data-legacy-order="${esc(row.orderId)}" data-legacy-idx="${row.idx}" data-legacy-status="served"`;
@@ -2469,11 +2495,9 @@ function logHtml() {
   // Two logs share this tab: the customer/guest log (default) and the staff
   // Operation log (who-did-what across the panels).
   const view = state.logView || "customers";
-  const toggle = `<div class="dash-toggle" style="margin-bottom:14px;display:inline-flex">
-    <button class="dash-range ${view === "customers" ? "active" : ""}" data-logview="customers">Customer log</button>
-    <button class="dash-range ${view === "operations" ? "active" : ""}" data-logview="operations">Operation log</button>
-  </div>`;
-  if (view === "operations") return toggle + oplogHtml();
+  // The Customer/Operation switch now lives in the LEFT SIDEBAR (see renderList),
+  // so there's no top toggle here.
+  if (view === "operations") return oplogHtml();
   const u = state.users || {};
   const members = u.members || [];
   const blocks = u.blocklist || [];
@@ -2514,7 +2538,7 @@ function logHtml() {
   const table = `<div class="logtable"><div class="logrow loghead"><div>Guest</div><div>Table</div><div>Role</div><div>Did</div><div>Status</div><div>When</div><div></div></div>${rows}</div>`;
   const blkRows = blocks.length ? blocks.map((b) => `<div class="sx-blk"><span>${b.phone ? "📵 " + esc(b.phone) : "🚫 table " + esc(b.table_number)}${b.reason ? ` — <small>${esc(b.reason)}</small>` : ""}</span><button class="btn small" data-unblock="${esc(b.id)}">Unblock</button></div>`).join("") : `<div class="sx-empty">Nobody is blocked.</div>`;
   const blkPanel = `<div class="sx-panel" style="margin-top:18px;max-width:560px"><h3>🚫 Blocked <span class="sub">· ${blocks.length}</span></h3>${blkRows}</div>`;
-  return toggle + head + table + blkPanel;
+  return head + table + blkPanel;
 }
 
 // oplogHtml: the Operation log — every staff action across the panels (which
@@ -2522,7 +2546,7 @@ function logHtml() {
 function oplogHtml() {
   const rows = state.oplog || [];
   const head = `<div class="ed-head"><h2>Operation log <span class="sub">· staff actions</span></h2><button class="btn" id="refreshOplog">↻ Refresh</button></div>
-    <div class="ord-note">Every staff action across the panels — which panel did it, where, and when. (No per-device login yet, so the actor is the panel.)</div>`;
+    <div class="ord-note">Every staff action across the panels — which panel <b>and which device</b> did it, where, and when. Each device gets an automatic ID (shown as <b>#id</b>) until real staff login lands.</div>`;
   if (!rows.length) return head + `<div class="sx-empty">No staff actions logged yet — accept/serve an order, open/close a table, etc.</div>`;
   const ACT = {
     order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
@@ -2531,7 +2555,7 @@ function oplogHtml() {
     call_attend: "Attended call", member_approve: "Approved guest", sold_out_on: "Marked sold-out", sold_out_off: "Back in stock",
   };
   const body = rows.map((r) => `<div class="oprow">
-    <span class="op-panel op-${esc(r.panel)}">${esc(r.panel)}</span>
+    <span class="op-panel op-${esc(r.panel)}">${esc(r.panel)}${r.device_id ? ` · <span class="op-dev">#${esc(r.device_id)}</span>` : ""}</span>
     <b>${esc(ACT[r.action] || r.action)}</b>
     <span class="lg-muted">${r.table_number ? "Table " + esc(r.table_number) : (r.detail ? esc(r.detail) : "")}</span>
     <small>${esc(timeAgo(r.created_at))}</small>

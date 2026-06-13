@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { logAction } from "@/lib/oplog";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +46,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
     const body = await readBody(req);
+    const dev = deviceIdFrom(req); // which device (kitchen screen) is acting
 
     // orders/:id/accept — everything not served → preparing
     if (a === "orders" && c === "accept") {
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).select());
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
-      await logAction("kitchen", "order_accept", { order_id: b });
+      await logAction("kitchen", "order_accept", { order_id: b, device_id: dev });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
     }
 
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "ready" })) : [];
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).select());
       await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).neq("status", "served");
-      await logAction("kitchen", "order_ready", { order_id: b });
+      await logAction("kitchen", "order_ready", { order_id: b, device_id: dev });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
     }
 
@@ -100,7 +101,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const tags = Array.isArray(cur.tags) ? cur.tags.filter((t: string) => t !== "sold-out") : [];
       if (value) tags.push("sold-out");
       const row = must(await sb.from("menu_items").update({ tags }).eq("id", b).select());
-      await logAction("kitchen", value ? "sold_out_on" : "sold_out_off", { detail: b });
+      await logAction("kitchen", value ? "sold_out_on" : "sold_out_off", { detail: b, device_id: dev });
       return ok(row[0] || null);
     }
 
