@@ -620,7 +620,7 @@ export default function MenuPage() {
                     aria-pressed={chefOnly}
                     onClick={() => setChefOnly((v) => !v)}
                   >
-                    ⭐ Chef's Special
+                    ⭐ Chef&apos;s Special
                   </button>
                 )}
                 {/* Favorites — the dishes this guest hearted (local). Only when
