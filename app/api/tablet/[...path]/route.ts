@@ -32,7 +32,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
         sb.from("session_members").select("*").eq("removed", false),
         sb.from("orders").select("*").gte("created_at", since.toISOString()).eq("archived", false).order("created_at"),
         sb.from("waiter_calls").select("*").eq("resolved", false),
-        sb.from("menu_items").select("id,title,price,category,tags,veg").order("category"),
+        sb.from("menu_items").select("id,title,price,category,tags,veg,options").order("category"),
         sb.from("categories").select("slug,name,icon,sort_order,active").order("sort_order"),
         sb.from("requests").select("*").eq("status", "pending").order("created_at"),
       ]);

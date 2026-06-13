@@ -24,6 +24,7 @@ const state = {
   dishSearch: "",       // the dish-search text in order mode
   note: "",             // one note for the whole order
   floorFilter: "all",   // which tables the floor shows: all | needs | open | free
+  allergies: "",        // order-level allergies (comma list), applied to the whole order
 };
 
 const api = async (method, path, body) => {
@@ -113,6 +114,11 @@ function renderFloor() {
     state.table = b.dataset.t;
     state.ordering = false; state.cart = []; state.note = ""; state.dishSearch = "";
     renderFloor(); renderPanel();
+    // On a stacked (phone/narrow) layout the detail panel sits below the floor —
+    // jump straight to it so the waiter sees the table's orders / take-order.
+    if (window.matchMedia("(max-width: 760px)").matches) {
+      document.getElementById("panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }));
   // One-click tile actions (stopPropagation so they don't also open the panel).
   document.querySelectorAll(".quick").forEach((q) => (q.onclick = (e) => {
@@ -208,11 +214,67 @@ function bindDishButtons() {
   document.querySelectorAll("[data-dish]").forEach((b) => (b.onclick = () => {
     const d = state.data.dishes.find((x) => x.id === b.dataset.dish);
     if (!d) { toast("That dish just changed — refreshing the menu", false); renderOrderMode(); return; } // the poll removed/edited it between render and tap
-    const line = state.cart.find((l) => l.id === d.id);
+    // Customizable dish (size/extras) → open the options picker first.
+    if (Array.isArray(d.options) && d.options.length) { renderDishOptions(d, null); return; }
+    // Plain dish → add one (merging only with other plain lines of the same dish).
+    const line = state.cart.find((l) => l.id === d.id && !l.options);
     if (line) line.qty = Math.min(99, line.qty + 1);
     else state.cart.push({ id: d.id, title: d.title, price: dishPrice(d), qty: 1 });
     renderOrderMode();
   }));
+}
+
+// The options picker (size / milk / extras…) shown when adding a customizable
+// dish — or when editing a cart line. Renders in the panel (responsive), tracks
+// the choices, and builds a cart line with the chosen options + unit price.
+function renderDishOptions(d, editIndex) {
+  const sel = {}; // { groupName: [chosen labels] }
+  if (editIndex != null && state.cart[editIndex] && state.cart[editIndex].options) {
+    for (const o of state.cart[editIndex].options) (sel[o.group] = sel[o.group] || []).push(o.label);
+  }
+  state._opt = { d, sel, editIndex };
+  drawDishOptions();
+}
+function drawDishOptions() {
+  const { d, sel, editIndex } = state._opt;
+  const base = dishPrice(d);
+  let addons = 0;
+  const groups = (d.options || []).map((g) => {
+    const multi = g.type === "multi";
+    const choices = (g.choices || []).map((c) => {
+      const on = (sel[g.name] || []).includes(c.label);
+      if (on) addons += Number(c.price) || 0;
+      const plus = Number(c.price) > 0 ? ` <em>+${inr(c.price)}</em>` : "";
+      return `<button class="optchoice ${on ? "on" : ""}" data-optg="${esc(g.name)}" data-optl="${esc(c.label)}" data-multi="${multi}">${esc(c.label)}${plus}</button>`;
+    }).join("");
+    return `<div class="optgroup"><h4>${esc(g.name)}${multi ? ` <span class="muted small">· choose any</span>` : ""}</h4><div class="optchoices">${choices}</div></div>`;
+  }).join("");
+  const unit = base + addons;
+  $("#panel").innerHTML = `
+    <div class="phead"><h2>${esc(d.title)}</h2><button class="btn small" id="optBack">← back</button></div>
+    <div class="muted small">Base ${inr(base)}</div>
+    ${groups || `<div class="muted">No options.</div>`}
+    <div class="ctotal"><span>Per item</span><b>${inr(unit)}</b></div>
+    <button class="btn primary big" id="optAdd">${editIndex != null ? "Update item" : "Add to order"}</button>`;
+  document.querySelectorAll("[data-optg]").forEach((b) => (b.onclick = () => {
+    const g = b.dataset.optg, l = b.dataset.optl, multi = b.dataset.multi === "true";
+    const cur = sel[g] || [];
+    sel[g] = multi ? (cur.includes(l) ? cur.filter((x) => x !== l) : [...cur, l]) : (cur.includes(l) ? [] : [l]);
+    drawDishOptions();
+  }));
+  $("#optBack").onclick = renderOrderMode;
+  $("#optAdd").onclick = () => {
+    const opts = [];
+    for (const g of (d.options || [])) for (const c of (g.choices || [])) {
+      if ((sel[g.name] || []).includes(c.label)) opts.push({ group: g.name, label: c.label, price: Number(c.price) || 0 });
+    }
+    const unitPrice = base + opts.reduce((s, o) => s + o.price, 0);
+    const line = { id: d.id, title: d.title, price: unitPrice, qty: 1, options: opts };
+    if (editIndex != null && state.cart[editIndex]) { line.qty = state.cart[editIndex].qty; state.cart[editIndex] = line; }
+    else state.cart.push(line);
+    state._opt = null;
+    renderOrderMode();
+  };
 }
 
 function renderOrderMode() {
@@ -222,7 +284,7 @@ function renderOrderMode() {
   const chips = state.dishSearch.trim() ? "" : [`<button class="chip ${!state.cat ? "on" : ""}" data-cat="">All</button>`]
     .concat(cats.map((c) => `<button class="chip ${state.cat === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc((c.name && c.name.en) || c.slug)}</button>`)).join("");
   const lines = state.cart.map((l, i) => `<div class="cline">
-      <span class="cname">${esc(l.title)}</span>
+      <span class="cname">${esc(l.title)}${l.options && l.options.length ? `<small class="copts">${esc(l.options.map((o) => o.label).join(", "))}</small>` : ""}${l.options ? ` <button class="cedit" data-edit="${i}">edit</button>` : ""}</span>
       <span class="cqty"><button class="qbtn" data-minus="${i}">−</button><b>${l.qty}</b><button class="qbtn" data-plus="${i}">+</button></span>
       <span class="cprice">${inr(l.price * l.qty)}</span>
     </div>`).join("");
@@ -236,6 +298,7 @@ function renderOrderMode() {
       <h3>This order</h3>
       ${lines || `<div class="muted">Tap dishes above to add them.</div>`}
       <input type="text" id="orderNote" class="note" placeholder="Note for the kitchen (optional)" value="${esc(state.note)}">
+      <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Allergies (e.g. nuts, dairy) — applies to the whole order" value="${esc(state.allergies || "")}">
       <div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
       <div class="muted small">Final bill (incl. tax) is computed by the system when you send it.</div>
       <button class="btn primary big" id="sendOrder" ${state.cart.length ? "" : "disabled"}>SEND TO KITCHEN</button>
@@ -258,6 +321,12 @@ function renderOrderMode() {
     renderOrderMode();
   }));
   $("#orderNote").oninput = (e) => (state.note = e.target.value);
+  const al = $("#orderAllergy"); if (al) al.oninput = (e) => (state.allergies = e.target.value);
+  document.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => {
+    const l = state.cart[+b.dataset.edit];
+    const d = l && state.data.dishes.find((x) => x.id === l.id);
+    if (d) renderDishOptions(d, +b.dataset.edit);
+  }));
   $("#backBtn").onclick = () => { state.ordering = false; renderPanel(); };
   $("#sendOrder").onclick = sendOrder;
 }
@@ -274,14 +343,15 @@ async function sendOrder() {
   try {
     const r = await api("POST", "/order", {
       table: state.table,
-      items: state.cart.map((l) => ({ id: l.id, qty: l.qty })),
+      items: state.cart.map((l) => ({ id: l.id, qty: l.qty, options: l.options ? l.options.map((o) => ({ group: o.group, label: o.label })) : undefined })),
+      allergies: (state.allergies || "").split(",").map((s) => s.trim()).filter(Boolean),
       note: state.note.trim() || null,
     });
     // Treat a non-ok or shapeless response as a failure — but DON'T clear the
     // cart, so the waiter can retry without rebuilding the order.
     if (!r || r.ok !== true) { toast("Rejected: " + ((r && r.reason) || "unknown") + (r && r.item ? ` (${r.item})` : ""), false); return; }
     toast(`Sent! Kitchen ticket #${r.kot_no}`);
-    state.ordering = false; state.cart = []; state.note = "";
+    state.ordering = false; state.cart = []; state.note = ""; state.allergies = "";
     await load(); renderPanel();
   } catch (e) { toast("Failed: " + e.message, false); }
   finally {
