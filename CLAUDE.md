@@ -24,20 +24,37 @@ is to be built until the owner says so.
 - GLB models on Supabase Storage; two tiers per dish (small ~2 MB, optimized ~9 MB).
 - Dev: `npm run dev` (port 4000). Playwright: `node scripts/verify-cache.mjs`.
 
-## The FOUR apps (2026-06-13 restructure — one repo, one Supabase backend)
+## ONE unified app (2026-06-13 — was four separate servers, now merged)
 
-- **Guest menu** — the Next app (`app/`), port 4000. Petpooja-style scroll-spy
-  category strip lives in the pinned `#sticky-header` on /menu.
-- **editor/** — the boss panel (own git repo + deploy), port 4001. Tabs now
-  include **Dashboard** (Chart.js via CDN, fed by `/api/stats`), **Customers**
-  (CRM-lite + feedback), **Features** (per-restaurant switches). Table panel:
-  KOT chips, per-order discount, ⇄ Shift table, 🖨 Print bill.
-- **kitchen/** — the KDS, port 4002 (`node kitchen/server.js`). KOT tickets in
-  New→Cooking→Ready columns, 86 board (sold-out = the `sold-out` tag), chime.
-- **tablet/** — the waiter captain app, port 4003 (`node tablet/server.js`).
-  Floor tiles + TAKE ORDER for a table via `lfh_staff_place_order` (service-only).
-- kitchen/ and tablet/ are editor-style Express apps (own package.json, optional
-  `KITCHEN_PASSWORD`/`TABLET_PASSWORD` cookie locks, read root `../.env.local`).
+Everything is a SINGLE Next app on **port 4000** (`npm run dev` / `START-ALL.bat`).
+The panels are routes inside it:
+
+- **/menu** — guest menu (`app/`). Scroll-spy category strip in `#sticky-header`.
+- **/admin** — owner control room (`app/admin/page.tsx`): live floor (reads the
+  `lfh_floor_state` brain), key numbers, maintenance switch, and the 10 guest
+  FEATURE TOGGLES. **The only password-gated route** (see Security gate).
+- **/editor** — boss panel: Dishes/Categories/Tags/Orders/Tables/Dashboard/
+  Customers/Log/General; KOT chips, per-order discount, ⇄ Shift table. (Features
+  tab REMOVED — toggles live in /admin now.)
+- **/kitchen** — KDS: New→Cooking→Ready, 86 board (sold-out tag), chime.
+- **/tablet** — waiter app: floor tiles + TAKE ORDER via `lfh_staff_place_order`.
+
+The editor/kitchen/tablet UIs are the original vanilla files served from
+`public/panels/<name>/` (embedded full-screen); their old Express APIs are ported
+to Next route handlers at `app/api/<name>/[...path]/route.ts` (service-role via
+`lib/supabaseAdmin.ts`). The admin-only floating switcher (`components/AdminSwitcher`)
+hops between panels. The old standalone `editor/ kitchen/ tablet/ admin/` folders +
+the separate editor repo were DELETED (preserved in `reference/` + the
+`pre-rewrite-reference` git tag).
+
+## Security gate (2026-06-13)
+
+Only **/admin** (+ `/api/admin/*`) is protected: `middleware.ts` redirects to
+`/staff-login` without a valid cookie; `/api/staff-login` stores a hashed
+`STAFF_PASSWORD` cookie (`lib/staffAuth.ts`). The guest menu AND the other staff
+panels (/editor /kitchen /tablet) are currently OPEN (owner's call) — RE-LOCK them
+in the middleware matcher before any public hosting. `STAFF_PASSWORD` is in
+`.env.local` (must also be set in the Vercel project env for the gate to work in prod).
 
 ## Feature switches (migration 035)
 
@@ -168,17 +185,13 @@ via `ToolSearch` BEFORE planning around it.
 - If the change touches UI, run the page in Chrome MCP and screenshot or
   describe what's now visible. Don't claim "it works" from source alone.
 
-## Deployment (TWO separate targets — `aevinite` has access to both)
+## Deployment (ONE target now)
 
-There are two git repos that deploy to two different places. "Push" means push
-BOTH, each to its own remote:
-
-- **Main menu app** = the root repo → GitHub `aevinite/3D_BACKUP` (branch `main`).
-  Vercel project **3-d-backup** auto-deploys from it:
-  https://vercel.com/aevinite1/3-d-backup . Deploy with `git push origin main`.
-- **Admin editor** = the `editor/` folder, which is its OWN git repo (`editor/.git`)
-  → GitHub `INFINITESTUDIOIF/ADMIN_PANEL_3D_MENU` (branch `main`), Vercel-deployable,
-  password-locked via `EDITOR_PASSWORD`. Deploy with `git -C editor push origin main`.
-- The GitHub login `aevinite` (Vercel handle `aevinite1`) has access to BOTH repos
-  and BOTH Vercel projects. Secrets live in `.env.local` (gitignored in both repos —
-  never committed); local `*.bat` launchers are gitignored too.
+Single git repo → GitHub `aevinite/3D_BACKUP` (branch `main`); Vercel project
+**3-d-backup** auto-deploys it (https://vercel.com/aevinite1/3-d-backup). Deploy with
+`git push origin main`. The WHOLE thing now ships from this one repo/deploy — guest
+menu + all four staff panels + admin. The old separate `editor/` repo
+(`INFINITESTUDIOIF/ADMIN_PANEL_3D_MENU`) is **retired/deleted**; ignore the old
+"push both repos" rule. Secrets live in `.env.local` (gitignored, never committed);
+local `*.bat` launchers are gitignored too. The admin gate needs `STAFF_PASSWORD`
+set in the Vercel project env to work in production.
