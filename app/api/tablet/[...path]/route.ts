@@ -68,6 +68,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const t = String(table || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
       if (!Array.isArray(items) || !items.length) return err("items required");
+      // Double-tap guard: refuse an IDENTICAL order for the same table within 8s
+      // (prevents a fat-fingered "Send" from issuing two KOTs / double-charging).
+      const sig = JSON.stringify(items.map((i: any) => ({ id: i.id, qty: i.qty, options: i.options })));
+      const recent = must(await sb.from("orders").select("items")
+        .eq("table_number", t).gte("created_at", new Date(Date.now() - 8000).toISOString()).limit(5));
+      if (recent.some((o: any) => JSON.stringify((o.items || []).map((i: any) => ({ id: i.id, qty: i.qty, options: i.options }))) === sig)) {
+        return err("That order was just sent — check the ticket before re-sending.", 409);
+      }
       const { data, error } = await sb.rpc("lfh_staff_place_order", {
         p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
       });

@@ -355,7 +355,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
          
         const served = rows.filter((r: any) => r.status === "served").length;
          
-        const anyActive = rows.some((r: any) => r.status === "preparing" || r.status === "served");
+        const anyActive = rows.some((r: any) => ["preparing", "ready", "served"].includes(r.status));
         const orderStatus = total > 0 && served === total ? "served" : anyActive ? "preparing" : "received";
         await sb.from("orders").update({ status: orderStatus }).eq("id", item.order_id);
       }
