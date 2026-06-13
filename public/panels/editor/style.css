@@ -737,6 +737,10 @@ body {
 .ft-free { --c: #6b6253; } .ft-seated { --c: #2dd4bf; } .ft-new { --c: #f59e0b; }
 .ft-prep { --c: #4f9dff; } .ft-done { --c: #6b6253; } /* (ft-bill removed — payment lives in the outline) */
 .ft-req { --c: #e7b75a; }
+/* Open table, nobody seated yet → bright YELLOW fill so it clearly reads as
+   "open & waiting" (not the dark free/off look). Stronger tint than the others. */
+.ft-waiting { --c: #f5c451; }
+.ftile.ft-waiting { background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
 .ft-new { box-shadow: 0 0 16px color-mix(in srgb, var(--c) 26%, transparent); }
 /* a free table a guest is asking to be let into — pulse so staff can't miss it */
 .ftile.ft-req { border-color: color-mix(in srgb, var(--c) 55%, transparent); animation: ftReqPulse 1.5s ease-in-out infinite; }

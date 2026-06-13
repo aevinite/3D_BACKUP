@@ -67,7 +67,8 @@ function tileState(t) {
   if (os.some((o) => o.status === "received")) return { cls: "new", label: "New order" };
   if (os.some((o) => o.status === "preparing")) return { cls: "prep", label: "Cooking" };
   if (os.length) return { cls: "done", label: "Served" };
-  if (s) return { cls: "seated", label: "Seated" };
+  // Open table: someone seated → "Seated" (teal); nobody yet → yellow "Open".
+  if (s) return membersOf(t).length ? { cls: "seated", label: "Seated" } : { cls: "waiting", label: "Open" };
   return { cls: "free", label: "Free" };
 }
 

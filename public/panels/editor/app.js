@@ -1885,10 +1885,11 @@ function tableTileState(t) {
     const served = items.filter((i) => i.status === "served").length;
     meta = items.length ? `${served}/${items.length} served${due > 0 ? ` · ${inr(due)} due` : ""}` : `${os.length} order${os.length > 1 ? "s" : ""}`;
   } else if (sess) {
-    st = "seated"; label = mem.length ? `Seated · ${mem.length}` : "Open";
-    // The building cart is intentionally NOT shown on the tile — staff see it only
-    // when they open the table panel. So the tile just shows the seated state.
-    meta = mem.length ? "no orders yet" : "waiting for guests";
+    // Someone actually seated → teal "Seated". Open but nobody seated yet → a
+    // bright YELLOW "waiting" tile (owner: an open-but-empty table should light up
+    // yellow, not look dark/off). The building cart isn't shown on the tile.
+    if (mem.length) { st = "seated"; label = `Seated · ${mem.length}`; meta = "no orders yet"; }
+    else { st = "waiting"; label = "Open"; meta = "waiting for guests"; }
   } else if (reqs.length) {
     // free table, but a guest is asking to be let in -> make it shout for attention
     st = "req"; label = "Wants in";
