@@ -74,7 +74,12 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   padding-left: calc(16px + env(safe-area-inset-left));
   padding-right: calc(16px + env(safe-area-inset-right));
   background: transparent;
+  /* Slide the whole brand bar up out of view once the category bar pins to the
+     top (owner: the brand shouldn't sit there while scrolling). It glides back
+     down when you scroll near the top again. */
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
+.nav.nav-hidden { transform: translateY(-100%); }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .brand-title {
   font-family: 'Playfair Display'; margin: 0;
@@ -627,10 +632,12 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
    cards sliding underneath don't show through. */
 .menu-sticky {
   position: sticky; top: 0; z-index: 50;
-  /* nearly opaque so dish cards scrolling underneath don't bleed through */
-  background: color-mix(in srgb, var(--bg) 97%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  /* SAME frosted glass as the brand bar (.nav): fully transparent + a strong
+     blur, so the dishes scrolling underneath turn into a premium frosted wash
+     that visually continues the header — not an opaque box. */
+  background: transparent;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 .search-container { position: relative; width: 100%; }
 /* search autocomplete dropdown */

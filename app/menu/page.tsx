@@ -294,6 +294,11 @@ export default function MenuPage() {
           ? secHeader.getBoundingClientRect().bottom <= containerTop + 1
           : el.scrollTop > 48; // fallback if the header isn't present
         setCatsMin(stuck);
+        // Slide the brand bar (.nav) up out of view while the category bar is
+        // pinned, and bring it back when we return near the top. This is what
+        // makes the brand "scroll away" even though it's a fixed bar — and it
+        // hands the very top of the screen to the frosted category+search bar.
+        document.querySelector(".nav")?.classList.toggle("nav-hidden", stuck);
         computeSpy();
       });
     };
@@ -302,8 +307,14 @@ export default function MenuPage() {
     // would leave the spy pointing at the wrong section — so also re-check on a
     // gentle timer (the computation is a handful of rectangle reads, very cheap).
     const tick = setInterval(computeSpy, 600);
-    // Cleanup: stop listening and cancel any pending save when leaving.
-    return () => { el.removeEventListener("scroll", onScroll); cancelAnimationFrame(raf); clearInterval(tick); };
+    // Cleanup: stop listening, cancel any pending save, and make sure the brand
+    // bar isn't left hidden when we navigate away from the menu.
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+      clearInterval(tick);
+      document.querySelector(".nav")?.classList.remove("nav-hidden");
+    };
   }, []);
 
   // When the spied category changes, slide the (now pinned) category bar
@@ -486,10 +497,10 @@ export default function MenuPage() {
             {t.slide} <i className="fas fa-arrow-right"></i>
           </span>
         </div>
-        {/* Everything from here to the matching close stays PINNED while the
-            dishes scroll: the existing category bar (which highlights + follows
-            the category you've scrolled into) AND the search/filter bar. This is
-            the one and only category bar — no separate strip. */}
+        {/* PINNED block — ONLY the category bar + the search box stay pinned at the
+            top while dishes scroll (owner's layout). The filter/grid controls live
+            BELOW this block and scroll away with the page. Order: categories, then
+            search. This block wears the SAME frosted glass as the brand bar. */}
         <div className={`menu-sticky ${catsMin ? "cats-min" : ""}`} id="menu-sticky">
         {/* The horizontal row of category tabs. */}
         <div className="cat-scroller" id="cat-scroller" role="tablist" aria-label="Menu categories">
@@ -544,12 +555,11 @@ export default function MenuPage() {
                 </button>
               ))}
         </div>
-
-        {/* The sticky bar: search box on top, then the filter/sort/layout
-            controls. It stays pinned as you scroll the dishes. */}
-        <div className="items-header" id="sticky-header">
-          {/* The search box — gone when the search feature is switched off. */}
-          {features.search && (
+        {/* SEARCH BOX — sits right under the categories, still INSIDE the pinned
+            block, so categories + search stay glued to the top together. Hidden
+            when the search feature is switched off. */}
+        {features.search && (
+        <div className="items-header search-row">
           <div className="search-container">
             {/* The little logo tucked inside the search box. */}
             <img
@@ -569,12 +579,9 @@ export default function MenuPage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
-            {/* When there are matches, show the dropdown of quick results.
-                (&& means "only render this when the left side is true".) */}
+            {/* When there are matches, show the dropdown of quick results. */}
             {searchResults.length > 0 && (
               <div className="search-dropdown" role="listbox">
-                {/* One tappable result row per matching dish. Tapping it
-                    opens the dish and clears the search. */}
                 {searchResults.map((r) => (
                   <Link
                     key={r.id}
@@ -592,7 +599,15 @@ export default function MenuPage() {
               </div>
             )}
           </div>
-          )}
+        </div>
+        )}
+        </div>
+        {/* /menu-sticky — ONLY the categories + search box stay pinned. */}
+
+        {/* The filter/sort chips + the list/gallery toggle. These now live OUTSIDE
+            the pinned block, so they scroll away with the dishes (owner's call:
+            keep only categories + search glued to the top). */}
+        <div className="items-header" id="sticky-header">
           {/* The row of sort chips, diet chips, and the list/gallery toggle. */}
           <div className="header-controls">
             <div className="controls-group">
@@ -651,8 +666,7 @@ export default function MenuPage() {
             </div>
           </div>
         </div>
-        </div>
-        {/* /menu-sticky — the category bar + search/filters that stay pinned. */}
+        {/* /items-header — filter/grid controls (these scroll away, not pinned). */}
 
         {/* The dishes. Three shapes:
             A) still loading            -> grey placeholder cards
