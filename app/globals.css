@@ -72,12 +72,11 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   padding-top: calc(12px + env(safe-area-inset-top));
   padding-left: calc(16px + env(safe-area-inset-left));
   padding-right: calc(16px + env(safe-area-inset-right));
-  /* SOLID page-colour background (adapts to dark/light via --bg) — NOT frosted.
-     The brand bar is LOCKED at the top and the category+search bar pins right
-     beneath it; both share this exact same solid colour so they MERGE into one
-     seamless block with no blur-seam / no visible difference when you scroll
-     (the dishes no longer show through). */
-  background: var(--bg);
+  /* Frosted glass: transparent + a 20px backdrop blur (the project's "blur").
+     The category+search bar below uses the SAME recipe so the brand and the bar
+     read as one continuous frosted region. NO own background colour. */
+  background: transparent;
+  backdrop-filter: blur(20px);
 }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .brand-title {
@@ -641,10 +640,33 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   /* Scroll-linked shrink dial: the menu raises this 0 -> 1 as you scroll, and
      the category cards/icons interpolate off it (see .cat-card). 0 = full size. */
   --shrink: 0;
-  /* SOLID page-colour background — the EXACT same --bg as the brand bar (.nav),
-     so the brand + category + search read as ONE seamless block (no frosted
-     blur, no edge/seam, no dishes showing through). Adapts to dark/light. */
-  background: var(--bg);
+  /* No background and NO own blur. A SINGLE fixed frost panel (.menu-headfrost)
+     sitting BEHIND the brand + this bar provides one continuous blur, so there
+     is NO seam between the brand and the categories. This bar only holds the
+     (sharp) cards + search box on top of that shared frost. */
+  background: transparent;
+}
+/* ONE frosted backdrop behind the WHOLE pinned header (brand + category +
+   search). Being a single fixed element, it blurs the dishes as one continuous
+   region — no double-blur seam where the brand meets the categories. Its height
+   is set live by the menu's scroll handler (--headfrost-h): just the brand strip
+   at the very top, growing to cover the category+search once they pin to the
+   top. pointer-events:none so it never eats taps. */
+.menu-headfrost {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: var(--headfrost-h, 0px);
+  z-index: 49; pointer-events: none;
+  backdrop-filter: blur(20px);
+}
+/* On the MENU, the brand bar has a SOLID page-colour background that FADES
+   (gradient) into transparency at its bottom edge — so the solid brand melts
+   into the frosted category bar below instead of meeting it at a hard line.
+   No own blur: the single frost panel behind shows through the faded part, so
+   the brand's bottom and the category read as the same frosted glass. (Other
+   pages keep their own frosted brand bar.) */
+body.menu-frost .nav {
+  background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 45%, transparent 100%);
+  backdrop-filter: none;
 }
 .search-container { position: relative; width: 100%; }
 /* search autocomplete dropdown */

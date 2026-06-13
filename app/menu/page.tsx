@@ -246,6 +246,11 @@ export default function MenuPage() {
   useEffect(() => {
     const el = document.getElementById("main-scroll");  // the scrolling area
     if (!el) return;  // nothing to do if it isn't on the page
+    // On the menu, the brand loses its OWN blur and shares the single frost panel
+    // (see .menu-headfrost / body.menu-frost in CSS) — that's what merges the
+    // brand with the category bar seamlessly. Removed again on cleanup so other
+    // pages keep the brand's normal frosted bar.
+    document.body.classList.add("menu-frost");
     let raf = 0;
     // SCROLL-SPY (Petpooja-style): work out which category section sits under
     // the sticky header right now. The chips highlight + follow automatically
@@ -297,6 +302,17 @@ export default function MenuPage() {
           const p = Math.max(0, Math.min(1, past / SHRINK_DIST));
           sticky.style.setProperty("--shrink", p.toFixed(3));
         }
+        // Size the SINGLE frost panel that sits behind the brand + category +
+        // search: just the brand strip normally, growing to cover the pinned
+        // category+search once the bar reaches the top. This one shared blur is
+        // what removes the seam between the brand and the categories.
+        const frost = document.querySelector<HTMLElement>(".menu-headfrost");
+        if (frost && sticky) {
+          const sRect = sticky.getBoundingClientRect();
+          const pinned = sRect.top <= navBottom + 4;
+          const h = pinned ? Math.max(navBottom, sRect.bottom) : navBottom;
+          frost.style.setProperty("--headfrost-h", Math.round(h) + "px");
+        }
         computeSpy();
       });
     };
@@ -312,6 +328,7 @@ export default function MenuPage() {
       el.removeEventListener("scroll", onScroll);
       cancelAnimationFrame(raf);
       clearInterval(tick);
+      document.body.classList.remove("menu-frost");
     };
   }, []);
 
@@ -470,6 +487,10 @@ export default function MenuPage() {
   return (
     // AppShell = the shared outer frame (header, footer, etc.).
     <AppShell>
+      {/* ONE fixed frosted backdrop behind the whole pinned header (brand +
+          category + search). A single blur region = no seam between the brand
+          and the categories. Its height is driven live by the scroll handler. */}
+      <div className="menu-headfrost" aria-hidden="true" />
       {/* The scrolling content area. Its id is used to save/restore scroll. */}
       <main id="main-scroll">
         {/* The big animated greeting banner up top. */}
