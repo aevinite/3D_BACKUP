@@ -28,11 +28,15 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 /* Tiles match the editor's floor exactly: a per-state --c accent driving a soft
    gradient fill + border (editor ft-* colors). Open tables grow to hold real
    info (guests, KOT, kitchen progress); free tables stay compact. */
-.tile { --c: #6b6253; position: relative; min-height: 92px; border-radius: 16px;
+/* Every tile is the SAME fixed height — open or free — so the grid never goes
+   ragged (owner: don't resize a tile when it opens). Content bottom-anchors. */
+.tile { --c: #6b6253; position: relative; height: 140px; border-radius: 16px;
   border: 1.5px solid color-mix(in srgb, var(--c) 55%, var(--line));
   background: linear-gradient(157deg, color-mix(in srgb, var(--c) 16%, var(--panel)), var(--panel) 78%);
   color: var(--text); cursor: pointer; display: flex; flex-direction: column; align-items: stretch; gap: 4px;
-  font-family: inherit; padding: 12px 12px 13px; text-align: left; }
+  font-family: inherit; padding: 12px 12px 13px; text-align: left; overflow: hidden; }
+/* the action / progress cluster sticks to the bottom, so all tiles read evenly */
+.tile .topen, .tile .tstrip { margin-top: auto; }
 .tile.sel { outline: 3px solid var(--blue); outline-offset: 1px; }
 /* OUTLINE = payment (only on tables that have orders) */
 .tile.pay-unpaid { border-color: var(--red); }
@@ -141,6 +145,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .btn.small { padding: 7px 12px; font-size: 13px; }
 .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 800; }
 .btn.big { padding: 15px; font-size: 16px; letter-spacing: 0.5px; }
+.btn.danger { color: #ff8a8a; border-color: rgba(239,68,68,.4); }
+.btn.danger:hover { border-color: var(--red); background: rgba(239,68,68,.08); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* order mode */

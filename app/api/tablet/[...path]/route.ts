@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction } from "@/lib/oplog";
+import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic";
 
@@ -25,15 +26,15 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "state") {
-      const since = new Date(); since.setHours(0, 0, 0, 0);
+      const since = businessDayStartIso();
       const [settings, sessions, members, orders, items, calls, dishes, categories, requests] = await Promise.all([
         sb.from("settings").select("*").eq("id", "site").maybeSingle(),
         sb.from("sessions").select("*").neq("status", "closed"),
         sb.from("session_members").select("*").eq("removed", false),
-        sb.from("orders").select("*").gte("created_at", since.toISOString()).eq("archived", false).order("created_at"),
+        sb.from("orders").select("*").gte("created_at", since).eq("archived", false).order("created_at"),
         // Per-dish rows (the same table the kitchen advances). Lets the tablet show
         // and advance each dish's status (new → cooking → served), not just the order.
-        sb.from("order_items").select("*").gte("created_at", since.toISOString()).order("created_at").order("id"),
+        sb.from("order_items").select("*").gte("created_at", since).order("created_at").order("id"),
         sb.from("waiter_calls").select("*").eq("resolved", false),
         sb.from("menu_items").select("id,title,price,category,tags,veg,options").order("category"),
         sb.from("categories").select("slug,name,icon,sort_order,active").order("sort_order"),
@@ -163,8 +164,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (!target) target = (must(await sb.from("sessions").insert({ table_number: to, status: "open", opened_by: "waiter", opened_at: nowIso() }).select()))[0];
       const moved = must(await sb.from("orders").update({ table_number: to, session_id: target.id }).eq("id", b).select());
       await sb.from("order_items").update({ session_id: target.id }).eq("order_id", b);
+      // The target now has an order, so make sure it has a bill number (the bill
+      // trigger only fires on INSERT, not on this move — assign it if missing).
+      const tb = (must(await sb.from("sessions").select("bill_no").eq("id", target.id).limit(1)))[0];
+      if (tb && tb.bill_no == null) {
+        try { const { data: bn } = await sb.rpc("lfh_next_counter", { p_key: "bill" }); if (bn != null) await sb.from("sessions").update({ bill_no: bn }).eq("id", target.id).is("bill_no", null); } catch { /* bill stays lazy if the counter isn't callable */ }
+      }
       await logAction("tablet", "order_move", { order_id: b, table_number: to });
       return ok(moved[0] || null);
+    }
+
+    // sessions/:id/close — free the table (end the dining session). Mirrors the
+    // editor's close: mark the session closed; the floor immediately shows it free.
+    if (a === "sessions" && c === "close") {
+      const sess = (must(await sb.from("sessions").select("table_number").eq("id", b).limit(1)))[0];
+      const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", b).select());
+      await logAction("tablet", "table_close", { table_number: sess ? sess.table_number : null });
+      return ok(row[0] || null);
     }
 
     // sessions/open

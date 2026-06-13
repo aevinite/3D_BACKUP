@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction } from "@/lib/oplog";
+import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -100,7 +101,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const range = new URL(req.url).searchParams.get("range") || "30d";
       const now = new Date();
       let since: Date;
-      if (range === "today") { since = new Date(); since.setHours(0, 0, 0, 0); }
+      if (range === "today") { since = new Date(businessDayStartIso()); } // 05:00 IST business day
       else if (range === "year") { since = new Date(now.getFullYear(), now.getMonth() - 11, 1); }
       else { since = new Date(Date.now() - 29 * 864e5); since.setHours(0, 0, 0, 0); }
 

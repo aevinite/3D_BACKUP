@@ -48,8 +48,9 @@ const toast = (msg, ok = true) => {
 };
 // Two-step confirm (a promise that resolves true/false) — used before sending
 // an order to the kitchen, so a stray tap can't fire a ticket.
-const confirmDialog = (text) => new Promise((resolve) => {
+const confirmDialog = (text, yesLabel = "Yes, send it") => new Promise((resolve) => {
   $("#confirmText").textContent = text;
+  $("#confirmYes").textContent = yesLabel;
   $("#confirmOverlay").hidden = false;
   $("#confirmYes").onclick = () => { $("#confirmOverlay").hidden = true; resolve(true); };
   $("#confirmNo").onclick = () => { $("#confirmOverlay").hidden = true; resolve(false); };
@@ -218,23 +219,25 @@ function renderPanel() {
   const callRows = calls.map((c) => `<div class="row"><span>🔔 ${esc(c.note || "Waiter call")}</span><button class="btn small primary" data-attend="${esc(c.id)}">Done</button></div>`).join("");
 
   // Bottom bar: bill + paid/unpaid on the left; a big ATTEND filling the rest when
-  // there's a call (sized to whatever space is left, exactly as asked).
+  // there's a call (sized to whatever space is left, exactly as asked). The bill
+  // number only exists once the table has ordered — until then we say so plainly.
   let foot = "";
   if (s) {
-    const payCls = a.unpaid ? "unpaid" : "paid";
+    const hasOrders = os.length > 0;
+    const payCls = hasOrders ? (a.unpaid ? "unpaid" : "paid") : "";
+    const billInner = hasOrders
+      ? `<span class="bn">bill #${esc(a.billNo ?? "—")}</span>${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : "paid ✓"}</span>`
+      : `<span class="bn">no bill yet</span><span class="due">starts on first order</span>`;
     const attend = calls.length
       ? `<button class="attend ${calls.length > 1 ? "more" : ""}" data-attend="${esc(calls[0].id)}">🔔 ATTEND — ${esc(calls[0].note || "call")}${calls.length > 1 ? ` (+${calls.length - 1} more)` : ""}</button>`
       : "";
-    foot = `<div class="foot">
-      <div class="billbox ${payCls}"><span class="bn">bill #${esc(a.billNo ?? "—")}</span>${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : "paid ✓"}</span></div>
-      ${attend}
-    </div>`;
+    foot = `<div class="foot"><div class="billbox ${payCls}">${billInner}</div>${attend}</div>`;
   }
 
   p.classList.add("has-detail");
   p.innerHTML = `
     <div class="phead">
-      <div style="flex:1"><h2 style="margin:0;font-size:19px">Table ${esc(t)}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}bill #${esc(a.billNo ?? "—")}` : "closed"}</div></div>
+      <div style="flex:1"><h2 style="margin:0;font-size:19px">Table ${esc(t)}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"}` : "closed"}</div></div>
       <button class="btn small backtop" id="backTop">↑ Tables</button>
       ${s ? `<span class="live">● open</span>` : `<span class="off">closed</span>`}
     </div>
@@ -250,6 +253,7 @@ function renderPanel() {
       <button class="btn primary big" id="takeOrder">＋ Take order</button>
       ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
       ${s && os.length ? `<button class="btn" id="moveOrder">↪ Move an order</button>` : ""}
+      ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
     </div>
     ${foot}`;
 
@@ -265,6 +269,10 @@ function renderPanel() {
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
   const mvb = $("#moveOrder"); if (mvb) mvb.onclick = () => renderMoveOrderPicker(t);
+  const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
+    const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
+    if (await confirmDialog(`Close table ${t} and free it?${warn}`, "Close table")) act(() => api("POST", `/sessions/${s.id}/close`));
+  };
   const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
   $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel(); };
 }

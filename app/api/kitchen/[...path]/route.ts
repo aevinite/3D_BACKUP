@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction } from "@/lib/oplog";
+import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic";
 
@@ -25,10 +26,10 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "board") {
-      const since = new Date(); since.setHours(0, 0, 0, 0);
+      const since = businessDayStartIso();
       const [orders, items, dishes] = await Promise.all([
-        sb.from("orders").select("*").gte("created_at", since.toISOString()).eq("archived", false).order("created_at", { ascending: true }),
-        sb.from("order_items").select("*").gte("created_at", since.toISOString()).order("created_at", { ascending: true }),
+        sb.from("orders").select("*").gte("created_at", since).eq("archived", false).order("created_at", { ascending: true }),
+        sb.from("order_items").select("*").gte("created_at", since).order("created_at", { ascending: true }),
         sb.from("menu_items").select("id,title,category,tags").order("category"),
       ]);
       return ok({ orders: must(orders), items: must(items), dishes: must(dishes) });
