@@ -11,11 +11,13 @@
   // log). One year, lax — survives reloads, never blocks taps.
   (function ensureDeviceId() {
     try {
-      if (!/(?:^|;\s*)lfh_device_id=/.test(document.cookie)) {
+      // Cookie name is "lfh_panel_device" (NOT lfh_device_id — that's the guest
+      // rating id in localStorage; keep them separate to avoid any clash).
+      if (!/(?:^|;\s*)lfh_panel_device=/.test(document.cookie)) {
         const rand = (self.crypto && self.crypto.randomUUID)
           ? self.crypto.randomUUID().replace(/-/g, "").slice(0, 8)
           : Math.random().toString(16).slice(2, 10);
-        document.cookie = "lfh_device_id=" + rand + "; path=/; max-age=31536000; samesite=lax";
+        document.cookie = "lfh_panel_device=" + rand + "; path=/; max-age=31536000; samesite=lax";
       }
     } catch { /* cookies blocked — log just won't show a device id */ }
   })();

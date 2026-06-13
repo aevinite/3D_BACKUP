@@ -764,9 +764,11 @@ body {
 /* Operation log rows (staff actions). */
 /* Operation log = a TABLE (like the Customer log) with a DEVICE column first,
    so you can see which tablet/kitchen screen did each action. */
-.oplist { display: flex; flex-direction: column; gap: 4px; max-width: 860px; margin-top: 14px; overflow-x: auto; }
-.oprow { display: grid; grid-template-columns: 1.2fr 0.8fr 1.4fr 1fr 0.8fr; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 9px; background: var(--panel); border: 1px solid var(--line); min-width: 620px; }
-.oprow.ophead { background: transparent; border: none; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 2px 12px; min-width: 620px; }
+.oplist { display: flex; flex-direction: column; gap: 4px; max-width: 920px; margin-top: 14px; overflow-x: auto; }
+.oprow { display: grid; grid-template-columns: 1.1fr 0.7fr 1.3fr 0.9fr 0.7fr auto; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 9px; background: var(--panel); border: 1px solid var(--line); min-width: 700px; }
+.oprow.ophead { background: transparent; border: none; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 2px 12px; min-width: 700px; }
+.oprow.op-blocked { opacity: .72; border-color: color-mix(in srgb, #ef4444 40%, var(--line)); }
+.opacts { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
 .opcell { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .op-dev { font-weight: 800; color: var(--gold); white-space: nowrap; }
 .op-panel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; padding: 2px 8px; border-radius: 999px; text-align: center; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); display: inline-block; }

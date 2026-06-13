@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { logAction, deviceIdFrom } from "@/lib/oplog";
+import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +47,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const [a, b, c] = path;
     const body = await readBody(req);
     const dev = deviceIdFrom(req); // which device (kitchen screen) is acting
+    // A staff-blocked device can't do anything from the kitchen screen.
+    if (await deviceBlocked(dev)) return err("This device has been blocked by staff.", 403);
 
     // orders/:id/accept — everything not served → preparing
     if (a === "orders" && c === "accept") {

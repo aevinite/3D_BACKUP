@@ -2562,20 +2562,33 @@ function oplogHtml() {
     table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",
     call_attend: "Attended call", member_approve: "Approved guest", sold_out_on: "Marked sold-out", sold_out_off: "Back in stock",
   };
+  // Which staff devices are currently blocked → map device_id to its blocklist
+  // row id (so we can offer Unblock). Loaded alongside the customer-log data.
+  const blockedDev = {};
+  ((state.users && state.users.blocklist) || []).forEach((b) => { if (b.device_id) blockedDev[b.device_id] = b.id; });
   // Table-style (like the Customer log): a Device column first so you can see
-  // exactly WHICH tablet/kitchen screen did each action (and could block one).
-  const headRow = `<div class="oprow ophead"><div>Device</div><div>Panel</div><div>Action</div><div>Where</div><div>When</div></div>`;
+  // exactly WHICH tablet/kitchen screen did each action, plus Block/Unblock.
+  const headRow = `<div class="oprow ophead"><div>Device</div><div>Panel</div><div>Action</div><div>Where</div><div>When</div><div></div></div>`;
   const body = rows.map((r) => {
     const device = r.device_id
       ? `<span class="op-dev">📱 #${esc(r.device_id)}</span>`
       : `<span class="lg-muted">—</span>`;
     const where = r.table_number ? "Table " + esc(r.table_number) : (r.detail ? esc(r.detail) : "");
-    return `<div class="oprow">
+    // Block/Unblock only for field devices (tablet/kitchen) — never the editor,
+    // so the owner can't lock themselves out of the panel that does the unblocking.
+    let act = "";
+    if (r.device_id && r.panel !== "editor") {
+      act = blockedDev[r.device_id]
+        ? `<span class="logstat logstat-blocked">blocked</span> <button class="btn small" data-unblock-dev="${esc(blockedDev[r.device_id])}">Unblock</button>`
+        : `<button class="btn small danger" data-block-dev="${esc(r.device_id)}">Block</button>`;
+    }
+    return `<div class="oprow${blockedDev[r.device_id] ? " op-blocked" : ""}">
       <div class="opcell">${device}</div>
       <div class="opcell"><span class="op-panel op-${esc(r.panel)}">${esc(r.panel)}</span></div>
       <div class="opcell"><b>${esc(ACT[r.action] || r.action)}</b></div>
       <div class="opcell lg-muted">${where}</div>
       <div class="opcell"><small>${esc(timeAgo(r.created_at))}</small></div>
+      <div class="opcell opacts">${act}</div>
     </div>`;
   }).join("");
   return head + `<div class="oplist">${headRow}${body}</div>`;
@@ -2594,6 +2607,9 @@ function bindLog() {
   ed.querySelectorAll("[data-exit]").forEach((b) => (b.onclick = () => exitUser(b.dataset.exit)));
   ed.querySelectorAll("[data-block-phone]").forEach((b) => (b.onclick = () => blockUser(b.dataset.blockPhone, b.dataset.blockTable)));
   ed.querySelectorAll("[data-unblock]").forEach((b) => (b.onclick = () => unblockLog(b.dataset.unblock)));
+  // Operation log: block / unblock a staff DEVICE (tablet / kitchen screen).
+  ed.querySelectorAll("[data-block-dev]").forEach((b) => (b.onclick = () => blockDevice(b.dataset.blockDev)));
+  ed.querySelectorAll("[data-unblock-dev]").forEach((b) => (b.onclick = () => unblockLog(b.dataset.unblockDev)));
   // Switch between the Customer log and the Operation log.
   ed.querySelectorAll("[data-logview]").forEach((b) => (b.onclick = () => { state.logView = b.dataset.logview; if (state.logView === "operations") loadOplog(); else renderEditor(); }));
   const ro = document.getElementById("refreshOplog"); if (ro) ro.onclick = loadOplog;
@@ -2612,7 +2628,16 @@ async function blockUser(phone, table) {
   try { await api("POST", "/blocklist", phone ? { phone } : { table }); await loadUsers(); toast("Blocked", "ok"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
-// unblockLog: remove someone from the blocklist (from the Log tab).
+// blockDevice: block a staff DEVICE (a tablet / kitchen screen) by its device id.
+// The tablet & kitchen APIs then refuse every request from it until unblocked.
+async function blockDevice(deviceId) {
+  if (!deviceId) return;
+  if (!(await confirmDialog("Block this device? The tablet/kitchen screen using it won't be able to take orders or act until you unblock it.", "Block device"))) return;
+  try { await api("POST", "/blocklist", { device_id: deviceId, reason: "device" }); await loadUsers(); toast("Device blocked", "ok"); }
+  catch (e) { toast("Failed: " + e.message, "err"); }
+}
+// unblockLog: remove someone from the blocklist (a guest OR a device). After it,
+// loadUsers refreshes the blocklist so the operation-log buttons flip back too.
 async function unblockLog(id) {
   try { await api("DELETE", "/blocklist/" + id); await loadUsers(); toast("Unblocked", "ok"); }
   catch (e) { toast("Failed: " + e.message, "err"); }

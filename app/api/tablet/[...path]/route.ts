@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { logAction, deviceIdFrom } from "@/lib/oplog";
+import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic";
@@ -59,6 +59,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const [a, b, c] = path;
     const body = await readBody(req);
     const dev = deviceIdFrom(req); // which tablet/device is acting
+    // A staff-blocked device can't do anything from the tablet.
+    if (await deviceBlocked(dev)) return err("This device has been blocked by staff.", 403);
 
     // order — server-side priced via lfh_staff_place_order (never trusts prices)
     if (a === "order" && path.length === 1) {
