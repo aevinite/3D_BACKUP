@@ -607,7 +607,7 @@ body {
 .tmo-total { margin-left: auto; font-weight: 700; }
 .tmo-items { font-size: 13px; color: var(--muted); margin: 8px 0; }
 .tmo-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.tbl-modal-foot { padding: 16px 20px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 14px; }
+.tbl-modal-foot { padding: 16px 20px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tbl-modal-due { color: var(--muted); font-size: 14px; }
 .tbl-modal-foot .tbl-modal-free { margin-left: auto; }
 .tbl-num { font-size: 30px; font-weight: 800; line-height: 1; }

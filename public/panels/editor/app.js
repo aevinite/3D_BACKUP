@@ -2297,7 +2297,16 @@ function renderTablePanel() {
   // can clear them one at a time; if there are several, an "Attend all" clears them together.
   const callsSec = calls.length ? `<div class="sx-sec"><div class="sx-sec-h">Calls <span class="sub">· ${calls.length}</span></div>${calls.map((c) => `<div class="sx-call">${callEmoji(c.note)} ${esc(c.note || "Waiter call")} <button class="btn small primary" data-call-attend="${esc(c.id)}">Done</button></div>`).join("")}${calls.length > 1 ? `<button class="btn small" data-attend-all="${esc(t)}">✓ Attend all (${calls.length})</button>` : ""}</div>` : "";
   const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="sx-total">${due > 0 ? `Due <b>${inr(due)}</b> · ` : ""}Total <b>${inr(billTotal)}</b></div><div class="sx-bill-actions"><button class="btn small" id="sxPrint">🖨 Print bill</button></div></div>` : "";
-  const foot = `${sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : ""}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${sess ? `<button class="btn danger" id="sxClose">⏻ Turn table off</button>` : ""}<button class="btn ${canFree ? "primary" : ""} tp-free" ${canFree ? "" : "disabled"}>${canFree ? "✓ Free table" : "Settle bill to free"}</button>`;
+  // ONE end-the-table button (was a redundant "Turn table off" + "Free table",
+  // which do the same thing once the bill is paid). It adapts to the state:
+  //  • bill fully settled → "✓ Free table" (archive the paid orders + close)
+  //  • open but unpaid    → "⏻ Close table" (force-close, cancels unmade food)
+  //  • legacy no-session + unpaid → a disabled "Settle bill to free" hint.
+  const endBtn = canFree
+    ? `<button class="btn primary tp-free">✓ Free table</button>`
+    : (sess ? `<button class="btn danger" id="sxClose">⏻ Close table</button>`
+            : `<button class="btn tp-free" disabled>Settle bill to free</button>`);
+  const foot = `${sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : ""}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
 
   const wrap = el(`<div class="sx-modal-overlay tbl-modal-overlay"><div class="tbl-modal sx-modal"><div class="tbl-modal-head"><h3>Table ${esc(t)}${sess ? ` <span class="sx-live">● open</span>` : ""}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div><div class="tbl-modal-body">${sessionSec}${buildingSec}${ordersSec}${callsSec}${billSec}</div><div class="tbl-modal-foot">${foot}</div></div></div>`);
   document.body.appendChild(wrap);
