@@ -14,7 +14,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 5; }
 .brand { font-size: 20px; font-weight: 800; }
 .brand .sub { color: var(--muted); font-weight: 500; font-size: 13px; margin-left: 6px; }
 .clock { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -25,7 +25,12 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 
 /* floor tiles — fluid grid, no dead gap */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
-.tile { position: relative; aspect-ratio: 1; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-family: inherit; }
+/* Tiles match the editor's floor exactly: a per-state --c accent driving a soft
+   gradient fill + border (editor ft-* colors). */
+.tile { --c: #6b6253; position: relative; aspect-ratio: 1; border-radius: 14px;
+  border: 1.5px solid color-mix(in srgb, var(--c) 55%, var(--line));
+  background: linear-gradient(157deg, color-mix(in srgb, var(--c) 16%, var(--panel)), var(--panel) 78%);
+  color: var(--text); cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-family: inherit; }
 .tile.sel { outline: 3px solid var(--blue); outline-offset: 1px; }
 .tnum { font-size: 22px; font-weight: 900; }
 .tlabel { font-size: 11px; color: var(--muted); }
@@ -33,10 +38,10 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .tbadges em { font-style: normal; font-size: 11px; background: rgba(0,0,0,0.45); border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px; }
 .b-call { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { transform: scale(1.12); } }
-.t-free { opacity: 0.65; }
-.t-seated { border-color: rgba(212,165,116,0.5); }
-/* open but nobody seated yet → bright yellow fill (not dark/off) */
-.t-waiting { background: color-mix(in srgb, var(--amber) 30%, var(--panel)); border-color: rgba(251,191,36,0.6); }
+.t-free { --c: #6b6253; opacity: 0.7; }
+.t-seated { --c: #2dd4bf; }
+/* open but nobody seated yet → bright yellow fill (like the editor's ft-waiting) */
+.t-waiting { --c: #f5c451; background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
 /* request badge on a tile (a guest asked to open / be let in) */
 .b-req { color: var(--gold-strong); }
 /* one-click action pill on a tile (Open / Attend / Let in) — taps without opening the panel */
@@ -65,9 +70,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .copts { display: block; color: var(--muted); font-size: 12px; line-height: 1.2; }
 .cedit { background: none; border: 0; color: var(--gold); font-size: 12px; cursor: pointer; padding: 0; text-decoration: underline; }
 .allergy { border-color: rgba(239,68,68,.45); }
-.t-new { border-color: rgba(251,191,36,0.65); box-shadow: 0 0 0 1px rgba(251,191,36,0.3); }
-.t-prep { border-color: rgba(212,165,116,0.65); }
-.t-done { border-color: rgba(74,222,128,0.55); }
+.t-new { --c: #f59e0b; box-shadow: 0 0 16px color-mix(in srgb, var(--c) 26%, transparent); }
+.t-prep { --c: #4f9dff; }
+.t-done { --c: #22c55e; }
 
 /* the right work panel */
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; min-height: 320px; }
