@@ -256,6 +256,7 @@ function renderPanel() {
       <button class="btn primary big" id="takeOrder">＋ Take order</button>
       ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
       ${s && os.length ? `<button class="btn" id="moveOrder">↪ Move an order</button>` : ""}
+      ${s && os.length && a.unpaid ? `<button class="btn pay" id="payBill">💳 Mark bill paid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
     </div>
     ${foot}`;
@@ -272,6 +273,10 @@ function renderPanel() {
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
   const mvb = $("#moveOrder"); if (mvb) mvb.onclick = () => renderMoveOrderPicker(t);
+  const pb = $("#payBill"); if (pb) pb.onclick = async () => {
+    if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
+      act(() => api("POST", `/tables/${t}/pay`));
+  };
   const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
     const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
     if (await confirmDialog(`Close table ${t} and free it?${warn}`, "Close table")) act(() => api("POST", `/sessions/${s.id}/close`));
@@ -394,10 +399,10 @@ function bindDishButtons() {
 
 function renderDishOptions(d, editIndex) {
   const sel = {};
-  if (editIndex != null && state.cart[editIndex] && state.cart[editIndex].options) {
-    for (const o of state.cart[editIndex].options) (sel[o.group] = sel[o.group] || []).push(o.label);
-  }
-  state._opt = { d, sel, editIndex };
+  const line = editIndex != null ? state.cart[editIndex] : null;
+  if (line && line.options) for (const o of line.options) (sel[o.group] = sel[o.group] || []).push(o.label);
+  // carry the line's per-item allergy + note so editing keeps them
+  state._opt = { d, sel, editIndex, allergy: (line && line.allergy) || "", note: (line && line.note) || "" };
   drawDishOptions();
 }
 function drawDishOptions() {
@@ -416,10 +421,16 @@ function drawDishOptions() {
   }).join("");
   const unit = base + addons;
   $("#panel").classList.remove("has-detail");
+  // Size/extras (if the dish has any) PLUS a per-item allergy + note — so the
+  // waiter can flag "no nuts" or "less ice" on this one dish, not the whole order.
   $("#panel").innerHTML = `
     <div class="phead"><h2>${esc(d.title)}</h2><button class="btn small" id="optBack">← back</button></div>
     <div class="muted small">Base ${inr(base)}</div>
-    ${groups || `<div class="muted">No options.</div>`}
+    ${groups || `<div class="muted small">No size / extras for this dish.</div>`}
+    <div class="optgroup"><h4>⚠ Allergy / avoid <span class="muted small">· this item</span></h4>
+      <input type="text" id="optAllergy" class="note allergy" placeholder="e.g. nuts, dairy" value="${esc(state._opt.allergy || "")}"></div>
+    <div class="optgroup"><h4>Note <span class="muted small">· optional</span></h4>
+      <input type="text" id="optNote" class="note" placeholder="e.g. less ice, extra hot" value="${esc(state._opt.note || "")}"></div>
     <div class="ctotal"><span>Per item</span><b>${inr(unit)}</b></div>
     <button class="btn primary big" id="optAdd">${editIndex != null ? "Update item" : "Add to order"}</button>`;
   document.querySelectorAll("[data-optg]").forEach((b) => (b.onclick = () => {
@@ -428,6 +439,10 @@ function drawDishOptions() {
     sel[g] = multi ? (cur.includes(l) ? cur.filter((x) => x !== l) : [...cur, l]) : (cur.includes(l) ? [] : [l]);
     drawDishOptions();
   }));
+  // Persist the typed allergy/note onto _opt so a re-render (toggling an option)
+  // doesn't wipe them.
+  const al = $("#optAllergy"); if (al) al.oninput = (e) => (state._opt.allergy = e.target.value);
+  const nt = $("#optNote"); if (nt) nt.oninput = (e) => (state._opt.note = e.target.value);
   $("#optBack").onclick = renderOrderMode;
   $("#optAdd").onclick = () => {
     const opts = [];
@@ -435,7 +450,8 @@ function drawDishOptions() {
       if ((sel[g.name] || []).includes(c.label)) opts.push({ group: g.name, label: c.label, price: Number(c.price) || 0 });
     }
     const unitPrice = base + opts.reduce((s, o) => s + o.price, 0);
-    const line = { id: d.id, title: d.title, price: unitPrice, qty: 1, options: opts };
+    const line = { id: d.id, title: d.title, price: unitPrice, qty: 1, options: opts.length ? opts : undefined,
+      allergy: (state._opt.allergy || "").trim() || undefined, note: (state._opt.note || "").trim() || undefined };
     if (editIndex != null && state.cart[editIndex]) { line.qty = state.cart[editIndex].qty; state.cart[editIndex] = line; }
     else state.cart.push(line);
     state._opt = null;
@@ -450,8 +466,8 @@ function renderOrderMode() {
   const chips = state.dishSearch.trim() ? "" : [`<button class="chip ${!state.cat ? "on" : ""}" data-cat="">All</button>`]
     .concat(cats.map((c) => `<button class="chip ${state.cat === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc((c.name && c.name.en) || c.slug)}</button>`)).join("");
   const lines = state.cart.map((l, i) => `<div class="cline">
-      <span class="cname">${esc(l.title)}${l.options && l.options.length ? `<small class="copts">${esc(l.options.map((o) => o.label).join(", "))}</small>` : ""}${l.options ? ` <button class="cedit" data-edit="${i}">edit</button>` : ""}</span>
-      <span class="cqty"><button class="qbtn" data-minus="${i}">−</button><b>${l.qty}</b><button class="qbtn" data-plus="${i}">+</button></span>
+      <span class="cname">${esc(l.title)}${l.options && l.options.length ? `<small class="copts">${esc(l.options.map((o) => o.label).join(", "))}</small>` : ""}${l.allergy ? `<small class="callergy">⚠ ${esc(l.allergy)}</small>` : ""}${l.note ? `<small class="copts">✎ ${esc(l.note)}</small>` : ""}</span>
+      <span class="cqty"><button class="qbtn" data-minus="${i}">−</button><b>${l.qty}</b><button class="qbtn" data-plus="${i}">+</button><button class="qbtn edit" data-edit="${i}" title="Size / extras / allergy">✎</button></span>
       <span class="cprice">${inr(l.price * l.qty)}</span>
     </div>`).join("");
   const total = state.cart.reduce((s, l) => s + l.price * l.qty, 0);
@@ -504,10 +520,19 @@ async function sendOrder() {
   const sendBtn = document.getElementById("sendOrder");
   if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }
   try {
+    // Each line carries its own note (allergy + free note) so the kitchen sees it
+    // on that exact dish; per-item allergies are ALSO rolled into the order-level
+    // allergy list so the loud ⚠ banner still fires.
+    const perItemAllergies = state.cart.flatMap((l) => (l.allergy || "").split(",")).map((s) => s.trim()).filter(Boolean);
+    const allergies = [...(state.allergies || "").split(","), ...perItemAllergies].map((s) => s.trim()).filter(Boolean);
     const r = await api("POST", "/order", {
       table: state.table,
-      items: state.cart.map((l) => ({ id: l.id, qty: l.qty, options: l.options ? l.options.map((o) => ({ group: o.group, label: o.label })) : undefined })),
-      allergies: (state.allergies || "").split(",").map((s) => s.trim()).filter(Boolean),
+      items: state.cart.map((l) => ({
+        id: l.id, qty: l.qty,
+        options: l.options ? l.options.map((o) => ({ group: o.group, label: o.label })) : undefined,
+        note: [l.allergy ? `⚠ ${l.allergy}` : null, l.note || null].filter(Boolean).join(" · ") || undefined,
+      })),
+      allergies: [...new Set(allergies)],
       note: state.note.trim() || null,
     });
     if (!r || r.ok !== true) { toast("Rejected: " + ((r && r.reason) || "unknown") + (r && r.item ? ` (${r.item})` : ""), false); return; }

@@ -177,6 +177,18 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok(moved[0] || null);
     }
 
+    // tables/:t/pay — settle the WHOLE bill: mark every unpaid, non-cancelled
+    // order for the table as paid. The waiter confirms on-screen that the money
+    // was actually collected before this fires.
+    if (a === "tables" && c === "pay") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      const rows = must(await sb.from("orders").update({ payment_status: "paid" })
+        .eq("table_number", t).neq("status", "cancelled").neq("payment_status", "paid").select());
+      await logAction("tablet", "bill_paid", { table_number: t });
+      return ok({ ok: true, count: rows.length });
+    }
+
     // sessions/:id/close — free the table (end the dining session). Mirrors the
     // editor's close: mark the session closed; the floor immediately shows it free.
     if (a === "sessions" && c === "close") {

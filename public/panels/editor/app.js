@@ -996,7 +996,13 @@ async function deleteOrders(ids, all = false) {
 
 // setOrderPayment: flip one order between paid and unpaid.
 // OPTIMISTIC like setOrderStatus: screen first, server second, undo on error.
-async function setOrderPayment(id, paid) {
+// Marking PAID asks first ("has the money actually been collected?") so a stray
+// tap can't record a payment that never happened. The bulk "settle whole table"
+// path passes skipConfirm so it asks once, not per order.
+async function setOrderPayment(id, paid, opts = {}) {
+  if (paid && !opts.skipConfirm) {
+    if (!(await confirmDialog("Mark this order PAID? Only confirm if the payment has actually been collected.", "Yes, payment done"))) return;
+  }
   const o = (state.data.orders || []).find((x) => x.id === id);
   const prev = o ? o.payment_status : null;
   if (o) o.payment_status = paid ? "paid" : "pending"; // flip the screen NOW
@@ -1303,7 +1309,12 @@ function renderEditor() {
     });
     // Bills view: settle a table's WHOLE bill at once (mark every unpaid order paid).
     ed.querySelectorAll("[data-pay-table]").forEach((btn) => {
-      btn.onclick = () => btn.dataset.payTable.split(",").filter(Boolean).forEach((id) => setOrderPayment(id, true));
+      btn.onclick = async () => {
+        const ids = btn.dataset.payTable.split(",").filter(Boolean);
+        if (!ids.length) return;
+        if (!(await confirmDialog(`Mark this whole bill PAID (${ids.length} order${ids.length > 1 ? "s" : ""})? Only confirm if the payment has actually been collected.`, "Yes, payment done"))) return;
+        ids.forEach((id) => setOrderPayment(id, true, { skipConfirm: true }));
+      };
     });
     const updateSel = () => {
       const ids = [...ed.querySelectorAll(".ord-select:checked")].map((c) => c.dataset.sel);
