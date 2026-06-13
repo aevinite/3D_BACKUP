@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin · control room</title>
+  <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛠️</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Top bar: brand + the panel SWITCHER. Tap a panel to open it embedded;
+       tap the active one again (or "Admin") to come back to this control room. -->
+  <header class="topbar">
+    <div class="brand">🛠️ <b>Admin</b> <span class="sub">control room</span></div>
+    <nav class="switcher" id="switcher">
+      <button class="sw active" data-panel="home">🏠 Admin</button>
+      <button class="sw" data-panel="menu">🍽️ Menu <i class="dot" id="dot-menu"></i></button>
+      <button class="sw" data-panel="editor">✏️ Editor <i class="dot" id="dot-editor"></i></button>
+      <button class="sw" data-panel="kitchen">🍳 Kitchen <i class="dot" id="dot-kitchen"></i></button>
+      <button class="sw" data-panel="tablet">🧑‍🍳 Tablet <i class="dot" id="dot-tablet"></i></button>
+    </nav>
+  </header>
+
+  <!-- The HOME cockpit (shown when "Admin" is active). -->
+  <main id="home" class="home">
+    <div class="row1">
+      <div class="card stat"><small>Open tables</small><b id="s-tables">—</b></div>
+      <div class="card stat"><small>Active orders</small><b id="s-active">—</b></div>
+      <div class="card stat"><small>Unpaid bills</small><b id="s-unpaid">—</b></div>
+      <div class="card stat"><small>Revenue today</small><b id="s-rev">—</b></div>
+    </div>
+
+    <div class="card maint" id="maint-card">
+      <div class="maint-info">
+        <h3>Maintenance mode</h3>
+        <p id="maint-desc">When ON, guests see a "we'll be right back" screen instead of the menu. Staff panels keep working.</p>
+      </div>
+      <button class="big-toggle" id="maint-toggle" aria-pressed="false">OFF</button>
+    </div>
+
+    <div class="card">
+      <h3>Open a panel</h3>
+      <p class="muted">Everything in one place — tap to work in it, tap its tab again up top to come back here.</p>
+      <div class="launch" id="launch"></div>
+    </div>
+
+    <div class="card">
+      <h3>This restaurant</h3>
+      <div class="meta-grid" id="meta-grid"><span class="muted">Loading…</span></div>
+      <p class="muted small">Single restaurant, local control room. Deep editing (menu, orders, floor, dashboard, customers, feature switches) lives in the Editor — open it above.</p>
+    </div>
+  </main>
+
+  <!-- The embedded panel (shown when a panel is active). One iframe, reused. -->
+  <iframe id="frame" class="frame" title="panel" hidden></iframe>
+
+  <div id="toasts" class="toasts"></div>
+  <div class="confirm-overlay" id="confirmOverlay" hidden>
+    <div class="confirm-box"><p id="confirmText"></p>
+      <div class="confirm-actions"><button class="btn" id="confirmNo">Cancel</button><button class="btn primary" id="confirmYes">Yes</button></div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

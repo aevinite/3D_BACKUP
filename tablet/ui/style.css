@@ -85,6 +85,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .toast { background: var(--panel); border: 1px solid rgba(74,222,128,0.5); border-radius: 12px; padding: 11px 16px; font-size: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .toast.bad { border-color: rgba(239,68,68,0.55); }
 .confirm-overlay { position: fixed; inset: 0; background: rgba(3,7,16,0.65); display: grid; place-items: center; z-index: 60; }
+/* the [hidden] attribute must win over display:grid — else it blocks taps at rest */
+.confirm-overlay[hidden] { display: none; }
 .confirm-box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; width: min(92vw, 380px); }
 .confirm-box p { margin: 0 0 16px; font-size: 15px; line-height: 1.5; }
 .confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }

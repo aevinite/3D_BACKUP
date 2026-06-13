@@ -19,6 +19,7 @@ const eslintConfig = defineConfig([
     "editor/**",
     "kitchen/**",
     "tablet/**",
+    "admin/**",
   ]),
   {
     // Deliberate rule choices for this codebase. NONE of these change runtime
