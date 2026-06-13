@@ -126,7 +126,7 @@ export default function SessionStatusWidget() {
           if (reason === "session_closed") {
             const tellThem = wasActive.current; // only toast someone who was actually connected
             wasActive.current = false; tokenRef.current = null;
-            if (tellThem) { clearLocal(); toast("This table’s session ended", "table"); }
+            if (tellThem) { clearLocal(); toast("This table’s session ended — scan the QR again to start a new one", "table"); }
             else clearStoredSession();
             setSt(null);
           } else if (reason === "removed") {
