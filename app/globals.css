@@ -585,11 +585,11 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   background: var(--accent-grad);
   border-color: transparent;
   transform: translateY(-2px);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+  /* No shadow — it cast a murky halo that made the neighbouring borders show. */
+  box-shadow: none;
 }
 [data-theme="dark"] .cat-card.active {
-  /* THEME-TRIAL: active-card glow follows the accent (was a hardcoded gold) */
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4), 0 0 16px color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: none;
 }
 .cat-card.active .cat-icon {
   color: #ffffff;
@@ -604,7 +604,7 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   transform: translateY(-2px);
   /* THEME-TRIAL: hover border follows the accent instead of a hardcoded gold */
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  /* no shadow — keeps the bar clean, matches the active card */
 }
 .cat-card:hover:not(.active) .cat-icon {
   filter: drop-shadow(0 0 6px var(--accent-glow));
