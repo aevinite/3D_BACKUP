@@ -59,3 +59,6 @@ verify-*.png
 # `pre-rewrite-reference` git tag, so don't also commit a full duplicate.
 # The small docs (README.md, DATABASE.md) ARE committed for convenience.
 reference/code-snapshot/
+
+# brainstorm companion mockups (local only)
+.superpowers/
