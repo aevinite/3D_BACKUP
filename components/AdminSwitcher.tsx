@@ -32,7 +32,10 @@ export default function AdminSwitcher() {
   // Decide admin-or-not + restore saved position, once, in the browser.
   useEffect(() => {
     try {
-      setIsAdmin(localStorage.getItem("lfh_admin") === "1");
+      // Admin = signed in to the staff gate. The login sets a readable flag
+      // cookie (the real auth cookie is HttpOnly and can't be read here). So a
+      // plain customer (no cookie) never sees the switcher.
+      setIsAdmin(document.cookie.split("; ").some((c) => c === "lfh_is_staff=1"));
       const saved = localStorage.getItem("lfh_switcher_pos");
       if (saved) setPos(JSON.parse(saved));
     } catch {
@@ -152,6 +155,16 @@ export default function AdminSwitcher() {
               {p.label}
             </a>
           ))}
+          {/* Sign out of the staff gate. */}
+          <a
+            href="/api/staff-logout"
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", color: "#f87171", textDecoration: "none", fontSize: 14 }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "#16223c")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+          >
+            <span style={{ fontSize: 16 }}>🚪</span>
+            Log out
+          </a>
         </div>
       )}
     </div>
