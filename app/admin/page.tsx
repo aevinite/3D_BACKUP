@@ -1,15 +1,14 @@
-// The ADMIN home — first slice of the unified shell.
+// The ADMIN home — the owner's control room (behind the admin login gate).
 //
-// It shows the LIVE floor by polling /api/admin/floor (~1s), which reads the one
-// "brain" (lfh_floor_state). This is the proof that the brain works end-to-end:
-// every table's status comes from a single source, so it can never disagree with
-// the other screens. Styling here is intentionally minimal for now — the full
-// admin dashboard design is piece 3.
+// It is deliberately MORE than the editor: alongside the live floor it holds the
+// powerful, owner-only controls — the maintenance switch (takes the guest menu
+// offline) and the per-restaurant FEATURE TOGGLES (moved here from the editor;
+// the editor no longer has them). Everything reads/writes via /api/admin/* which
+// is locked to the admin. Deep menu/order editing still lives in the Editor.
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-// The shape of one table tile, as the brain returns it.
 type Tile = {
   table_number: string;
   state: "free" | "seated" | "new" | "preparing" | "served" | "cleared";
@@ -22,124 +21,202 @@ type Tile = {
   pay: "" | "red" | "green";
 };
 
-// Friendly label + colour per state.
+type Overview = {
+  maintenance: boolean;
+  sessionsEnabled: boolean;
+  tableCount: number;
+  features: Record<string, boolean>;
+  openTables: number;
+  activeOrders: number;
+  unpaidOrders: number;
+  revenueToday: number;
+  ordersToday: number;
+};
+
 const LABEL: Record<Tile["state"], string> = {
-  free: "Free",
-  seated: "Seated",
-  new: "New order",
-  preparing: "Preparing",
-  served: "Served",
-  cleared: "Cleared",
+  free: "Free", seated: "Seated", new: "New order",
+  preparing: "Preparing", served: "Served", cleared: "Cleared",
 };
-// Free tables stay DIM; any open/occupied table lights up bright and warm so the
-// floor reads at a glance (owner: "if the table is open it should brighten up,
-// kind of yellow" — not just an outline).
+// Free tables stay dim; open ones brighten (warm/bright) so the floor reads fast.
 const COLOR: Record<Tile["state"], string> = {
-  free: "#0e1726",      // dim navy — clearly empty
-  seated: "#2563eb",    // bright blue — guests seated
-  new: "#ea580c",       // bright orange — new order waiting
-  preparing: "#7c3aed", // violet — cooking
-  served: "#ca8a04",    // gold/yellow — open & served (brightened)
-  cleared: "#15803d",   // green — paid / cleared
+  free: "#0e1726", seated: "#2563eb", new: "#ea580c",
+  preparing: "#7c3aed", served: "#ca8a04", cleared: "#15803d",
 };
+
+// The ten guest-facing feature switches (the four backend-only ones are hidden).
+const FEATURES: { key: string; label: string }[] = [
+  { key: "model3d", label: "3D dish viewer" },
+  { key: "ratings", label: "Star ratings" },
+  { key: "reviews", label: "Written reviews" },
+  { key: "allergies", label: "Allergy system" },
+  { key: "favorites", label: "Favorites" },
+  { key: "waiter_calls", label: "Call waiter" },
+  { key: "search", label: "Dish search" },
+  { key: "languages", label: "Languages" },
+  { key: "currency", label: "Currency picker" },
+  { key: "scrollspy", label: "Category scroll-spy" },
+];
+
+const card = { background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 14, padding: 16 } as const;
 
 export default function AdminHome() {
   const [tables, setTables] = useState<Tile[]>([]);
+  const [ov, setOv] = useState<Overview | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  // Visiting /admin marks this browser as "admin" so the floating switcher
-  // appears across the panels. (A real password login replaces this in piece 5.)
-  useEffect(() => {
+  const loadOverview = useCallback(async () => {
     try {
-      localStorage.setItem("lfh_admin", "1");
+      const r = await fetch("/api/admin/overview", { cache: "no-store" });
+      const j = await r.json();
+      if (!j.error) setOv(j as Overview);
     } catch {
-      /* ignore */
+      /* ignore a transient poll miss */
     }
   }, []);
 
   useEffect(() => {
     let alive = true;
-    const load = async () => {
+    const loadFloor = async () => {
       try {
         const r = await fetch("/api/admin/floor", { cache: "no-store" });
         const j = await r.json();
         if (!alive) return;
         if (j.error) setErr(j.error);
-        else {
-          setErr(null);
-          setTables(j.tables as Tile[]);
-        }
+        else { setErr(null); setTables(j.tables as Tile[]); }
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (alive) setLoadedOnce(true);
       }
     };
-    load();
-    const id = setInterval(load, 1000); // ~1s live poll
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, []);
+    loadFloor();
+    loadOverview();
+    const id = setInterval(() => { loadFloor(); loadOverview(); }, 1000);
+    return () => { alive = false; clearInterval(id); };
+  }, [loadOverview]);
 
-  const open = tables.filter((t) => t.open).length;
-  const due = tables.reduce((s, t) => s + (Number(t.due) || 0), 0);
+  // Flip the maintenance switch (with an are-you-sure, since it hides the menu).
+  const toggleMaintenance = async () => {
+    if (!ov) return;
+    const turningOn = !ov.maintenance;
+    const msg = turningOn
+      ? "Put the guest menu into maintenance ('we'll be right back')? Guests can't browse or order until you turn it back on."
+      : "Bring the guest menu back online?";
+    if (!window.confirm(msg)) return;
+    setBusy(true);
+    try {
+      await fetch("/api/admin/maintenance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: turningOn }) });
+      await loadOverview();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Flip one feature switch.
+  const toggleFeature = async (key: string, current: boolean) => {
+    setBusy(true);
+    try {
+      await fetch("/api/admin/features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, value: !current }) });
+      await loadOverview();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const featureOn = (key: string) => {
+    // default ON for the guest switches unless explicitly stored false
+    const v = ov?.features?.[key];
+    return v === undefined ? true : v === true;
+  };
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: "#0b1220",
-        color: "#dbe7ff",
-        fontFamily: "system-ui, sans-serif",
-        padding: "24px",
-      }}
-    >
+    <main style={{ minHeight: "100vh", background: "#0b1220", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", padding: 24 }}>
       <header style={{ display: "flex", alignItems: "baseline", gap: 16, flexWrap: "wrap" }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>🛠️ Admin · Live floor</h1>
-        <span style={{ opacity: 0.7, fontSize: 14 }}>
-          {open} open · €{due.toFixed(2)} due · updates every second
-        </span>
+        <h1 style={{ margin: 0, fontSize: 22 }}>🛠️ Admin · Control room</h1>
+        {ov?.maintenance ? (
+          <span style={{ background: "#7f1d1d", color: "#fecaca", padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700 }}>
+            ⚠ Menu in maintenance
+          </span>
+        ) : null}
       </header>
 
-      {err && (
-        <p style={{ color: "#f87171", marginTop: 12 }}>
-          Couldn&apos;t load the floor: {err}
-        </p>
-      )}
+      {/* Key numbers */}
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginTop: 16 }}>
+        <Stat label="Open tables" value={ov ? ov.openTables : "…"} />
+        <Stat label="Active orders" value={ov ? ov.activeOrders : "…"} />
+        <Stat label="Unpaid bills" value={ov ? ov.unpaidOrders : "…"} />
+        <Stat label="Revenue today" value={ov ? `€${ov.revenueToday.toFixed(2)}` : "…"} />
+        <Stat label="Orders today" value={ov ? ov.ordersToday : "…"} />
+      </section>
 
-      {!loadedOnce ? (
-        <p style={{ opacity: 0.6, marginTop: 24 }}>Loading the live floor…</p>
-      ) : (
-        <div
-          style={{
-            marginTop: 20,
-            display: "grid",
-            gap: 12,
-            gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-          }}
-        >
+      {/* Owner controls: maintenance + feature toggles (admin-only powers) */}
+      <section style={{ display: "grid", gridTemplateColumns: "minmax(220px, 320px) 1fr", gap: 12, marginTop: 16, alignItems: "start" }}>
+        <div style={card}>
+          <h2 style={{ margin: "0 0 4px", fontSize: 15 }}>Maintenance</h2>
+          <p style={{ margin: "0 0 12px", fontSize: 12, opacity: 0.7 }}>
+            Turn the guest menu off with a “we’ll be right back” screen. Staff panels keep working.
+          </p>
+          <button
+            onClick={toggleMaintenance}
+            disabled={!ov || busy}
+            style={{
+              width: "100%", padding: "10px 14px", borderRadius: 10, border: 0, cursor: ov && !busy ? "pointer" : "default",
+              background: ov?.maintenance ? "#16a34a" : "#dc2626", color: "#fff", fontWeight: 700, fontSize: 14,
+            }}
+          >
+            {ov?.maintenance ? "Bring menu back online" : "Take menu offline"}
+          </button>
+        </div>
+
+        <div style={card}>
+          <h2 style={{ margin: "0 0 4px", fontSize: 15 }}>Features</h2>
+          <p style={{ margin: "0 0 12px", fontSize: 12, opacity: 0.7 }}>
+            Turn guest-facing features on/off for the whole restaurant. (Edited only here — not in the editor.)
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 8 }}>
+            {FEATURES.map((f) => {
+              const on = featureOn(f.key);
+              return (
+                <button
+                  key={f.key}
+                  onClick={() => toggleFeature(f.key, on)}
+                  disabled={!ov || busy}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
+                    padding: "9px 12px", borderRadius: 10, border: "1px solid #1f2c49", cursor: ov && !busy ? "pointer" : "default",
+                    background: on ? "#13351f" : "#1a2236", color: on ? "#86efac" : "#94a3b8", fontSize: 13, fontWeight: 600, textAlign: "left",
+                  }}
+                  title={on ? "On — tap to turn off" : "Off — tap to turn on"}
+                >
+                  <span>{f.label}</span>
+                  <span>{on ? "ON" : "OFF"}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* Live floor */}
+      <section style={{ marginTop: 20 }}>
+        <h2 style={{ margin: "0 0 10px", fontSize: 15 }}>
+          Live floor <span style={{ opacity: 0.6, fontWeight: 400 }}>· updates every second</span>
+        </h2>
+        {err && <p style={{ color: "#f87171" }}>Couldn&apos;t load the floor: {err}</p>}
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }}>
           {tables.map((t) => (
             <div
               key={t.table_number}
               style={{
                 background: COLOR[t.state],
                 border: t.pay === "red" ? "2px solid #f87171" : t.pay === "green" ? "2px solid #34d399" : "2px solid transparent",
-                borderRadius: 14,
-                padding: "14px 16px",
-                // Occupied tiles glow so the floor reads at a glance; free stays flat.
+                borderRadius: 14, padding: "14px 16px",
                 boxShadow: t.state === "free" ? "none" : "0 4px 18px rgba(0,0,0,.35)",
                 opacity: t.state === "free" ? 0.75 : 1,
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <strong style={{ fontSize: 18 }}>Table {t.table_number}</strong>
-                <span style={{ fontSize: 16 }}>
-                  {t.has_call ? "🔔" : ""}
-                  {t.has_new ? "🆕" : ""}
-                </span>
+                <span style={{ fontSize: 16 }}>{t.has_call ? "🔔" : ""}{t.has_new ? "🆕" : ""}</span>
               </div>
               <div style={{ marginTop: 6, fontSize: 14, fontWeight: 600 }}>{LABEL[t.state]}</div>
               <div style={{ marginTop: 4, fontSize: 12, opacity: 0.85 }}>
@@ -149,7 +226,16 @@ export default function AdminHome() {
             </div>
           ))}
         </div>
-      )}
+      </section>
     </main>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div style={{ ...card, padding: "12px 16px" }}>
+      <div style={{ fontSize: 12, opacity: 0.7 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>{value}</div>
+    </div>
   );
 }
