@@ -70,7 +70,6 @@ export default function MenuPage() {
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
   const [closedCats, setClosedCats] = useState<string[]>([]); // "All" view: which dropdowns the guest manually FOLDED (default: none — everything starts open)
   const [spyCat, setSpyCat] = useState(""); // scroll-spy: which category's section is under the header right now (drives the auto-shifting chips)
-  const [catsMin, setCatsMin] = useState(false); // true once scrolled down a bit → the big category cards shrink into a thin chip strip
   const restoredRef = useRef(false); // skip persisting UI state until after the restore
   // Only show skeletons if loading is actually slow — avoids a flash on fast /
   // cached loads where the data is ready almost immediately.
@@ -279,21 +278,18 @@ export default function MenuPage() {
       raf = requestAnimationFrame(() => {
         // Remember how far down we are, in this browsing session.
         try { sessionStorage.setItem("lfh_menu_scroll", String(el.scrollTop)); } catch {}
-        // Collapse the big SQUARE category cards into a thin PILL strip ONLY once
-        // the bar actually pins to the top of the screen — i.e. when the hero +
-        // the "CATEGORIES" header have scrolled away. We measure that off the
-        // (non-sticky) ".section-header": the moment its bottom edge passes the
-        // top of the scroll area, the sticky bar is now stuck → show pills.
-        // Using that header as the yard-stick (instead of a tiny pixel count)
-        // means a small nudge no longer hides the OG square cards, and because
-        // the header isn't sticky its position moves cleanly with the scroll, so
-        // the square⇄pill switch can't flip-flop at the boundary.
+        // Work out when the pinned bar is actually STUCK to the top of the
+        // screen — once the hero + the "CATEGORIES" header have scrolled away.
+        // We measure that off the (non-sticky) ".section-header": the moment its
+        // bottom edge passes the top of the scroll area, the bar is stuck.
+        // NOTE: the category cards stay BIG (square) the whole time — owner's
+        // call, no shrink-to-pills on scroll. `stuck` now only drives the brand
+        // slide-away below.
         const containerTop = el.getBoundingClientRect().top;
         const secHeader = el.querySelector<HTMLElement>(".section-header");
         const stuck = secHeader
           ? secHeader.getBoundingClientRect().bottom <= containerTop + 1
           : el.scrollTop > 48; // fallback if the header isn't present
-        setCatsMin(stuck);
         // Slide the brand bar (.nav) up out of view while the category bar is
         // pinned, and bring it back when we return near the top. This is what
         // makes the brand "scroll away" even though it's a fixed bar — and it
@@ -501,7 +497,7 @@ export default function MenuPage() {
             top while dishes scroll (owner's layout). The filter/grid controls live
             BELOW this block and scroll away with the page. Order: categories, then
             search. This block wears the SAME frosted glass as the brand bar. */}
-        <div className={`menu-sticky ${catsMin ? "cats-min" : ""}`} id="menu-sticky">
+        <div className="menu-sticky" id="menu-sticky">
         {/* The horizontal row of category tabs. */}
         <div className="cat-scroller" id="cat-scroller" role="tablist" aria-label="Menu categories">
           {/* If categories haven't loaded yet, maybe show placeholders;
