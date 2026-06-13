@@ -556,6 +556,20 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
+/* Collapse-on-scroll: once the guest scrolls down, the tall square category
+   cards shrink into a thin pill strip (icon shrinks, the label stays) — like the
+   filter chips. The `transition: all` on .cat-card animates it; scrolling back to
+   the top restores the full cards. Only the height/shape changes, so the bar
+   keeps less of the screen while browsing. */
+.cats-min .cat-scroller { padding-top: 7px; padding-bottom: 7px; }
+.cats-min .cat-card {
+  min-width: auto; height: 36px; flex-direction: row; gap: 7px;
+  padding: 0 14px; border-radius: 999px;
+}
+.cats-min .cat-card .cat-icon { font-size: 13px; transform: scale(0.85); }
+.cats-min .cat-card.active .cat-icon { transform: scale(0.9); }
+.cats-min .cat-card .cat-name { font-size: 12.5px; white-space: nowrap; }
+.cats-min .cat-card.active { transform: none; }
 /* category icons — accent color inactive, white on active (both modes) */
 .cat-card .cat-icon {
   color: var(--accent);

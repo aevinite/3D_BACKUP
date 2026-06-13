@@ -70,6 +70,7 @@ export default function MenuPage() {
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
   const [closedCats, setClosedCats] = useState<string[]>([]); // "All" view: which dropdowns the guest manually FOLDED (default: none — everything starts open)
   const [spyCat, setSpyCat] = useState(""); // scroll-spy: which category's section is under the header right now (drives the auto-shifting chips)
+  const [catsMin, setCatsMin] = useState(false); // true once scrolled down a bit → the big category cards shrink into a thin chip strip
   const restoredRef = useRef(false); // skip persisting UI state until after the restore
   // Only show skeletons if loading is actually slow — avoids a flash on fast /
   // cached loads where the data is ready almost immediately.
@@ -278,6 +279,9 @@ export default function MenuPage() {
       raf = requestAnimationFrame(() => {
         // Remember how far down we are, in this browsing session.
         try { sessionStorage.setItem("lfh_menu_scroll", String(el.scrollTop)); } catch {}
+        // Once scrolled past a little, collapse the big category cards into a thin
+        // chip strip (and restore them when scrolled back to the top).
+        setCatsMin(el.scrollTop > 48);
         computeSpy();
       });
     };
@@ -474,7 +478,7 @@ export default function MenuPage() {
             dishes scroll: the existing category bar (which highlights + follows
             the category you've scrolled into) AND the search/filter bar. This is
             the one and only category bar — no separate strip. */}
-        <div className="menu-sticky" id="menu-sticky">
+        <div className={`menu-sticky ${catsMin ? "cats-min" : ""}`} id="menu-sticky">
         {/* The horizontal row of category tabs. */}
         <div className="cat-scroller" id="cat-scroller" role="tablist" aria-label="Menu categories">
           {/* If categories haven't loaded yet, maybe show placeholders;
