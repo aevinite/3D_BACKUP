@@ -645,7 +645,7 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
      right above it (no line) — down to transparent at the bottom, where the
      shared frost panel behind shows through as frosted glass and melts into the
      dishes. NO own blur: the single .menu-headfrost panel does the blurring. */
-  background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 50%, transparent 100%);
+  background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 25%, transparent 75%);
 }
 /* ONE frosted backdrop behind the WHOLE pinned header (brand + category +
    search). Being a single fixed element, it blurs the dishes as one continuous
