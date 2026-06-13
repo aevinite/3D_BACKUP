@@ -66,6 +66,23 @@ const CHIPS = [
   { key: "chip_non-veg", label: "Non-Veg" },
 ];
 
+// Recent-activity feed helpers (the admin's combined who-did-what view).
+const PANEL_COLOR: Record<string, string> = { editor: "#d4a574", kitchen: "#7ec88a", tablet: "#60a5fa", admin: "#e8a13c" };
+const ACT_LABEL: Record<string, string> = {
+  order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
+  order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
+  table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",
+  call_attend: "Attended call", member_approve: "Approved guest", sold_out_on: "Marked sold-out", sold_out_off: "Back in stock",
+};
+const timeAgo = (iso: string) => {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
+};
+type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; created_at: string };
+
 const card = { background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 14, padding: 16 } as const;
 
 // Prices/totals are stored in a USD base; show them in rupees the SAME way the
@@ -78,12 +95,23 @@ export default function AdminHome() {
   const [ov, setOv] = useState<Overview | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [activity, setActivity] = useState<Action[]>([]);
 
   const loadOverview = useCallback(async () => {
     try {
       const r = await fetch("/api/admin/overview", { cache: "no-store" });
       const j = await r.json();
       if (!j.error) setOv(j as Overview);
+    } catch {
+      /* ignore a transient poll miss */
+    }
+  }, []);
+
+  const loadActivity = useCallback(async () => {
+    try {
+      const r = await fetch("/api/admin/oplog", { cache: "no-store" });
+      const j = await r.json();
+      if (!j.error) setActivity(j.actions || []);
     } catch {
       /* ignore a transient poll miss */
     }
@@ -104,9 +132,11 @@ export default function AdminHome() {
     };
     loadFloor();
     loadOverview();
+    loadActivity();
     const id = setInterval(() => { loadFloor(); loadOverview(); }, 1000);
-    return () => { alive = false; clearInterval(id); };
-  }, [loadOverview]);
+    const aid = setInterval(loadActivity, 3000); // activity feed — a touch slower
+    return () => { alive = false; clearInterval(id); clearInterval(aid); };
+  }, [loadOverview, loadActivity]);
 
   // Flip the maintenance switch (with an are-you-sure, since it hides the menu).
   const toggleMaintenance = async () => {
@@ -237,6 +267,24 @@ export default function AdminHome() {
             );
           })}
         </div>
+      </section>
+
+      {/* Recent activity across all panels (the combined who-did-what feed) */}
+      <section style={{ ...card, marginTop: 12 }}>
+        <h2 style={{ margin: "0 0 10px", fontSize: 15 }}>Recent activity <span style={{ opacity: 0.6, fontWeight: 400 }}>· across all panels</span></h2>
+        {activity.length === 0 ? (
+          <p style={{ opacity: 0.6, fontSize: 13, margin: 0 }}>No staff actions yet.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", maxHeight: 300, overflowY: "auto" }}>
+            {activity.map((a) => (
+              <div key={a.id} style={{ display: "grid", gridTemplateColumns: "76px 1fr auto", gap: 10, alignItems: "center", fontSize: 13, padding: "7px 0", borderBottom: "1px solid #16223c" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: PANEL_COLOR[a.panel] || "#94a3b8" }}>{a.panel}</span>
+                <span>{ACT_LABEL[a.action] || a.action}{a.table_number ? ` · Table ${a.table_number}` : (a.detail ? ` · ${a.detail}` : "")}</span>
+                <span style={{ opacity: 0.55, whiteSpace: "nowrap" }}>{timeAgo(a.created_at)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Live floor */}
