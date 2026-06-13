@@ -37,6 +37,14 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .t-seated { border-color: rgba(212,165,116,0.5); }
 /* open but nobody seated yet → bright yellow fill (not dark/off) */
 .t-waiting { background: color-mix(in srgb, var(--amber) 30%, var(--panel)); border-color: rgba(251,191,36,0.6); }
+/* request badge on a tile (a guest asked to open / be let in) */
+.b-req { color: var(--gold-strong); }
+/* one-click action pill on a tile (Open / Attend / Let in) — taps without opening the panel */
+.quick { position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+  background: var(--gold); color: #2a1d0c; font-size: 11px; font-weight: 800;
+  padding: 3px 10px; border-radius: 999px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+.quick:hover { background: var(--gold-strong); }
+.reqbtns { display: flex; gap: 6px; }
 .t-new { border-color: rgba(251,191,36,0.65); box-shadow: 0 0 0 1px rgba(251,191,36,0.3); }
 .t-prep { border-color: rgba(212,165,116,0.65); }
 .t-done { border-color: rgba(74,222,128,0.55); }

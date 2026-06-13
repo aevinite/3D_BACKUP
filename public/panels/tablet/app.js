@@ -16,7 +16,7 @@ const INR_RATE = 84;
 const inr = (n) => "₹" + Math.round((parseFloat(n) || 0) * INR_RATE).toLocaleString("en-US");
 
 const state = {
-  data: { settings: null, sessions: [], members: [], orders: [], calls: [], dishes: [], categories: [] },
+  data: { settings: null, sessions: [], members: [], orders: [], calls: [], dishes: [], categories: [], requests: [] },
   table: null,          // which table the panel is showing
   ordering: false,      // true while the waiter is building an order (freezes panel redraws)
   cart: [],             // [{ id, title, price, qty }]
@@ -61,6 +61,8 @@ const membersOf = (t) => {
   const s = sessionOf(t);
   return s ? state.data.members.filter((m) => m.session_id === s.id) : [];
 };
+// Pending guest requests for a table (type "open" = asked to open, else asked for access).
+const reqsOf = (t) => (state.data.requests || []).filter((r) => String(r.table_number) === String(t));
 
 function tileState(t) {
   const os = ordersOf(t), s = sessionOf(t);
@@ -77,11 +79,18 @@ function renderFloor() {
   let html = "";
   for (let i = 1; i <= n; i++) {
     const st = tileState(i);
-    const calls = callsOf(i).length, joiners = joinersOf(i).length;
+    const calls = callsOf(i), joiners = joinersOf(i).length, reqs = reqsOf(i);
+    // One-click quick action right on the tile (no need to open the panel):
+    // a pending request → "Let in"; an open call → "Attend"; a free table → "Open".
+    let quick = "";
+    if (reqs.length) quick = `<span class="quick" data-quick="req" data-qid="${esc(reqs[reqs.length - 1].id)}">✓ Let in</span>`;
+    else if (calls.length) quick = `<span class="quick" data-quick="attend" data-qid="${esc(calls[0].id)}">Attend</span>`;
+    else if (st.cls === "free") quick = `<span class="quick" data-quick="open" data-qt="${i}">Open</span>`;
     html += `<button class="tile t-${st.cls} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
       <span class="tnum">${i}</span>
       <span class="tlabel">${st.label}</span>
-      <span class="tbadges">${calls ? `<em class="b-call">🔔${calls}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
+      <span class="tbadges">${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${calls.length ? `<em class="b-call">🔔${calls.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
+      ${quick}
     </button>`;
   }
   $("#tiles").innerHTML = html;
@@ -89,6 +98,14 @@ function renderFloor() {
     state.table = b.dataset.t;
     state.ordering = false; state.cart = []; state.note = ""; state.dishSearch = "";
     renderFloor(); renderPanel();
+  }));
+  // One-click tile actions (stopPropagation so they don't also open the panel).
+  document.querySelectorAll(".quick").forEach((q) => (q.onclick = (e) => {
+    e.stopPropagation();
+    const type = q.dataset.quick;
+    if (type === "open") act(() => api("POST", "/sessions/open", { table: q.dataset.qt }));
+    else if (type === "attend") act(() => api("POST", `/calls/${q.dataset.qid}/attend`));
+    else if (type === "req") act(() => api("POST", `/requests/${q.dataset.qid}/resolve`, { status: "approved" }));
   }));
 }
 
@@ -99,6 +116,8 @@ function renderPanel() {
   if (state.ordering) { renderOrderMode(); return; }
   const t = state.table, s = sessionOf(t), os = ordersOf(t), calls = callsOf(t), joiners = joinersOf(t);
   const members = s ? membersOf(t) : [];
+  const reqs = reqsOf(t);
+  const reqRows = reqs.map((r) => `<div class="row"><span>📨 ${r.type === "open" ? "Asked to open" : "Asked for access"}${r.name ? ` · ${esc(r.name)}` : ""}</span><span class="reqbtns"><button class="btn small primary" data-req-approve="${esc(r.id)}">Approve</button><button class="btn small" data-req-deny="${esc(r.id)}">Deny</button></span></div>`).join("");
   const callRows = calls.map((c) => `<div class="row"><span>🔔 ${esc(c.note || "Waiter call")}</span><button class="btn small primary" data-attend="${esc(c.id)}">Done</button></div>`).join("");
   const joinRows = joiners.map((m) => `<div class="row"><span>🙋 ${esc(m.name || "Guest")} wants to join</span><button class="btn small primary" data-approve="${esc(m.id)}">Approve</button></div>`).join("");
   // The seated party: the head shows a crown; tap "Make head" to transfer it.
@@ -106,6 +125,7 @@ function renderPanel() {
   const orderRows = os.map((o) => `<div class="row"><span><b>#${esc(o.kot_no ?? "—")}</b> · ${esc(o.status)} · ${inr(o.total)}</span></div>`).join("");
   p.innerHTML = `
     <div class="phead"><h2>Table ${esc(t)}</h2>${s ? `<span class="live">● open${s.bill_no ? ` · bill #${esc(s.bill_no)}` : ""}</span>` : `<span class="off">closed</span>`}</div>
+    ${reqRows ? `<div class="sec"><h3>Requests</h3>${reqRows}</div>` : ""}
     ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
     ${callRows ? `<div class="sec"><h3>Calls</h3>${callRows}</div>` : ""}
     ${members.length ? `<div class="sec"><h3>Party</h3>${partyRows}</div>` : ""}
@@ -115,6 +135,8 @@ function renderPanel() {
       <button class="btn primary big" id="takeOrder">📝 TAKE ORDER</button>
       ${s ? `<button class="btn" id="shiftTable">⇄ Shift to another table</button>` : ""}
     </div>`;
+  document.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqApprove}/resolve`, { status: "approved" }))));
+  document.querySelectorAll("[data-req-deny]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqDeny}/resolve`, { status: "denied" }))));
   document.querySelectorAll("[data-attend]").forEach((b) => (b.onclick = () => act(() => api("POST", `/calls/${b.dataset.attend}/attend`))));
   document.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.approve}/approve`))));
   document.querySelectorAll("[data-makehead]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.makehead}/make-head`))));

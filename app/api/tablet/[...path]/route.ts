@@ -25,7 +25,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "state") {
       const since = new Date(); since.setHours(0, 0, 0, 0);
-      const [settings, sessions, members, orders, calls, dishes, categories] = await Promise.all([
+      const [settings, sessions, members, orders, calls, dishes, categories, requests] = await Promise.all([
         sb.from("settings").select("*").eq("id", "site").maybeSingle(),
         sb.from("sessions").select("*").neq("status", "closed"),
         sb.from("session_members").select("*").eq("removed", false),
@@ -33,10 +33,12 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
         sb.from("waiter_calls").select("*").eq("resolved", false),
         sb.from("menu_items").select("id,title,price,category,tags,veg").order("category"),
         sb.from("categories").select("slug,name,icon,sort_order,active").order("sort_order"),
+        sb.from("requests").select("*").eq("status", "pending").order("created_at"),
       ]);
       return ok({
         settings: must(settings), sessions: must(sessions), members: must(members),
         orders: must(orders), calls: must(calls), dishes: must(dishes), categories: must(categories),
+        requests: must(requests),
       });
     }
     return err("unknown GET endpoint", 404);
@@ -63,6 +65,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       });
       if (error) throw new Error(error.message);
       return ok(data);
+    }
+
+    // requests/:id/resolve — approve/deny a guest's open/join request (approving
+    // an "open" request opens that table). Mirrors the editor.
+    if (a === "requests" && c === "resolve") {
+      const status = body && body.status;
+      if (!["approved", "denied"].includes(status)) return err("invalid status");
+      const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).select())[0];
+      if (status === "approved" && reqRow && reqRow.type === "open") {
+        const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).neq("status", "closed").limit(1));
+        if (!existing.length) must(await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso() }));
+      }
+      return ok(reqRow || null);
     }
 
     // calls/:id/attend
