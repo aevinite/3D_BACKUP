@@ -208,7 +208,11 @@ function renderPanel() {
       const tap = r.fromDb ? `tap data-item="${esc(r.id)}" data-cur="${esc(r.status)}"` : "";
       return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span><span class="ist ${r.status} ${r.fromDb ? "tap" : ""}" ${tap} title="${r.fromDb ? "tap to advance" : ""}">${STATUS_WORD[r.status] || r.status}</span></div>`;
     }).join("");
-    const accept = o.status === "received" ? `<button class="accept" data-accept="${esc(o.id)}">✓ Accept &amp; send to kitchen</button>` : "";
+    // Accept is ONLY for orders that came from a guest's phone (via app) — the
+    // waiter reviews those before they reach the kitchen. An order the staff took
+    // on the tablet is already confirmed, so it never needs an Accept button (the
+    // kitchen still accepts it on its own screen).
+    const accept = (o.status === "received" && viaApp) ? `<button class="accept" data-accept="${esc(o.id)}">✓ Accept &amp; send to kitchen</button>` : "";
     // Allergies are safety-critical — show them as a loud banner on the order.
     const allergy = (o.allergies && o.allergies.length) ? `<div class="oallergy">⚠ ALLERGY — ${esc(o.allergies.join(", "))}</div>` : "";
     return `<div class="ord">
