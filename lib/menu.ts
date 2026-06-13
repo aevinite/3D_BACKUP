@@ -132,13 +132,15 @@ export interface OrderInput {
 // Guest taps "Call a Waiter" — inserts a row the restaurant sees live in the editor.
 // `async` means this talks to the database and we wait for it to finish.
 export async function callWaiter(tableNumber: string, note?: string): Promise<void> {
-  // Add a new row to the `waiter_calls` table. "|| null" stores an empty value
-  // as a proper blank in the database rather than an empty string.
-  const { error } = await supabase.from("waiter_calls").insert({
-    table_number: tableNumber || null,
-    note: note || null,
+  // Go through the GUARDED RPC (not a direct insert): the database function
+  // refuses blocked tables, throttles rapid repeats, and caps pile-up. Direct
+  // inserts to waiter_calls are no longer allowed (see migration 050).
+  const { error } = await supabase.rpc("lfh_call_waiter_table", {
+    p_table: tableNumber || null,
+    p_note: note || null,
   });
-  // If the database refused, raise a clear error the caller can show/handle.
+  // Only a real transport/DB failure is an error. A throttled/blocked call comes
+  // back ok:false on purpose (anti-spam) — not something to alarm the guest with.
   if (error) throw new Error(`Call failed: ${error.message}`);
 }
 
