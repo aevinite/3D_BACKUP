@@ -1,13 +1,13 @@
-// STAFF GATE — real protection for the admin/editor/kitchen/tablet panels.
+// ADMIN GATE — protection for the ADMIN panel only (owner's choice).
 //
-// Anyone could previously open /admin (or /editor, /kitchen, /tablet) just by
-// typing the URL. This middleware blocks every staff route unless the request
-// carries a valid login cookie. The GUEST MENU (/, /menu, /item, /view) is NOT
-// matched here, so it stays completely public — duplicating a tab into the menu
-// still works with no login.
+// Only /admin (and its /api/admin/*) is locked: nobody can reach the admin by
+// just typing the URL. The other staff panels (/editor, /kitchen, /tablet) and
+// the guest menu are OPEN for now — the owner asked for the password to be on
+// the admin alone. (Re-lock the staff panels here before hosting publicly.)
 //
-// Not signed in → browser visits get redirected to /staff-login; API calls get a
-// clean 401. The login itself (/staff-login page + /api/staff-login) is public.
+// Not signed in → browser visits to /admin redirect to /staff-login; /api/admin
+// calls get a clean 401. The login itself (/staff-login + /api/staff-login) is
+// public so you can actually sign in.
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -33,18 +33,8 @@ export async function middleware(req: NextRequest) {
   return NextResponse.redirect(url);
 }
 
-// Only run on staff routes — everything else (menu, item, view, login, static
-// assets) is untouched and public.
+// Only run on the ADMIN routes — everything else (menu, the other staff panels,
+// the panel static files, login, assets) is untouched and open for now.
 export const config = {
-  matcher: [
-    "/admin", "/admin/:path*",
-    "/editor", "/editor/:path*",
-    "/kitchen", "/kitchen/:path*",
-    "/tablet", "/tablet/:path*",
-    "/panels/:path*",
-    "/api/admin/:path*",
-    "/api/editor/:path*",
-    "/api/kitchen/:path*",
-    "/api/tablet/:path*",
-  ],
+  matcher: ["/admin", "/admin/:path*", "/api/admin/:path*"],
 };

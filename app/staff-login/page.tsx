@@ -16,7 +16,7 @@ export default async function StaffLogin({
         action="/api/staff-login"
         style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 16, padding: 28, width: "min(92vw, 360px)" }}
       >
-        <h1 style={{ fontSize: 18, margin: "0 0 14px" }}>🔒 Staff sign in</h1>
+        <h1 style={{ fontSize: 18, margin: "0 0 14px" }}>🔒 Admin sign in</h1>
         <input type="hidden" name="next" value={next} />
         <input
           type="password"
