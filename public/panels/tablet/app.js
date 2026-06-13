@@ -156,8 +156,25 @@ function renderPanel() {
   document.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.approve}/approve`))));
   document.querySelectorAll("[data-makehead]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.makehead}/make-head`))));
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
-  const shb = $("#shiftTable"); if (shb && s) shb.onclick = async () => { const to = prompt("Shift this table's party to which table number?"); if (!to) return; act(() => api("POST", `/sessions/${s.id}/shift`, { to: String(to).trim() })); };
+  const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
   $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel(); };
+}
+
+// Shift picker: tap "⇄ Shift", pick a FREE table, and the whole party (orders +
+// calls) moves there. A proper picker instead of a typed prompt.
+function renderShiftPicker(t, s) {
+  const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+  const free = [];
+  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !sessionOf(i)) free.push(i); }
+  const btns = free.length
+    ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">Table ${i}</button>`).join("")
+    : `<div class="muted">No free tables to shift to.</div>`;
+  $("#panel").innerHTML = `
+    <div class="phead"><h2>Shift Table ${esc(t)} →</h2><button class="btn small" id="shiftBack">← back</button></div>
+    <div class="muted small" style="margin-bottom:10px">Move this party — orders &amp; calls included — to a free table:</div>
+    <div class="shiftgrid">${btns}</div>`;
+  $("#shiftBack").onclick = renderPanel;
+  document.querySelectorAll("[data-shiftto]").forEach((b) => (b.onclick = () => act(() => api("POST", `/sessions/${s.id}/shift`, { to: b.dataset.shiftto }))));
 }
 
 const act = async (fn) => { try { await fn(); await load(); renderPanel(); } catch (e) { toast("Failed: " + e.message, false); } };

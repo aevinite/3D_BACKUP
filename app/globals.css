@@ -563,11 +563,12 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
    keeps less of the screen while browsing. */
 .cats-min .cat-scroller { padding-top: 7px; padding-bottom: 7px; }
 .cats-min .cat-card {
-  min-width: auto; height: 36px; flex-direction: row; gap: 7px;
-  padding: 0 14px; border-radius: 999px;
+  min-width: auto; height: 36px; flex-direction: row; gap: 0;
+  padding: 0 16px; border-radius: 999px;
 }
-.cats-min .cat-card .cat-icon { font-size: 13px; transform: scale(0.85); }
-.cats-min .cat-card.active .cat-icon { transform: scale(0.9); }
+/* When collapsed, the icon disappears completely (its space too) — just the
+   label stays. Scrolling back up restores the full card with its icon. */
+.cats-min .cat-card .cat-icon { display: none; }
 .cats-min .cat-card .cat-name { font-size: 12.5px; white-space: nowrap; }
 .cats-min .cat-card.active { transform: none; }
 /* category icons — accent color inactive, white on active (both modes) */
