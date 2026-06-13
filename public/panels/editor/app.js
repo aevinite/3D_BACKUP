@@ -2530,7 +2530,17 @@ function setTab(tab) {
   state.sel = tab === "general"
     ? clone(state.data.settings || { id: "site", bubbles_enabled: true, service_mode: false })
     : null;
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
+  // The single "Editor" top tab (data-tab="items") stays highlighted across its
+  // three sub-views (Dishes / Categories / Tags).
+  const EDITOR_SUB = ["items", "categories", "filters"];
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab || (t.dataset.tab === "items" && EDITOR_SUB.includes(tab))));
+  // Show the Dishes/Categories/Tags sub-nav only inside the Editor section, and
+  // mark which sub-view is open.
+  const sub = document.getElementById("editorSubtabs");
+  if (sub) {
+    sub.hidden = !EDITOR_SUB.includes(tab);
+    sub.querySelectorAll(".subtab").forEach((s) => s.classList.toggle("active", s.dataset.tab === tab));
+  }
   // The search box and "+ New" don't apply to the General/Orders/Tables tabs.
   const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "log" || tab === "features" || tab === "dash" || tab === "customers";
   $("#newBtn").style.display = noList ? "none" : "";
@@ -2713,6 +2723,7 @@ function startOrderWatch() {
 
 // --- final wiring: connect the static page controls and start everything up ---
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => setTab(t.dataset.tab))); // top tabs switch views
+document.querySelectorAll(".subtab").forEach((t) => (t.onclick = () => setTab(t.dataset.tab))); // Editor sub-nav: Dishes/Categories/Tags
 $("#newBtn").onclick = newRecord; // the "+ New" button
 
 // Drag the left sidebar's right edge to resize it (width persists across reloads).

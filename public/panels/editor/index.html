@@ -14,9 +14,7 @@
   <header class="topbar">
     <div class="brand"><span>🍽️</span> Menu Editor</div>
     <nav class="tabs">
-      <button class="tab active" data-tab="items">Dishes</button>
-      <button class="tab" data-tab="categories">Categories</button>
-      <button class="tab" data-tab="filters">Tags</button>
+      <button class="tab active" data-tab="items">📝 Editor</button>
       <button class="tab" data-tab="orders">Orders<span id="ordersBadge" class="tab-badge" hidden></span></button>
       <button class="tab" data-tab="tables">Tables</button>
       <button class="tab" data-tab="dash">Dashboard</button>
@@ -30,6 +28,13 @@
 
   <main class="layout">
     <aside class="sidebar">
+      <!-- Sub-nav for the "Editor" section: Dishes / Categories / Tags. Shown only
+           while one of those is open (toggled by setTab in app.js). -->
+      <div class="subtabs" id="editorSubtabs" hidden>
+        <button class="subtab active" data-tab="items">Dishes</button>
+        <button class="subtab" data-tab="categories">Categories</button>
+        <button class="subtab" data-tab="filters">Tags</button>
+      </div>
       <div class="sidebar-head">
         <input id="search" class="search" type="search" placeholder="Search…" />
         <button id="newBtn" class="btn primary">+ New</button>

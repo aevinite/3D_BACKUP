@@ -741,6 +741,13 @@ body {
    "open & waiting" (not the dark free/off look). Stronger tint than the others. */
 .ft-waiting { --c: #f5c451; }
 .ftile.ft-waiting { background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
+
+/* Editor sub-nav (Dishes / Categories / Tags) shown inside the "Editor" tab. */
+.subtabs { display: flex; gap: 6px; padding: 12px 12px 0; }
+.subtab { flex: 1; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+  border-radius: 9px; padding: 8px 8px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.subtab:hover { border-color: color-mix(in srgb, var(--gold) 45%, transparent); color: var(--text); }
+.subtab.active { background: var(--gold); border-color: var(--gold); color: #2a1d0c; }
 .ft-new { box-shadow: 0 0 16px color-mix(in srgb, var(--c) 26%, transparent); }
 /* a free table a guest is asking to be let into — pulse so staff can't miss it */
 .ftile.ft-req { border-color: color-mix(in srgb, var(--c) 55%, transparent); animation: ftReqPulse 1.5s ease-in-out infinite; }
