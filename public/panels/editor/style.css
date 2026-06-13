@@ -744,10 +744,19 @@ body {
 
 /* Editor sub-nav (Dishes / Categories / Tags) shown inside the "Editor" tab. */
 .subtabs { display: flex; gap: 6px; padding: 12px 12px 0; }
+/* the `hidden` attribute must win over display:flex (else the sub-nav shows on every tab) */
+.subtabs[hidden] { display: none; }
 .subtab { flex: 1; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
   border-radius: 9px; padding: 8px 8px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .subtab:hover { border-color: color-mix(in srgb, var(--gold) 45%, transparent); color: var(--text); }
 .subtab.active { background: var(--gold); border-color: var(--gold); color: #2a1d0c; }
+
+/* Dashboard range toggle (Today / 30 days / Year). */
+.dash-head { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.dash-toggle { display: inline-flex; gap: 4px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
+.dash-range { background: transparent; border: 0; color: var(--muted); border-radius: 999px; padding: 7px 16px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.dash-range:hover { color: var(--text); }
+.dash-range.active { background: var(--gold); color: #2a1d0c; }
 .ft-new { box-shadow: 0 0 16px color-mix(in srgb, var(--c) 26%, transparent); }
 /* a free table a guest is asking to be let into — pulse so staff can't miss it */
 .ftile.ft-req { border-color: color-mix(in srgb, var(--c) 55%, transparent); animation: ftReqPulse 1.5s ease-in-out infinite; }

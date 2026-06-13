@@ -45,7 +45,7 @@ async function readBody(req: NextRequest): Promise<any> {
 type Ctx = { params: Promise<{ path?: string[] }> };
 
 // ── GET ──────────────────────────────────────────────────────────────────────
-export async function GET(_req: NextRequest, ctx: Ctx) {
+export async function GET(req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     const p = path.join("/");
@@ -95,24 +95,34 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     }
 
     if (p === "stats") {
-      const since = new Date(Date.now() - 29 * 864e5);
-      since.setHours(0, 0, 0, 0);
+      // Range: today | 30d | year. Buckets the revenue series by hour / day / month.
+      const range = new URL(req.url).searchParams.get("range") || "30d";
+      const now = new Date();
+      let since: Date;
+      if (range === "today") { since = new Date(); since.setHours(0, 0, 0, 0); }
+      else if (range === "year") { since = new Date(now.getFullYear(), now.getMonth() - 11, 1); }
+      else { since = new Date(Date.now() - 29 * 864e5); since.setHours(0, 0, 0, 0); }
+
       const [ordersQ, dishesQ] = await Promise.all([
         sb.from("orders").select("id,total,discount,status,payment_status,created_at,items").gte("created_at", since.toISOString()),
         sb.from("menu_items").select("id,title,category"),
       ]);
       const orders = must(ordersQ), dishes = must(dishesQ);
-       
-      const catOf: Record<string, string> = Object.fromEntries(dishes.map((d: any) => [d.id, d.category || "other"]));
-      const days: Record<string, number> = {}, hours = Array(24).fill(0), topD: Record<string, number> = {}, cats: Record<string, number> = {};
+      const catOf: Record<string, string> = Object.fromEntries(dishes.map((d: { id: string; category?: string }) => [d.id, d.category || "other"]));
+      const hours = Array(24).fill(0);
+      const topD: Record<string, number> = {}, cats: Record<string, number> = {}, seriesMap: Record<string, number> = {};
+      const bucket = range === "today" ? "hour" : range === "year" ? "month" : "day";
+      const keyFor = (d: Date) => bucket === "hour" ? String(d.getHours())
+        : bucket === "month" ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+        : d.toISOString().slice(0, 10);
       let paid = 0, unpaid = 0, cancelled = 0, revenue = 0;
       for (const o of orders) {
         if (o.status === "cancelled") { cancelled++; continue; }
-        const day = String(o.created_at).slice(0, 10);
+        const dt = new Date(o.created_at);
         const amt = (Number(o.total) || 0) - (Number(o.discount) || 0);
-        days[day] = (days[day] || 0) + amt;
         revenue += amt;
-        hours[new Date(o.created_at).getHours()] += 1;
+        const k = keyFor(dt); seriesMap[k] = (seriesMap[k] || 0) + amt;
+        hours[dt.getHours()] += 1;
         if (o.payment_status === "paid") paid++; else unpaid++;
         for (const it of (Array.isArray(o.items) ? o.items : [])) {
           const q = Number(it.qty) || 1;
@@ -121,9 +131,21 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
           cats[c] = (cats[c] || 0) + q;
         }
       }
+      // Zero-filled, ordered revenue series with friendly labels.
+      const series: { label: string; revenue: number }[] = [];
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      if (bucket === "hour") {
+        for (let h = 0; h < 24; h++) series.push({ label: `${h}:00`, revenue: r2(seriesMap[String(h)] || 0) });
+      } else if (bucket === "day") {
+        for (let i = 29; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5); const k = d.toISOString().slice(0, 10); series.push({ label: k.slice(5), revenue: r2(seriesMap[k] || 0) }); }
+      } else {
+        const MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        for (let i = 11; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; series.push({ label: MN[d.getMonth()], revenue: r2(seriesMap[k] || 0) }); }
+      }
+      const avgOrder = (paid + unpaid) > 0 ? r2(revenue / (paid + unpaid)) : 0;
       return ok({
-        days, hours, cats, paid, unpaid, cancelled, revenue,
-        orderCount: orders.length,
+        range, series, hours, cats, paid, unpaid, cancelled, revenue: r2(revenue),
+        orderCount: orders.length, avgOrder,
         topDishes: Object.entries(topD).sort((a, b) => b[1] - a[1]).slice(0, 10),
       });
     }

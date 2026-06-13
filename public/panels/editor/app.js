@@ -1040,36 +1040,43 @@ async function resolveCall(id) {
 // ---------- Dashboard tab: the restaurant's numbers as graphs ----------
 let dashCharts = []; // live Chart.js instances (destroyed before each redraw)
 
+let dashRange = "30d"; // today | 30d | year — which window the dashboard shows
 async function loadDashboard() {
   const body = document.getElementById("dashBody");
   let s;
-  try { s = await api("GET", "/stats"); }
+  try { s = await api("GET", "/stats?range=" + dashRange); }
   catch (e) { body.innerHTML = `<div class="empty">Couldn't load stats: ${esc(e.message)}</div>`; return; }
-  // headline numbers first, then four graphs
+  const RL = { today: "today", "30d": "last 30 days", year: "last 12 months" };
+  const rangeLabel = RL[dashRange] || dashRange;
+  // Range toggle, then headline numbers, then four graphs.
+  const toggle = [["today", "Today"], ["30d", "30 days"], ["year", "Year"]]
+    .map(([r, lbl]) => `<button class="dash-range ${dashRange === r ? "active" : ""}" data-range="${r}">${lbl}</button>`).join("");
   body.innerHTML = `
+    <div class="dash-head"><div class="dash-toggle">${toggle}</div></div>
     <div class="dash-cards">
-      <div class="dash-card"><small>Revenue (30d)</small><b>${inr(s.revenue)}</b></div>
+      <div class="dash-card"><small>Revenue · ${rangeLabel}</small><b>${inr(s.revenue)}</b></div>
       <div class="dash-card"><small>Orders</small><b>${s.orderCount}</b></div>
+      <div class="dash-card"><small>Avg order</small><b>${inr(s.avgOrder)}</b></div>
       <div class="dash-card"><small>Paid / unpaid</small><b>${s.paid} / ${s.unpaid}</b></div>
       <div class="dash-card"><small>Cancelled</small><b>${s.cancelled}</b></div>
     </div>
     <div class="dash-grid">
-      <div class="dash-chart"><h4>Sales per day</h4><canvas id="chSales"></canvas></div>
+      <div class="dash-chart"><h4>Sales · ${rangeLabel}</h4><canvas id="chSales"></canvas></div>
       <div class="dash-chart"><h4>Top dishes</h4><canvas id="chTop"></canvas></div>
       <div class="dash-chart"><h4>Orders by hour</h4><canvas id="chHours"></canvas></div>
       <div class="dash-chart"><h4>Category share</h4><canvas id="chCats"></canvas></div>
     </div>`;
+  // Switch the window and reload.
+  body.querySelectorAll(".dash-range").forEach((b) => (b.onclick = () => { dashRange = b.dataset.range; loadDashboard(); }));
   dashCharts.forEach((c) => { try { c.destroy(); } catch {} });
   dashCharts = [];
   if (typeof Chart === "undefined") { body.insertAdjacentHTML("beforeend", `<div class="empty">Charts library didn't load (offline?) — the numbers above still work.</div>`); return; }
   Chart.defaults.color = "#a89a87"; Chart.defaults.borderColor = "rgba(150,140,125,0.15)";
-  // last 30 day labels in order, filling silent days with zero
-  const dayLabels = [];
-  for (let i = 29; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5); dayLabels.push(d.toISOString().slice(0, 10)); }
   const gold = "#d4a574", goldSoft = "rgba(212,165,116,0.25)";
+  // Sales series (already bucketed + ordered by the server); shown in rupees (×INR_RATE) to match the cards.
   dashCharts.push(new Chart(document.getElementById("chSales"), {
     type: "line",
-    data: { labels: dayLabels.map((d) => d.slice(5)), datasets: [{ label: "₹ sales", data: dayLabels.map((d) => Math.round((s.days[d] || 0) * 100) / 100), borderColor: gold, backgroundColor: goldSoft, fill: true, tension: 0.35, pointRadius: 2 }] },
+    data: { labels: s.series.map((p) => p.label), datasets: [{ label: "₹ sales", data: s.series.map((p) => Math.round((p.revenue || 0) * INR_RATE)), borderColor: gold, backgroundColor: goldSoft, fill: true, tension: 0.35, pointRadius: 2 }] },
     options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
   }));
   dashCharts.push(new Chart(document.getElementById("chTop"), {
