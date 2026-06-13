@@ -23,6 +23,7 @@ const state = {
   cat: "",              // active category chip in order mode ("" = all)
   dishSearch: "",       // the dish-search text in order mode
   note: "",             // one note for the whole order
+  floorFilter: "all",   // which tables the floor shows: all | needs | open | free
 };
 
 const api = async (method, path, body) => {
@@ -76,8 +77,21 @@ function tileState(t) {
 
 function renderFloor() {
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+  const filt = state.floorFilter || "all";
+  // A table "needs attention" if it has a waiter call, a pending request, or a
+  // brand-new order waiting to be accepted.
+  const needsAttention = (i) => callsOf(i).length > 0 || reqsOf(i).length > 0 || tileState(i).cls === "new";
+  // Filter nav bar (with live counts) so the waiter can jump to what matters.
+  let cNeeds = 0, cOpen = 0, cFree = 0;
+  for (let i = 1; i <= n; i++) { if (needsAttention(i)) cNeeds++; if (sessionOf(i)) cOpen++; else cFree++; }
+  const navEl = document.getElementById("floorNav");
+  if (navEl) navEl.innerHTML = [["all", "All", n], ["needs", "⚠ Needs", cNeeds], ["open", "Open", cOpen], ["free", "Free", cFree]]
+    .map(([k, lbl, c]) => `<button class="fnav ${filt === k ? "on" : ""}" data-filter="${k}">${lbl} <em>${c}</em></button>`).join("");
   let html = "";
   for (let i = 1; i <= n; i++) {
+    if (filt === "needs" && !needsAttention(i)) continue;
+    if (filt === "open" && !sessionOf(i)) continue;
+    if (filt === "free" && sessionOf(i)) continue;
     const st = tileState(i);
     const calls = callsOf(i), joiners = joinersOf(i).length, reqs = reqsOf(i);
     // One-click quick action right on the tile (no need to open the panel):
@@ -93,7 +107,8 @@ function renderFloor() {
       ${quick}
     </button>`;
   }
-  $("#tiles").innerHTML = html;
+  $("#tiles").innerHTML = html || `<div class="muted" style="padding:14px">No tables here right now.</div>`;
+  document.querySelectorAll(".fnav").forEach((b) => (b.onclick = () => { state.floorFilter = b.dataset.filter; renderFloor(); }));
   document.querySelectorAll("[data-t]").forEach((b) => (b.onclick = () => {
     state.table = b.dataset.t;
     state.ordering = false; state.cart = []; state.note = ""; state.dishSearch = "";

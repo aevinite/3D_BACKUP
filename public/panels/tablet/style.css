@@ -45,6 +45,12 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
   padding: 3px 10px; border-radius: 999px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
 .quick:hover { background: var(--gold-strong); }
 .reqbtns { display: flex; gap: 6px; }
+/* floor filter nav (All / Needs / Open / Free) — quick way to see what matters */
+.floor-nav { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.fnav { background: var(--panel); border: 1px solid var(--line); color: var(--muted); border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.fnav em { font-style: normal; font-size: 11px; background: var(--bg); border-radius: 999px; padding: 1px 7px; }
+.fnav.on { background: var(--gold); border-color: var(--gold); color: #2a1d0c; }
+.fnav.on em { background: rgba(0,0,0,.2); }
 .t-new { border-color: rgba(251,191,36,0.65); box-shadow: 0 0 0 1px rgba(251,191,36,0.3); }
 .t-prep { border-color: rgba(212,165,116,0.65); }
 .t-done { border-color: rgba(74,222,128,0.55); }
