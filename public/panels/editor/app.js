@@ -28,6 +28,11 @@ const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "dash"
 // Remember which tab you were on so a refresh keeps you there (e.g. stay on
 // Orders during a busy service instead of snapping back to Dishes).
 const savedTab = (() => { try { return localStorage.getItem("lfh_editor_tab"); } catch { return null; } })();
+// Tiny localStorage helpers so a refresh keeps you exactly where you were —
+// not just the tab, but the SUB-VIEW too (Orders: live/previous/calls; Log:
+// customer/operation). Wrapped so a blocked localStorage never throws.
+const lsGet = (k, def) => { try { return localStorage.getItem(k) || def; } catch { return def; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 // "state" is the editor's single source of truth — one object holding everything
 // the screen needs: which tab is open, the data loaded from the server, the record
 // currently being edited, the search text, and the live tables board. Whenever
@@ -42,7 +47,8 @@ const state = {
   board: { sessions: [], members: [], items: [], requests: [], blocklist: [] }, // v2 sessions live board
   boardLoaded: false, // false until the live board arrives once → drives the floor skeleton (no "all Free" flash on load)
   openSess: null, // table number whose session modal is open
-  ordersView: "live", // Orders tab left-bar selection: live | previous | bills | calls
+  ordersView: lsGet("lfh_editor_ordersview", "live"), // Orders left-bar: live | previous | bills | calls — remembered across refresh
+  logView: lsGet("lfh_editor_logview", "customers"),  // Log left-bar: customers | operations — remembered across refresh
   users: { members: [], customers: [], blocklist: [] }, // Log tab data
 };
 
@@ -244,6 +250,7 @@ function renderList() {
       </li>`);
       li.onclick = () => {
         state.ordersView = key;
+        lsSet("lfh_editor_ordersview", key); // remember across refresh
         renderList();   // re-highlight the chosen row
         renderEditor(); // redraw the order cards on the right
       };
@@ -282,6 +289,7 @@ function renderList() {
       </li>`);
       li.onclick = () => {
         state.logView = key;
+        lsSet("lfh_editor_logview", key); // remember across refresh
         if (key === "operations") loadOplog(); // fetch (it re-renders when ready)
         renderList();   // re-highlight the chosen row
         renderEditor(); // redraw the main panel on the right
@@ -1327,7 +1335,7 @@ function renderEditor() {
     });
     // Left-bar: switch which Orders view is showing (live / previous / bills / calls).
     ed.querySelectorAll("[data-orders-view]").forEach((btn) => {
-      btn.onclick = () => { state.ordersView = btn.dataset.ordersView; renderEditor(); };
+      btn.onclick = () => { state.ordersView = btn.dataset.ordersView; lsSet("lfh_editor_ordersview", state.ordersView); renderEditor(); };
     });
     // Bills view: settle a table's WHOLE bill at once (mark every unpaid order paid).
     ed.querySelectorAll("[data-pay-table]").forEach((btn) => {
@@ -2554,13 +2562,23 @@ function oplogHtml() {
     table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",
     call_attend: "Attended call", member_approve: "Approved guest", sold_out_on: "Marked sold-out", sold_out_off: "Back in stock",
   };
-  const body = rows.map((r) => `<div class="oprow">
-    <span class="op-panel op-${esc(r.panel)}">${esc(r.panel)}${r.device_id ? ` · <span class="op-dev">#${esc(r.device_id)}</span>` : ""}</span>
-    <b>${esc(ACT[r.action] || r.action)}</b>
-    <span class="lg-muted">${r.table_number ? "Table " + esc(r.table_number) : (r.detail ? esc(r.detail) : "")}</span>
-    <small>${esc(timeAgo(r.created_at))}</small>
-  </div>`).join("");
-  return head + `<div class="oplist">${body}</div>`;
+  // Table-style (like the Customer log): a Device column first so you can see
+  // exactly WHICH tablet/kitchen screen did each action (and could block one).
+  const headRow = `<div class="oprow ophead"><div>Device</div><div>Panel</div><div>Action</div><div>Where</div><div>When</div></div>`;
+  const body = rows.map((r) => {
+    const device = r.device_id
+      ? `<span class="op-dev">📱 #${esc(r.device_id)}</span>`
+      : `<span class="lg-muted">—</span>`;
+    const where = r.table_number ? "Table " + esc(r.table_number) : (r.detail ? esc(r.detail) : "");
+    return `<div class="oprow">
+      <div class="opcell">${device}</div>
+      <div class="opcell"><span class="op-panel op-${esc(r.panel)}">${esc(r.panel)}</span></div>
+      <div class="opcell"><b>${esc(ACT[r.action] || r.action)}</b></div>
+      <div class="opcell lg-muted">${where}</div>
+      <div class="opcell"><small>${esc(timeAgo(r.created_at))}</small></div>
+    </div>`;
+  }).join("");
+  return head + `<div class="oplist">${headRow}${body}</div>`;
 }
 
 // Fetch the operation log (lazily, when that view is shown).
@@ -2636,7 +2654,12 @@ function setTab(tab) {
     document.title = "Menu Editor";
   }
   if (tab === "tables") loadSessions(); // unified live floor (orders + sessions in one)
-  if (tab === "log") loadUsers();
+  if (tab === "log") {
+    loadUsers(); // customer-log data
+    // If we're restoring straight onto the Operation log (e.g. a refresh stayed
+    // there), fetch its data too — otherwise the table would be empty.
+    if (state.logView === "operations") loadOplog();
+  }
 }
 
 // loadOrders: fetch the latest orders (and waiter calls) and redraw if we're on
