@@ -186,8 +186,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "pay") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      const rows = must(await sb.from("orders").update({ payment_status: "paid" })
-        .eq("table_number", t).neq("status", "cancelled").neq("payment_status", "paid").select());
+      // Settle only the CURRENT party's bill: scope to the table's open session
+      // so we never mark a previous party's leftover order paid. Sessions-off
+      // mode (no open session) falls back to the table's active orders.
+      const openSess = (await sb.from("sessions").select("id")
+        .eq("table_number", t).eq("status", "open")
+        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+      let q = sb.from("orders").update({ payment_status: "paid" })
+        .neq("status", "cancelled").neq("payment_status", "paid");
+      q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t).eq("archived", false);
+      const rows = must(await q.select());
       await logAction("tablet", "bill_paid", { table_number: t, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
