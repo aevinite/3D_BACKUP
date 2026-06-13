@@ -45,6 +45,16 @@ export default function AdminHome() {
   const [err, setErr] = useState<string | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
 
+  // Visiting /admin marks this browser as "admin" so the floating switcher
+  // appears across the panels. (A real password login replaces this in piece 5.)
+  useEffect(() => {
+    try {
+      localStorage.setItem("lfh_admin", "1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     let alive = true;
     const load = async () => {

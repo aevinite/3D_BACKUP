@@ -20,6 +20,9 @@ import SessionGate from "@/components/SessionGate";
 import SessionOwner from "@/components/SessionOwner";
 import SessionCartSync from "@/components/SessionCartSync";
 import SessionStatusWidget from "@/components/SessionStatusWidget";
+// The admin-only floating panel switcher. It renders nothing unless this browser
+// is in admin mode, so customers never see it.
+import AdminSwitcher from "@/components/AdminSwitcher";
 
 // The browser-tab title and the description search engines show.
 export const metadata: Metadata = {
@@ -94,6 +97,8 @@ export default function RootLayout({
         <SessionOwner />
         <SessionCartSync />
         <SessionStatusWidget />
+        {/* Admin-only floating panel switcher (self-hides for customers). */}
+        <AdminSwitcher />
       </body>
     </html>
   );
