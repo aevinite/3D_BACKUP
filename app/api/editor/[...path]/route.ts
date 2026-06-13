@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -194,6 +195,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       return ok({ members, customers, blocklist, orders, calls });
     }
 
+    if (p === "oplog") {
+      // The operation log: recent staff actions across all panels.
+      return ok(must(await sb.from("staff_actions").select("*").order("created_at", { ascending: false }).limit(200)));
+    }
+
     return err("unknown GET endpoint", 404);
   } catch (e) {
     return err(e instanceof Error ? e.message : String(e), 500);
@@ -236,6 +242,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).select());
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
+      await logAction("editor", "order_accept", { order_id: b });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()) || null);
     }
     if (a === "orders" && c === "serve-all") {
@@ -244,6 +251,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).select());
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).neq("status", "served");
+      await logAction("editor", "order_serve", { order_id: b });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()) || null);
     }
     if (a === "orders" && c === "item") {
@@ -280,6 +288,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         row = must(await sb.from("sessions").insert({ table_number: table, status: "open", opened_by: "waiter", opened_at: nowIso() }).select())[0];
       }
       await sb.from("requests").update({ status: "approved" }).eq("table_number", table).eq("status", "pending");
+      await logAction("editor", "table_open", { table_number: table });
       return ok(row || null);
     }
 
@@ -292,6 +301,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         must(await sb.from("orders").update({ status: "cancelled", archived: true }).eq("table_number", t).eq("archived", false).in("status", ["received", "preparing"]).select());
         must(await sb.from("orders").update({ archived: true }).eq("table_number", t).eq("archived", false).eq("status", "served").select());
       }
+      await logAction("editor", "table_close", { table_number: sess?.table_number ?? null });
       return ok(sess || null);
     }
     if (a === "sessions" && c === "auto-approve") {
@@ -303,6 +313,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const to = String((body && body.to) || "").trim();
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
+      await logAction("editor", "table_shift", { detail: "→ table " + to });
       return ok(data);
     }
 

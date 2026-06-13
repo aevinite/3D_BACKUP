@@ -2455,6 +2455,14 @@ async function loadUsers() {
 // logHtml: build the Log tab — a table listing every guest (name, table, role,
 // what they did, status, when) with Exit/Block actions, plus the blocklist below.
 function logHtml() {
+  // Two logs share this tab: the customer/guest log (default) and the staff
+  // Operation log (who-did-what across the panels).
+  const view = state.logView || "customers";
+  const toggle = `<div class="dash-toggle" style="margin-bottom:14px;display:inline-flex">
+    <button class="dash-range ${view === "customers" ? "active" : ""}" data-logview="customers">Customer log</button>
+    <button class="dash-range ${view === "operations" ? "active" : ""}" data-logview="operations">Operation log</button>
+  </div>`;
+  if (view === "operations") return toggle + oplogHtml();
   const u = state.users || {};
   const members = u.members || [];
   const blocks = u.blocklist || [];
@@ -2495,7 +2503,35 @@ function logHtml() {
   const table = `<div class="logtable"><div class="logrow loghead"><div>Guest</div><div>Table</div><div>Role</div><div>Did</div><div>Status</div><div>When</div><div></div></div>${rows}</div>`;
   const blkRows = blocks.length ? blocks.map((b) => `<div class="sx-blk"><span>${b.phone ? "📵 " + esc(b.phone) : "🚫 table " + esc(b.table_number)}${b.reason ? ` — <small>${esc(b.reason)}</small>` : ""}</span><button class="btn small" data-unblock="${esc(b.id)}">Unblock</button></div>`).join("") : `<div class="sx-empty">Nobody is blocked.</div>`;
   const blkPanel = `<div class="sx-panel" style="margin-top:18px;max-width:560px"><h3>🚫 Blocked <span class="sub">· ${blocks.length}</span></h3>${blkRows}</div>`;
-  return head + table + blkPanel;
+  return toggle + head + table + blkPanel;
+}
+
+// oplogHtml: the Operation log — every staff action across the panels (which
+// panel did what, where, and when). Fed by /oplog (the staff_actions table).
+function oplogHtml() {
+  const rows = state.oplog || [];
+  const head = `<div class="ed-head"><h2>Operation log <span class="sub">· staff actions</span></h2><button class="btn" id="refreshOplog">↻ Refresh</button></div>
+    <div class="ord-note">Every staff action across the panels — which panel did it, where, and when. (No per-device login yet, so the actor is the panel.)</div>`;
+  if (!rows.length) return head + `<div class="sx-empty">No staff actions logged yet — accept/serve an order, open/close a table, etc.</div>`;
+  const ACT = {
+    order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
+    order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
+    table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",
+    call_attend: "Attended call", member_approve: "Approved guest", sold_out_on: "Marked sold-out", sold_out_off: "Back in stock",
+  };
+  const body = rows.map((r) => `<div class="oprow">
+    <span class="op-panel op-${esc(r.panel)}">${esc(r.panel)}</span>
+    <b>${esc(ACT[r.action] || r.action)}</b>
+    <span class="lg-muted">${r.table_number ? "Table " + esc(r.table_number) : (r.detail ? esc(r.detail) : "")}</span>
+    <small>${esc(timeAgo(r.created_at))}</small>
+  </div>`).join("");
+  return head + `<div class="oplist">${body}</div>`;
+}
+
+// Fetch the operation log (lazily, when that view is shown).
+async function loadOplog() {
+  try { state.oplog = await api("GET", "/oplog"); if (state.tab === "log") renderEditor(); }
+  catch (e) { toast("Could not load operation log: " + e.message, "err"); }
 }
 
 // bindLog: wire up the Log tab's buttons (refresh, exit a guest, block, unblock).
@@ -2505,6 +2541,9 @@ function bindLog() {
   ed.querySelectorAll("[data-exit]").forEach((b) => (b.onclick = () => exitUser(b.dataset.exit)));
   ed.querySelectorAll("[data-block-phone]").forEach((b) => (b.onclick = () => blockUser(b.dataset.blockPhone, b.dataset.blockTable)));
   ed.querySelectorAll("[data-unblock]").forEach((b) => (b.onclick = () => unblockLog(b.dataset.unblock)));
+  // Switch between the Customer log and the Operation log.
+  ed.querySelectorAll("[data-logview]").forEach((b) => (b.onclick = () => { state.logView = b.dataset.logview; if (state.logView === "operations") loadOplog(); else renderEditor(); }));
+  const ro = document.getElementById("refreshOplog"); if (ro) ro.onclick = loadOplog;
 }
 
 // exitUser: remove a guest from their table (from the Log tab).

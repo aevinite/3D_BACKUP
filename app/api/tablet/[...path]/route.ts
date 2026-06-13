@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +65,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
       });
       if (error) throw new Error(error.message);
+      await logAction("tablet", "order_place", { table_number: t });
       return ok(data);
     }
 
@@ -83,6 +85,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // calls/:id/attend
     if (a === "calls" && c === "attend") {
       const row = must(await sb.from("waiter_calls").update({ resolved: true }).eq("id", b).select());
+      await logAction("tablet", "call_attend", { table_number: row[0]?.table_number ?? null });
       return ok(row[0] || null);
     }
 
@@ -122,6 +125,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const existing = must(await sb.from("sessions").select("id").eq("table_number", t).neq("status", "closed").limit(1));
       if (existing.length) return ok(existing[0]);
       const row = must(await sb.from("sessions").insert({ table_number: t, status: "open", opened_by: "waiter", opened_at: nowIso() }).select());
+      await logAction("tablet", "table_open", { table_number: t });
       return ok(row[0] || null);
     }
 
