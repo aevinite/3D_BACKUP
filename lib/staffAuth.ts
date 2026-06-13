@@ -19,3 +19,12 @@ export async function sha256hex(s: string): Promise<string> {
 export function staffPassword(): string {
   return process.env.STAFF_PASSWORD || process.env.ADMIN_PASSWORD || process.env.EDITOR_PASSWORD || "";
 }
+
+// True if the given cookie token matches the configured password's hash. Used by
+// the admin's server-side gate (layout + /api/admin routes), which run in the
+// Node runtime where env vars are reliably available (unlike edge middleware).
+export async function tokenIsValid(token?: string | null): Promise<boolean> {
+  const p = staffPassword();
+  if (!p || !token) return false;
+  return token === (await sha256hex(p));
+}

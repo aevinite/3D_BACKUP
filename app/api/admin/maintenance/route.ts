@@ -3,10 +3,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const on = body?.on === true;
   const r = await sb.from("settings").update({ service_mode: on }).eq("id", "site").select();

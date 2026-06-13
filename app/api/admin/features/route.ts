@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +18,11 @@ const GUEST_FEATURE_KEYS = [
 ];
 
 export async function POST(req: NextRequest) {
+  if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { key, value } = await req.json().catch(() => ({}));
-  if (!GUEST_FEATURE_KEYS.includes(key)) {
+  // Allow the ten guest features OR a menu-chip visibility flag (chip_<slug>).
+  if (!GUEST_FEATURE_KEYS.includes(key) && !/^chip_[a-z-]+$/.test(key)) {
     return NextResponse.json({ error: "unknown or non-editable feature" }, { status: 400 });
   }
   const cur = await sb.from("settings").select("features").eq("id", "site").maybeSingle();

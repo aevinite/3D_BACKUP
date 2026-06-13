@@ -585,8 +585,9 @@ export default function MenuPage() {
           <div className="header-controls">
             <div className="controls-group">
               <div className="filter-row" role="group" aria-label="Filter and sort dishes">
-                {/* One chip per sort option (Popular / Top Rated / Low Price). */}
-                {SORTS.map((s) => (
+                {/* One chip per sort option (Popular / Top Rated / Low Price).
+                    Hidden if the admin switched it off (settings.features.chip_<slug> === false). */}
+                {SORTS.filter((s) => (features as Record<string, boolean>)[`chip_${s.slug}`] !== false).map((s) => (
                   <button
                     key={s.slug}
                     type="button"
@@ -599,8 +600,8 @@ export default function MenuPage() {
                 ))}
                 {/* A thin divider between the sort chips and the diet chips. */}
                 <span className="chip-divider" aria-hidden="true"></span>
-                {/* One chip per diet option (Veg / Non-Veg). */}
-                {DIETS.map((d) => (
+                {/* One chip per diet option (Veg / Non-Veg). Hidden if switched off in admin. */}
+                {DIETS.filter((d) => (features as Record<string, boolean>)[`chip_${d.slug}`] !== false).map((d) => (
                   <button
                     key={d.slug}
                     type="button"

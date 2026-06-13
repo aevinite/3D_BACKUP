@@ -4,12 +4,15 @@
 // open tables / active orders / unpaid bills / revenue / order count.
 // Behind the admin gate (middleware protects /api/admin/*).
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const since = new Date();
   since.setHours(0, 0, 0, 0);
   const [settingsQ, sessionsQ, ordersQ] = await Promise.all([

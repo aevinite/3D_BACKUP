@@ -57,6 +57,15 @@ const FEATURES: { key: string; label: string }[] = [
   { key: "scrollspy", label: "Category scroll-spy" },
 ];
 
+// The guest-menu filter chips, each toggleable on/off (stored as features.chip_<slug>).
+const CHIPS = [
+  { key: "chip_popular", label: "Popular" },
+  { key: "chip_top-rated", label: "Top Rated" },
+  { key: "chip_price", label: "Low Price" },
+  { key: "chip_veg", label: "Veg" },
+  { key: "chip_non-veg", label: "Non-Veg" },
+];
+
 const card = { background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 14, padding: 16 } as const;
 
 // Prices/totals are stored in a USD base; show them in rupees the SAME way the
@@ -198,6 +207,35 @@ export default function AdminHome() {
               );
             })}
           </div>
+        </div>
+      </section>
+
+      {/* Menu filter chips — show/hide each chip in the guest menu */}
+      <section style={{ ...card, marginTop: 12 }}>
+        <h2 style={{ margin: "0 0 4px", fontSize: 15 }}>Menu filter chips</h2>
+        <p style={{ margin: "0 0 12px", fontSize: 12, opacity: 0.7 }}>
+          Show or hide each filter chip in the guest menu.
+        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {CHIPS.map((c) => {
+            const on = featureOn(c.key);
+            return (
+              <button
+                key={c.key}
+                onClick={() => toggleFeature(c.key, on)}
+                disabled={!ov || busy}
+                style={{
+                  padding: "9px 12px", borderRadius: 10, border: "1px solid #1f2c49",
+                  cursor: ov && !busy ? "pointer" : "default",
+                  background: on ? "#13351f" : "#1a2236", color: on ? "#86efac" : "#94a3b8",
+                  fontSize: 13, fontWeight: 600,
+                }}
+                title={on ? "Showing in menu — tap to hide" : "Hidden — tap to show"}
+              >
+                {c.label}: {on ? "ON" : "OFF"}
+              </button>
+            );
+          })}
         </div>
       </section>
 
