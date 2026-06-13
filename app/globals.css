@@ -640,11 +640,12 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   /* Scroll-linked shrink dial: the menu raises this 0 -> 1 as you scroll, and
      the category cards/icons interpolate off it (see .cat-card). 0 = full size. */
   --shrink: 0;
-  /* No background and NO own blur. A SINGLE fixed frost panel (.menu-headfrost)
-     sitting BEHIND the brand + this bar provides one continuous blur, so there
-     is NO seam between the brand and the categories. This bar only holds the
-     (sharp) cards + search box on top of that shared frost. */
-  background: transparent;
+  /* The fade lives HERE (not on the brand). Background goes from the SOLID page
+     colour at the top — so it merges seamlessly with the fully-solid brand bar
+     right above it (no line) — down to transparent at the bottom, where the
+     shared frost panel behind shows through as frosted glass and melts into the
+     dishes. NO own blur: the single .menu-headfrost panel does the blurring. */
+  background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 50%, transparent 100%);
 }
 /* ONE frosted backdrop behind the WHOLE pinned header (brand + category +
    search). Being a single fixed element, it blurs the dishes as one continuous
@@ -665,7 +666,7 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
    the brand's bottom and the category read as the same frosted glass. (Other
    pages keep their own frosted brand bar.) */
 body.menu-frost .nav {
-  background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 45%, transparent 100%);
+  background: var(--bg);   /* FULLY solid — the solid->frosted fade now lives on the category bar below */
   backdrop-filter: none;
 }
 .search-container { position: relative; width: 100%; }
