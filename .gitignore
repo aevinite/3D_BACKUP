@@ -52,3 +52,8 @@ next-env.d.ts
 # health-nudge hook state (per-machine prompt counter — not code)
 .claude/hooks/health-nudge-state.json
 verify-*.png
+
+# pre-rewrite reference: the bulky frozen code copy is preserved by the
+# `pre-rewrite-reference` git tag, so don't also commit a full duplicate.
+# The small docs (README.md, DATABASE.md) ARE committed for convenience.
+reference/code-snapshot/
