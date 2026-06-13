@@ -59,6 +59,11 @@ const FEATURES: { key: string; label: string }[] = [
 
 const card = { background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 14, padding: 16 } as const;
 
+// Prices/totals are stored in a USD base; show them in rupees the SAME way the
+// menu/editor/tablet do (× INR_RATE) so every screen shows the identical ₹ amount.
+const INR_RATE = 84;
+const inr = (n: number) => "₹" + Math.round((Number(n) || 0) * INR_RATE).toLocaleString("en-US");
+
 export default function AdminHome() {
   const [tables, setTables] = useState<Tile[]>([]);
   const [ov, setOv] = useState<Overview | null>(null);
@@ -144,7 +149,7 @@ export default function AdminHome() {
         <Stat label="Open tables" value={ov ? ov.openTables : "…"} />
         <Stat label="Active orders" value={ov ? ov.activeOrders : "…"} />
         <Stat label="Unpaid bills" value={ov ? ov.unpaidOrders : "…"} />
-        <Stat label="Revenue today" value={ov ? `€${ov.revenueToday.toFixed(2)}` : "…"} />
+        <Stat label="Revenue today" value={ov ? inr(ov.revenueToday) : "…"} />
         <Stat label="Orders today" value={ov ? ov.ordersToday : "…"} />
       </section>
 
@@ -221,7 +226,7 @@ export default function AdminHome() {
               <div style={{ marginTop: 6, fontSize: 14, fontWeight: 600 }}>{LABEL[t.state]}</div>
               <div style={{ marginTop: 4, fontSize: 12, opacity: 0.85 }}>
                 {t.open ? `${t.members} seated` : "—"}
-                {Number(t.due) > 0 ? ` · €${Number(t.due).toFixed(2)} due` : ""}
+                {Number(t.due) > 0 ? ` · ${inr(Number(t.due))} due` : ""}
               </div>
             </div>
           ))}

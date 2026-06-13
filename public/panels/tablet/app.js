@@ -9,7 +9,11 @@
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const inr = (n) => "₹" + (Math.round(Number(n) * 100) / 100).toFixed(2);
+// Prices are stored in a USD base; show them in rupees the SAME way the editor
+// and guest menu do (× INR_RATE), so every panel shows the identical ₹ amount.
+// (Was the bug: this prepended ₹ to the raw USD number → "₹4.19" instead of ₹350.)
+const INR_RATE = 84;
+const inr = (n) => "₹" + Math.round((parseFloat(n) || 0) * INR_RATE).toLocaleString("en-US");
 
 const state = {
   data: { settings: null, sessions: [], members: [], orders: [], calls: [], dishes: [], categories: [] },
