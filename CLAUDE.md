@@ -5,6 +5,19 @@ selected dishes. The user is a beginner who vibe-codes; teach as you build,
 keep chat in plain language, explain why before how. See user/feedback
 memory for tone and preferences.
 
+## What "blur" means (owner's word — 2026-06-13)
+
+When the owner says **"blur"** they mean the brand bar's **frosted glass**: a
+**transparent background + `backdrop-filter: blur(20px)`** (see `.nav` and
+`.menu-sticky` in `app/globals.css`). It only shows over content scrolling
+behind it (e.g. the pinned category+search bar over the dishes) — at the very
+top there's nothing behind it to frost. Use this exact recipe for any "blur".
+
+- **BUILD GOTCHA:** write `backdrop-filter` as a SINGLE unprefixed line. Do NOT
+  hand-add `-webkit-backdrop-filter` next to it — the Tailwind-4 / Lightning-CSS
+  build then DROPS the property entirely and the blur silently vanishes (cost us
+  a long debugging round). The build auto-prefixes for Safari on its own.
+
 ## Long-term direction (owner, 2026-06-12 — context only, do NOT build yet)
 
 This becomes a **hybrid SaaS**: one shared backend serving MANY restaurants, where

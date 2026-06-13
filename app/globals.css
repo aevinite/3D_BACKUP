@@ -631,13 +631,21 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
    + follows the section you've scrolled into. Frosted background so the dish
    cards sliding underneath don't show through. */
 .menu-sticky {
-  position: sticky; top: 0; z-index: 50;
-  /* SAME frosted glass as the brand bar (.nav): fully transparent + a strong
-     blur, so the dishes scrolling underneath turn into a premium frosted wash
-     that visually continues the header — not an opaque box. */
+  position: sticky;
+  /* Pin to the VERY top of the screen. #main-scroll carries a 64px top padding
+     to clear the fixed brand bar, so a plain `top:0` would pin the block 64px
+     DOWN — leaving a see-through gap once the brand slides away (the "stuck in
+     the middle" bug). Cancelling that padding with a negative top sits it flush
+     at the top. */
+  top: calc(-1 * (64px + env(safe-area-inset-top)));
+  z-index: 50;
+  /* EXACT same frosted glass as the brand bar (.nav): transparent background +
+     a 20px backdrop blur, nothing else. Written as a SINGLE unprefixed line that
+     mirrors .nav byte-for-byte — the build (Lightning CSS) auto-adds the -webkit
+     prefix; adding it by hand here previously made the build drop the property
+     entirely, so the blur silently vanished. This is the project's "blur". */
   background: transparent;
   backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
 }
 .search-container { position: relative; width: 100%; }
 /* search autocomplete dropdown */
