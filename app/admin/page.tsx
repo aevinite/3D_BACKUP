@@ -31,13 +31,16 @@ const LABEL: Record<Tile["state"], string> = {
   served: "Served",
   cleared: "Cleared",
 };
+// Free tables stay DIM; any open/occupied table lights up bright and warm so the
+// floor reads at a glance (owner: "if the table is open it should brighten up,
+// kind of yellow" — not just an outline).
 const COLOR: Record<Tile["state"], string> = {
-  free: "#1f2937",
-  seated: "#1d4ed8",
-  new: "#b45309",
-  preparing: "#7c3aed",
-  served: "#0f766e",
-  cleared: "#334155",
+  free: "#0e1726",      // dim navy — clearly empty
+  seated: "#2563eb",    // bright blue — guests seated
+  new: "#ea580c",       // bright orange — new order waiting
+  preparing: "#7c3aed", // violet — cooking
+  served: "#ca8a04",    // gold/yellow — open & served (brightened)
+  cleared: "#15803d",   // green — paid / cleared
 };
 
 export default function AdminHome() {
@@ -126,6 +129,9 @@ export default function AdminHome() {
                 border: t.pay === "red" ? "2px solid #f87171" : t.pay === "green" ? "2px solid #34d399" : "2px solid transparent",
                 borderRadius: 14,
                 padding: "14px 16px",
+                // Occupied tiles glow so the floor reads at a glance; free stays flat.
+                boxShadow: t.state === "free" ? "none" : "0 4px 18px rgba(0,0,0,.35)",
+                opacity: t.state === "free" ? 0.75 : 1,
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>

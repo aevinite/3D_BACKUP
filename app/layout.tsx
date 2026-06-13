@@ -10,18 +10,13 @@ import { type Viewport } from "next";
 import "./globals.css";
 // These are the always-present background helpers, mounted once for the whole
 // app so any page can trigger them. Each is explained where it's used below.
-import ModelToastHost from "@/components/ModelToastHost";
-import OrderConfirmModal from "@/components/OrderConfirmModal";
-import OrderTracker from "@/components/OrderTracker";
-import MiniCart from "@/components/MiniCart";
-import CartPanel from "@/components/CartPanel";
-import ToastHost from "@/components/ToastHost";
-import SessionGate from "@/components/SessionGate";
-import SessionOwner from "@/components/SessionOwner";
-import SessionCartSync from "@/components/SessionCartSync";
-import SessionStatusWidget from "@/components/SessionStatusWidget";
+// GuestChrome bundles all the customer-facing always-on widgets (cart, dining
+// session, toasts, 3D toast host) and renders them ONLY on guest pages — never
+// on the staff panels. (Previously these were mounted globally here, which made
+// the guest session logic run on /admin and auto-open tables.)
+import GuestChrome from "@/components/GuestChrome";
 // The admin-only floating panel switcher. It renders nothing unless this browser
-// is in admin mode, so customers never see it.
+// is signed in as staff, so customers never see it.
 import AdminSwitcher from "@/components/AdminSwitcher";
 
 // The browser-tab title and the description search engines show.
@@ -77,26 +72,9 @@ export default function RootLayout({
       <body>
         {/* The current page gets drawn right here. */}
         {children}
-        {/* Below: always-on helpers, mounted once for the whole app. They stay
-            invisible until something triggers them, then pop up over any page. */}
-        {/* Toast pop-ups when a 3D model finishes loading or fails. */}
-        <ModelToastHost />
-        {/* The "confirm your order" popup (quantity + total) before adding. */}
-        <OrderConfirmModal />
-        {/* Live tracker showing the status of a placed order. */}
-        <OrderTracker />
-        {/* The small floating cart button/summary. */}
-        <MiniCart />
-        {/* The full slide-out cart panel. */}
-        <CartPanel />
-        {/* Generic little message toasts ("Review posted", etc.). */}
-        <ToastHost />
-        {/* The dining-session pieces: gate (access control), owner tracking,
-            cart syncing across devices, and a small status widget. */}
-        <SessionGate />
-        <SessionOwner />
-        <SessionCartSync />
-        <SessionStatusWidget />
+        {/* Guest-only always-on widgets (cart, dining session, toasts) — rendered
+            only on customer pages, never on the staff panels. */}
+        <GuestChrome />
         {/* Admin-only floating panel switcher (self-hides for customers). */}
         <AdminSwitcher />
       </body>
