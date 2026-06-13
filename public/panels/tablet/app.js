@@ -15,10 +15,11 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const INR_RATE = 1;
 const inr = (n) => "₹" + Math.round((parseFloat(n) || 0) * INR_RATE).toLocaleString("en-US");
 
-// One dish status flows new → cooking → served, then wraps back to new so a
-// mis-tap can be undone. Labels are the waiter-friendly words for each.
-const NEXT_STATUS = { received: "preparing", preparing: "served", served: "received" };
-const STATUS_WORD = { received: "new", preparing: "cooking", served: "served" };
+// One dish flows new → cooking → ready → served, then wraps back so a mis-tap is
+// undoable. "ready" = kitchen finished it, waiter still has to carry it out (the
+// pink alert); "served" = the waiter delivered it. Labels are the words shown.
+const NEXT_STATUS = { received: "preparing", preparing: "ready", ready: "served", served: "received" };
+const STATUS_WORD = { received: "new", preparing: "cooking", ready: "ready", served: "served" };
 
 const state = {
   data: { settings: null, sessions: [], members: [], orders: [], items: [], calls: [], dishes: [], categories: [], requests: [] },
@@ -84,34 +85,36 @@ function dishRowsOf(o) {
 // KOT numbers, guests, and whether the bill is paid (drives the outline).
 function tableAgg(t) {
   const os = ordersOf(t), s = sessionOf(t);
-  let nw = 0, ck = 0, sv = 0, due = 0;
+  let nw = 0, ck = 0, rd = 0, sv = 0, due = 0;
   const kots = [];
   os.forEach((o) => {
     if (o.kot_no != null) kots.push(o.kot_no);
     if (o.payment_status !== "paid") due += (Number(o.total) || 0) - (Number(o.discount) || 0);
     dishRowsOf(o).forEach((r) => {
       const q = r.qty || 1;
-      if (r.status === "served") sv += q; else if (r.status === "preparing") ck += q; else nw += q;
+      if (r.status === "served") sv += q; else if (r.status === "ready") rd += q; else if (r.status === "preparing") ck += q; else nw += q;
     });
   });
   const unpaid = os.some((o) => o.payment_status !== "paid");
-  return { os, nw, ck, sv, due, kots, session: s, guests: membersOf(t).length, unpaid, paid: os.length > 0 && !unpaid, billNo: s && s.bill_no };
+  return { os, nw, ck, rd, sv, due, kots, session: s, guests: membersOf(t).length, unpaid, paid: os.length > 0 && !unpaid, billNo: s && s.bill_no };
 }
 
-// The tile's colour/label, decided by the most urgent thing happening: a brand-new
-// (unaccepted) dish wins, then cooking, then all-served, then just seated, then free.
+// The tile's colour/label, decided by the most urgent thing for the waiter: a
+// brand-new (unaccepted) dish, then READY-to-serve (pink — go carry it out!),
+// then cooking, then all-served, then just seated, then free.
 function tileState(t) {
   const a = tableAgg(t);
   if (a.nw > 0) return { cls: "new", label: "New order" };
+  if (a.rd > 0) return { cls: "ready", label: "Ready to serve" };
   if (a.ck > 0) return { cls: "prep", label: "Preparing" };
   if (a.os.length && a.sv > 0) return { cls: "done", label: "Served" };
   if (a.session) return a.guests ? { cls: "seated", label: "Seated" } : { cls: "waiting", label: "Open" };
   return { cls: "free", label: "Free" };
 }
 
-// A table "needs attention" if it has a waiter call, a pending request, or a
-// brand-new order waiting to be accepted.
-const needsAttention = (i) => callsOf(i).length > 0 || reqsOf(i).length > 0 || tileState(i).cls === "new";
+// A table "needs attention" if it has a waiter call, a pending request, a brand-new
+// order to accept, or food sitting READY that the waiter must carry out.
+const needsAttention = (i) => { const a = tableAgg(i); return callsOf(i).length > 0 || reqsOf(i).length > 0 || a.nw > 0 || a.rd > 0; };
 
 function tableCount() { return Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12); }
 
@@ -147,9 +150,9 @@ function renderFloor() {
       body = `<span class="tsub">tap to open</span><span class="topen" data-quick="open" data-qt="${i}">Open</span>`;
     } else {
       const kot = a.kots.length ? `KOT #${a.kots[a.kots.length - 1]}${a.kots.length > 1 ? ` +${a.kots.length - 1}` : ""}` : "no order yet";
-      const total = a.nw + a.ck + a.sv;
-      const strip = total > 0 ? `<div class="tstrip">${a.nw ? `<i style="width:${(a.nw / total) * 100}%;background:#f59e0b"></i>` : ""}${a.ck ? `<i style="width:${(a.ck / total) * 100}%;background:#4f9dff"></i>` : ""}${a.sv ? `<i style="width:${(a.sv / total) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
-      const pills = total > 0 ? `<div class="tpills">${a.nw ? `<span class="tpill nw">${a.nw} new</span>` : ""}${a.ck ? `<span class="tpill ck">${a.ck} cooking</span>` : ""}${a.sv ? `<span class="tpill sv">${a.sv} ready</span>` : ""}</div>` : "";
+      const total = a.nw + a.ck + a.rd + a.sv;
+      const strip = total > 0 ? `<div class="tstrip">${a.nw ? `<i style="width:${(a.nw / total) * 100}%;background:#f59e0b"></i>` : ""}${a.ck ? `<i style="width:${(a.ck / total) * 100}%;background:#4f9dff"></i>` : ""}${a.rd ? `<i style="width:${(a.rd / total) * 100}%;background:#ec4899"></i>` : ""}${a.sv ? `<i style="width:${(a.sv / total) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
+      const pills = total > 0 ? `<div class="tpills">${a.nw ? `<span class="tpill nw">${a.nw} new</span>` : ""}${a.ck ? `<span class="tpill ck">${a.ck} cooking</span>` : ""}${a.rd ? `<span class="tpill rd">${a.rd} ready</span>` : ""}${a.sv ? `<span class="tpill sv">${a.sv} served</span>` : ""}</div>` : "";
       body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}`;
     }
     html += `<button class="tile t-${st.cls} ${payCls} ${called ? "called" : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">

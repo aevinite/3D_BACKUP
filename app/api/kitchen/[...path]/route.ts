@@ -58,32 +58,34 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
     }
 
-    // orders/:id/ready — everything → served, order complete
+    // orders/:id/ready — kitchen finished the whole order: every dish → READY
+    // (cooked, waiting for the waiter to carry it out). NOT served — serving is
+    // the waiter's action on the tablet. Order stays "preparing" until served.
     if (a === "orders" && c === "ready") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
-       
-      const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
-      must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).select());
-      await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b);
+      const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "ready" })) : [];
+      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).select());
+      await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).neq("status", "served");
       await logAction("kitchen", "order_ready", { order_id: b });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
     }
 
-    // items/:id/status — one dish ready/back, with order rollup
+    // items/:id/status — one dish moved along, with order rollup. The kitchen
+    // sends "ready" (cooked); the tablet sends "served" (delivered).
     if (a === "items" && c === "status") {
       const status = body && body.status;
-      if (!["received", "preparing", "served"].includes(status)) return err("invalid status");
-       
+      if (!["received", "preparing", "ready", "served"].includes(status)) return err("invalid status");
+
       const patch: any = { status };
       if (status === "served") patch.served_at = nowIso();
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).select());
       const item = updated[0];
       if (item && item.order_id) {
         const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id));
-         
+
         const served = rows.filter((r: any) => r.status === "served").length;
-         
-        const anyActive = rows.some((r: any) => r.status === "preparing" || r.status === "served");
+
+        const anyActive = rows.some((r: any) => ["preparing", "ready", "served"].includes(r.status));
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
         await sb.from("orders").update({ status: overall }).eq("id", item.order_id);
       }

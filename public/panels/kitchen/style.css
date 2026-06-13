@@ -57,6 +57,10 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .tick { width: 44px; height: 44px; border-radius: 12px; border: 1px solid rgba(74,222,128,0.5); background: rgba(74,222,128,0.12); color: var(--green); font-size: 20px; font-weight: 900; cursor: pointer; flex: 0 0 auto; }
 .tick:active { transform: scale(0.94); }
 .done { color: var(--green); font-weight: 900; font-size: 18px; }
+/* a dish the kitchen has finished but the waiter hasn't carried out yet */
+.done.rdy { color: #f472b6; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.line-ready .ltitle { color: #f9a8d4; }
+.awaiting { width: 100%; margin-top: 10px; padding: 11px; border-radius: 12px; text-align: center; font-weight: 800; font-size: 13.5px; color: #f9a8d4; background: rgba(236,72,153,.12); border: 1px solid rgba(236,72,153,.4); }
 .big { width: 100%; margin-top: 10px; padding: 13px; border-radius: 12px; border: 0; font-size: 16px; font-weight: 900; letter-spacing: 0.6px; cursor: pointer; }
 .big.accept { background: var(--amber); color: #201500; }
 .big.ready { background: var(--green); color: #06270f; }

@@ -127,15 +127,18 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // endpoint exactly so kitchen + tablet stay perfectly consistent.
     if (a === "items" && c === "status") {
       const status = body && body.status;
-      if (!["received", "preparing", "served"].includes(status)) return err("invalid status");
+      if (!["received", "preparing", "ready", "served"].includes(status)) return err("invalid status");
       const patch: any = { status };
       if (status === "served") patch.served_at = nowIso();
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).select());
       const item = updated[0];
       if (item && item.order_id) {
+        // Order-level status stays coarse (received/preparing/served) so the guest
+        // tracker + floor never see the internal "ready": a cooked-but-unserved
+        // dish keeps the order "preparing".
         const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id));
         const served = rows.filter((r: any) => r.status === "served").length;
-        const anyActive = rows.some((r: any) => r.status === "preparing" || r.status === "served");
+        const anyActive = rows.some((r: any) => ["preparing", "ready", "served"].includes(r.status));
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
         await sb.from("orders").update({ status: overall }).eq("id", item.order_id);
       }

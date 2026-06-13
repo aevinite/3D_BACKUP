@@ -68,10 +68,15 @@ function ticketHtml(o) {
       ...(Array.isArray(r.removed) && r.removed.length ? [`NO ${r.removed.join(", NO ")}`] : []),
       ...(r.note ? [`✎ ${r.note}`] : []),
     ];
-    // In the Cooking column each DB-backed dish gets its own big Ready tick.
-    const tick = o.status === "preparing" && r.fromDb && r.status !== "served"
-      ? `<button class="tick" data-item-ready="${esc(r.id)}">✓</button>` : (r.status === "served" ? `<span class="done">✓</span>` : "");
-    return `<div class="line ${r.status === "served" ? "line-done" : ""}">
+    // Each cooking dish gets a ✓ to mark it READY (cooked). Once ready it shows a
+    // pink "ready" tag (waiter still has to carry it out); once the waiter serves
+    // it on the tablet it reads "served".
+    const tick = r.fromDb && (r.status === "received" || r.status === "preparing")
+      ? `<button class="tick" data-item-ready="${esc(r.id)}">✓</button>`
+      : r.status === "ready" ? `<span class="done rdy">ready</span>`
+        : r.status === "served" ? `<span class="done">served ✓</span>` : "";
+    const lineCls = r.status === "served" ? "line-done" : r.status === "ready" ? "line-ready" : "";
+    return `<div class="line ${lineCls}">
       <span class="qty">${esc(r.qty)}×</span>
       <span class="ltitle">${esc(r.title)}${extras.length ? `<small>${esc(extras.join(" · "))}</small>` : ""}</span>
       ${tick}</div>`;
@@ -79,29 +84,42 @@ function ticketHtml(o) {
   // Allergies shout in red — the kitchen must never miss them.
   const allergy = Array.isArray(o.allergies) && o.allergies.length
     ? `<div class="allergy">⚠ ALLERGY: ${esc(o.allergies.join(", "))}</div>` : "";
+  const rows2 = rowsOf(o);
+  const allCooked = rows2.length > 0 && rows2.every((r) => r.status === "ready" || r.status === "served");
   const action = o.status === "received"
     ? `<button class="big accept" data-accept="${esc(o.id)}">ACCEPT</button>`
-    : o.status === "preparing"
+    : (!allCooked
       ? `<button class="big ready" data-ready="${esc(o.id)}">ALL READY</button>`
-      : "";
+      : `<div class="awaiting">✓ ready — waiter serving</div>`);
   return `<div class="ticket st-${esc(o.status)}">
     <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span></div>
     ${allergy}${lines}${action}</div>`;
 }
 
+// A kitchen ticket's column comes from its DISHES, not the coarse order status:
+// New = not accepted; Ready = every dish cooked (awaiting the waiter); Cooking =
+// anything in between. Fully-served orders have been delivered and leave the board.
+function orderPhase(o) {
+  if (o.status === "received") return "new";
+  const rows = rowsOf(o);
+  if (!rows.length) return o.status === "served" ? "served" : "cooking";
+  if (rows.every((r) => r.status === "served")) return "served";
+  if (rows.every((r) => r.status === "ready" || r.status === "served")) return "ready";
+  return "cooking";
+}
 function render() {
-  const buckets = { received: [], preparing: [], served: [] };
-  state.orders.forEach((o) => { if (o.status !== "cancelled" && buckets[o.status]) buckets[o.status].push(o); });
-  buckets.served = buckets.served.slice(-8).reverse(); // just the recent finishes
+  const buckets = { new: [], cooking: [], ready: [], served: [] };
+  state.orders.forEach((o) => { if (o.status !== "cancelled") buckets[orderPhase(o)].push(o); });
   const draw = (key, list) => {
     $("#list-" + key).innerHTML = list.length ? list.map(ticketHtml).join("") : `<div class="empty">Nothing here.</div>`;
     $("#count-" + key).textContent = list.length || "";
   };
-  draw("new", buckets.received); draw("cooking", buckets.preparing); draw("ready", buckets.served);
+  draw("new", buckets.new); draw("cooking", buckets.cooking); draw("ready", buckets.ready);
   // wire the buttons (we redraw each poll, so we rebind each poll)
   document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => act(() => api("POST", `/orders/${b.dataset.accept}/accept`))));
   document.querySelectorAll("[data-ready]").forEach((b) => (b.onclick = () => act(() => api("POST", `/orders/${b.dataset.ready}/ready`))));
-  document.querySelectorAll("[data-item-ready]").forEach((b) => (b.onclick = () => act(() => api("POST", `/items/${b.dataset.itemReady}/status`, { status: "served" }))));
+  // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
+  document.querySelectorAll("[data-item-ready]").forEach((b) => (b.onclick = () => act(() => api("POST", `/items/${b.dataset.itemReady}/status`, { status: "ready" }))));
 }
 
 // Run an action then refresh immediately (snappier than waiting for the poll).
