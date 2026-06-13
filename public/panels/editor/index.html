@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Menu Editor — Little French House</title>
+  <!-- Inline emoji favicon (an SVG data URI) so the browser stops 404-ing on /favicon.ico — no extra file needed. -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>" />
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <link rel="stylesheet" href="/panels/editor/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span>🍽️</span> Menu Editor</div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="items">Dishes</button>
+      <button class="tab" data-tab="categories">Categories</button>
+      <button class="tab" data-tab="filters">Tags</button>
+      <button class="tab" data-tab="orders">Orders<span id="ordersBadge" class="tab-badge" hidden></span></button>
+      <button class="tab" data-tab="tables">Tables</button>
+      <button class="tab" data-tab="dash">Dashboard</button>
+      <button class="tab" data-tab="customers">Customers</button>
+      <button class="tab" data-tab="log">Log</button>
+      <button class="tab" data-tab="features">Features</button>
+      <button class="tab" data-tab="general">General</button>
+    </nav>
+    <div class="conn" id="conn">connecting…</div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <input id="search" class="search" type="search" placeholder="Search…" />
+        <button id="newBtn" class="btn primary">+ New</button>
+      </div>
+      <!-- Category filter chips (Dishes tab only): tap a category to see just its
+           dishes. Built by renderCatFilter() in app.js; hidden on other tabs. -->
+      <div id="catFilter" class="cat-filter" hidden></div>
+      <ul id="list" class="list"></ul>
+      <div class="sidebar-resizer" id="sidebarResizer" title="Drag to resize"></div>
+    </aside>
+
+    <section class="editor" id="editor">
+      <div class="empty">Pick something on the left, or hit <b>+ New</b>.</div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <!-- Chart.js (CDN) powers the Dashboard tab's graphs. The editor is a private,
+       password-locked tool, so a CDN script here is fine (unlike the guest menu). -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="/panels/editor/app.js"></script>
+</body>
+</html>

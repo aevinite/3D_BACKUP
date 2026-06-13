@@ -1,12 +1,16 @@
-// Stub for /editor — the real editor panel is brought into the app in Phase B.
-// Kept as a placeholder so the switcher has a working destination meanwhile.
-export default function EditorStub() {
+// /editor — the editor panel, now hosted INSIDE the one app.
+//
+// Its exact original UI is served as static files from /panels/editor and
+// embedded full-screen here, so the look/behaviour is byte-for-byte identical to
+// the old standalone editor. Its data calls go to /api/editor/* (the ported
+// route handlers). The admin-only floating switcher (mounted in the layout)
+// floats above this. A native React rebuild is the later "polish" step.
+export default function EditorPanel() {
   return (
-    <main style={{ minHeight: "100vh", background: "#0b1220", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", display: "grid", placeItems: "center", padding: 24, textAlign: "center" }}>
-      <div>
-        <h1 style={{ margin: 0 }}>✏️ Editor</h1>
-        <p style={{ opacity: 0.7 }}>Being moved into the one app (Phase B). For now it still runs on its own server.</p>
-      </div>
-    </main>
+    <iframe
+      src="/panels/editor/index.html"
+      title="Menu Editor"
+      style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", border: 0 }}
+    />
   );
 }
