@@ -247,4 +247,4 @@ async function load() {
 }
 setInterval(() => ($("#clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })), 1000);
 load().catch((e) => toast("Can't reach the database: " + e.message, false));
-setInterval(() => load().catch(() => {}), 2500);
+setInterval(() => load().catch(() => {}), 1000); // ~1s real-time (signature-diff means no wasted redraws)
