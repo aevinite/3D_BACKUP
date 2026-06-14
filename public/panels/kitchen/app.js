@@ -63,10 +63,15 @@ const rowsOf = (o) => {
 
 function ticketHtml(o) {
   const rows = rowsOf(o);
+  // Allergens avoided for the WHOLE order (the red banner). We hide these from the
+  // per-dish "NO x" so the kitchen doesn't see e.g. "NO og" on the espresso AND
+  // "ALLERGY: og" on the order — that duplicate was confusing (owner, 2026-06-14).
+  const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
   const lines = rows.map((r) => {
+    const lineRemoved = Array.isArray(r.removed) ? r.removed.filter((x) => !orderAllergies.includes(x)) : [];
     const extras = [
       ...(Array.isArray(r.options) ? r.options.map((op) => `+ ${op.label || op}`) : []),
-      ...(Array.isArray(r.removed) && r.removed.length ? [`NO ${r.removed.join(", NO ")}`] : []),
+      ...(lineRemoved.length ? [`NO ${lineRemoved.join(", NO ")}`] : []),
       ...(r.note ? [`✎ ${r.note}`] : []),
     ];
     // Each cooking dish gets a ✓ to mark it READY (cooked). Once ready it shows a

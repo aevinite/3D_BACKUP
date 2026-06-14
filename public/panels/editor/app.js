@@ -1920,13 +1920,17 @@ async function banMember(id, phone) {
 // instantly (no refetch). The real reconcile happens 5s after the last click —
 // see scheduleServeFlush — so serving several dishes in a row stays smooth.
 async function itemStatus(id, status) {
+  const it = (state.board.items || []).find((i) => i.id === id);
+  const prev = it ? it.status : null;
+  if (it) it.status = status;   // optimistic FIRST → the pill flips instantly (no waiting on the network)
+  renderTablePanel();           // instant redraw from local state
+  scheduleServeFlush();         // sets the guard so the poll won't repaint under the finger; reconciles after the last click
   try {
-    await api("POST", "/items/" + id + "/status", { status });   // persist now
-    const it = (state.board.items || []).find((i) => i.id === id); // optimistic local update
-    if (it) it.status = status;
-    renderTablePanel();                                            // instant redraw from local state
-    scheduleServeFlush();                                          // one real refresh after you stop clicking
-  } catch (e) { toast("Failed: " + e.message, "err"); }
+    await api("POST", "/items/" + id + "/status", { status });   // persist in the background
+  } catch (e) {
+    if (it && prev != null) { it.status = prev; renderTablePanel(); } // revert the optimistic change on failure
+    toast("Failed: " + e.message, "err");
+  }
 }
 // resolveRequest: approve or dismiss a queued "let me in / open this table" request.
 // OPTIMISTIC: the request row leaves the queue instantly; the real refresh

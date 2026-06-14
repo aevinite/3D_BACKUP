@@ -18,7 +18,11 @@ const inr = (n) => "₹" + Math.round((parseFloat(n) || 0) * INR_RATE).toLocaleS
 // One dish flows new → cooking → ready → served, then wraps back so a mis-tap is
 // undoable. "ready" = kitchen finished it, waiter still has to carry it out (the
 // pink alert); "served" = the waiter delivered it. Labels are the words shown.
-const NEXT_STATUS = { received: "preparing", preparing: "ready", ready: "served", served: "received" };
+// Waiter tap flow MATCHES the manager: cooking → served in one tap (the kitchen
+// owns "ready"; if they're too busy to mark it, the waiter who carries the food
+// just serves it directly). A dish already marked "ready" by the kitchen also
+// serves in one tap. (owner, 2026-06-14)
+const NEXT_STATUS = { received: "preparing", preparing: "served", ready: "served", served: "received" };
 const STATUS_WORD = { received: "new", preparing: "cooking", ready: "ready", served: "served" };
 
 const state = {
@@ -213,7 +217,11 @@ function renderPanel() {
     const viaApp = !!o.member_id; // guest orders carry a member_id; staff-taken ones don't
     const rows = dishRowsOf(o).map((r) => {
       const opt = (r.options && r.options.length) ? `<div class="iopt">${esc(r.options.map((x) => x.label || x).join(" · "))}</div>` : "";
-      const rem = (r.removed && r.removed.length) ? `<div class="irem">no ${esc(r.removed.join(", "))}</div>` : "";
+      // Hide a "no X" that's already avoided for the WHOLE order (the order allergy
+      // banner) so it isn't shown twice.
+      const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
+      const lineRem = (r.removed || []).filter((x) => !orderAllergies.includes(x));
+      const rem = lineRem.length ? `<div class="irem">no ${esc(lineRem.join(", "))}</div>` : "";
       const note = r.note ? `<div class="iopt">“${esc(r.note)}”</div>` : "";
       // Real DB rows are tappable (advance the dish); legacy JSON rows just show.
       const tap = r.fromDb ? `tap data-item="${esc(r.id)}" data-cur="${esc(r.status)}"` : "";
@@ -316,13 +324,26 @@ function renderPanel() {
 }
 
 // Advance one dish new→cooking→served (wrapping). Optimistic so it feels instant.
+// After serving stops for a moment, do ONE real refetch to reconcile — instead of
+// reloading the whole board after EVERY tap (that full reload was the ~1.5s
+// "auto-refresh" between serves). The optimistic update already shows it instantly.
+let serveReconcileTimer = null;
+function scheduleServeReconcile() {
+  if (serveReconcileTimer) clearTimeout(serveReconcileTimer);
+  serveReconcileTimer = setTimeout(() => { serveReconcileTimer = null; load().catch(() => {}); }, 2500);
+}
 function advanceDish(id, cur) {
   const next = NEXT_STATUS[cur] || "preparing";
   const it = (state.data.items || []).find((x) => x.id === id);
-  if (it) it.status = next;
-  renderPanel();
+  if (it) it.status = next;            // optimistic — the pill flips instantly
+  // Adopt this state as the baseline so a poll that arrives with the SAME
+  // (server-confirmed) data won't repaint the panel under the waiter's finger.
+  lastSig = boardSig(state.data);
+  renderFloor();
+  if (!state.ordering) renderPanel();
+  // Fire-and-forget; reconcile once after the taps stop (not per tap).
   api("POST", `/items/${id}/status`, { status: next })
-    .then(() => load()).then(() => { if (!state.ordering) renderPanel(); })
+    .then(() => scheduleServeReconcile())
     .catch((e) => { toast("Failed: " + e.message, false); load(); });
 }
 
