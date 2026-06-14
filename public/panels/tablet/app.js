@@ -217,10 +217,11 @@ function renderPanel() {
     const viaApp = !!o.member_id; // guest orders carry a member_id; staff-taken ones don't
     const rows = dishRowsOf(o).map((r) => {
       const opt = (r.options && r.options.length) ? `<div class="iopt">${esc(r.options.map((x) => x.label || x).join(" · "))}</div>` : "";
-      // Hide a "no X" that's already avoided for the WHOLE order (the order allergy
-      // banner) so it isn't shown twice.
+      // Allergens shown PER ITEM (matches the manager): the dish's own removals PLUS
+      // the order-wide "avoid in all my dishes" distributed onto every item — so each
+      // dish shows its own "no dairy". No shared/common allergy banner.
       const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
-      const lineRem = (r.removed || []).filter((x) => !orderAllergies.includes(x));
+      const lineRem = [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...orderAllergies])];
       const rem = lineRem.length ? `<div class="irem">no ${esc(lineRem.join(", "))}</div>` : "";
       const note = r.note ? `<div class="iopt">“${esc(r.note)}”</div>` : "";
       // Show the dish's line price (unit × qty) — there's room on the row, so the
@@ -238,11 +239,9 @@ function renderPanel() {
     // longer accepts on its own screen, so an order must be accepted here (or in
     // the editor) before the kitchen starts cooking it.
     const accept = (o.status === "received") ? `<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button>` : "";
-    // Allergies are safety-critical — show them as a loud banner on the order.
-    const allergy = (o.allergies && o.allergies.length) ? `<div class="oallergy">⚠ ALLERGY — ${esc(o.allergies.join(", "))}</div>` : "";
+    // No shared allergy banner — allergens are shown per item above (matches manager).
     return `<div class="ord">
       <div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">Order ${oi + 1}${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}</span><span class="ordtotal">${inr(o.total)}</span></div>
-      ${allergy}
       ${rows || `<div class="iline muted">No items.</div>`}
       ${accept}
     </div>`;
