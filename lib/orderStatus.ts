@@ -77,18 +77,19 @@ export const writeActiveOrders = (list: ActiveOrder[]) => {
   } catch {}
 };
 
-// The orders still worth showing live: not dismissed, not aged out, and either
-// in-progress OR finished within the last minute (so "Served!" lingers briefly).
-// Newest first.
+// The orders still worth showing live: not dismissed and not aged out. A SERVED
+// (or cancelled) order now STAYS in the live panel — it no longer drops after a
+// few seconds. It only goes away when the dining session ends / a new session
+// starts (that clears lfh_active_orders), so the guest keeps seeing "everything
+// served" for the rest of their visit (owner, 2026-06-14). Newest first.
 export const liveActiveOrders = (list: ActiveOrder[], now: number = Date.now()): ActiveOrder[] =>
   list
     // .filter keeps only the orders that pass this test; the rest drop away.
     .filter((o) => {
-      // Drop it if the guest dismissed it, or it's older than our 3-hour limit.
+      // Drop it only if the guest dismissed it, or it's older than our 3-hour limit.
       if (o.dismissed || now - o.placedAt > MAX_AGE_MS) return false;
-      // If it's finished, only keep it briefly (the 1-minute "lingering" window).
-      if (isFinalStatus(o.status)) return !!o.finalizedAt && now - o.finalizedAt < SERVED_LINGER_MS;
-      // Otherwise it's still cooking — definitely keep it.
+      // Served/cancelled stay visible (until the session ends or it's dismissed) —
+      // no timed disappearance.
       return true;
     })
     // .sort with (b - a) puts the most recently placed order first (newest first).
