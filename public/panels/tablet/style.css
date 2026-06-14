@@ -30,7 +30,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
    info (guests, KOT, kitchen progress); free tables stay compact. */
 /* Every tile is the SAME fixed height — open or free — so the grid never goes
    ragged (owner: don't resize a tile when it opens). Content bottom-anchors. */
-.tile { --c: #6b6253; position: relative; height: 140px; border-radius: 16px;
+/* min-height (not a fixed height) so a tile GROWS to fit its content — e.g. the
+   served-unpaid tile that also carries a "Mark paid" button — instead of clipping it. */
+.tile { --c: #6b6253; position: relative; min-height: 140px; border-radius: 16px;
   border: 1.5px solid color-mix(in srgb, var(--c) 55%, var(--line));
   background: linear-gradient(157deg, color-mix(in srgb, var(--c) 16%, var(--panel)), var(--panel) 78%);
   color: var(--text); cursor: pointer; display: flex; flex-direction: column; align-items: stretch; gap: 4px;
@@ -69,7 +71,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
   font-weight: 800; font-size: 14px; text-align: center; padding: 10px; border-radius: 11px; }
 .topen:hover { filter: brightness(1.05); }
 /* the on-tile "Mark paid" button for a served-but-unpaid table (same look as Open) */
-.tile .tpay { margin-top: auto; }
+.tile .tpay { margin-top: 8px; }
 .tpay { background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c;
   font-weight: 800; font-size: 14px; text-align: center; padding: 10px; border-radius: 11px; margin-top: 8px; }
 .tpay:hover { filter: brightness(1.05); }
@@ -237,6 +239,10 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .ist.preparing { background: rgba(79,157,255,.18); color: #7ab4ff; }
 .ist.ready { background: rgba(236,72,153,.20); color: #f9a8d4; border-color: rgba(236,72,153,.5); }
 .ist.served { background: rgba(34,197,94,.18); color: #4ade80; }
+/* Explicit, obvious SERVE button on a cooking/ready dish (green = go) */
+.ist-serve { background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; font-weight: 800;
+  font-size: 12px; padding: 7px 13px; border: 0; border-radius: 9px; cursor: pointer; white-space: nowrap; }
+.ist-serve:hover { filter: brightness(1.07); }
 .oallergy { margin: 0 12px; margin-top: 10px; background: rgba(239,68,68,.14); border: 1px solid rgba(239,68,68,.5); color: #ff8a8a; font-weight: 800; font-size: 12px; padding: 7px 10px; border-radius: 9px; letter-spacing: .03em; }
 .accept { margin: 10px 12px; display: block; width: calc(100% - 24px); background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; font-weight: 800; text-align: center; padding: 11px; border-radius: 10px; font-size: 13.5px; border: 0; cursor: pointer; }
 

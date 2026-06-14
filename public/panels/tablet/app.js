@@ -223,12 +223,19 @@ function renderPanel() {
       const lineRem = (r.removed || []).filter((x) => !orderAllergies.includes(x));
       const rem = lineRem.length ? `<div class="irem">no ${esc(lineRem.join(", "))}</div>` : "";
       const note = r.note ? `<div class="iopt">“${esc(r.note)}”</div>` : "";
-      // Real DB rows are tappable (advance the dish); legacy JSON rows just show.
-      const tap = r.fromDb ? `tap data-item="${esc(r.id)}" data-cur="${esc(r.status)}"` : "";
       // Show the dish's line price (unit × qty) — there's room on the row, so the
       // waiter sees what each dish costs without opening anything.
       const priceTag = r.price > 0 ? `<span class="iprice">${inr(r.price * r.qty)}</span>` : "";
-      return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}<span class="ist ${r.status} ${r.fromDb ? "tap" : ""}" ${tap} title="${r.fromDb ? "tap to advance" : ""}">${STATUS_WORD[r.status] || r.status}</span></div>`;
+      // Explicit, obvious SERVE button on any cooking/ready dish (the waiter taps it
+      // to serve directly — kitchen owns "ready"). Served shows a static badge; a
+      // not-yet-accepted ("received") dish shows "new" (accept the order first).
+      let statusEl;
+      if (r.fromDb && (r.status === "preparing" || r.status === "ready")) {
+        statusEl = `<button class="ist-serve" data-serve="${esc(r.id)}" data-cur="${esc(r.status)}">✓ Serve</button>`;
+      } else {
+        statusEl = `<span class="ist ${r.status}">${STATUS_WORD[r.status] || r.status}</span>`;
+      }
+      return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}${statusEl}</div>`;
     }).join("");
     // The waiter accepts EVERY new order now (owner, 2026-06-14): the kitchen no
     // longer accepts on its own screen, so an order must be accepted here (or in
@@ -297,6 +304,9 @@ function renderPanel() {
   document.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () => act(async () => { const recv = ordersOf(b.dataset.acceptAll).filter((o) => o.status === "received"); for (const o of recv) await api("POST", `/orders/${o.id}/accept`); })));
   // Per-dish advance: optimistically flip the pill, then persist + reconcile.
   document.querySelectorAll(".ist.tap[data-item]").forEach((el) => (el.onclick = () => advanceDish(el.dataset.item, el.dataset.cur)));
+  // Explicit "✓ Serve" button on each cooking/ready dish → serves it directly
+  // (advanceDish takes preparing/ready straight to served).
+  document.querySelectorAll("[data-serve]").forEach((b) => (b.onclick = () => advanceDish(b.dataset.serve, b.dataset.cur)));
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
   const mvb = $("#moveOrder"); if (mvb) mvb.onclick = () => renderMoveOrderPicker(t);
