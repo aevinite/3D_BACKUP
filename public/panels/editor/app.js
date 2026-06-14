@@ -854,7 +854,6 @@ function mergedOrderCardHtml(g) {
       <b>${tnum ? "Table " + esc(tnum) : "Walk-in / no table"}</b>
       <span class="ord-pill ${cls}">${label}</span>
       <span class="pay-pill ${paid ? "paid" : "pending"}">${paid ? "💳 Paid" : "⏳ Unpaid"}</span>
-      <button class="ord-del" data-sess-del="${esc(sessKey)}" title="Delete this whole bill">🗑</button>
     </div>
     <small class="ord-when">${esc(when)}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
     <div class="ord-items">${items}</div>
