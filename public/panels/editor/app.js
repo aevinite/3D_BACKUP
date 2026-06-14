@@ -2820,10 +2820,13 @@ function setTab(tab) {
   if (tab === "orders") {
     loadOrders();
     unseenOrders = 0;
-    updateOrdersBadge();
-    document.title = "Menu Editor";
+    updateOrdersBadge(); // also refreshes the tab title (orders + tables combined)
   }
-  if (tab === "tables") loadSessions(); // unified live floor (orders + sessions in one)
+  if (tab === "tables") {
+    loadSessions(); // unified live floor (orders + sessions in one)
+    unseenTables = 0; // opening the floor clears its unseen-request badge
+    updateTablesBadge();
+  }
   if (tab === "log") {
     loadUsers(); // customer-log data
     // If we're restoring straight onto the Operation log (e.g. a refresh stayed
@@ -2867,14 +2870,33 @@ let lastPollSig = "";               // fingerprint of the last drawn orders view
 let floorOpsInFlight = 0;
 let lastReqCount = null;   // pending requests (join/access/open/waiter) baseline
 let unseenOrders = 0;
+// Table requests (a guest asking to open/join/access a table) belong to the
+// FLOOR, not Orders — so they get their OWN unseen counter and badge on the
+// Tables tab. Previously they wrongly bumped the Orders badge (owner report).
+let unseenTables = 0;
 
 // updateOrdersBadge: show/hide the little red number on the Orders tab counting
 // new things you haven't looked at yet.
 function updateOrdersBadge() {
   const b = $("#ordersBadge");
-  if (!b) return;
-  b.textContent = unseenOrders;
-  b.hidden = unseenOrders === 0;
+  if (b) { b.textContent = unseenOrders; b.hidden = unseenOrders === 0; }
+  refreshTitle();
+}
+
+// updateTablesBadge: same idea for the Tables tab — counts unseen floor requests
+// (wants-in / join / access) so the owner's eye goes to the FLOOR, where the
+// matching 📨 badge already sits on the actual table tile.
+function updateTablesBadge() {
+  const b = $("#tablesBadge");
+  if (b) { b.textContent = unseenTables; b.hidden = unseenTables === 0; }
+  refreshTitle();
+}
+
+// refreshTitle: the browser-tab title shows the TOTAL unseen (orders + floor
+// requests) so a notification is visible even when this tab is in the background.
+function refreshTitle() {
+  const n = unseenOrders + unseenTables;
+  document.title = n ? `(${n}) Menu Editor` : "Menu Editor";
 }
 
 // A short, soft two-note chime via the Web Audio API — no sound file needed.
@@ -2965,7 +2987,7 @@ async function pollOrders() {
     const where = latest && latest.table_number ? "Table " + latest.table_number : "Walk-in";
     playOrderChime();
     toast(`🔔 ${newCount} new order${newCount > 1 ? "s" : ""} — ${where}`, "ok");
-    if (state.tab !== "orders") { unseenOrders += newCount; updateOrdersBadge(); document.title = `(${unseenOrders}) Menu Editor`; }
+    if (state.tab !== "orders") { unseenOrders += newCount; updateOrdersBadge(); }
   }
   // new waiter-call alert
   if (prevC !== null && pending > prevC) {
@@ -2973,7 +2995,7 @@ async function pollOrders() {
     const where = latest && latest.table_number ? "Table " + latest.table_number : "a guest";
     playOrderChime();
     toast(`🔔 Waiter call — ${where}`, "ok");
-    if (state.tab !== "orders") { unseenOrders += (pending - prevC); updateOrdersBadge(); document.title = `(${unseenOrders}) Menu Editor`; }
+    if (state.tab !== "orders") { unseenOrders += (pending - prevC); updateOrdersBadge(); }
   }
   // new request alert (a guest asked to join/access a table, or requested a waiter
   // when they couldn't be auto-let-in). Newest request is last (queue is ascending).
@@ -2983,7 +3005,9 @@ async function pollOrders() {
     const where = latest && latest.table_number ? `Table ${latest.table_number}` : "a table";
     playOrderChime();
     toast(`🙋 Request — ${verb} ${where}`, "ok");
-    if (state.tab !== "tables") { unseenOrders += (reqCount - prevR); updateOrdersBadge(); document.title = `(${unseenOrders}) Menu Editor`; }
+    // Floor request → light the TABLES badge (not Orders). The table tile itself
+    // already shows the 📨 badge + "Wants in", so this just points the owner there.
+    if (state.tab !== "tables") { unseenTables += (reqCount - prevR); updateTablesBadge(); }
   }
 }
 
