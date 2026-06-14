@@ -39,6 +39,18 @@ RLS: enabled, **no anon/authenticated policy** (service-role only — the API re
 it). Never exposed to the guest anon key. Password/PIN hashes never leave the
 server.
 
+## Routing (how each person is directed)
+One app, one set of URLs:
+- `/menu` — guest, always open, no login.
+- `/login` — the SINGLE staff door (username + password). On success, redirect by
+  role: manager→`/manager`, tablet→`/tablet`, kitchen→`/kitchen`.
+- Visiting `/login` (or `/`) while already logged in → redirect straight to the
+  user's role panel (no re-typing).
+- Visiting any panel without a valid cookie → redirect to `/login?next=<panel>`.
+- Admin (you) logs into `/admin` and reaches every panel + the Users page.
+- No separate/secret per-role URLs — the role on the user row decides the landing
+  panel.
+
 ## Auth flow
 - **Login page** `/login` (username + password). Posts to `POST /api/panel-login`:
   server (service-role) looks up the active user, verifies `sha256hex(password)`
@@ -115,8 +127,7 @@ server-side; the admin never sees an existing password (only sets a new one).
 - `/editor` and `/api/editor/*` still work (redirect / alias).
 - Type-check + production build pass; verified in the browser.
 
-## Open question for the owner
-First-boot: do you want the migration to **seed one manager account** from an env
-var (so you can log in immediately after deploy), or will you create all users
-from the admin Users page (using admin super-access to reach it first)? Default:
-no seed — use admin super-access to create the first users.
+## First-boot (decided)
+**No seeded account.** The owner logs into `/admin` (existing gate) and creates the
+first manager/kitchen/tablet users from the new Users page. Admin super-access
+reaches every panel, so the owner is never locked out while no users exist yet.
