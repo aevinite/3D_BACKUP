@@ -181,6 +181,10 @@ export default function AdminHome() {
             ⚠ Menu in maintenance
           </span>
         ) : null}
+        {/* Quick link to staff-user management (create logins for the 3 panels). */}
+        <a href="/admin/users" style={{ marginLeft: "auto", color: "#dbe7ff", textDecoration: "none", background: "#1f2c49", border: "1px solid #2a3a5f", padding: "6px 12px", borderRadius: 999, fontSize: 13, fontWeight: 600 }}>
+          👥 Users &amp; access
+        </a>
       </header>
 
       {/* Key numbers */}
