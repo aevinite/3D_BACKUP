@@ -6,10 +6,11 @@
 // It also lets the owner switch to "anyone can join automatically" for the rest of
 // the meal.
 //
-// Why polling (every 5s) instead of Supabase Realtime: session_members has RLS with
-// NO public read policy — guests only ever touch the lfh_* RPCs — so Realtime can't
-// subscribe to it. Polling is the right fit here, and we keep it cheap: we only hit
-// the network when an OWNER token actually exists and the tab is visible.
+// Realtime is the FAST path: a partner joining drops a breadcrumb on the head's
+// `table:<n>` topic (migration 059), which fires `lfh:rt-tick` here → instant refetch.
+// But approving a waiting partner is time-sensitive, so the backup poll is kept
+// TIGHT (a few seconds, not the usual 60s) to catch any realtime lapse quickly. It's
+// cheap: only the OWNER device, only while it actually holds an owner token + visible.
 
 // React building blocks: useState remembers values, useEffect runs setup code,
 // useRef keeps a value that survives re-draws, useCallback reuses a function.
@@ -22,7 +23,9 @@ import {
   getStoredSession, clearStoredSession, getSessionState,
   approveMember, removeMember, setAutoApprove,
 } from "@/lib/session";
-import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
+// Tight backup poll for the head's join-approval prompt (realtime is the instant
+// path; this catches any lapse fast because a partner is waiting to be let in).
+const OWNER_POLL_MS = 4000;
 
 // One person waiting to be let in: their id and (optional) name.
 interface PendingMember { id: string; name: string | null; }
@@ -76,8 +79,9 @@ export default function SessionOwner() {
     getSettings()
       .then((s) => { if (alive) { enabledRef.current = s.sessionsEnabled; if (s.sessionsEnabled) poll(); } })
       .catch(() => {});
-    // Realtime nudges drive instant refetches; this slow timer is just the backup.
-    const id = setInterval(poll, RT_BACKUP_MS);
+    // Realtime nudges drive instant refetches; this TIGHT 4s timer is the backup so
+    // a waiting partner's request never lingers unseen if realtime briefly lapses.
+    const id = setInterval(poll, OWNER_POLL_MS);
     const onChanged = () => poll();                       // fired right after we become an owner
     const onTick = () => poll();                          // realtime breadcrumb for this table
     const onVis = () => { if (!document.hidden) poll(); }; // refresh the instant the tab is reopened
