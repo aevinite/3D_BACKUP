@@ -2490,14 +2490,19 @@ function renderTablePanel() {
     // The separate order rows still live in the DB as the log of which came first.
     const newOrders = os.filter((o) => o.status === "received");
     const liveOrders = os.filter((o) => o.status !== "received" && o.status !== "cancelled");
+    // The order's items (from order_items, same source the tablet uses) WITH the
+    // order-wide allergens distributed onto each item's "removed" — so every dish
+    // shows "no dairy", identical to the tablet. This is what made the two detail
+    // views disagree before (the popup showed only each item's own removals).
+    const withAllergens = (o) => { const a = Array.isArray(o.allergies) ? o.allergies : []; return orderItemRows(o).map((r) => ({ ...r, removed: [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...a])] })); };
     // Each un-accepted order: just its dishes + its own Accept.
     const newBlocks = newOrders.map((o) => {
       const when = o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-      const rows = orderItemRows(o).map((r) => `<div class="sx-item"><div class="sx-item-info"><span class="ord-pill received">received</span> ${esc(r.title)}${dishNoTag(r.title)} ×${esc(r.qty)}${itemDetailLine(r)}</div>${r.price > 0 ? `<span class="sx-item-price">${inr(r.price * r.qty)}</span>` : ""}</div>`).join("");
+      const rows = withAllergens(o).map((r) => `<div class="sx-item"><div class="sx-item-info"><span class="ord-pill received">received</span> ${esc(r.title)}${dishNoTag(r.title)} ×${esc(r.qty)}${itemDetailLine(r)}</div>${r.price > 0 ? `<span class="sx-item-price">${inr(r.price * r.qty)}</span>` : ""}</div>`).join("");
       return `<div class="tp-order"><div class="tp-order-head">${o.kot_no != null ? `<span class="kot-chip">#${esc(o.kot_no)}</span> ` : ""}New order${when ? ` · ${when}` : ""}</div>${rows}<button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
     }).join("");
     // All ACCEPTED dishes, merged into one continuous list (status + price + serve each).
-    const mergedRows = liveOrders.flatMap((o) => orderItemRows(o)).map(itemRowHtml).join("");
+    const mergedRows = liveOrders.flatMap(withAllergens).map(itemRowHtml).join("");
     // Top-level "Serve all" — serves every accepted-but-unserved dish in one tap.
     const anyUnservedAccepted = liveOrders.some((o) => orderItemRows(o).some((r) => r.status !== "served"));
     const serveAllOrdersBtn = anyUnservedAccepted
