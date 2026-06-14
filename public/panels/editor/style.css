@@ -268,7 +268,13 @@ input:disabled { opacity: .55; cursor: not-allowed; }
 .ord-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 6px; }
 .ord-top small { color: var(--muted); font-size: 12px; }
 .ord-items { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
-.ord-line { display: flex; justify-content: space-between; font-size: 14px; color: var(--text); }
+/* Each dish row is a clean 3-column grid: name (flexes) · ×qty · price (aligned,
+   right). Options/allergy/note drop to a full-width line below. Keeps prices and
+   quantities in tidy columns instead of wrapping into the name. */
+.ord-line { display: grid; grid-template-columns: 1fr auto auto; column-gap: 14px; align-items: baseline; font-size: 14px; color: var(--text); }
+.ord-line .ol-name { min-width: 0; }
+.ord-line .ol-qty { font-weight: 700; color: var(--muted); white-space: nowrap; }
+.ord-line .ol-price { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .ord-allergy { font-size: 13px; color: #fca5a5; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.35); border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; }
 .ord-total { display: flex; justify-content: space-between; align-items: baseline; font-weight: 700; border-top: 1px solid var(--line); padding-top: 10px; }
 /* The amount itself reads large so the staff can see what a table owes from across
@@ -576,7 +582,12 @@ body {
 .opt-choices { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .opt-choice { display: grid; grid-template-columns: 1fr 120px auto; gap: 8px; align-items: end; }
 .opt-choice .btn.small.danger { align-self: end; height: 38px; }
-.ord-line-opts { font-size: 12px; color: var(--gold); margin-top: 2px; }
+.ord-line-opts { grid-column: 1 / -1; font-size: 12px; color: var(--gold); margin-top: 2px; }
+/* per-item allergen tag (e.g. "NO DAIRY") — red so the kitchen can't miss it */
+.ol-no { color: #ff8a8a; font-weight: 700; }
+/* a clear gap + divider between each source order inside one merged bill, so it
+   still reads as "order 1 / order 2" while being a single bill */
+.ord-grp-sep { height: 0; border-top: 1px dashed color-mix(in srgb, var(--line) 80%, var(--gold)); margin: 12px 0; }
 
 /* live table floor map */
 .tbl-legend { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; font-size: 13px; color: var(--muted); }

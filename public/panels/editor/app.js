@@ -736,7 +736,7 @@ function orderCardHtml(o, freed = false) {
   const when = o.created_at ? new Date(o.created_at).toLocaleString() : ""; // friendly date/time
   // Build one line per item, including any chosen options, "NO …" removals, and notes.
   const items = (o.items || [])
-    .map((i) => `<div class="ord-line"><span>${esc(i.title)}${dishNoTag(i.title)} <b>×${esc(i.qty)}</b>${itemDetailLine(i)}</span><span>${esc(i.price)}</span></div>`)
+    .map((i) => `<div class="ord-line"><span class="ol-name">${esc(i.title)}${dishNoTag(i.title)}</span><span class="ol-qty">×${esc(i.qty)}</span><span class="ol-price">${inr(parseFloat(i.price) || 0)}</span>${itemDetailLine(i)}</div>`)
     .join("");
   const allergy = (o.allergies || []).length
     ? `<div class="ord-allergy">⚠ Avoid: ${o.allergies.map(esc).join(", ")}</div>`
@@ -811,10 +811,26 @@ function mergedOrderCardHtml(g) {
   const tnum = (o0.table_number || "").trim();
   const sessKey = o0.session_id || o0.id; // group key for delete-all
   const live = g.filter((o) => o.status !== "cancelled");
-  const items = g.flatMap((o) => (o.items || []).map((i) => `<div class="ord-line"><span>${esc(i.title)}${dishNoTag(i.title)} <b>×${esc(i.qty)}</b>${itemDetailLine(i)}</span><span>${esc(i.price)}</span></div>`)).join("");
+  // Items grouped per source order with a separator between orders, so the merged
+  // bill still reads as "order 1 / order 2" with some distance between them.
+  // Allergens show PER ITEM: the order-wide "avoid X in all my dishes" is distributed
+  // onto every item as "NO X" — there is NO shared/common allergy banner
+  // (owner, 2026-06-14). Different orders keep their own per-item allergens.
+  const items = g.map((o, gi) => {
+    const oAll = Array.isArray(o.allergies) ? o.allergies : [];
+    const rows = (o.items || []).map((i) => {
+      const allerg = [...new Set([...(Array.isArray(i.removed) ? i.removed : []), ...oAll])];
+      const parts = [];
+      if (Array.isArray(i.options) && i.options.length) parts.push(i.options.map((x) => esc(x.label)).join(" · "));
+      if (allerg.length) parts.push(`<span class="ol-no">NO ${allerg.map((r) => esc(r)).join(", NO ").toUpperCase()}</span>`);
+      if (i.note) parts.push("“" + esc(i.note) + "”");
+      const opts = parts.length ? `<div class="ord-line-opts">${parts.join(" · ")}</div>` : "";
+      return `<div class="ord-line"><span class="ol-name">${esc(i.title)}${dishNoTag(i.title)}</span><span class="ol-qty">×${esc(i.qty)}</span><span class="ol-price">${inr(parseFloat(i.price) || 0)}</span>${opts}</div>`;
+    }).join("");
+    return (gi > 0 ? `<div class="ord-grp-sep" aria-hidden="true"></div>` : "") + rows;
+  }).join("");
   const total = g.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
   const disc = g.reduce((s, o) => s + (Number(o.discount) || 0), 0);
-  const allergies = [...new Set(g.flatMap((o) => o.allergies || []))];
   const anyReceived = g.some((o) => o.status === "received");
   const anyPreparing = g.some((o) => o.status === "preparing");
   const paid = live.length > 0 && live.every((o) => o.payment_status === "paid");
@@ -842,7 +858,6 @@ function mergedOrderCardHtml(g) {
     </div>
     <small class="ord-when">${esc(when)}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
     <div class="ord-items">${items}</div>
-    ${allergies.length ? `<div class="ord-allergy">⚠ Avoid: ${allergies.map(esc).join(", ")}</div>` : ""}
     ${disc > 0 ? `<div class="ord-disc">Discount<span>− ${inr(disc)}</span></div>` : ""}
     <div class="ord-total"><span>Total</span><span>${inr(total)}</span></div>
     <div class="ord-actions">${payBtn}${stage}${freeBtn}</div>
