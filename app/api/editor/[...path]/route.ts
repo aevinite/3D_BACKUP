@@ -11,8 +11,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
+import { requireRole } from "@/lib/userAuth";
 
 export const dynamic = "force-dynamic"; // always live, never cached
+
+// Gate: only a logged-in MANAGER (or the admin super-user) may touch this API.
+// Returns a 401 response to short-circuit, or null to let the handler proceed.
+async function gate(req: NextRequest): Promise<NextResponse | null> {
+  const g = await requireRole(req, "manager");
+  return g.ok ? null : NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
+}
 
 const nowIso = () => new Date().toISOString();
 // Unwrap a Supabase { data, error } reply — throw on error so the catch turns it
@@ -48,6 +56,7 @@ type Ctx = { params: Promise<{ path?: string[] }> };
 
 // ── GET ──────────────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest, ctx: Ctx) {
+  const denied = await gate(req); if (denied) return denied;
   try {
     const { path = [] } = await ctx.params;
     const p = path.join("/");
@@ -209,6 +218,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
 // ── POST ─────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest, ctx: Ctx) {
+  const denied = await gate(req); if (denied) return denied;
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
@@ -455,6 +465,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
 // ── PATCH ────────────────────────────────────────────────────────────────────
 export async function PATCH(req: NextRequest, ctx: Ctx) {
+  const denied = await gate(req); if (denied) return denied;
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;
@@ -502,7 +513,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 }
 
 // ── DELETE ───────────────────────────────────────────────────────────────────
-export async function DELETE(_req: NextRequest, ctx: Ctx) {
+export async function DELETE(req: NextRequest, ctx: Ctx) {
+  const denied = await gate(req); if (denied) return denied;
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;

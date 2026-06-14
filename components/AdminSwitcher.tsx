@@ -32,9 +32,12 @@ export default function AdminSwitcher() {
   // Decide admin-or-not + restore saved position, once, in the browser.
   useEffect(() => {
     try {
-      // Admin = signed in to the staff gate. The login sets a readable flag
-      // cookie (the real auth cookie is HttpOnly and can't be read here). So a
-      // plain customer (no cookie) never sees the switcher.
+      // Only the ADMIN super-user may hop between panels, so the switcher shows
+      // ONLY for admin. The admin gate (/api/staff-login) sets this readable flag
+      // cookie; the real auth cookie is HttpOnly and unreadable here. IMPORTANT:
+      // a plain role-user who logs in at /login gets ONLY the HttpOnly lfh_user
+      // cookie — never this flag — so they are locked to their one panel and
+      // never see the switcher. A plain customer (no cookie) never sees it either.
       setIsAdmin(document.cookie.split("; ").some((c) => c === "lfh_is_staff=1"));
       const saved = localStorage.getItem("lfh_switcher_pos");
       if (saved) setPos(JSON.parse(saved));

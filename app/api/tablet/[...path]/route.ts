@@ -7,8 +7,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
+import { requireRole } from "@/lib/userAuth";
 
 export const dynamic = "force-dynamic";
+
+// Gate: only a logged-in TABLET (waiter) user (or admin super-user) may touch this.
+async function gate(req: NextRequest): Promise<NextResponse | null> {
+  const g = await requireRole(req, "tablet");
+  return g.ok ? null : NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
+}
 
 const nowIso = () => new Date().toISOString();
  
@@ -22,7 +29,8 @@ async function readBody(req: NextRequest): Promise<any> { try { return await req
 type Ctx = { params: Promise<{ path?: string[] }> };
 
 // ── GET /api/tablet/state — everything the tablet floor needs in one call ─────
-export async function GET(_req: NextRequest, ctx: Ctx) {
+export async function GET(req: NextRequest, ctx: Ctx) {
+  const denied = await gate(req); if (denied) return denied;
   try {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "state") {
@@ -54,6 +62,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 
 // ── POST: place order / attend call / approve member / open session ──────────
 export async function POST(req: NextRequest, ctx: Ctx) {
+  const denied = await gate(req); if (denied) return denied;
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
