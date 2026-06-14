@@ -801,6 +801,66 @@ function orderCardHtml(o, freed = false) {
   </div>`;
 }
 
+// mergedOrderCardHtml: build ONE card for a whole group of orders that belong
+// together (same session / same table visit) — every dish from every order in one
+// combined list with a SINGLE bill (owner: merge the orders, one bill). The
+// separate order rows still exist underneath as the record. Per-order accept/serve/
+// pay become session-level (they reuse the table-wide helpers).
+function mergedOrderCardHtml(g) {
+  const o0 = g[0];
+  const tnum = (o0.table_number || "").trim();
+  const sessKey = o0.session_id || o0.id; // group key for delete-all
+  const live = g.filter((o) => o.status !== "cancelled");
+  const items = g.flatMap((o) => (o.items || []).map((i) => `<div class="ord-line"><span>${esc(i.title)}${dishNoTag(i.title)} <b>×${esc(i.qty)}</b>${itemDetailLine(i)}</span><span>${esc(i.price)}</span></div>`)).join("");
+  const total = g.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
+  const disc = g.reduce((s, o) => s + (Number(o.discount) || 0), 0);
+  const allergies = [...new Set(g.flatMap((o) => o.allergies || []))];
+  const anyReceived = g.some((o) => o.status === "received");
+  const anyPreparing = g.some((o) => o.status === "preparing");
+  const paid = live.length > 0 && live.every((o) => o.payment_status === "paid");
+  const anyUnpaid = live.some((o) => o.payment_status !== "paid");
+  const cls = anyReceived ? "received" : anyPreparing ? "preparing" : "served";
+  const label = anyReceived ? "New order" : anyPreparing ? "Preparing" : "Served";
+  const when = o0.created_at ? new Date(o0.created_at).toLocaleString() : "";
+  const kots = g.map((o) => o.kot_no).filter((x) => x != null);
+  // Stage action: accept the whole table, or serve the whole table.
+  let stage = "";
+  if (anyReceived) stage = `<button class="ord-btn accept" data-sess-accept="${esc(sessKey)}">✓ Accept &amp; Prepare</button>`;
+  else if (anyPreparing) stage = `<button class="ord-btn serve" data-sess-serve="${esc(sessKey)}">🍽️ Mark Served</button>`;
+  const payBtn = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}">💳 Mark paid</button>` : "";
+  const tableDue = live.filter((o) => o.payment_status !== "paid").reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
+  const freeBtn = (tnum && paid)
+    ? (tableDue === 0 ? `<button class="ord-btn free-table" data-free-table="${esc(tnum)}">🪑 Free table ${esc(tnum)}</button>` : "")
+    : "";
+  return `<div class="card ord-card ord-${cls} ${paid ? "is-paid" : ""}">
+    <div class="ord-top">
+      ${kots.length ? `<span class="kot-chip" title="Kitchen tickets">#${esc(kots[0])}${kots.length > 1 ? ` +${kots.length - 1}` : ""}</span>` : ""}
+      <b>${tnum ? "Table " + esc(tnum) : "Walk-in / no table"}</b>
+      <span class="ord-pill ${cls}">${label}</span>
+      <span class="pay-pill ${paid ? "paid" : "pending"}">${paid ? "💳 Paid" : "⏳ Unpaid"}</span>
+      <button class="ord-del" data-sess-del="${esc(sessKey)}" title="Delete this whole bill">🗑</button>
+    </div>
+    <small class="ord-when">${esc(when)}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
+    <div class="ord-items">${items}</div>
+    ${allergies.length ? `<div class="ord-allergy">⚠ Avoid: ${allergies.map(esc).join(", ")}</div>` : ""}
+    ${disc > 0 ? `<div class="ord-disc">Discount<span>− ${inr(disc)}</span></div>` : ""}
+    <div class="ord-total"><span>Total</span><span>${inr(total)}</span></div>
+    <div class="ord-actions">${payBtn}${stage}${freeBtn}</div>
+  </div>`;
+}
+
+// Group orders that belong together: same session_id → one bill. An order with no
+// session_id stands alone (its own id is the key). Returns an array of groups.
+function groupOrdersBySession(orders) {
+  const map = new Map();
+  orders.forEach((o) => {
+    const key = o.session_id || ("solo:" + o.id);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(o);
+  });
+  return [...map.values()];
+}
+
 // Pending waiter calls shown at the top of the Orders tab.
 function callsHtml() {
   const calls = (state.data.calls || []).filter((c) => !c.resolved);
@@ -876,20 +936,17 @@ function ordersHtml() {
 // bulk-select + "money owed" banner that staff rely on.
 function ordersLiveHtml(live) {
   if (!live.length) return `<div class="empty">No active orders right now. Orders placed from the menu show up here.</div>`;
-  const orders = [...live].sort((a, b) =>
-    (String(a.table_number || "").localeCompare(String(b.table_number || ""), undefined, { numeric: true }))
-    || ((STATUS_RANK[a.status] ?? 0) - (STATUS_RANK[b.status] ?? 0)));
-  const unpaid = live.filter((o) => o.payment_status !== "paid" && o.status !== "cancelled");
-  const pendingTotal = unpaid.reduce((s, o) => s + (parseFloat(o.total) || 0), 0);
-  const note = unpaid.length
-    ? `<div class="ord-note">⏳ <b>Pending bills:</b> ${unpaid.length} order${unpaid.length !== 1 ? "s" : ""} · ${inr(pendingTotal)} unpaid — mark each "Paid" once the guest settles up.</div>`
+  // MERGE: a table's orders (same session) show as ONE card with one bill. New
+  // session = new card. Groups are sorted by table number, newest order first.
+  const groups = groupOrdersBySession(live).sort((a, b) =>
+    String(a[0].table_number || "").localeCompare(String(b[0].table_number || ""), undefined, { numeric: true }));
+  // "Pending bills" banner counts SESSIONS (merged bills) still unpaid, not orders.
+  const unpaidGroups = groups.filter((g) => g.some((o) => o.status !== "cancelled" && o.payment_status !== "paid"));
+  const pendingTotal = unpaidGroups.reduce((s, g) => s + g.reduce((t, o) => t + ((o.status !== "cancelled" && o.payment_status !== "paid") ? (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0) : 0), 0), 0);
+  const note = unpaidGroups.length
+    ? `<div class="ord-note">⏳ <b>Pending bills:</b> ${unpaidGroups.length} bill${unpaidGroups.length !== 1 ? "s" : ""} · ${inr(pendingTotal)} unpaid — mark each "Paid" once the guest settles up.</div>`
     : "";
-  const bulk = `<div class="ord-bulk">
-      <label class="ord-check"><input type="checkbox" id="ordSelectAll"> Select all</label>
-      <span id="ordSelCount" class="sub"></span>
-      <button class="btn danger" id="ordDeleteSelected" disabled>Delete selected</button>
-    </div>`;
-  return note + bulk + `<div class="ord-grid">${orders.map((o) => orderCardHtml(o)).join("")}</div>`;
+  return note + `<div class="ord-grid">${groups.map((g) => mergedOrderCardHtml(g)).join("")}</div>`;
 }
 
 // PREVIOUS view: the bill records — freed/cleared orders AND cancelled orders,
@@ -1342,6 +1399,32 @@ function renderEditor() {
     ed.querySelectorAll(".ord-del[data-del]").forEach((btn) => {
       btn.onclick = async () => {
         if (await confirmDialog("Delete this order? It will be permanently removed.", "Delete")) deleteOrders([btn.dataset.del]);
+      };
+    });
+    // Merged session-card actions act on EVERY order in the group (one bill).
+    // The group is the orders sharing a session_id (or a single "solo:" order).
+    const ordersInGroup = (key) => (key || "").startsWith("solo:")
+      ? (state.data.orders || []).filter((o) => o.id === key.slice(5))
+      : (state.data.orders || []).filter((o) => o.session_id === key);
+    ed.querySelectorAll("[data-sess-accept]").forEach((btn) => {
+      btn.onclick = async () => { for (const o of ordersInGroup(btn.dataset.sessAccept).filter((x) => x.status === "received")) await acceptOrder(o.id); };
+    });
+    ed.querySelectorAll("[data-sess-serve]").forEach((btn) => {
+      btn.onclick = async () => { for (const o of ordersInGroup(btn.dataset.sessServe).filter((x) => x.status === "preparing")) await serveAllOrder(o.id); };
+    });
+    ed.querySelectorAll("[data-sess-pay]").forEach((btn) => {
+      btn.onclick = async () => {
+        const grp = ordersInGroup(btn.dataset.sessPay).filter((x) => x.status !== "cancelled" && x.payment_status !== "paid");
+        if (!grp.length) return;
+        if (!(await confirmDialog("Mark this whole bill PAID? Only confirm if the payment has actually been collected.", "Yes, payment done"))) return;
+        for (const o of grp) await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true });
+        toast("Bill marked paid 💳", "ok");
+      };
+    });
+    ed.querySelectorAll("[data-sess-del]").forEach((btn) => {
+      btn.onclick = async () => {
+        const ids = ordersInGroup(btn.dataset.sessDel).map((o) => o.id);
+        if (ids.length && await confirmDialog(`Delete this whole bill (${ids.length} order${ids.length > 1 ? "s" : ""})? Permanently removed.`, "Delete")) deleteOrders(ids);
       };
     });
     ed.querySelectorAll("[data-resolve]").forEach((btn) => {
