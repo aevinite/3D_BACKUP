@@ -3,9 +3,8 @@
 //   POST → set their own name/phone (first-login capture) and/or PIN.
 // Scoped to the cookie's user id, so a user can only edit themselves.
 import { NextRequest, NextResponse } from "next/server";
-import { userFromCookie, USER_COOKIE } from "@/lib/userAuth";
+import { userFromCookie, USER_COOKIE, hashSecret } from "@/lib/userAuth";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { sha256hex } from "@/lib/staffAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +25,7 @@ export async function POST(req: NextRequest) {
   if (body?.pin !== undefined) {
     const pin = String(body.pin || "").trim();
     if (!/^\d{4,8}$/.test(pin)) return NextResponse.json({ error: "PIN must be 4–8 digits." }, { status: 400 });
-    patch.pin_hash = await sha256hex(pin);
+    patch.pin_hash = await hashSecret(pin); // salted, slow hash (same as passwords)
   }
   if (!Object.keys(patch).length) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   await sb.from("staff_users").update(patch).eq("id", u.id);
