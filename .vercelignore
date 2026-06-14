@@ -1,3 +1,9 @@
-# The menu editor is a PRIVATE local tool. It must never be deployed — it uses
-# the Supabase service-role key. Keep it out of the Vercel build entirely.
-editor
+# The OLD standalone menu editor (a root-level `editor/` folder using the
+# service-role key) must never be deployed. It has since been deleted, but we keep
+# this rule ANCHORED to the repo root (`/editor`) in case it ever reappears.
+#
+# CRITICAL: the leading slash is REQUIRED. An unanchored `editor` matches ANYTHING
+# named editor anywhere — including `app/editor`, `app/api/editor` and
+# `public/panels/editor` (the manager panel), which silently 404'd the manager
+# panel on every Vercel deploy until this was anchored.
+/editor
