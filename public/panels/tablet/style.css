@@ -231,6 +231,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .ordtotal { font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; }
 .iline { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #2a2114; }
 .iline:last-child { border-bottom: 0; }
+/* dashed gap between each source order inside one merged bill (matches manager) */
+.ord-sep { height: 0; border-top: 1px dashed color-mix(in srgb, var(--line) 80%, var(--gold)); margin: 10px 4px; }
 .iqty { font-weight: 800; color: var(--gold); min-width: 26px; }
 .inm { flex: 1; min-width: 0; font-size: 14px; }
 /* per-dish line price, sits between the name and the status pill */

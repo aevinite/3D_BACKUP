@@ -212,40 +212,34 @@ function renderPanel() {
 
   // Each order is a card: KOT chip, time, "via app" badge for guest/phone orders,
   // every dish with a tappable status pill, and an Accept button when it's new.
-  const orderCards = os.map((o, oi) => {
+  // One dish row: qty · name · price · status badge · Serve button, with per-item
+  // allergens (the order-wide "avoid in all" distributed onto each item; no banner).
+  const dishRowHtml = (r, o) => {
+    const opt = (r.options && r.options.length) ? `<div class="iopt">${esc(r.options.map((x) => x.label || x).join(" · "))}</div>` : "";
+    const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
+    const lineRem = [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...orderAllergies])];
+    const rem = lineRem.length ? `<div class="irem">no ${esc(lineRem.join(", "))}</div>` : "";
+    const note = r.note ? `<div class="iopt">“${esc(r.note)}”</div>` : "";
+    const priceTag = r.price > 0 ? `<span class="iprice">${inr(r.price * r.qty)}</span>` : "";
+    const statusBadge = `<span class="ist ${r.status}">${STATUS_WORD[r.status] || r.status}</span>`;
+    const serveBtn = (r.fromDb && (r.status === "preparing" || r.status === "ready"))
+      ? `<button class="ist-serve" data-serve="${esc(r.id)}" data-cur="${esc(r.status)}">✓ Serve</button>` : "";
+    return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}</div>`;
+  };
+  // MERGED like the manager: un-accepted orders stay SEPARATE (each with its own
+  // Accept); accepted orders fold into ONE combined list with a dashed separator
+  // between each source order — the single bill lives in the footer (owner, 2026-06-14).
+  const newOrdersT = os.filter((o) => o.status === "received");
+  const liveOrdersT = os.filter((o) => o.status !== "received" && o.status !== "cancelled");
+  const newCards = newOrdersT.map((o) => {
     const when = o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-    const viaApp = !!o.member_id; // guest orders carry a member_id; staff-taken ones don't
-    const rows = dishRowsOf(o).map((r) => {
-      const opt = (r.options && r.options.length) ? `<div class="iopt">${esc(r.options.map((x) => x.label || x).join(" · "))}</div>` : "";
-      // Allergens shown PER ITEM (matches the manager): the dish's own removals PLUS
-      // the order-wide "avoid in all my dishes" distributed onto every item — so each
-      // dish shows its own "no dairy". No shared/common allergy banner.
-      const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
-      const lineRem = [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...orderAllergies])];
-      const rem = lineRem.length ? `<div class="irem">no ${esc(lineRem.join(", "))}</div>` : "";
-      const note = r.note ? `<div class="iopt">“${esc(r.note)}”</div>` : "";
-      // Show the dish's line price (unit × qty) — there's room on the row, so the
-      // waiter sees what each dish costs without opening anything.
-      const priceTag = r.price > 0 ? `<span class="iprice">${inr(r.price * r.qty)}</span>` : "";
-      // Three things on every row, side by side: the live STATUS badge, the PRICE,
-      // and (only for a cooking/ready dish) a separate "✓ Serve" button. The status
-      // badge is ALWAYS shown — the Serve button is in ADDITION to it, never instead.
-      const statusBadge = `<span class="ist ${r.status}">${STATUS_WORD[r.status] || r.status}</span>`;
-      const serveBtn = (r.fromDb && (r.status === "preparing" || r.status === "ready"))
-        ? `<button class="ist-serve" data-serve="${esc(r.id)}" data-cur="${esc(r.status)}">✓ Serve</button>` : "";
-      return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}</div>`;
-    }).join("");
-    // The waiter accepts EVERY new order now (owner, 2026-06-14): the kitchen no
-    // longer accepts on its own screen, so an order must be accepted here (or in
-    // the editor) before the kitchen starts cooking it.
-    const accept = (o.status === "received") ? `<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button>` : "";
-    // No shared allergy banner — allergens are shown per item above (matches manager).
-    return `<div class="ord">
-      <div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">Order ${oi + 1}${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}</span><span class="ordtotal">${inr(o.total)}</span></div>
-      ${rows || `<div class="iline muted">No items.</div>`}
-      ${accept}
-    </div>`;
+    const viaApp = !!o.member_id;
+    const rows = dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("");
+    return `<div class="ord"><div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">New order${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}</span></div>${rows || `<div class="iline muted">No items.</div>`}<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
   }).join("");
+  const mergedDishes = liveOrdersT.map((o, i) => (i > 0 ? `<div class="ord-sep" aria-hidden="true"></div>` : "") + dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("")).join("");
+  const mergedCard = liveOrdersT.length ? `<div class="ord">${mergedDishes}</div>` : "";
+  const orderCards = newCards + mergedCard;
 
   const callRows = calls.map((c) => `<div class="row"><span>🔔 ${esc(c.note || "Waiter call")}</span><button class="btn small primary" data-attend="${esc(c.id)}">Done</button></div>`).join("");
 
