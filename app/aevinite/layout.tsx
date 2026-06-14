@@ -9,6 +9,6 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const store = await cookies();
   const ok = await tokenIsValid(store.get(AUTH_COOKIE)?.value);
-  if (!ok) redirect("/staff-login?next=/admin");
+  if (!ok) redirect("/staff-login?next=/aevinite");
   return <>{children}</>;
 }

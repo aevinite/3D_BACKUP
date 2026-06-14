@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from "react";
 
 // The panels you can jump to. Order matters — admin first (home).
 const PANELS = [
-  { href: "/admin", label: "Admin", icon: "🛠️" },
+  { href: "/aevinite", label: "Admin", icon: "🛠️" },
   { href: "/menu", label: "Menu", icon: "🍽️" },
   { href: "/manager", label: "Manager", icon: "✏️" },
   { href: "/kitchen", label: "Kitchen", icon: "👨‍🍳" },

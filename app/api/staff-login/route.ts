@@ -9,9 +9,9 @@ import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, adminPassword } from "@/lib/staffA
 export async function POST(req: NextRequest) {
   const form = await req.formData().catch(() => null);
   const password = String(form?.get("password") || "");
-  const rawNext = String(form?.get("next") || "/admin");
+  const rawNext = String(form?.get("next") || "/aevinite");
   // Only allow same-site relative paths as the redirect target (no open redirect).
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/admin";
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/aevinite";
 
   const expected = adminPassword();
   if (!expected || password !== expected) {

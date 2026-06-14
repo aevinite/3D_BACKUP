@@ -8,7 +8,7 @@ export default async function StaffLogin({
 }: {
   searchParams: Promise<{ bad?: string; next?: string }>;
 }) {
-  const { bad, next = "/admin" } = await searchParams;
+  const { bad, next = "/aevinite" } = await searchParams;
   return (
     <main style={{ margin: 0, minHeight: "100vh", display: "grid", placeItems: "center", background: "#0b1220", color: "#dbe7ff", fontFamily: "system-ui, sans-serif" }}>
       <form
