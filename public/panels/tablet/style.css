@@ -243,6 +243,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .ist-serve { background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; font-weight: 800;
   font-size: 12px; padding: 7px 13px; border: 0; border-radius: 9px; cursor: pointer; white-space: nowrap; }
 .ist-serve:hover { filter: brightness(1.07); }
+/* top-of-orders "Serve all" — full-width green action, matches the Serve buttons */
+.serve-all-btn { display: block; width: 100%; margin: 0 0 10px; background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; font-weight: 800; font-size: 14px; text-align: center; padding: 11px; border: 0; border-radius: 11px; cursor: pointer; }
+.serve-all-btn:hover { filter: brightness(1.06); }
 .oallergy { margin: 0 12px; margin-top: 10px; background: rgba(239,68,68,.14); border: 1px solid rgba(239,68,68,.5); color: #ff8a8a; font-weight: 800; font-size: 12px; padding: 7px 10px; border-radius: 9px; letter-spacing: .03em; }
 .accept { margin: 10px 12px; display: block; width: calc(100% - 24px); background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; font-weight: 800; text-align: center; padding: 11px; border-radius: 10px; font-size: 13.5px; border: 0; cursor: pointer; }
 

@@ -226,16 +226,13 @@ function renderPanel() {
       // Show the dish's line price (unit × qty) — there's room on the row, so the
       // waiter sees what each dish costs without opening anything.
       const priceTag = r.price > 0 ? `<span class="iprice">${inr(r.price * r.qty)}</span>` : "";
-      // Explicit, obvious SERVE button on any cooking/ready dish (the waiter taps it
-      // to serve directly — kitchen owns "ready"). Served shows a static badge; a
-      // not-yet-accepted ("received") dish shows "new" (accept the order first).
-      let statusEl;
-      if (r.fromDb && (r.status === "preparing" || r.status === "ready")) {
-        statusEl = `<button class="ist-serve" data-serve="${esc(r.id)}" data-cur="${esc(r.status)}">✓ Serve</button>`;
-      } else {
-        statusEl = `<span class="ist ${r.status}">${STATUS_WORD[r.status] || r.status}</span>`;
-      }
-      return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}${statusEl}</div>`;
+      // Three things on every row, side by side: the live STATUS badge, the PRICE,
+      // and (only for a cooking/ready dish) a separate "✓ Serve" button. The status
+      // badge is ALWAYS shown — the Serve button is in ADDITION to it, never instead.
+      const statusBadge = `<span class="ist ${r.status}">${STATUS_WORD[r.status] || r.status}</span>`;
+      const serveBtn = (r.fromDb && (r.status === "preparing" || r.status === "ready"))
+        ? `<button class="ist-serve" data-serve="${esc(r.id)}" data-cur="${esc(r.status)}">✓ Serve</button>` : "";
+      return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}</div>`;
     }).join("");
     // The waiter accepts EVERY new order now (owner, 2026-06-14): the kitchen no
     // longer accepts on its own screen, so an order must be accepted here (or in
@@ -281,7 +278,7 @@ function renderPanel() {
       ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
       ${callRows ? `<div class="sec"><h3>Calls</h3>${callRows}</div>` : ""}
       ${members.length ? `<div class="sec"><h3>Party</h3>${partyRows}</div>` : ""}
-      <div class="sec"><h3>Orders</h3>${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}</div>
+      <div class="sec"><h3>Orders</h3>${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}</div>
     </div>
     <div class="dacts">
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
@@ -302,6 +299,11 @@ function renderPanel() {
   document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => act(() => api("POST", `/orders/${b.dataset.accept}/accept`))));
   // Accept ALL un-accepted orders on the table in one tap.
   document.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () => act(async () => { const recv = ordersOf(b.dataset.acceptAll).filter((o) => o.status === "received"); for (const o of recv) await api("POST", `/orders/${o.id}/accept`); })));
+  // Serve ALL accepted-but-unserved dishes on the table in one tap.
+  document.querySelectorAll("[data-serve-all]").forEach((b) => (b.onclick = () => act(async () => {
+    const orders = ordersOf(b.dataset.serveAll).filter((o) => o.status !== "received" && o.status !== "cancelled");
+    for (const o of orders) for (const r of dishRowsOf(o)) if (r.fromDb && r.status !== "served") await api("POST", `/items/${r.id}/status`, { status: "served" });
+  })));
   // Per-dish advance: optimistically flip the pill, then persist + reconcile.
   document.querySelectorAll(".ist.tap[data-item]").forEach((el) => (el.onclick = () => advanceDish(el.dataset.item, el.dataset.cur)));
   // Explicit "✓ Serve" button on each cooking/ready dish → serves it directly

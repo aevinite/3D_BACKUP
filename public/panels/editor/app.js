@@ -2000,8 +2000,8 @@ function orderItemRows(o) {
   const rows = itemsForOrder(o.id);
   // Carry options/removed/note through so the table panel can show the full
   // customization (what the guest chose, what to leave out) — not just the name.
-  if (rows.length) return rows.map((it) => ({ kind: "session", id: it.id, title: it.title, qty: it.qty, status: it.status, options: it.options, removed: it.removed, note: it.note }));
-  return (o.items || []).map((it, idx) => ({ kind: "legacy", orderId: o.id, idx, title: it.title, qty: it.qty, status: it.status || "received", options: it.options, removed: it.removed, note: it.note }));
+  if (rows.length) return rows.map((it) => ({ kind: "session", id: it.id, title: it.title, qty: it.qty, status: it.status, options: it.options, removed: it.removed, note: it.note, price: Number(it.unit_price) || 0 }));
+  return (o.items || []).map((it, idx) => ({ kind: "legacy", orderId: o.id, idx, title: it.title, qty: it.qty, status: it.status || "received", options: it.options, removed: it.removed, note: it.note, price: Number(it.price) || 0 }));
 }
 
 // What the guest tapped, as an emoji for the tile / call list.
@@ -2324,7 +2324,9 @@ function itemRowHtml(row) {
   } else if (row.status === "served") {
     btn = `<span class="sx-served">✓ served</span>`;
   }
-  return `<div class="sx-item"><div class="sx-item-info"><span class="ord-pill ${esc(row.status)}">${esc(row.status)}</span> ${esc(row.title)}${dishNoTag(row.title)} ×${esc(row.qty)}${itemDetailLine(row)}</div><div>${btn}</div></div>`;
+  // Row shows three things together: STATUS pill (left), PRICE, then the Serve button.
+  const priceTag = row.price > 0 ? `<span class="sx-item-price">${inr(row.price * row.qty)}</span>` : "";
+  return `<div class="sx-item"><div class="sx-item-info"><span class="ord-pill ${esc(row.status)}">${esc(row.status)}</span> ${esc(row.title)}${dishNoTag(row.title)} ×${esc(row.qty)}${itemDetailLine(row)}</div>${priceTag}<div>${btn}</div></div>`;
 }
 
 // renderTablePanel: draw the big "do everything for this table" pop-up — guests,
@@ -2407,15 +2409,17 @@ function renderTablePanel() {
     }).join("");
     // A table-wide "serve everything" button when there are several orders with
     // anything still unserved (in addition to each order's own "Serve all").
-    const anyUnservedAll = os.some((o) => orderItemRows(o).some((r) => r.status !== "served"));
-    const serveAllOrdersBtn = (os.length > 1 && anyUnservedAll)
-      ? `<button class="btn small primary tp-serve-all-orders" data-serve-all-orders="${esc(t)}">✓ Serve ALL orders (${os.length})</button>`
+    // Top-level "Serve all" — serves every accepted-but-unserved dish on the table
+    // in one tap. Shown whenever anything accepted is still unserved.
+    const anyUnservedAccepted = os.some((o) => o.status !== "received" && o.status !== "cancelled" && orderItemRows(o).some((r) => r.status !== "served"));
+    const serveAllOrdersBtn = anyUnservedAccepted
+      ? `<button class="btn small primary tp-serve-all-orders" data-serve-all-orders="${esc(t)}">🍽️ Serve all</button>`
       : "";
     // When several orders are still un-accepted, a single "Accept all & prepare"
     // at the top accepts the whole table in one tap (each order also has its own Accept).
     const recvCount = os.filter((o) => o.status === "received").length;
     const acceptAllBtn = (recvCount > 1) ? `<button class="btn small primary tp-accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${recvCount})</button>` : "";
-    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${os.length}</span></div>${acceptAllBtn}${orderBlocks}${serveAllOrdersBtn}</div>`;
+    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${os.length}</span></div>${acceptAllBtn}${serveAllOrdersBtn}${orderBlocks}</div>`;
   }
 
   // Each active call (water, napkins, clean…) gets its own "Done" button so staff
