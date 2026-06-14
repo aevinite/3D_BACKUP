@@ -44,9 +44,6 @@ export default function OrderConfirmModal() {
   const [editSig, setEditSig] = useState<string | null>(null); // set when editing an existing line
   const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null); // which currency to show
   const [submitting, setSubmitting] = useState(false); // true briefly while saving, to block double-taps
-  // After a successful add, the dialog flips to a success step ("Added to your
-  // bill — View bill / Keep browsing") instead of vanishing silently.
-  const [added, setAdded] = useState<{ qty: number; title: string } | null>(null);
 
   // This useEffect runs once on mount: load the currency and start listening
   // for the "please open me" message (and the messages to close/refresh).
@@ -81,7 +78,6 @@ export default function OrderConfirmModal() {
       setNote(pre?.note || "");
       setQty(pre?.qty && pre.qty > 0 ? pre.qty : 1); // default to 1 when adding fresh
       setEditSig(detail.editSig || null); // non-null means "we're editing, not adding"
-      setAdded(null); // a fresh open always starts at the form, not the success step
       setOpen(true); // finally, show the popup
     };
     const onClose = () => setOpen(false); // a global "close everything" message
@@ -108,44 +104,8 @@ export default function OrderConfirmModal() {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  // The success step auto-dismisses after 4 seconds (same as tapping
-  // "Keep browsing") so a guest who walks away isn't left with a stuck dialog.
-  useEffect(() => {
-    if (!added) return;
-    const tm = setTimeout(() => { setAdded(null); setOpen(false); }, 4000);
-    return () => clearTimeout(tm);
-  }, [added]);
-
   // If we're not open (or there's no dish), draw nothing at all.
   if (!open || !item) return null;
-
-  // STEP 2 of 2: the success confirmation after a fresh add.
-  if (added) {
-    const closeDone = () => { setAdded(null); setOpen(false); };
-    return (
-      <>
-        <div className="overlay active" onClick={closeDone} />
-        <div role="dialog" aria-modal="true" aria-label="Added to your bill" className="order-confirm order-confirm-done">
-          <div className="done-check" aria-hidden="true">✓</div>
-          <h3 className="done-title">Added to your bill</h3>
-          <p className="done-line">{added.qty} × {added.title}</p>
-          <div className="order-confirm-actions done-actions">
-            {/* Reuses the modal's own button styles so the two steps match. */}
-            <button type="button" className="order-confirm-cancel" onClick={closeDone}>
-              Keep browsing
-            </button>
-            <button
-              type="button"
-              className="order-confirm-add"
-              onClick={() => { closeDone(); window.dispatchEvent(new Event("lfh:open-cart")); }}
-            >
-              View bill
-            </button>
-          </div>
-        </div>
-      </>
-    );
-  }
 
   // fmtDisp(): format a number that's ALREADY in the display currency.
   const fmtDisp = (n: number) => (currency ? formatAmount(n, currency) : `$${n.toFixed(2)}`);
@@ -238,9 +198,11 @@ export default function OrderConfirmModal() {
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `${item.title} updated`, kicker: "your order" } }));
         setOpen(false);
       } else {
-        // Fresh add: flip this dialog to its success step (step 2 of 2) so the
-        // guest gets unmistakable confirmation + a shortcut to the bill.
-        setAdded({ qty, title: item.title });
+        // Adding is meant to be frictionless: confirm with a quick toast and close
+        // immediately, so the guest can keep tapping dishes without dismissing a
+        // "View bill / Keep browsing" step every single time (owner, 2026-06-14).
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `${qty} × ${item.title} added`, subtitle: "tap the cart when you're ready", kicker: "your order", variant: "success", icon: "🛒" } }));
+        setOpen(false);
       }
     } catch (e) {
       console.error("Failed to add to cart", e);
