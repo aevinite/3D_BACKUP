@@ -962,7 +962,7 @@ export default function CartPanel() {
             {/* The bill summary: subtotal, tax, and grand total. */}
             <div className="bill-rows">
               <div className="bill-line"><span>Subtotal</span><span>{fmtDisp(subtotal)}</span></div>
-              <div className="bill-line"><span>Tax (5%)</span><span>{fmtDisp(tax)}</span></div>
+              <div className="bill-line"><span>GST (5%)</span><span>{fmtDisp(tax)}</span></div>
               <div className="bill-line grand"><span>Total</span><span>{fmtDisp(total)}</span></div>
             </div>
 

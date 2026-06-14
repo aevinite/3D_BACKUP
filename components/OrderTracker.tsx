@@ -165,7 +165,10 @@ export default function OrderTracker() {
         // Per-dish progress across the whole table — one status per dish — so the
         // strip can show "2 of 3 dishes served" + a segment per dish.
         const sItems = (st.items as Array<{ status: string }>) || [];
-        setDishProg({ served: sItems.filter((i) => i.status === "served").length, segs: sItems.map((i) => i.status) });
+        // The guest never sees "ready" — that's a staff-only stage. A ready dish
+        // shows as "preparing" (still cooking) to the customer until it's served
+        // (owner, 2026-06-14). The served count is unaffected.
+        setDishProg({ served: sItems.filter((i) => i.status === "served").length, segs: sItems.map((i) => (i.status === "ready" ? "preparing" : i.status)) });
         const sessOrders = (st.orders as Array<{ id: string; status: OrderStatus; total: number; items?: { title: string; qty: number }[]; created_at: string }>) || [];
         if (!sessOrders.length) return;
         const sess = st.session as { table_number?: string } | undefined;
@@ -224,7 +227,7 @@ export default function OrderTracker() {
   const order = (dismissing && dismissingOrderRef.current) || visible[0];
   if (!order) return null; // nothing live to show -> draw nothing
 
-  const c = COPY[order.status]; // the label/sub/icon text for this status
+  const c = COPY[order.status] || COPY.preparing; // label/sub/icon; fall back to "preparing" for any unexpected status (e.g. a staff-only "ready")
   const stepIndex = STEPS.indexOf(order.status); // which step of the progress bar we're on
   // When the table has SEVERAL live orders, the strip becomes a table-level
   // summary ("2 of 3 served") with one segment per order, instead of a single

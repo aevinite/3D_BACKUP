@@ -72,7 +72,9 @@ export default function SessionTableBill() {
         if (sess?.status !== "open") { setActive(false); return; }
         // Refresh everything we display from the server's answer.
         setTable(sess?.table_number || "");
-        setItems((st.items as SItem[]) || []);
+        // The guest never sees "ready" (a staff-only stage) — show a ready dish as
+        // "preparing" (still cooking) until it's actually served (owner, 2026-06-14).
+        setItems(((st.items as SItem[]) || []).map((i) => ((i.status as string) === "ready" ? { ...i, status: "preparing" } : i)));
         setBill((st.bill as SBill) || null);
         setMembers(Array.isArray(st.members) ? (st.members as unknown[]).length : 0);
       };
@@ -143,7 +145,7 @@ export default function SessionTableBill() {
           {bill && (
             <div className="bill-rows stb-bill">
               <div className="bill-line"><span>Subtotal</span><span>{show(Number(bill.subtotal) || 0)}</span></div>
-              <div className="bill-line"><span>Tax</span><span>{show(Number(bill.tax) || 0)}</span></div>
+              <div className="bill-line"><span>GST</span><span>{show(Number(bill.tax) || 0)}</span></div>
               <div className="bill-line grand"><span>Table total</span><span>{show(Number(bill.total) || 0)}</span></div>
             </div>
           )}
