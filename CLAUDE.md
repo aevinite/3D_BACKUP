@@ -64,9 +64,9 @@ the separate editor repo were DELETED (preserved in `reference/` + the
 
 Only **/admin** (+ `/api/admin/*`) is protected: `middleware.ts` redirects to
 `/staff-login` without a valid cookie; `/api/staff-login` stores a hashed
-`STAFF_PASSWORD` cookie (`lib/staffAuth.ts`). The guest menu AND the other staff
+`ADMIN_PASSWORD` cookie (`lib/staffAuth.ts`). The guest menu AND the other staff
 panels (/editor /kitchen /tablet) are currently OPEN (owner's call) — RE-LOCK them
-in the middleware matcher before any public hosting. `STAFF_PASSWORD` is in
+in the middleware matcher before any public hosting. `ADMIN_PASSWORD` is in
 `.env.local` (must also be set in the Vercel project env for the gate to work in prod).
 
 ## Feature switches (migration 035)
@@ -206,5 +206,5 @@ Single git repo → GitHub `aevinite/3D_BACKUP` (branch `main`); Vercel project
 menu + all four staff panels + admin. The old separate `editor/` repo
 (`INFINITESTUDIOIF/ADMIN_PANEL_3D_MENU`) is **retired/deleted**; ignore the old
 "push both repos" rule. Secrets live in `.env.local` (gitignored, never committed);
-local `*.bat` launchers are gitignored too. The admin gate needs `STAFF_PASSWORD`
+local `*.bat` launchers are gitignored too. The admin gate needs `ADMIN_PASSWORD`
 set in the Vercel project env to work in production.

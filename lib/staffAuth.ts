@@ -1,6 +1,6 @@
 // Shared helpers for the STAFF password gate (admin/editor/kitchen/tablet).
 //
-// One password (STAFF_PASSWORD in .env.local) protects every staff route. The
+// One password (ADMIN_PASSWORD in .env.local) protects every staff route. The
 // guest menu stays public. The login cookie stores a HASH of the password, never
 // the password itself, so a stolen cookie can't reveal it. sha256hex uses Web
 // Crypto so it works in BOTH the edge middleware and Node route handlers.
@@ -23,17 +23,17 @@ export function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-// The configured staff password (prefer STAFF_PASSWORD; accept the old per-panel
-// names too, in case they're set). Empty string = none configured.
-export function staffPassword(): string {
-  return process.env.STAFF_PASSWORD || process.env.ADMIN_PASSWORD || process.env.EDITOR_PASSWORD || "";
+// The configured admin password (prefer ADMIN_PASSWORD; STAFF_PASSWORD and the old
+// per-panel name are accepted as fallbacks for back-compat). Empty = none set.
+export function adminPassword(): string {
+  return process.env.ADMIN_PASSWORD || process.env.STAFF_PASSWORD || process.env.EDITOR_PASSWORD || "";
 }
 
 // True if the given cookie token matches the configured password's hash. Used by
 // the admin's server-side gate (layout + /api/admin routes), which run in the
 // Node runtime where env vars are reliably available (unlike edge middleware).
 export async function tokenIsValid(token?: string | null): Promise<boolean> {
-  const p = staffPassword();
+  const p = adminPassword();
   if (!p || !token) return false;
   return safeEqual(token, await sha256hex(p));
 }

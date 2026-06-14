@@ -1,10 +1,10 @@
-// POST /api/staff-login — check the staff password, set the login cookie, and
+// POST /api/staff-login — check the admin password, set the login cookie, and
 // redirect back to where the user was headed. Public (not behind the gate) so
 // login is possible. Stores a HASH of the password in an HttpOnly cookie, plus a
 // readable flag cookie the UI uses to show the admin switcher.
 
 import { NextRequest, NextResponse } from "next/server";
-import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, staffPassword } from "@/lib/staffAuth";
+import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, adminPassword } from "@/lib/staffAuth";
 
 export async function POST(req: NextRequest) {
   const form = await req.formData().catch(() => null);
@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   // Only allow same-site relative paths as the redirect target (no open redirect).
   const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/admin";
 
-  const expected = staffPassword();
+  const expected = adminPassword();
   if (!expected || password !== expected) {
     return NextResponse.redirect(new URL(`/staff-login?bad=1&next=${encodeURIComponent(next)}`, req.url), 303);
   }

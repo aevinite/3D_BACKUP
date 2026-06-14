@@ -26,7 +26,7 @@ const PBKDF2_ITERS = 120_000;                   // slow-hash work factor
 // The HMAC signing key for cookies. Prefer a dedicated SESSION_SECRET; fall back
 // to the admin password so the gate still works if it isn't set separately.
 const SECRET = () =>
-  process.env.SESSION_SECRET || process.env.STAFF_PASSWORD || process.env.ADMIN_PASSWORD || "lfh-dev-secret";
+  process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || process.env.STAFF_PASSWORD || "lfh-dev-secret";
 
 export type StaffUser = {
   id: string; username: string; role: Role;
