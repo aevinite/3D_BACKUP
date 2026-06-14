@@ -17,6 +17,7 @@ import MiniCart from "@/components/MiniCart";
 import CartPanel from "@/components/CartPanel";
 import ToastHost from "@/components/ToastHost";
 import SessionGate from "@/components/SessionGate";
+import RealtimeProvider from "@/components/RealtimeProvider";
 import SessionOwner from "@/components/SessionOwner";
 import SessionCartSync from "@/components/SessionCartSync";
 import SessionStatusWidget from "@/components/SessionStatusWidget";
@@ -30,6 +31,7 @@ export default function GuestChrome() {
   if (isStaff) return null;
   return (
     <>
+      <RealtimeProvider />
       <ModelToastHost />
       <OrderConfirmModal />
       <OrderTracker />
