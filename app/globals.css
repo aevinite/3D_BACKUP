@@ -450,13 +450,13 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 /* Slim, themed scrollbars EVERYWHERE (replaces the chunky default OS scrollbar,
    e.g. on the cart / bill panel). The more-specific rules above for #main-scroll,
    .cat-scroller, etc. still win where they're set. */
-* { scrollbar-width: thin; scrollbar-color: rgba(212,165,116,0.40) transparent; }
-*::-webkit-scrollbar { width: 8px; height: 8px; }
+* { scrollbar-width: thin; scrollbar-color: rgba(212,165,116,0.35) transparent; }
+*::-webkit-scrollbar { width: 12px; height: 12px; }
 *::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: rgba(212,165,116,0.40); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
-*::-webkit-scrollbar-thumb:hover { background: rgba(212,165,116,0.70); }
-[data-theme="light"] * { scrollbar-color: rgba(139,90,43,0.45) transparent; }
-[data-theme="light"] *::-webkit-scrollbar-thumb { background: rgba(139,90,43,0.45); border: 2px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-thumb { background: rgba(212,165,116,0.35); border: 3px solid transparent; border-radius: 999px; background-clip: padding-box; min-height: 40px; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(212,165,116,0.60); background-clip: padding-box; }
+[data-theme="light"] * { scrollbar-color: rgba(139,90,43,0.40) transparent; }
+[data-theme="light"] *::-webkit-scrollbar-thumb { background: rgba(139,90,43,0.40); border: 3px solid transparent; background-clip: padding-box; }
 
 /* --- HERO --- */
 .hero { position: relative; width: 100%; padding: 30px 20px; text-align: center; }
