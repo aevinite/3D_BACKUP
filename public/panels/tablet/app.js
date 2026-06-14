@@ -283,7 +283,20 @@ function renderPanel() {
   };
   const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
     const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
-    if (await confirmDialog(`Close table ${t} and free it?${warn}`, "Close table")) act(() => api("POST", `/sessions/${s.id}/close`));
+    if (!(await confirmDialog(`Close table ${t} and free it?${warn}`, "Close table"))) return;
+    try {
+      await api("POST", `/sessions/${s.id}/close`);
+      await load(); if (!state.ordering) renderPanel();
+    } catch (e) {
+      // Server blocks closing while money is owed — offer an explicit override.
+      if (/owes money/i.test(String(e && e.message))) {
+        if (await confirmDialog(`Table ${t} still OWES ${inr(a.due)}. Close anyway? (recorded in the log)`, "Close anyway")) {
+          act(() => api("POST", `/sessions/${s.id}/close`, { force: true }));
+        }
+        return;
+      }
+      toast("Failed: " + e.message, false);
+    }
   };
   const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
   $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel(); };

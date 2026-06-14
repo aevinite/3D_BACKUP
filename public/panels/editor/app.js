@@ -1749,31 +1749,24 @@ async function closeAllTables() {
     },
   }, 8000);
 }
-// closeSession: end a table's session (after confirming).
-async function closeSession(id) {
-  if (!(await confirmDialog("Close this session? Guests at this table can no longer order or call until it's reopened.", "Close session"))) return;
-  // Which table is this? We archive its orders too, so closing clears the floor.
-  const sess = (state.board.sessions || []).find((s) => s.id === id);
-  const t = sess ? String(sess.table_number).trim() : null;
+// closeSession: end a table's session. The SERVER now scopes the order cleanup to
+// this session and archives them (no client-side loop needed), and it BLOCKS the
+// close while money is owed — so we offer an explicit "close anyway" override.
+async function closeSession(id, force) {
+  if (!force && !(await confirmDialog("Close this session? Guests at this table can no longer order or call until it's reopened.", "Close session"))) return;
   try {
-    await api("POST", "/sessions/" + id + "/close");
-    // Closing the table clears its orders OFF the floor. UNFINISHED orders
-    // (received/preparing) are CANCELLED — the meal's over, they won't be made,
-    // and the guest's app then shows "Order cancelled". Already-SERVED orders are
-    // kept as completed bills. Either way they're archived → Previous orders, and
-    // the tile goes back to Free (the bug was a closed table still showing them).
-    if (t) {
-      const live = (state.data.orders || []).filter((o) => !o.archived && (o.table_number || "").trim() === t);
-      for (const o of live) {
-        const patch = o.status === "served" ? { archived: true } : { status: "cancelled", archived: true };
-        await api("PATCH", "/orders/" + o.id, patch);
-        o.archived = true; if (o.status !== "served") o.status = "cancelled";
-      }
-    }
+    await api("POST", "/sessions/" + id + "/close", force ? { force: true } : undefined);
     state.openSess = null; document.querySelector(".sx-modal-overlay")?.remove();
     await loadSessions();
     toast("Table closed — bill moved to Previous", "ok");
-  } catch (e) { toast("Could not close: " + e.message, "err"); }
+  } catch (e) {
+    // Server refuses to close a table that still owes money — offer the override.
+    if (/owes money/i.test(String(e && e.message))) {
+      if (await confirmDialog("This table still OWES money. Close anyway? The unpaid bill is recorded in the log.", "Close anyway")) return closeSession(id, true);
+      return;
+    }
+    toast("Could not close: " + e.message, "err");
+  }
 }
 // setSessAutoApprove: turn on/off "let new joiners in automatically" for a table.
 async function setSessAutoApprove(id, value) {

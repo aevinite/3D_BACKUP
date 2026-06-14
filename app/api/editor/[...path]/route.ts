@@ -296,6 +296,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // sessions/:id/close | auto-approve | shift
     if (a === "sessions" && c === "close") {
+      // Block closing while money is still owed — unless an explicit override.
+      const owed0 = must(await sb.from("orders").select("id")
+        .eq("session_id", b).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid").limit(1));
+      if (owed0.length && !(body && body.force === true)) {
+        return err("This table still owes money — settle the bill, or close anyway.", 409);
+      }
       const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", b).select());
       const sess = row[0];
       if (sess) {

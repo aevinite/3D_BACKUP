@@ -211,6 +211,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // sessions/:id/close — free the table (end the dining session). Mirrors the
     // editor's close: mark the session closed; the floor immediately shows it free.
     if (a === "sessions" && c === "close") {
+      // Block closing while money is still owed — unless an explicit override.
+      const owed0 = must(await sb.from("orders").select("id")
+        .eq("session_id", b).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid").limit(1));
+      if (owed0.length && !(body && body.force === true)) {
+        return err("This table still owes money — take payment, or close anyway.", 409);
+      }
       const sess = (must(await sb.from("sessions").select("table_number").eq("id", b).limit(1)))[0];
       const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", b).select());
       // Log any unpaid money, then clean up THIS session's orders (mirrors the
