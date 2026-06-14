@@ -63,12 +63,12 @@ const rowsOf = (o) => {
 
 function ticketHtml(o) {
   const rows = rowsOf(o);
-  // Allergens avoided for the WHOLE order (the red banner). We hide these from the
-  // per-dish "NO x" so the kitchen doesn't see e.g. "NO og" on the espresso AND
-  // "ALLERGY: og" on the order — that duplicate was confusing (owner, 2026-06-14).
+  // NO common allergy banner anywhere (owner, 2026-06-14). The order-wide "avoid" is
+  // DISTRIBUTED onto every item, so each dish shows its own "NO x" — matching the
+  // manager and tablet. Each item = its own removals ∪ the order-wide allergens.
   const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
   const lines = rows.map((r) => {
-    const lineRemoved = Array.isArray(r.removed) ? r.removed.filter((x) => !orderAllergies.includes(x)) : [];
+    const lineRemoved = [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...orderAllergies])];
     const extras = [
       ...(Array.isArray(r.options) ? r.options.map((op) => `+ ${op.label || op}`) : []),
       ...(lineRemoved.length ? [`NO ${lineRemoved.join(", NO ")}`] : []),
@@ -87,9 +87,6 @@ function ticketHtml(o) {
       <span class="ltitle">${esc(r.title)}${extras.length ? `<small>${esc(extras.join(" · "))}</small>` : ""}</span>
       ${tick}</div>`;
   }).join("");
-  // Allergies shout in red — the kitchen must never miss them.
-  const allergy = Array.isArray(o.allergies) && o.allergies.length
-    ? `<div class="allergy">⚠ ALLERGY: ${esc(o.allergies.join(", "))}</div>` : "";
   const rows2 = rowsOf(o);
   const allCooked = rows2.length > 0 && rows2.every((r) => r.status === "ready" || r.status === "served");
   // The kitchen does NOT accept orders (owner, 2026-06-14): a new order is shown
@@ -102,7 +99,7 @@ function ticketHtml(o) {
       : `<div class="awaiting">✓ ready — waiter serving</div>`);
   return `<div class="ticket st-${esc(o.status)}">
     <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span></div>
-    ${allergy}${lines}${action}</div>`;
+    ${lines}${action}</div>`;
 }
 
 // A kitchen ticket's column comes from its DISHES, not the coarse order status:

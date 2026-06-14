@@ -292,7 +292,6 @@ function renderPanel() {
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
       <button class="btn primary big" id="takeOrder">＋ Take order</button>
       ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
-      ${s && os.length ? `<button class="btn" id="moveOrder">↪ Move an order</button>` : ""}
       ${s && os.length && a.unpaid ? `<button class="btn pay" id="payBill">💳 Mark bill paid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
     </div>
@@ -319,7 +318,6 @@ function renderPanel() {
   document.querySelectorAll("[data-serve]").forEach((b) => (b.onclick = () => advanceDish(b.dataset.serve, b.dataset.cur)));
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
-  const mvb = $("#moveOrder"); if (mvb) mvb.onclick = () => renderMoveOrderPicker(t);
   const pb = $("#payBill"); if (pb) pb.onclick = async () => {
     if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
       act(() => api("POST", `/tables/${t}/pay`));

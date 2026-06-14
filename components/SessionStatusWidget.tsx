@@ -23,7 +23,7 @@ import { getSettings } from "@/lib/menu";
 // Lets us clear the "pre-fill this table" hint when you leave a table.
 import { setScannedTable } from "@/lib/table";
 // Helpers that talk to the server about the table's dining session.
-import { getStoredSession, clearStoredSession, getSessionState, leaveSession } from "@/lib/session";
+import { getStoredSession, storeSession, clearStoredSession, getSessionState, leaveSession } from "@/lib/session";
 // Publish the live "can this guest order?" answer so the Add-to-cart gate can read
 // it synchronously (this widget already polls the session, so we reuse that poll).
 import { setTableConnection } from "@/lib/tableConnection";
@@ -155,6 +155,15 @@ export default function SessionStatusWidget() {
         }
         // We're connected to an open table — remember that and refresh the display.
         wasActive.current = true;
+        // If staff SHIFTED us to a new table, our locally-stored table is now stale.
+        // Sync it and announce the change so realtime resubscribes to the NEW table's
+        // topic (otherwise we'd keep listening on the old table and miss updates).
+        const newTable = sess.table_number || s.table;
+        if (newTable && s.table !== newTable) {
+          storeSession({ ...s, table: newTable });
+          setScannedTable(newTable);
+          window.dispatchEvent(new Event("lfh:session-changed"));
+        }
         const m = state.member as { role: "owner" | "guest"; approved?: boolean } | undefined;
         setSt({
           table: sess.table_number || s.table,
