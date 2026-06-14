@@ -14,6 +14,15 @@ export async function sha256hex(s: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Constant-time string compare — avoids leaking how much of a hash/token matched
+// via timing. Both inputs are fixed-length hex hashes here.
+export function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 // The configured staff password (prefer STAFF_PASSWORD; accept the old per-panel
 // names too, in case they're set). Empty string = none configured.
 export function staffPassword(): string {
@@ -26,5 +35,5 @@ export function staffPassword(): string {
 export async function tokenIsValid(token?: string | null): Promise<boolean> {
   const p = staffPassword();
   if (!p || !token) return false;
-  return token === (await sha256hex(p));
+  return safeEqual(token, await sha256hex(p));
 }
