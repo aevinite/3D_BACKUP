@@ -1073,3 +1073,38 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   *, *::before, *::after { transition: none !important; animation: none !important; }
   .btn:hover, .ftile:hover, .list-item:hover, .card:hover { transform: none !important; }
 }
+
+/* ── Log retention dropdown + clickable rows + detail card ──────────────────── */
+/* The header's right-hand cluster: "Keep logs for …" control + Refresh button. */
+.ed-head-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+.ret-ctl {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--muted); white-space: nowrap;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 9px; padding: 6px 10px;
+}
+.ret-ctl i { opacity: .7; }
+.ret-select {
+  background: var(--bg); color: var(--text, inherit);
+  border: 1px solid var(--line); border-radius: 7px;
+  padding: 4px 6px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.ret-select:focus { outline: 2px solid color-mix(in srgb, var(--accent, #4f8cff) 55%, transparent); outline-offset: 1px; }
+
+/* Log rows are clickable → show a pointer + a gentle hover lift so it's obvious. */
+.oprow-click, .logrow-click { cursor: pointer; transition: border-color .12s, background .12s; }
+.oprow-click:hover, .logrow-click:hover { border-color: color-mix(in srgb, var(--accent, #4f8cff) 45%, var(--line)); background: color-mix(in srgb, var(--accent, #4f8cff) 6%, var(--panel)); }
+
+/* The click-to-open detail card (reuses .confirm-overlay / .confirm-box). */
+.confirm-box.logdetail { text-align: left; max-width: 460px; }
+.confirm-box.logdetail .confirm-msg { margin-bottom: 12px; font-size: 16px; }
+.ld-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 16px; }
+.ld-row { display: grid; grid-template-columns: 120px 1fr; gap: 12px; padding: 7px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.ld-row:last-child { border-bottom: none; }
+.ld-k { color: var(--muted); font-size: 12.5px; }
+.ld-v { font-size: 13.5px; font-weight: 600; word-break: break-word; }
+
+@media (max-width: 760px) {
+  .ed-head-actions { flex-wrap: wrap; gap: 8px; }
+  .ret-ctl { font-size: 12px; padding: 5px 8px; }
+}

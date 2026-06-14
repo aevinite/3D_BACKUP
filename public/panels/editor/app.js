@@ -1616,6 +1616,104 @@ function timeAgo(ts) {
   return Math.floor(d / 86400) + "d ago";
 }
 
+// whenLabel: the LOG timestamp rule the owner asked for. For the first 3 days it
+// reads relative ("just now", "2h ago", "yesterday", "2 days ago"); once a row
+// is 3+ days old it switches to the actual calendar date (e.g. "12 Jun 2026"),
+// so older entries are pinned to a real day, not a vague "47 days ago".
+function whenLabel(ts) {
+  if (!ts) return "";
+  const secs = (Date.now() - new Date(ts).getTime()) / 1000;
+  if (secs < 60) return "just now";
+  if (secs < 3600) return Math.floor(secs / 60) + "m ago";
+  if (secs < 86400) return Math.floor(secs / 3600) + "h ago";
+  const days = Math.floor(secs / 86400);
+  if (days < 3) return days === 1 ? "yesterday" : days + " days ago";
+  return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+// fullWhen: the exact date + time for the click-to-open detail card, e.g.
+// "Sat, 14 Jun 2026, 14:32". Shown in the log detail dialog.
+function fullWhen(ts) {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleString("en-GB", {
+    weekday: "short", day: "numeric", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  });
+}
+
+// ── Log retention control (the "Keep logs for …" dropdown) ───────────────────
+// The owner picks how long each log is kept; a once-a-day database job
+// (migration 053 — lfh_prune_logs) deletes anything older. It runs server-side
+// on its own, NEVER on page load, so opening the logs stays instant. Max 90 days
+// (3 months) and that's also the default. Bills are never affected.
+const RETENTION_OPTS = [
+  { d: 1, label: "1 day" },
+  { d: 2, label: "2 days" },
+  { d: 5, label: "5 days" },
+  { d: 7, label: "7 days" },
+  { d: 30, label: "1 month" },
+  { d: 90, label: "3 months" },
+];
+// Human labels for the operation-log action codes (shared by the table row and
+// the click-to-open detail card).
+const OP_ACTION_LABELS = {
+  order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
+  order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
+  table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",
+  call_attend: "Attended call", member_approve: "Approved guest", sold_out_on: "Marked sold-out", sold_out_off: "Back in stock",
+};
+// which: "oplog_retention_days" (operation log) or "custlog_retention_days" (customer log).
+function retentionControl(which) {
+  const cur = Number((state.data.settings || {})[which]) || 90;
+  const opts = RETENTION_OPTS
+    .map((o) => `<option value="${o.d}"${o.d === cur ? " selected" : ""}>${o.label}</option>`)
+    .join("");
+  return `<label class="ret-ctl" title="Logs older than this are deleted automatically by a once-a-day cleanup. Your bills are never touched.">
+      <i class="fas fa-clock-rotate-left"></i> Keep logs for
+      <select class="ret-select" data-ret="${esc(which)}">${opts}</select>
+    </label>`;
+}
+// Save a new retention choice. Sends ONLY this one field (a partial settings
+// upsert leaves every other setting untouched), then updates local state so the
+// dropdown stays put on the next redraw.
+async function saveRetention(which, val) {
+  const days = Math.min(Math.max(parseInt(val, 10) || 90, 1), 90);
+  try {
+    await api("POST", "/settings", { id: "site", [which]: days });
+    state.data.settings = { ...(state.data.settings || { id: "site" }), [which]: days };
+    const lbl = (RETENTION_OPTS.find((o) => o.d === days) || {}).label || days + " days";
+    toast("Saved — old logs auto-delete after " + lbl, "ok");
+  } catch (e) {
+    toast("Couldn't save retention: " + e.message, "err");
+  }
+}
+
+// logDetailDialog: the click-to-open card showing a single log row's FULL info —
+// exact date + time, who/what/where. `rows` is [{ label, value }]. Reuses the
+// confirm-overlay look so it matches every other dialog in the editor.
+function logDetailDialog(title, rows) {
+  const wrap = document.createElement("div");
+  wrap.className = "confirm-overlay";
+  const body = rows
+    .filter((r) => r && r.value != null && r.value !== "")
+    .map((r) => `<div class="ld-row"><span class="ld-k">${esc(r.label)}</span><span class="ld-v">${esc(r.value)}</span></div>`)
+    .join("");
+  wrap.innerHTML = `
+    <div class="confirm-box logdetail">
+      <div class="confirm-msg"><b>${esc(title)}</b></div>
+      <div class="ld-list">${body}</div>
+      <div class="confirm-actions"><button class="btn confirm-ok">Close</button></div>
+    </div>`;
+  document.body.appendChild(wrap);
+  requestAnimationFrame(() => wrap.classList.add("show"));
+  const close = () => { wrap.classList.remove("show"); setTimeout(() => wrap.remove(), 200); };
+  wrap.querySelector(".confirm-ok").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  document.addEventListener("keydown", function k(e) {
+    if (e.key === "Escape") { close(); document.removeEventListener("keydown", k); }
+  });
+}
+
 // Fetch the whole board in one call. `fromPoll` = silent (no error toast, and don't
 // stomp the editor while the owner is typing in an input).
 let lastBoardSig = ""; // last rendered board fingerprint — skip needless re-renders on poll
@@ -2524,8 +2622,8 @@ function logHtml() {
   (u.orders || []).forEach((o) => { if (o.member_id) orderCount[o.member_id] = (orderCount[o.member_id] || 0) + 1; });
   (u.calls || []).forEach((c) => { if (c.member_id) callCount[c.member_id] = (callCount[c.member_id] || 0) + 1; });
 
-  const head = `<div class="ed-head"><h2>Log <span class="sub">· who did what</span></h2><button class="btn" id="refreshLog">↻ Refresh</button></div>
-    <div class="ord-note">Every guest gets an automatic ID. <b>Role</b> shows who ran the table (👑 Head) vs a joiner (🤝 Partner); <b>Did</b> shows whether they ordered or just called a waiter. Use <b>Exit</b> to remove someone, or <b>Block</b> to stop a misbehaving guest (e.g. someone who calls a waiter but isn't here).</div>`;
+  const head = `<div class="ed-head"><h2>Log <span class="sub">· who did what</span></h2><div class="ed-head-actions">${retentionControl("custlog_retention_days")}<button class="btn" id="refreshLog">↻ Refresh</button></div></div>
+    <div class="ord-note">Every guest gets an automatic ID. <b>Role</b> shows who ran the table (👑 Head) vs a joiner (🤝 Partner); <b>Did</b> shows whether they ordered or just called a waiter. Use <b>Exit</b> to remove someone, or <b>Block</b> to stop a misbehaving guest (e.g. someone who calls a waiter but isn't here). <b>Click a row</b> for full details. <span class="lg-muted">This timer clears old guest-activity records only — your bills are kept.</span></div>`;
   const rows = members.length ? members.map((m) => {
     const table = m.session ? m.session.table_number : "—"; // which table they're at
     const open = m.session && m.session.status === "open"; // is that table's session still open?
@@ -2542,13 +2640,13 @@ function logHtml() {
     let acts = "";
     if (open && !m.removed) acts += `<button class="btn small" data-exit="${esc(m.id)}">Exit</button>`;
     if (!blocked) acts += `<button class="btn small danger" data-block-phone="${esc(m.phone || "")}" data-block-table="${esc(table)}">Block</button>`;
-    return `<div class="logrow">
+    return `<div class="logrow logrow-click" data-cust-detail="${esc(m.id)}">
         <div class="logcell"><b>${esc(m.name || (isHead ? "Head" : "Guest"))}</b><small>${esc(String(m.id).slice(0, 8))}</small></div>
         <div class="logcell">T${esc(table)}</div>
         <div class="logcell">${role}</div>
         <div class="logcell logdidcell">${did}</div>
         <div class="logcell"><span class="logstat logstat-${status.replace(/ /g, "-")}">${status}</span></div>
-        <div class="logcell"><small>${esc(timeAgo(m.joined_at))}</small></div>
+        <div class="logcell"><small>${esc(whenLabel(m.joined_at))}</small></div>
         <div class="logcell logacts">${acts}</div>
       </div>`;
   }).join("") : `<div class="sx-empty">No guests have joined a table yet.</div>`;
@@ -2562,15 +2660,10 @@ function logHtml() {
 // panel did what, where, and when). Fed by /oplog (the staff_actions table).
 function oplogHtml() {
   const rows = state.oplog || [];
-  const head = `<div class="ed-head"><h2>Operation log <span class="sub">· staff actions</span></h2><button class="btn" id="refreshOplog">↻ Refresh</button></div>
-    <div class="ord-note">Every staff action across the panels — which panel <b>and which device</b> did it, where, and when. Each device gets an automatic ID (shown as <b>#id</b>) until real staff login lands.</div>`;
+  const head = `<div class="ed-head"><h2>Operation log <span class="sub">· staff actions</span></h2><div class="ed-head-actions">${retentionControl("oplog_retention_days")}<button class="btn" id="refreshOplog">↻ Refresh</button></div></div>
+    <div class="ord-note">Every staff action across the panels — which panel <b>and which device</b> did it, where, and when. Each device gets an automatic ID (shown as <b>#id</b>) until real staff login lands. <b>Click any row</b> for its full date, time and details.</div>`;
   if (!rows.length) return head + `<div class="sx-empty">No staff actions logged yet — accept/serve an order, open/close a table, etc.</div>`;
-  const ACT = {
-    order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
-    order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
-    table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",
-    call_attend: "Attended call", member_approve: "Approved guest", sold_out_on: "Marked sold-out", sold_out_off: "Back in stock",
-  };
+  const ACT = OP_ACTION_LABELS;
   // Which staff devices are currently blocked → map device_id to its blocklist
   // row id (so we can offer Unblock). Loaded alongside the customer-log data.
   const blockedDev = {};
@@ -2591,12 +2684,12 @@ function oplogHtml() {
         ? `<span class="logstat logstat-blocked">blocked</span> <button class="btn small" data-unblock-dev="${esc(blockedDev[r.device_id])}">Unblock</button>`
         : `<button class="btn small danger" data-block-dev="${esc(r.device_id)}">Block</button>`;
     }
-    return `<div class="oprow${blockedDev[r.device_id] ? " op-blocked" : ""}">
+    return `<div class="oprow oprow-click${blockedDev[r.device_id] ? " op-blocked" : ""}" data-op-detail="${esc(r.id)}">
       <div class="opcell">${device}</div>
       <div class="opcell"><span class="op-panel op-${esc(r.panel)}">${esc(r.panel)}</span></div>
       <div class="opcell"><b>${esc(ACT[r.action] || r.action)}</b></div>
       <div class="opcell lg-muted">${where}</div>
-      <div class="opcell"><small>${esc(timeAgo(r.created_at))}</small></div>
+      <div class="opcell"><small>${esc(whenLabel(r.created_at))}</small></div>
       <div class="opcell opacts">${act}</div>
     </div>`;
   }).join("");
@@ -2622,6 +2715,49 @@ function bindLog() {
   // Switch between the Customer log and the Operation log.
   ed.querySelectorAll("[data-logview]").forEach((b) => (b.onclick = () => { state.logView = b.dataset.logview; if (state.logView === "operations") loadOplog(); else renderEditor(); }));
   const ro = document.getElementById("refreshOplog"); if (ro) ro.onclick = loadOplog;
+  // "Keep logs for …" dropdown (both logs) → save the new retention.
+  ed.querySelectorAll(".ret-select").forEach((s) => (s.onchange = () => saveRetention(s.dataset.ret, s.value)));
+  // Click a row to open its full detail (ignore clicks that landed on a button,
+  // e.g. Block/Unblock/Exit — those do their own thing).
+  ed.querySelectorAll("[data-op-detail]").forEach((row) => (row.onclick = (e) => { if (!e.target.closest("button")) showOpDetail(row.dataset.opDetail); }));
+  ed.querySelectorAll("[data-cust-detail]").forEach((row) => (row.onclick = (e) => { if (!e.target.closest("button")) showCustDetail(row.dataset.custDetail); }));
+}
+
+// showOpDetail: open the full-info card for one operation-log row.
+function showOpDetail(id) {
+  const r = (state.oplog || []).find((x) => x.id === id);
+  if (!r) return;
+  logDetailDialog("Operation log entry", [
+    { label: "Action", value: OP_ACTION_LABELS[r.action] || r.action },
+    { label: "Panel", value: r.panel },
+    { label: "Device", value: r.device_id ? "#" + r.device_id : "—" },
+    // The "who" slot — filled once staff login lands (migration 053 actor column).
+    { label: "By", value: r.actor || "— (no staff login yet, device only)" },
+    { label: "Table", value: r.table_number ? "Table " + r.table_number : "" },
+    { label: "Note", value: r.detail || "" },
+    { label: "Order id", value: r.order_id || "" },
+    { label: "When", value: fullWhen(r.created_at) },
+  ]);
+}
+
+// showCustDetail: open the full-info card for one customer-log (guest) row.
+function showCustDetail(id) {
+  const u = state.users || {};
+  const m = (u.members || []).find((x) => x.id === id);
+  if (!m) return;
+  const nOrders = (u.orders || []).filter((o) => o.member_id === id).length;
+  const nCalls = (u.calls || []).filter((c) => c.member_id === id).length;
+  const table = m.session ? m.session.table_number : "—";
+  logDetailDialog("Guest log entry", [
+    { label: "Guest", value: m.name || "(unnamed)" },
+    { label: "Guest id", value: m.id },
+    { label: "Table", value: "T" + table },
+    { label: "Role", value: m.role === "owner" ? "👑 Head" : "🤝 Partner" },
+    { label: "Phone", value: m.phone || "" },
+    { label: "Orders placed", value: String(nOrders) },
+    { label: "Waiter calls", value: String(nCalls) },
+    { label: "Joined", value: fullWhen(m.joined_at) },
+  ]);
 }
 
 // exitUser: remove a guest from their table (from the Log tab).

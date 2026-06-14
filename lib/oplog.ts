@@ -11,6 +11,11 @@ type Fields = {
   // WHICH device did it (the per-device cookie id). Read from the request by the
   // route handler and passed in, so the Operation log can name the exact tablet.
   device_id?: string | null;
+  // WHO did it — the staff member's name/id. Empty for now (no per-staff login
+  // yet). When the owner wires up login, pass the logged-in user's name here and
+  // it shows up in the Operation log automatically. See migration 053 (the
+  // staff_actions.actor column) — this is the ready "who" slot.
+  actor?: string | null;
 };
 
 export async function logAction(panel: Panel, action: string, fields: Fields = {}): Promise<void> {
@@ -22,6 +27,7 @@ export async function logAction(panel: Panel, action: string, fields: Fields = {
       order_id: fields.order_id ?? null,
       detail: fields.detail ?? null,
       device_id: fields.device_id ?? null,
+      actor: fields.actor ?? null,
     });
   } catch {
     /* never let logging break the real action */

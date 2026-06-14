@@ -423,6 +423,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           const n = Math.round(Number(body.geo_radius_m));
           body.geo_radius_m = Number.isFinite(n) ? Math.min(Math.max(n, 20), 5000) : 250;
         }
+        // Log retention (in days): clamp to 1..90. 90 = the "3 months" max the UI
+        // offers. The nightly cleanup job (migration 053) reads these each run.
+        for (const rk of ["oplog_retention_days", "custlog_retention_days"]) {
+          if (rk in body) {
+            const n = Math.round(Number(body[rk]));
+            body[rk] = Number.isFinite(n) ? Math.min(Math.max(n, 1), 90) : 90;
+          }
+        }
         if ("features" in body) {
           const f = body.features;
           body.features = f && typeof f === "object" && !Array.isArray(f)
