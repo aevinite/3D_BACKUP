@@ -3016,7 +3016,15 @@ async function pollOrders() {
 // repeats it every second so the floor and alerts stay near-real-time.
 function startOrderWatch() {
   pollOrders(); // sets the baseline immediately (no alert on first run)
-  setInterval(pollOrders, 1000); // near-real-time floor: requests/orders/calls show within ~1s
+  // Realtime: refresh the floor the instant an order/dish changes, instead of
+  // polling every second. Slow 60s timer is the backup if the WebSocket drops;
+  // if realtime didn't load, fall back to a gentle 2s poll.
+  if (window.LFH_RT) {
+    LFH_RT.start({ topics: ["ops"], onEvent: () => pollOrders() });
+    setInterval(pollOrders, 60000); // backup sync
+  } else {
+    setInterval(pollOrders, 2000); // fallback poll
+  }
 }
 
 // --- final wiring: connect the static page controls and start everything up ---

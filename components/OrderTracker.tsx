@@ -8,7 +8,7 @@ import { toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/for
 import {
   STEPS,
   STATUS_COPY as COPY,
-  POLL_MS,
+  RT_BACKUP_MS,
   SERVED_LINGER_MS,
   MAX_AGE_MS,
   type ActiveOrder,
@@ -128,11 +128,16 @@ export default function OrderTracker() {
       }
     };
     poll(); // check immediately on mount
-    const iv = setInterval(poll, POLL_MS); // then keep checking every POLL_MS milliseconds
+    // Realtime drives instant updates (via lfh:rt-tick); this slow timer is only a
+    // backup poll for when the WebSocket is asleep/dropped.
+    const iv = setInterval(poll, RT_BACKUP_MS);
+    const onTick = () => poll(); // a realtime breadcrumb for this table → refetch now
+    window.addEventListener("lfh:rt-tick", onTick);
     // Cleanup: mark cancelled and stop the timer when this effect tears down.
     return () => {
       cancelled = true;
       clearInterval(iv);
+      window.removeEventListener("lfh:rt-tick", onTick);
     };
   }, [orders.length]);
 
@@ -146,6 +151,7 @@ export default function OrderTracker() {
   useEffect(() => {
     let alive = true;
     let iv: ReturnType<typeof setInterval> | null = null;
+    let onTick: (() => void) | null = null;
     (async () => {
       let on = false;
       try { on = (await getSettings()).sessionsEnabled; } catch {}
@@ -184,9 +190,12 @@ export default function OrderTracker() {
         if (changed) { write(list); refresh(); broadcast(); }
       };
       pull();
-      iv = setInterval(pull, 3000);
+      // Realtime nudge drives the refetch; slow timer is just the backup.
+      iv = setInterval(pull, RT_BACKUP_MS);
+      onTick = () => pull();
+      window.addEventListener("lfh:rt-tick", onTick);
     })();
-    return () => { alive = false; if (iv) clearInterval(iv); };
+    return () => { alive = false; if (iv) clearInterval(iv); if (onTick) window.removeEventListener("lfh:rt-tick", onTick); };
   }, []);
 
   // Auto-hide a served/cancelled strip one minute after it finishes.

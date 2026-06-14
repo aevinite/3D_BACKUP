@@ -588,4 +588,12 @@ async function load() {
 }
 setInterval(() => ($("#clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })), 1000);
 load().catch((e) => toast("Can't reach the database: " + e.message, false));
-setInterval(() => load().catch(() => {}), 1000); // ~1s real-time (signature-diff means no wasted redraws)
+// Realtime: refetch only when something on the floor actually changes (instant),
+// instead of polling every second. A slow 60s timer is the backup if the
+// WebSocket drops; if realtime didn't load, fall back to a gentle 2s poll.
+if (window.LFH_RT) {
+  LFH_RT.start({ topics: ["ops"], onEvent: () => load().catch(() => {}) });
+  setInterval(() => load().catch(() => {}), 60000); // backup sync
+} else {
+  setInterval(() => load().catch(() => {}), 2000); // fallback poll
+}

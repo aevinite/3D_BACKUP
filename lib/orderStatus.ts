@@ -26,6 +26,10 @@ export const STATUS_COPY: Record<OrderStatus, { label: string; sub: string; icon
 // The localStorage key under which this device's in-progress orders are saved.
 export const ACTIVE_ORDERS_KEY = "lfh_active_orders";
 export const POLL_MS = 1500; // how often a guest re-checks their order's status (snappy near-real-time)
+// With Realtime ON, the guest refetches the instant a breadcrumb arrives (via the
+// `lfh:rt-tick` window event), so the timer below is only a slow safety-net poll
+// for when the WebSocket is asleep/dropped. (Was POLL_MS=1.5s of constant polling.)
+export const RT_BACKUP_MS = 60 * 1000;
 export const SERVED_LINGER_MS = 5 * 1000; // a served/cancelled order lingers 5s in the live view, then drops into Previous orders (becomes a past bill)
 export const MAX_AGE_MS = 3 * 60 * 60 * 1000; // stop following an order after 3h (3 hrs * 60 min * 60 sec * 1000 ms)
 
