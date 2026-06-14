@@ -233,7 +233,7 @@ function renderPanel() {
     // The waiter accepts EVERY new order now (owner, 2026-06-14): the kitchen no
     // longer accepts on its own screen, so an order must be accepted here (or in
     // the editor) before the kitchen starts cooking it.
-    const accept = (o.status === "received") ? `<button class="accept" data-accept="${esc(o.id)}">✓ Accept &amp; send to kitchen</button>` : "";
+    const accept = (o.status === "received") ? `<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button>` : "";
     // Allergies are safety-critical — show them as a loud banner on the order.
     const allergy = (o.allergies && o.allergies.length) ? `<div class="oallergy">⚠ ALLERGY — ${esc(o.allergies.join(", "))}</div>` : "";
     return `<div class="ord">
@@ -274,7 +274,7 @@ function renderPanel() {
       ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
       ${callRows ? `<div class="sec"><h3>Calls</h3>${callRows}</div>` : ""}
       ${members.length ? `<div class="sec"><h3>Party</h3>${partyRows}</div>` : ""}
-      <div class="sec"><h3>Orders</h3>${orderCards || `<div class="muted">No orders yet.</div>`}</div>
+      <div class="sec"><h3>Orders</h3>${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}</div>
     </div>
     <div class="dacts">
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
@@ -293,6 +293,8 @@ function renderPanel() {
   document.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.approve}/approve`))));
   document.querySelectorAll("[data-makehead]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.makehead}/make-head`))));
   document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => act(() => api("POST", `/orders/${b.dataset.accept}/accept`))));
+  // Accept ALL un-accepted orders on the table in one tap.
+  document.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () => act(async () => { const recv = ordersOf(b.dataset.acceptAll).filter((o) => o.status === "received"); for (const o of recv) await api("POST", `/orders/${o.id}/accept`); })));
   // Per-dish advance: optimistically flip the pill, then persist + reconcile.
   document.querySelectorAll(".ist.tap[data-item]").forEach((el) => (el.onclick = () => advanceDish(el.dataset.item, el.dataset.cur)));
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));

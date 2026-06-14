@@ -2393,7 +2393,7 @@ function renderTablePanel() {
       if (!accepted) {
         // whole-order accept first; dishes are listed but not yet individually actionable
         body = orderItemRows(o).map((r) => `<div class="sx-item"><div class="sx-item-info"><span class="ord-pill received">received</span> ${esc(r.title)}${dishNoTag(r.title)} ×${esc(r.qty)}${itemDetailLine(r)}</div></div>`).join("")
-          + `<button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept &amp; prepare order</button>`;
+          + `<button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept</button>`;
       } else {
         // accepted → serve each dish one at a time, or serve everything at once
         const rows = orderItemRows(o);
@@ -2411,7 +2411,11 @@ function renderTablePanel() {
     const serveAllOrdersBtn = (os.length > 1 && anyUnservedAll)
       ? `<button class="btn small primary tp-serve-all-orders" data-serve-all-orders="${esc(t)}">✓ Serve ALL orders (${os.length})</button>`
       : "";
-    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${os.length}</span></div>${orderBlocks}${serveAllOrdersBtn}</div>`;
+    // When several orders are still un-accepted, a single "Accept all & prepare"
+    // at the top accepts the whole table in one tap (each order also has its own Accept).
+    const recvCount = os.filter((o) => o.status === "received").length;
+    const acceptAllBtn = (recvCount > 1) ? `<button class="btn small primary tp-accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${recvCount})</button>` : "";
+    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${os.length}</span></div>${acceptAllBtn}${orderBlocks}${serveAllOrdersBtn}</div>`;
   }
 
   // Each active call (water, napkins, clean…) gets its own "Done" button so staff
@@ -2481,6 +2485,7 @@ function renderTablePanel() {
   wrap.querySelectorAll("[data-item-next]").forEach((b) => (b.onclick = () => itemStatus(b.dataset.itemNext, b.dataset.itemStatus)));
   wrap.querySelectorAll("[data-legacy-order]").forEach((b) => (b.onclick = () => legacyItemStatus(b.dataset.legacyOrder, b.dataset.legacyIdx, b.dataset.legacyStatus)));
   wrap.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => acceptOrder(b.dataset.accept)));
+  wrap.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () => acceptTableOrders(b.dataset.acceptAll)));
   wrap.querySelectorAll("[data-serveall]").forEach((b) => (b.onclick = () => serveAllOrder(b.dataset.serveall)));
   wrap.querySelectorAll("[data-serve-all-orders]").forEach((b) => (b.onclick = () => serveAllOrders(b.dataset.serveAllOrders)));
   wrap.querySelectorAll("[data-pay]").forEach((b) => (b.onclick = () => setOrderPayment(b.dataset.pay, b.dataset.paid !== "1")));
@@ -2523,20 +2528,20 @@ async function serveAllOrder(orderId) {
   try { await api("POST", "/orders/" + orderId + "/serve-all"); release(); await loadSessions(); toast("All items served", "ok"); }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
 }
-// Quick action: accept new orders on a table. If there's only ONE new order,
-// accept it in one tap. If there are SEVERAL, don't bulk-accept — open the detail
-// panel so staff can accept each order separately.
+// Quick action: accept ALL new orders on a table in one tap. Used by BOTH the
+// floor tile's Accept AND the detail's "Accept all & prepare" button — one tap
+// accepts the whole table (owner: never open the detail just to accept each).
 async function acceptTableOrders(t) {
   const recv = ordersForTable(t).filter((o) => o.status === "received");
-  if (recv.length > 1) { openTablePanel(t); return; } // multiple → accept each in the detail view
+  if (!recv.length) return;
   // OPTIMISTIC: tile flips to "Preparing" instantly, server told in background.
   recv.forEach((o) => { o.status = "preparing"; flipOrderItems(o, "received", "preparing"); opBegin(o.id); });
   floorOpsInFlight++;
-  loadSessions(true);
+  loadSessions(true); renderTablePanel();
   // release first, then refresh — see restartTable for why this order matters.
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; recv.forEach((o) => opEnd(o.id)); } };
-  try { for (const o of recv) await api("POST", "/orders/" + o.id + "/accept"); toast("Order accepted", "ok"); }
+  try { for (const o of recv) await api("POST", "/orders/" + o.id + "/accept"); toast(recv.length > 1 ? recv.length + " orders accepted → preparing" : "Order accepted → preparing", "ok"); }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); } // reload truth on failure
   finally { release(); }
 }
