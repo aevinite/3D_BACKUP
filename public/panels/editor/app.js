@@ -1048,7 +1048,9 @@ async function setOrderPayment(id, paid, opts = {}) {
   renderTablePanel();
   try {
     await api("PATCH", "/orders/" + id, { payment_status: paid ? "paid" : "pending", ...(revertReason ? { revert_reason: revertReason } : {}) });
-    toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
+    // The bulk "settle whole table" path passes quiet:true so we toast once at the
+    // end instead of once per order.
+    if (!opts.quiet) toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
   } catch (e) {
     if (o && prev !== null) o.payment_status = prev;   // undo on failure
     renderEditor();
@@ -1057,6 +1059,20 @@ async function setOrderPayment(id, paid, opts = {}) {
   } finally {
     opEnd(id);
   }
+}
+
+// markTablePaid: settle the WHOLE table in one tap — mark every unpaid (non-
+// cancelled) order paid after a single "are you sure?" confirm. Used by the
+// on-tile quick button AND the "Mark all paid" button in the table popup, so
+// staff don't have to settle three orders separately.
+async function markTablePaid(t) {
+  const os = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  if (!os.length) { toast("Nothing to settle — already paid", "ok"); return; }
+  const due = os.reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
+  if (!(await confirmDialog(`Mark table ${t} PAID — settle all ${os.length} order${os.length > 1 ? "s" : ""} (${inr(due)})? Only confirm if the payment has actually been collected.`, "Yes, payment done"))) return;
+  // One confirm above; each order flips quietly, then one summary toast.
+  for (const o of os) await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true });
+  toast(`Table ${t} settled 💳`, "ok");
 }
 
 // resolveCall: mark a waiter call as attended and drop it from the list.
@@ -2029,7 +2045,7 @@ function tableTileState(t) {
     // No separate "Bill due" fill anymore (owner, 2026-06-10): payment is
     // already told by the OUTLINE (red = unpaid, green = paid), so a fully
     // served table just says "Served" until it's paid, then "Cleared".
-    else if (unpaid) { st = "done"; label = "Served"; }
+    else if (unpaid) { st = "bill"; label = "Served"; } // served but money still due → yellow "to pay" tile
     else { st = "done"; label = "Cleared"; }
     const served = items.filter((i) => i.status === "served").length;
     meta = items.length ? `${served}/${items.length} served${due > 0 ? ` · ${inr(due)} due` : ""}` : `${os.length} order${os.length > 1 ? "s" : ""}`;
@@ -2125,6 +2141,8 @@ function floorHtml() {
     // a request needs a choice, so unlike a water call it can't be blind-resolved.
     else if (hasJoin || hasReq) quick = `<button class="btn small primary ftq" data-quick-requests="${i}">Attend</button>`;
     else if (done) quick = `<div class="ft-quick2"><button class="btn small ftq2" data-quick-restart="${i}" title="Restart — clear orders, keep table open">RST</button><button class="btn small primary ftq2" data-quick-close="${i}" title="Close & free the table">CLS</button></div>`;
+    // Served but unpaid → a one-tap "Mark paid" right on the tile (it confirms first).
+    else if (st === "bill") quick = `<button class="btn small primary ftq" data-quick-pay="${i}">💳 Mark paid</button>`;
     else if (hasCall) quick = `<button class="btn small ftq" data-quick-attend="${i}">Attend</button>`;
     // A faint chair watermark marks an OFF/free table (an empty seat) — a quiet,
     // premium cue that the table is available.
@@ -2226,6 +2244,7 @@ function bindFloor() {
   ed.querySelectorAll("[data-mem-ban]").forEach((b) => (b.onclick = () => banMember(b.dataset.memBan, b.dataset.banPhone)));
   ed.querySelectorAll("[data-quick-restart]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); restartTable(b.dataset.quickRestart); }));
   ed.querySelectorAll("[data-quick-close]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); closeTableQuick(b.dataset.quickClose); }));
+  ed.querySelectorAll("[data-quick-pay]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); markTablePaid(b.dataset.quickPay); }));
   ed.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => resolveRequest(b.dataset.reqApprove, "approved")));
   ed.querySelectorAll("[data-req-deny]").forEach((b) => (b.onclick = () => resolveRequest(b.dataset.reqDeny, "denied")));
   ed.querySelectorAll("[data-unblock]").forEach((b) => (b.onclick = () => unblock(b.dataset.unblock)));
@@ -2394,7 +2413,11 @@ function renderTablePanel() {
   // Each active call (water, napkins, clean…) gets its own "Done" button so staff
   // can clear them one at a time; if there are several, an "Attend all" clears them together.
   const callsSec = calls.length ? `<div class="sx-sec"><div class="sx-sec-h">Calls <span class="sub">· ${calls.length}</span></div>${calls.map((c) => `<div class="sx-call">${callEmoji(c.note)} ${esc(c.note || "Waiter call")} <button class="btn small primary" data-call-attend="${esc(c.id)}">Done</button></div>`).join("")}${calls.length > 1 ? `<button class="btn small" data-attend-all="${esc(t)}">✓ Attend all (${calls.length})</button>` : ""}</div>` : "";
-  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="sx-total">${due > 0 ? `Due <b>${inr(due)}</b> · ` : ""}Total <b>${inr(billTotal)}</b></div><div class="sx-bill-actions"><button class="btn small" id="sxPrint">🖨 Print bill</button></div></div>` : "";
+  // When several orders are still unpaid, offer a single "Mark all paid" so staff
+  // settle the whole table at once instead of paying each order separately.
+  const anyUnpaidBill = os.some((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  const payAllBtn = (os.length > 1 && anyUnpaidBill) ? `<button class="btn small primary" id="sxPayAll">💳 Mark all paid</button>` : "";
+  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="sx-total">${due > 0 ? `Due <b>${inr(due)}</b> · ` : ""}Total <b>${inr(billTotal)}</b></div><div class="sx-bill-actions">${payAllBtn}<button class="btn small" id="sxPrint">🖨 Print bill</button></div></div>` : "";
   // ONE end-the-table button (was a redundant "Turn table off" + "Free table",
   // which do the same thing once the bill is paid). It adapts to the state:
   //  • bill fully settled → "✓ Free table" (archive the paid orders + close)
@@ -2429,6 +2452,7 @@ function renderTablePanel() {
   // Print bill: a clean printable window with KOT numbers, discounts and totals.
   const pr = wrap.querySelector("#sxPrint");
   if (pr) pr.onclick = () => printBill(t, sess, os);
+  const payAll = wrap.querySelector("#sxPayAll"); if (payAll) payAll.onclick = () => markTablePaid(t);
   // Per-order discount: ask for the amount (with the order total as the cap).
   wrap.querySelectorAll("[data-disc]").forEach((b) => (b.onclick = async () => {
     const max = parseFloat(b.dataset.discMax) || 0;

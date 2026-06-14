@@ -107,7 +107,8 @@ function tileState(t) {
   if (a.nw > 0) return { cls: "new", label: "New order" };
   if (a.rd > 0) return { cls: "ready", label: "Ready to serve" };
   if (a.ck > 0) return { cls: "prep", label: "Preparing" };
-  if (a.os.length && a.sv > 0) return { cls: "done", label: "Served" };
+  // All dishes served: yellow "bill" tile while money is still due, plain "done" once paid.
+  if (a.os.length && a.sv > 0) return { cls: a.unpaid ? "bill" : "done", label: "Served" };
   if (a.session) return a.guests ? { cls: "seated", label: "Seated" } : { cls: "waiting", label: "Open" };
   return { cls: "free", label: "Free" };
 }
@@ -153,7 +154,9 @@ function renderFloor() {
       const total = a.nw + a.ck + a.rd + a.sv;
       const strip = total > 0 ? `<div class="tstrip">${a.nw ? `<i style="width:${(a.nw / total) * 100}%;background:#f59e0b"></i>` : ""}${a.ck ? `<i style="width:${(a.ck / total) * 100}%;background:#4f9dff"></i>` : ""}${a.rd ? `<i style="width:${(a.rd / total) * 100}%;background:#ec4899"></i>` : ""}${a.sv ? `<i style="width:${(a.sv / total) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
       const pills = total > 0 ? `<div class="tpills">${a.nw ? `<span class="tpill nw">${a.nw} new</span>` : ""}${a.ck ? `<span class="tpill ck">${a.ck} cooking</span>` : ""}${a.rd ? `<span class="tpill rd">${a.rd} ready</span>` : ""}${a.sv ? `<span class="tpill sv">${a.sv} served</span>` : ""}</div>` : "";
-      body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}`;
+      // Served but unpaid → a one-tap "Mark paid" right on the tile (it confirms first).
+      const payBtn = st.cls === "bill" ? `<span class="tpay" data-quick="pay" data-qt="${i}">💳 Mark paid</span>` : "";
+      body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}${payBtn}`;
     }
     html += `<button class="tile t-${st.cls} ${payCls} ${called ? "called" : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
       <span class="tbadges">${called ? `<em class="b-call">🔔</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
@@ -179,6 +182,14 @@ function renderFloor() {
   document.querySelectorAll(".topen[data-quick='open']").forEach((q) => (q.onclick = (e) => {
     e.stopPropagation();
     act(() => api("POST", "/sessions/open", { table: q.dataset.qt }));
+  }));
+  // Quick "Mark paid" on a served-but-unpaid tile — same confirm + whole-table
+  // pay as the detail panel's "Mark bill paid", without opening the table.
+  document.querySelectorAll(".tpay[data-quick='pay']").forEach((q) => (q.onclick = async (e) => {
+    e.stopPropagation();
+    const t = q.dataset.qt, a = tableAgg(t);
+    if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
+      act(() => api("POST", `/tables/${t}/pay`));
   }));
 }
 

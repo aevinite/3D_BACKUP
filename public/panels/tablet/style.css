@@ -48,6 +48,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .t-free .tlabel { color: var(--muted); }
 .t-seated .tlabel { color: #2dd4bf; }
 .t-waiting .tlabel { color: #f5c451; }
+.t-bill .tlabel { color: #f5c451; }
 .t-new .tlabel { color: #f59e0b; }
 .t-prep .tlabel { color: #4f9dff; }
 .t-ready .tlabel { color: #f472b6; }
@@ -67,6 +68,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .topen { margin-top: 8px; background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c;
   font-weight: 800; font-size: 14px; text-align: center; padding: 10px; border-radius: 11px; }
 .topen:hover { filter: brightness(1.05); }
+/* the on-tile "Mark paid" button for a served-but-unpaid table (same look as Open) */
+.tile .tpay { margin-top: auto; }
+.tpay { background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c;
+  font-weight: 800; font-size: 14px; text-align: center; padding: 10px; border-radius: 11px; margin-top: 8px; }
+.tpay:hover { filter: brightness(1.05); }
 
 /* ── always-on legend ── */
 .legend { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; font-size: 13px;
@@ -94,6 +100,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .t-seated { --c: #2dd4bf; }
 /* open but nobody seated yet → bright yellow fill (like the editor's ft-waiting) */
 .t-waiting { --c: #f5c451; background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
+/* served but UNPAID → same warm yellow as "open", red unpaid outline sits on top */
+.t-bill { --c: #f5c451; background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
 /* request badge on a tile (a guest asked to open / be let in) */
 .b-req { color: var(--gold-strong); }
 /* one-click action pill on a tile (Open / Attend / Let in) — taps without opening the panel */

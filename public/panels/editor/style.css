@@ -598,7 +598,10 @@ body {
 /* table detail modal */
 .tbl-modal-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); backdrop-filter: blur(5px); }
 .tbl-modal { width: min(460px, calc(100vw - 36px)); max-height: 84vh; overflow-y: auto; background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 30px 70px rgba(0,0,0,0.6); }
-.tbl-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel-2); border-radius: 18px 18px 0 0; }
+/* z-index keeps this sticky header ABOVE scrolled body content — without it the
+   header has no stacking order, so dish KOT chips (e.g. "#21") painted through it
+   as the list scrolled up. */
+.tbl-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; background: var(--panel-2); border-radius: 18px 18px 0 0; }
 .tbl-modal-head h3 { margin: 0; font-size: 19px; }
 .tbl-modal-close { background: transparent; border: none; color: var(--muted); font-size: 17px; cursor: pointer; }
 .tbl-modal-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
@@ -736,7 +739,12 @@ body {
   transition: transform .12s ease, box-shadow .16s ease; }
 .ftile:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.4); }
 .ft-free { --c: #6b6253; } .ft-seated { --c: #2dd4bf; } .ft-new { --c: #f59e0b; }
-.ft-prep { --c: #4f9dff; } .ft-done { --c: #6b6253; } /* (ft-bill removed — payment lives in the outline) */
+.ft-prep { --c: #4f9dff; } .ft-done { --c: #6b6253; }
+/* Served but UNPAID → a warm yellow "to pay" tile (owner, 2026-06-14): a dark
+   tile with only a red outline read as "off", so an open table awaiting payment
+   now lights up yellow. The red unpaid outline still sits on top. */
+.ft-bill { --c: #f5c451; }
+.ftile.ft-bill { background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
 .ft-ready { --c: #ec4899; } /* cooked, waiting for the waiter — pink, matches the tablet */
 .ftile.ft-ready { box-shadow: 0 0 16px color-mix(in srgb, var(--c) 28%, transparent); }
 .ft-req { --c: #e7b75a; }

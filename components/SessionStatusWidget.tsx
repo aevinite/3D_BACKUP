@@ -64,6 +64,8 @@ export default function SessionStatusWidget() {
   const [collapsed, setCollapsed] = useState(false); // shrunk to the little bubble?
   const [busy, setBusy] = useState(false); // true while a leave/change is in flight
   const [confirming, setConfirming] = useState(false); // showing the "are you sure you want to leave?" step
+  const [orderActive, setOrderActive] = useState(false); // does the table have an in-progress (unserved) order?
+  const [blocked, setBlocked] = useState(false); // showing the "can't leave mid-order — call a waiter" popup
   const [pos, setPos] = useState<{ right: number; top: number } | null>(null); // where the card sits on screen
   const tokenRef = useRef<string | null>(null); // our session token
   const wasActive = useRef(false); // were we connected last check? (used to detect the session ending)
@@ -161,6 +163,11 @@ export default function SessionStatusWidget() {
           count: Array.isArray(state.members) ? (state.members as unknown[]).length : 1,
           calls: Array.isArray(state.calls) ? (state.calls as { note: string }[]) : [],
         });
+        // Is the table mid-meal? If ANY ordered dish isn't served yet, an order is
+        // "going on" — we use this to block leaving/switching (the guest must ask a
+        // waiter to transfer the table instead of walking off with food in flight).
+        const sItems = Array.isArray(state.items) ? (state.items as { status: string }[]) : [];
+        setOrderActive(sItems.some((i) => i.status !== "served"));
         // First time we see this session (you just got the table): show the full
         // card for 2s, then auto-shrink to the circle.
         if (introToken.current !== s.token) {
@@ -296,6 +303,7 @@ export default function SessionStatusWidget() {
   // Otherwise draw the full card: a drag handle on top, then the status and the
   // Change-table / Leave buttons.
   return (
+    <>
     <div className={`ssw-card${anchor}`} style={style} role="dialog" aria-label="Your table">
       {/* The top bar: grip to drag, and a chevron to collapse back to the bubble. */}
       <div className="ssw-head" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}>
@@ -337,11 +345,39 @@ export default function SessionStatusWidget() {
           </>
         ) : (
           <div className="ssw-actions">
-            <button type="button" className="ssw-btn" disabled={busy} onClick={doChange}>Change table</button>
-            <button type="button" className="ssw-btn danger" disabled={busy} onClick={() => setConfirming(true)}>{isHost ? "Leave" : "Leave / own cart"}</button>
+            {/* While an order is in progress, both leaving and switching are blocked —
+                they pop the "call a waiter to transfer" dialog instead. */}
+            <button type="button" className="ssw-btn" disabled={busy} onClick={() => (orderActive ? setBlocked(true) : doChange())}>Change table</button>
+            <button type="button" className="ssw-btn danger" disabled={busy} onClick={() => (orderActive ? setBlocked(true) : setConfirming(true))}>{isHost ? "Leave" : "Leave / own cart"}</button>
           </div>
         )}
       </div>
     </div>
+
+    {/* "Order in progress — can't leave" popup. Reuses the app's standard
+        overlay+popup styling (themed) so it matches the waiter-call dialog. The
+        Call-a-waiter button fires the same event that opens the service popup,
+        where staff can be asked to transfer the table. */}
+    {blocked && (
+      <>
+        <div className="overlay active" onClick={() => setBlocked(false)} />
+        <div className="popup active" role="dialog" aria-modal="true" aria-label="Order in progress">
+          <i className="fas fa-utensils" style={{ fontSize: 44, color: "var(--accent)" }} aria-hidden="true"></i>
+          <h2 style={{ fontFamily: "Playfair Display", color: "var(--text)", margin: "16px 0 8px", fontSize: 22, fontWeight: 700 }}>
+            Your order&apos;s on its way
+          </h2>
+          <p style={{ color: "var(--muted)", fontSize: 14, margin: "0 0 18px", lineHeight: 1.5 }}>
+            You can&apos;t leave this table while an order is in progress. To move to another table, ask a waiter to transfer you.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <button type="button" className="btn btn-gold" onClick={() => { setBlocked(false); window.dispatchEvent(new CustomEvent("lfh:chef-call")); }}>
+              <i className="fas fa-bell" aria-hidden="true"></i> Call a waiter
+            </button>
+            <button type="button" className="ssw-btn" onClick={() => setBlocked(false)}>Stay at table</button>
+          </div>
+        </div>
+      </>
+    )}
+    </>
   );
 }
