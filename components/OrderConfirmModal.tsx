@@ -155,13 +155,22 @@ export default function OrderConfirmModal() {
     if (submitting) return; // ignore a second tap while the first is saving
     setSubmitting(true);
     try {
+      // Split what's avoided JUST for this dish from what's avoided across the WHOLE
+      // order. If the guest ticked "avoid in all my dishes" — OR the allergen is
+      // already on the order-wide list — it belongs at the ORDER level only, so the
+      // kitchen sees "no dairy" once on the whole order, NOT repeated on the
+      // cappuccino line too (owner, 2026-06-14: the duplicate was confusing).
+      let orderWide: string[] = [];
+      try { const d = JSON.parse(localStorage.getItem("lfh_declared") || "[]"); if (Array.isArray(d)) orderWide = d; } catch {}
+      const lineRemoved = (applyAll ? [] : finalRemoved).filter((r) => !orderWide.includes(r));
+
       // Fingerprint of this line's spec. An EMPTY spec (no options, no removed
       // allergens, no note) yields "[]" — the same as a quick "+" add — so the
       // plain/non-allergic version always merges regardless of how it was added,
       // while any removed allergen (e.g. "no:milk") makes it a separate line.
       const sig = JSON.stringify([
         ...chosen.map((c) => `${c.group}:${c.label}`),
-        ...finalRemoved.map((r) => `no:${r}`),
+        ...lineRemoved.map((r) => `no:${r}`),
         ...(note.trim() ? [`note:${note.trim()}`] : []),
       ]);
       let cart: { id: string; title: string; price: string; image: string; qty: number; options?: typeof chosen; removed?: string[]; note?: string; sig?: string }[] = [];
@@ -179,7 +188,7 @@ export default function OrderConfirmModal() {
       else cart.push({ // otherwise add a brand-new line
         id: item.id, title: item.title, price: unit.toFixed(2), image: item.image, qty,
         options: chosen.length ? chosen : undefined,
-        removed: finalRemoved.length ? finalRemoved : undefined,
+        removed: lineRemoved.length ? lineRemoved : undefined,
         note: note.trim() || undefined,
         sig,
       });
