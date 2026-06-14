@@ -3,7 +3,9 @@
 // must never break the actual action, so it's wrapped in try/catch.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 
-type Panel = "editor" | "kitchen" | "tablet" | "admin";
+// "manager" is the new name for the old "editor" panel (rename is a later task);
+// both are accepted so login/audit rows tag correctly during the transition.
+type Panel = "editor" | "manager" | "kitchen" | "tablet" | "admin";
 type Fields = {
   table_number?: string | null;
   order_id?: string | null;
