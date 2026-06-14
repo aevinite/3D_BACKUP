@@ -195,6 +195,9 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
   const [showPw, setShowPw] = useState(false);
   const [pwBusy, setPwBusy] = useState(false);
   const [pwReveal, setPwReveal] = useState<string | null>(null);
+  // In-app confirm step (replaces the ugly native browser popup). null = nothing
+  // pending; true = a generated password awaiting confirm; false = a typed one.
+  const [pendingGen, setPendingGen] = useState<null | boolean>(null);
 
   // Escape closes; lock background scroll while open.
   useEffect(() => {
@@ -231,16 +234,22 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
     finally { setSaving(false); }
   }
 
-  // Update the password: either a typed one or a server-generated one (blank).
-  async function updatePassword(generate: boolean) {
+  // Step 1: validate, then ask for confirmation IN the panel (no native popup).
+  function askReset(generate: boolean) {
     setMErr(""); setOk(""); setPwReveal(null);
     if (!generate && pw.trim().length < 6) { setMErr("Password must be at least 6 characters."); return; }
-    if (!confirm(`Set a new password for ${user.username}? They'll be logged out everywhere.`)) return;
-    setPwBusy(true);
+    setPendingGen(generate);
+  }
+
+  // Step 2: actually set the password once the admin confirms in-app.
+  async function doReset() {
+    if (pendingGen === null) return;
+    const generate = pendingGen;
+    setPwBusy(true); setMErr("");
     try {
       const j = await apiPatch({ action: "reset_password", password: generate ? "" : pw.trim() });
       setPwReveal(j.password);
-      setPw(""); setShowPw(false);
+      setPw(""); setShowPw(false); setPendingGen(null);
       onChanged();
     } catch (e: any) { setMErr(e.message || "Could not update password."); }
     finally { setPwBusy(false); }
@@ -330,10 +339,24 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
                   {showPw ? "🙈" : "👁️"}
                 </button>
               </span>
-              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                <button style={{ ...btn("#3b82f6"), opacity: pwBusy ? 0.6 : 1 }} disabled={pwBusy} onClick={() => updatePassword(false)}>Set password</button>
-                <button style={{ ...btn("#374151"), opacity: pwBusy ? 0.6 : 1 }} disabled={pwBusy} onClick={() => updatePassword(true)}>Generate random</button>
-              </div>
+              {pendingGen === null ? (
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  <button style={btn("#3b82f6")} onClick={() => askReset(false)}>Set password</button>
+                  <button style={btn("#374151")} onClick={() => askReset(true)}>Generate random</button>
+                </div>
+              ) : (
+                /* In-app confirmation (no browser popup from the top). */
+                <div style={{ marginTop: 10, padding: 12, borderRadius: 10, background: "#1a1407", border: "1px solid #b45309" }}>
+                  <div style={{ fontSize: 12.5, color: "#fcd34d", display: "flex", gap: 8, alignItems: "flex-start", lineHeight: 1.45 }}>
+                    <span aria-hidden>⚠️</span>
+                    <span>This sets a {pendingGen ? "new random" : "new"} password for <b>{user.username}</b> and <b>logs them out on every device</b>. They&apos;ll need the new password to sign back in.</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                    <button style={{ ...btn("#b45309"), opacity: pwBusy ? 0.6 : 1 }} disabled={pwBusy} onClick={doReset}>{pwBusy ? "Setting…" : "Yes, set new password"}</button>
+                    <button style={btn("#374151")} disabled={pwBusy} onClick={() => setPendingGen(null)}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Danger zone — visually + spatially separated from everything else. */}
