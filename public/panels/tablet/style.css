@@ -81,6 +81,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .tpay { background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c;
   font-weight: 800; font-size: 14px; text-align: center; padding: 10px; border-radius: 11px; margin-top: 8px; }
 .tpay:hover { filter: brightness(1.05); }
+/* on-tile Accept / Attend quick actions (match the manager's tile buttons) */
+.tile .tacc, .tile .tatt { margin-top: 8px; }
+.tacc, .tatt { background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c;
+  font-weight: 800; font-size: 14px; text-align: center; padding: 10px; border-radius: 11px; }
+.tacc:hover, .tatt:hover { filter: brightness(1.05); }
 
 /* ── always-on legend ── */
 .legend { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; font-size: 13px;

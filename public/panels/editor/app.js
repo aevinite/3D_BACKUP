@@ -713,7 +713,7 @@ const STATUS_RANK = { received: 0, preparing: 1, served: 2, cancelled: 3 };
 function itemDetailLine(it) {
   const parts = [];
   if (Array.isArray(it.options) && it.options.length) parts.push(it.options.map((o) => esc(o.label)).join(" · "));
-  if (Array.isArray(it.removed) && it.removed.length) parts.push("NO " + it.removed.map((r) => esc(r)).join(", ").toUpperCase());
+  if (Array.isArray(it.removed) && it.removed.length) parts.push(`<span class="ol-no">NO ${it.removed.map((r) => esc(r)).join(", NO ").toUpperCase()}</span>`);
   if (it.note) parts.push("“" + esc(it.note) + "”");
   return parts.length ? `<div class="ord-line-opts">${parts.join(" · ")}</div>` : "";
 }

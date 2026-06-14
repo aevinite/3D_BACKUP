@@ -158,9 +158,13 @@ function renderFloor() {
       const total = a.nw + a.ck + a.rd + a.sv;
       const strip = total > 0 ? `<div class="tstrip">${a.nw ? `<i style="width:${(a.nw / total) * 100}%;background:#f59e0b"></i>` : ""}${a.ck ? `<i style="width:${(a.ck / total) * 100}%;background:#4f9dff"></i>` : ""}${a.rd ? `<i style="width:${(a.rd / total) * 100}%;background:#ec4899"></i>` : ""}${a.sv ? `<i style="width:${(a.sv / total) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
       const pills = total > 0 ? `<div class="tpills">${a.nw ? `<span class="tpill nw">${a.nw} new</span>` : ""}${a.ck ? `<span class="tpill ck">${a.ck} cooking</span>` : ""}${a.rd ? `<span class="tpill rd">${a.rd} ready</span>` : ""}${a.sv ? `<span class="tpill sv">${a.sv} served</span>` : ""}</div>` : "";
-      // Served but unpaid → a one-tap "Mark paid" right on the tile (it confirms first).
-      const payBtn = st.cls === "bill" ? `<span class="tpay" data-quick="pay" data-qt="${i}">💳 Mark paid</span>` : "";
-      body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}${payBtn}`;
+      // ONE contextual quick action, same priority as the manager floor tile:
+      // new order → Accept, a call/request → Attend, served-but-unpaid → Mark paid.
+      let quick = "";
+      if (a.nw > 0) quick = `<span class="tacc" data-quick="accept" data-qt="${i}">✓ Accept</span>`;
+      else if (called || joiners) quick = `<span class="tatt" data-quick="attend" data-qt="${i}">Attend</span>`;
+      else if (st.cls === "bill") quick = `<span class="tpay" data-quick="pay" data-qt="${i}">💳 Mark paid</span>`;
+      body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}${quick}`;
     }
     html += `<button class="tile t-${st.cls} ${payCls} ${called ? "called" : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
       <span class="tbadges">${called ? `<em class="b-call">🔔</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
@@ -186,6 +190,17 @@ function renderFloor() {
   document.querySelectorAll(".topen[data-quick='open']").forEach((q) => (q.onclick = (e) => {
     e.stopPropagation();
     act(() => api("POST", "/sessions/open", { table: q.dataset.qt }));
+  }));
+  // Quick "Accept" on the tile — accept every new order for the table in one tap.
+  document.querySelectorAll(".tacc[data-quick='accept']").forEach((q) => (q.onclick = (e) => {
+    e.stopPropagation();
+    act(async () => { const recv = ordersOf(q.dataset.qt).filter((o) => o.status === "received"); for (const o of recv) await api("POST", `/orders/${o.id}/accept`); });
+  }));
+  // Quick "Attend" — open the table's detail to handle the call / join request.
+  document.querySelectorAll(".tatt[data-quick='attend']").forEach((q) => (q.onclick = (e) => {
+    e.stopPropagation();
+    state.table = q.dataset.qt; state.ordering = false; renderFloor(); renderPanel();
+    if (window.matchMedia("(max-width: 760px)").matches) document.getElementById("panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }));
   // Quick "Mark paid" on a served-but-unpaid tile — same confirm + whole-table
   // pay as the detail panel's "Mark bill paid", without opening the table.
