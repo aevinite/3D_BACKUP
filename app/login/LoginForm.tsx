@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 // Must match the server's ROLE_HOME map.
-const ROLE_HOME: Record<string, string> = { manager: "/editor", kitchen: "/kitchen", tablet: "/tablet" };
+const ROLE_HOME: Record<string, string> = { manager: "/manager", kitchen: "/kitchen", tablet: "/tablet" };
 
 export default function LoginForm({ next }: { next: string }) {
   const router = useRouter();

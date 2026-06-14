@@ -9,8 +9,8 @@ import { redirect } from "next/navigation";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import LoginForm from "./LoginForm";
 
-// Where each role lands. (manager → /editor until the folder rename to /manager.)
-export const ROLE_HOME: Record<string, string> = { manager: "/editor", kitchen: "/kitchen", tablet: "/tablet" };
+// Where each role lands after login.
+export const ROLE_HOME: Record<string, string> = { manager: "/manager", kitchen: "/kitchen", tablet: "/tablet" };
 
 export default async function LoginPage({
   searchParams,

@@ -1,16 +1,7 @@
-// /editor — the editor panel, now hosted INSIDE the one app.
-//
-// Its exact original UI is served as static files from /panels/editor and
-// embedded full-screen here, so the look/behaviour is byte-for-byte identical to
-// the old standalone editor. Its data calls go to /api/editor/* (the ported
-// route handlers). The admin-only floating switcher (mounted in the layout)
-// floats above this. A native React rebuild is the later "polish" step.
-export default function EditorPanel() {
-  return (
-    <iframe
-      src="/panels/editor/index.html"
-      title="Menu Editor"
-      style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", border: 0 }}
-    />
-  );
+// /editor — kept only for BACK-COMPAT. The panel is now /manager; anyone hitting
+// the old URL is redirected there (which then runs the manager auth gate).
+import { redirect } from "next/navigation";
+
+export default function EditorRedirect() {
+  redirect("/manager");
 }

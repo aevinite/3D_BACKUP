@@ -16,7 +16,7 @@ import { useEffect, useRef, useState } from "react";
 const PANELS = [
   { href: "/admin", label: "Admin", icon: "🛠️" },
   { href: "/menu", label: "Menu", icon: "🍽️" },
-  { href: "/editor", label: "Editor", icon: "✏️" },
+  { href: "/manager", label: "Manager", icon: "✏️" },
   { href: "/kitchen", label: "Kitchen", icon: "👨‍🍳" },
   { href: "/tablet", label: "Tablet", icon: "📋" },
 ];

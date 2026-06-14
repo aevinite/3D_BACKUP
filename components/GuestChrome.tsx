@@ -22,7 +22,7 @@ import SessionCartSync from "@/components/SessionCartSync";
 import SessionStatusWidget from "@/components/SessionStatusWidget";
 
 // Staff routes never get guest chrome.
-const STAFF_PREFIXES = ["/admin", "/editor", "/kitchen", "/tablet", "/staff-login"];
+const STAFF_PREFIXES = ["/admin", "/manager", "/editor", "/kitchen", "/tablet", "/staff-login", "/login"];
 
 export default function GuestChrome() {
   const pathname = usePathname() || "/";
