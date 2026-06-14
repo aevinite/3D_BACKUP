@@ -2387,39 +2387,30 @@ function renderTablePanel() {
   if (!os.length) {
     ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders</div><div class="sx-empty">No orders yet.</div></div>`;
   } else {
-    const orderBlocks = os.map((o, oi) => {
-      const paid = o.payment_status === "paid";
-      const accepted = o.status !== "received"; // a brand-new order is "received" until accepted
+    // Un-accepted (new) orders stay SEPARATE so each can be accepted — separation
+    // only while accepting. Once accepted, every dish MERGES into one combined list
+    // with a SINGLE bill; no per-order split, no per-order total/pay (owner, 2026-06-14).
+    // The separate order rows still live in the DB as the log of which came first.
+    const newOrders = os.filter((o) => o.status === "received");
+    const liveOrders = os.filter((o) => o.status !== "received" && o.status !== "cancelled");
+    // Each un-accepted order: just its dishes + its own Accept.
+    const newBlocks = newOrders.map((o) => {
       const when = o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-      let body;
-      if (!accepted) {
-        // whole-order accept first; dishes are listed but not yet individually actionable
-        body = orderItemRows(o).map((r) => `<div class="sx-item"><div class="sx-item-info"><span class="ord-pill received">received</span> ${esc(r.title)}${dishNoTag(r.title)} ×${esc(r.qty)}${itemDetailLine(r)}</div></div>`).join("")
-          + `<button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept</button>`;
-      } else {
-        // accepted → serve each dish one at a time, or serve everything at once
-        const rows = orderItemRows(o);
-        const anyUnserved = rows.some((r) => r.status !== "served");
-        body = rows.map(itemRowHtml).join("") + (anyUnserved ? `<button class="btn small tp-serveall" data-serveall="${esc(o.id)}">✓ Serve all (complete order)</button>` : "");
-      }
-      // The order's shoutable kitchen-ticket number leads the row; the total
-      // shows net-of-discount, and "− disc" opens the discount prompt.
-      const disc = Number(o.discount) || 0;
-      return `<div class="tp-order"><div class="tp-order-head">${o.kot_no != null ? `<span class="kot-chip">#${esc(o.kot_no)}</span> ` : ""}Order ${oi + 1}${when ? ` · ${when}` : ""}</div><div class="tp-order-top"><span class="pay-pill ${paid ? "paid" : "pending"}">${paid ? "💳 Paid" : "⏳ Unpaid"}</span><span class="tp-order-total">${disc > 0 ? `<s>${inr(o.total)}</s> ` : ""}${inr((Number(o.total) || 0) - disc)}</span><button class="btn small" data-disc="${esc(o.id)}" data-disc-cur="${esc(disc)}" data-disc-max="${esc(o.total)}" title="Give a discount on this order">− disc</button><button class="btn small ${paid ? "" : "primary"}" data-pay="${esc(o.id)}" data-paid="${paid ? "1" : "0"}">${paid ? "↩ Unpaid" : "Mark paid"}</button></div>${body}</div>`;
+      const rows = orderItemRows(o).map((r) => `<div class="sx-item"><div class="sx-item-info"><span class="ord-pill received">received</span> ${esc(r.title)}${dishNoTag(r.title)} ×${esc(r.qty)}${itemDetailLine(r)}</div>${r.price > 0 ? `<span class="sx-item-price">${inr(r.price * r.qty)}</span>` : ""}</div>`).join("");
+      return `<div class="tp-order"><div class="tp-order-head">${o.kot_no != null ? `<span class="kot-chip">#${esc(o.kot_no)}</span> ` : ""}New order${when ? ` · ${when}` : ""}</div>${rows}<button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
     }).join("");
-    // A table-wide "serve everything" button when there are several orders with
-    // anything still unserved (in addition to each order's own "Serve all").
-    // Top-level "Serve all" — serves every accepted-but-unserved dish on the table
-    // in one tap. Shown whenever anything accepted is still unserved.
-    const anyUnservedAccepted = os.some((o) => o.status !== "received" && o.status !== "cancelled" && orderItemRows(o).some((r) => r.status !== "served"));
+    // All ACCEPTED dishes, merged into one continuous list (status + price + serve each).
+    const mergedRows = liveOrders.flatMap((o) => orderItemRows(o)).map(itemRowHtml).join("");
+    // Top-level "Serve all" — serves every accepted-but-unserved dish in one tap.
+    const anyUnservedAccepted = liveOrders.some((o) => orderItemRows(o).some((r) => r.status !== "served"));
     const serveAllOrdersBtn = anyUnservedAccepted
       ? `<button class="btn small primary tp-serve-all-orders" data-serve-all-orders="${esc(t)}">🍽️ Serve all</button>`
       : "";
-    // When several orders are still un-accepted, a single "Accept all & prepare"
-    // at the top accepts the whole table in one tap (each order also has its own Accept).
-    const recvCount = os.filter((o) => o.status === "received").length;
+    const mergedBlock = liveOrders.length ? `<div class="tp-order">${serveAllOrdersBtn}${mergedRows}</div>` : "";
+    // When several orders are still un-accepted, a single "Accept all & prepare".
+    const recvCount = newOrders.length;
     const acceptAllBtn = (recvCount > 1) ? `<button class="btn small primary tp-accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${recvCount})</button>` : "";
-    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${os.length}</span></div>${acceptAllBtn}${serveAllOrdersBtn}${orderBlocks}</div>`;
+    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${os.length}</span></div>${acceptAllBtn}${newBlocks}${mergedBlock}</div>`;
   }
 
   // Each active call (water, napkins, clean…) gets its own "Done" button so staff
@@ -2427,9 +2418,15 @@ function renderTablePanel() {
   const callsSec = calls.length ? `<div class="sx-sec"><div class="sx-sec-h">Calls <span class="sub">· ${calls.length}</span></div>${calls.map((c) => `<div class="sx-call">${callEmoji(c.note)} ${esc(c.note || "Waiter call")} <button class="btn small primary" data-call-attend="${esc(c.id)}">Done</button></div>`).join("")}${calls.length > 1 ? `<button class="btn small" data-attend-all="${esc(t)}">✓ Attend all (${calls.length})</button>` : ""}</div>` : "";
   // When several orders are still unpaid, offer a single "Mark all paid" so staff
   // settle the whole table at once instead of paying each order separately.
+  // Payment + discount now live on the single MERGED bill (per-order pay/disc were
+  // removed when the orders merged). Mark-paid settles the whole table at once.
   const anyUnpaidBill = os.some((o) => o.status !== "cancelled" && o.payment_status !== "paid");
-  const payAllBtn = (os.length > 1 && anyUnpaidBill) ? `<button class="btn small primary" id="sxPayAll">💳 Mark all paid</button>` : "";
-  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="sx-total">${due > 0 ? `Due <b>${inr(due)}</b> · ` : ""}Total <b>${inr(billTotal)}</b></div><div class="sx-bill-actions">${payAllBtn}<button class="btn small" id="sxPrint">🖨 Print bill</button></div></div>` : "";
+  const payAllBtn = anyUnpaidBill ? `<button class="btn small primary" id="sxPayAll">💳 Mark ${os.length > 1 ? "all " : ""}paid</button>` : "";
+  // The bill discount writes to the first non-cancelled order's record; the bill
+  // total already nets every order's discount, so it shows correctly on the merged bill.
+  const discTarget = os.find((o) => o.status !== "cancelled");
+  const discBtn = discTarget ? `<button class="btn small" data-disc="${esc(discTarget.id)}" data-disc-cur="${esc(Number(discTarget.discount) || 0)}" data-disc-max="${esc(discTarget.total)}" title="Give a discount on the bill">− Discount</button>` : "";
+  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="sx-total">${due > 0 ? `Due <b>${inr(due)}</b> · ` : ""}Total <b>${inr(billTotal)}</b></div><div class="sx-bill-actions">${discBtn}${payAllBtn}<button class="btn small" id="sxPrint">🖨 Print bill</button></div></div>` : "";
   // ONE end-the-table button (was a redundant "Turn table off" + "Free table",
   // which do the same thing once the bill is paid). It adapts to the state:
   //  • bill fully settled → "✓ Free table" (archive the paid orders + close)
