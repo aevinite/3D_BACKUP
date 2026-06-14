@@ -18,6 +18,7 @@ import { getStoredSession, getSessionState } from "@/lib/session";
 import { getSettings } from "@/lib/menu";
 // Money-formatting helpers so prices show in the right currency.
 import { toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
 
 // The shape of one dish on the bill: an id, its name, how many, and where it is
 // in the kitchen (just received, being prepared, or already served).
@@ -48,6 +49,7 @@ export default function SessionTableBill() {
     let alive = true;
     // "iv" will hold the repeating timer so we can stop it later.
     let iv: ReturnType<typeof setInterval> | null = null;
+    let onTick: (() => void) | null = null; // realtime nudge → refetch now
     // Figure out which currency to display prices in.
     setCurrency(getCurrency());
     (async () => {
@@ -74,12 +76,15 @@ export default function SessionTableBill() {
         setBill((st.bill as SBill) || null);
         setMembers(Array.isArray(st.members) ? (st.members as unknown[]).length : 0);
       };
-      // Check right away, then keep checking every 2 seconds for live updates.
+      // Check right away; realtime nudges drive instant refetches, with a slow 60s
+      // backup poll for when the WebSocket is asleep/dropped.
       poll();
-      iv = setInterval(poll, 2000);
+      iv = setInterval(poll, RT_BACKUP_MS);
+      onTick = () => poll();
+      window.addEventListener("lfh:rt-tick", onTick);
     })();
-    // Cleanup when the component disappears: stop the timer and ignore late replies.
-    return () => { alive = false; if (iv) clearInterval(iv); };
+    // Cleanup when the component disappears: stop the timer, listener; ignore late replies.
+    return () => { alive = false; if (iv) clearInterval(iv); if (onTick) window.removeEventListener("lfh:rt-tick", onTick); };
   }, []);
 
   // If we're not in a live session, show nothing at all.

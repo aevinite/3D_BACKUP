@@ -27,6 +27,7 @@ import { getStoredSession, clearStoredSession, getSessionState, leaveSession } f
 // Publish the live "can this guest order?" answer so the Add-to-cart gate can read
 // it synchronously (this widget already polls the session, so we reuse that poll).
 import { setTableConnection } from "@/lib/tableConnection";
+import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
 
 // localStorage keys for remembering where the user dragged the card and whether
 // they collapsed it to the small bubble.
@@ -99,6 +100,7 @@ export default function SessionStatusWidget() {
   useEffect(() => {
     let alive = true; // guards against updating state after the component is gone
     let iv: ReturnType<typeof setInterval> | null = null; // the poll timer
+    let onTick: (() => void) | null = null; // realtime nudge → refetch now
     (async () => {
       // Is the session system even turned on? If not, we'll never show anything.
       let on = false;
@@ -168,12 +170,15 @@ export default function SessionStatusWidget() {
           introTimer.current = setTimeout(() => setCollapsed(true), 2000);
         }
       };
-      // Check right away, then keep checking every 3 seconds.
+      // Check right away; realtime nudges drive instant refetches after that, with
+      // a slow 60s backup poll for when the WebSocket is asleep/dropped.
       poll();
-      iv = setInterval(poll, 3000);
+      iv = setInterval(poll, RT_BACKUP_MS);
+      onTick = () => poll();
+      window.addEventListener("lfh:rt-tick", onTick);
     })();
-    // Cleanup when the component disappears: stop the poll and the intro timer.
-    return () => { alive = false; if (iv) clearInterval(iv); if (introTimer.current) clearTimeout(introTimer.current); };
+    // Cleanup when the component disappears: stop the poll, listener and intro timer.
+    return () => { alive = false; if (iv) clearInterval(iv); if (onTick) window.removeEventListener("lfh:rt-tick", onTick); if (introTimer.current) clearTimeout(introTimer.current); };
   }, []);
 
   // Publish the live "is this guest allowed to add to the cart?" answer for the

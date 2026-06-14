@@ -22,11 +22,11 @@ import {
   getStoredSession, clearStoredSession, getSessionState,
   approveMember, removeMember, setAutoApprove,
 } from "@/lib/session";
+import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
 
 // One person waiting to be let in: their id and (optional) name.
 interface PendingMember { id: string; name: string | null; }
 
-const POLL_MS = 1500; // owner sees "X wants to join" within ~1.5s
 const SNOOZE_MS = 20000; // "Later" hides the prompt briefly so the owner isn't trapped
 
 // SessionOwner — only does anything on the TABLE HOST's device. It quietly checks
@@ -76,17 +76,20 @@ export default function SessionOwner() {
     getSettings()
       .then((s) => { if (alive) { enabledRef.current = s.sessionsEnabled; if (s.sessionsEnabled) poll(); } })
       .catch(() => {});
-    // Keep polling on a steady timer.
-    const id = setInterval(poll, POLL_MS);
+    // Realtime nudges drive instant refetches; this slow timer is just the backup.
+    const id = setInterval(poll, RT_BACKUP_MS);
     const onChanged = () => poll();                       // fired right after we become an owner
+    const onTick = () => poll();                          // realtime breadcrumb for this table
     const onVis = () => { if (!document.hidden) poll(); }; // refresh the instant the tab is reopened
     window.addEventListener("lfh:session-changed", onChanged);
+    window.addEventListener("lfh:rt-tick", onTick);
     document.addEventListener("visibilitychange", onVis);
     // Cleanup when the component disappears: stop the timer and remove listeners.
     return () => {
       alive = false;
       clearInterval(id);
       window.removeEventListener("lfh:session-changed", onChanged);
+      window.removeEventListener("lfh:rt-tick", onTick);
       document.removeEventListener("visibilitychange", onVis);
     };
   }, [poll]);

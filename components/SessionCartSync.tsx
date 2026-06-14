@@ -27,6 +27,7 @@ import { useEffect, useRef } from "react";
 import { getSettings } from "@/lib/menu";
 // Helpers: read the saved session, and read/write the table's shared server cart.
 import { getStoredSession, getSessionCart, setSessionCart } from "@/lib/session";
+import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
 
 // The localStorage key where the cart is saved on this device.
 const CART_KEY = "lfh_cart";
@@ -140,10 +141,13 @@ export default function SessionCartSync() {
 
     // Start listening for cart edits and session changes, do one pull now, then
     // keep pulling every 2 seconds.
+    // Realtime nudge for this table → pull the shared cart immediately.
+    const onTick = () => tick();
     window.addEventListener("lfh:cart-updated", onCartUpdated);
     window.addEventListener("lfh:session-changed", onSessionChanged);
+    window.addEventListener("lfh:rt-tick", onTick);
     tick();
-    iv = setInterval(tick, 2000);
+    iv = setInterval(tick, RT_BACKUP_MS); // 60s backup; realtime drives the rest
 
     // Cleanup when the component disappears: stop timers and remove listeners.
     return () => {
@@ -152,6 +156,7 @@ export default function SessionCartSync() {
       if (pushTimer.current) clearTimeout(pushTimer.current);
       window.removeEventListener("lfh:cart-updated", onCartUpdated);
       window.removeEventListener("lfh:session-changed", onSessionChanged);
+      window.removeEventListener("lfh:rt-tick", onTick);
     };
   }, []);
 
