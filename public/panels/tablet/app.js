@@ -592,7 +592,7 @@ load().catch((e) => toast("Can't reach the database: " + e.message, false));
 // instead of polling every second. A slow 60s timer is the backup if the
 // WebSocket drops; if realtime didn't load, fall back to a gentle 2s poll.
 if (window.LFH_RT) {
-  LFH_RT.start({ topics: ["ops"], onEvent: () => load().catch(() => {}) });
+  LFH_RT.start({ topics: ["ops"], onEvent: () => load() }); // realtime.js counts failures
   setInterval(() => load().catch(() => {}), 60000); // backup sync
 } else {
   setInterval(() => load().catch(() => {}), 2000); // fallback poll
