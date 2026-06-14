@@ -225,6 +225,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .iline:last-child { border-bottom: 0; }
 .iqty { font-weight: 800; color: var(--gold); min-width: 26px; }
 .inm { flex: 1; min-width: 0; font-size: 14px; }
+/* per-dish line price, sits between the name and the status pill */
+.iprice { font-size: 13px; font-weight: 700; color: #e8dcc8; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .inm .iopt { color: var(--muted); font-size: 11px; margin-top: 2px; }
 .inm .irem { color: #ff8a8a; font-size: 11px; margin-top: 2px; text-transform: uppercase; letter-spacing: .03em; }
 /* the per-dish status pill — tappable when it's a real DB row (advances new→cooking→served) */

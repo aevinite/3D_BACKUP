@@ -1,6 +1,7 @@
 // kitchen/ui/app.js — the kitchen screen's brain. Polls the live board every
-// 2 seconds and draws orders as big KOT tickets in three columns: New (accept
-// them), Cooking (tick each dish ready), Ready (recently finished, for glory).
+// 2 seconds and draws orders as big KOT tickets in three columns: New (VIEW ONLY
+// — the waiter accepts, not the kitchen), Cooking (tick each dish ready), Ready
+// (recently finished, for glory).
 // Also: the 86 board (sold-out toggles with an UNDO toast — kitchens move fast,
 // so no confirm dialog; a 6-second undo is safer than a popup mid-rush) and a
 // chime when a brand-new order lands (mutable, remembered per device).
@@ -71,7 +72,7 @@ function ticketHtml(o) {
     // Each cooking dish gets a ✓ to mark it READY (cooked). Once ready it shows a
     // pink "ready" tag (waiter still has to carry it out); once the waiter serves
     // it on the tablet it reads "served".
-    const tick = r.fromDb && (r.status === "received" || r.status === "preparing")
+    const tick = r.fromDb && r.status === "preparing"
       ? `<button class="tick" data-item-ready="${esc(r.id)}">✓</button>`
       : r.status === "ready" ? `<span class="done rdy">ready</span>`
         : r.status === "served" ? `<span class="done">served ✓</span>` : "";
@@ -86,8 +87,11 @@ function ticketHtml(o) {
     ? `<div class="allergy">⚠ ALLERGY: ${esc(o.allergies.join(", "))}</div>` : "";
   const rows2 = rowsOf(o);
   const allCooked = rows2.length > 0 && rows2.every((r) => r.status === "ready" || r.status === "served");
+  // The kitchen does NOT accept orders (owner, 2026-06-14): a new order is shown
+  // for visibility only — the waiter/manager accepts it. The kitchen's only job is
+  // moving a COOKING dish to READY (the ✓ ticks, or "ALL READY").
   const action = o.status === "received"
-    ? `<button class="big accept" data-accept="${esc(o.id)}">ACCEPT</button>`
+    ? `<div class="awaiting">🆕 new — waiting for the waiter to accept</div>`
     : (!allCooked
       ? `<button class="big ready" data-ready="${esc(o.id)}">ALL READY</button>`
       : `<div class="awaiting">✓ ready — waiter serving</div>`);
@@ -116,7 +120,7 @@ function render() {
   };
   draw("new", buckets.new); draw("cooking", buckets.cooking); draw("ready", buckets.ready);
   // wire the buttons (we redraw each poll, so we rebind each poll)
-  document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => act(() => api("POST", `/orders/${b.dataset.accept}/accept`))));
+  // (No accept handler — the kitchen can't accept orders anymore; the waiter does.)
   document.querySelectorAll("[data-ready]").forEach((b) => (b.onclick = () => act(() => api("POST", `/orders/${b.dataset.ready}/ready`))));
   // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
   document.querySelectorAll("[data-item-ready]").forEach((b) => (b.onclick = () => act(() => api("POST", `/items/${b.dataset.itemReady}/status`, { status: "ready" }))));

@@ -76,9 +76,9 @@ const reqsOf = (t) => (state.data.requests || []).filter((r) => String(r.table_n
 // (legacy / no per-dish id) exactly like the kitchen does.
 function dishRowsOf(o) {
   const db = (state.data.items || []).filter((i) => i.order_id === o.id);
-  if (db.length) return db.map((r) => ({ id: r.id, title: r.title, qty: r.qty || 1, status: r.status || "received", options: r.options, removed: r.removed, note: r.note, fromDb: true }));
+  if (db.length) return db.map((r) => ({ id: r.id, title: r.title, qty: r.qty || 1, status: r.status || "received", options: r.options, removed: r.removed, note: r.note, price: Number(r.unit_price) || 0, fromDb: true }));
   const js = Array.isArray(o.items) ? o.items : [];
-  return js.map((r) => ({ id: null, title: r.title || r.name, qty: r.qty || 1, status: r.status || o.status || "received", options: r.options, removed: r.removed, note: r.note, fromDb: false }));
+  return js.map((r) => ({ id: null, title: r.title || r.name, qty: r.qty || 1, status: r.status || o.status || "received", options: r.options, removed: r.removed, note: r.note, price: Number(r.price) || 0, fromDb: false }));
 }
 
 // Everything a tile needs about a table in one pass: dish counts by status,
@@ -217,13 +217,15 @@ function renderPanel() {
       const note = r.note ? `<div class="iopt">“${esc(r.note)}”</div>` : "";
       // Real DB rows are tappable (advance the dish); legacy JSON rows just show.
       const tap = r.fromDb ? `tap data-item="${esc(r.id)}" data-cur="${esc(r.status)}"` : "";
-      return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span><span class="ist ${r.status} ${r.fromDb ? "tap" : ""}" ${tap} title="${r.fromDb ? "tap to advance" : ""}">${STATUS_WORD[r.status] || r.status}</span></div>`;
+      // Show the dish's line price (unit × qty) — there's room on the row, so the
+      // waiter sees what each dish costs without opening anything.
+      const priceTag = r.price > 0 ? `<span class="iprice">${inr(r.price * r.qty)}</span>` : "";
+      return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}<span class="ist ${r.status} ${r.fromDb ? "tap" : ""}" ${tap} title="${r.fromDb ? "tap to advance" : ""}">${STATUS_WORD[r.status] || r.status}</span></div>`;
     }).join("");
-    // Accept is ONLY for orders that came from a guest's phone (via app) — the
-    // waiter reviews those before they reach the kitchen. An order the staff took
-    // on the tablet is already confirmed, so it never needs an Accept button (the
-    // kitchen still accepts it on its own screen).
-    const accept = (o.status === "received" && viaApp) ? `<button class="accept" data-accept="${esc(o.id)}">✓ Accept &amp; send to kitchen</button>` : "";
+    // The waiter accepts EVERY new order now (owner, 2026-06-14): the kitchen no
+    // longer accepts on its own screen, so an order must be accepted here (or in
+    // the editor) before the kitchen starts cooking it.
+    const accept = (o.status === "received") ? `<button class="accept" data-accept="${esc(o.id)}">✓ Accept &amp; send to kitchen</button>` : "";
     // Allergies are safety-critical — show them as a loud banner on the order.
     const allergy = (o.allergies && o.allergies.length) ? `<div class="oallergy">⚠ ALLERGY — ${esc(o.allergies.join(", "))}</div>` : "";
     return `<div class="ord">
