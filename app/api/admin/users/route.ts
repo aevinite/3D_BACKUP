@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const { data, error } = await sb
     .from("staff_users")
-    .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash")
+    .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset")
     .order("created_at", { ascending: true });
   if (error) return bad(error.message, 500);
   // Strip the PIN hash to a boolean — never ship hashes to the browser.
@@ -106,6 +106,14 @@ export async function PATCH(req: NextRequest) {
     // token_version too to be doubly sure.
     await sb.from("staff_users").update({ role, token_version: (u.token_version || 0) + 1 }).eq("id", id);
     await logAction("admin", "user_set_role", { actor: "admin", detail: `set "${u.username}" → ${role} · id ${id}` });
+    return ok({ ok: true });
+  }
+  if (action === "set_access") {
+    // Grant/revoke the user's ability to change their OWN password. Admin can
+    // always reset it regardless.
+    const can = !!body?.can_self_reset;
+    await sb.from("staff_users").update({ can_self_reset: can }).eq("id", id);
+    await logAction("admin", "user_set_access", { actor: "admin", detail: `${can ? "granted" : "revoked"} self password-reset for "${u.username}" · id ${id}` });
     return ok({ ok: true });
   }
   if (action === "edit") {

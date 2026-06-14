@@ -31,7 +31,7 @@ const SECRET = () =>
 export type StaffUser = {
   id: string; username: string; role: Role;
   name: string | null; phone: string | null; active: boolean; pin_hash: string | null;
-  token_version: number;
+  token_version: number; can_self_reset: boolean;
 };
 
 // ── small byte/base64 helpers (work in both Node and edge runtimes) ──────────

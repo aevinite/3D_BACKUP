@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 type User = {
   id: string; username: string; role: string; name: string | null; phone: string | null;
   active: boolean; last_seen_at: string | null; created_at: string; hasPin: boolean;
+  can_self_reset: boolean;
 };
 
 const ROLES = ["manager", "kitchen", "tablet"] as const;
@@ -146,6 +147,7 @@ export default function AdminUsers() {
                     <span style={{ fontSize: 11, fontWeight: 700, color: "#0b1220", background: ROLE_COLOR[u.role] || "#9ca3af", padding: "2px 8px", borderRadius: 999 }}>{ROLE_LABEL[u.role] || u.role}</span>
                     {!u.active ? <span style={{ fontSize: 11, color: "#fca5a5" }}>disabled</span> : null}
                     {u.hasPin ? <span style={{ fontSize: 11, color: "#8aa0c9" }}>🔑 PIN set</span> : null}
+                    {u.can_self_reset ? null : <span style={{ fontSize: 11, color: "#fbbf24" }}>🔒 admin-managed pw</span>}
                   </div>
                   <div style={{ fontSize: 12, color: "#8aa0c9", marginTop: 3 }}>
                     {u.name || "—"} · {u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : "never"}
@@ -156,6 +158,7 @@ export default function AdminUsers() {
                     {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                   </select>
                   <button style={btn("#3b82f6")} onClick={() => patch(u.id, { action: "reset_password" }, `Reset ${u.username}'s password? They'll be logged out everywhere.`)}>Reset pw</button>
+                  <button style={btn(u.can_self_reset ? "#6d28d9" : "#4b5563")} title={u.can_self_reset ? "User can change their own password — click to revoke" : "Admin-managed password — click to let the user change it"} onClick={() => patch(u.id, { action: "set_access", can_self_reset: !u.can_self_reset })}>{u.can_self_reset ? "Self-pw: on" : "Self-pw: off"}</button>
                   <button style={btn(u.active ? "#b45309" : "#15803d")} onClick={() => patch(u.id, { action: "set_active", active: !u.active })}>{u.active ? "Disable" : "Enable"}</button>
                   <button style={btn("#991b1b")} onClick={() => remove(u)}>Delete</button>
                 </div>
