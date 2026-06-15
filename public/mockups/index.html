@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tables — redesign mockup</title>
+<style>
+  :root{
+    --bg:#14110d; --panel:#1d1812; --panel2:#251f17; --line:#38301f;
+    --text:#f2e9da; --muted:#a8997f; --gold:#d4a574; --gold2:#e8b884;
+    --green:#22c55e; --blue:#4f9dff; --pink:#ec4899; --red:#ef4444; --amber:#f5c451;
+  }
+  *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  body{margin:0;background:var(--bg);color:var(--text)}
+  /* slim themed scrollbars (matches the real app) */
+  *{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--gold) 28%,transparent) transparent}
+  *::-webkit-scrollbar{width:12px;height:12px}
+  *::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--gold) 24%,transparent);border:3px solid transparent;border-radius:999px;background-clip:padding-box;min-height:40px}
+
+  .topbar{display:flex;align-items:center;gap:14px;padding:0 22px;height:60px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .brand{font-weight:800;font-size:18px;color:var(--gold)}
+  .topbar .sub{color:var(--muted);font-size:13px;font-weight:500}
+  .mockTag{margin-left:auto;font-size:11px;color:var(--muted);border:1px dashed var(--line);padding:4px 10px;border-radius:999px}
+
+  .layout{display:grid;grid-template-columns:minmax(320px,420px) 1fr;gap:0;height:calc(100vh - 60px)}
+  @media(max-width:820px){.layout{grid-template-columns:1fr;height:auto}}
+
+  /* LEFT — tables */
+  .left{border-right:1px solid var(--line);padding:16px;overflow-y:auto}
+  .left h2{font-size:15px;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  .legend{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11px;color:var(--muted);margin-bottom:14px}
+  .legend i{width:9px;height:9px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:middle}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+  .tile{--c:#6b6253;position:relative;min-height:118px;border-radius:14px;border:1.5px solid color-mix(in srgb,var(--c) 55%,var(--line));
+    background:linear-gradient(157deg,color-mix(in srgb,var(--c) 16%,var(--panel)),var(--panel) 80%);
+    padding:11px 12px;display:flex;flex-direction:column;gap:3px;cursor:pointer;text-align:left;color:var(--text);transition:.12s}
+  .tile:hover{transform:translateY(-2px)}
+  .tile.sel{outline:3px solid var(--gold);outline-offset:1px}
+  .tile.pay-unpaid{border-color:var(--red)} .tile.pay-paid{border-color:var(--green)}
+  .t-free{--c:#6b6253}.t-seated{--c:#2dd4bf}.t-new{--c:#f59e0b}.t-prep{--c:#4f9dff}.t-bill{--c:#f5c451}.t-done{--c:#6b6253}
+  .tnum{font-size:26px;font-weight:800;line-height:1}
+  .tlabel{font-weight:700;font-size:13px} .t-bill .tlabel{color:var(--amber)} .t-new .tlabel{color:#f59e0b} .t-prep .tlabel{color:var(--blue)}
+  .tmeta{font-size:11px;color:var(--muted)}
+  .tbtn{margin-top:auto;background:linear-gradient(180deg,#e8c79a,#d4a574);color:#1a140c;font-weight:800;font-size:13px;text-align:center;padding:8px;border-radius:10px}
+
+  /* RIGHT */
+  .right{padding:20px 24px;overflow-y:auto}
+
+  /* RIGHT default — floor controls */
+  .fc-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+  .fc-card h3{margin:0 0 12px;font-size:14px}
+  .fc-bulk{display:flex;gap:10px}
+  .btn{padding:11px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-weight:700;font-size:13px;cursor:pointer}
+  .btn.primary{background:linear-gradient(180deg,#e8c79a,#d4a574);color:#1a140c;border:0}
+  .btn.danger{border-color:#7f1d1d;color:#fca5a5}
+  .btn.green{background:linear-gradient(180deg,#34d399,#22c55e);color:#06281a;border:0}
+  .req{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .req:last-child{border-bottom:0}
+  .tag{font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;background:#1f2c49;color:#9ec1ff}
+  .hint{color:var(--muted);font-size:13px;text-align:center;padding:30px 16px;border:1px dashed var(--line);border-radius:14px}
+
+  /* RIGHT selected — table detail */
+  .det-head{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .det-head h2{margin:0;font-size:22px}
+  .pill{font-size:11px;font-weight:800;padding:3px 10px;border-radius:999px}
+  .pill.open{background:rgba(34,197,94,.16);color:#4ade80}
+  .pill.prep{background:rgba(79,157,255,.18);color:#7ab4ff}
+  .pill.unpaid{background:rgba(245,196,81,.16);color:var(--amber)}
+  .det-sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+  .sec-h{font-weight:800;font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px}
+  .sep{border-top:1px dashed color-mix(in srgb,var(--line) 80%,var(--gold));margin:10px 0}
+  .ordhint{font-size:11px;color:var(--muted);margin:-2px 0 8px}
+
+  .row{display:grid;grid-template-columns:auto 1fr auto auto auto;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .qty{font-weight:800;color:var(--gold)}
+  .nm{min-width:0}
+  .nm .no{display:block;font-size:11px;color:#ff8a8a;font-weight:700;margin-top:2px}
+  .nm .opt{display:block;font-size:11px;color:var(--muted)}
+  .price{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .st{font-size:10px;font-weight:800;padding:4px 9px;border-radius:8px;white-space:nowrap}
+  .st.served{background:rgba(34,197,94,.18);color:#4ade80}
+  .st.cooking{background:rgba(79,157,255,.18);color:#7ab4ff}
+  .serve{background:linear-gradient(180deg,#34d399,#22c55e);color:#06281a;font-weight:800;border:0;border-radius:8px;padding:6px 11px;font-size:12px;cursor:pointer}
+  .del{background:transparent;border:0;color:#b06b6b;font-size:16px;cursor:pointer;border-radius:8px;padding:4px 6px}
+  .del:hover{background:rgba(239,68,68,.12);color:#ff8a8a}
+
+  .bill{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-top:16px}
+  .bline{display:flex;justify-content:space-between;font-size:14px;padding:3px 0}
+  .bline.grand{border-top:1px solid var(--line);margin-top:6px;padding-top:10px;font-weight:800;font-size:18px}
+  .bline.grand b{color:var(--gold)}
+  .det-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span class="brand">Manager</span><span class="sub">· Tables — live floor</span>
+    <span class="mockTag">MOCKUP · click any table on the left</span>
+  </div>
+
+  <div class="layout">
+    <!-- LEFT: all tables -->
+    <aside class="left">
+      <h2>Tables <span class="sub" style="color:var(--muted);font-weight:500">· 13</span></h2>
+      <div class="legend">
+        <span><i style="background:#6b6253"></i>Free</span>
+        <span><i style="background:#2dd4bf"></i>Seated</span>
+        <span><i style="background:#f59e0b"></i>New</span>
+        <span><i style="background:#4f9dff"></i>Preparing</span>
+        <span><i style="background:#f5c451"></i>To pay</span>
+        <span><i style="border:1px solid var(--red);background:transparent"></i>unpaid</span>
+      </div>
+      <div class="tiles" id="tiles"></div>
+    </aside>
+
+    <!-- RIGHT: floor controls (default) OR table detail (when selected) -->
+    <main class="right" id="right"></main>
+  </div>
+
+<script>
+const TABLES = [
+  {n:1,cls:"free",label:"Free",meta:"tap to open",btn:"Open"},
+  {n:2,cls:"free",label:"Free",meta:"tap to open",btn:"Open"},
+  {n:3,cls:"bill",label:"Served",meta:"10/10 served · ₹2,153 due",pay:"unpaid",btn:"💳 Mark paid",
+    detail:{guests:2,bill:"#8",status:"Served · unpaid",statusCls:"unpaid",
+      orders:[
+        {kot:"#21",when:"7:44 PM",items:[
+          {q:1,name:"Roasted Tomato & Basil Soup",code:"#21",price:"₹420",st:"served",no:["GLUTEN","SOY"]},
+          {q:1,name:"Farmer's Tear & Share Bread",code:"#26",price:"₹590",st:"served",no:["GLUTEN","SOY"]},
+        ]},
+        {kot:"#26",when:"7:51 PM",items:[
+          {q:2,name:"Cappuccino",code:"#2",price:"₹680",st:"served"},
+          {q:1,name:"Espresso",code:"#1",price:"₹250",st:"served",opt:"Small · Regular",no:["DAIRY"]},
+        ]},
+      ],
+      subtotal:"₹2,050",gst:"₹103",total:"₹2,153"}},
+  {n:4,cls:"new",label:"New order",meta:"2 dishes · waiting",btn:"✓ Accept",
+    detail:{guests:1,bill:"#9",status:"New — needs accept",statusCls:"prep",
+      orders:[{kot:"#27",when:"just now",items:[
+        {q:1,name:"Spicy Watermelon Cooler",code:"#14",price:"₹420",st:"cooking"},
+        {q:1,name:"Hash Brown Potato Cakes",code:"#23",price:"₹500",st:"cooking",no:["EGGS"]},
+      ]}],subtotal:"₹920",gst:"₹46",total:"₹966"}},
+  {n:5,cls:"prep",label:"Preparing",meta:"1/3 served · ₹1,180 due",pay:"unpaid",btn:"🍽️ Serve all",
+    detail:{guests:3,bill:"#10",status:"Preparing",statusCls:"prep",
+      orders:[{kot:"#28",when:"8:02 PM",items:[
+        {q:1,name:"Sassy Signature Salad",code:"#31",price:"₹840",st:"served"},
+        {q:1,name:"Caramel Cold Coffee",code:"#6",price:"₹340",st:"cooking"},
+        {q:1,name:"Mocha Frappe",code:"#4",price:"₹0",st:"cooking"},
+      ]}],subtotal:"₹1,124",gst:"₹56",total:"₹1,180"}},
+  {n:6,cls:"seated",label:"Seated · 2",meta:"no orders yet"},
+  {n:7,cls:"free",label:"Free",meta:"tap to open",btn:"Open"},
+  {n:8,cls:"free",label:"Free",meta:"tap to open",btn:"Open"},
+];
+
+const FLOOR = `
+  <div class="fc-card">
+    <h3>Whole floor</h3>
+    <div class="fc-bulk">
+      <button class="btn primary">⬆ Open all</button>
+      <button class="btn danger">⬇ Close all</button>
+      <button class="btn">↻ Refresh</button>
+    </div>
+  </div>
+  <div class="fc-card">
+    <h3>Requests · 2</h3>
+    <div class="req"><span><span class="tag">join</span> Riya · join T3 <span style="color:var(--muted)">· 1m</span></span><span><button class="btn">✕</button> <button class="btn primary">OK</button></span></div>
+    <div class="req"><span><span class="tag">open</span> Guest · open T7 <span style="color:var(--muted)">· just now</span></span><span><button class="btn">✕</button> <button class="btn primary">Open</button></span></div>
+  </div>
+  <div class="fc-card">
+    <h3>Needs · 1</h3>
+    <div class="req"><span>💧 T5 · Water <span style="color:var(--muted)">· 2m</span></span><button class="btn primary">Done</button></div>
+  </div>
+  <div class="hint">Tap a table on the left to see its full detail here — every order, dish status, and the bill, all in one place.</div>
+`;
+
+function itemRow(it){
+  const no = it.no && it.no.length ? `<span class="no">NO ${it.no.join(", NO ")}</span>` : "";
+  const opt = it.opt ? `<span class="opt">${it.opt}</span>` : "";
+  const st = it.st==="served" ? `<span class="st served">served</span>` : `<span class="st cooking">cooking</span>`;
+  const action = it.st==="served" ? st : `${st}<button class="serve">✓ Serve</button>`;
+  return `<div class="row">
+    <span class="qty">${it.q}×</span>
+    <span class="nm">${it.name} <span style="color:var(--gold);font-size:12px">${it.code}</span>${opt}${no}</span>
+    <span class="price">${it.price}</span>
+    ${it.st==="served" ? `<span class="st served">served</span>` : `<span class="st cooking">cooking</span><button class="serve">✓ Serve</button>`}
+    <button class="del" title="Remove this dish from the order">🗑</button>
+  </div>`;
+}
+
+function detailHTML(t){
+  const d=t.detail; let dishes="";
+  d.orders.forEach((o,i)=>{
+    if(i>0) dishes += `<div class="sep"></div>`;
+    dishes += o.items.map(itemRow).join("");
+  });
+  const recv = d.status.includes("New");
+  return `
+    <div class="det-head"><h2>Table ${t.n}</h2><span class="pill ${d.statusCls}">${d.status}</span></div>
+    <div class="det-sub">${d.guests} guest${d.guests>1?"s":""} · bill ${d.bill}</div>
+
+    <div class="sec-h">Orders · ${d.orders.length} merged into one bill</div>
+    <div class="ordhint">New orders show separately to accept; once accepted they merge here. Allergens shown per dish in red.</div>
+    ${dishes}
+
+    <div class="bill">
+      <div class="bline"><span>Subtotal</span><span>${d.subtotal}</span></div>
+      <div class="bline"><span>GST</span><span>${d.gst}</span></div>
+      <div class="bline grand"><span>Total</span><b>${d.total}</b></div>
+    </div>
+
+    <div class="det-actions">
+      ${recv?`<button class="btn primary">✓ Accept all &amp; prepare</button>`:`<button class="btn green">🍽️ Serve all</button>`}
+      <button class="btn primary">💳 Mark all paid</button>
+      <button class="btn">⇄ Shift table</button>
+      <button class="btn">🖨 Print bill</button>
+      <button class="btn danger">⏻ Close table</button>
+    </div>
+  `;
+}
+
+let selected=null;
+function render(){
+  document.getElementById("tiles").innerHTML = TABLES.map(t=>`
+    <button class="tile t-${t.cls} ${t.pay?"pay-"+t.pay:""} ${selected===t.n?"sel":""}" data-n="${t.n}">
+      <span class="tnum">${t.n}</span>
+      <span class="tlabel">${t.label}</span>
+      <span class="tmeta">${t.meta||""}</span>
+      ${t.btn?`<span class="tbtn">${t.btn}</span>`:""}
+    </button>`).join("");
+  const t = TABLES.find(x=>x.n===selected);
+  document.getElementById("right").innerHTML = (t && t.detail) ? detailHTML(t) : FLOOR;
+  document.querySelectorAll(".tile").forEach(b=>b.onclick=()=>{ selected=+b.dataset.n; render(); });
+}
+render();
+</script>
+</body>
+</html>

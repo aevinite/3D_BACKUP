@@ -728,6 +728,23 @@ body {
    its dragged pixel width instead of going full-width on a narrow screen. */
 @media (max-width: 1040px) { .floor-wrap { flex-direction: column; margin-right: 0; } .floor-side { width: 100% !important; flex: none !important; margin-top: 0; } }
 
+/* Master-detail: the table detail shown IN the right side panel (replacing the
+   floor controls when a tile is selected). It reuses all the .sx-* / .tp-order /
+   .bill section styles the pop-up modal used — only the OUTER frame is new here,
+   styled to sit in the panel column rather than float as a centered card. */
+.tp-detail { background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; }
+.tp-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; background: var(--panel-2); }
+.tp-detail-head h3 { margin: 0; font-family: var(--display); font-weight: 700; font-size: 20px; }
+.tp-detail-close { line-height: 1; }
+.tp-detail-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.tp-detail-foot { padding: 14px 16px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tp-detail-foot .tp-free { margin-left: auto; }
+/* the selected tile gets a gold ring so it's obvious which detail is showing */
+.ftile.ft-sel { outline: 3px solid var(--gold); outline-offset: 1px; }
+/* dish row actions (Serve + 🗑 delete) sit together at the row's right edge */
+.sx-item-acts { display: inline-flex; align-items: center; gap: 6px; }
+.sx-item-del { padding: 4px 8px; }
+
 /* legend — every state + its colour */
 .floor-legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 2px 0 18px; font-size: 12px; color: var(--muted); }
 .lgi { display: inline-flex; align-items: center; gap: 7px; }
@@ -1132,3 +1149,113 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   .ed-head-actions { flex-wrap: wrap; gap: 8px; }
   .ret-ctl { font-size: 12px; padding: 5px 8px; }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   TABLES TAB — MASTER-DETAIL REDESIGN (2026-06-15)
+   A polished, organised pass over the floor + table detail: a stats strip,
+   richer tiles, a detail header with a dish-status progress bar, KOT order
+   cards, a clean dish-row grid, a bill breakdown, and ONE sticky action bar.
+   These rules sit at the END of the file so they win the cascade over the
+   older floor styles above (same selectors, later = applied). Local accent
+   colours (blue/orange/teal) are literals — the theme only ships gold/green.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ---- stats strip: the whole floor's health at a glance ---- */
+.floor-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 4px 0 16px; }
+.fstat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 13px; }
+.fstat-n { font-size: 20px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.fstat-l { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
+.fstat.warn .fstat-n { color: var(--gold-strong); }
+.fstat.alert .fstat-n { color: #f59e0b; }
+
+/* ---- tiles: rounder, lift on hover, a clear gold ring when selected ---- */
+.ftile { border-radius: 16px; padding: 12px 13px; min-height: 118px; transition: transform .12s ease, box-shadow .12s ease, border-color .12s; }
+.ftile:hover { transform: translateY(-3px); box-shadow: 0 12px 26px -12px rgba(0,0,0,.7); }
+.ftile.ft-sel { outline: none; border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold), 0 12px 26px -12px rgba(0,0,0,.8); }
+
+/* ---- detail header: title + status pill + summary + progress bar ---- */
+.tp-detail { border-radius: 16px; }
+.tp-detail-head { display: block; position: sticky; top: 0; z-index: 5; padding: 15px 16px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.tp-detail-top { display: flex; align-items: center; gap: 11px; }
+.tp-detail-top h3 { margin: 0; font-family: var(--display); font-weight: 700; font-size: 23px; }
+.tp-detail-close { margin-left: auto; width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 16px; cursor: pointer; line-height: 1; }
+.tp-detail-close:hover { border-color: var(--gold); }
+.tbl-modal-head .tp-detail-top { width: 100%; }
+
+.tp-pill { font-size: 11px; font-weight: 800; padding: 4px 11px; border-radius: 999px; white-space: nowrap; }
+.tp-pill-new  { background: rgba(245,158,11,.16); color: #f59e0b; }
+.tp-pill-prep { background: rgba(90,162,255,.16); color: #5aa2ff; }
+.tp-pill-ready{ background: rgba(236,72,153,.18); color: #f472b6; }
+.tp-pill-bill { background: rgba(245,196,81,.16); color: #f5c451; }
+.tp-pill-seated, .tp-pill-waiting { background: rgba(45,212,191,.15); color: #2dd4bf; }
+.tp-pill-done, .tp-pill-free, .tp-pill-req { background: rgba(168,153,127,.16); color: var(--muted); }
+
+.tp-det-sub { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 13px; margin-top: 10px; }
+.tp-det-sub b { color: var(--text); font-weight: 700; }
+
+.tp-prog { margin-top: 12px; }
+.tp-prog-bar { height: 8px; border-radius: 999px; background: var(--panel); overflow: hidden; display: flex; border: 1px solid var(--line); }
+.tp-prog-bar span { height: 100%; transition: width .3s ease; }
+.pp-served { background: var(--green); } .pp-cook { background: #5aa2ff; } .pp-recv { background: #f59e0b; }
+.tp-prog-leg { display: flex; gap: 14px; margin-top: 7px; font-size: 11px; color: var(--muted); }
+.tp-prog-leg i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 5px; vertical-align: middle; }
+.pl-served { background: var(--green); } .pl-cook { background: #5aa2ff; } .pl-recv { background: #f59e0b; }
+
+/* ---- KOT order cards (accepted orders grouped by ticket; still one bill) ---- */
+.tp-order { border: 1px solid var(--line); border-radius: 13px; padding: 0; margin-bottom: 12px; background: var(--panel); overflow: hidden; }
+.tp-order-new { border-color: color-mix(in srgb, #f59e0b 45%, var(--line)); }
+.tp-order-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; margin: 0; background: var(--panel-2); border-bottom: 1px solid var(--line); text-transform: none; letter-spacing: 0; font-weight: 600; }
+.tp-order-new .tp-order-head { background: color-mix(in srgb, #f59e0b 12%, var(--panel-2)); }
+.kot-chip { background: color-mix(in srgb, var(--gold) 16%, var(--panel)); color: var(--gold-strong); font-weight: 800; font-size: 12px; padding: 3px 9px; border-radius: 8px; }
+.tp-when { color: var(--muted); font-size: 12px; }
+.tp-newtag { margin-left: auto; font-size: 10px; font-weight: 800; text-transform: uppercase; color: #f59e0b; background: rgba(245,158,11,.16); padding: 2px 8px; border-radius: 999px; }
+.tp-order-foot { padding: 9px 14px; background: var(--panel-2); border-top: 1px solid var(--line); display: flex; justify-content: flex-end; }
+.sx-badge2 { background: var(--panel-2); color: var(--muted); font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-left: auto; }
+
+/* ---- dish row: qty · name/detail · price · [chip + serve + delete] ---- */
+.tp-order .sx-item { display: grid; grid-template-columns: 32px 1fr auto auto; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent); justify-content: unset; }
+.tp-order .sx-item:last-child { border-bottom: none; }
+.sx-item-qty { font-weight: 800; color: var(--gold-strong); font-size: 15px; text-align: center; }
+.sx-item-info { min-width: 0; font-size: 13.5px; display: flex; flex-direction: column; gap: 2px; }
+.sx-item-name { font-weight: 600; }
+.dish-no { color: var(--gold); font-size: 11.5px; font-weight: 700; }
+.ord-line-opts { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+.ol-no { color: #ff9a9a; font-weight: 800; background: rgba(239,68,68,.13); border-radius: 5px; padding: 1px 6px; }
+.sx-item-price { margin-left: 0; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.sx-item-acts { display: inline-flex; align-items: center; gap: 7px; justify-content: flex-end; }
+
+/* status chip now sits on the RIGHT with the actions; recolour cooking → blue */
+.ord-pill { font-size: 10px; font-weight: 800; padding: 4px 9px; border-radius: 7px; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+.ord-pill.received  { background: rgba(245,158,11,.16); color: #f59e0b; }
+.ord-pill.preparing { background: rgba(90,162,255,.16); color: #5aa2ff; }
+.ord-pill.served    { background: rgba(34,197,94,.16);  color: #4ade80; }
+
+.icon-serve, .icon-del { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: transparent; cursor: pointer; font-size: 14px; display: inline-grid; place-items: center; transition: .1s; }
+.icon-serve { color: var(--green); border-color: color-mix(in srgb, var(--green) 35%, transparent); }
+.icon-serve:hover { background: rgba(34,197,94,.14); }
+.icon-del { color: #c47b7b; }
+.icon-del:hover { background: rgba(239,68,68,.13); color: #ff9a9a; border-color: #7f1d1d; }
+
+/* ---- bill breakdown card ---- */
+.tp-bill { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px; }
+.tp-bl { display: flex; justify-content: space-between; font-size: 13.5px; padding: 3px 0; color: var(--muted); }
+.tp-bl b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tp-bl.disc b { color: var(--green); }
+.tp-bl.grand { border-top: 1px dashed var(--line); margin-top: 7px; padding-top: 10px; font-size: 18px; color: var(--text); font-weight: 800; }
+.tp-bl-amt { color: var(--gold-strong); font-variant-numeric: tabular-nums; }
+
+/* ---- ONE sticky action bar (in-panel detail AND legacy modal) ---- */
+.tp-detail-foot, .tbl-modal-foot { position: sticky; bottom: 0; z-index: 4; padding: 13px 16px; border-top: 1px solid var(--line); background: var(--panel-2); display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
+.tp-foot-spacer { flex: 1 1 auto; min-width: 6px; }
+.tp-detail-foot .tp-free, .tbl-modal-foot .tp-free { margin-left: 0; }
+.btn.green { background: linear-gradient(180deg, #4ade80, #22c55e); color: #06281a; border: 0; }
+
+/* ---- the middle divider: a visible, grabbable handle to resize both columns ---- */
+.floor-resizer { flex: 0 0 8px; align-self: stretch; min-height: 320px; cursor: col-resize; background: transparent; position: relative; transition: flex-basis .15s; }
+.floor-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); background: var(--line); border-radius: 999px; transition: background .15s, width .15s; }
+.floor-resizer::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 6px; height: 38px; border-radius: 999px; background: color-mix(in srgb, var(--gold) 45%, var(--line)); transition: background .15s, height .15s; }
+.floor-resizer:hover::before, .floor-resizer:active::before { width: 4px; background: var(--gold); }
+.floor-resizer:hover::after, .floor-resizer:active::after { background: var(--gold); height: 54px; }
+
+/* ---- floor-control cards: match the rounder, gradient look ---- */
+.fc-card { border-radius: 16px; background: linear-gradient(180deg, var(--panel-2), var(--panel)); }

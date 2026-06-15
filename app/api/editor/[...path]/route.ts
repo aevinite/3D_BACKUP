@@ -368,6 +368,28 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok(row[0] || null);
     }
 
+    // items/:id/delete — remove ONE dish (order_item) from a table's order and
+    // reconcile the bill. CRITICAL (money): orders.total is a stored server-priced
+    // number, so we DON'T just delete the row — the lfh_delete_order_item RPC
+    // deletes it AND recomputes the order's subtotal/tax/total from the remaining
+    // dishes (and cancels the order if it's now empty), all in one transaction.
+    // The RPC refuses to touch a PAID bill. Returns { ok, items_left, total, ... }.
+    if (a === "items" && c === "delete") {
+      const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
+      if (error) throw new Error(error.message);
+      if (data && data.ok === false) {
+        const reason = data.reason || "could not delete";
+        const msg = reason === "order_paid"
+          ? "Won't change a PAID bill — mark it unpaid first."
+          : reason === "item_not_found"
+            ? "That dish was already removed."
+            : reason;
+        return err(msg, reason === "order_paid" ? 409 : 400);
+      }
+      await logAction("editor", "order_item_delete", { order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
+      return ok(data);
+    }
+
     // items/:id/status (session order_items)
     if (a === "items" && c === "status") {
       const status = body && body.status;
