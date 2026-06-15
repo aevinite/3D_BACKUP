@@ -263,7 +263,8 @@ function renderList() {
     return;
   }
   if (state.tab === "tables") {
-    ul.appendChild(el(`<li class="list-item active"><div class="thumb"><i class="fas fa-chair"></i></div><div class="meta"><b>Floor map</b><small>live tables</small></div></li>`));
+    // Nothing in the sidebar for Tables — it's hidden (see setTab's .no-sidebar);
+    // the floor uses the full width.
     return;
   }
   if (state.tab === "features") {
@@ -3114,6 +3115,11 @@ function setTab(tab) {
   const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "log" || tab === "features" || tab === "dash" || tab === "customers";
   $("#newBtn").style.display = noList ? "none" : "";
   $("#search").style.display = noList ? "none" : "";
+  // Tables tab: drop the whole left sidebar (it only held a dead "Floor map" label).
+  // The floor already has its own left tiles + right detail, so it takes the full
+  // width — the .no-sidebar class collapses the grid's first column to nothing.
+  const layout = document.querySelector(".layout");
+  if (layout) layout.classList.toggle("no-sidebar", tab === "tables");
   renderCatFilter(); // show category chips on Dishes, hide elsewhere
   renderList();
   renderEditor();
