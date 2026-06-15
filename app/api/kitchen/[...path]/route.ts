@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
-import { businessDayStartIso } from "@/lib/businessDay";
+import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole } from "@/lib/userAuth";
 
 export const dynamic = "force-dynamic";
@@ -34,13 +34,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "board") {
-      const since = businessDayStartIso();
-      const [orders, items, dishes] = await Promise.all([
-        sb.from("orders").select("*").gte("created_at", since).eq("archived", false).order("created_at", { ascending: true }),
-        sb.from("order_items").select("*").gte("created_at", since).order("created_at", { ascending: true }),
+      // Orders + dishes from the shared "live board" helper — today's tickets PLUS
+      // any still-open session's, so a dish left cooking on an overnight table keeps
+      // showing here (and matches the manager). Was a day-clipped fetch before.
+      const [live, dishes] = await Promise.all([
+        liveOrdersAndItems(),
         sb.from("menu_items").select("id,title,category,tags").order("category"),
       ]);
-      return ok({ orders: must(orders), items: must(items), dishes: must(dishes) });
+      return ok({ orders: live.orders, items: live.items, dishes: must(dishes) });
     }
     return err("unknown GET endpoint", 404);
   } catch (e) {

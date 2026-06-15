@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
-import { businessDayStartIso } from "@/lib/businessDay";
+import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole } from "@/lib/userAuth";
 
 export const dynamic = "force-dynamic";
@@ -34,15 +34,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "state") {
-      const since = businessDayStartIso();
-      const [settings, sessions, members, orders, items, calls, dishes, categories, requests] = await Promise.all([
+      // Orders + dishes come from the shared "live board" helper so the tablet shows
+      // EXACTLY what the manager shows — today's orders plus any still-open session's
+      // orders, even past the 05:00 IST rollover. (This used to be a day-clipped fetch
+      // here, which hid an overnight open table's orders → tablet-vs-manager desync.)
+      const [live, settings, sessions, members, calls, dishes, categories, requests] = await Promise.all([
+        liveOrdersAndItems(),
         sb.from("settings").select("*").eq("id", "site").maybeSingle(),
         sb.from("sessions").select("*").neq("status", "closed"),
         sb.from("session_members").select("*").eq("removed", false),
-        sb.from("orders").select("*").gte("created_at", since).eq("archived", false).order("created_at"),
-        // Per-dish rows (the same table the kitchen advances). Lets the tablet show
-        // and advance each dish's status (new → cooking → served), not just the order.
-        sb.from("order_items").select("*").gte("created_at", since).order("created_at").order("id"),
         sb.from("waiter_calls").select("*").eq("resolved", false),
         sb.from("menu_items").select("id,title,price,category,tags,veg,options").order("category"),
         sb.from("categories").select("slug,name,icon,sort_order,active").order("sort_order"),
@@ -50,7 +50,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       ]);
       return ok({
         settings: must(settings), sessions: must(sessions), members: must(members),
-        orders: must(orders), items: must(items), calls: must(calls), dishes: must(dishes),
+        orders: live.orders, items: live.items, calls: must(calls), dishes: must(dishes),
         categories: must(categories), requests: must(requests),
       });
     }
