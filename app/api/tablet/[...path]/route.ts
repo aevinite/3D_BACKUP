@@ -89,6 +89,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
       });
       if (error) throw new Error(error.message);
+      // A WAITER placed this on the tablet, so it's already confirmed — skip the
+      // kitchen "accept" step and push it straight onto the pass as "preparing"
+      // (same effect as orders/:id/accept). Guest/head orders still arrive as
+      // "received" and need accepting. (owner, 2026-06-16 — tablet-only)
+      const placedId = (data as any)?.order_id;
+      if (placedId) {
+        const cur = must(await sb.from("orders").select("items").eq("id", placedId).single());
+        const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
+        await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", placedId);
+        await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("status", "received");
+      }
       await logAction("tablet", "order_place", { table_number: t, device_id: dev });
       return ok(data);
     }
@@ -175,6 +186,44 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
       await logAction("tablet", "order_accept", { order_id: b, device_id: dev });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
+    }
+
+    // orders/:id/allergies — staff edit of the order-wide "avoid" list (add a
+    // missed allergen / fix a wrong one). Mirrors the editor endpoint exactly.
+    // (owner, 2026-06-16)
+    if (a === "orders" && c === "allergies") {
+      const raw = Array.isArray(body?.allergies) ? body.allergies : [];
+      const allergies = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
+      const row = must(await sb.from("orders").update({ allergies }).eq("id", b).select());
+      await logAction("tablet", "order_allergies", { order_id: b, detail: allergies.join(", ") || "(none)", device_id: dev });
+      return ok(row[0] || null);
+    }
+
+    // items/:id/delete — remove ONE dish and reconcile the bill. Same as the
+    // editor: the lfh_delete_order_item RPC re-prices the order and refuses a
+    // PAID bill (orders.total is a stored, server-priced number).
+    if (a === "items" && c === "delete") {
+      const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
+      if (error) throw new Error(error.message);
+      if (data && data.ok === false) {
+        const reason = data.reason || "could not delete";
+        const msg = reason === "order_paid" ? "Won't change a PAID bill — mark it unpaid first."
+          : reason === "item_not_found" ? "That dish was already removed." : reason;
+        return err(msg, reason === "order_paid" ? 409 : 400);
+      }
+      await logAction("tablet", "order_item_delete", { order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
+      return ok(data);
+    }
+
+    // orders/:id/delete — remove a WHOLE order (and its dishes). Refuses a PAID
+    // order (it's a financial record); otherwise hard-deletes order + items.
+    if (a === "orders" && c === "delete") {
+      const cur = must(await sb.from("orders").select("payment_status").eq("id", b).single());
+      if (cur && cur.payment_status === "paid") return err("Won't delete a PAID order — mark it unpaid first.", 409);
+      await sb.from("order_items").delete().eq("order_id", b);
+      must(await sb.from("orders").delete().eq("id", b).select());
+      await logAction("tablet", "order_delete", { order_id: b, device_id: dev });
+      return ok({ ok: true });
     }
 
     // orders/:id/move — move a SINGLE order (and its dish rows) to another table's

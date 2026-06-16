@@ -755,6 +755,8 @@ body.menu-frost .nav {
 .allergy-toggle { font-size: 13px; padding: 6px 12px; border-radius: 999px; background: rgba(212,165,116,0.08); border: 1px solid rgba(212,165,116,0.3); color: var(--muted); cursor: pointer; transition: all 0.2s; }
 .allergy-toggle.on { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.6); color: #fca5a5; font-weight: 700; }
 .allergy-warning { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; font-size: 13px; line-height: 1.45; }
+.allergy-note { margin: 10px 0 0; font-size: 12px; line-height: 1.45; color: var(--muted); opacity: 0.85; }
+.allergy-note i { margin-right: 5px; opacity: 0.8; }
 .cart-item-warn { font-size: 12px; color: #fca5a5; margin-top: 4px; }
 /* pairing upsell on the bill */
 .pairing { margin: 4px 0 16px; }

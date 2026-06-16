@@ -77,13 +77,20 @@ export default function SessionStatusWidget() {
 
   // Disconnect this device locally: drop the token AND the (now-shared) cart, so a
   // left/closed table leaves no stale state. The cart reverts to private + empty.
+  // We ALSO drop the live order records (lfh_active_orders): once you're off the
+  // table — whether you left, were removed, or staff CLOSED the table — the floating
+  // "order preparing / served" tracker should disappear instead of lingering after
+  // the meal is over (owner, 2026-06-16). The lfh:order-placed nudge makes the
+  // OrderTracker re-read straight away and draw nothing.
   const clearLocal = () => {
     clearStoredSession();
     try { localStorage.removeItem("lfh_cart"); } catch {}
+    try { localStorage.removeItem("lfh_active_orders"); } catch {}
     setScannedTable("");                                    // stop pre-filling the table you just left
     window.dispatchEvent(new Event("lfh:cart-updated"));
     window.dispatchEvent(new Event("lfh:table-scanned"));
     window.dispatchEvent(new Event("lfh:session-changed"));
+    window.dispatchEvent(new Event("lfh:order-placed"));    // make the live tracker re-read + hide
   };
 
   // This runs once on first appear: restore where the card was last dragged to
@@ -211,13 +218,7 @@ export default function SessionStatusWidget() {
     const token = tokenRef.current; if (!token || busy) return;
     setBusy(true);
     await leaveSession(token);
-    clearLocal();
-    // You CHOSE to leave, so stop following this table's orders — drop the live
-    // tracker records so the "order served / preparing" notifications disappear
-    // for you (they keep going for whoever's still at the table). (A staff CLOSE
-    // is different: that path keeps them so the guest sees "Order cancelled".)
-    try { localStorage.removeItem("lfh_active_orders"); } catch {}
-    window.dispatchEvent(new Event("lfh:order-placed")); // make the tracker re-read + hide
+    clearLocal(); // also drops lfh_active_orders + nudges the tracker to hide
     wasActive.current = false;
     setSt(null);
     setBusy(false);
@@ -229,8 +230,7 @@ export default function SessionStatusWidget() {
     const token = tokenRef.current; if (!token || busy) return;
     setBusy(true);
     await leaveSession(token);
-    clearLocal();
-    try { localStorage.removeItem("lfh_active_orders"); } catch {} // stop following the old table's orders
+    clearLocal(); // also drops lfh_active_orders so the old table's tracker won't follow you
     window.location.href = "/menu"; // go pick / scan another table
   };
 

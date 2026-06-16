@@ -158,6 +158,11 @@ export const approveMember = (ownerToken: string, memberId: string, name: string
 // The head removes a member from the table.
 export const removeMember = (ownerToken: string, memberId: string) =>
   rpc("lfh_remove_member", { p_owner_token: ownerToken, p_member_id: memberId });
+// Set THIS device's own display name on its membership (migration 048). Used to
+// capture a casual "nickname" before someone places their first order, so staff
+// and the table can tell whose order is whose. Proven by the session token.
+export const setMemberName = (token: string, name: string) =>
+  rpc("lfh_set_member_name", { p_token: token, p_name: name });
 // The head toggles "let new people in automatically" on/off.
 export const setAutoApprove = (ownerToken: string, value: boolean) =>
   rpc("lfh_set_auto_approve", { p_owner_token: ownerToken, p_value: value });

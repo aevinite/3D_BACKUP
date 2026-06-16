@@ -29,7 +29,7 @@ import { setScannedTable } from "@/lib/table";
 import {
   getStoredSession, storeSession, clearStoredSession,
   checkLocation, tableStatus, joinSession, getSessionState, requestAccess,
-  placeSessionOrder, callWaiterSession,
+  placeSessionOrder, callWaiterSession, setMemberName,
 } from "@/lib/session";
 
 // Once you're in a session, that table becomes your default everywhere (cart +
@@ -42,12 +42,17 @@ const rememberTable = (table: string) => {
 // The named screens this gate can show. Think of it as "which page are we on".
 type Step =
   | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "joining"
-  | "waiting_approval" | "denied" | "table_closed" | "net_error" | "request_sent" | "working" | "blocked";
+  | "nickname" | "waiting_approval" | "denied" | "table_closed" | "net_error" | "request_sent" | "working" | "blocked";
 
 // Remember (per device) that the guest has already seen the "why we check your
 // location" consent screen, so we only show it the FIRST time and go straight to
 // the check on later visits.
 const LOC_CONSENT_KEY = "lfh_loc_consent";
+
+// Remembers this device's chosen nickname so we only ask for it ONCE (before the
+// first order), then reuse it for every later order without nagging.
+const NICKNAME_KEY = "lfh_nickname";
+const getNickname = () => { try { return (localStorage.getItem(NICKNAME_KEY) || "").trim(); } catch { return ""; } };
 
 // The job we were asked to do, for which table, with whatever data it needs:
 //  • "order" / "call" — the original server actions.
@@ -113,31 +118,58 @@ export default function SessionGate() {
   // ── perform the queued action once the session is ready ────────────────────
   // Now that we're in the session, actually do the job: place the order or call
   // the waiter, then report success/failure and close.
+  // Actually send the order to the kitchen (nickname already ensured by act()).
+  // Split out from act() so the nickname screen can resume here after the guest
+  // types their name.
+  const placeOrderNow = useCallback(async () => {
+    const p = pending.current, s = sess.current;
+    if (!p || !s) return close();
+    setStep("working"); // show the "One moment…" screen
+    // EMAIL SEAM: when email verification lands, gate this on a verified member.
+    // Only the item lines + allergies travel to the server — no prices. The
+    // server prices the whole bill itself (see lfh_place_order).
+    const pl = p.payload as { items: unknown[]; allergies: string[] };
+    const r = await placeSessionOrder(s.token, pl.items, pl.allergies || []);
+    if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked" }); setStep("blocked"); return; } // table was blocked by staff
+    if (r.ok) { fireDone({ ok: true, action: "order", orderId: r.order_id }); toast("Order placed", "to the kitchen"); close(); } // success
+    else { toast("Couldn't place order", "order", "error"); fireDone({ ok: false, reason: r.reason }); close(); } // failed
+  }, [close]);
+
   const act = useCallback(async () => {
     const p = pending.current, s = sess.current;
     if (!p || !s) return close(); // nothing queued or no session — bail out
     // "connect" has no server work: we only needed to get the guest in. Report
     // success so the Add-to-cart gate can carry out the held add, then close.
     if (p.action === "connect") { fireDone({ ok: true, action: "connect" }); close(); return; }
-    setStep("working"); // show the "One moment…" screen
     if (p.action === "order") {
-      // EMAIL SEAM: when email verification lands, gate this on a verified member.
-      // Only the item lines + allergies travel to the server — no prices. The
-      // server prices the whole bill itself (see lfh_place_order).
-      const pl = p.payload as { items: unknown[]; allergies: string[] };
-      // Send the order to the kitchen against this table's shared bill.
-      const r = await placeSessionOrder(s.token, pl.items, pl.allergies || []);
-      if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked" }); setStep("blocked"); return; } // table was blocked by staff
-      if (r.ok) { fireDone({ ok: true, action: "order", orderId: r.order_id }); toast("Order placed", "to the kitchen"); close(); } // success
-      else { toast("Couldn't place order", "order", "error"); fireDone({ ok: false, reason: r.reason }); close(); } // failed
-    } else {
-      // The action was "call a waiter" — send that for this table.
-      const r = await callWaiterSession(s.token, (p.payload?.reason as string) || "");
-      if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked" }); setStep("blocked"); return; }
-      if (r.ok) { fireDone({ ok: true, action: "call" }); toast("On our way!", "service"); close(); }
-      else { toast("Couldn't reach staff", "service", "error"); close(); }
+      // Ask for a casual nickname ONCE before the first order (the head joins with
+      // no name; auto-joined guests too). Once we have one we reuse it silently, so
+      // nobody is re-asked. submitNickname() saves it and resumes placeOrderNow().
+      if (!getNickname()) { setNote(""); setStep("nickname"); return; }
+      await placeOrderNow();
+      return;
     }
-  }, [close]);
+    // The action was "call a waiter" — send that for this table.
+    setStep("working"); // show the "One moment…" screen
+    const r = await callWaiterSession(s.token, (p.payload?.reason as string) || "");
+    if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked" }); setStep("blocked"); return; }
+    if (r.ok) { fireDone({ ok: true, action: "call" }); toast("On our way!", "service"); close(); }
+    else { toast("Couldn't reach staff", "service", "error"); close(); }
+  }, [close, placeOrderNow]);
+
+  // The nickname screen's submit: save the chosen nickname (device + DB), then
+  // carry on and place the order. Best-effort DB write — a blip there must not
+  // block the order, since the name is also kept on the device.
+  const submitNickname = useCallback(async () => {
+    const nick = name.trim();
+    if (!nick) { setNote("Add a nickname so we know whose order this is."); return; }
+    try { localStorage.setItem(NICKNAME_KEY, nick); } catch {}
+    const s = sess.current;
+    if (s) { try { await setMemberName(s.token, nick); } catch {} }
+    window.dispatchEvent(new Event("lfh:session-changed")); // refresh widgets that show the name
+    setNote("");
+    await placeOrderNow();
+  }, [name, placeOrderNow]);
 
   // Functions below are ordered so each only references ones defined ABOVE it —
   // no forward references, no useCallback dependency cycle.
@@ -396,6 +428,9 @@ export default function SessionGate() {
       // Save the session and make this our default table.
       const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
       sess.current = s; storeSession(s); rememberTable(s.table);
+      // They just typed a name to join → reuse it as their nickname so the order
+      // step never re-asks. (Joining as head sends no name, so the head still gets asked.)
+      if (name.trim()) { try { localStorage.setItem(NICKNAME_KEY, name.trim()); } catch {} }
       window.dispatchEvent(new Event("lfh:session-changed"));
       // If the table auto-approves, go straight to acting; else wait for the host.
       if (r.approved) await ensureReadyAndAct();
@@ -594,6 +629,21 @@ export default function SessionGate() {
           <div className="sg-links">
             <button className="sg-link" onClick={rescan}>Wrong table? Scan again</button>
             <button className="sg-link" onClick={() => doRequest("access")}>Call a waiter instead</button>
+          </div>
+        </>)}
+
+        {/* Casual nickname ask before sending the first order. Framed so it never
+            feels like collecting personal info — any nickname is fine. */}
+        {step === "nickname" && (<>
+          <div className="sg-badge"><i className="fas fa-pen"></i></div>
+          <div className="sg-kicker">Almost done</div>
+          <h3 className="sg-title">What should we call you?</h3>
+          <p className="sg-sub">Just a nickname so the kitchen and your table can tell whose order is whose — no real name or details needed.</p>
+          <input className="sg-input" placeholder="Type your nickname — e.g. Mia" value={name} maxLength={40}
+            onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitNickname(); }} autoFocus />
+          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          <div className="sg-actions">
+            <button className="sg-btn gold" onClick={submitNickname}>Send my order</button>
           </div>
         </>)}
 

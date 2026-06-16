@@ -24,6 +24,15 @@ const inr = (n) => "₹" + Math.round((parseFloat(n) || 0) * INR_RATE).toLocaleS
 // serves in one tap. (owner, 2026-06-14)
 const NEXT_STATUS = { received: "preparing", preparing: "served", ready: "served", served: "received" };
 const STATUS_WORD = { received: "new", preparing: "cooking", ready: "ready", served: "served" };
+// The standard allergens staff can toggle per order (keep in sync with lib/allergens.ts).
+const ALLERGENS = [
+  { slug: "gluten", label: "🌾 Gluten" },
+  { slug: "dairy", label: "🥛 Dairy" },
+  { slug: "eggs", label: "🥚 Eggs" },
+  { slug: "nuts", label: "🥜 Nuts" },
+  { slug: "soy", label: "🫘 Soy" },
+  { slug: "fish", label: "🐟 Fish" },
+];
 
 const state = {
   data: { settings: null, sessions: [], members: [], orders: [], items: [], calls: [], dishes: [], categories: [], requests: [] },
@@ -239,7 +248,23 @@ function renderPanel() {
     const statusBadge = `<span class="ist ${r.status}">${STATUS_WORD[r.status] || r.status}</span>`;
     const serveBtn = (r.fromDb && (r.status === "preparing" || r.status === "ready"))
       ? `<button class="ist-serve" data-serve="${esc(r.id)}" data-cur="${esc(r.status)}">✓ Serve</button>` : "";
-    return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}</div>`;
+    // Per-dish delete (only for real saved dishes, not served): removes the dish and
+    // re-prices the bill server-side. (owner, 2026-06-16)
+    const delBtn = (r.fromDb && r.status !== "served")
+      ? `<button class="idel" data-del-item="${esc(r.id)}" title="Remove this dish">🗑</button>` : "";
+    return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}${delBtn}</div>`;
+  };
+  // Per-order staff controls: editable allergen chips ("avoid in all dishes") + a
+  // Delete-order button. Mirrors the manager's edit. Reuses .chip styling.
+  const orderControlsHtml = (o) => {
+    const list = Array.isArray(o.allergies) ? o.allergies : [];
+    const aSet = new Set(list.map((x) => String(x).toLowerCase()));
+    const extra = list.filter((x) => !ALLERGENS.some((a) => a.slug === String(x).toLowerCase()));
+    const chips = ALLERGENS.map((a) => `<span class="chip talg ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("");
+    return `<div class="ordctl">
+      <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}${extra.length ? `<span class="muted small">+ ${esc(extra.join(", "))}</span>` : ""}</div>
+      <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
+    </div>`;
   };
   // MERGED like the manager: un-accepted orders stay SEPARATE (each with its own
   // Accept); accepted orders fold into ONE combined list with a dashed separator
@@ -250,9 +275,9 @@ function renderPanel() {
     const when = o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
     const viaApp = !!o.member_id;
     const rows = dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("");
-    return `<div class="ord"><div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">New order${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}</span></div>${rows || `<div class="iline muted">No items.</div>`}<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
+    return `<div class="ord"><div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">New order${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}</span></div>${rows || `<div class="iline muted">No items.</div>`}${orderControlsHtml(o)}<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
   }).join("");
-  const mergedDishes = liveOrdersT.map((o, i) => (i > 0 ? `<div class="ord-sep" aria-hidden="true"></div>` : "") + dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("")).join("");
+  const mergedDishes = liveOrdersT.map((o, i) => (i > 0 ? `<div class="ord-sep" aria-hidden="true"></div>` : "") + dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("") + orderControlsHtml(o)).join("");
   const mergedCard = liveOrdersT.length ? `<div class="ord">${mergedDishes}</div>` : "";
   const orderCards = newCards + mergedCard;
 
@@ -316,6 +341,25 @@ function renderPanel() {
   // Explicit "✓ Serve" button on each cooking/ready dish → serves it directly
   // (advanceDish takes preparing/ready straight to served).
   document.querySelectorAll("[data-serve]").forEach((b) => (b.onclick = () => advanceDish(b.dataset.serve, b.dataset.cur)));
+  // Per-dish delete (confirm first; the server re-prices / cancels an emptied order).
+  document.querySelectorAll("[data-del-item]").forEach((b) => (b.onclick = async () => {
+    if (await confirmDialog("Remove this dish from the order? The bill updates automatically.", "Remove dish"))
+      act(() => api("POST", `/items/${b.dataset.delItem}/delete`));
+  }));
+  // Delete a WHOLE order (confirm; refused server-side if the order is already paid).
+  document.querySelectorAll("[data-del-order]").forEach((b) => (b.onclick = async () => {
+    if (await confirmDialog("Delete this whole order? It will be permanently removed.", "Delete order"))
+      act(() => api("POST", `/orders/${b.dataset.delOrder}/delete`));
+  }));
+  // Per-order allergen chips: toggle an allergen on/off for the whole order.
+  document.querySelectorAll(".talg[data-alg]").forEach((chip) => (chip.onclick = () => {
+    const id = chip.dataset.alg, slug = chip.dataset.slug;
+    const o = (state.data.orders || []).find((x) => x.id === id);
+    if (!o) return;
+    const cur = new Set((Array.isArray(o.allergies) ? o.allergies : []).map((x) => String(x).toLowerCase()));
+    if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
+    act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }));
+  }));
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
   const pb = $("#payBill"); if (pb) pb.onclick = async () => {
@@ -449,10 +493,12 @@ function orderGridHtml() {
   if (!dishes.length) return `<div class="muted" style="padding:14px">No dishes match.</div>`;
   return dishes.map((d) => {
     const out = (d.tags || []).includes("sold-out");
-    const inCart = state.cart.find((l) => l.id === d.id);
-    return `<button class="dish ${out ? "out" : ""} ${inCart ? "in" : ""}" data-dish="${esc(d.id)}" ${out ? "disabled" : ""}>
+    // Total this dish across ALL its cart lines (a dish can now appear on several
+    // lines — e.g. plain + "no nuts"), so the badge shows the true count.
+    const inCartQty = state.cart.filter((l) => l.id === d.id).reduce((s, l) => s + l.qty, 0);
+    return `<button class="dish ${out ? "out" : ""} ${inCartQty ? "in" : ""}" data-dish="${esc(d.id)}" ${out ? "disabled" : ""}>
       <span class="dname">${esc(d.title)}</span>
-      <span class="dprice">${out ? "SOLD OUT" : inr(dishPrice(d))}${inCart ? ` · ×${inCart.qty}` : ""}</span>
+      <span class="dprice">${out ? "SOLD OUT" : inr(dishPrice(d))}${inCartQty ? ` · ×${inCartQty}` : ""}</span>
     </button>`;
   }).join("");
 }
@@ -461,7 +507,12 @@ function bindDishButtons() {
     const d = state.data.dishes.find((x) => x.id === b.dataset.dish);
     if (!d) { toast("That dish just changed — refreshing the menu", false); renderOrderMode(); return; }
     if (Array.isArray(d.options) && d.options.length) { renderDishOptions(d, null); return; }
-    const line = state.cart.find((l) => l.id === d.id && !l.options);
+    // A quick tap only stacks onto a PLAIN line of this dish — one with no options,
+    // no per-item allergy and no note. An edited line (e.g. "no nuts") is left alone,
+    // so tapping the dish again starts a fresh plain line instead of bumping the
+    // customised one — letting a waiter order "1 no-nuts" AND "1 normal" of the same
+    // dish side by side. (owner, 2026-06-16)
+    const line = state.cart.find((l) => l.id === d.id && !l.options && !l.allergy && !l.note);
     if (line) line.qty = Math.min(99, line.qty + 1);
     else state.cart.push({ id: d.id, title: d.title, price: dishPrice(d), qty: 1 });
     renderOrderMode();
@@ -628,6 +679,11 @@ function boardSig(d) {
     (d.items || []).map((i) => [i.id, i.order_id, i.status]),
     (d.calls || []).map((c) => [c.id, c.table_number]),
     (d.members || []).map((m) => [m.id, m.session_id, m.approved, m.removed]),
+    // Pending open/join requests — MUST be in the signature, else a brand-new
+    // request (e.g. a guest asking to open a table) arrives via realtime and gets
+    // fetched, but the board doesn't repaint because the signature looks unchanged
+    // — so the 📨 badge only appeared after some OTHER change. (owner, 2026-06-16)
+    (d.requests || []).map((r) => [r.id, r.table_number, r.type, r.status]),
     (d.settings || {}).table_count,
   ]);
 }

@@ -256,6 +256,15 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .ist-serve { background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; font-weight: 800;
   font-size: 12px; padding: 7px 13px; border: 0; border-radius: 9px; cursor: pointer; white-space: nowrap; }
 .ist-serve:hover { filter: brightness(1.07); }
+/* Per-dish delete (🗑) on a dish row — small, muted until hovered. */
+.idel { background: transparent; border: 0; color: var(--muted); font-size: 14px; padding: 4px 6px; border-radius: 8px; cursor: pointer; line-height: 1; }
+.idel:hover { background: rgba(239,68,68,0.15); color: #fca5a5; }
+/* Per-order staff controls (allergen chips + delete order). */
+.ordctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px dashed #2a2114; }
+.ordctl-alg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; }
+.ordctl .talg { padding: 5px 11px; font-size: 12.5px; }
+/* "Avoid" allergen chips read red when ON (semantic), overriding the blue .chip.on. */
+.talg.on { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.6); color: #fca5a5; }
 /* top-of-orders "Serve all" — full-width green action, matches the Serve buttons */
 .serve-all-btn { display: block; width: 100%; margin: 0 0 10px; background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; font-weight: 800; font-size: 14px; text-align: center; padding: 11px; border: 0; border-radius: 11px; cursor: pointer; }
 .serve-all-btn:hover { filter: brightness(1.06); }

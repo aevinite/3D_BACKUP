@@ -740,9 +740,18 @@ function orderCardHtml(o, freed = false) {
   const items = (o.items || [])
     .map((i) => `<div class="ord-line"><span class="ol-name">${esc(i.title)}${dishNoTag(i.title)}</span><span class="ol-qty">×${esc(i.qty)}</span><span class="ol-price">${inr(parseFloat(i.price) || 0)}</span>${itemDetailLine(i)}</div>`)
     .join("");
-  const allergy = (o.allergies || []).length
-    ? `<div class="ord-allergy">⚠ Avoid: ${o.allergies.map(esc).join(", ")}</div>`
-    : "";
+  // Staff-editable allergen chips: tap to add a missed allergen or remove a wrong
+  // one for THIS order (applies to every dish on it). Archived/"freed" cards stay
+  // read-only. Reuses the existing .chip styling. (owner, 2026-06-16)
+  const aSet = new Set((o.allergies || []).map((x) => String(x).toLowerCase()));
+  const extraAlg = (o.allergies || []).filter((x) => !ALLERGENS.some((a) => a.slug === String(x).toLowerCase()));
+  const allergy = freed
+    ? ((o.allergies || []).length ? `<div class="ord-allergy">⚠ Avoid: ${o.allergies.map(esc).join(", ")}</div>` : "")
+    : `<div class="ord-allergy-edit" style="margin:6px 0;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <span class="muted small">⚠ Avoid in all dishes:</span>
+        ${ALLERGENS.map((a) => `<span class="chip oae-chip ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("")}
+        ${extraAlg.length ? `<span class="muted small">+ ${extraAlg.map(esc).join(", ")}</span>` : ""}
+      </div>`;
   // Actions depend on where the order is in its lifecycle.
   let actions = "";
   if (status === "received") {
@@ -829,7 +838,17 @@ function mergedOrderCardHtml(g) {
       const opts = parts.length ? `<div class="ord-line-opts">${parts.join(" · ")}</div>` : "";
       return `<div class="ord-line"><span class="ol-name">${esc(i.title)}${dishNoTag(i.title)}</span><span class="ol-qty">×${esc(i.qty)}</span><span class="ol-price">${inr(parseFloat(i.price) || 0)}</span>${opts}</div>`;
     }).join("");
-    return (gi > 0 ? `<div class="ord-grp-sep" aria-hidden="true"></div>` : "") + rows;
+    // Per-order editable allergen chips (apply to every dish in THIS order). The
+    // .oae-chip click handler (in renderEditor) toggles + persists by order id.
+    // (owner, 2026-06-16)
+    const aSet = new Set(oAll.map((x) => String(x).toLowerCase()));
+    const extraAlg = oAll.filter((x) => !ALLERGENS.some((a) => a.slug === String(x).toLowerCase()));
+    const algEdit = `<div class="ord-allergy-edit" style="margin:6px 0 2px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+      <span class="muted small">⚠ Avoid in all dishes${g.length > 1 ? ` (order #${esc(o.kot_no ?? "—")})` : ""}:</span>
+      ${ALLERGENS.map((a) => `<span class="chip oae-chip ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("")}
+      ${extraAlg.length ? `<span class="muted small">+ ${extraAlg.map(esc).join(", ")}</span>` : ""}
+    </div>`;
+    return (gi > 0 ? `<div class="ord-grp-sep" aria-hidden="true"></div>` : "") + rows + algEdit;
   }).join("");
   const total = g.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
   const disc = g.reduce((s, o) => s + (Number(o.discount) || 0), 0);
@@ -1415,6 +1434,21 @@ function renderEditor() {
     ed.querySelectorAll(".ord-del[data-del]").forEach((btn) => {
       btn.onclick = async () => {
         if (await confirmDialog("Delete this order? It will be permanently removed.", "Delete")) deleteOrders([btn.dataset.del]);
+      };
+    });
+    // Per-order allergen chips: optimistic toggle, then persist; the poll reconciles.
+    ed.querySelectorAll(".oae-chip[data-alg]").forEach((chip) => {
+      chip.onclick = async () => {
+        const id = chip.dataset.alg, slug = chip.dataset.slug;
+        const o = (state.data.orders || []).find((x) => x.id === id);
+        if (!o) return;
+        const cur = new Set((o.allergies || []).map((x) => String(x).toLowerCase()));
+        if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
+        o.allergies = [...cur];          // flip the screen now
+        opBegin(id); renderEditor();
+        try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }); }
+        catch (e) { toast("Couldn't update allergens: " + e.message, "err"); }
+        finally { opEnd(id); }
       };
     });
     // Merged session-card actions act on EVERY order in the group (one bill).

@@ -920,6 +920,11 @@ export default function CartPanel() {
                   ✏️ Other
                 </button>
               </div>
+              {/* Make the order-wide behaviour explicit: an allergen tapped here is
+                  left out of EVERY dish in the order, not just one. (owner, 2026-06-16) */}
+              <p className="allergy-note">
+                <i className="fas fa-circle-info"></i> Anything you tap here is removed from <b>all the dishes</b> in this order.
+              </p>
               {/* Free-text "other allergy" box, shown only when "Other" is toggled on. */}
               {otherOpen && (
                 <input

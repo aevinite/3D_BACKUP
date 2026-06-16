@@ -89,9 +89,13 @@ export default function ToastHost() {
       const id = ++counter;
       // Add the new toast, keeping only the last 3 on screen (slice(-3)).
       setToasts((t) => [...t, { id, kicker, title, subtitle, variant, mark: d.icon || MARK[variant], href: d.href, event: d.event }].slice(-3));
-      // How long it stays: tappable tickets (link or action) linger longest,
-      // errors a bit longer than normal, everything else briefest.
-      const ttl = d.href || d.event ? 6000 : variant === "error" ? 4400 : 3200;
+      // How long it stays. A toast may pass its own `duration` (ms) to override;
+      // otherwise we pick by type: tappable tickets (link/action) need time to be
+      // tapped, errors need a beat to read, and plain confirmations ("Added to
+      // cart") flash briefly so they never feel naggy (owner, 2026-06-16).
+      const ttl = typeof d.duration === "number" && d.duration > 0
+        ? d.duration
+        : d.href || d.event ? 5000 : variant === "error" ? 3000 : 1800;
       // After that delay, remove this toast by its id.
       setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ttl);
     };

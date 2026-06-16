@@ -248,6 +248,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).select());
       return ok(row[0] || null);
     }
+    // orders/:id/allergies — staff edit of the order-wide "avoid" list (add a
+    // missed allergen, fix a wrong one). Stored on orders.allergies; the kitchen/
+    // tablet distribute it onto every dish as "NO X". Free-form strings allowed
+    // (guests can type "other"), trimmed + de-duped + capped. (owner, 2026-06-16)
+    if (a === "orders" && c === "allergies") {
+      const raw = Array.isArray(body?.allergies) ? body.allergies : [];
+      const allergies = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
+      const row = must(await sb.from("orders").update({ allergies }).eq("id", b).select());
+      await logAction("editor", "order_allergies", { order_id: b, detail: allergies.join(", ") || "(none)", device_id: dev });
+      return ok(row[0] || null);
+    }
     if (a === "orders" && c === "accept") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
        
