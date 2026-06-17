@@ -173,36 +173,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       });
     }
 
-    if (p === "customers") {
-      const [membersQ, ordersQ, fbQ] = await Promise.all([
-        sb.from("session_members").select("id,name,phone,session_id,joined_at,role"),
-        sb.from("orders").select("id,member_id,total,discount,status,created_at"),
-        sb.from("feedback").select("*").order("created_at", { ascending: false }).limit(200),
-      ]);
-      const members = must(membersQ), orders = must(ordersQ), feedback = must(fbQ);
-      const spendByMember: Record<string, number> = {};
-      for (const o of orders) {
-        if (o.status === "cancelled" || !o.member_id) continue;
-        spendByMember[o.member_id] = (spendByMember[o.member_id] || 0) + (Number(o.total) || 0) - (Number(o.discount) || 0);
-      }
-       
-      const map: Record<string, any> = {};
-      for (const m of members) {
-        const key = (m.phone && m.phone.trim()) || (m.name && m.name.trim().toLowerCase());
-        if (!key) continue;
-        const c = map[key] || (map[key] = { name: m.name || "", phone: m.phone || "", sessions: new Set(), spend: 0, lastSeen: m.joined_at, headCount: 0 });
-        if (m.name && !c.name) c.name = m.name;
-        c.sessions.add(m.session_id);
-        c.spend += spendByMember[m.id] || 0;
-        if (m.role === "owner") c.headCount++;
-        if (m.joined_at > c.lastSeen) c.lastSeen = m.joined_at;
-      }
-      const customers = Object.values(map)
-         
-        .map((c: any) => ({ name: c.name, phone: c.phone, visits: c.sessions.size, spend: Math.round(c.spend * 100) / 100, lastSeen: c.lastSeen, headCount: c.headCount }))
-        .sort((a, b) => (b.lastSeen > a.lastSeen ? 1 : -1));
-      return ok({ customers, feedback });
-    }
 
     if (p === "users") {
       const members = must(
@@ -436,6 +406,26 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("editor", "order_item_note", { order_id: data?.order_id, device_id: dev });
       return ok(data);
+    }
+
+    // items/:id/removed — STAFF EDIT: change ONE dish's removed/allergen list ("NO X")
+    // on a PLACED order — add a missed allergen on just this dish, or UNDO one added by
+    // mistake (the order-wide list has its own endpoint above). Removals don't change
+    // the price, so a direct table write (service-role, already gated) is enough; we
+    // still refuse a PAID/cancelled order to match the other edit endpoints.
+    if (a === "items" && c === "removed") {
+      const raw = Array.isArray(body?.removed) ? body.removed : [];
+      const removed = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
+      // maybeSingle (not single): a missing row returns null instead of throwing, so
+      // the friendly "dish not found" 400 below is reachable for a stale id.
+      const item = must(await sb.from("order_items").select("id, order_id").eq("id", b).maybeSingle());
+      if (!item) return err(editErrMsg("item_not_found"), 400);
+      const order = must(await sb.from("orders").select("payment_status, status").eq("id", item.order_id).maybeSingle());
+      if (order?.payment_status === "paid") return err(editErrMsg("order_paid"), 409);
+      if (order?.status === "cancelled") return err(editErrMsg("order_cancelled"), 400);
+      const row = must(await sb.from("order_items").update({ removed }).eq("id", b).select());
+      await logAction("editor", "order_item_removed", { order_id: item.order_id, detail: removed.join(", ") || "(none)", device_id: dev });
+      return ok(row[0] || { ok: true });
     }
 
     // orders/:id/add-item — STAFF EDIT: ADD a new dish to an already-placed order.

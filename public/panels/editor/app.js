@@ -24,7 +24,7 @@ const ALLERGENS = [
 const TAB_LABEL = { items: "Dish", categories: "Category", filters: "Tag", general: "Settings" };
 
 // The tabs across the top of the editor. Anything not in this list is ignored.
-const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "dash", "customers", "log", "features", "general"];
+const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "dash", "log", "features", "general"];
 // Remember which tab you were on so a refresh keeps you there (e.g. stay on
 // Orders during a busy service instead of snapping back to Dishes).
 const savedTab = (() => { try { return localStorage.getItem("lfh_editor_tab"); } catch { return null; } })();
@@ -273,10 +273,6 @@ function renderList() {
   }
   if (state.tab === "dash") {
     ul.appendChild(el(`<li class="list-item active"><div class="thumb"><i class="fas fa-chart-line"></i></div><div class="meta"><b>Dashboard</b><small>last 30 days</small></div></li>`));
-    return;
-  }
-  if (state.tab === "customers") {
-    ul.appendChild(el(`<li class="list-item active"><div class="thumb"><i class="fas fa-users"></i></div><div class="meta"><b>Customers</b><small>visits & feedback</small></div></li>`));
     return;
   }
   if (state.tab === "log") {
@@ -712,10 +708,12 @@ const STATUS_RANK = { received: 0, preparing: 1, served: 2, cancelled: 3 };
 // ingredients ("NO DAIRY"), and any note ("'less ice'"). Shared by the order
 // cards, the per-table bill, AND the table detail popup so the kitchen always
 // sees exactly what to make. Returns "" when a dish is plain (nothing to show).
-function itemDetailLine(it) {
+function itemDetailLine(it, skipRemoved = false) {
   const parts = [];
   if (Array.isArray(it.options) && it.options.length) parts.push(it.options.map((o) => esc(o.label)).join(" · "));
-  if (Array.isArray(it.removed) && it.removed.length) parts.push(`<span class="ol-no">NO ${it.removed.map((r) => esc(r)).join(", NO ").toUpperCase()}</span>`);
+  // In staff EDIT mode the allergens render as their own removable chips (see
+  // dishAllergenEditHtml), so we skip the read-only "NO X" here to avoid showing both.
+  if (!skipRemoved && Array.isArray(it.removed) && it.removed.length) parts.push(`<span class="ol-no">NO ${it.removed.map((r) => esc(r)).join(", NO ").toUpperCase()}</span>`);
   if (it.note) parts.push("“" + esc(it.note) + "”");
   return parts.length ? `<div class="ord-line-opts">${parts.join(" · ")}</div>` : "";
 }
@@ -1234,30 +1232,6 @@ async function loadDashboard() {
   }));
 }
 
-// ---------- Customers tab: who comes back, and what they said ----------
-async function loadCustomers() {
-  const body = document.getElementById("custBody");
-  let d;
-  try { d = await api("GET", "/customers"); }
-  catch (e) { body.innerHTML = `<div class="empty">Couldn't load customers: ${esc(e.message)}</div>`; return; }
-  const rows = d.customers.map((c) => `<tr>
-      <td><b>${esc(c.name || "—")}</b>${c.phone ? `<small>${esc(c.phone)}</small>` : ""}</td>
-      <td>${c.visits} visit${c.visits === 1 ? "" : "s"}${c.headCount ? ` <span class="sub">(${c.headCount}× head)</span>` : ""}</td>
-      <td>${inr(c.spend)}</td>
-      <td>${esc(timeAgo(c.lastSeen))}</td>
-    </tr>`).join("");
-  const stars = (n) => "★".repeat(n) + "☆".repeat(5 - n);
-  const fb = d.feedback.map((f) => `<div class="fb-row">
-      <span class="fb-stars">${stars(f.rating)}</span>
-      <div class="fb-main"><b>${esc(f.name || "Guest")}</b> · T${esc(f.table_number || "?")} · ${esc(timeAgo(f.created_at))}
-      ${f.comment ? `<p>${esc(f.comment)}</p>` : ""}</div>
-    </div>`).join("");
-  body.innerHTML = `
-    ${d.customers.length ? `<table class="cust-table"><thead><tr><th>Guest</th><th>Visits</th><th>Spend</th><th>Last seen</th></tr></thead><tbody>${rows}</tbody></table>`
-      : `<div class="empty">No named guests yet — customers appear here once people join tables with their name (or later, phone).</div>`}
-    <h3 class="fb-h">Guest feedback <span class="sub">· ${d.feedback.length}</span></h3>
-    ${fb || `<div class="empty">No feedback yet — guests can rate their visit from their bill.</div>`}`;
-}
 
 // ---------- printable bill ----------
 // Opens a clean print window for one table's bill: every order with its KOT
@@ -1389,12 +1363,6 @@ function renderEditor() {
     ed.innerHTML = `<div class="ed-head"><h2>Dashboard <span class="sub">· last 30 days</span></h2><button class="btn" id="dashRefresh">↻ Refresh</button></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
     document.getElementById("dashRefresh").onclick = () => renderEditor();
     loadDashboard();
-    return;
-  }
-  if (state.tab === "customers") {
-    ed.innerHTML = `<div class="ed-head"><h2>Customers <span class="sub">· visits, spend & feedback</span></h2><button class="btn" id="custRefresh">↻ Refresh</button></div><div id="custBody" class="dash-body"><div class="empty">Loading guests…</div></div>`;
-    document.getElementById("custRefresh").onclick = () => renderEditor();
-    loadCustomers();
     return;
   }
   if (state.tab === "orders") {
@@ -2554,7 +2522,80 @@ function itemRowHtml(row, editing = false) {
     : "";
   // status label: friendlier words for the chip (class stays the raw status for colour).
   const STLABEL = { received: "new", preparing: "cooking", ready: "ready", served: "served", cancelled: "cancelled" };
-  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}</span>${itemDetailLine(row)}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${editCtl}${delBtn}</div></div>`;
+  // STAFF EDIT: on a real, not-yet-served dish, allergens become removable ✕ chips
+  // (+ a "＋ allergy" picker) so a mistake can be UNDONE per dish — not just added.
+  const canEditAlg = editing && row.kind === "session" && row.status !== "served";
+  const algEdit = canEditAlg ? dishAllergenEditHtml(row) : "";
+  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}</span>${itemDetailLine(row, canEditAlg)}${algEdit}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${editCtl}${delBtn}</div></div>`;
+}
+
+// dishAllergenEditHtml: the per-dish allergen editor shown on a dish row while a
+// table is in staff EDIT mode. Each allergen the dish currently avoids is a
+// removable chip ("NO 🥜 Nuts ✕"); the "＋ allergy" button opens a picker to add
+// one to THIS dish only. (owner, 2026-06-17 — fix: you could add but not remove.)
+function dishAllergenEditHtml(row) {
+  const avoided = Array.isArray(row.removed) ? row.removed : [];
+  const labelFor = (slug) => { const a = ALLERGENS.find((x) => x.slug === String(slug).toLowerCase()); return a ? a.label : slug; };
+  const chips = avoided.map((slug) =>
+    `<span class="sx-dish-alg" data-dishalg-item="${esc(row.id)}" data-dishalg-slug="${esc(slug)}" title="Tap to remove this allergen from this dish">NO ${esc(labelFor(slug))} <b>✕</b></span>`
+  ).join("");
+  return `<div class="sx-dish-alg-row"><span class="muted small">⚠ Avoid:</span>${chips || `<span class="muted small">none</span>`}<button class="sx-dish-addalg" data-dishalg-add="${esc(row.id)}">＋ allergy</button></div>`;
+}
+
+// toggleDishAllergen: shared add/remove for ONE dish's allergens, used by both the
+// inline ✕ chips and the "＋ allergy" picker. An allergen on a dish can live in two
+// places: the dish's own order_items.removed, OR the order-wide orders.allergies
+// (distributed onto every dish as "NO X"). Removing clears it from BOTH so it truly
+// disappears from this dish; adding writes only to this dish's own list.
+async function toggleDishAllergen(item, order, slug) {
+  slug = String(slug || "").toLowerCase();
+  if (!slug || !item) return;
+  const own = new Set((Array.isArray(item.removed) ? item.removed : []).map((x) => String(x).toLowerCase()));
+  const ord = new Set((order && Array.isArray(order.allergies) ? order.allergies : []).map((x) => String(x).toLowerCase()));
+  const isOn = own.has(slug) || ord.has(slug);
+  try {
+    if (isOn) {
+      if (own.has(slug)) { own.delete(slug); item.removed = [...own]; await api("POST", `/items/${item.id}/removed`, { removed: item.removed }); }
+      if (ord.has(slug) && order && order.id) {
+        ord.delete(slug); order.allergies = [...ord];
+        await api("POST", `/orders/${order.id}/allergies`, { allergies: order.allergies });
+        const sib = itemsForOrder(order.id).length;
+        if (sib > 1) toast(`Removed “${slug}” from all ${sib} dishes in this order`, "ok");
+      }
+    } else {
+      own.add(slug); item.removed = [...own];
+      await api("POST", `/items/${item.id}/removed`, { removed: item.removed });
+    }
+    await loadSessions();
+  } catch (e) { toast("Couldn't update allergen: " + e.message, "err"); }
+}
+
+// openDishAllergenModal: the "＋ allergy" picker for ONE dish. Lit = the dish avoids
+// it (own list or order-wide); tapping toggles via toggleDishAllergen. Stays open so
+// several can be set at once.
+function openDishAllergenModal(itemId, rerender) {
+  document.querySelector(".dish-alg-overlay")?.remove();
+  const item = (state.board.items || []).find((i) => i.id === itemId);
+  if (!item) { toast("That dish is no longer on the order.", "err"); return; }
+  const orderOf = () => (state.data.orders || []).find((o) => o.id === item.order_id) || {};
+  const litSet = () => {
+    const order = orderOf();
+    const own = (Array.isArray(item.removed) ? item.removed : []).map((x) => String(x).toLowerCase());
+    const ord = (Array.isArray(order.allergies) ? order.allergies : []).map((x) => String(x).toLowerCase());
+    return new Set([...own, ...ord]);
+  };
+  const chipsHtml = () => { const set = litSet(); return ALLERGENS.map((a) => `<span class="chip dish-alg-chip ${set.has(a.slug) ? "on" : ""}" data-slug="${a.slug}">${esc(a.label)}</span>`).join(""); };
+  const wrap = el(`<div class="sx-modal-overlay dish-alg-overlay"><div class="sx-modal dish-alg-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Allergens · ${esc(item.title)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><p class="muted small" style="padding:0 14px;margin:6px 0 0">Tap to add or remove. Adding affects only this dish; removing also clears it from the order-wide list if it was set there.</p><div class="dish-alg-list">${chipsHtml()}</div></div></div>`);
+  document.body.appendChild(wrap);
+  const listEl = wrap.querySelector(".dish-alg-list");
+  const bind = () => listEl.querySelectorAll(".dish-alg-chip").forEach((chip) => (chip.onclick = async () => {
+    await toggleDishAllergen(item, orderOf(), chip.dataset.slug);
+    listEl.innerHTML = chipsHtml(); bind();
+    if (rerender) rerender();
+  }));
+  bind();
+  wrap.querySelector(".tbl-modal-close").onclick = () => wrap.remove();
+  wrap.onclick = (e) => { if (e.target === wrap) wrap.remove(); };
 }
 
 // tablePanelParts: build ALL the inner HTML sections for ONE table's full detail
@@ -2816,6 +2857,17 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }); await loadSessions(); if (rerender) rerender(); }
     catch (e) { toast("Couldn't update allergens: " + e.message, "err"); }
   }));
+  // Per-dish allergen REMOVE: tap the ✕ on a dish's "NO X" chip to clear that
+  // allergen from this dish (and from the order-wide list if it lived there).
+  root.querySelectorAll("[data-dishalg-slug]").forEach((chip) => (chip.onclick = async () => {
+    const item = (state.board.items || []).find((i) => i.id === chip.dataset.dishalgItem);
+    if (!item) { toast("That dish is no longer on the order.", "err"); return; }
+    const order = (state.data.orders || []).find((o) => o.id === item.order_id) || {};
+    await toggleDishAllergen(item, order, chip.dataset.dishalgSlug);
+    if (rerender) rerender();
+  }));
+  // Per-dish allergen ADD: "＋ allergy" opens a small picker for THIS dish.
+  root.querySelectorAll("[data-dishalg-add]").forEach((b) => (b.onclick = () => openDishAllergenModal(b.dataset.dishalgAdd, rerender)));
   // Add a dish to THIS order: a compact dish-picker modal → /orders/:id/add-item.
   root.querySelectorAll("[data-add-dish-order]").forEach((b) => (b.onclick = () => openAddDishModal(b.dataset.addDishOrder, rerender)));
   // Per-bill discount: ask for the amount (with the order total as the cap).
@@ -3221,7 +3273,7 @@ function setTab(tab) {
     sub.querySelectorAll(".subtab").forEach((s) => s.classList.toggle("active", s.dataset.tab === tab));
   }
   // The search box and "+ New" don't apply to the General/Orders/Tables tabs.
-  const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "log" || tab === "features" || tab === "dash" || tab === "customers";
+  const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "log" || tab === "features" || tab === "dash";
   $("#newBtn").style.display = noList ? "none" : "";
   $("#search").style.display = noList ? "none" : "";
   // Tables tab: drop the whole left sidebar (it only held a dead "Floor map" label).
