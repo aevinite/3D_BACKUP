@@ -175,7 +175,7 @@ export default function FoodCard({ item, index, viewingCategory }: { item: FoodI
     if (delta > 0) {
       // Tappable confirmation: tapping the toast opens the bill (the quick "+"
       // skips the customize popup, so this is its version of the success step).
-      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `${item.title} added`, subtitle: "tap to view your bill", kicker: "your order", event: "lfh:open-cart", duration: 2000 } }));
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `${item.title} added`, subtitle: "tap to view your bill", kicker: "your order", event: "lfh:open-cart", duration: 1200 } }));
     }
   };
 

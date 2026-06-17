@@ -115,7 +115,7 @@ function toast(msg, type = "ok", action, ms) {
   t.className = "toast " + type;
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), ms || 2600);
+  toastTimer = setTimeout(() => (t.hidden = true), ms || 1800);
 }
 
 // Pretty in-app confirm (replaces the ugly native window.confirm).
@@ -740,18 +740,11 @@ function orderCardHtml(o, freed = false) {
   const items = (o.items || [])
     .map((i) => `<div class="ord-line"><span class="ol-name">${esc(i.title)}${dishNoTag(i.title)}</span><span class="ol-qty">×${esc(i.qty)}</span><span class="ol-price">${inr(parseFloat(i.price) || 0)}</span>${itemDetailLine(i)}</div>`)
     .join("");
-  // Staff-editable allergen chips: tap to add a missed allergen or remove a wrong
-  // one for THIS order (applies to every dish on it). Archived/"freed" cards stay
-  // read-only. Reuses the existing .chip styling. (owner, 2026-06-16)
-  const aSet = new Set((o.allergies || []).map((x) => String(x).toLowerCase()));
-  const extraAlg = (o.allergies || []).filter((x) => !ALLERGENS.some((a) => a.slug === String(x).toLowerCase()));
-  const allergy = freed
-    ? ((o.allergies || []).length ? `<div class="ord-allergy">⚠ Avoid: ${o.allergies.map(esc).join(", ")}</div>` : "")
-    : `<div class="ord-allergy-edit" style="margin:6px 0;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-        <span class="muted small">⚠ Avoid in all dishes:</span>
-        ${ALLERGENS.map((a) => `<span class="chip oae-chip ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("")}
-        ${extraAlg.length ? `<span class="muted small">+ ${extraAlg.map(esc).join(", ")}</span>` : ""}
-      </div>`;
+  // Order-wide allergies shown READ-ONLY (no always-on toggle chips any more — owner,
+  // 2026-06-17). Adding/removing an allergen now lives in the gated staff EDIT flow.
+  const allergy = (o.allergies || []).length
+    ? `<div class="ord-allergy">⚠ Avoid: ${o.allergies.map(esc).join(", ")}</div>`
+    : "";
   // Actions depend on where the order is in its lifecycle.
   let actions = "";
   if (status === "received") {
@@ -838,17 +831,10 @@ function mergedOrderCardHtml(g) {
       const opts = parts.length ? `<div class="ord-line-opts">${parts.join(" · ")}</div>` : "";
       return `<div class="ord-line"><span class="ol-name">${esc(i.title)}${dishNoTag(i.title)}</span><span class="ol-qty">×${esc(i.qty)}</span><span class="ol-price">${inr(parseFloat(i.price) || 0)}</span>${opts}</div>`;
     }).join("");
-    // Per-order editable allergen chips (apply to every dish in THIS order). The
-    // .oae-chip click handler (in renderEditor) toggles + persists by order id.
-    // (owner, 2026-06-16)
-    const aSet = new Set(oAll.map((x) => String(x).toLowerCase()));
-    const extraAlg = oAll.filter((x) => !ALLERGENS.some((a) => a.slug === String(x).toLowerCase()));
-    const algEdit = `<div class="ord-allergy-edit" style="margin:6px 0 2px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-      <span class="muted small">⚠ Avoid in all dishes${g.length > 1 ? ` (order #${esc(o.kot_no ?? "—")})` : ""}:</span>
-      ${ALLERGENS.map((a) => `<span class="chip oae-chip ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("")}
-      ${extraAlg.length ? `<span class="muted small">+ ${extraAlg.map(esc).join(", ")}</span>` : ""}
-    </div>`;
-    return (gi > 0 ? `<div class="ord-grp-sep" aria-hidden="true"></div>` : "") + rows + algEdit;
+    // No always-on allergen toggle chips here any more (owner, 2026-06-17) — each
+    // dish line already shows its "NO X" removals, and adding/removing an allergen
+    // now lives in the gated staff EDIT flow.
+    return (gi > 0 ? `<div class="ord-grp-sep" aria-hidden="true"></div>` : "") + rows;
   }).join("");
   const total = g.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
   const disc = g.reduce((s, o) => s + (Number(o.discount) || 0), 0);

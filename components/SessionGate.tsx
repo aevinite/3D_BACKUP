@@ -49,10 +49,25 @@ type Step =
 // the check on later visits.
 const LOC_CONSENT_KEY = "lfh_loc_consent";
 
-// Remembers this device's chosen nickname so we only ask for it ONCE (before the
-// first order), then reuse it for every later order without nagging.
+// The guest's name is SESSION-SCOPED: stored against the current session's token,
+// so it lives only for THAT session. While the session is open we reuse it (asked
+// once, never nagged). When the session ends and a NEW one opens (new token — e.g.
+// staff closed the table and a different guest sits down, or the same device comes
+// back later), the saved name no longer matches, so we ask again. The backend still
+// keeps each past session's member name for the records (owner, 2026-06-17).
 const NICKNAME_KEY = "lfh_nickname";
-const getNickname = () => { try { return (localStorage.getItem(NICKNAME_KEY) || "").trim(); } catch { return ""; } };
+const getNickname = (token?: string): string => {
+  try {
+    const raw = localStorage.getItem(NICKNAME_KEY);
+    if (!raw) return "";
+    const v = JSON.parse(raw) as { token?: string; name?: string };
+    // Only valid for the CURRENT session's token; a different/stale token = ask again.
+    return token && v && v.token === token ? String(v.name || "").trim() : "";
+  } catch { return ""; } // legacy plain-string (pre-session-scoping) → treat as none
+};
+const setNicknameFor = (token: string | undefined, name: string) => {
+  try { localStorage.setItem(NICKNAME_KEY, JSON.stringify({ token, name })); } catch {}
+};
 
 // The job we were asked to do, for which table, with whatever data it needs:
 //  • "order" / "call" — the original server actions.
@@ -138,14 +153,17 @@ export default function SessionGate() {
   const act = useCallback(async () => {
     const p = pending.current, s = sess.current;
     if (!p || !s) return close(); // nothing queued or no session — bail out
+    // NAME GATE — ask for a casual name ONCE, before ANY session action: add-to-cart
+    // ("connect"), placing an order, OR calling a waiter. Whichever the guest does
+    // FIRST triggers it. Saved to the device + their session row, then reused
+    // silently — nobody is ever re-asked. submitNickname() resumes the SAME queued
+    // action by calling act() again (the name now passes this gate). Tied to the
+    // session: when a session is required, a name is too (owner, 2026-06-17).
+    if (!getNickname(s.token)) { setNote(""); setStep("nickname"); return; }
     // "connect" has no server work: we only needed to get the guest in. Report
     // success so the Add-to-cart gate can carry out the held add, then close.
     if (p.action === "connect") { fireDone({ ok: true, action: "connect" }); close(); return; }
     if (p.action === "order") {
-      // Ask for a casual nickname ONCE before the first order (the head joins with
-      // no name; auto-joined guests too). Once we have one we reuse it silently, so
-      // nobody is re-asked. submitNickname() saves it and resumes placeOrderNow().
-      if (!getNickname()) { setNote(""); setStep("nickname"); return; }
       await placeOrderNow();
       return;
     }
@@ -162,14 +180,14 @@ export default function SessionGate() {
   // block the order, since the name is also kept on the device.
   const submitNickname = useCallback(async () => {
     const nick = name.trim();
-    if (!nick) { setNote("Add a nickname so we know whose order this is."); return; }
-    try { localStorage.setItem(NICKNAME_KEY, nick); } catch {}
+    if (!nick) { setNote("Add a name so we know who you are."); return; }
     const s = sess.current;
+    setNicknameFor(s?.token, nick); // session-scoped: cleared when this session ends
     if (s) { try { await setMemberName(s.token, nick); } catch {} }
     window.dispatchEvent(new Event("lfh:session-changed")); // refresh widgets that show the name
     setNote("");
-    await placeOrderNow();
-  }, [name, placeOrderNow]);
+    await act(); // resume the ORIGINAL queued action (connect / order / call) — the name now passes the gate
+  }, [name, act]);
 
   // Functions below are ordered so each only references ones defined ABOVE it —
   // no forward references, no useCallback dependency cycle.
@@ -430,7 +448,7 @@ export default function SessionGate() {
       sess.current = s; storeSession(s); rememberTable(s.table);
       // They just typed a name to join → reuse it as their nickname so the order
       // step never re-asks. (Joining as head sends no name, so the head still gets asked.)
-      if (name.trim()) { try { localStorage.setItem(NICKNAME_KEY, name.trim()); } catch {} }
+      if (name.trim()) setNicknameFor(s.token, name.trim()); // session-scoped name
       window.dispatchEvent(new Event("lfh:session-changed"));
       // If the table auto-approves, go straight to acting; else wait for the host.
       if (r.approved) await ensureReadyAndAct();
@@ -632,18 +650,19 @@ export default function SessionGate() {
           </div>
         </>)}
 
-        {/* Casual nickname ask before sending the first order. Framed so it never
-            feels like collecting personal info — any nickname is fine. */}
+        {/* Casual name ask the FIRST time the guest does anything that opens a session
+            (add-to-cart / order / call-waiter). Framed so it never feels like collecting
+            personal info — any nickname is fine — and reused after, so it's asked once. */}
         {step === "nickname" && (<>
           <div className="sg-badge"><i className="fas fa-pen"></i></div>
-          <div className="sg-kicker">Almost done</div>
+          <div className="sg-kicker">One quick thing</div>
           <h3 className="sg-title">What should we call you?</h3>
-          <p className="sg-sub">Just a nickname so the kitchen and your table can tell whose order is whose — no real name or details needed.</p>
-          <input className="sg-input" placeholder="Type your nickname — e.g. Mia" value={name} maxLength={40}
+          <p className="sg-sub">Just a name so the kitchen and your table know who&apos;s who — no real name or details needed. We&apos;ll only ask this once.</p>
+          <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
             onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitNickname(); }} autoFocus />
           {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
           <div className="sg-actions">
-            <button className="sg-btn gold" onClick={submitNickname}>Send my order</button>
+            <button className="sg-btn gold" onClick={submitNickname}>Continue</button>
           </div>
         </>)}
 

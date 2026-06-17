@@ -95,7 +95,7 @@ export default function ToastHost() {
       // cart") flash briefly so they never feel naggy (owner, 2026-06-16).
       const ttl = typeof d.duration === "number" && d.duration > 0
         ? d.duration
-        : d.href || d.event ? 5000 : variant === "error" ? 3000 : 1800;
+        : d.href || d.event ? 3500 : variant === "error" ? 2200 : 1100;
       // After that delay, remove this toast by its id.
       setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ttl);
     };

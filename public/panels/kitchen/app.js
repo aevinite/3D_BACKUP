@@ -31,7 +31,7 @@ const toast = (msg, undoFn) => {
   t.innerHTML = `<span>${esc(msg)}</span>${undoFn ? '<button class="undo">UNDO</button>' : ""}`;
   if (undoFn) t.querySelector(".undo").onclick = () => { undoFn(); t.remove(); };
   $("#toasts").appendChild(t);
-  setTimeout(() => t.remove(), 6000);
+  setTimeout(() => t.remove(), 4000);
 };
 
 // A short two-note chime for new orders (WebAudio — no sound file needed).

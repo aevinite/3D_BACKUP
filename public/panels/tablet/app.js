@@ -58,7 +58,7 @@ const toast = (msg, ok = true) => {
   t.className = "toast" + (ok ? "" : " bad");
   t.textContent = msg;
   $("#toasts").appendChild(t);
-  setTimeout(() => t.remove(), 4000);
+  setTimeout(() => t.remove(), 2600);
 };
 // Two-step confirm (a promise that resolves true/false) — used before sending
 // an order to the kitchen, so a stray tap can't fire a ticket.
@@ -254,15 +254,11 @@ function renderPanel() {
       ? `<button class="idel" data-del-item="${esc(r.id)}" title="Remove this dish">🗑</button>` : "";
     return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}${delBtn}</div>`;
   };
-  // Per-order staff controls: editable allergen chips ("avoid in all dishes") + a
-  // Delete-order button. Mirrors the manager's edit. Reuses .chip styling.
+  // Per-order staff controls: just the Delete-order button now. The always-on
+  // allergen toggle chips were removed (owner, 2026-06-17) — each dish row already
+  // shows its "no X", and adding/removing an allergen now lives in the staff EDIT flow.
   const orderControlsHtml = (o) => {
-    const list = Array.isArray(o.allergies) ? o.allergies : [];
-    const aSet = new Set(list.map((x) => String(x).toLowerCase()));
-    const extra = list.filter((x) => !ALLERGENS.some((a) => a.slug === String(x).toLowerCase()));
-    const chips = ALLERGENS.map((a) => `<span class="chip talg ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("");
     return `<div class="ordctl">
-      <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}${extra.length ? `<span class="muted small">+ ${esc(extra.join(", "))}</span>` : ""}</div>
       <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
     </div>`;
   };

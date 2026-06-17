@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
-import { getMenuItems, getSettings, createOrder, leaveFeedback, type MenuItem } from "@/lib/menu";
+import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 // Per-restaurant feature switches: the allergy section can be turned off.
 import { useFeatures } from "@/lib/features";
@@ -35,148 +35,9 @@ interface CartItem {
   sig?: string;
 }
 
-// A past order kept in this device's history (for the "Previous orders" tab).
-// Items now carry their customizations so a past bill shows exactly what was
-// ordered (extras, removed/allergens, notes), and `status` lets a cancelled
-// order render greyed-out with a label.
-interface HistoryItem { title: string; qty: number; price: string; options?: CartOption[]; removed?: string[]; note?: string }
-interface HistoryOrder {
-  id: string;
-  tableNumber: string;
-  total: number;
-  items: HistoryItem[];
-  placedAt: number;
-  status?: string; // "received" | "preparing" | "served" | "cancelled"
-}
-
-// Build the history item list from cart lines, keeping the customizations.
-const histItemsOf = (lines: CartItem[]): HistoryItem[] =>
-  lines.map((it) => ({ title: it.title, qty: it.qty, price: it.price, options: it.options, removed: it.removed, note: it.note }));
-
-// Split past orders into Today / Yesterday / Earlier so the list reads like a
-// dated statement instead of one long pile.
-function partitionByDate(orders: HistoryOrder[]): { label: string; orders: HistoryOrder[] }[] {
-  const now = new Date();
-  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startYesterday = startToday - 86_400_000;
-  const today: HistoryOrder[] = [], yest: HistoryOrder[] = [], earlier: HistoryOrder[] = [];
-  for (const o of orders) {
-    if (o.placedAt >= startToday) today.push(o);
-    else if (o.placedAt >= startYesterday) yest.push(o);
-    else earlier.push(o);
-  }
-  return [
-    { label: "Today", orders: today },
-    { label: "Yesterday", orders: yest },
-    { label: "Earlier", orders: earlier },
-  ].filter((g) => g.orders.length);
-}
-
-// One past bill. Dish name on the left, quantity on the right; each line can
-// show its customizations (extras · NO allergen · note). Long bills collapse to
-// 5 lines with a "show more". A cancelled order renders greyed with a label.
-function HistoryBill({ order, showPrice }: { order: HistoryOrder; showPrice: (n: number) => string }) {
-  const [expanded, setExpanded] = useState(false);
-  const cancelled = order.status === "cancelled";
-  const shown = expanded ? order.items : order.items.slice(0, 5);
-  const extra = (it: HistoryItem) => {
-    const parts: string[] = [];
-    if (it.options?.length) parts.push(it.options.map((o) => o.label).join(" · "));
-    if (it.removed?.length) parts.push(it.removed.map((r) => "No " + r).join(" · "));
-    if (it.note) parts.push(`“${it.note}”`);
-    return parts.join(" · ");
-  };
-  return (
-    <div className={`hist-order${cancelled ? " hist-cancelled" : ""}`}>
-      <div className="hist-top">
-        <span className="hist-table">{order.tableNumber ? `Table ${order.tableNumber}` : "Order"}</span>
-        {cancelled && <span className="hist-cancel-tag">Order cancelled</span>}
-        <span className="hist-when">{new Date(order.placedAt).toLocaleString()}</span>
-      </div>
-      <div className="hist-lines">
-        {shown.map((it, i) => {
-          const ex = extra(it);
-          return (
-            <div key={i} className="hist-line">
-              <div className="hist-line-main">
-                <span className="hist-line-name">{it.title}</span>
-                {ex && <span className="hist-line-opts">{ex}</span>}
-              </div>
-              <span className="hist-line-qty">×{it.qty}</span>
-            </div>
-          );
-        })}
-      </div>
-      {order.items.length > 5 && (
-        <button type="button" className="hist-line-more" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? "Show less ↑" : `Show ${order.items.length - 5} more items ↓`}
-        </button>
-      )}
-      <div className="hist-total"><span>Total</span><span>{showPrice(order.total)}</span></div>
-      {/* Rate-your-visit: one tap per bill (not for cancelled ones). */}
-      {!cancelled && <BillFeedback orderId={order.id} />}
-    </div>
-  );
-}
-
-// BillFeedback — the little "How was it?" star row under a past bill. Tapping a
-// star sends the rating right away (holding the order id proves the visit);
-// a comment box appears after, for anyone who wants to say more. The rating is
-// remembered per device, but stays EDITABLE — tapping a different star re-sends
-// (the server keeps one feedback per order and updates it), so a mis-tap is
-// fixable.
-function BillFeedback({ orderId }: { orderId: string }) {
-  const KEY = "lfh_fb_" + orderId;
-  // SSR-safe: start at 0 (matches the server, which has no localStorage), then
-  // read the saved rating in a mount effect — avoids a hydration mismatch.
-  const [saved, setSaved] = useState(0);     // the rating already stored on this device (0 = none yet)
-  const [picked, setPicked] = useState(0);   // the rating shown/selected right now
-  const [comment, setComment] = useState("");
-  const [sending, setSending] = useState(false);
-  useEffect(() => {
-    try { const v = Number(localStorage.getItem(KEY)) || 0; if (v) { setSaved(v); setPicked(v); } } catch {}
-  }, [KEY]);
-
-  // Send (or re-send with a comment) the rating for this bill. Guarded so a
-  // double-tap can't fire two overlapping requests.
-  const send = async (rating: number, text: string) => {
-    if (sending) return;
-    setPicked(rating);
-    setSending(true);
-    const r = await leaveFeedback(orderId, rating, text);
-    setSending(false);
-    if (!r.ok) {
-      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't send your rating", kicker: "feedback", variant: "error" } }));
-      return;
-    }
-    try { localStorage.setItem(KEY, String(rating)); } catch {}
-    setSaved(rating);
-    window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: saved ? "Rating updated!" : "Thanks for the feedback!", kicker: "feedback", variant: "success" } }));
-  };
-
-  return (
-    <div className="fb-box">
-      <span className="fb-ask">{saved ? "Your rating" : "How was it?"}</span>
-      <span className="fb-starrow">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <button key={n} type="button" className={`fb-star ${picked >= n ? "on" : ""}`} disabled={sending}
-            aria-label={`${n} star${n > 1 ? "s" : ""}`}
-            onClick={() => send(n, comment)}>★</button>
-        ))}
-        {saved > 0 && <span className="fb-thanks">✓ saved — tap to change</span>}
-      </span>
-      {/* Once a rating is picked, offer a comment box that upgrades it with words. */}
-      {picked > 0 && (
-        <span className="fb-comment">
-          <input type="text" placeholder="Add a comment (optional)" value={comment} maxLength={300}
-            disabled={sending}
-            onChange={(e) => setComment(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && comment.trim()) send(picked, comment); }} />
-        </span>
-      )}
-    </div>
-  );
-}
+// NOTE: the per-device "Previous orders / past bills" history (with the star-rating
+// feedback row) was removed (owner, 2026-06-17). The cart's second tab is now a
+// LIVE-STATUS tab only — see the live bill (SessionTableBill) + live-orders strip.
 
 const TAX_RATE = 0.05; // 5% — shown as a line on the bill
 
@@ -218,7 +79,6 @@ export default function CartPanel() {
   const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null); // currency for all prices
   const [allergenMap, setAllergenMap] = useState<Record<string, string[]>>({}); // dish id -> its allergens, for warnings
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]); // the full menu (for pairings/editing)
-  const [history, setHistory] = useState<HistoryOrder[]>([]); // this device's past orders
   const [liveOrders, setLiveOrders] = useState<ActiveOrder[]>([]); // orders still in progress
   const [showHistory, setShowHistory] = useState(false); // which tab: false=current bill, true=previous orders
   // Previous orders are now grouped by date (Today / Yesterday / Earlier) and each
@@ -292,28 +152,8 @@ export default function CartPanel() {
       .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); })
       .catch(() => {});
 
-    const loadHistory = () => {
-      try {
-        const r = localStorage.getItem("lfh_order_history");
-        const p = r ? JSON.parse(r) : [];
-        let hist: HistoryOrder[] = Array.isArray(p) ? p : [];
-        // Keep each past bill's status fresh from the live/active record (which
-        // the tracker polls), so an order that ended up cancelled/served shows
-        // that here too. Persist it so the status sticks once the live row is gone.
-        const liveById = new Map(readActiveOrders().map((o) => [o.id, o.status]));
-        let changed = false;
-        hist = hist.map((h) => {
-          const live = liveById.get(h.id);
-          if (live && live !== h.status) { changed = true; return { ...h, status: live }; }
-          return h;
-        });
-        if (changed) { try { localStorage.setItem("lfh_order_history", JSON.stringify(hist.slice(0, 50))); } catch {} }
-        setHistory(hist);
-      } catch { setHistory([]); }
-    };
     // Live orders are written/polled by OrderTracker; we just read them here.
     const loadLive = () => setLiveOrders(liveActiveOrders(readActiveOrders()));
-    loadHistory();
     loadLive();
     // restore order-wide allergy avoidances (set via "apply to all" or the bill section)
     try {
@@ -339,19 +179,19 @@ export default function CartPanel() {
     // handleOpen: when "lfh:open-cart" fires, slide the panel open and refresh
     // everything it shows.
     const handleOpen = () => {
-      setOpen(true); loadCart(); loadHistory(); loadLive(); setShowHistory(false); prefillScanned(); syncSession();
+      setOpen(true); loadCart(); loadLive(); setShowHistory(false); prefillScanned(); syncSession();
       // re-read settings on open so a freshly-toggled sessions mode is always respected
       getSettings().then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
     };
-    // handleShowPrev: open straight to the "Previous orders" tab (the live table
-    // view with the served-progress bar). Fired when the multi-order tracker is tapped.
-    const handleShowPrev = () => { setOpen(true); setShowHistory(true); loadHistory(); loadLive(); };
+    // handleShowPrev: open straight to the LIVE-STATUS tab (the live table view
+    // with the served-progress bar). Fired when the multi-order tracker is tapped.
+    const handleShowPrev = () => { setOpen(true); setShowHistory(true); loadLive(); };
     const handleClose = () => setOpen(false); // "lfh:close-all" -> slide shut
     const handleScanned = prefillScanned; // a QR table scan arrived -> pre-fill table
     const handleCartUpdated = loadCart; // cart changed elsewhere -> re-read it
     const handleCurrency = () => setCurrencyState(getCurrency()); // currency switched -> refresh
     // Re-read live orders whenever one is placed or its status changes.
-    const handleOrdersChanged = () => { loadLive(); loadHistory(); };
+    const handleOrdersChanged = () => { loadLive(); };
     // TWO-TABS bridge: "lfh:cart-updated" is a same-tab announcement only, so a
     // cart change made in ANOTHER tab never reached this one — its badge and
     // open cart panel showed stale items. The browser's "storage" event DOES
@@ -461,11 +301,7 @@ export default function CartPanel() {
   // popup chip by chip; then × qty, so lines sum to exactly what's printed.
   const lineDisp = (it: CartItem) =>
     unitDisplay(parseFloat(it.price), (it.options || []).map((o) => o.price || 0), currency || undefined) * it.qty;
-  // Orders shown live up top are hidden from the history list below, so the
-  // same order never appears twice in the same tab.
-  const liveIds = new Set(liveOrders.map((o) => o.id));
-  const pastOrders = history.filter((h) => !liveIds.has(h.id));
-  // Red dot on the Previous-orders tab: a live order whose floating strip was hidden.
+  // Red dot on the Live-status tab: a live order whose floating strip was hidden.
   const hiddenLive = liveOrders.some((o) => o.stripHidden && !isFinalStatus(o.status));
   // Bill math — in the guest's DISPLAY currency, not USD, so the printed
   // lines visibly add up: subtotal = sum of the printed line values.
@@ -575,7 +411,6 @@ export default function CartPanel() {
       // up from menu_items and prices the bill itself, so nothing here is trusted.
       const itemsS = cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note }));
       const trackS = cart.map((it) => ({ title: it.title, qty: it.qty })); // slim list for the tracker
-      const histS = histItemsOf(cart); // list for history (keeps options/removed/note)
       const totalS = totalUsd, countS = itemCount; // USD — order records convert at render
       // onDone: runs once the SessionGate finishes (after location/join/OTP). If the
       // server actually placed the order, we record it locally so the tracker follows it.
@@ -595,14 +430,6 @@ export default function CartPanel() {
           arr.push({ id: d.orderId, tableNumber: tableTrim, total: totalS, itemCount: countS, items: trackS, status: "received", placedAt: Date.now() });
           localStorage.setItem("lfh_active_orders", JSON.stringify(arr));
           window.dispatchEvent(new Event("lfh:order-placed")); // wake the tracker
-        } catch {}
-        try {
-          // Also add it to the browser-only permanent history (newest first, max 50).
-          const rawH = localStorage.getItem("lfh_order_history");
-          const hist = (() => { const p = rawH ? JSON.parse(rawH) : []; return Array.isArray(p) ? p : []; })();
-          hist.unshift({ id: d.orderId, tableNumber: tableTrim, total: totalS, items: histS, placedAt: Date.now(), status: "received" });
-          localStorage.setItem("lfh_order_history", JSON.stringify(hist.slice(0, 50)));
-          setHistory(hist.slice(0, 50));
         } catch {}
         // Empty the cart and reset the allergy fields, then refresh + close.
         setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
@@ -642,22 +469,6 @@ export default function CartPanel() {
         });
         localStorage.setItem("lfh_active_orders", JSON.stringify(active));
         window.dispatchEvent(new Event("lfh:order-placed")); // wake the tracker
-      } catch {}
-      // Also keep a permanent history this device can browse later.
-      try {
-        const rawH = localStorage.getItem("lfh_order_history");
-        const hist = (() => { const p = rawH ? JSON.parse(rawH) : []; return Array.isArray(p) ? p : []; })();
-        hist.unshift({
-          id: orderId,
-          tableNumber: tableTrim,
-          total: totalUsd, // USD — converted at render time like all order records
-          items: histItemsOf(cart),
-          placedAt: Date.now(),
-          status: "received",
-        });
-        // Kept only in the guest's own browser (never Supabase); persists across visits.
-        localStorage.setItem("lfh_order_history", JSON.stringify(hist.slice(0, 50)));
-        setHistory(hist.slice(0, 50));
       } catch {}
       // Pop a success toast confirming the order went to the kitchen.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
@@ -717,18 +528,18 @@ export default function CartPanel() {
           )}
         </h3>
 
-        {/* The two tabs: "Current bill" and "Previous orders" (with a count + live dot). */}
+        {/* The two tabs: "Current bill" and "Live status" (with a count + live dot). */}
         <div className="cart-tabs">
           <button type="button" className={!showHistory ? "active" : ""} onClick={() => setShowHistory(false)}>Current bill</button>
           <button type="button" className={showHistory ? "active" : ""} onClick={() => setShowHistory(true)}>
-            Previous orders{liveOrders.length + pastOrders.length ? ` (${liveOrders.length + pastOrders.length})` : ""}
+            Live status{liveOrders.length ? ` (${liveOrders.length})` : ""}
             {hiddenLive && <span className="tab-live-dot" aria-label="Live order in progress" />}
           </button>
         </div>
 
-        {/* Show EITHER the history tab OR the current-bill tab, never both. */}
+        {/* Show EITHER the live-status tab OR the current-bill tab, never both. */}
         {showHistory ? (
-          /* ── HISTORY TAB ── */
+          /* ── LIVE-STATUS TAB ── */
           <div className="order-history">
             <SessionTableBill />
             {/* "Live now": the coarse order-level status strip. When dining-sessions
@@ -776,25 +587,15 @@ export default function CartPanel() {
               </div>
             )}
 
-            {/* Friendly empty state when there's nothing live AND nothing in history. */}
-            {pastOrders.length === 0 && liveOrders.length === 0 && (
+            {/* Friendly empty state when nothing is live. In sessions mode the
+                SessionTableBill above shows the live bill (and its own empty), so
+                this only fills the plain (sessions-off) no-live-orders case. */}
+            {!sessionsEnabled && liveOrders.length === 0 && (
               <div style={{ textAlign: "center", color: "var(--muted)", padding: "44px 16px", fontSize: 15 }}>
-                <div style={{ fontSize: 30, marginBottom: 10 }}>🧾</div>
-                No previous orders yet.<br />Your past orders will show up here.
+                <div style={{ fontSize: 30, marginBottom: 10 }}>🍽️</div>
+                Nothing cooking right now.<br />Your live orders will show up here.
               </div>
             )}
-
-            {/* Past bills, grouped into Today / Yesterday / Earlier. Each bill
-                lists its dishes (name left, qty right, with customizations) and
-                collapses long ones to 5 lines; cancelled bills show greyed. */}
-            {pastOrders.length > 0 && partitionByDate(pastOrders).map((group) => (
-              <div key={group.label} className="hist-group">
-                <div className="hist-group-head">{group.label}</div>
-                {group.orders.map((h) => (
-                  <HistoryBill key={h.id} order={h} showPrice={showPrice} />
-                ))}
-              </div>
-            ))}
           </div>
         ) : (
         /* ── CURRENT BILL TAB ── */
