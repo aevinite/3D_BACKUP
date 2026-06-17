@@ -25,10 +25,18 @@ async function gate(req: NextRequest): Promise<NextResponse | null> {
 const nowIso = () => new Date().toISOString();
 // Unwrap a Supabase { data, error } reply — throw on error so the catch turns it
 // into a clean 500 (mirrors the editor server's `must`).
- 
+
 const must = (r: any) => {
   if (r.error) throw new Error(r.error.message);
   return r.data;
+};
+
+// Mark an order as EDITED after it was placed → drives the persistent "✎ Edited"
+// badge on the kitchen/tablet/manager ticket so staff re-check what changed.
+// Best-effort: a stamp failure must never fail the edit itself.
+const stampEdited = async (orderId?: string | null) => {
+  if (!orderId) return;
+  try { await sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); } catch {}
 };
  
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
@@ -239,7 +247,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "allergies") {
       const raw = Array.isArray(body?.allergies) ? body.allergies : [];
       const allergies = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
-      const row = must(await sb.from("orders").update({ allergies }).eq("id", b).select());
+      const row = must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).select());
       await logAction("editor", "order_allergies", { order_id: b, detail: allergies.join(", ") || "(none)", device_id: dev });
       return ok(row[0] || null);
     }
@@ -382,6 +390,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         return err(msg, reason === "order_paid" ? 409 : 400);
       }
       await logAction("editor", "order_item_delete", { order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
+      await stampEdited(data?.order_id);
       return ok(data);
     }
 
@@ -396,6 +405,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("editor", "order_item_qty", { order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
+      await stampEdited(data?.order_id);
       return ok(data);
     }
 
@@ -405,6 +415,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("editor", "order_item_note", { order_id: data?.order_id, device_id: dev });
+      await stampEdited(data?.order_id);
       return ok(data);
     }
 
@@ -425,6 +436,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (order?.status === "cancelled") return err(editErrMsg("order_cancelled"), 400);
       const row = must(await sb.from("order_items").update({ removed }).eq("id", b).select());
       await logAction("editor", "order_item_removed", { order_id: item.order_id, detail: removed.join(", ") || "(none)", device_id: dev });
+      await stampEdited(item.order_id);
       return ok(row[0] || { ok: true });
     }
 
@@ -445,6 +457,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("editor", "order_add_item", { order_id: b, detail: dishId, device_id: dev });
+      await stampEdited(b);
       return ok(data);
     }
 

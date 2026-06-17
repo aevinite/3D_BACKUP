@@ -178,7 +178,7 @@ function renderFloor() {
       body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}${quick}`;
     }
     html += `<button class="tile t-${st.cls} ${payCls} ${called ? "called" : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
-      <span class="tbadges">${called ? `<em class="b-call">🔔</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
+      <span class="tbadges">${called ? `<em class="b-call">🔔</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}${a.os.some((o) => o.edited_at) ? `<em class="b-edit" title="An order was edited after it was placed">✎</em>` : ""}</span>
       <span class="tnum">${i}</span>
       <span class="tlabel">${st.label}</span>
       ${body}
@@ -300,10 +300,11 @@ function renderPanel() {
     const when = o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
     const viaApp = !!o.member_id;
     const rows = dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("");
-    return `<div class="ord"><div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">New order${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}</span></div>${rows || `<div class="iline muted">No items.</div>`}${orderControlsHtml(o)}<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
+    return `<div class="ord"><div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">New order${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}${o.edited_at ? `<span class="edited">✎ Edited</span>` : ""}</span></div>${rows || `<div class="iline muted">No items.</div>`}${orderControlsHtml(o)}<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
   }).join("");
   const mergedDishes = liveOrdersT.map((o, i) => (i > 0 ? `<div class="ord-sep" aria-hidden="true"></div>` : "") + dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("") + orderControlsHtml(o)).join("");
-  const mergedCard = liveOrdersT.length ? `<div class="ord">${mergedDishes}</div>` : "";
+  const mergedEdited = liveOrdersT.some((o) => o.edited_at);
+  const mergedCard = liveOrdersT.length ? `<div class="ord">${mergedEdited ? `<div class="ordh"><span class="left"><span class="edited">✎ Edited</span></span></div>` : ""}${mergedDishes}</div>` : "";
   const orderCards = newCards + mergedCard;
 
   const callRows = calls.map((c) => `<div class="row"><span>🔔 ${esc(c.note || "Waiter call")}</span><button class="btn small primary" data-attend="${esc(c.id)}">Done</button></div>`).join("");

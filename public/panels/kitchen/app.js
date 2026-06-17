@@ -98,7 +98,7 @@ function ticketHtml(o) {
       ? `<button class="big ready" data-ready="${esc(o.id)}">ALL READY</button>`
       : `<div class="awaiting">✓ ready — waiter serving</div>`);
   return `<div class="ticket st-${esc(o.status)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span></div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span>${o.edited_at ? `<span class="edited" title="Edited after the order was placed">✎ EDITED</span>` : ""}<span class="age">${esc(timeAgo(o.created_at))}</span></div>
     ${lines}${action}</div>`;
 }
 
