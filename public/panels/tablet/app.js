@@ -44,6 +44,8 @@ const state = {
   note: "",             // one note for the whole order
   floorFilter: "all",   // which tables the floor shows: all | needs | open | free
   allergies: "",        // order-level allergies (comma list), applied to the whole order
+  editOrders: new Set(),// order ids currently in staff EDIT mode (after the kitchen-confirm)
+  addToOrderId: null,   // when set, the dish browser ADDS to this existing order (not a new one)
 };
 
 const api = async (method, path, body) => {
@@ -252,14 +254,36 @@ function renderPanel() {
     // re-prices the bill server-side. (owner, 2026-06-16)
     const delBtn = (r.fromDb && r.status !== "served")
       ? `<button class="idel" data-del-item="${esc(r.id)}" title="Remove this dish">🗑</button>` : "";
-    return `<div class="iline"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}${delBtn}</div>`;
+    // STAFF EDIT mode (gated by the kitchen-confirm): quantity steppers + a note
+    // edit on each real dish that isn't served yet. (owner, 2026-06-17)
+    const editing = state.editOrders.has(o.id);
+    const editCtl = (editing && r.fromDb && r.status !== "served")
+      ? `<span class="iedit"><button class="qbtn" data-qty-dec="${esc(r.id)}" data-qty="${r.qty}" title="Fewer">−</button><button class="qbtn" data-qty-inc="${esc(r.id)}" data-qty="${r.qty}" title="More">＋</button><button class="qbtn" data-note-item="${esc(r.id)}" title="Edit note">✎</button></span>`
+      : "";
+    return `<div class="iline${editing ? " editing" : ""}"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}${editCtl}${delBtn}</div>`;
   };
-  // Per-order staff controls: just the Delete-order button now. The always-on
-  // allergen toggle chips were removed (owner, 2026-06-17) — each dish row already
-  // shows its "no X", and adding/removing an allergen now lives in the staff EDIT flow.
+  // Per-order staff controls. NOT editing: an "✎ Edit" button (opens the gated edit
+  // mode) + Delete order. EDITING: allergen toggle chips ("avoid in all dishes"),
+  // an "＋ Add dish" button, Delete order, and "✓ Done editing". The dish rows show
+  // qty steppers + a note edit while editing. (owner, 2026-06-17)
   const orderControlsHtml = (o) => {
-    return `<div class="ordctl">
-      <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
+    if (!state.editOrders.has(o.id)) {
+      return `<div class="ordctl">
+        <button class="btn small" data-edit-order="${esc(o.id)}">✎ Edit</button>
+        <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
+      </div>`;
+    }
+    const list = Array.isArray(o.allergies) ? o.allergies : [];
+    const aSet = new Set(list.map((x) => String(x).toLowerCase()));
+    const extra = list.filter((x) => !ALLERGENS.some((a) => a.slug === String(x).toLowerCase()));
+    const chips = ALLERGENS.map((a) => `<span class="chip talg ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("");
+    return `<div class="ordctl ordctl-edit">
+      <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}${extra.length ? `<span class="muted small">+ ${esc(extra.join(", "))}</span>` : ""}</div>
+      <div class="ordctl-row">
+        <button class="btn small" data-add-dish="${esc(o.id)}">＋ Add dish</button>
+        <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
+        <button class="btn small primary" data-done-order="${esc(o.id)}">✓ Done editing</button>
+      </div>
     </div>`;
   };
   // MERGED like the manager: un-accepted orders stay SEPARATE (each with its own
@@ -347,6 +371,26 @@ function renderPanel() {
     if (await confirmDialog("Delete this whole order? It will be permanently removed.", "Delete order"))
       act(() => api("POST", `/orders/${b.dataset.delOrder}/delete`));
   }));
+  // ── STAFF EDIT-AFTER-CONFIRM (owner, 2026-06-17) ──────────────────────────
+  // Enter edit mode ONLY after the waiter confirms with the kitchen it's still
+  // editable (the order may already be cooking). The 2-step confirm IS the guard.
+  document.querySelectorAll("[data-edit-order]").forEach((b) => (b.onclick = async () => {
+    if (await confirmDialog("Have you checked with the kitchen that this order is still editable? Only edit if they haven't started making it.", "Yes — it's editable")) {
+      state.editOrders.add(b.dataset.editOrder); renderPanel();
+    }
+  }));
+  document.querySelectorAll("[data-done-order]").forEach((b) => (b.onclick = () => { state.editOrders.delete(b.dataset.doneOrder); renderPanel(); }));
+  // Quantity −/＋ on one dish (re-prices the bill server-side, clamped 1..99).
+  document.querySelectorAll("[data-qty-inc]").forEach((b) => (b.onclick = () => act(() => api("POST", `/items/${b.dataset.qtyInc}/qty`, { qty: Math.min(99, (parseInt(b.dataset.qty, 10) || 1) + 1) }))));
+  document.querySelectorAll("[data-qty-dec]").forEach((b) => (b.onclick = () => { const q = (parseInt(b.dataset.qty, 10) || 1) - 1; if (q < 1) { toast("Use 🗑 to remove the dish", false); return; } act(() => api("POST", `/items/${b.dataset.qtyDec}/qty`, { qty: q })); }));
+  // Edit one dish's note (simple prompt — staff tablet).
+  document.querySelectorAll("[data-note-item]").forEach((b) => (b.onclick = () => {
+    const it = (state.data.items || []).find((x) => x.id === b.dataset.noteItem);
+    const v = window.prompt("Note for this dish (e.g. less ice, extra hot):", (it && it.note) || "");
+    if (v !== null) act(() => api("POST", `/items/${b.dataset.noteItem}/note`, { note: v }));
+  }));
+  // Add a dish to THIS already-placed order: reuse the dish browser in add mode.
+  document.querySelectorAll("[data-add-dish]").forEach((b) => (b.onclick = () => { state.ordering = true; state.addToOrderId = b.dataset.addDish; state.cat = ""; state.dishSearch = ""; renderPanel(); }));
   // Per-order allergen chips: toggle an allergen on/off for the whole order.
   document.querySelectorAll(".talg[data-alg]").forEach((chip) => (chip.onclick = () => {
     const id = chip.dataset.alg, slug = chip.dataset.slug;
@@ -479,6 +523,18 @@ const act = async (fn) => { try { await fn(); await load(); if (!state.ordering)
 // ── order-taking mode ────────────────────────────────────────────────────────
 const dishPrice = (d) => Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
 
+// Add ONE dish to an already-placed order (staff edit). Server prices + re-prices.
+// Stays in add mode so the waiter can add several, then taps "✓ Done".
+async function addDishToOrder(orderId, payload) {
+  try {
+    const r = await api("POST", `/orders/${orderId}/add-item`, payload);
+    if (r && r.ok === false) { toast("Couldn't add: " + (r.reason || "rejected"), false); return; }
+    toast("Dish added ✓");
+    await load();
+    if (state.addToOrderId) renderOrderMode(); else if (!state.ordering) renderPanel();
+  } catch (e) { toast("Failed: " + e.message, false); }
+}
+
 function orderDishes() {
   const q = state.dishSearch.trim().toLowerCase();
   return state.data.dishes.filter((d) =>
@@ -503,6 +559,8 @@ function bindDishButtons() {
     const d = state.data.dishes.find((x) => x.id === b.dataset.dish);
     if (!d) { toast("That dish just changed — refreshing the menu", false); renderOrderMode(); return; }
     if (Array.isArray(d.options) && d.options.length) { renderDishOptions(d, null); return; }
+    // ADD-TO-EXISTING-ORDER mode: a plain dish is added straight away (no cart).
+    if (state.addToOrderId) { addDishToOrder(state.addToOrderId, { dishId: d.id, qty: 1 }); return; }
     // A quick tap only stacks onto a PLAIN line of this dish — one with no options,
     // no per-item allergy and no note. An edited line (e.g. "no nuts") is left alone,
     // so tapping the dish again starts a fresh plain line instead of bumping the
@@ -568,8 +626,18 @@ function drawDishOptions() {
       if ((sel[g.name] || []).includes(c.label)) opts.push({ group: g.name, label: c.label, price: Number(c.price) || 0 });
     }
     const unitPrice = base + opts.reduce((s, o) => s + o.price, 0);
+    const allergy = (state._opt.allergy || "").trim();
+    const noteRaw = (state._opt.note || "").trim();
+    // ADD-TO-EXISTING-ORDER mode: send straight to the order's add-item endpoint
+    // (allergy folded into the dish note, mirroring how new orders carry it).
+    if (state.addToOrderId) {
+      const note = [allergy ? `⚠ ${allergy}` : null, noteRaw || null].filter(Boolean).join(" · ") || undefined;
+      addDishToOrder(state.addToOrderId, { dishId: d.id, qty: 1, options: opts.length ? opts.map((o) => ({ group: o.group, label: o.label })) : undefined, note });
+      state._opt = null;
+      return;
+    }
     const line = { id: d.id, title: d.title, price: unitPrice, qty: 1, options: opts.length ? opts : undefined,
-      allergy: (state._opt.allergy || "").trim() || undefined, note: (state._opt.note || "").trim() || undefined };
+      allergy: allergy || undefined, note: noteRaw || undefined };
     if (editIndex != null && state.cart[editIndex]) { line.qty = state.cart[editIndex].qty; state.cart[editIndex] = line; }
     else state.cart.push(line);
     state._opt = null;
@@ -583,6 +651,22 @@ function renderOrderMode() {
   const cats = state.data.categories.filter((c) => c.active !== false);
   const chips = state.dishSearch.trim() ? "" : [`<button class="chip ${!state.cat ? "on" : ""}" data-cat="">All</button>`]
     .concat(cats.map((c) => `<button class="chip ${state.cat === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc((c.name && c.name.en) || c.slug)}</button>`)).join("");
+  // ADD-TO-EXISTING-ORDER mode: a slim dish browser. Tapping a dish adds it straight
+  // to the order (the bill re-prices itself); "✓ Done" returns to the table.
+  if (state.addToOrderId) {
+    p.innerHTML = `
+      <div class="phead"><h2 style="margin:0;font-size:19px">Add a dish · Table ${esc(state.table)}</h2><button class="btn small primary" id="addDoneBtn">✓ Done</button></div>
+      <input type="search" id="dishSearch" class="order-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">
+      <div class="chips">${chips}</div>
+      <div class="muted small" style="padding:4px 2px">Tap a dish to add it to this order — the bill updates automatically.</div>
+      <div class="dishgrid">${orderGridHtml()}</div>`;
+    document.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => { state.cat = b.dataset.cat; renderOrderMode(); }));
+    bindDishButtons();
+    const search = $("#dishSearch");
+    if (search) search.oninput = (e) => { state.dishSearch = e.target.value; const g = document.querySelector(".dishgrid"); if (g) { g.innerHTML = orderGridHtml(); bindDishButtons(); } };
+    $("#addDoneBtn").onclick = () => { state.ordering = false; state.addToOrderId = null; renderPanel(); };
+    return;
+  }
   const lines = state.cart.map((l, i) => `<div class="cline">
       <span class="cname">${esc(l.title)}${l.options && l.options.length ? `<small class="copts">${esc(l.options.map((o) => o.label).join(", "))}</small>` : ""}${l.allergy ? `<small class="callergy">⚠ ${esc(l.allergy)}</small>` : ""}${l.note ? `<small class="copts">✎ ${esc(l.note)}</small>` : ""}</span>
       <span class="cqty"><button class="qbtn" data-minus="${i}">−</button><b>${l.qty}</b><button class="qbtn" data-plus="${i}">+</button><button class="qbtn edit" data-edit="${i}" title="Size / extras / allergy">✎</button></span>

@@ -1796,6 +1796,8 @@ const OP_ACTION_LABELS = {
   order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
   table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",
   call_attend: "Attended call", member_approve: "Approved guest", sold_out_on: "Marked sold-out", sold_out_off: "Back in stock",
+  login: "Signed in", logout: "Signed out",
+  profile_setup: "Completed profile", profile_update: "Updated profile", pin_set: "Set PIN", password_change: "Changed password",
 };
 // which: "oplog_retention_days" (operation log) or "custlog_retention_days" (customer log).
 function retentionControl(which) {
@@ -2521,9 +2523,14 @@ function refreshTableDetail() {
   }
 }
 
+// Tables currently in STAFF EDIT mode (after the kitchen-confirm). Module-level so
+// it survives the panel's poll-driven re-renders. (owner, 2026-06-17)
+const editTables = new Set();
+
 // One dish row: its own status pill + next-step tap. Works for session items (order_items)
 // AND legacy items (orders.items JSON) — so dishes are served one at a time either way.
-function itemRowHtml(row) {
+// `editing` (staff edit mode) adds qty steppers + a note edit on each real dish row.
+function itemRowHtml(row, editing = false) {
   // Redesigned row layout (master-detail): qty · name+detail · price · [chip + serve + 🗑].
   // The status now reads as a CHIP on the right next to its actions (was a pill on the
   // left), so the eye runs name → price → status → action in one line.
@@ -2541,9 +2548,13 @@ function itemRowHtml(row) {
   // have no per-item row, so we don't offer it there. Deleting recomputes the bill
   // total server-side (see lfh_delete_order_item) so no stale money is left behind.
   const delBtn = row.kind === "session" ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
+  // STAFF EDIT: qty −/＋ + note edit on a real (session) dish that isn't served yet.
+  const editCtl = (editing && row.kind === "session" && row.status !== "served")
+    ? `<span class="sx-item-edit"><button class="sx-qty" data-qty-dec="${esc(row.id)}" data-qty="${esc(row.qty)}" title="Fewer">−</button><button class="sx-qty" data-qty-inc="${esc(row.id)}" data-qty="${esc(row.qty)}" title="More">＋</button><button class="sx-qty" data-note-item="${esc(row.id)}" title="Edit note">✎</button></span>`
+    : "";
   // status label: friendlier words for the chip (class stays the raw status for colour).
   const STLABEL = { received: "new", preparing: "cooking", ready: "ready", served: "served", cancelled: "cancelled" };
-  return `<div class="sx-item"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}</span>${itemDetailLine(row)}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${delBtn}</div></div>`;
+  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}</span>${itemDetailLine(row)}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${editCtl}${delBtn}</div></div>`;
 }
 
 // tablePanelParts: build ALL the inner HTML sections for ONE table's full detail
@@ -2628,21 +2639,34 @@ function tablePanelParts(t) {
     // views disagree before (the popup showed only each item's own removals).
     const withAllergens = (o) => { const a = Array.isArray(o.allergies) ? o.allergies : []; return orderItemRows(o).map((r) => ({ ...r, removed: [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...a])] })); };
     const when = (o) => o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    const editing = editTables.has(String(t)); // staff EDIT mode for this table?
+    // While editing, each KOT card gets allergen toggle chips ("avoid in all dishes")
+    // + an "＋ Add dish" button. Allergy/add are PER-ORDER (per KOT). (owner, 2026-06-17)
+    const orderEditExtras = (o) => {
+      if (!editing) return "";
+      const aSet = new Set((Array.isArray(o.allergies) ? o.allergies : []).map((x) => String(x).toLowerCase()));
+      const chips = ALLERGENS.map((a) => `<span class="chip oae-chip ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("");
+      return `<div class="tp-edit-extras"><div class="tp-edit-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}</div><button class="btn small" data-add-dish-order="${esc(o.id)}">＋ Add dish</button></div>`;
+    };
     // Each un-accepted (NEW) order is its own highlighted card with its own Accept —
     // dishes share the same row layout as the rest (via itemRowHtml).
     const newBlocks = newOrders.map((o) => {
-      const rows = withAllergens(o).map(itemRowHtml).join("");
-      return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span></div>${rows}<div class="tp-order-foot"><button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
+      const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
+      return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span></div>${rows}${orderEditExtras(o)}<div class="tp-order-foot"><button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
     }).join("");
     // ACCEPTED orders are GROUPED into per-KOT cards (so you can see which ticket each
     // dish came from) but they still settle as ONE bill — no per-order total/pay/discount
     // (owner, 2026-06-14: one merged bill). Per-dish serve/delete live on each row.
     const mergedBlock = liveOrders.map((o) => {
-      const rows = withAllergens(o).map(itemRowHtml).join("");
-      return `<div class="tp-order"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "Order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}</div>${rows}</div>`;
+      const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
+      return `<div class="tp-order"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "Order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}</div>${rows}${orderEditExtras(o)}</div>`;
     }).join("");
     const mergedBadge = liveOrders.length > 1 ? `<span class="sx-badge2">${liveOrders.length} merged · one bill</span>` : "";
-    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${os.length}</span>${mergedBadge}</div>${newBlocks}${mergedBlock}</div>`;
+    // Edit/Done toggle: the gated entry to staff editing. The confirm fires on Edit.
+    const editToggle = editing
+      ? `<button class="btn small primary tp-edit-toggle" data-done-table="${esc(t)}">✓ Done editing</button>`
+      : `<button class="btn small tp-edit-toggle" data-edit-table="${esc(t)}">✎ Edit</button>`;
+    ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${os.length}</span>${mergedBadge}${editToggle}</div>${newBlocks}${mergedBlock}</div>`;
   }
 
   // Each active call (water, napkins, clean…) gets its own "Done" button so staff
@@ -2690,6 +2714,38 @@ function tablePanelParts(t) {
   return { sess, os, canFree, headPill, headMeta, sessionSec, buildingSec, ordersSec, callsSec, billSec, foot };
 }
 
+// Compact dish-picker modal for ADDING a dish to an already-placed order (staff
+// edit). Lists the live menu with a search; tapping a dish adds it (qty 1) and the
+// bill re-prices itself server-side. Stays open so several can be added. (2026-06-17)
+function openAddDishModal(orderId, rerender) {
+  document.querySelector(".add-dish-overlay")?.remove();
+  const dishes = (state.data.items || []).filter((d) => !(d.tags || []).includes("sold-out"));
+  const rowsFor = (q) => {
+    const ql = (q || "").trim().toLowerCase();
+    const list = dishes.filter((d) => !ql || (d.title || "").toLowerCase().includes(ql));
+    return list.length
+      ? list.map((d) => `<button class="add-dish-row" data-add="${esc(d.id)}"><span>${esc(d.title)}</span><span class="muted">${inr(parseFloat(d.price) || 0)}</span></button>`).join("")
+      : `<div class="muted" style="padding:14px">No dishes match.</div>`;
+  };
+  const wrap = el(`<div class="sx-modal-overlay add-dish-overlay"><div class="sx-modal add-dish-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Add a dish</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><input type="search" class="add-dish-search" placeholder="🔎 Search dishes…"><div class="add-dish-list">${rowsFor("")}</div></div></div>`);
+  document.body.appendChild(wrap);
+  const listEl = wrap.querySelector(".add-dish-list");
+  const bind = () => listEl.querySelectorAll("[data-add]").forEach((b) => (b.onclick = async () => {
+    try {
+      const r = await api("POST", `/orders/${orderId}/add-item`, { dishId: b.dataset.add, qty: 1 });
+      if (r && r.ok === false) { toast("Couldn't add: " + (r.reason || "rejected"), "err"); return; }
+      toast("Dish added — bill updated", "ok");
+      await loadSessions(); if (rerender) rerender();
+    } catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+  bind();
+  const search = wrap.querySelector(".add-dish-search");
+  search.oninput = () => { listEl.innerHTML = rowsFor(search.value); bind(); };
+  wrap.querySelector(".tbl-modal-close").onclick = () => wrap.remove();
+  wrap.onclick = (e) => { if (e.target === wrap) wrap.remove(); };
+  search.focus();
+}
+
 // bindTablePanel: wire up every button inside an already-rendered table detail.
 // `root` is the container the detail's HTML lives in (the modal OR the side panel).
 // `rerender` redraws the SAME view after a local-state change (modal vs side panel
@@ -2729,6 +2785,39 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
       toast(r && r.order_cancelled ? "Dish removed — order now empty, cancelled" : "Dish removed — bill updated", "ok");
     } catch (e) { toast("Failed: " + e.message, "err"); }
   }));
+  // ── STAFF EDIT-AFTER-CONFIRM (owner, 2026-06-17) ──────────────────────────
+  // Enter edit mode ONLY after confirming with the kitchen the order's editable
+  // (it may already be cooking). The 2-step confirm IS the guard.
+  root.querySelectorAll("[data-edit-table]").forEach((b) => (b.onclick = async () => {
+    if (await confirmDialog("Have you checked with the kitchen that this order is still editable? Only edit if they haven't started making it.", "Yes — it's editable")) {
+      editTables.add(String(b.dataset.editTable)); if (rerender) rerender();
+    }
+  }));
+  root.querySelectorAll("[data-done-table]").forEach((b) => (b.onclick = () => { editTables.delete(String(b.dataset.doneTable)); if (rerender) rerender(); }));
+  // Quantity −/＋ on one dish: re-prices the bill server-side (clamped 1..99).
+  const editQty = async (id, qty) => { try { await api("POST", `/items/${id}/qty`, { qty }); await loadSessions(); if (rerender) rerender(); } catch (e) { toast("Failed: " + e.message, "err"); } };
+  root.querySelectorAll("[data-qty-inc]").forEach((b) => (b.onclick = () => editQty(b.dataset.qtyInc, Math.min(99, (parseInt(b.dataset.qty, 10) || 1) + 1))));
+  root.querySelectorAll("[data-qty-dec]").forEach((b) => (b.onclick = () => { const q = (parseInt(b.dataset.qty, 10) || 1) - 1; if (q < 1) { toast("Use 🗑 to remove the dish", "err"); return; } editQty(b.dataset.qtyDec, q); }));
+  // Edit one dish's note (simple prompt; prefilled from the current note).
+  root.querySelectorAll("[data-note-item]").forEach((b) => (b.onclick = async () => {
+    const it = (state.board && state.board.items || []).find((x) => x.id === b.dataset.noteItem);
+    const v = prompt("Note for this dish (e.g. less ice, extra hot):", (it && it.note) || "");
+    if (v === null) return;
+    try { await api("POST", `/items/${b.dataset.noteItem}/note`, { note: v }); await loadSessions(); if (rerender) rerender(); } catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+  // Per-order allergen toggle chips (edit mode): optimistic flip, then persist.
+  root.querySelectorAll(".oae-chip[data-alg]").forEach((chip) => (chip.onclick = async () => {
+    const id = chip.dataset.alg, slug = chip.dataset.slug;
+    const o = (state.data.orders || []).find((x) => x.id === id);
+    if (!o) return;
+    const cur = new Set((o.allergies || []).map((x) => String(x).toLowerCase()));
+    if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
+    o.allergies = [...cur]; if (rerender) rerender(); // flip the screen now
+    try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }); await loadSessions(); if (rerender) rerender(); }
+    catch (e) { toast("Couldn't update allergens: " + e.message, "err"); }
+  }));
+  // Add a dish to THIS order: a compact dish-picker modal → /orders/:id/add-item.
+  root.querySelectorAll("[data-add-dish-order]").forEach((b) => (b.onclick = () => openAddDishModal(b.dataset.addDishOrder, rerender)));
   // Per-bill discount: ask for the amount (with the order total as the cap).
   root.querySelectorAll("[data-disc]").forEach((b) => (b.onclick = async () => {
     const max = parseFloat(b.dataset.discMax) || 0;

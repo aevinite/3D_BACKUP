@@ -265,6 +265,14 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .ordctl .talg { padding: 5px 11px; font-size: 12.5px; }
 /* "Avoid" allergen chips read red when ON (semantic), overriding the blue .chip.on. */
 .talg.on { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.6); color: #fca5a5; }
+/* STAFF EDIT mode (owner, 2026-06-17): per-dish qty steppers + note; the row gets a
+   faint gold wash so it's obvious which order is being edited. */
+.iline.editing { background: rgba(212,165,116,0.06); }
+.iedit { display: inline-flex; align-items: center; gap: 5px; }
+.iedit .qbtn { width: 30px; height: 30px; font-size: 15px; }
+.ordctl-edit { flex-direction: column; align-items: stretch; }
+.ordctl-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ordctl-row .primary { background: rgba(34,197,94,.16); border-color: rgba(34,197,94,.4); color: #4ade80; margin-left: auto; }
 /* top-of-orders "Serve all" — full-width green action, matches the Serve buttons */
 .serve-all-btn { display: block; width: 100%; margin: 0 0 10px; background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; font-weight: 800; font-size: 14px; text-align: center; padding: 11px; border: 0; border-radius: 11px; cursor: pointer; }
 .serve-all-btn:hover { filter: brightness(1.06); }

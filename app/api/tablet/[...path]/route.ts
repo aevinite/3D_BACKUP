@@ -23,7 +23,18 @@ const must = (r: any) => { if (r.error) throw new Error(r.error.message); return
  
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
- 
+
+// Friendly message for a staff-edit RPC's { ok:false, reason } (edit-qty/note/add).
+const editErrMsg = (reason?: string) =>
+  reason === "order_paid" ? "Won't change a PAID bill — mark it unpaid first."
+  : reason === "order_cancelled" ? "This order was cancelled — nothing to edit."
+  : reason === "item_not_found" ? "That dish is no longer on the order."
+  : reason === "order_not_found" ? "That order no longer exists."
+  : reason === "sold_out" ? "That dish is sold out — can't add it."
+  : reason === "unknown_item" ? "That dish isn't on the menu."
+  : reason === "empty_order" ? "Nothing to add."
+  : (reason || "Couldn't edit the order.");
+
 async function readBody(req: NextRequest): Promise<any> { try { return await req.json(); } catch { return {}; } }
 
 type Ctx = { params: Promise<{ path?: string[] }> };
@@ -212,6 +223,46 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         return err(msg, reason === "order_paid" ? 409 : 400);
       }
       await logAction("tablet", "order_item_delete", { order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
+      return ok(data);
+    }
+
+    // items/:id/qty — STAFF EDIT: change ONE dish's quantity on a PLACED order.
+    // Money-safe via the RPC (clamps 1..99, re-prices the bill). Mirrors the editor.
+    if (a === "items" && c === "qty") {
+      const qty = Math.round(Number(body?.qty));
+      if (!Number.isFinite(qty) || qty < 1) return err("invalid quantity");
+      const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
+      if (error) throw new Error(error.message);
+      if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
+      await logAction("tablet", "order_item_qty", { order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
+      return ok(data);
+    }
+
+    // items/:id/note — STAFF EDIT: change ONE dish's note on a PLACED order.
+    if (a === "items" && c === "note") {
+      const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
+      if (error) throw new Error(error.message);
+      if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
+      await logAction("tablet", "order_item_note", { order_id: data?.order_id, device_id: dev });
+      return ok(data);
+    }
+
+    // orders/:id/add-item — STAFF EDIT: ADD a new dish to an already-placed order.
+    // Server-priced + re-priced. Body: { dishId, qty, options?, removed?, note? }.
+    if (a === "orders" && c === "add-item") {
+      const dishId = String(body?.dishId || body?.id || "").trim();
+      if (!dishId) return err("dish required");
+      const line = {
+        id: dishId,
+        qty: Math.max(1, Math.round(Number(body?.qty) || 1)),
+        options: Array.isArray(body?.options) ? body.options : undefined,
+        removed: Array.isArray(body?.removed) ? body.removed : undefined,
+        note: body?.note ? String(body.note) : undefined,
+      };
+      const { data, error } = await sb.rpc("lfh_staff_add_item_to_order", { p_order: b, p_items: [line] });
+      if (error) throw new Error(error.message);
+      if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
+      await logAction("tablet", "order_add_item", { order_id: b, detail: dishId, device_id: dev });
       return ok(data);
     }
 
