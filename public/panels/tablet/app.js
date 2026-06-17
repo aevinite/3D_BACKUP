@@ -72,6 +72,67 @@ const confirmDialog = (text, yesLabel = "Yes, send it") => new Promise((resolve)
   $("#confirmNo").onclick = () => { $("#confirmOverlay").hidden = true; resolve(false); };
 });
 
+// Ask for a MANAGER PIN (a self-contained modal so it needs nothing in the HTML).
+// Resolves with the typed digits, or null if cancelled. Sensitive tablet actions
+// (ban, discount, closing/restarting a busy table) are unlocked by a manager's PIN.
+const pinPrompt = (message, errText) => new Promise((resolve) => {
+  const ov = document.createElement("div");
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  const box = document.createElement("div");
+  Object.assign(box.style, { width: "min(92vw,340px)", background: "#0f1830", color: "#e7eefc", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
+  box.innerHTML = `
+    <div style="font-size:16px;font-weight:800;margin:0 0 6px">🔑 Manager PIN</div>
+    <div style="font-size:13px;color:#9fb2d8;margin:0 0 12px">${message || "A manager PIN is required for this action."}</div>
+    <input class="pp-in" type="password" inputmode="numeric" maxlength="8" placeholder="••••" autocomplete="off"
+      style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:18px;letter-spacing:4px;text-align:center;outline:none" />
+    <div class="pp-err" style="font-size:12px;color:#fca5a5;min-height:16px;margin:6px 2px 0">${errText || ""}</div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button class="pp-cancel" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:#243049;color:#fff;cursor:pointer">Cancel</button>
+      <button class="pp-ok" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:#3b82f6;color:#fff;cursor:pointer">Confirm</button>
+    </div>`;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  const input = box.querySelector(".pp-in");
+  const err = box.querySelector(".pp-err");
+  setTimeout(() => input.focus(), 50);
+  const done = (val) => { ov.remove(); resolve(val); };
+  box.querySelector(".pp-cancel").onclick = () => done(null);
+  box.querySelector(".pp-ok").onclick = () => {
+    const v = input.value.trim();
+    if (!/^\d{4,8}$/.test(v)) { err.textContent = "Enter the 4–8 digit PIN."; return; }
+    done(v);
+  };
+  input.onkeydown = (e) => { if (e.key === "Enter") box.querySelector(".pp-ok").click(); else if (e.key === "Escape") done(null); };
+  ov.onclick = (e) => { if (e.target === ov) done(null); };
+});
+
+// Run an action that MAY need a manager PIN: try it plainly first (so it stays
+// frictionless when no PIN is configured yet, or for the admin super-user); if the
+// server answers "manager PIN required", prompt once and retry with it. Reloads on
+// success; a cancelled PIN aborts silently; real errors toast.
+async function actGated(method, path, body, opts = {}) {
+  try {
+    try {
+      await api(method, path, body);
+    } catch (e) {
+      if (!/manager pin/i.test(String(e && e.message))) throw e;
+      let pin = await pinPrompt(opts.message);
+      while (pin) {
+        try { await api(method, path, { ...(body || {}), managerPin: pin }); break; }
+        catch (e2) {
+          if (/manager pin/i.test(String(e2 && e2.message))) { pin = await pinPrompt(opts.message, "That PIN didn't match — try again."); continue; }
+          throw e2;
+        }
+      }
+      if (!pin) return; // cancelled
+    }
+    await load();
+    if (opts.toast) toast(opts.toast);
+  } catch (e) {
+    toast("Failed: " + e.message, false);
+  }
+}
+
 // ── floor helpers ────────────────────────────────────────────────────────────
 const sessionOf = (t) => state.data.sessions.find((s) => String(s.table_number) === String(t) && s.status === "open");
 const ordersOf = (t) => state.data.orders.filter((o) => String(o.table_number) === String(t) && o.status !== "cancelled");
@@ -178,7 +239,7 @@ function renderFloor() {
       body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}${quick}`;
     }
     html += `<button class="tile t-${st.cls} ${payCls} ${called ? "called" : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
-      <span class="tbadges">${called ? `<em class="b-call">🔔</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
+      <span class="tbadges">${called ? `<em class="b-call">🔔</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}${a.os.some((o) => o.edited_at) ? `<em class="b-edit" title="An order was edited after it was placed">✎</em>` : ""}</span>
       <span class="tnum">${i}</span>
       <span class="tlabel">${st.label}</span>
       ${body}
@@ -300,10 +361,11 @@ function renderPanel() {
     const when = o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
     const viaApp = !!o.member_id;
     const rows = dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("");
-    return `<div class="ord"><div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">New order${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}</span></div>${rows || `<div class="iline muted">No items.</div>`}${orderControlsHtml(o)}<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
+    return `<div class="ord"><div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">New order${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}${o.edited_at ? `<span class="edited">✎ Edited</span>` : ""}</span></div>${rows || `<div class="iline muted">No items.</div>`}${orderControlsHtml(o)}<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
   }).join("");
   const mergedDishes = liveOrdersT.map((o, i) => (i > 0 ? `<div class="ord-sep" aria-hidden="true"></div>` : "") + dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("") + orderControlsHtml(o)).join("");
-  const mergedCard = liveOrdersT.length ? `<div class="ord">${mergedDishes}</div>` : "";
+  const mergedEdited = liveOrdersT.some((o) => o.edited_at);
+  const mergedCard = liveOrdersT.length ? `<div class="ord">${mergedEdited ? `<div class="ordh"><span class="left"><span class="edited">✎ Edited</span></span></div>` : ""}${mergedDishes}</div>` : "";
   const orderCards = newCards + mergedCard;
 
   const callRows = calls.map((c) => `<div class="row"><span>🔔 ${esc(c.note || "Waiter call")}</span><button class="btn small primary" data-attend="${esc(c.id)}">Done</button></div>`).join("");
@@ -363,7 +425,7 @@ function renderPanel() {
   // Ban a guest: kicked now AND blocklisted so they can't rejoin. Destructive — confirm.
   document.querySelectorAll("[data-ban]").forEach((b) => (b.onclick = async () => {
     if (await confirmDialog("Ban this guest? They're kicked now and blocked from rejoining this table.", "Ban"))
-      act(() => api("POST", `/members/${b.dataset.ban}/ban`));
+      actGated("POST", `/members/${b.dataset.ban}/ban`, null, { message: "Enter a manager PIN to ban this guest." });
   }));
   // Auto-approve toggle: future joiners are approved automatically (no staff review).
   document.querySelectorAll("[data-autoapp]").forEach((cb) => (cb.onchange = () => act(() => api("POST", `/sessions/${cb.dataset.autoapp}/auto-approve`, { value: cb.checked }))));
@@ -380,7 +442,7 @@ function renderPanel() {
     if (raw === null) return; // cancelled
     const amount = Math.max(0, Number(raw) || 0);
     const note = amount > 0 ? (window.prompt("Reason (optional, e.g. loyalty/comp):", (o && o.discount_note) || "") || "") : "";
-    act(() => api("POST", `/orders/${b.dataset.discount}/discount`, { amount, note }));
+    actGated("POST", `/orders/${b.dataset.discount}/discount`, { amount, note }, { message: "Enter a manager PIN to apply this discount." });
   }));
   document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => act(() => api("POST", `/orders/${b.dataset.accept}/accept`))));
   // Accept ALL un-accepted orders on the table in one tap.
@@ -440,7 +502,7 @@ function renderPanel() {
   // records) but keep the table OPEN for a fresh round. Mirrors the manager.
   const rsb = $("#restartTable"); if (rsb && s) rsb.onclick = async () => {
     if (await confirmDialog(`Restart table ${t}? Its current orders clear off the floor and the table stays OPEN for a fresh round.`, "Restart"))
-      act(() => api("POST", `/tables/${t}/restart`));
+      actGated("POST", `/tables/${t}/restart`, null, { message: "This table has a round going — enter a manager PIN to restart it." });
   };
   const pb = $("#payBill"); if (pb) pb.onclick = async () => {
     if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
@@ -453,10 +515,11 @@ function renderPanel() {
       await api("POST", `/sessions/${s.id}/close`);
       await load(); if (!state.ordering) renderPanel();
     } catch (e) {
-      // Server blocks closing while money is owed — offer an explicit override.
-      if (/owes money/i.test(String(e && e.message))) {
-        if (await confirmDialog(`Table ${t} still OWES ${inr(a.due)}. Close anyway? (recorded in the log)`, "Close anyway")) {
-          act(() => api("POST", `/sessions/${s.id}/close`, { force: true }));
+      // Server blocks closing while money is owed OR an order is still cooking — all
+      // such messages end with "close anyway". The override needs a manager PIN.
+      if (/close anyway/i.test(String(e && e.message))) {
+        if (await confirmDialog(`${e.message}`, "Close anyway")) {
+          await actGated("POST", `/sessions/${s.id}/close`, { force: true }, { message: "Enter a manager PIN to close this busy table.", toast: "Table closed" });
         }
         return;
       }
@@ -555,10 +618,10 @@ function renderMoveOrderTarget(t, orderId) {
 async function runOptimistic(mutate, fn) {
   try { mutate(); renderFloor(); renderPanel(); await fn(); }
   catch (e) { toast("Failed: " + e.message, false); }
-  await load(); if (!state.ordering) renderPanel();
+  await load();   // load() already repaints if anything changed — no second render (that was the extra flash)
 }
 
-const act = async (fn) => { try { await fn(); await load(); if (!state.ordering) renderPanel(); } catch (e) { toast("Failed: " + e.message, false); } };
+const act = async (fn) => { try { await fn(); await load(); } catch (e) { toast("Failed: " + e.message, false); } };
 
 // ── order-taking mode ────────────────────────────────────────────────────────
 const dishPrice = (d) => Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
@@ -806,7 +869,7 @@ function boardSig(d) {
     // cart repaint via realtime (they're drawn but were missing from the sig).
     (d.sessions || []).map((s) => [s.id, s.table_number, s.status, s.bill_no, s.auto_approve, s.cart]),
     // o.discount + o.allergies so a discount or an order-wide allergen edit repaints.
-    (d.orders || []).map((o) => [o.id, o.table_number, o.status, o.total, o.kot_no, o.payment_status, o.discount, o.allergies]),
+    (d.orders || []).map((o) => [o.id, o.table_number, o.status, o.total, o.kot_no, o.payment_status, o.discount, o.allergies, o.edited_at]),
     // i.removed/note/options so a per-dish allergen, note or option edit repaints.
     (d.items || []).map((i) => [i.id, i.order_id, i.status, i.removed, i.note, i.options]),
     (d.calls || []).map((c) => [c.id, c.table_number]),
@@ -821,8 +884,18 @@ function boardSig(d) {
   ]);
 }
 let lastSig = null;
+// Every load() gets a rising ticket; only the most-recently-STARTED fetch is
+// allowed to apply. Without this, two overlapping refetches (your tap + the
+// realtime event for that same change + the backup timer) race, and whichever
+// GET *finishes* last wins — even when it's the OLDER snapshot. That stale
+// snapshot is what made the panel flash the pre-open "Attend/request" view,
+// drop an order that's actually there, then pop it back a moment later.
+let loadSeq = 0;
 async function load() {
-  state.data = await api("GET", "/state");
+  const seq = ++loadSeq;
+  const data = await api("GET", "/state");
+  if (seq !== loadSeq) return;          // a newer refresh started — this one is stale, drop it
+  state.data = data;
   const sig = boardSig(state.data);
   if (sig === lastSig) return;
   lastSig = sig;

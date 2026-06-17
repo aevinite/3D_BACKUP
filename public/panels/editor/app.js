@@ -184,8 +184,20 @@ async function api(method, path, body) {
 // loadAll: fetch everything from the server in one go (the /all endpoint), store
 // it in state.data, flip the little "connected" indicator green, then redraw the
 // left-hand list. Called on startup and after every save.
+// Two rising-ticket guards stop an OLDER fetch from overwriting a NEWER one when
+// several callers fire refreshes at once (a click, the realtime onEvent, a timer).
+// loadAll() pulls the FULL state (menu + dishes + the whole live board), so it owns
+// its OWN ticket — a 1-second order poll must never cancel a menu save's reload,
+// which would leave the owner's just-saved dish looking stale. The live-board
+// loaders (loadOrders / loadSessions / pollOrders) all rewrite the SAME
+// orders/calls/board, so they share one ticket and the newest of THEM wins.
+let allSeq = 0;
+let dataSeq = 0;
 async function loadAll() {
-  state.data = await api("GET", "/all");
+  const seq = ++allSeq;
+  const data = await api("GET", "/all");
+  if (seq !== allSeq) return; // a newer loadAll started — drop this stale response
+  state.data = data;
   $("#conn").textContent = "connected";
   $("#conn").className = "conn ok";
   renderList();
@@ -1848,8 +1860,10 @@ async function loadSessions(fromPoll) {
   // already refreshed state.board/orders/calls, so we just render from it (no
   // double round-trip).
   if (!fromPoll) {
+    const seq = ++dataSeq;
     try {
       let [board, orders, calls] = await Promise.all([api("GET", "/sessions"), api("GET", "/orders"), api("GET", "/calls")]);
+      if (seq !== dataSeq) return; // a newer refresh started — drop this stale snapshot
       // Same shields the 1-second poll uses (see pollOrders). One action's
       // refresh must not wipe ANOTHER action's optimistic state while that
       // save is still travelling — e.g. opening tables 1, 2, 3 quickly:
@@ -2518,89 +2532,85 @@ function itemRowHtml(row, editing = false) {
   const delBtn = row.kind === "session" ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
   // status label: friendlier words for the chip (class stays the raw status for colour).
   const STLABEL = { received: "new", preparing: "cooking", ready: "ready", served: "served", cancelled: "cancelled" };
-  // STAFF EDIT (a real, not-yet-served dish): the per-dish controls — qty −/＋, note ✎,
-  // and the allergen editor (removable "NO X ✕" chips + "＋ allergy" picker) — live on a
-  // FULL-WIDTH row BELOW the dish (grid-column:1/-1). Keeping them off the top row lets
-  // the dish name keep its room so it doesn't wrap to several lines on a narrow panel.
+  // STAFF EDIT (a real, not-yet-served dish): qty −/＋ steppers + a single "✎ Edit"
+  // button that opens ONE modal to set allergens (standard + custom) and the kitchen
+  // note. The controls sit on a FULL-WIDTH row below the dish so the name keeps its
+  // room; the dish's current allergens + note show read-only on the line above.
   const canEdit = editing && row.kind === "session" && row.status !== "served";
-  const editCtl = canEdit
-    ? `<span class="sx-item-edit"><button class="sx-qty" data-qty-dec="${esc(row.id)}" data-qty="${esc(row.qty)}" title="Fewer">−</button><button class="sx-qty" data-qty-inc="${esc(row.id)}" data-qty="${esc(row.qty)}" title="More">＋</button><button class="sx-qty" data-note-item="${esc(row.id)}" title="Edit note">✎</button></span>`
+  const editRow = canEdit
+    ? `<div class="sx-dish-edit-row"><span class="sx-item-edit"><button class="sx-qty" data-qty-dec="${esc(row.id)}" data-qty="${esc(row.qty)}" title="Fewer">−</button><button class="sx-qty" data-qty-inc="${esc(row.id)}" data-qty="${esc(row.qty)}" title="More">＋</button></span><button class="sx-dish-edit-btn" data-edit-dish="${esc(row.id)}" title="Edit allergens & note for this dish">✎ Edit</button></div>`
     : "";
-  const editRow = canEdit ? `<div class="sx-dish-edit-row">${editCtl}${dishAllergenEditHtml(row)}</div>` : "";
-  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}</span>${itemDetailLine(row, canEdit)}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${delBtn}</div>${editRow}</div>`;
+  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}</span>${itemDetailLine(row)}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${delBtn}</div>${editRow}</div>`;
 }
 
-// dishAllergenEditHtml: the per-dish allergen editor shown on a dish row while a
-// table is in staff EDIT mode. Each allergen the dish currently avoids is a
-// removable chip ("NO 🥜 Nuts ✕"); the "＋ allergy" button opens a picker to add
-// one to THIS dish only. (owner, 2026-06-17 — fix: you could add but not remove.)
-function dishAllergenEditHtml(row) {
-  const avoided = Array.isArray(row.removed) ? row.removed : [];
-  const labelFor = (slug) => { const a = ALLERGENS.find((x) => x.slug === String(slug).toLowerCase()); return a ? a.label : slug; };
-  const chips = avoided.map((slug) =>
-    `<button type="button" class="sx-dish-alg" data-dishalg-item="${esc(row.id)}" data-dishalg-slug="${esc(slug)}" title="Remove this allergen from this dish">NO ${esc(labelFor(slug))} <b>✕</b></button>`
-  ).join("");
-  // When the dish already avoids something: a "⚠ Avoid" label + its chips + a compact ＋.
-  // When it avoids nothing: just a quiet "＋ allergy" so we don't clutter every row with "none".
-  const lead = avoided.length ? `<span class="sx-dish-alg-lbl">⚠ Avoid</span>${chips}` : "";
-  const addLabel = avoided.length ? "＋" : "＋ allergy";
-  return `<div class="sx-dish-alg-row">${lead}<button type="button" class="sx-dish-addalg" data-dishalg-add="${esc(row.id)}" title="Add an allergen to this dish">${addLabel}</button></div>`;
-}
-
-// toggleDishAllergen: shared add/remove for ONE dish's allergens, used by both the
-// inline ✕ chips and the "＋ allergy" picker. An allergen on a dish can live in two
-// places: the dish's own order_items.removed, OR the order-wide orders.allergies
-// (distributed onto every dish as "NO X"). Removing clears it from BOTH so it truly
-// disappears from this dish; adding writes only to this dish's own list.
-async function toggleDishAllergen(item, order, slug) {
-  slug = String(slug || "").toLowerCase();
-  if (!slug || !item) return;
-  const own = new Set((Array.isArray(item.removed) ? item.removed : []).map((x) => String(x).toLowerCase()));
-  const ord = new Set((order && Array.isArray(order.allergies) ? order.allergies : []).map((x) => String(x).toLowerCase()));
-  const isOn = own.has(slug) || ord.has(slug);
-  try {
-    if (isOn) {
-      if (own.has(slug)) { own.delete(slug); item.removed = [...own]; await api("POST", `/items/${item.id}/removed`, { removed: item.removed }); }
-      if (ord.has(slug) && order && order.id) {
-        ord.delete(slug); order.allergies = [...ord];
-        await api("POST", `/orders/${order.id}/allergies`, { allergies: order.allergies });
-        const sib = itemsForOrder(order.id).length;
-        if (sib > 1) toast(`Removed “${slug}” from all ${sib} dishes in this order`, "ok");
-      }
-    } else {
-      own.add(slug); item.removed = [...own];
-      await api("POST", `/items/${item.id}/removed`, { removed: item.removed });
-    }
-    await loadSessions();
-  } catch (e) { toast("Couldn't update allergen: " + e.message, "err"); }
-}
-
-// openDishAllergenModal: the "＋ allergy" picker for ONE dish. Lit = the dish avoids
-// it (own list or order-wide); tapping toggles via toggleDishAllergen. Stays open so
-// several can be set at once.
-function openDishAllergenModal(itemId, rerender) {
-  document.querySelector(".dish-alg-overlay")?.remove();
+// openDishEditModal: ONE editor for a single placed dish — toggle which allergens to
+// AVOID (the 6 standard ones PLUS any custom like "water"), type a NEW custom allergen,
+// and write a kitchen note. Replaces the old browser prompt() + scattered inline chips
+// with one clean, dynamic modal (owner, 2026-06-17). Save persists in a single go:
+//   • adding an allergen → written to THIS dish's own list (order_items.removed)
+//   • removing one → cleared from the dish AND the order-wide "avoid" list so it's gone
+//   • the note → order_items.note
+function openDishEditModal(itemId, rerender) {
+  document.querySelector(".dish-edit-overlay")?.remove();
   const item = (state.board.items || []).find((i) => i.id === itemId);
   if (!item) { toast("That dish is no longer on the order.", "err"); return; }
-  const orderOf = () => (state.data.orders || []).find((o) => o.id === item.order_id) || {};
-  const litSet = () => {
-    const order = orderOf();
-    const own = (Array.isArray(item.removed) ? item.removed : []).map((x) => String(x).toLowerCase());
-    const ord = (Array.isArray(order.allergies) ? order.allergies : []).map((x) => String(x).toLowerCase());
-    return new Set([...own, ...ord]);
+  const order = (state.data.orders || []).find((o) => o.id === item.order_id) || {};
+  // Normalise an allergen: lowercase, trim, strip a leading "no " so typing "no water"
+  // or "water" both store "water" (the UI prepends "NO" when it shows it).
+  const norm = (s) => String(s || "").trim().toLowerCase().replace(/^no[\s-]+/, "");
+  const itemRemoved = (Array.isArray(item.removed) ? item.removed : []).map(norm).filter(Boolean);
+  const orderAllergies = (Array.isArray(order.allergies) ? order.allergies : []).map(norm).filter(Boolean);
+  const initial = new Set([...itemRemoved, ...orderAllergies]); // what the dish avoids now
+  const working = new Set(initial);                             // live working copy until Save
+  const STD = ALLERGENS.map((a) => a.slug);
+  const labelFor = (slug) => { const a = ALLERGENS.find((x) => x.slug === slug); return a ? a.label : "🚫 " + slug; };
+  const chipsHtml = () => {
+    const std = ALLERGENS.map((a) => `<span class="chip dish-alg-chip ${working.has(a.slug) ? "on" : ""}" data-slug="${esc(a.slug)}">${esc(a.label)}</span>`).join("");
+    const cust = [...working].filter((s) => !STD.includes(s)).map((s) => `<span class="chip dish-alg-chip on" data-slug="${esc(s)}">${esc(labelFor(s))}</span>`).join("");
+    return std + cust;
   };
-  const chipsHtml = () => { const set = litSet(); return ALLERGENS.map((a) => `<span class="chip dish-alg-chip ${set.has(a.slug) ? "on" : ""}" data-slug="${a.slug}">${esc(a.label)}</span>`).join(""); };
-  const wrap = el(`<div class="sx-modal-overlay dish-alg-overlay"><div class="sx-modal dish-alg-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Allergens · ${esc(item.title)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><p class="muted small" style="padding:0 14px;margin:6px 0 0">Tap to add or remove. Adding affects only this dish; removing also clears it from the order-wide list if it was set there.</p><div class="dish-alg-list">${chipsHtml()}</div></div></div>`);
+  const wrap = el(`<div class="sx-modal-overlay dish-edit-overlay"><div class="sx-modal dish-edit-modal">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Edit dish · ${esc(item.title)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body">
+      <div class="dish-edit-lbl">⚠ Allergies to avoid <span class="muted small">— tap to add or remove</span></div>
+      <div class="dish-alg-list"></div>
+      <div class="dish-edit-custom"><input type="text" class="dish-edit-custominput" placeholder="Add another — e.g. water" maxlength="24"><button type="button" class="btn small dish-edit-customadd">＋ Add</button></div>
+      <div class="dish-edit-lbl" style="margin-top:15px">✎ Note for the kitchen</div>
+      <textarea class="dish-edit-note" rows="2" maxlength="200" placeholder="e.g. less ice, extra chocolate"></textarea>
+    </div>
+    <div class="dish-edit-foot"><button type="button" class="btn dish-edit-cancel">Cancel</button><button type="button" class="btn primary dish-edit-save">Save</button></div>
+  </div></div>`);
   document.body.appendChild(wrap);
+  wrap.querySelector(".dish-edit-note").value = item.note || "";
   const listEl = wrap.querySelector(".dish-alg-list");
-  const bind = () => listEl.querySelectorAll(".dish-alg-chip").forEach((chip) => (chip.onclick = async () => {
-    await toggleDishAllergen(item, orderOf(), chip.dataset.slug);
-    listEl.innerHTML = chipsHtml(); bind();
-    if (rerender) rerender();
-  }));
-  bind();
-  wrap.querySelector(".tbl-modal-close").onclick = () => wrap.remove();
-  wrap.onclick = (e) => { if (e.target === wrap) wrap.remove(); };
+  const bindChips = () => listEl.querySelectorAll(".dish-alg-chip").forEach((c) => (c.onclick = () => { const s = c.dataset.slug; working.has(s) ? working.delete(s) : working.add(s); redraw(); }));
+  const redraw = () => { listEl.innerHTML = chipsHtml(); bindChips(); };
+  redraw();
+  const input = wrap.querySelector(".dish-edit-custominput");
+  const addCustom = () => { const v = norm(input.value); if (v) working.add(v); input.value = ""; redraw(); input.focus(); };
+  wrap.querySelector(".dish-edit-customadd").onclick = addCustom;
+  input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } };
+  const close = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = close;
+  wrap.querySelector(".dish-edit-cancel").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  const same = (a, b) => JSON.stringify(a.slice().sort()) === JSON.stringify(b.slice().sort());
+  wrap.querySelector(".dish-edit-save").onclick = async () => {
+    const note = wrap.querySelector(".dish-edit-note").value.trim();
+    const removed = [...initial].filter((s) => !working.has(s));  // cleared → drop everywhere
+    const added = [...working].filter((s) => !initial.has(s));    // new avoids → this dish only
+    const newItemRemoved = [...new Set([...itemRemoved.filter((s) => !removed.includes(s)), ...added])];
+    const newOrderAllergies = orderAllergies.filter((s) => !removed.includes(s));
+    try {
+      if (note !== String(item.note || "").trim()) await api("POST", `/items/${item.id}/note`, { note });
+      if (!same(newItemRemoved, itemRemoved)) await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved });
+      if (order.id && !same(newOrderAllergies, orderAllergies)) await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies });
+      close();
+      await loadSessions(); if (rerender) rerender();
+      toast("Dish updated", "ok");
+    } catch (e) { toast("Couldn't save: " + e.message, "err"); }
+  };
+  setTimeout(() => input.focus(), 30);
 }
 
 // tablePanelParts: build ALL the inner HTML sections for ONE table's full detail
@@ -2698,14 +2708,14 @@ function tablePanelParts(t) {
     // dishes share the same row layout as the rest (via itemRowHtml).
     const newBlocks = newOrders.map((o) => {
       const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
-      return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span></div>${rows}${orderEditExtras(o)}<div class="tp-order-foot"><button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
+      return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span>${o.edited_at ? `<span class="edited-badge" title="Edited after the order was placed">✎ Edited</span>` : ""}</div>${rows}${orderEditExtras(o)}<div class="tp-order-foot"><button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
     }).join("");
     // ACCEPTED orders are GROUPED into per-KOT cards (so you can see which ticket each
     // dish came from) but they still settle as ONE bill — no per-order total/pay/discount
     // (owner, 2026-06-14: one merged bill). Per-dish serve/delete live on each row.
     const mergedBlock = liveOrders.map((o) => {
       const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
-      return `<div class="tp-order"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "Order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}</div>${rows}${orderEditExtras(o)}</div>`;
+      return `<div class="tp-order"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "Order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}${o.edited_at ? `<span class="edited-badge" title="Edited after the order was placed">✎ Edited</span>` : ""}</div>${rows}${orderEditExtras(o)}</div>`;
     }).join("");
     const mergedBadge = liveOrders.length > 1 ? `<span class="sx-badge2">${liveOrders.length} merged · one bill</span>` : "";
     // Edit/Done toggle: the gated entry to staff editing. The confirm fires on Edit.
@@ -2844,13 +2854,8 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   const editQty = async (id, qty) => { try { await api("POST", `/items/${id}/qty`, { qty }); await loadSessions(); if (rerender) rerender(); } catch (e) { toast("Failed: " + e.message, "err"); } };
   root.querySelectorAll("[data-qty-inc]").forEach((b) => (b.onclick = () => editQty(b.dataset.qtyInc, Math.min(99, (parseInt(b.dataset.qty, 10) || 1) + 1))));
   root.querySelectorAll("[data-qty-dec]").forEach((b) => (b.onclick = () => { const q = (parseInt(b.dataset.qty, 10) || 1) - 1; if (q < 1) { toast("Use 🗑 to remove the dish", "err"); return; } editQty(b.dataset.qtyDec, q); }));
-  // Edit one dish's note (simple prompt; prefilled from the current note).
-  root.querySelectorAll("[data-note-item]").forEach((b) => (b.onclick = async () => {
-    const it = (state.board && state.board.items || []).find((x) => x.id === b.dataset.noteItem);
-    const v = prompt("Note for this dish (e.g. less ice, extra hot):", (it && it.note) || "");
-    if (v === null) return;
-    try { await api("POST", `/items/${b.dataset.noteItem}/note`, { note: v }); await loadSessions(); if (rerender) rerender(); } catch (e) { toast("Failed: " + e.message, "err"); }
-  }));
+  // "✎ Edit" on a dish → the unified editor (allergens incl. custom + kitchen note).
+  root.querySelectorAll("[data-edit-dish]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.editDish, rerender)));
   // Per-order allergen toggle chips (edit mode): optimistic flip, then persist.
   root.querySelectorAll(".oae-chip[data-alg]").forEach((chip) => (chip.onclick = async () => {
     const id = chip.dataset.alg, slug = chip.dataset.slug;
@@ -2862,17 +2867,6 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }); await loadSessions(); if (rerender) rerender(); }
     catch (e) { toast("Couldn't update allergens: " + e.message, "err"); }
   }));
-  // Per-dish allergen REMOVE: tap the ✕ on a dish's "NO X" chip to clear that
-  // allergen from this dish (and from the order-wide list if it lived there).
-  root.querySelectorAll("[data-dishalg-slug]").forEach((chip) => (chip.onclick = async () => {
-    const item = (state.board.items || []).find((i) => i.id === chip.dataset.dishalgItem);
-    if (!item) { toast("That dish is no longer on the order.", "err"); return; }
-    const order = (state.data.orders || []).find((o) => o.id === item.order_id) || {};
-    await toggleDishAllergen(item, order, chip.dataset.dishalgSlug);
-    if (rerender) rerender();
-  }));
-  // Per-dish allergen ADD: "＋ allergy" opens a small picker for THIS dish.
-  root.querySelectorAll("[data-dishalg-add]").forEach((b) => (b.onclick = () => openDishAllergenModal(b.dataset.dishalgAdd, rerender)));
   // Add a dish to THIS order: a compact dish-picker modal → /orders/:id/add-item.
   root.querySelectorAll("[data-add-dish-order]").forEach((b) => (b.onclick = () => openAddDishModal(b.dataset.addDishOrder, rerender)));
   // Per-bill discount: ask for the amount (with the order total as the cap).
@@ -3310,11 +3304,16 @@ function setTab(tab) {
 // loadOrders: fetch the latest orders (and waiter calls) and redraw if we're on
 // the Orders tab. Used by the Refresh button and after any order change.
 async function loadOrders() {
+  const seq = ++dataSeq;
   try {
-    state.data.orders = await api("GET", "/orders");
+    const orders = await api("GET", "/orders");
+    if (seq !== dataSeq) return; // a newer refresh started — drop this stale response
+    state.data.orders = orders;
     lastOrderCount = state.data.orders.length;
     try {
-      state.data.calls = await api("GET", "/calls");
+      const calls = await api("GET", "/calls");
+      if (seq !== dataSeq) return; // superseded mid-fetch
+      state.data.calls = calls;
       lastCallCount = (state.data.calls || []).filter((c) => !c.resolved).length;
     } catch {}
     if (state.tab === "orders") { renderList(); renderEditor(); } // sidebar counts + cards
@@ -3399,12 +3398,14 @@ function playOrderChime() {
 // and — by comparing the new counts to the last counts — chimes + toasts + badges
 // whenever something NEW arrives, no matter which tab the owner is currently on.
 async function pollOrders() {
+  const seq = ++dataSeq;
   let orders, calls, board;
   try {
     orders = await api("GET", "/orders");
   } catch {
     return; // network blip — try again next tick
   }
+  if (seq !== dataSeq) return; // a newer loader started — this poll snapshot is stale
   // Merge, don't clobber: keep the LOCAL copy of any order whose save is
   // still in flight, and keep optimistically-deleted rows gone — otherwise
   // this poll would flicker fresh clicks back to their old state.
@@ -3412,12 +3413,13 @@ async function pollOrders() {
     .filter((o) => !pendingDeletes.has(o.id))
     .map((o) => (pendingOrderOps.has(o.id) ? ((state.data.orders || []).find((x) => x.id === o.id) || o) : o));
   state.data.orders = orders;
-  try { calls = await api("GET", "/calls"); state.data.calls = calls; } catch { calls = state.data.calls || []; }
+  try { calls = await api("GET", "/calls"); if (seq !== dataSeq) return; state.data.calls = calls; } catch { calls = state.data.calls || []; }
   // The session board (sessions + members + the requests queue + blocklist) is now
   // refreshed on every tick too, so the live cart and the request queue stay fresh
   // and we can chime for new requests from ANY tab.
   try {
     board = await api("GET", "/sessions");
+    if (seq !== dataSeq) return; // superseded by a newer loader — drop this board snapshot
     // Don't clobber the board while a floor action's save is still in flight.
     if (!floorOpsInFlight) state.board = board; else board = state.board || {};
     state.boardLoaded = true; // a poll fetch counts too: we now know the real floor

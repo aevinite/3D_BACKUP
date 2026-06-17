@@ -98,7 +98,7 @@ function ticketHtml(o) {
       ? `<button class="big ready" data-ready="${esc(o.id)}">ALL READY</button>`
       : `<div class="awaiting">✓ ready — waiter serving</div>`);
   return `<div class="ticket st-${esc(o.status)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span></div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span>${o.edited_at ? `<span class="edited" title="Edited after the order was placed">✎ EDITED</span>` : ""}<span class="age">${esc(timeAgo(o.created_at))}</span></div>
     ${lines}${action}</div>`;
 }
 
@@ -146,11 +146,11 @@ function renderDishes() {
     const id = b.dataset["86"], wasOut = b.dataset.out === "1";
     try {
       await api("POST", `/dishes/${id}/sold-out`, { value: !wasOut });
-      await load(); renderDishes();
+      await load(); // load() already re-renders the open 86 board (its drawer is open here)
       const dish = state.dishes.find((d) => d.id === id);
       // No confirm — kitchens move fast — but always an UNDO escape hatch.
       toast(`${dish ? dish.title : "Dish"} ${wasOut ? "back on the menu" : "marked SOLD OUT"}`,
-        async () => { await api("POST", `/dishes/${id}/sold-out`, { value: wasOut }); await load(); renderDishes(); });
+        async () => { await api("POST", `/dishes/${id}/sold-out`, { value: wasOut }); await load(); });
     } catch (e) { toast("Failed: " + e.message); }
   }));
 }
@@ -162,7 +162,7 @@ function boardSig(d) {
   return JSON.stringify([
     // Include allergies (order-wide "avoid") so adding "no nuts" to a running order
     // repaints the tickets via realtime — not only on a manual refresh.
-    (d.orders || []).map((o) => [o.id, o.status, o.kot_no, o.allergies]),
+    (d.orders || []).map((o) => [o.id, o.status, o.kot_no, o.allergies, o.edited_at]),
     // Include removed/note/options: a per-dish allergen, note or option edit must
     // also flip the signature, else the fetched change isn't drawn.
     (d.items || []).map((i) => [i.id, i.status, i.removed, i.note, i.options]),
@@ -171,8 +171,15 @@ function boardSig(d) {
 }
 let lastSig = null;
 // ── the poll ─────────────────────────────────────────────────────────────────
+// Rising-ticket guard: act() taps, the 86-board undo, the realtime onEvent and the
+// backup timer all call load() independently. Without this, whichever fetch FINISHES
+// last wins — even an older snapshot — flashing a stale board. Drop any response
+// that a newer load() has already superseded.
+let loadSeq = 0;
 async function load() {
+  const seq = ++loadSeq;
   const data = await api("GET", "/board");
+  if (seq !== loadSeq) return; // a newer refresh started — drop this stale response
   // Chime only for orders we have NEVER seen (not on the very first load).
   const ids = new Set(data.orders.map((o) => o.id));
   if (state.knownIds) {

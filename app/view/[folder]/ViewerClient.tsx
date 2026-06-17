@@ -94,8 +94,12 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // Runs when we arrive (and if the source dish changes).
   useEffect(() => {
     setCurrency(getCurrency());  // figure out the currency for prices
+    // CONCURRENCY GUARD: fromSlug can change (back/forward between dishes); ignore a
+    // late reply from a previous fromSlug so it can't overwrite the current dish.
+    let cancelled = false;
     // If we know which dish we came from, fetch its menu details for the bar.
-    if (fromSlug) getMenuItem(fromSlug).then(setMenuItem).catch(() => {});
+    if (fromSlug) getMenuItem(fromSlug).then((m) => { if (!cancelled) setMenuItem(m); }).catch(() => {});
+    return () => { cancelled = true; };
   }, [fromSlug]);
 
   // Open the SAME confirm popup the dish-detail page uses (qty picker + total),
@@ -145,6 +149,9 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // Load this dish folder's config.json (the model URLs + hotspot tags).
   // Re-runs if the folder changes.
   useEffect(() => {
+    // CONCURRENCY GUARD: folder can change while a config fetch is still in flight;
+    // ignore a stale earlier response so it can't replace the new folder's config.
+    let cancelled = false;
     const normalizedFolder = (folder || "");
     fetch(`/content/items/${normalizedFolder}/config.json`)
       .then((res) => {
@@ -155,13 +162,16 @@ export default function ViewerClient({ folder }: { folder: string }) {
         return res.json();  // turn the response into a usable object
       })
       .then((data) => {
+        if (cancelled) return; // a newer folder superseded this fetch
         setConfig(data);     // store the config
         setLoading(false);   // done loading
       })
       .catch((err) => {
+        if (cancelled) return;
         setError(err.message);  // remember the error to show it
         setLoading(false);
       });
+    return () => { cancelled = true; };
   }, [folder]);
 
   // Once the config is loaded, decide which model file to actually display:

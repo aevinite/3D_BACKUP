@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 type User = {
   id: string; username: string; role: string; name: string | null; phone: string | null;
   active: boolean; last_seen_at: string | null; created_at: string; hasPin: boolean;
-  can_self_reset: boolean;
+  can_self_reset: boolean; can_self_set_pin: boolean;
 };
 
 const ROLES = ["manager", "kitchen", "tablet"] as const;
@@ -181,7 +181,7 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
   user: User; onClose: () => void; onChanged: () => void; onDeleted: () => void;
 }) {
   // Working copy of the editable bits (compared against `user` on save).
-  const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "", role: user.role, active: user.active, can_self_reset: user.can_self_reset });
+  const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "", role: user.role, active: user.active, can_self_reset: user.can_self_reset, can_self_set_pin: user.can_self_set_pin });
   const [saving, setSaving] = useState(false);
   const [mErr, setMErr] = useState("");
   const [ok, setOk] = useState("");
@@ -194,6 +194,27 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
   // In-app confirm step (replaces the ugly native browser popup). null = nothing
   // pending; true = a generated password awaiting confirm; false = a typed one.
   const [pendingGen, setPendingGen] = useState<null | boolean>(null);
+
+  // Manager-PIN admin controls (set/clear the manager's PIN directly).
+  const [pin, setPin] = useState("");
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinMsg, setPinMsg] = useState("");
+
+  async function setManagerPin() {
+    setPinMsg(""); setMErr("");
+    if (!/^\d{4,8}$/.test(pin.trim())) { setPinMsg("PIN must be 4–8 digits."); return; }
+    setPinBusy(true);
+    try { await apiPatch({ action: "set_pin", pin: pin.trim() }); setPin(""); setPinMsg("PIN saved."); onChanged(); }
+    catch (e: any) { setPinMsg(e.message || "Could not set PIN."); }
+    finally { setPinBusy(false); }
+  }
+  async function clearManagerPin() {
+    if (!confirm(`Remove ${user.name || user.username}'s PIN? Until a new one is set, their account can't authorise tablet actions.`)) return;
+    setPinMsg(""); setMErr(""); setPinBusy(true);
+    try { await apiPatch({ action: "set_pin", clear: true }); setPinMsg("PIN cleared."); onChanged(); }
+    catch (e: any) { setPinMsg(e.message || "Could not clear PIN."); }
+    finally { setPinBusy(false); }
+  }
 
   // Escape closes; lock background scroll while open.
   useEffect(() => {
@@ -223,7 +244,9 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
       }
       if (form.role !== user.role) await apiPatch({ action: "set_role", role: form.role });
       if (form.active !== user.active) await apiPatch({ action: "set_active", active: form.active });
-      if (form.can_self_reset !== user.can_self_reset) await apiPatch({ action: "set_access", can_self_reset: form.can_self_reset });
+      if (form.can_self_reset !== user.can_self_reset || form.can_self_set_pin !== user.can_self_set_pin) {
+        await apiPatch({ action: "set_access", can_self_reset: form.can_self_reset, can_self_set_pin: form.can_self_set_pin });
+      }
       setOk("Saved.");
       onChanged();
     } catch (e: any) { setMErr(e.message || "Could not save."); }
@@ -262,7 +285,7 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
     } catch { setMErr("Network error."); }
   }
 
-  const dirty = form.name !== (user.name || "") || form.phone !== (user.phone || "") || form.role !== user.role || form.active !== user.active || form.can_self_reset !== user.can_self_reset;
+  const dirty = form.name !== (user.name || "") || form.phone !== (user.phone || "") || form.role !== user.role || form.active !== user.active || form.can_self_reset !== user.can_self_reset || form.can_self_set_pin !== user.can_self_set_pin;
 
   return (
     <>
@@ -311,6 +334,12 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
                 title="Can change own password" desc="Off = only you (admin) can reset it for them."
                 on={form.can_self_reset} onChange={(v) => setForm({ ...form, can_self_reset: v })}
               />
+              {form.role === "manager" ? (
+                <ToggleRow
+                  title="Can change own PIN" desc="Off = only you (admin) can set their manager PIN; the option is hidden from their profile."
+                  on={form.can_self_set_pin} onChange={(v) => setForm({ ...form, can_self_set_pin: v })}
+                />
+              ) : null}
             </div>
 
             <button onClick={save} disabled={!dirty || saving} style={{ ...btn("#22c55e"), opacity: !dirty || saving ? 0.5 : 1 }}>
@@ -354,6 +383,21 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
                 </div>
               )}
             </div>
+
+            {/* Manager PIN — admin set/clear (managers only). The PIN unlocks the
+                tablet's gated actions; a manager can also set it themselves if their
+                "Can change own PIN" toggle is on. */}
+            {user.role === "manager" ? (
+              <div style={{ ...card, padding: 14, background: "var(--bg)" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>🔑 Manager PIN {user.hasPin ? <span style={{ color: "#86efac", fontWeight: 500 }}>· set</span> : <span style={{ color: "var(--muted)", fontWeight: 500 }}>· not set</span>}</div>
+                {pinMsg ? <div style={{ fontSize: 12, color: pinMsg.includes("saved") || pinMsg.includes("cleared") ? "#86efac" : "#fca5a5", marginBottom: 8 }}>{pinMsg}</div> : null}
+                <input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} placeholder="4–8 digit PIN" inputMode="numeric" maxLength={8} style={{ ...field, letterSpacing: 2 }} />
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  <button style={{ ...btn("#8b5cf6"), opacity: pinBusy ? 0.6 : 1 }} disabled={pinBusy} onClick={setManagerPin}>{user.hasPin ? "Change PIN" : "Set PIN"}</button>
+                  {user.hasPin ? <button style={{ ...btn("#374151"), opacity: pinBusy ? 0.6 : 1 }} disabled={pinBusy} onClick={clearManagerPin}>Clear PIN</button> : null}
+                </div>
+              </div>
+            ) : null}
 
             {/* Danger zone — visually + spatially separated from everything else. */}
             <div style={{ ...card, padding: 14, borderColor: "#7f1d1d", background: "#1a0f14" }}>

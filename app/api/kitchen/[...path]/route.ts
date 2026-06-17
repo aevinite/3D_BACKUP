@@ -65,7 +65,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
        
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).select());
+      // No .select(): the fetched-back row was discarded; we re-read the full row below.
+      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
       await logAction("kitchen", "order_accept", { order_id: b, device_id: dev });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
@@ -77,7 +78,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "ready") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "ready" })) : [];
-      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).select());
+      // No .select(): the fetched-back row was discarded; we re-read the full row below.
+      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b));
       await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).neq("status", "served");
       await logAction("kitchen", "order_ready", { order_id: b, device_id: dev });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()));

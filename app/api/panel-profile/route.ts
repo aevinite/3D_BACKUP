@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
     hasPin: !!u.pin_hash,
     needsProfile: !u.profile_confirmed, // one-time setup card shown until confirmed once
     canSelfReset: u.can_self_reset,
+    canSelfSetPin: u.can_self_set_pin, // may they set/change their own PIN? (managers)
   });
 }
 
@@ -81,6 +82,11 @@ export async function POST(req: NextRequest) {
     patch.phone = phone;
   }
   if (body?.pin !== undefined) {
+    // Honor the admin toggle: if they're not allowed to manage their own PIN, the
+    // admin sets it for them (via /api/admin/users). Mirrors the password rule.
+    if (!u.can_self_set_pin) {
+      return NextResponse.json({ error: "Your admin manages your PIN. Ask them to set it." }, { status: 403 });
+    }
     const pin = String(body.pin || "").trim();
     if (!/^\d{4,8}$/.test(pin)) return NextResponse.json({ error: "PIN must be 4–8 digits." }, { status: 400 });
     patch.pin_hash = await hashSecret(pin); // salted, slow hash (same as passwords)
@@ -88,11 +94,16 @@ export async function POST(req: NextRequest) {
   if (!Object.keys(patch).length) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
 
   // Once they have BOTH a name and a phone, mark the one-time setup done so the
-  // welcome card never auto-opens again.
+  // welcome card never auto-opens again. A MANAGER who is allowed to self-set a PIN
+  // must also HAVE a PIN before setup is complete (matches the welcome card asking
+  // for it). If they can't self-set (admin owns it), name+phone is enough.
   const effName = patch.name !== undefined ? patch.name : u.name;
   const effPhone = patch.phone !== undefined ? patch.phone : u.phone;
-  const firstConfirm = !u.profile_confirmed && !!effName && !!effPhone;
-  if (effName && effPhone) patch.profile_confirmed = true;
+  const willHavePin = patch.pin_hash !== undefined || !!u.pin_hash;
+  const pinRequiredForSetup = u.role === "manager" && u.can_self_set_pin;
+  const setupComplete = !!effName && !!effPhone && (!pinRequiredForSetup || willHavePin);
+  const firstConfirm = !u.profile_confirmed && setupComplete;
+  if (setupComplete) patch.profile_confirmed = true;
 
   await sb.from("staff_users").update(patch).eq("id", u.id);
 
