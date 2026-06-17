@@ -247,8 +247,26 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "allergies") {
       const raw = Array.isArray(body?.allergies) ? body.allergies : [];
       const allergies = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
+      // Diff the OLD order-wide list so the per-dish markers stay right: an order-wide
+      // allergen distributes onto every dish, so an add/remove here marks ＋ / ✎− on
+      // ALL the order's items (same rules as the per-dish endpoint).
+      const prev = must(await sb.from("orders").select("allergies").eq("id", b).maybeSingle());
+      const oldOW = new Set((Array.isArray(prev?.allergies) ? prev.allergies : []).map((x: any) => String(x).toLowerCase()));
+      const addedOW = allergies.filter((s) => !oldOW.has(s));
+      const removedOW = [...oldOW].filter((s) => !allergies.includes(s));
       const row = must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).select());
-      await logAction("editor", "order_allergies", { order_id: b, detail: allergies.join(", ") || "(none)", device_id: dev });
+      if (addedOW.length || removedOW.length) {
+        const items = must(await sb.from("order_items").select("id, added_allergens, removed_flag").eq("order_id", b));
+        for (const it of items) {
+          const mark = new Set((Array.isArray(it.added_allergens) ? it.added_allergens : []).map((x: any) => String(x).toLowerCase()));
+          let rf = !!it.removed_flag;
+          for (const s of addedOW) mark.add(s);
+          for (const s of removedOW) { if (mark.has(s)) mark.delete(s); else rf = true; }
+          await sb.from("order_items").update({ added_allergens: [...mark], removed_flag: rf }).eq("id", it.id);
+        }
+      }
+      const detail = [addedOW.length ? `added ${addedOW.join(", ")}` : "", removedOW.length ? `removed ${removedOW.join(", ")}` : ""].filter(Boolean).join("; ") || (allergies.join(", ") || "(none)");
+      await logAction("editor", "order_allergies", { order_id: b, detail, device_id: dev });
       return ok(row[0] || null);
     }
     if (a === "orders" && c === "accept") {
@@ -427,17 +445,28 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "items" && c === "removed") {
       const raw = Array.isArray(body?.removed) ? body.removed : [];
       const removed = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
-      // maybeSingle (not single): a missing row returns null instead of throwing, so
-      // the friendly "dish not found" 400 below is reachable for a stale id.
-      const item = must(await sb.from("order_items").select("id, order_id").eq("id", b).maybeSingle());
+      // Fetch the CURRENT state so we can diff old→new and keep the per-dish edit
+      // markers: which allergens were ADDED after placement (added_allergens, → a "＋"
+      // beside each) and whether one was REMOVED (removed_flag, → a "✎−" on the name).
+      // maybeSingle: a stale id returns null so the friendly "dish not found" 400 fires.
+      const item = must(await sb.from("order_items").select("id, order_id, removed, added_allergens, removed_flag").eq("id", b).maybeSingle());
       if (!item) return err(editErrMsg("item_not_found"), 400);
       const order = must(await sb.from("orders").select("payment_status, status").eq("id", item.order_id).maybeSingle());
       if (order?.payment_status === "paid") return err(editErrMsg("order_paid"), 409);
       if (order?.status === "cancelled") return err(editErrMsg("order_cancelled"), 400);
-      const row = must(await sb.from("order_items").update({ removed }).eq("id", b).select());
-      await logAction("editor", "order_item_removed", { order_id: item.order_id, detail: removed.join(", ") || "(none)", device_id: dev });
+      const oldSet = new Set((Array.isArray(item.removed) ? item.removed : []).map((x: any) => String(x).toLowerCase()));
+      const justAdded = removed.filter((s) => !oldSet.has(s));
+      const justRemoved = [...oldSet].filter((s) => !removed.includes(s));
+      const addedMark = new Set((Array.isArray(item.added_allergens) ? item.added_allergens : []).map((x: any) => String(x).toLowerCase()));
+      let removedFlag = !!item.removed_flag;
+      for (const s of justAdded) addedMark.add(s);   // staff-added allergen → mark it "added"
+      for (const s of justRemoved) { if (addedMark.has(s)) addedMark.delete(s); else removedFlag = true; } // un-mark a re-removed add; else flag a real removal
+      const added_allergens = [...addedMark].filter((s) => removed.includes(s)); // keep only ones still present
+      const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).select());
+      const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : ""].filter(Boolean).join("; ") || "no change";
+      await logAction("editor", "order_item_removed", { order_id: item.order_id, detail, device_id: dev });
       await stampEdited(item.order_id);
-      return ok(row[0] || { ok: true });
+      return ok(rowU[0] || { ok: true });
     }
 
     // orders/:id/add-item — STAFF EDIT: ADD a new dish to an already-placed order.
