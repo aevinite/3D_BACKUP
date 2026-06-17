@@ -1913,12 +1913,21 @@ async function openTableSession(table) {
   const t = String(table);
   const pending = { id: "pending-" + t, table_number: t, status: "open", auto_approve: false };
   state.board.sessions = [...(state.board.sessions || []), pending];
+  // Opening a table ALSO approves its pending "let me in / open" requests on the
+  // server (see /api/editor sessions/open). Clear them from local state in the SAME
+  // tick, or the tile flashes an "Attend" quick-action for ~1s: the optimistic
+  // session makes the tile "seated" (so the Open branch no longer matches) while the
+  // still-pending request keeps hasReq true → it falls to the hasJoin||hasReq→Attend
+  // branch until the refetch lands. Remember the cleared ones so we can undo on error.
+  const reqsBefore = state.board.requests || [];
+  state.board.requests = reqsBefore.filter((r) => String(r.table_number) !== t);
   floorOpsInFlight++;
   loadSessions(true); // render-only, no network
   try { await api("POST", "/sessions/open", { table: t }); floorOpsInFlight--; await loadSessions(); toast("Table opened", "ok"); }
   catch (e) {
     floorOpsInFlight--;
     state.board.sessions = (state.board.sessions || []).filter((s) => s.id !== pending.id); // undo
+    state.board.requests = reqsBefore;                                                      // undo the request clear too
     loadSessions(true);
     toast("Could not open: " + e.message, "err");
   }
