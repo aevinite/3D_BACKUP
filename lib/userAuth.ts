@@ -31,8 +31,16 @@ const SECRET = () =>
 export type StaffUser = {
   id: string; username: string; role: Role;
   name: string | null; phone: string | null; active: boolean; pin_hash: string | null;
-  token_version: number; can_self_reset: boolean;
+  token_version: number; can_self_reset: boolean; profile_confirmed: boolean;
 };
+
+// Normalize a typed "Name" into the canonical login key stored in `username`:
+// trimmed, lowercased, inner whitespace collapsed. This is what makes a single
+// "Name" field double as a forgiving, unique login id ("Raj  Kumar" === "raj
+// kumar"). Used by BOTH account creation/edit and the login lookup so they agree.
+export function normalizeLoginName(s: string): string {
+  return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
 
 // ── small byte/base64 helpers (work in both Node and edge runtimes) ──────────
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -91,12 +99,12 @@ async function sign(u: { id: string; role: string; token_version: number }): Pro
 export async function loginUser(
   username: string, password: string,
 ): Promise<{ ok: true; user: StaffUser; cookie: string } | { ok: false; error: string }> {
-  const uname = String(username || "").trim().toLowerCase();
-  if (!uname || !password) return { ok: false, error: "Enter a username and password." };
+  const uname = normalizeLoginName(username);
+  if (!uname || !password) return { ok: false, error: "Enter your name and password." };
   const u = (await sb.from("staff_users").select("*").eq("username", uname).eq("active", true).limit(1)).data?.[0];
   // Same generic message whether the user is missing or the password is wrong —
-  // never reveal which usernames exist.
-  if (!u) return { ok: false, error: "Wrong username or password." };
+  // never reveal which names exist.
+  if (!u) return { ok: false, error: "Wrong name or password." };
   if (u.locked_until && new Date(u.locked_until) > new Date()) {
     return { ok: false, error: "Too many tries — wait a minute and try again." };
   }
@@ -106,7 +114,7 @@ export async function loginUser(
       ? { failed_count: 0, locked_until: new Date(Date.now() + LOCK_MS).toISOString() }
       : { failed_count: fc };
     await sb.from("staff_users").update(patch).eq("id", u.id);
-    return { ok: false, error: "Wrong username or password." };
+    return { ok: false, error: "Wrong name or password." };
   }
   await sb.from("staff_users")
     .update({ failed_count: 0, locked_until: null, last_seen_at: new Date().toISOString() })

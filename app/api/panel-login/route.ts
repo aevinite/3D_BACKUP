@@ -21,7 +21,9 @@ export async function POST(req: NextRequest) {
     device_id: deviceIdFrom(req),
     detail: `${u.name || "(no name yet)"} logged in · user "${u.username}" · id ${u.id}`,
   });
-  const needsProfile = !u.name || !u.phone;
+  // Show the one-time setup card until the user has confirmed their profile ONCE
+  // (even if the admin pre-filled everything). After that it never auto-opens.
+  const needsProfile = !u.profile_confirmed;
   const res = NextResponse.json({ ok: true, role: u.role, needsProfile });
   res.cookies.set(USER_COOKIE, r.cookie, {
     path: "/", httpOnly: true, sameSite: "lax",

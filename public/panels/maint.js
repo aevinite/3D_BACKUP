@@ -55,16 +55,24 @@
     if (document.getElementById("lfh-set-style")) return;
     const css = `
     .lfh-ov{position:fixed;inset:0;background:rgba(4,8,18,.6);backdrop-filter:blur(4px);z-index:99998;display:flex;justify-content:flex-end}
-    .lfh-dw{width:min(92vw,420px);height:100%;overflow:auto;background:#0f1830;color:#e7eefc;box-shadow:-20px 0 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif;animation:lfhslide .18s ease}
-    @keyframes lfhslide{from{transform:translateX(30px);opacity:.4}to{transform:none;opacity:1}}
-    .lfh-dw h2{font-size:16px;margin:0}
+    .lfh-dw{width:min(92vw,430px);height:100%;overflow:auto;background:#0f1830;color:#e7eefc;box-shadow:-20px 0 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif;animation:lfhslide .2s cubic-bezier(.16,1,.3,1)}
+    @keyframes lfhslide{from{transform:translateX(40px);opacity:.2}to{transform:none;opacity:1}}
+    .lfh-dw h2{font-size:16px;margin:0;font-weight:800}
     .lfh-sec{padding:16px 18px;border-bottom:1px solid #1d2944}
     .lfh-sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#7e93bd;margin:0 0 10px}
     .lfh-lab{display:block;font-size:12px;color:#8aa0c9;margin:0 0 4px}
-    .lfh-in{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;margin:0 0 10px}
-    .lfh-bt{padding:9px 13px;border:0;border-radius:9px;font-weight:600;font-size:13px;cursor:pointer;color:#fff}
+    .lfh-in{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:10px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;margin:0 0 10px;outline:none;transition:border-color .15s,box-shadow .15s}
+    .lfh-in:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.22)}
+    .lfh-bt{padding:11px 14px;border:0;border-radius:10px;font-weight:700;font-size:13.5px;cursor:pointer;color:#fff;transition:filter .15s,opacity .15s}
+    .lfh-bt:hover{filter:brightness(1.08)}
+    .lfh-bt:disabled{opacity:.6;cursor:default}
     .lfh-msg{font-size:12px;margin:2px 0 8px}
-    .lfh-note{font-size:12px;color:#8aa0c9}`;
+    .lfh-note{font-size:12px;color:#8aa0c9}
+    .lfh-av{width:46px;height:46px;border-radius:999px;display:grid;place-items:center;font-weight:800;font-size:20px;color:#0b1220;flex-shrink:0}
+    .lfh-chip{display:inline-block;font-size:11px;font-weight:700;color:#0b1220;padding:2px 9px;border-radius:999px}
+    .lfh-welcome{margin:14px 18px 0;padding:15px 16px;border-radius:14px;background:linear-gradient(135deg,#16294a,#0e1830);border:1px solid #2a4474}
+    .lfh-welcome .wt{font-size:15.5px;font-weight:800;color:#eaf1ff;margin:0 0 5px}
+    .lfh-welcome .wd{font-size:12.5px;color:#a8bce0;line-height:1.5}`;
     document.head.appendChild(el("style", { id: "lfh-set-style", html: css }));
   }
 
@@ -72,10 +80,13 @@
   let overlay = null;
 
   function closeDrawer() {
-    // Block closing during first-login until name + phone are filled.
-    if (profile && profile.needsProfile) { alert("Please add your name and phone to continue."); return; }
+    // Block closing during the one-time setup until name + phone are confirmed.
+    if (profile && profile.needsProfile) { alert("Please confirm your name and phone to continue."); return; }
     if (overlay) { overlay.remove(); overlay = null; }
   }
+
+  // Role → accent colour for the avatar + chip (matches the admin Users palette).
+  const ROLE_COLOR = { manager: "#d4a574", editor: "#d4a574", kitchen: "#7ec88a", tablet: "#60a5fa" };
 
   function setMsg(node, text, good) { node.textContent = text || ""; node.style.color = good ? "#86efac" : "#fca5a5"; }
 
@@ -83,48 +94,57 @@
     injectStyles();
     if (overlay) overlay.remove();
     const roleLabel = { manager: "Manager", editor: "Manager", kitchen: "Kitchen", tablet: "Tablet (waiter)" }[profile.role] || profile.role;
+    const accent = ROLE_COLOR[profile.role] || "#9ca3af";
+    const displayName = profile.name || profile.username;
 
-    // — header —
-    const closeBtn = el("button", { class: "lfh-bt", style: { background: "#243049" }, onClick: closeDrawer, html: "✕" });
-    const header = el("div", { class: "lfh-sec", style: { display: "flex", alignItems: "center", gap: "10px", position: "sticky", top: "0", background: "#0f1830", zIndex: "1" } }, [
-      el("div", { style: { fontSize: "22px" } }, ["👤"]),
-      el("div", { style: { flex: "1" } }, [
-        el("h2", null, [profile.name || profile.username]),
-        el("div", { class: "lfh-note" }, ["@" + profile.username + " · " + roleLabel]),
+    // — header: avatar + name + role chip (no "username" shown anywhere) —
+    const closeBtn = el("button", { class: "lfh-bt", style: { background: "#243049", padding: "8px 12px" }, onClick: closeDrawer, "aria-label": "Close", html: "✕" });
+    const header = el("div", { class: "lfh-sec", style: { display: "flex", alignItems: "center", gap: "12px", position: "sticky", top: "0", background: "#0f1830", zIndex: "1" } }, [
+      el("div", { class: "lfh-av", style: { background: accent } }, [(displayName || "?").charAt(0).toUpperCase()]),
+      el("div", { style: { flex: "1", minWidth: "0" } }, [
+        el("h2", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, [displayName]),
+        el("div", { style: { marginTop: "5px" } }, [el("span", { class: "lfh-chip", style: { background: accent } }, [roleLabel])]),
       ]),
       closeBtn,
     ]);
 
     const sections = [header];
 
-    // — first-login banner —
+    // — first-login welcome card (one-time; polished, not a thin strip) —
     if (profile.needsProfile) {
-      sections.push(el("div", { class: "lfh-sec", style: { background: "#1e2a16", borderBottom: "1px solid #2f4020" } }, [
-        el("div", { style: { color: "#bef264", fontSize: "13px" } }, ["👋 Welcome! Please add your name and phone number to continue."]),
+      const hasBoth = !!(profile.name && profile.phone);
+      sections.push(el("div", { class: "lfh-welcome" }, [
+        el("div", { class: "wt" }, ["👋 Welcome" + (profile.name ? ", " + profile.name : "") + "!"]),
+        el("div", { class: "wd" }, [hasBoth
+          ? "Please take a second to confirm your details below — you'll only do this once."
+          : "Please add your phone number below to finish setting up your account. You'll only do this once."]),
       ]));
     }
 
-    // — details (name / phone) —
-    const nameIn = el("input", { class: "lfh-in", value: profile.name || "", placeholder: "Your full name" });
+    // — details (name / phone) — name doubles as the sign-in name —
+    const nameIn = el("input", { class: "lfh-in", value: profile.name || "", placeholder: "Your name" });
     const phoneIn = el("input", { class: "lfh-in", value: profile.phone || "", placeholder: "Your phone number", inputmode: "tel" });
     const detMsg = el("div", { class: "lfh-msg" });
-    const saveDet = el("button", { class: "lfh-bt", style: { background: "#22c55e" }, onClick: async () => {
+    const saveDet = el("button", { class: "lfh-bt", style: { background: "#22c55e", width: "100%" }, onClick: async () => {
       const name = nameIn.value.trim(), phone = phoneIn.value.trim();
-      if (!name || !phone) { setMsg(detMsg, "Both name and phone are required.", false); return; }
+      if (!name || !phone) { setMsg(detMsg, "Both your name and phone are required.", false); return; }
       saveDet.disabled = true;
       try {
         const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, phone }) });
         const j = await r.json();
         if (!r.ok) { setMsg(detMsg, j.error || "Could not save.", false); return; }
+        const wasSetup = profile.needsProfile;
         profile.name = name; profile.phone = phone; profile.needsProfile = false;
-        setMsg(detMsg, "Saved.", true);
-        const sb = document.getElementById("staffSettingsBtn"); if (sb) sb.textContent = "⚙️ Settings";
+        setMsg(detMsg, wasSetup ? "All set — welcome aboard! 🎉" : "Saved.", true);
+        const sb = document.getElementById("staffSettingsBtn"); if (sb) sb.textContent = "👤 Profile";
+        // Refresh the header (name/avatar) and drop the welcome card after setup.
+        if (wasSetup) setTimeout(openDrawer, 700);
       } catch { setMsg(detMsg, "Network error.", false); }
       finally { saveDet.disabled = false; }
-    } }, ["Save details"]);
+    } }, [profile.needsProfile ? "Save & continue" : "Save details"]);
     sections.push(el("div", { class: "lfh-sec" }, [
       el("h3", null, ["Your details"]),
-      el("label", { class: "lfh-lab" }, ["Name"]), nameIn,
+      el("label", { class: "lfh-lab" }, ["Name (this is also your sign-in name)"]), nameIn,
       el("label", { class: "lfh-lab" }, ["Phone"]), phoneIn,
       detMsg, saveDet,
     ]));
@@ -231,7 +251,7 @@
     const bar = topbar();
     if (!bar || document.getElementById("staffSettingsBtn")) return;
     const btn = el("button", { id: "staffSettingsBtn", class: "btn", style: { marginLeft: "auto" }, onClick: openDrawer },
-      [profile && profile.needsProfile ? "⚙️ Finish setup" : "⚙️ Settings"]);
+      [profile && profile.needsProfile ? "👋 Finish setup" : "👤 Profile"]);
     bar.appendChild(btn);
   }
 

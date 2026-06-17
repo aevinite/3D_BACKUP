@@ -6,8 +6,9 @@
 //          password and bumps token_version so all sessions must re-login).
 // Scoped to the cookie's user id, so a user can only edit themselves.
 import { NextRequest, NextResponse } from "next/server";
-import { userFromCookie, USER_COOKIE, hashSecret, verifySecret } from "@/lib/userAuth";
+import { userFromCookie, USER_COOKIE, hashSecret, verifySecret, normalizeLoginName } from "@/lib/userAuth";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     username: u.username, role: u.role, name: u.name, phone: u.phone,
     hasPin: !!u.pin_hash,
-    needsProfile: !u.name || !u.phone, // first-login capture not done yet
+    needsProfile: !u.profile_confirmed, // one-time setup card shown until confirmed once
     canSelfReset: u.can_self_reset,
   });
 }
@@ -50,19 +51,62 @@ export async function POST(req: NextRequest) {
     await sb.from("staff_users")
       .update({ password_hash: await hashSecret(next), token_version: (u.token_version || 0) + 1 })
       .eq("id", u.id);
+    // Staff-initiated change → operation log (admin resets are logged separately).
+    await logAction(u.role, "password_change", {
+      actor: u.name || u.username, device_id: deviceIdFrom(req),
+      detail: `${u.name || u.username} changed their own password`,
+    });
     return NextResponse.json({ ok: true, passwordChanged: true });
   }
 
-  // ── name / phone / PIN ─────────────────────────────────────────────────────
+  // ── name / phone / PIN (the user editing their OWN profile) ─────────────────
   const patch: Record<string, unknown> = {};
-  if (body?.name !== undefined) patch.name = String(body.name || "").trim().slice(0, 80) || null;
-  if (body?.phone !== undefined) patch.phone = String(body.phone || "").trim().slice(0, 20) || null;
+  const changes: string[] = [];
+
+  if (body?.name !== undefined) {
+    // The Name doubles as the unique login id. Store it as typed (display) and a
+    // normalized copy in `username` (the matchable key); reject duplicates.
+    const display = String(body.name || "").trim().slice(0, 80);
+    const key = normalizeLoginName(display);
+    if (!display || !key) return NextResponse.json({ error: "Your name can't be empty." }, { status: 400 });
+    const clash = (await sb.from("staff_users").select("id").eq("username", key).neq("id", u.id).limit(1)).data?.[0];
+    if (clash) return NextResponse.json({ error: "That name is already taken — please pick another." }, { status: 409 });
+    patch.name = display;
+    patch.username = key;
+    if (key !== normalizeLoginName(u.name || u.username)) changes.push("name");
+  }
+  if (body?.phone !== undefined) {
+    const phone = String(body.phone || "").trim().slice(0, 20) || null;
+    if (phone !== (u.phone ?? null)) changes.push("phone");
+    patch.phone = phone;
+  }
   if (body?.pin !== undefined) {
     const pin = String(body.pin || "").trim();
     if (!/^\d{4,8}$/.test(pin)) return NextResponse.json({ error: "PIN must be 4–8 digits." }, { status: 400 });
     patch.pin_hash = await hashSecret(pin); // salted, slow hash (same as passwords)
   }
   if (!Object.keys(patch).length) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
+
+  // Once they have BOTH a name and a phone, mark the one-time setup done so the
+  // welcome card never auto-opens again.
+  const effName = patch.name !== undefined ? patch.name : u.name;
+  const effPhone = patch.phone !== undefined ? patch.phone : u.phone;
+  const firstConfirm = !u.profile_confirmed && !!effName && !!effPhone;
+  if (effName && effPhone) patch.profile_confirmed = true;
+
   await sb.from("staff_users").update(patch).eq("id", u.id);
+
+  // Operation log — STAFF edits land here; the admin's edits in /api/admin/users
+  // are deliberately NOT logged. actor = their (new) name.
+  const who = (patch.name as string) || u.name || u.username;
+  const dev = deviceIdFrom(req);
+  if (patch.pin_hash !== undefined) {
+    await logAction(u.role, "pin_set", { actor: who, device_id: dev, detail: `${who} ${u.pin_hash ? "changed" : "set"} their PIN` });
+  }
+  if (firstConfirm) {
+    await logAction(u.role, "profile_setup", { actor: who, device_id: dev, detail: `${who} completed their profile${changes.length ? " (" + changes.join(" & ") + ")" : ""}` });
+  } else if (changes.length) {
+    await logAction(u.role, "profile_update", { actor: who, device_id: dev, detail: `${who} updated their ${changes.join(" & ")}` });
+  }
   return NextResponse.json({ ok: true });
 }

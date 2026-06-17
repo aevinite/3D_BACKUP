@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { hashSecret, type Role } from "@/lib/userAuth";
+import { hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -52,26 +52,29 @@ export async function POST(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {};
   try { body = await req.json(); } catch {}
-  const username = String(body?.username || "").trim().toLowerCase();
+  // ONE "Name" is the whole identity: stored as-typed for display (`name`) and as
+  // a normalized, unique key for login (`username`). No separate username concept.
+  const display = String(body?.name ?? body?.username ?? "").trim().slice(0, 80);
+  const key = normalizeLoginName(display);
   const role = String(body?.role || "") as Role;
-  if (!/^[a-z0-9._-]{3,40}$/.test(username)) return bad("Username: 3–40 chars, letters/numbers/._- only.");
+  if (key.length < 2) return bad("Name must be at least 2 characters.");
   if (!ROLES.includes(role)) return bad("Pick a valid role.");
   // Friendly duplicate check (there's also a unique index as the hard guarantee).
-  const dup = (await sb.from("staff_users").select("id").eq("username", username).limit(1)).data?.[0];
-  if (dup) return bad("That username is taken.", 409);
+  const dup = (await sb.from("staff_users").select("id").eq("username", key).limit(1)).data?.[0];
+  if (dup) return bad("That name is taken — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const row = {
-    username, role,
+    username: key, role,
     password_hash: await hashSecret(password),
-    name: String(body?.name || "").trim().slice(0, 80) || null,
+    name: display,
     phone: String(body?.phone || "").trim().slice(0, 20) || null,
   };
-  const { data, error } = await sb.from("staff_users").insert(row).select("id, username, role").single();
+  const { data, error } = await sb.from("staff_users").insert(row).select("id, username, role, name").single();
   if (error) return bad(error.message, 500);
-  await logAction("admin", "user_create", { actor: "admin", detail: `created ${role} "${username}" · id ${data!.id}` });
+  await logAction("admin", "user_create", { actor: "admin", detail: `created ${role} "${display}" · id ${data!.id}` });
   // Return the password ONCE so the admin can hand it over; it's only stored hashed.
-  return ok({ ok: true, id: data!.id, username, role, password });
+  return ok({ ok: true, id: data!.id, username: key, name: display, role, password });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -118,11 +121,22 @@ export async function PATCH(req: NextRequest) {
   }
   if (action === "edit") {
     const patch: Record<string, unknown> = {};
-    if (body?.name !== undefined) patch.name = String(body.name || "").trim().slice(0, 80) || null;
+    if (body?.name !== undefined) {
+      // Changing the Name also changes the login key — keep them in sync, unique.
+      // The user's live session is keyed by id, so this never logs them out; their
+      // next login just uses the new Name.
+      const display = String(body.name || "").trim().slice(0, 80);
+      const key = normalizeLoginName(display);
+      if (key.length < 2) return bad("Name must be at least 2 characters.");
+      const clash = (await sb.from("staff_users").select("id").eq("username", key).neq("id", id).limit(1)).data?.[0];
+      if (clash) return bad("That name is taken — pick another.", 409);
+      patch.name = display;
+      patch.username = key;
+    }
     if (body?.phone !== undefined) patch.phone = String(body.phone || "").trim().slice(0, 20) || null;
     if (!Object.keys(patch).length) return bad("Nothing to change.");
     await sb.from("staff_users").update(patch).eq("id", id);
-    return ok({ ok: true });
+    return ok({ ok: true }); // intentionally NOT logged — admin edits stay out of the operation log
   }
   return bad("Unknown action.");
 }

@@ -56,14 +56,14 @@ export default function LoginForm({ next }: { next: string }) {
           <p style={{ margin: 0, fontSize: 13, color: "#8aa0c9" }}>Staff sign in</p>
         </div>
 
-        <label style={{ fontSize: 12, color: "#8aa0c9" }}>Username</label>
+        <label style={{ fontSize: 12, color: "#8aa0c9" }}>Name</label>
         <input
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          placeholder="your username"
+          placeholder="your name"
           autoFocus
           autoComplete="username"
-          autoCapitalize="none"
+          autoCapitalize="words"
           spellCheck={false}
           style={{ ...field, margin: "4px 0 12px" }}
         />

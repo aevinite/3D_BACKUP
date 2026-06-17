@@ -30,12 +30,13 @@ export default function AdminUsers() {
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
 
-  // New-user form state
-  const [nu, setNu] = useState({ username: "", role: "manager", name: "", phone: "", password: "" });
+  // New-user form state. The single "Name" is the whole identity (it becomes the
+  // login id under the hood) — there is no separate username field any more.
+  const [nu, setNu] = useState({ role: "manager", name: "", phone: "", password: "" });
   const [showNewPw, setShowNewPw] = useState(false);
   const [creating, setCreating] = useState(false);
   // The password to reveal once after a CREATE (shown at the top until dismissed).
-  const [reveal, setReveal] = useState<{ username: string; password: string } | null>(null);
+  const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
 
   // Which user's edit modal is open (null = closed) + a working copy of editable fields.
   const [editId, setEditId] = useState<string | null>(null);
@@ -61,8 +62,8 @@ export default function AdminUsers() {
       const r = await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(nu) });
       const j = await r.json();
       if (!r.ok) { setErr(j.error || "Could not create user."); return; }
-      setReveal({ username: j.username, password: j.password });
-      setNu({ username: "", role: "manager", name: "", phone: "", password: "" });
+      setReveal({ name: j.name || j.username, password: j.password });
+      setNu({ role: "manager", name: "", phone: "", password: "" });
       setShowNewPw(false);
       load();
     } catch { setErr("Network error."); }
@@ -82,7 +83,7 @@ export default function AdminUsers() {
       {reveal ? (
         <div style={{ ...card, borderColor: "#166534", marginBottom: 14 }}>
           <div style={{ fontSize: 13, color: "#86efac" }}>
-            Password for <b>{reveal.username}</b> — copy it now, it won&apos;t be shown again:
+            Password for <b>{reveal.name}</b> — copy it now, it won&apos;t be shown again:
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
             <code style={{ fontSize: 18, background: "#0b1220", padding: "8px 12px", borderRadius: 8, letterSpacing: 1 }}>{reveal.password}</code>
@@ -97,18 +98,14 @@ export default function AdminUsers() {
         <h2 style={{ fontSize: 15, margin: "0 0 12px" }}>Add a user</h2>
         <form onSubmit={create} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, alignItems: "end" }}>
           <label style={label}>
-            Username
-            <input value={nu.username} onChange={(e) => setNu({ ...nu, username: e.target.value })} placeholder="e.g. raj" autoCapitalize="none" spellCheck={false} style={field} required />
+            Name
+            <input value={nu.name} onChange={(e) => setNu({ ...nu, name: e.target.value })} placeholder="e.g. Raj" autoCapitalize="words" style={field} required />
           </label>
           <label style={label}>
             Role
             <select value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value })} style={field}>
               {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
             </select>
-          </label>
-          <label style={label}>
-            Name (optional)
-            <input value={nu.name} onChange={(e) => setNu({ ...nu, name: e.target.value })} placeholder="Full name" style={field} />
           </label>
           <label style={label}>
             Phone (optional)
@@ -129,7 +126,7 @@ export default function AdminUsers() {
           </button>
         </form>
         <p style={{ fontSize: 12, color: "#6f86b0", margin: "10px 0 0" }}>
-          The person sets their own name/phone on first login if you leave them blank, and can set a personal PIN in their profile.
+          The <b>Name</b> is what they sign in with (and how they appear everywhere) — it must be unique. They confirm their details once on first login and can edit their name/phone, change their password, and set a PIN in their profile.
         </p>
       </section>
 
@@ -144,16 +141,16 @@ export default function AdminUsers() {
               <div key={u.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, alignItems: "center", padding: 12, borderRadius: 10, background: "#0e1830", border: "1px solid #1f2c49", opacity: u.active ? 1 : 0.55 }}>
                 {/* Initial badge */}
                 <div aria-hidden style={{ width: 38, height: 38, borderRadius: 999, background: ROLE_COLOR[u.role] || "#9ca3af", color: "#0b1220", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }}>
-                  {u.username.charAt(0).toUpperCase()}
+                  {(u.name || u.username).charAt(0).toUpperCase()}
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <strong style={{ fontSize: 15 }}>{u.username}</strong>
+                    <strong style={{ fontSize: 15 }}>{u.name || u.username}</strong>
                     <span style={{ fontSize: 11, fontWeight: 700, color: "#0b1220", background: ROLE_COLOR[u.role] || "#9ca3af", padding: "2px 8px", borderRadius: 999 }}>{ROLE_LABEL[u.role] || u.role}</span>
                     {!u.active ? <span style={{ fontSize: 11, color: "#fca5a5" }}>disabled</span> : null}
                   </div>
                   <div style={{ fontSize: 12, color: "#8aa0c9", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {u.name || "—"} · {u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : "never"}
+                    {u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : "never"}
                   </div>
                 </div>
                 <button style={btn("#1f2c49")} onClick={() => setEditId(u.id)}>Edit</button>
@@ -219,7 +216,7 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
   // Save only the fields that changed. Role change logs the user out, so confirm it.
   async function save() {
     setMErr(""); setOk("");
-    if (form.role !== user.role && !confirm(`Change ${user.username} to ${ROLE_LABEL[form.role]}? They'll be logged out.`)) return;
+    if (form.role !== user.role && !confirm(`Change ${user.name || user.username} to ${ROLE_LABEL[form.role]}? They'll be logged out.`)) return;
     setSaving(true);
     try {
       if (form.name !== (user.name || "") || form.phone !== (user.phone || "")) {
@@ -256,7 +253,7 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
   }
 
   async function remove() {
-    if (!confirm(`Delete "${user.username}" permanently? They won't be able to log in.`)) return;
+    if (!confirm(`Delete "${user.name || user.username}" permanently? They won't be able to log in.`)) return;
     setMErr("");
     try {
       const r = await fetch(`/api/admin/users?id=${encodeURIComponent(user.id)}`, { method: "DELETE" });
@@ -272,13 +269,13 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
     <>
       {/* Scrim — strong enough to isolate the dialog; click to dismiss. */}
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000, animation: "lfhFade 160ms ease-out" }} />
-      <div role="dialog" aria-modal="true" aria-label={`Edit ${user.username}`} style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+      <div role="dialog" aria-modal="true" aria-label={`Edit ${user.name || user.username}`} style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
         <div style={{ ...card, pointerEvents: "auto", width: "min(96vw, 460px)", maxHeight: "90vh", overflowY: "auto", padding: 0, animation: "lfhPop 180ms cubic-bezier(0.16,1,0.3,1)" }}>
           {/* Header */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: "1px solid #1f2c49", position: "sticky", top: 0, background: "#111a2e", borderRadius: "14px 14px 0 0" }}>
-            <div aria-hidden style={{ width: 36, height: 36, borderRadius: 999, background: ROLE_COLOR[user.role] || "#9ca3af", color: "#0b1220", display: "grid", placeItems: "center", fontWeight: 800 }}>{user.username.charAt(0).toUpperCase()}</div>
+            <div aria-hidden style={{ width: 36, height: 36, borderRadius: 999, background: ROLE_COLOR[user.role] || "#9ca3af", color: "#0b1220", display: "grid", placeItems: "center", fontWeight: 800 }}>{(user.name || user.username).charAt(0).toUpperCase()}</div>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 16, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.username}</div>
+              <div style={{ fontSize: 16, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name || user.username}</div>
               <div style={{ fontSize: 11, color: "#8aa0c9" }}>
                 {user.hasPin ? "🔑 PIN set · " : ""}created {new Date(user.created_at).toLocaleDateString()} · last seen {user.last_seen_at ? new Date(user.last_seen_at).toLocaleString() : "never"}
               </div>
@@ -292,8 +289,8 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
 
             {/* Details */}
             <div style={{ display: "grid", gap: 10 }}>
-              <label style={label}>Name
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Full name" style={field} />
+              <label style={label}>Name <span style={{ color: "#6f86b0" }}>· this is their login</span>
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Raj" style={field} />
               </label>
               <label style={label}>Phone
                 <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Phone" style={field} />
@@ -349,7 +346,7 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
                 <div style={{ marginTop: 10, padding: 12, borderRadius: 10, background: "#1a1407", border: "1px solid #b45309" }}>
                   <div style={{ fontSize: 12.5, color: "#fcd34d", display: "flex", gap: 8, alignItems: "flex-start", lineHeight: 1.45 }}>
                     <span aria-hidden>⚠️</span>
-                    <span>This sets a {pendingGen ? "new random" : "new"} password for <b>{user.username}</b> and <b>logs them out on every device</b>. They&apos;ll need the new password to sign back in.</span>
+                    <span>This sets a {pendingGen ? "new random" : "new"} password for <b>{user.name || user.username}</b> and <b>logs them out on every device</b>. They&apos;ll need the new password to sign back in.</span>
                   </div>
                   <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                     <button style={{ ...btn("#b45309"), opacity: pwBusy ? 0.6 : 1 }} disabled={pwBusy} onClick={doReset}>{pwBusy ? "Setting…" : "Yes, set new password"}</button>

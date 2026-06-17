@@ -62,3 +62,6 @@ reference/code-snapshot/
 
 # brainstorm companion mockups (local only)
 .superpowers/
+
+# Playwright MCP scratch output
+.playwright-mcp/
