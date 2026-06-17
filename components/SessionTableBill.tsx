@@ -19,10 +19,18 @@ import { getSettings } from "@/lib/menu";
 // Money-formatting helpers so prices show in the right currency.
 import { toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
+import { allergenLabel } from "@/lib/allergens"; // turns "milk" → "Milk" for the "no …" lines
 
-// The shape of one dish on the bill: an id, its name, how many, and where it is
-// in the kitchen (just received, being prepared, or already served).
-interface SItem { id: string; title: string; qty: number; status: "received" | "preparing" | "served"; }
+// The shape of one dish on the bill: id, name, qty, kitchen status — plus the
+// customizations the guest chose when ordering (options like "Large", allergens
+// they removed like "milk", and a free-text note), so the live view can show the
+// SAME detail the Current-bill tab does.
+interface SItem {
+  id: string; title: string; qty: number; status: "received" | "preparing" | "served";
+  options?: { label?: string }[] | null;
+  removed?: string[] | null;
+  note?: string | null;
+}
 // The money totals for the whole table.
 interface SBill { subtotal: number; tax: number; total: number; }
 
@@ -97,6 +105,9 @@ export default function SessionTableBill() {
   const show = (n: number) => (currency ? formatAmount(toMinor(n * currency.rate, currency), currency) : `$${n.toFixed(2)}`);
   // Counts how many dishes have already been served (for the "X of Y served" line).
   const served = items.filter((i) => i.status === "served").length;
+  // Everything the table asked to leave out across all dishes, de-duplicated —
+  // shown as one clear summary line at the very bottom of the live view.
+  const excluded = [...new Set(items.flatMap((i) => i.removed || []))];
 
   // What the guest actually sees on screen:
   return (
@@ -132,11 +143,22 @@ export default function SessionTableBill() {
               <span key={it.id} className={`stb-seg ${it.status}`} />
             ))}
           </div>
-          {/* The list of ordered dishes, each with its name, quantity and status. */}
+          {/* The list of ordered dishes, each with its name, quantity, status, and
+              the same customizations the Current-bill tab shows: chosen options,
+              the allergens left out (in red), and any note. */}
           <div className="stb-items">
             {items.map((it) => (
               <div key={it.id} className="stb-item">
-                <span className="stb-item-name">{it.title} <span className="stb-qty">×{it.qty}</span></span>
+                <span className="stb-item-name">
+                  {it.title} <span className="stb-qty">×{it.qty}</span>
+                  {it.options && it.options.length > 0 && (
+                    <span className="stb-item-detail">{it.options.map((o) => o.label).filter(Boolean).join(", ")}</span>
+                  )}
+                  {it.removed && it.removed.length > 0 && (
+                    <span className="stb-item-detail stb-item-removed">No {it.removed.map((r) => allergenLabel(r).toLowerCase()).join(", ")}</span>
+                  )}
+                  {it.note && <span className="stb-item-detail">“{it.note}”</span>}
+                </span>
                 <span className={`stb-pill ${it.status}`}>{STATUS_LABEL[it.status] || it.status}</span>
               </div>
             ))}
@@ -147,6 +169,13 @@ export default function SessionTableBill() {
               <div className="bill-line"><span>Subtotal</span><span>{show(Number(bill.subtotal) || 0)}</span></div>
               <div className="bill-line"><span>GST</span><span>{show(Number(bill.tax) || 0)}</span></div>
               <div className="bill-line grand"><span>Table total</span><span>{show(Number(bill.total) || 0)}</span></div>
+            </div>
+          )}
+          {/* Bottom summary: a single clear line of what the table left out, so the
+              kitchen's exclusions are confirmed at a glance for this order. */}
+          {excluded.length > 0 && (
+            <div className="stb-exclusions">
+              <i className="fas fa-circle-info" aria-hidden="true" /> Left out for your table: no {excluded.map((r) => allergenLabel(r).toLowerCase()).join(", ")}
             </div>
           )}
         </>

@@ -803,9 +803,15 @@ body.menu-frost .nav {
 .stb-seg.preparing { background: #e8a13c; }  /* amber = being prepared */
 .stb-seg.served    { background: #4ade80; }  /* green = done */
 .stb-items { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
-.stb-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--text); }
+.stb-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--text); }
 .stb-item-name { min-width: 0; }
 .stb-qty { color: var(--muted); }
+/* Per-dish customization lines in the live view (mirrors the Current-bill tab). */
+.stb-item-detail { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+.stb-item-removed { color: #cc4b4b; }
+/* Bottom summary line: everything the table asked to leave out, for this order. */
+.stb-exclusions { margin-top: 12px; padding: 9px 12px; border-radius: 10px; background: rgba(204,75,75,0.1); color: #cc4b4b; font-size: 12.5px; line-height: 1.4; display: flex; gap: 7px; align-items: flex-start; }
+.stb-exclusions i { margin-top: 2px; }
 .stb-pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
 .stb-pill.received { background: rgba(212,165,116,0.2); color: #d4a574; }
 .stb-pill.preparing { background: rgba(79,157,255,0.18); color: #4f9dff; }
