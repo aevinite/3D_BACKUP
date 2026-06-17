@@ -33,12 +33,12 @@ const stampEdited = async (orderId?: string | null) => {
 };
 // Unwrap a Supabase { data, error } reply — throw on error so the catch turns it
 // into a clean 500 (mirrors the editor server's `must`).
- 
+
 const must = (r: any) => {
   if (r.error) throw new Error(r.error.message);
   return r.data;
 };
- 
+
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 

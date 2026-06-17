@@ -158,15 +158,22 @@ function renderDishes() {
 // A fingerprint of everything the board draws — same idea as the tablet: only
 // re-render when it changes, so a tap on ACCEPT / a dish ✓ landing exactly when
 // the poll fires can't be eaten by a DOM rebuild.
+// BULLETPROOF redraw fingerprint. We serialize the FULL drawn rows (minus a few
+// heartbeat-only columns) so ANY field that affects a ticket — including columns
+// added in the FUTURE — flips the signature and forces a repaint. Do NOT shrink
+// this back to a hand-picked field list: a hand-picked list silently missed
+// allergy/note edits, so they only appeared after a MANUAL refresh (bug fixed
+// 2026-06-17). New editable field on an order/dish? It's already covered here.
+// See CLAUDE.md "Live-update redraw guard". RT_VOLATILE = columns that change with
+// NO visible effect (heartbeats / derived timestamps) — excluded so idle polls and
+// post-action reconciles don't needlessly rebuild the DOM.
+const RT_VOLATILE = new Set(["last_activity_at", "updated_at", "cart_updated_at", "served_at"]);
+const stableRow = (row) => { const o = {}; for (const k in (row || {})) if (!RT_VOLATILE.has(k)) o[k] = row[k]; return o; };
 function boardSig(d) {
   return JSON.stringify([
-    // Include allergies (order-wide "avoid") so adding "no nuts" to a running order
-    // repaints the tickets via realtime — not only on a manual refresh.
-    (d.orders || []).map((o) => [o.id, o.status, o.kot_no, o.allergies, o.edited_at]),
-    // Include removed/note/options: a per-dish allergen, note or option edit must
-    // also flip the signature, else the fetched change isn't drawn.
-    (d.items || []).map((i) => [i.id, i.status, i.removed, i.note, i.options]),
-    (d.dishes || []).map((x) => [x.id, (x.tags || []).includes("sold-out")]),
+    (d.orders || []).map(stableRow),
+    (d.items || []).map(stableRow),
+    (d.dishes || []).map(stableRow),
   ]);
 }
 let lastSig = null;
