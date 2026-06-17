@@ -180,8 +180,11 @@ export default function OrderConfirmModal() {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) cart = parsed;
       }
-      // Editing from the bill: drop the line being edited first.
-      if (editSig) cart = cart.filter((it) => (it.sig || "[]") !== editSig);
+      // Editing from the bill: drop ONLY the exact line being edited. Match the
+      // dish id TOO — two DIFFERENT plain dishes both carry sig "[]", so matching on
+      // sig alone wiped the other dish off the bill (data loss). Same dish + same
+      // sig is always a single merged line, so id+sig targets exactly one row.
+      if (editSig) cart = cart.filter((it) => !(it.id === item.id && (it.sig || "[]") === editSig));
       // Same dish + same options/allergy/note = one line; otherwise a new line.
       const existing = cart.find((it) => it.id === item.id && (it.sig || "[]") === sig);
       if (existing) existing.qty += qty; // already there -> just bump the quantity
