@@ -36,12 +36,13 @@ export const viewport: Viewport = {
 
 // This tiny script runs the instant the page loads, BEFORE anything is drawn.
 // Its job: decide light vs dark theme and apply it immediately, so the screen
-// never "flashes" the wrong color while the app boots. It checks the saved
-// choice in the browser's storage first, otherwise follows the phone's system
-// setting, and if anything goes wrong it just falls back to light mode.
+// never "flashes" the wrong color while the app boots. It honours the visitor's
+// OWN saved choice first; otherwise it DEFAULTS TO LIGHT (the brand's default) —
+// it deliberately does NOT follow the phone's system dark setting, so the menu
+// always opens light for new visitors (owner, 2026-06-17). Falls back to light on error.
 // (Leave the text inside the backticks exactly as-is — it's a script string.)
 const themeBootScript = `
-(function(){try{var saved=localStorage.getItem('lfh_theme');var t;if(saved==='dark'||saved==='light'){t=saved;}else{t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','light');}})();
+(function(){try{var saved=localStorage.getItem('lfh_theme');document.documentElement.setAttribute('data-theme',saved==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}})();
 `.trim();
 
 // The main layout function. "children" is whatever page is currently showing —

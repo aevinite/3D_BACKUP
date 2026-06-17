@@ -41,7 +41,7 @@ const rememberTable = (table: string) => {
 
 // The named screens this gate can show. Think of it as "which page are we on".
 type Step =
-  | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "not_open" | "request_name" | "guest_name" | "open_name" | "joining"
+  | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "name_first" | "not_open" | "request_name" | "guest_name" | "open_name" | "joining"
   | "nickname" | "waiting_approval" | "denied" | "table_closed" | "net_error" | "request_sent" | "working" | "blocked";
 
 // Remember (per device) that the guest has already seen the "why we check your
@@ -249,6 +249,12 @@ export default function SessionGate() {
   // open the table, become the host, or ask the existing host to let them in.
   const afterLocation = useCallback(async () => {
     const p = pending.current!;
+    // COMPULSORY NAME FIRST (owner, 2026-06-17): nobody connects to a table —
+    // opening it, joining it, or asking a waiter to open it — without a name. We
+    // ask it ONCE here, before the table-status branches below, so the name is
+    // already known whether the table is open, busy, or not open yet. submitNameFirst
+    // re-enters; downstream paths reuse this name and never re-ask.
+    if (!name.trim()) { setNote(""); setStep("name_first"); return; }
     const st = await tableStatus(p.table);
     if (st.reason === "blocked") { setStep("blocked"); return; }
     // No answer ≠ "table not open" — don't mislabel a network blip; offer a retry.
@@ -258,9 +264,9 @@ export default function SessionGate() {
       return;
     }
     if (!st.open) { setStep("not_open"); proceedWhenOpen(); return; } // wait for staff to open it
-    if ((st.members as number) === 0) { await joinAsHead(); return; } // empty table -> you're the host
-    setStep("guest_name"); // someone's there -> ask to join
-  }, [joinAsHead, proceedWhenOpen]);
+    if ((st.members as number) === 0) { await joinAsHead(); return; } // empty table -> you're the host (name already given)
+    setStep("guest_name"); // someone's there -> confirm the name we already have, then ask to join
+  }, [joinAsHead, proceedWhenOpen, name]);
 
   // Phase 2: actually ask the browser for the location and judge the result. This
   // is where the OS permission prompt appears, so we only reach it AFTER the guest
@@ -436,9 +442,19 @@ export default function SessionGate() {
     setNote("");
     joinAsHead();
   };
+  // The compulsory name screen shown FIRST (before open / join / request). Validate,
+  // then resume the normal flow — afterLocation now knows the name and routes to the
+  // right next step (open the table, join it, or ask a waiter to open it).
+  const submitNameFirst = () => {
+    if (!name.trim()) { setNote("Please add your name to continue — you can't join a table without one."); return; }
+    setNote("");
+    afterLocation();
+  };
   // This runs when the guest taps "Ask to join this table": send their name to
   // the host. If auto-approved, act now; otherwise wait for the host's OK.
   const doJoinAsGuest = async () => {
+    // Compulsory name — never join a table without one (owner, 2026-06-17).
+    if (!name.trim()) { setNote("Add your name to join the table."); return; }
     // Double-tap guard: two fast taps on "Ask to join" would create the same
     // person TWICE in the head's approve list (one of them a permanent ghost).
     if (joining.current) return;
@@ -451,7 +467,7 @@ export default function SessionGate() {
       const already = getStoredSession(p.table);
       if (already) { sess.current = already; await ensureReadyAndAct(); return; }
       setStep("joining");
-      const r = await joinSession(p.table, name.trim() || null, coords.current.lat, coords.current.lng);
+      const r = await joinSession(p.table, name.trim(), coords.current.lat, coords.current.lng);
       if (r.reason === "blocked") { setStep("blocked"); return; }
       if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
       if (r.reason === "no_open_session") { setStep("not_open"); return; }
@@ -648,6 +664,22 @@ export default function SessionGate() {
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={() => runLocation()}>Try location again</button>
             <button className="sg-btn gold" onClick={() => doRequest("access")}>Request a waiter</button>
+          </div>
+        </>)}
+
+        {/* COMPULSORY name — the FIRST thing asked, before we open/join/request a
+            table, so the manager always sees who's at the table and nobody connects
+            anonymously. Whatever happens next (open, join, or request a waiter) reuses it. */}
+        {step === "name_first" && (<>
+          <div className="sg-badge"><i className="fas fa-user"></i></div>
+          <div className="sg-kicker">Table {pending.current?.table}</div>
+          <h3 className="sg-title">What should we call you?</h3>
+          <p className="sg-sub">Add your name to continue at table {pending.current?.table} — the staff use it to know who&apos;s at the table. We&apos;ll only ask once for this visit.</p>
+          <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
+            onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitNameFirst(); }} autoFocus />
+          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          <div className="sg-actions">
+            <button className="sg-btn gold" onClick={submitNameFirst}>Continue</button>
           </div>
         </>)}
 
