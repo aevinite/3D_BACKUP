@@ -3,18 +3,18 @@
 // else (floor, users, logs, features, settings) lives on its own page now.
 import Link from "next/link";
 import { useState } from "react";
-import { StatCards, ActivityFeed, usePoll, type Overview, type Action } from "@/components/admin/shared";
+import { StatCards, ActivityFeed, useLivePoll, type Overview, type Action } from "@/components/admin/shared";
 
 export default function AdminOverview() {
   const [ov, setOv] = useState<Overview | null>(null);
   const [activity, setActivity] = useState<Action[]>([]);
 
-  usePoll(() => {
+  // Live push instead of per-second polling: both fetches run on mount and the
+  // instant anything operational (ops) or content (menu) changes.
+  useLivePoll(() => {
     fetch("/api/admin/overview", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setOv(j); }).catch(() => {});
-  }, 2000);
-  usePoll(() => {
     fetch("/api/admin/oplog?limit=20", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setActivity(j.actions || []); }).catch(() => {});
-  }, 3000);
+  });
 
   return (
     <>

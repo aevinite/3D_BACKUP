@@ -33,22 +33,40 @@
   function debounce(fn, ms) { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; }
 
   async function start(opts) {
-    const onEvent = (opts && opts.onEvent) || function () {};
-    const topics = (opts && opts.topics) || ["ops"];
-    metrics.topics = topics;
-
-    // The one true refetch path: count it, run it, count failures (never throws).
-    async function doRefetch() {
-      metrics.refetch_count++;
-      try { await onEvent(); } catch (e) { metrics.sync_failures++; }
+    opts = opts || {};
+    // Normalise to a { topic: handler } map. Back-compat with {topics, onEvent}:
+    //   LFH_RT.start({ topics: ["ops","menu"], onEvent: () => load() })   // one fn, many topics
+    //   LFH_RT.start({ handlers: { ops: pollOrders, menu: loadAll } })    // a fn PER topic
+    // Per-topic handlers matter when one topic is cheap (ops → pollOrders) and
+    // another is expensive (menu → loadAll): a cheap event must not trigger the
+    // expensive refetch.
+    let handlers = opts.handlers;
+    if (!handlers) {
+      const onEvent = opts.onEvent || function () {};
+      const topics = opts.topics || ["ops"];
+      handlers = {};
+      topics.forEach((t) => { handlers[t] = onEvent; });
     }
-    // Debounce bursts → one refetch. Used by breadcrumbs AND wake/reconnect.
-    const fire = debounce(doRefetch, 300);
+    const topicList = Object.keys(handlers);
+    metrics.topics = topicList;
+
+    // One debounced refetch PER topic (counts it, runs it, never throws). Bursts on
+    // a topic coalesce into a single refetch of THAT topic's handler.
+    const firePerTopic = {};
+    topicList.forEach((topic) => {
+      const run = async () => {
+        metrics.refetch_count++;
+        try { await handlers[topic](); } catch (e) { metrics.sync_failures++; }
+      };
+      firePerTopic[topic] = debounce(run, 300);
+    });
+    // Wake/reconnect/initial → refetch every topic once (each debounced).
+    const fireAll = () => topicList.forEach((t) => firePerTopic[t]());
 
     let everSubscribed = false;
     try {
       const sb = await getClient();
-      topics.forEach((topic) => {
+      topicList.forEach((topic) => {
         sb.channel("rt:" + topic)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "realtime_events", filter: "topic=eq." + topic },
             (payload) => {
@@ -56,10 +74,10 @@
               // Delivery latency = now − when the breadcrumb was written.
               const ts = payload && payload.new && payload.new.created_at;
               if (ts) { const lat = Date.now() - Date.parse(ts); if (lat >= 0 && lat < 60000) { metrics._latSum += lat; metrics._latN++; metrics.avgLatencyMs = Math.round(metrics._latSum / metrics._latN); } }
-              fire();
+              firePerTopic[topic]();
             })
           .subscribe((status) => {
-            if (status === "SUBSCRIBED") { metrics.subscribed++; if (everSubscribed) { metrics.reconnects++; fire(); } everSubscribed = true; }
+            if (status === "SUBSCRIBED") { metrics.subscribed++; if (everSubscribed) { metrics.reconnects++; fireAll(); } everSubscribed = true; }
             else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") { metrics.errors++; }
           });
       });
@@ -68,14 +86,14 @@
     }
 
     // Catch anything missed while the tab slept / lost focus / dropped network.
-    // All routed through the debounced fire() so they can't stack up.
-    const wake = () => { if (!document.hidden) fire(); };
+    // All routed through the debounced fires so they can't stack up.
+    const wake = () => { if (!document.hidden) fireAll(); };
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("focus", wake);
     window.addEventListener("pageshow", wake);   // fires on bfcache restore (phone wake)
-    window.addEventListener("online", () => { metrics.reconnects++; fire(); });
+    window.addEventListener("online", () => { metrics.reconnects++; fireAll(); });
 
-    doRefetch(); // initial load (immediate, not debounced)
+    fireAll(); // initial load
   }
 
   window.LFH_RT = { start, metrics };
