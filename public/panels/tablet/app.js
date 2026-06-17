@@ -628,11 +628,12 @@ function drawDishOptions() {
     const unitPrice = base + opts.reduce((s, o) => s + o.price, 0);
     const allergy = (state._opt.allergy || "").trim();
     const noteRaw = (state._opt.note || "").trim();
-    // ADD-TO-EXISTING-ORDER mode: send straight to the order's add-item endpoint
-    // (allergy folded into the dish note, mirroring how new orders carry it).
+    // ADD-TO-EXISTING-ORDER mode: send straight to the order's add-item endpoint.
+    // The allergy rides as this dish's own `removed` list (NOT the order-wide
+    // list), so it stays on this dish only — mirroring how new orders carry it.
     if (state.addToOrderId) {
-      const note = [allergy ? `⚠ ${allergy}` : null, noteRaw || null].filter(Boolean).join(" · ") || undefined;
-      addDishToOrder(state.addToOrderId, { dishId: d.id, qty: 1, options: opts.length ? opts.map((o) => ({ group: o.group, label: o.label })) : undefined, note });
+      const removed = allergy ? allergy.split(",").map((s) => s.trim()).filter(Boolean) : [];
+      addDishToOrder(state.addToOrderId, { dishId: d.id, qty: 1, options: opts.length ? opts.map((o) => ({ group: o.group, label: o.label })) : undefined, removed: removed.length ? removed : undefined, note: noteRaw || undefined });
       state._opt = null;
       return;
     }
@@ -722,19 +723,26 @@ async function sendOrder() {
   const sendBtn = document.getElementById("sendOrder");
   if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }
   try {
-    // Each line carries its own note (allergy + free note) so the kitchen sees it
-    // on that exact dish; per-item allergies are ALSO rolled into the order-level
-    // allergy list so the loud ⚠ banner still fires.
-    const perItemAllergies = state.cart.flatMap((l) => (l.allergy || "").split(",")).map((s) => s.trim()).filter(Boolean);
-    const allergies = [...(state.allergies || "").split(","), ...perItemAllergies].map((s) => s.trim()).filter(Boolean);
+    // A per-item allergy belongs to THAT dish only, so it travels as that line's
+    // own `removed` list — the kitchen then shows "NO NUTS" on that one dish.
+    // The order-level `allergies` is ONLY the whole-order avoid box (under the
+    // cart): anything there applies to EVERY dish. We used to fold per-item
+    // allergies into that order-level list too, which made them leak onto every
+    // dish on the ticket — that's the bug this fixes (2026-06-17).
+    const splitCsv = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
+    const orderAllergies = splitCsv(state.allergies);
     const r = await api("POST", "/order", {
       table: state.table,
-      items: state.cart.map((l) => ({
-        id: l.id, qty: l.qty,
-        options: l.options ? l.options.map((o) => ({ group: o.group, label: o.label })) : undefined,
-        note: [l.allergy ? `⚠ ${l.allergy}` : null, l.note || null].filter(Boolean).join(" · ") || undefined,
-      })),
-      allergies: [...new Set(allergies)],
+      items: state.cart.map((l) => {
+        const removed = splitCsv(l.allergy);
+        return {
+          id: l.id, qty: l.qty,
+          options: l.options ? l.options.map((o) => ({ group: o.group, label: o.label })) : undefined,
+          removed: removed.length ? removed : undefined,
+          note: l.note || undefined,
+        };
+      }),
+      allergies: [...new Set(orderAllergies)],
       note: state.note.trim() || null,
     });
     if (!r || r.ok !== true) { toast("Rejected: " + ((r && r.reason) || "unknown") + (r && r.item ? ` (${r.item})` : ""), false); return; }
