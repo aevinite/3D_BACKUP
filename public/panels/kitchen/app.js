@@ -57,7 +57,7 @@ const chime = () => {
 // orders carry their dishes in the order's own items JSON).
 const rowsOf = (o) => {
   const dbRows = state.items.filter((i) => i.order_id === o.id);
-  if (dbRows.length) return dbRows.map((r) => ({ id: r.id, title: r.title, qty: r.qty, status: r.status, note: r.note, options: r.options, removed: r.removed, fromDb: true }));
+  if (dbRows.length) return dbRows.map((r) => ({ id: r.id, title: r.title, qty: r.qty, status: r.status, note: r.note, options: r.options, removed: r.removed, added_allergens: r.added_allergens, removed_flag: r.removed_flag, fromDb: true }));
   return (Array.isArray(o.items) ? o.items : []).map((i) => ({ id: null, title: i.title, qty: i.qty || 1, status: i.status || o.status, note: i.note, options: i.options, removed: i.removed, fromDb: false }));
 };
 
@@ -69,11 +69,15 @@ function ticketHtml(o) {
   const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
   const lines = rows.map((r) => {
     const lineRemoved = [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...orderAllergies])];
-    const extras = [
-      ...(Array.isArray(r.options) ? r.options.map((op) => `+ ${op.label || op}`) : []),
-      ...(lineRemoved.length ? [`NO ${lineRemoved.join(", NO ")}`] : []),
-      ...(r.note ? [`✎ ${r.note}`] : []),
-    ];
+    // Allergens render as HTML so a staff-ADDED one carries a green "＋"; options/note
+    // stay escaped text. A removed allergen flags "✎−" on the dish name (built below).
+    const added = new Set((Array.isArray(r.added_allergens) ? r.added_allergens : []).map((x) => String(x).toLowerCase()));
+    const segs = [];
+    if (Array.isArray(r.options) && r.options.length) segs.push(esc(r.options.map((op) => `+ ${op.label || op}`).join(" · ")));
+    if (lineRemoved.length) segs.push(lineRemoved.map((x) => `NO ${esc(String(x).toUpperCase())}${added.has(String(x).toLowerCase()) ? `<sup class="alg-add" title="Added after the order was placed">＋</sup>` : ""}`).join(", "));
+    if (r.note) segs.push(esc(`✎ ${r.note}`));
+    const small = segs.length ? `<small>${segs.join(" · ")}</small>` : "";
+    const remMark = r.removed_flag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : "";
     // Each cooking dish gets a ✓ to mark it READY (cooked). Once ready it shows a
     // pink "ready" tag (waiter still has to carry it out); once the waiter serves
     // it on the tablet it reads "served".
@@ -84,7 +88,7 @@ function ticketHtml(o) {
     const lineCls = r.status === "served" ? "line-done" : r.status === "ready" ? "line-ready" : "";
     return `<div class="line ${lineCls}">
       <span class="qty">${esc(r.qty)}×</span>
-      <span class="ltitle">${esc(r.title)}${extras.length ? `<small>${esc(extras.join(" · "))}</small>` : ""}</span>
+      <span class="ltitle">${esc(r.title)}${remMark}${small}</span>
       ${tick}</div>`;
   }).join("");
   const rows2 = rowsOf(o);
@@ -98,7 +102,7 @@ function ticketHtml(o) {
       ? `<button class="big ready" data-ready="${esc(o.id)}">ALL READY</button>`
       : `<div class="awaiting">✓ ready — waiter serving</div>`);
   return `<div class="ticket st-${esc(o.status)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span>${o.edited_at ? `<span class="edited" title="Edited after the order was placed">✎ EDITED</span>` : ""}<span class="age">${esc(timeAgo(o.created_at))}</span></div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span></div>
     ${lines}${action}</div>`;
 }
 

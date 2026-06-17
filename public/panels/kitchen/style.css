@@ -47,8 +47,10 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .kot { font-size: 24px; font-weight: 900; letter-spacing: 0.5px; }           /* the shoutable number */
 .tbl { font-size: 15px; font-weight: 700; color: var(--blue); }
 .age { margin-left: auto; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
-/* "✎ EDITED" — this ticket was changed after it was sent; re-check it. */
-.thead .edited { align-self: center; font-size: 12px; font-weight: 900; letter-spacing: .03em; color: #f59e0b; background: rgba(245,158,11,.16); border: 1px solid color-mix(in srgb, #f59e0b 45%, transparent); border-radius: 7px; padding: 2px 8px; }
+/* Per-dish edit markers: green "＋" on a staff-ADDED allergen; amber "✎−" on the dish
+   name when an allergen was REMOVED after the order — so the line cook re-checks it. */
+.alg-add { color: #4ade80; font-weight: 900; vertical-align: super; font-size: .8em; }
+.ltitle .alg-removed { color: #f5b042; font-weight: 800; font-size: 13px; margin-left: 4px; white-space: nowrap; }
 .allergy { background: rgba(239,68,68,0.16); border: 1px solid rgba(239,68,68,0.5); color: #fca5a5; font-weight: 800; font-size: 13px; border-radius: 9px; padding: 7px 10px; margin-bottom: 8px; }
 .line { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px dashed var(--line); font-size: 16px; }
 .line:first-of-type { border-top: none; }

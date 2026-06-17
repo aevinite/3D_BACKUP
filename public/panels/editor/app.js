@@ -713,7 +713,12 @@ function itemDetailLine(it, skipRemoved = false) {
   if (Array.isArray(it.options) && it.options.length) parts.push(it.options.map((o) => esc(o.label)).join(" · "));
   // In staff EDIT mode the allergens render as their own removable chips (see
   // dishAllergenEditHtml), so we skip the read-only "NO X" here to avoid showing both.
-  if (!skipRemoved && Array.isArray(it.removed) && it.removed.length) parts.push(`<span class="ol-no">NO ${it.removed.map((r) => esc(r)).join(", NO ").toUpperCase()}</span>`);
+  if (!skipRemoved && Array.isArray(it.removed) && it.removed.length) {
+    // Each allergen renders on its own so a staff-ADDED one can carry a "＋" marker.
+    const added = new Set((Array.isArray(it.added) ? it.added : []).map((x) => String(x).toLowerCase()));
+    const chips = it.removed.map((r) => `NO ${esc(String(r).toUpperCase())}${added.has(String(r).toLowerCase()) ? `<sup class="alg-add" title="Added after the order was placed">＋</sup>` : ""}`).join(", ");
+    parts.push(`<span class="ol-no">${chips}</span>`);
+  }
   if (it.note) parts.push("“" + esc(it.note) + "”");
   return parts.length ? `<div class="ord-line-opts">${parts.join(" · ")}</div>` : "";
 }
@@ -2106,7 +2111,7 @@ function orderItemRows(o) {
   const rows = itemsForOrder(o.id);
   // Carry options/removed/note through so the table panel can show the full
   // customization (what the guest chose, what to leave out) — not just the name.
-  if (rows.length) return rows.map((it) => ({ kind: "session", id: it.id, title: it.title, qty: it.qty, status: it.status, options: it.options, removed: it.removed, note: it.note, price: Number(it.unit_price) || 0 }));
+  if (rows.length) return rows.map((it) => ({ kind: "session", id: it.id, title: it.title, qty: it.qty, status: it.status, options: it.options, removed: it.removed, note: it.note, price: Number(it.unit_price) || 0, added: it.added_allergens, removedFlag: it.removed_flag }));
   return (o.items || []).map((it, idx) => ({ kind: "legacy", orderId: o.id, idx, title: it.title, qty: it.qty, status: it.status || "received", options: it.options, removed: it.removed, note: it.note, price: Number(it.price) || 0 }));
 }
 
@@ -2535,7 +2540,10 @@ function itemRowHtml(row, editing = false) {
   const editRow = canEdit
     ? `<div class="sx-dish-edit-row"><span class="sx-item-edit"><button class="sx-qty" data-qty-dec="${esc(row.id)}" data-qty="${esc(row.qty)}" title="Fewer">−</button><button class="sx-qty" data-qty-inc="${esc(row.id)}" data-qty="${esc(row.qty)}" title="More">＋</button></span><button class="sx-dish-edit-btn" data-edit-dish="${esc(row.id)}" title="Edit allergens & note for this dish">✎ Edit</button></div>`
     : "";
-  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}</span>${itemDetailLine(row)}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${delBtn}</div>${editRow}</div>`;
+  // ✎− on the dish NAME when an allergen was REMOVED after the order was placed
+  // (we flag that something was removed without naming the gone item).
+  const remMark = row.removedFlag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : "";
+  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}${remMark}</span>${itemDetailLine(row)}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${delBtn}</div>${editRow}</div>`;
 }
 
 // openDishEditModal: ONE editor for a single placed dish — toggle which allergens to
@@ -2703,14 +2711,14 @@ function tablePanelParts(t) {
     // dishes share the same row layout as the rest (via itemRowHtml).
     const newBlocks = newOrders.map((o) => {
       const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
-      return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span>${o.edited_at ? `<span class="edited-badge" title="Edited after the order was placed">✎ Edited</span>` : ""}</div>${rows}${orderEditExtras(o)}<div class="tp-order-foot"><button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
+      return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span></div>${rows}${orderEditExtras(o)}<div class="tp-order-foot"><button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
     }).join("");
     // ACCEPTED orders are GROUPED into per-KOT cards (so you can see which ticket each
     // dish came from) but they still settle as ONE bill — no per-order total/pay/discount
     // (owner, 2026-06-14: one merged bill). Per-dish serve/delete live on each row.
     const mergedBlock = liveOrders.map((o) => {
       const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
-      return `<div class="tp-order"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "Order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}${o.edited_at ? `<span class="edited-badge" title="Edited after the order was placed">✎ Edited</span>` : ""}</div>${rows}${orderEditExtras(o)}</div>`;
+      return `<div class="tp-order"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "Order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}</div>${rows}${orderEditExtras(o)}</div>`;
     }).join("");
     const mergedBadge = liveOrders.length > 1 ? `<span class="sx-badge2">${liveOrders.length} merged · one bill</span>` : "";
     // Edit/Done toggle: the gated entry to staff editing. The confirm fires on Edit.
