@@ -41,7 +41,7 @@ const rememberTable = (table: string) => {
 
 // The named screens this gate can show. Think of it as "which page are we on".
 type Step =
-  | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "joining"
+  | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "open_name" | "joining"
   | "nickname" | "waiting_approval" | "denied" | "table_closed" | "net_error" | "request_sent" | "working" | "blocked";
 
 // Remember (per device) that the guest has already seen the "why we check your
@@ -192,10 +192,15 @@ export default function SessionGate() {
   // Functions below are ordered so each only references ones defined ABOVE it —
   // no forward references, no useCallback dependency cycle.
 
-  // ── join as HEAD (no name) — only when the table is OPEN and still empty ────
-  // Become the table's host. No name needed because you're the first one in.
-  // After joining, immediately carry out the queued action.
+  // ── join as HEAD — only when the table is OPEN and still empty ──────────────
+  // Become the table's host. NAME-BEFORE-OPEN (owner, 2026-06-17): the head must
+  // give a name BEFORE the table opens, so the manager + tablet panels show who
+  // opened it (with the 👑 head role) — not a nameless "Head". We ask once here;
+  // submitOpenName() re-enters this with the name set. After joining, the name is
+  // saved session-scoped and we carry out the queued action.
   const joinAsHead = useCallback(async () => {
+    // No name yet → ask for it first, THEN open the table (submitOpenName re-enters).
+    if (!name.trim()) { setNote(""); setStep("open_name"); return; }
     // Double-fire guard: a double-tapped Continue runs the whole flow twice in
     // parallel — the second join would create a ghost "guest" copy of this
     // person (the DB now refuses a second HEAD, but not a stray guest row).
@@ -203,7 +208,8 @@ export default function SessionGate() {
     joining.current = true;
     try {
       const p = pending.current!; setStep("joining");
-      const r = await joinSession(p.table, null, coords.current.lat, coords.current.lng);
+      const headName = name.trim();
+      const r = await joinSession(p.table, headName, coords.current.lat, coords.current.lng);
       if (r.reason === "blocked") { setStep("blocked"); return; }
       if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
       if (r.reason === "no_open_session") { setStep("not_open"); return; } // staff hasn't opened it
@@ -213,10 +219,11 @@ export default function SessionGate() {
       // Save the new session and make this table our default everywhere.
       const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
       sess.current = s; storeSession(s); rememberTable(s.table);
+      setNicknameFor(s.token, headName); // session-scoped name for the head (asked above)
       window.dispatchEvent(new Event("lfh:session-changed")); // wake the owner-approve poller
       await act();
     } finally { joining.current = false; }
-  }, [act]);
+  }, [act, name]);
 
   // While the guest waits for staff to open the table, poll until it opens — then
   // continue automatically (become head & place the queued order, or ask to join).
@@ -420,6 +427,14 @@ export default function SessionGate() {
     rememberTable(t);
     setNote("");
     beginFlow();
+  };
+  // The HEAD typed their name on the "open this table" screen: open the table with
+  // that name attached (so staff see who opened it), then carry on. joinAsHead
+  // re-enters with the name now set and does the actual join.
+  const submitOpenName = () => {
+    if (!name.trim()) { setNote("Add your name so the table shows who opened it."); return; }
+    setNote("");
+    joinAsHead();
   };
   // This runs when the guest taps "Ask to join this table": send their name to
   // the host. If auto-approved, act now; otherwise wait for the host's OK.
@@ -631,6 +646,21 @@ export default function SessionGate() {
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={rescan}>Scan another table</button>
             <button className="sg-btn gold" onClick={doRequestOpen}>Request a waiter</button>
+          </div>
+        </>)}
+
+        {/* First one at an empty open table -> ask the HEAD's name BEFORE opening,
+            so the manager + tablet panels show who opened it (with the head role). */}
+        {step === "open_name" && (<>
+          <div className="sg-badge"><i className="fas fa-crown"></i></div>
+          <div className="sg-kicker">Opening table {pending.current?.table}</div>
+          <h3 className="sg-title">What should we call you?</h3>
+          <p className="sg-sub">You&apos;ll be the head of this table. Add your name so the staff know who opened it — we&apos;ll only ask once for this visit.</p>
+          <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
+            onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitOpenName(); }} autoFocus />
+          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
+          <div className="sg-actions">
+            <button className="sg-btn gold" onClick={submitOpenName}>Open table {pending.current?.table}</button>
           </div>
         </>)}
 
