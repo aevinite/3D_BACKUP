@@ -3435,7 +3435,12 @@ function startOrderWatch() {
   // polling every second. Slow 60s timer is the backup if the WebSocket drops;
   // if realtime didn't load, fall back to a gentle 2s poll.
   if (window.LFH_RT) {
-    LFH_RT.start({ topics: ["ops"], onEvent: () => pollOrders() });
+    // Split by topic: ops churn → cheap pollOrders(); menu content edits (dishes,
+    // categories, filters, settings) → loadAll() so the dish lists refresh live too.
+    LFH_RT.start({ handlers: {
+      ops:  () => pollOrders(),
+      menu: () => loadAll(),
+    }});
     setInterval(pollOrders, 60000); // backup sync
   } else {
     setInterval(pollOrders, 2000); // fallback poll
