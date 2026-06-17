@@ -160,8 +160,12 @@ function renderDishes() {
 // the poll fires can't be eaten by a DOM rebuild.
 function boardSig(d) {
   return JSON.stringify([
-    (d.orders || []).map((o) => [o.id, o.status, o.kot_no]),
-    (d.items || []).map((i) => [i.id, i.status]),
+    // Include allergies (order-wide "avoid") so adding "no nuts" to a running order
+    // repaints the tickets via realtime — not only on a manual refresh.
+    (d.orders || []).map((o) => [o.id, o.status, o.kot_no, o.allergies]),
+    // Include removed/note/options: a per-dish allergen, note or option edit must
+    // also flip the signature, else the fetched change isn't drawn.
+    (d.items || []).map((i) => [i.id, i.status, i.removed, i.note, i.options]),
     (d.dishes || []).map((x) => [x.id, (x.tags || []).includes("sold-out")]),
   ]);
 }

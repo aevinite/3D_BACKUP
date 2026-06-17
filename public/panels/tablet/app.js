@@ -802,11 +802,16 @@ async function sendOrder() {
 // dish's status, so advancing a dish anywhere repaints the tiles + detail).
 function boardSig(d) {
   return JSON.stringify([
-    (d.sessions || []).map((s) => [s.id, s.table_number, s.status, s.bill_no]),
-    (d.orders || []).map((o) => [o.id, o.table_number, o.status, o.total, o.kot_no, o.payment_status]),
-    (d.items || []).map((i) => [i.id, i.order_id, i.status]),
+    // s.auto_approve + s.cart so the auto-approve toggle and the live "Building"
+    // cart repaint via realtime (they're drawn but were missing from the sig).
+    (d.sessions || []).map((s) => [s.id, s.table_number, s.status, s.bill_no, s.auto_approve, s.cart]),
+    // o.discount + o.allergies so a discount or an order-wide allergen edit repaints.
+    (d.orders || []).map((o) => [o.id, o.table_number, o.status, o.total, o.kot_no, o.payment_status, o.discount, o.allergies]),
+    // i.removed/note/options so a per-dish allergen, note or option edit repaints.
+    (d.items || []).map((i) => [i.id, i.order_id, i.status, i.removed, i.note, i.options]),
     (d.calls || []).map((c) => [c.id, c.table_number]),
-    (d.members || []).map((m) => [m.id, m.session_id, m.approved, m.removed]),
+    // m.role/name so make-head (role change) and a renamed guest repaint the party.
+    (d.members || []).map((m) => [m.id, m.session_id, m.approved, m.removed, m.role, m.name]),
     // Pending open/join requests — MUST be in the signature, else a brand-new
     // request (e.g. a guest asking to open a table) arrives via realtime and gets
     // fetched, but the board doesn't repaint because the signature looks unchanged
