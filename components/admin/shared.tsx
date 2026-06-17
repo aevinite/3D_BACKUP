@@ -1,7 +1,7 @@
 "use client";
 // Shared bits for the admin pages: types, formatting, the live-floor grid, the
 // activity feed, and a tiny polling hook. Keeps Overview/Floor/Logs DRY.
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { useRealtime } from "@/lib/useRealtime";
 
 export type Tile = {
@@ -46,18 +46,8 @@ export const timeAgo = (iso: string) => {
   return Math.floor(s / 86400) + "d ago";
 };
 
-// Poll a callback on an interval, cleaning up on unmount. Runs once immediately.
-export function usePoll(fn: () => void, ms: number) {
-  const ref = useRef(fn);
-  ref.current = fn;
-  useEffect(() => {
-    ref.current();
-    const id = setInterval(() => ref.current(), ms);
-    return () => clearInterval(id);
-  }, [ms]);
-}
-
-// Live version of usePoll: refetches on mount, on every ops/menu breadcrumb
+// Live refetch (replaced the old fixed-interval usePoll): refetches on mount, on
+// every ops/menu breadcrumb
 // (instant push), on tab wake, and on useRealtime's own 60s safety net — no fast
 // per-second polling. Use ONE per page (pass a fn that runs all of that page's
 // fetches) so the page opens a single websocket.

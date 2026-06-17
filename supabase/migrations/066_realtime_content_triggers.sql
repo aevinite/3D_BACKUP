@@ -35,6 +35,9 @@ BEGIN
     SELECT s.table_number INTO tn FROM sessions s WHERE s.id = r.session_id;
   ELSIF TG_TABLE_NAME = 'blocklist' THEN
     k := 'block'; eid := NULL; tn := NULL;             -- ops topic, staff-only
+  ELSIF TG_TABLE_NAME = 'staff_actions' THEN
+    k := 'action'; eid := r.id::text; tn := NULL;      -- ops topic: drives the admin activity feed
+                                                       -- (login/logout/profile/user edits touch no other ops table)
   ELSIF TG_TABLE_NAME = 'menu_items' THEN
     k := 'menu_item'; eid := NULL; tn := NULL; topic_name := 'menu';
   ELSIF TG_TABLE_NAME = 'categories' THEN
@@ -85,6 +88,14 @@ CREATE TRIGGER rt_emit_settings AFTER INSERT OR UPDATE OR DELETE ON settings
 -- Blocklist → 'ops' topic (staff-only).
 DROP TRIGGER IF EXISTS rt_emit_blocklist ON blocklist;
 CREATE TRIGGER rt_emit_blocklist AFTER INSERT OR UPDATE OR DELETE ON blocklist
+  FOR EACH ROW EXECUTE FUNCTION lfh_rt_emit();
+
+-- Staff actions (the oplog) → 'ops' topic, so the admin activity feed updates live
+-- for actions that touch no other ops table (staff login/logout, profile setup,
+-- user create/edit). Actions that DO touch orders/sessions already emit; debounce
+-- coalesces the pair into one refetch.
+DROP TRIGGER IF EXISTS rt_emit_staff_actions ON staff_actions;
+CREATE TRIGGER rt_emit_staff_actions AFTER INSERT OR UPDATE OR DELETE ON staff_actions
   FOR EACH ROW EXECUTE FUNCTION lfh_rt_emit();
 
 NOTIFY pgrst, 'reload schema';
