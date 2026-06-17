@@ -152,7 +152,7 @@ const reqsOf = (t) => (state.data.requests || []).filter((r) => String(r.table_n
 // (legacy / no per-dish id) exactly like the kitchen does.
 function dishRowsOf(o) {
   const db = (state.data.items || []).filter((i) => i.order_id === o.id);
-  if (db.length) return db.map((r) => ({ id: r.id, title: r.title, qty: r.qty || 1, status: r.status || "received", options: r.options, removed: r.removed, note: r.note, price: Number(r.unit_price) || 0, fromDb: true }));
+  if (db.length) return db.map((r) => ({ id: r.id, title: r.title, qty: r.qty || 1, status: r.status || "received", options: r.options, removed: r.removed, note: r.note, price: Number(r.unit_price) || 0, added_allergens: r.added_allergens, removed_flag: r.removed_flag, fromDb: true }));
   const js = Array.isArray(o.items) ? o.items : [];
   return js.map((r) => ({ id: null, title: r.title || r.name, qty: r.qty || 1, status: r.status || o.status || "received", options: r.options, removed: r.removed, note: r.note, price: Number(r.price) || 0, fromDb: false }));
 }
@@ -239,7 +239,7 @@ function renderFloor() {
       body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}${quick}`;
     }
     html += `<button class="tile t-${st.cls} ${payCls} ${called ? "called" : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
-      <span class="tbadges">${called ? `<em class="b-call">🔔</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}${a.os.some((o) => o.edited_at) ? `<em class="b-edit" title="An order was edited after it was placed">✎</em>` : ""}</span>
+      <span class="tbadges">${called ? `<em class="b-call">🔔</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
       <span class="tnum">${i}</span>
       <span class="tlabel">${st.label}</span>
       ${body}
@@ -309,7 +309,10 @@ function renderPanel() {
     const opt = (r.options && r.options.length) ? `<div class="iopt">${esc(r.options.map((x) => x.label || x).join(" · "))}</div>` : "";
     const orderAllergies = Array.isArray(o.allergies) ? o.allergies : [];
     const lineRem = [...new Set([...(Array.isArray(r.removed) ? r.removed : []), ...orderAllergies])];
-    const rem = lineRem.length ? `<div class="irem">no ${esc(lineRem.join(", "))}</div>` : "";
+    // A staff-ADDED allergen carries a green "＋"; a removed one flags "✎−" on the name.
+    const addedSet = new Set((Array.isArray(r.added_allergens) ? r.added_allergens : []).map((x) => String(x).toLowerCase()));
+    const rem = lineRem.length ? `<div class="irem">no ${lineRem.map((x) => `${esc(String(x))}${addedSet.has(String(x).toLowerCase()) ? `<sup class="alg-add" title="Added after the order was placed">＋</sup>` : ""}`).join(", ")}</div>` : "";
+    const remMark = r.removed_flag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : "";
     const note = r.note ? `<div class="iopt">“${esc(r.note)}”</div>` : "";
     const priceTag = r.price > 0 ? `<span class="iprice">${inr(r.price * r.qty)}</span>` : "";
     const statusBadge = `<span class="ist ${r.status}">${STATUS_WORD[r.status] || r.status}</span>`;
@@ -325,7 +328,7 @@ function renderPanel() {
     const editCtl = (editing && r.fromDb && r.status !== "served")
       ? `<span class="iedit"><button class="qbtn" data-qty-dec="${esc(r.id)}" data-qty="${r.qty}" title="Fewer">−</button><button class="qbtn" data-qty-inc="${esc(r.id)}" data-qty="${r.qty}" title="More">＋</button><button class="qbtn" data-note-item="${esc(r.id)}" title="Edit note">✎</button></span>`
       : "";
-    return `<div class="iline${editing ? " editing" : ""}"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}${editCtl}${delBtn}</div>`;
+    return `<div class="iline${editing ? " editing" : ""}"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${remMark}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}${editCtl}${delBtn}</div>`;
   };
   // Per-order staff controls. NOT editing: an "✎ Edit" button (opens the gated edit
   // mode) + Delete order. EDITING: allergen toggle chips ("avoid in all dishes"),
@@ -361,11 +364,10 @@ function renderPanel() {
     const when = o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
     const viaApp = !!o.member_id;
     const rows = dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("");
-    return `<div class="ord"><div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">New order${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}${o.edited_at ? `<span class="edited">✎ Edited</span>` : ""}</span></div>${rows || `<div class="iline muted">No items.</div>`}${orderControlsHtml(o)}<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
+    return `<div class="ord"><div class="ordh"><span class="left"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="when">New order${when ? ` · ${when}` : ""}</span>${viaApp ? `<span class="viaapp">via app 📱</span>` : ""}</span></div>${rows || `<div class="iline muted">No items.</div>`}${orderControlsHtml(o)}<button class="accept" data-accept="${esc(o.id)}">✓ Accept</button></div>`;
   }).join("");
   const mergedDishes = liveOrdersT.map((o, i) => (i > 0 ? `<div class="ord-sep" aria-hidden="true"></div>` : "") + dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("") + orderControlsHtml(o)).join("");
-  const mergedEdited = liveOrdersT.some((o) => o.edited_at);
-  const mergedCard = liveOrdersT.length ? `<div class="ord">${mergedEdited ? `<div class="ordh"><span class="left"><span class="edited">✎ Edited</span></span></div>` : ""}${mergedDishes}</div>` : "";
+  const mergedCard = liveOrdersT.length ? `<div class="ord">${mergedDishes}</div>` : "";
   const orderCards = newCards + mergedCard;
 
   const callRows = calls.map((c) => `<div class="row"><span>🔔 ${esc(c.note || "Waiter call")}</span><button class="btn small primary" data-attend="${esc(c.id)}">Done</button></div>`).join("");
