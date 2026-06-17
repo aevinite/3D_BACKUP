@@ -39,6 +39,18 @@ export type FeatureMap = Record<FeatureKey, boolean>;
 let cached: FeatureMap | null = null;
 let inflight: Promise<FeatureMap> | null = null;
 
+// Live subscribers: every mounted useFeatures() registers its setter here so a
+// refreshFeatures() (fired by a realtime 'settings' breadcrumb) updates them all.
+const subscribers = new Set<(f: FeatureMap) => void>();
+
+// Re-fetch settings and push the new switches to every live component. Called by
+// the guest menu's useRealtime() when the owner toggles a feature in admin.
+export async function refreshFeatures(): Promise<void> {
+  cached = null; inflight = null;            // bust the per-load cache, force a real fetch
+  const fresh = await getFeatures();
+  subscribers.forEach((cb) => cb(fresh));
+}
+
 // The switches a device last saw, kept in localStorage so a RETURNING guest's
 // very first paint already reflects the real on/off state — no flash of a
 // disabled feature, and (for 3D) no wasted download before the fetch lands.
@@ -86,7 +98,9 @@ export function useFeatures(): FeatureMap {
     let alive = true;
     if (!cached) { const saved = readSaved(); if (saved && alive) setF(saved); }
     getFeatures().then((v) => { if (alive) setF(v); });
-    return () => { alive = false; };
+    // Stay subscribed for live toggles (refreshFeatures notifies this setter).
+    subscribers.add(setF);
+    return () => { alive = false; subscribers.delete(setF); };
   }, []);
   return f;
 }

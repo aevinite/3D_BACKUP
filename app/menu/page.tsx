@@ -31,7 +31,10 @@ import { useTranslation, useLanguage } from "@/lib/i18n";
 // Remembers the table number scanned from a QR code, for the cart/waiter.
 import { setScannedTable } from "@/lib/table";
 // Per-restaurant feature switches (search/favorites/3D/scroll-spy on-off).
-import { useFeatures } from "@/lib/features";
+import { useFeatures, refreshFeatures } from "@/lib/features";
+// Live updates: refetch the menu the instant the owner edits a dish / toggles a
+// feature, without yanking the guest around.
+import { useRealtime } from "@/lib/useRealtime";
 
 // The card list works with the full MenuItem shape from the data layer.
 type FoodItem = MenuItem;
@@ -153,23 +156,30 @@ export default function MenuPage() {
     } catch { setFavorites([]); }
   };
 
+  // Re-fetch dishes + categories and store them. Used on first mount AND by the
+  // live updater below. The render keys dishes by id, so re-setting this state
+  // doesn't jump the scroll — a sold-out dish just flips its badge in place.
+  const refreshMenu = () => {
+    getMenuItems()
+      .then((items) => setMenuData(items))
+      .catch((err) => console.error("Error loading menu data:", err));
+    // The menu is ALWAYS the full "all" view now — tapping a category just scrolls
+    // to its section, it never narrows. So there's no per-category state to restore.
+    getCategories()
+      .then((cats) => setDbCategories(cats))
+      .catch((err) => console.error("Error loading categories:", err));
+  };
+
+  // Live: when the owner edits the menu (dish/price/sold-out/category) or flips a
+  // feature in admin, refetch gently within ~1s. Guests subscribe to the 'menu'
+  // topic only — never the staff order firehose.
+  useRealtime({ menu: () => { refreshMenu(); refreshFeatures(); } });
+
   // The main "load everything" effect — runs once when the page first appears.
   // It fetches the dishes and categories, restores where you last were, and
   // starts listening for favorite changes.
   useEffect(() => {
-    // Fetch all dishes from the database, then store them.
-    getMenuItems()
-      .then((items) => setMenuData(items))
-      .catch((err) => console.error("Error loading menu data:", err));
-    // Fetch all categories from the database.
-    getCategories()
-      .then((cats) => {
-        setDbCategories(cats);
-        // The menu is ALWAYS the full "all" view now — tapping a category just
-        // scrolls to its section, it never narrows to a single category. So
-        // there's no per-category state to restore; we just stay on "all".
-      })
-      .catch((err) => console.error("Error loading categories:", err));
+    refreshMenu();
 
     // Restore the rest of the browse state so Back from a dish lands you exactly
     // where you left: view mode, sort, diet, search. (Category is handled above.)
