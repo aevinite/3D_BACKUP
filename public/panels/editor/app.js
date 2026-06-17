@@ -184,8 +184,20 @@ async function api(method, path, body) {
 // loadAll: fetch everything from the server in one go (the /all endpoint), store
 // it in state.data, flip the little "connected" indicator green, then redraw the
 // left-hand list. Called on startup and after every save.
+// Two rising-ticket guards stop an OLDER fetch from overwriting a NEWER one when
+// several callers fire refreshes at once (a click, the realtime onEvent, a timer).
+// loadAll() pulls the FULL state (menu + dishes + the whole live board), so it owns
+// its OWN ticket — a 1-second order poll must never cancel a menu save's reload,
+// which would leave the owner's just-saved dish looking stale. The live-board
+// loaders (loadOrders / loadSessions / pollOrders) all rewrite the SAME
+// orders/calls/board, so they share one ticket and the newest of THEM wins.
+let allSeq = 0;
+let dataSeq = 0;
 async function loadAll() {
-  state.data = await api("GET", "/all");
+  const seq = ++allSeq;
+  const data = await api("GET", "/all");
+  if (seq !== allSeq) return; // a newer loadAll started — drop this stale response
+  state.data = data;
   $("#conn").textContent = "connected";
   $("#conn").className = "conn ok";
   renderList();
@@ -1853,8 +1865,10 @@ async function loadSessions(fromPoll) {
   // already refreshed state.board/orders/calls, so we just render from it (no
   // double round-trip).
   if (!fromPoll) {
+    const seq = ++dataSeq;
     try {
       let [board, orders, calls] = await Promise.all([api("GET", "/sessions"), api("GET", "/orders"), api("GET", "/calls")]);
+      if (seq !== dataSeq) return; // a newer refresh started — drop this stale snapshot
       // Same shields the 1-second poll uses (see pollOrders). One action's
       // refresh must not wipe ANOTHER action's optimistic state while that
       // save is still travelling — e.g. opening tables 1, 2, 3 quickly:
@@ -3307,11 +3321,16 @@ function setTab(tab) {
 // loadOrders: fetch the latest orders (and waiter calls) and redraw if we're on
 // the Orders tab. Used by the Refresh button and after any order change.
 async function loadOrders() {
+  const seq = ++dataSeq;
   try {
-    state.data.orders = await api("GET", "/orders");
+    const orders = await api("GET", "/orders");
+    if (seq !== dataSeq) return; // a newer refresh started — drop this stale response
+    state.data.orders = orders;
     lastOrderCount = state.data.orders.length;
     try {
-      state.data.calls = await api("GET", "/calls");
+      const calls = await api("GET", "/calls");
+      if (seq !== dataSeq) return; // superseded mid-fetch
+      state.data.calls = calls;
       lastCallCount = (state.data.calls || []).filter((c) => !c.resolved).length;
     } catch {}
     if (state.tab === "orders") { renderList(); renderEditor(); } // sidebar counts + cards
@@ -3396,12 +3415,14 @@ function playOrderChime() {
 // and — by comparing the new counts to the last counts — chimes + toasts + badges
 // whenever something NEW arrives, no matter which tab the owner is currently on.
 async function pollOrders() {
+  const seq = ++dataSeq;
   let orders, calls, board;
   try {
     orders = await api("GET", "/orders");
   } catch {
     return; // network blip — try again next tick
   }
+  if (seq !== dataSeq) return; // a newer loader started — this poll snapshot is stale
   // Merge, don't clobber: keep the LOCAL copy of any order whose save is
   // still in flight, and keep optimistically-deleted rows gone — otherwise
   // this poll would flicker fresh clicks back to their old state.
@@ -3409,12 +3430,13 @@ async function pollOrders() {
     .filter((o) => !pendingDeletes.has(o.id))
     .map((o) => (pendingOrderOps.has(o.id) ? ((state.data.orders || []).find((x) => x.id === o.id) || o) : o));
   state.data.orders = orders;
-  try { calls = await api("GET", "/calls"); state.data.calls = calls; } catch { calls = state.data.calls || []; }
+  try { calls = await api("GET", "/calls"); if (seq !== dataSeq) return; state.data.calls = calls; } catch { calls = state.data.calls || []; }
   // The session board (sessions + members + the requests queue + blocklist) is now
   // refreshed on every tick too, so the live cart and the request queue stay fresh
   // and we can chime for new requests from ANY tab.
   try {
     board = await api("GET", "/sessions");
+    if (seq !== dataSeq) return; // superseded by a newer loader — drop this board snapshot
     // Don't clobber the board while a floor action's save is still in flight.
     if (!floorOpsInFlight) state.board = board; else board = state.board || {};
     state.boardLoaded = true; // a poll fetch counts too: we now know the real floor

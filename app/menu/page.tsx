@@ -77,6 +77,10 @@ export default function MenuPage() {
   const [closedCats, setClosedCats] = useState<string[]>([]); // "All" view: which dropdowns the guest manually FOLDED (default: none — everything starts open)
   const [spyCat, setSpyCat] = useState(""); // scroll-spy: which category's section is under the header right now (drives the auto-shifting chips)
   const restoredRef = useRef(false); // skip persisting UI state until after the restore
+  // Monotonic request counter so an OLDER refreshMenu() response can never overwrite
+  // a NEWER one. realtime nudges can fire refreshMenu() while a previous fetch is
+  // still in flight; without this an out-of-order reply would clobber fresh data.
+  const menuReqRef = useRef(0);
   // Only show skeletons if loading is actually slow — avoids a flash on fast /
   // cached loads where the data is ready almost immediately.
   const [showSkeleton, setShowSkeleton] = useState(false);
@@ -160,13 +164,14 @@ export default function MenuPage() {
   // live updater below. The render keys dishes by id, so re-setting this state
   // doesn't jump the scroll — a sold-out dish just flips its badge in place.
   const refreshMenu = () => {
+    const seq = ++menuReqRef.current; // tag this refresh; only the latest may apply
     getMenuItems()
-      .then((items) => setMenuData(items))
+      .then((items) => { if (seq === menuReqRef.current) setMenuData(items); }) // drop stale replies
       .catch((err) => console.error("Error loading menu data:", err));
     // The menu is ALWAYS the full "all" view now — tapping a category just scrolls
     // to its section, it never narrows. So there's no per-category state to restore.
     getCategories()
-      .then((cats) => setDbCategories(cats))
+      .then((cats) => { if (seq === menuReqRef.current) setDbCategories(cats); }) // drop stale replies
       .catch((err) => console.error("Error loading categories:", err));
   };
 

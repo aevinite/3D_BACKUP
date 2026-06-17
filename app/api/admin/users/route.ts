@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const { data, error } = await sb
     .from("staff_users")
-    .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset")
+    .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset, can_self_set_pin")
     .order("created_at", { ascending: true });
   if (error) return bad(error.message, 500);
   // Strip the PIN hash to a boolean — never ship hashes to the browser.
@@ -112,11 +112,30 @@ export async function PATCH(req: NextRequest) {
     return ok({ ok: true });
   }
   if (action === "set_access") {
-    // Grant/revoke the user's ability to change their OWN password. Admin can
-    // always reset it regardless.
-    const can = !!body?.can_self_reset;
-    await sb.from("staff_users").update({ can_self_reset: can }).eq("id", id);
-    await logAction("admin", "user_set_access", { actor: "admin", detail: `${can ? "granted" : "revoked"} self password-reset for "${u.username}" · id ${id}` });
+    // Grant/revoke the user's ability to change their OWN password and/or PIN.
+    // Each flag is independent and only touched when present in the body. Admin can
+    // always reset the password / set the PIN regardless of these.
+    const patch: Record<string, unknown> = {};
+    const notes: string[] = [];
+    if (body?.can_self_reset !== undefined) { patch.can_self_reset = !!body.can_self_reset; notes.push(`${body.can_self_reset ? "granted" : "revoked"} self password-reset`); }
+    if (body?.can_self_set_pin !== undefined) { patch.can_self_set_pin = !!body.can_self_set_pin; notes.push(`${body.can_self_set_pin ? "granted" : "revoked"} self PIN-change`); }
+    if (!Object.keys(patch).length) return bad("Nothing to change.");
+    await sb.from("staff_users").update(patch).eq("id", id);
+    await logAction("admin", "user_set_access", { actor: "admin", detail: `${notes.join(" & ")} for "${u.username}" · id ${id}` });
+    return ok({ ok: true });
+  }
+  if (action === "set_pin") {
+    // Admin sets or clears a user's PIN directly (e.g. a manager who can't self-set
+    // it). Stored hashed, never returned. clear=true removes the PIN.
+    if (body?.clear === true) {
+      await sb.from("staff_users").update({ pin_hash: null }).eq("id", id);
+      await logAction("admin", "user_set_pin", { actor: "admin", detail: `cleared PIN for "${u.username}" · id ${id}` });
+      return ok({ ok: true });
+    }
+    const pin = String(body?.pin || "").trim();
+    if (!/^\d{4,8}$/.test(pin)) return bad("PIN must be 4–8 digits.");
+    await sb.from("staff_users").update({ pin_hash: await hashSecret(pin) }).eq("id", id);
+    await logAction("admin", "user_set_pin", { actor: "admin", detail: `${u.pin_hash ? "changed" : "set"} PIN for "${u.username}" · id ${id}` });
     return ok({ ok: true });
   }
   if (action === "edit") {

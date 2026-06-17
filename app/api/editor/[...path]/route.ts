@@ -12,6 +12,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole } from "@/lib/userAuth";
+import { closeSession } from "@/lib/sessionClose";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -23,6 +24,13 @@ async function gate(req: NextRequest): Promise<NextResponse | null> {
 }
 
 const nowIso = () => new Date().toISOString();
+// Mark an order as EDITED after it was placed → drives the persistent "✎ Edited"
+// badge on the kitchen/tablet/manager ticket so staff re-check what changed.
+// Best-effort: a stamp failure must never fail the edit itself.
+const stampEdited = async (orderId?: string | null) => {
+  if (!orderId) return;
+  try { await sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); } catch {}
+};
 // Unwrap a Supabase { data, error } reply — throw on error so the catch turns it
 // into a clean 500 (mirrors the editor server's `must`).
 
@@ -31,14 +39,6 @@ const must = (r: any) => {
   return r.data;
 };
 
-// Mark an order as EDITED after it was placed → drives the persistent "✎ Edited"
-// badge on the kitchen/tablet/manager ticket so staff re-check what changed.
-// Best-effort: a stamp failure must never fail the edit itself.
-const stampEdited = async (orderId?: string | null) => {
-  if (!orderId) return;
-  try { await sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); } catch {}
-};
- 
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 
@@ -273,7 +273,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
        
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).select());
+      // No .select() here: the updated row was fetched-back then discarded — we re-read the
+      // full row below anyway, so the extra round-trip was dead. `must` still checks the error.
+      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
       await logAction("editor", "order_accept", { order_id: b, device_id: dev });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()) || null);
@@ -282,7 +284,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
        
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
-      must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).select());
+      // No .select(): the fetched-back row was discarded; we re-read the full row below.
+      must(await sb.from("orders").update({ items, status: "served" }).eq("id", b));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).neq("status", "served");
       await logAction("editor", "order_serve", { order_id: b, device_id: dev });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()) || null);
@@ -326,34 +329,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
 
     // sessions/:id/close | auto-approve | shift
+    // Uses the SHARED closeSession so the manager's rule is identical to the tablet's
+    // (blocked on unpaid OR still-cooking unless force). The manager needs no PIN —
+    // they're already the manager; force=true is their "close anyway" override.
     if (a === "sessions" && c === "close") {
-      // Block closing while money is still owed — unless an explicit override.
-      const owed0 = must(await sb.from("orders").select("id")
-        .eq("session_id", b).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid").limit(1));
-      if (owed0.length && !(body && body.force === true)) {
-        return err("This table still owes money — settle the bill, or close anyway.", 409);
-      }
-      const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", b).select());
-      const sess = row[0];
-      if (sess) {
-        // Scope cleanup to THIS session (NOT the bare table number, which could
-        // hit a different party that later sat at the same table). Any money still
-        // owed at close is LOGGED so it's never silently erased; un-served unpaid
-        // work is cancelled (the meal's over); everything else is archived as the
-        // bill record.
-        const owedRows = must(await sb.from("orders").select("total,discount")
-          .eq("session_id", b).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid"));
-        if (owedRows.length) {
-          const owed = owedRows.reduce((s: number, o: any) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
-          await logAction("editor", "close_unpaid", { table_number: sess.table_number ?? null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${owed} owed`, device_id: dev });
-        }
-        must(await sb.from("orders").update({ status: "cancelled", archived: true })
-          .eq("session_id", b).eq("archived", false).neq("payment_status", "paid").in("status", ["received", "preparing"]).select());
-        must(await sb.from("orders").update({ archived: true })
-          .eq("session_id", b).eq("archived", false).select());
-      }
-      await logAction("editor", "table_close", { table_number: sess?.table_number ?? null, device_id: dev });
-      return ok(sess || null);
+      const result = await closeSession(b, { force: !!(body && body.force === true) }, { panel: "editor", deviceId: dev });
+      if (!result.ok) return err(result.message, result.status);
+      return ok(result.session);
     }
     if (a === "sessions" && c === "auto-approve") {
       const value = !!(body && body.value === true);

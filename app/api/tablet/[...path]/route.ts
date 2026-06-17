@@ -8,6 +8,9 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole } from "@/lib/userAuth";
+import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
+import { closeSession } from "@/lib/sessionClose";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +19,20 @@ async function gate(req: NextRequest): Promise<NextResponse | null> {
   const g = await requireRole(req, "tablet");
   return g.ok ? null : NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
 }
+
+// Manager-PIN gate for the tablet's sensitive actions (ban, discount, and the
+// unpaid/cooking close|restart override). The admin super-user bypasses it; and
+// until ANY active manager has a PIN we stay open (bootstrap) so a waiter is never
+// locked out before setup. Returns { allow:true, managerName? } or a 403 to relay.
+type PinGate = { allow: true; managerName?: string } | { allow: false; resp: NextResponse };
+async function managerPinGate(req: NextRequest, body: any): Promise<PinGate> {
+  if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { allow: true, managerName: "admin" };
+  if (!(await anyManagerHasPin())) return { allow: true }; // no manager PIN set yet → open
+  const check = await verifyManagerPin(body?.managerPin || "");
+  if (!check.ok) return { allow: false, resp: NextResponse.json({ error: "A manager PIN is required for this.", needPin: true }, { status: 403 }) };
+  return { allow: true, managerName: check.managerName };
+}
+const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName !== "admin" ? ` (by ${g.managerName})` : "");
 
 const nowIso = () => new Date().toISOString();
  
@@ -167,6 +184,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // the editor's banMember, but done server-side in one call: we look up the
     // member's phone here (the editor passes it from its row). (owner, 2026-06-17)
     if (a === "members" && c === "ban") {
+      const g = await managerPinGate(req, body); if (!g.allow) return g.resp; // manager PIN required
       const found = must(await sb.from("session_members").select("id,phone").eq("id", b).limit(1));
       const m = found[0];
       if (!m) return err("member not found", 404);
@@ -174,7 +192,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       must(await sb.from("blocklist").insert({ member_id: b, phone, reason: "banned from tablet" }).select());
       if (phone) await sb.from("customers").upsert({ phone, blocked: true }, { onConflict: "phone" });
       const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).select());
-      await logAction("tablet", "member_ban", { detail: phone ? `banned ${phone}` : "banned", device_id: dev });
+      await logAction("tablet", "member_ban", { detail: (phone ? `banned ${phone}` : "banned") + byNote(g), device_id: dev });
       return ok(row[0] || null);
     }
 
@@ -190,12 +208,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/:id/discount — reduce ONE order's bill (comp/loyalty/fix). Clamped to
     // 0..order total, money-safe. Mirrors the editor endpoint. (owner, 2026-06-17)
     if (a === "orders" && c === "discount") {
+      const g = await managerPinGate(req, body); if (!g.allow) return g.resp; // manager PIN required
       const cur = must(await sb.from("orders").select("total").eq("id", b).single());
       const raw = Number(body && body.amount);
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number(cur.total) || 0) : 0;
       const note = String((body && body.note) || "").slice(0, 200) || null;
       const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).select());
-      await logAction("tablet", "order_discount", { order_id: b, detail: `₹${amount}`, device_id: dev });
+      await logAction("tablet", "order_discount", { order_id: b, detail: `₹${amount}` + byNote(g), device_id: dev });
       return ok(row[0] || null);
     }
 
@@ -209,10 +228,18 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const openSess = (await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open")
         .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+      // A restart needs a manager PIN only when there's an order GOING ON or an
+      // UNPAID bill to clear — an empty table can be restarted freely.
+      let peek = sb.from("orders").select("status,payment_status").neq("status", "cancelled").eq("archived", false);
+      peek = openSess ? peek.eq("session_id", openSess.id) : peek.eq("table_number", t);
+      const pending = must(await peek);
+      const needsPin = pending.some((o: any) => o.status === "received" || o.status === "preparing" || o.payment_status !== "paid");
+      let by = "";
+      if (needsPin) { const g = await managerPinGate(req, body); if (!g.allow) return g.resp; by = byNote(g); }
       let q = sb.from("orders").update({ status: "served", archived: true }).neq("status", "cancelled").eq("archived", false);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
       const rows = must(await q.select());
-      await logAction("tablet", "table_restart", { table_number: t, detail: `${rows.length} order(s) cleared`, device_id: dev });
+      await logAction("tablet", "table_restart", { table_number: t, detail: `${rows.length} order(s) cleared` + by, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
 
@@ -254,7 +281,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "accept") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
       const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-      must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).select());
+      // No .select(): the fetched-back row was discarded; we re-read the full row below.
+      must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
       await logAction("tablet", "order_accept", { order_id: b, device_id: dev });
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
@@ -378,31 +406,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true, count: rows.length });
     }
 
-    // sessions/:id/close — free the table (end the dining session). Mirrors the
-    // editor's close: mark the session closed; the floor immediately shows it free.
+    // sessions/:id/close — free the table (end the dining session). Uses the SHARED
+    // closeSession so the rule is identical to the manager's. On the tablet the
+    // "close anyway" override (force) for an unpaid/cooking table needs a manager PIN.
     if (a === "sessions" && c === "close") {
-      // Block closing while money is still owed — unless an explicit override.
-      const owed0 = must(await sb.from("orders").select("id")
-        .eq("session_id", b).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid").limit(1));
-      if (owed0.length && !(body && body.force === true)) {
-        return err("This table still owes money — take payment, or close anyway.", 409);
-      }
-      const sess = (must(await sb.from("sessions").select("table_number").eq("id", b).limit(1)))[0];
-      const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", b).select());
-      // Log any unpaid money, then clean up THIS session's orders (mirrors the
-      // editor close): cancel un-served unpaid work, archive the rest — so a
-      // closed table never leaves phantom unarchived orders behind.
-      const owedRows = must(await sb.from("orders").select("total,discount")
-        .eq("session_id", b).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid"));
-      if (owedRows.length) {
-        const owed = owedRows.reduce((s: number, o: any) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
-        await logAction("tablet", "close_unpaid", { table_number: sess ? sess.table_number : null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${owed} owed`, device_id: dev });
-      }
-      await sb.from("orders").update({ status: "cancelled", archived: true })
-        .eq("session_id", b).eq("archived", false).neq("payment_status", "paid").in("status", ["received", "preparing"]);
-      await sb.from("orders").update({ archived: true }).eq("session_id", b).eq("archived", false);
-      await logAction("tablet", "table_close", { table_number: sess ? sess.table_number : null, device_id: dev });
-      return ok(row[0] || null);
+      const force = !!(body && body.force === true);
+      if (force) { const g = await managerPinGate(req, body); if (!g.allow) return g.resp; } // override → manager PIN
+      const result = await closeSession(b, { force }, { panel: "tablet", deviceId: dev });
+      if (!result.ok) return err(result.message, result.status);
+      return ok(result.session);
     }
 
     // sessions/open

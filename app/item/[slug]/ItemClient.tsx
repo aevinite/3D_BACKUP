@@ -245,8 +245,13 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
   // Fetch the dishes and find the one matching this page's slug.
   // Re-runs if the slug changes (e.g. navigating to a different dish).
   useEffect(() => {
+    // CONCURRENCY GUARD: navigating dish→dish fast re-fires this fetch before the
+    // previous one resolves; without this flag a slow earlier response could land
+    // last and show the WRONG dish (older response clobbering the newer slug).
+    let cancelled = false;
     getMenuItems()
       .then((items) => {
+        if (cancelled) return; // a newer slug's fetch superseded this one
         // Compare ignoring upper/lowercase so "Croissant" and "croissant" match.
         const normalizedSlug = (slug || "").toLowerCase();
         const found = items.find(
@@ -257,9 +262,9 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
         setItem(found || null);             // this dish (or null if not found)
         // Real reviews load separately (getMenuItems carries only the rating
         // average); a failure here just leaves the list empty.
-        if (found) getItemReviews(found.slug).then(setLocalReviews).catch(() => {});
+        if (found) getItemReviews(found.slug).then((r) => { if (!cancelled) setLocalReviews(r); }).catch(() => {});
         setLoading(false);                  // done loading
-        setTimeout(() => setImageLoaded(true), 50); // trigger the photo fade-in
+        setTimeout(() => { if (!cancelled) setImageLoaded(true); }, 50); // trigger the photo fade-in
 
         // Load favorite state
         try {
@@ -273,10 +278,12 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
         }
       })
       .catch((err) => {
+        if (cancelled) return;
         // If the fetch failed, log it and stop the spinner.
         console.error(err);
         setLoading(false);
       });
+    return () => { cancelled = true; };
   }, [slug]);
 
   // Background preload: this dish's model first, then the next & previous dishes

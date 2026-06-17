@@ -96,6 +96,11 @@
     const roleLabel = { manager: "Manager", editor: "Manager", kitchen: "Kitchen", tablet: "Tablet (waiter)" }[profile.role] || profile.role;
     const accent = ROLE_COLOR[profile.role] || "#9ca3af";
     const displayName = profile.name || profile.username;
+    // PINs are a MANAGER concept (they unlock the tablet's gated actions). The
+    // maintenance switch is manager-only too. A manager who is allowed to self-set
+    // a PIN and doesn't have one yet must set it during first-login setup.
+    const isManager = profile.role === "manager" || profile.role === "editor";
+    const pinRequiredAtSetup = !!(profile.needsProfile && isManager && profile.canSelfSetPin && !profile.hasPin);
 
     // — header: avatar + name + role chip (no "username" shown anywhere) —
     const closeBtn = el("button", { class: "lfh-bt", style: { background: "#243049", padding: "8px 12px" }, onClick: closeDrawer, "aria-label": "Close", html: "✕" });
@@ -124,17 +129,28 @@
     // — details (name / phone) — name doubles as the sign-in name —
     const nameIn = el("input", { class: "lfh-in", value: profile.name || "", placeholder: "Your name" });
     const phoneIn = el("input", { class: "lfh-in", value: profile.phone || "", placeholder: "Your phone number", inputmode: "tel" });
+    // Managers set their PIN as part of first-login setup (only when required).
+    const setupPinIn = pinRequiredAtSetup
+      ? el("input", { class: "lfh-in", type: "password", placeholder: "4–8 digit manager PIN", inputmode: "numeric", maxlength: "8" })
+      : null;
     const detMsg = el("div", { class: "lfh-msg" });
     const saveDet = el("button", { class: "lfh-bt", style: { background: "#22c55e", width: "100%" }, onClick: async () => {
       const name = nameIn.value.trim(), phone = phoneIn.value.trim();
       if (!name || !phone) { setMsg(detMsg, "Both your name and phone are required.", false); return; }
+      const payload = { name, phone };
+      if (setupPinIn) {
+        const pin = setupPinIn.value.trim();
+        if (!/^\d{4,8}$/.test(pin)) { setMsg(detMsg, "Set a 4–8 digit manager PIN to continue.", false); return; }
+        payload.pin = pin;
+      }
       saveDet.disabled = true;
       try {
-        const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, phone }) });
+        const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
         const j = await r.json();
         if (!r.ok) { setMsg(detMsg, j.error || "Could not save.", false); return; }
         const wasSetup = profile.needsProfile;
         profile.name = name; profile.phone = phone; profile.needsProfile = false;
+        if (setupPinIn) profile.hasPin = true;
         setMsg(detMsg, wasSetup ? "All set — welcome aboard! 🎉" : "Saved.", true);
         const sb = document.getElementById("staffSettingsBtn"); if (sb) sb.textContent = "👤 Profile";
         // Refresh the header (name/avatar) and drop the welcome card after setup.
@@ -146,6 +162,7 @@
       el("h3", null, ["Your details"]),
       el("label", { class: "lfh-lab" }, ["Name (this is also your sign-in name)"]), nameIn,
       el("label", { class: "lfh-lab" }, ["Phone"]), phoneIn,
+      ...(setupPinIn ? [el("label", { class: "lfh-lab" }, ["Manager PIN (unlocks sensitive tablet actions)"]), setupPinIn] : []),
       detMsg, saveDet,
     ]));
 
@@ -177,43 +194,55 @@
       ]));
     }
 
-    // — PIN —
-    const pinIn = el("input", { class: "lfh-in", type: "password", placeholder: "4–8 digit PIN", inputmode: "numeric", maxlength: "8" });
-    const pinMsg = el("div", { class: "lfh-msg" });
-    const savePin = el("button", { class: "lfh-bt", style: { background: "#8b5cf6" }, onClick: async () => {
-      if (!/^\d{4,8}$/.test(pinIn.value)) { setMsg(pinMsg, "PIN must be 4–8 digits.", false); return; }
-      savePin.disabled = true;
-      try {
-        const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: pinIn.value }) });
-        const j = await r.json();
-        if (!r.ok) { setMsg(pinMsg, j.error || "Could not save.", false); return; }
-        profile.hasPin = true; pinIn.value = ""; setMsg(pinMsg, "PIN saved.", true);
-      } catch { setMsg(pinMsg, "Network error.", false); }
-      finally { savePin.disabled = false; }
-    } }, [profile.hasPin ? "Change PIN" : "Set PIN"]);
-    sections.push(el("div", { class: "lfh-sec" }, [
-      el("h3", null, [profile.hasPin ? "Change your PIN" : "Set a PIN"]),
-      el("div", { class: "lfh-note", style: { margin: "0 0 8px" } }, ["A personal PIN for sensitive actions (used for things like reverting a bill)."]),
-      pinIn, pinMsg, savePin,
-    ]));
+    // — PIN (MANAGERS only; the PIN unlocks the tablet's gated actions). Hidden
+    //   during first-login setup, where the inline field above captures it. —
+    if (isManager && !profile.needsProfile) {
+      if (profile.canSelfSetPin) {
+        const pinIn = el("input", { class: "lfh-in", type: "password", placeholder: "4–8 digit PIN", inputmode: "numeric", maxlength: "8" });
+        const pinMsg = el("div", { class: "lfh-msg" });
+        const savePin = el("button", { class: "lfh-bt", style: { background: "#8b5cf6" }, onClick: async () => {
+          if (!/^\d{4,8}$/.test(pinIn.value)) { setMsg(pinMsg, "PIN must be 4–8 digits.", false); return; }
+          savePin.disabled = true;
+          try {
+            const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: pinIn.value }) });
+            const j = await r.json();
+            if (!r.ok) { setMsg(pinMsg, j.error || "Could not save.", false); return; }
+            profile.hasPin = true; pinIn.value = ""; setMsg(pinMsg, "PIN saved.", true);
+          } catch { setMsg(pinMsg, "Network error.", false); }
+          finally { savePin.disabled = false; }
+        } }, [profile.hasPin ? "Change PIN" : "Set PIN"]);
+        sections.push(el("div", { class: "lfh-sec" }, [
+          el("h3", null, [profile.hasPin ? "Change your PIN" : "Set a PIN"]),
+          el("div", { class: "lfh-note", style: { margin: "0 0 8px" } }, ["Your manager PIN authorises sensitive actions on the tablet (close/restart a busy table, ban a guest, apply a discount)."]),
+          pinIn, pinMsg, savePin,
+        ]));
+      } else {
+        sections.push(el("div", { class: "lfh-sec" }, [
+          el("h3", null, ["Your PIN"]),
+          el("div", { class: "lfh-note" }, ["Your admin manages your PIN. Ask them to set or change it."]),
+        ]));
+      }
+    }
 
-    // — guest menu live/offline —
-    const maintBtn = el("button", { class: "lfh-bt", style: { background: "#243049" } }, ["…"]);
-    const renderMaint = () => {
-      maintBtn.textContent = maintOn ? "🔴 Bring menu back online" : "🟢 Take guest menu offline";
-      maintBtn.style.background = maintOn ? "#7f1d1d" : "#243049";
-    };
-    maintBtn.addEventListener("click", async () => {
-      const turnOn = !maintOn;
-      const msg = turnOn ? "Take the guest menu OFFLINE (“we’ll be right back”)? Guests can’t browse or order until it’s back." : "Bring the guest menu back ONLINE?";
-      if (!confirm(msg)) return;
-      try { await setMaint(turnOn); renderMaint(); } catch (e) { alert("Couldn't change it: " + (e && e.message)); }
-    });
-    fetchMaint().then(renderMaint);
-    sections.push(el("div", { class: "lfh-sec" }, [
-      el("h3", null, ["Guest menu"]),
-      maintBtn,
-    ]));
+    // — guest menu live/offline (MANAGERS only; kitchen/tablet never see this) —
+    if (isManager) {
+      const maintBtn = el("button", { class: "lfh-bt", style: { background: "#243049" } }, ["…"]);
+      const renderMaint = () => {
+        maintBtn.textContent = maintOn ? "🔴 Bring menu back online" : "🟢 Take guest menu offline";
+        maintBtn.style.background = maintOn ? "#7f1d1d" : "#243049";
+      };
+      maintBtn.addEventListener("click", async () => {
+        const turnOn = !maintOn;
+        const msg = turnOn ? "Take the guest menu OFFLINE (“we’ll be right back”)? Guests can’t browse or order until it’s back." : "Bring the guest menu back ONLINE?";
+        if (!confirm(msg)) return;
+        try { await setMaint(turnOn); renderMaint(); } catch (e) { alert("Couldn't change it: " + (e && e.message)); }
+      });
+      fetchMaint().then(renderMaint);
+      sections.push(el("div", { class: "lfh-sec" }, [
+        el("h3", null, ["Guest menu"]),
+        maintBtn,
+      ]));
+    }
 
     // — log out —
     sections.push(el("div", { class: "lfh-sec" }, [
@@ -223,27 +252,6 @@
     const drawer = el("div", { class: "lfh-dw" }, sections);
     overlay = el("div", { class: "lfh-ov", onClick: (e) => { if (e.target === overlay) closeDrawer(); } }, [drawer]);
     document.body.appendChild(overlay);
-  }
-
-  // ── admin super-access: just the original menu toggle in the top bar ───────
-  function buildAdminToggle() {
-    const bar = topbar();
-    if (!bar || document.getElementById("maintToggle")) return;
-    const btn = el("button", { id: "maintToggle", class: "btn", style: { marginLeft: "auto" } }, ["…"]);
-    const render = () => {
-      btn.textContent = maintOn ? "🔴 Menu offline" : "🟢 Menu live";
-      btn.style.color = maintOn ? "#ef4444" : "";
-      btn.title = maintOn ? "Guest menu is OFFLINE — click to bring it back" : "Guest menu is live — click to take it offline";
-    };
-    btn.onclick = async () => {
-      const turnOn = !maintOn;
-      const msg = turnOn ? "Take the guest menu OFFLINE (“we’ll be right back”)?" : "Bring the guest menu back ONLINE?";
-      if (!confirm(msg)) return;
-      try { await setMaint(turnOn); render(); } catch (e) { alert("Couldn't change it: " + (e && e.message)); }
-    };
-    bar.appendChild(btn);
-    fetchMaint().then(render);
-    setInterval(() => fetchMaint().then(render), 5000);
   }
 
   // ── user: the ⚙️ Settings button in the top bar ────────────────────────────
@@ -262,10 +270,10 @@
       profile = await res.json();
       buildSettingsButton();
       if (profile.needsProfile) openDrawer(); // force first-login capture
-    } else {
-      // 401 → admin super-access (no per-user profile) — original toggle only.
-      buildAdminToggle();
     }
+    // 401 → admin super-access (no per-user profile): nothing in the panel top bar.
+    // The floating "Menu live/offline" button was removed — the admin manages
+    // maintenance from the /aevinite admin panel, and managers from their profile.
   }
 
   if (document.readyState !== "loading") init();
