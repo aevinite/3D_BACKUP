@@ -19,11 +19,12 @@ const ROLES = ["manager", "kitchen", "tablet"] as const;
 const ROLE_LABEL: Record<string, string> = { manager: "Manager", kitchen: "Kitchen", tablet: "Tablet (waiter)" };
 const ROLE_COLOR: Record<string, string> = { manager: "#d4a574", kitchen: "#7ec88a", tablet: "#60a5fa" };
 
-// Shared visual tokens so everything matches the dark admin palette.
-const card: React.CSSProperties = { background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 14, padding: 18 };
-const field: React.CSSProperties = { boxSizing: "border-box", padding: "10px 12px", borderRadius: 10, border: "1px solid #2a3a5f", background: "#0b1220", color: "#eaf1ff", fontSize: 14, width: "100%" };
+// Shared visual tokens — now theme-driven so this page matches the warm light/dark
+// admin shell (was a hardcoded navy palette).
+const card: React.CSSProperties = { background: "var(--card)", border: "var(--border)", borderRadius: 14, padding: 18 };
+const field: React.CSSProperties = { boxSizing: "border-box", padding: "10px 12px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 14, width: "100%" };
 const btn = (bg: string): React.CSSProperties => ({ padding: "10px 14px", borderRadius: 9, border: 0, background: bg, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", minHeight: 40 });
-const label: React.CSSProperties = { display: "grid", gap: 4, fontSize: 12, color: "#8aa0c9" };
+const label: React.CSSProperties = { display: "grid", gap: 4, fontSize: 12, color: "var(--muted)" };
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<User[]>([]);
@@ -71,11 +72,9 @@ export default function AdminUsers() {
   }
 
   return (
-    <main style={{ minHeight: "100vh", background: "#0b1220", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", padding: "20px clamp(12px, 4vw, 40px)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <a href="/aevinite" style={{ color: "#8aa0c9", textDecoration: "none", fontSize: 14 }}>← Admin</a>
-        <h1 style={{ fontSize: 22, margin: 0, fontWeight: 800 }}>👥 Users &amp; access</h1>
-      </div>
+    <>
+      <h1 className="adm-page-h">Users &amp; access</h1>
+      <p className="adm-page-sub">Create and manage the logins for the manager, kitchen and tablet panels.</p>
 
       {err ? <div style={{ ...card, borderColor: "#7f1d1d", color: "#fca5a5", marginBottom: 14 }}>{err}</div> : null}
 
@@ -86,7 +85,7 @@ export default function AdminUsers() {
             Password for <b>{reveal.name}</b> — copy it now, it won&apos;t be shown again:
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-            <code style={{ fontSize: 18, background: "#0b1220", padding: "8px 12px", borderRadius: 8, letterSpacing: 1 }}>{reveal.password}</code>
+            <code style={{ fontSize: 18, background: "var(--bg)", padding: "8px 12px", borderRadius: 8, letterSpacing: 1 }}>{reveal.password}</code>
             <button style={btn("#3b82f6")} onClick={() => navigator.clipboard?.writeText(reveal.password)}>Copy</button>
             <button style={btn("#374151")} onClick={() => setReveal(null)}>Done</button>
           </div>
@@ -116,7 +115,7 @@ export default function AdminUsers() {
             {/* Masked by default with a show/hide eye so it never sits on screen as plain text. */}
             <span style={{ position: "relative", display: "block" }}>
               <input type={showNewPw ? "text" : "password"} value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })} placeholder="leave blank to generate" autoComplete="new-password" style={{ ...field, paddingRight: 44 }} />
-              <button type="button" onClick={() => setShowNewPw((s) => !s)} aria-label={showNewPw ? "Hide password" : "Show password"} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "transparent", border: 0, color: "#8aa0c9", cursor: "pointer", fontSize: 16, padding: 6 }}>
+              <button type="button" onClick={() => setShowNewPw((s) => !s)} aria-label={showNewPw ? "Hide password" : "Show password"} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", fontSize: 16, padding: 6 }}>
                 {showNewPw ? "🙈" : "👁️"}
               </button>
             </span>
@@ -125,7 +124,7 @@ export default function AdminUsers() {
             {creating ? "Creating…" : "Create user"}
           </button>
         </form>
-        <p style={{ fontSize: 12, color: "#6f86b0", margin: "10px 0 0" }}>
+        <p style={{ fontSize: 12, color: "var(--muted)", margin: "10px 0 0" }}>
           The <b>Name</b> is what they sign in with (and how they appear everywhere) — it must be unique. They confirm their details once on first login and can edit their name/phone, change their password, and set a PIN in their profile.
         </p>
       </section>
@@ -133,27 +132,27 @@ export default function AdminUsers() {
       {/* User list — compact rows, ONE button (Edit) each. Everything else lives in the modal. */}
       <section style={{ ...card }}>
         <h2 style={{ fontSize: 15, margin: "0 0 12px" }}>All users {loading ? "" : `(${users.length})`}</h2>
-        {loading ? <div style={{ color: "#8aa0c9" }}>Loading…</div> : users.length === 0 ? (
-          <div style={{ color: "#8aa0c9" }}>No users yet — add your first one above.</div>
+        {loading ? <div style={{ color: "var(--muted)" }}>Loading…</div> : users.length === 0 ? (
+          <div style={{ color: "var(--muted)" }}>No users yet — add your first one above.</div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {users.map((u) => (
-              <div key={u.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, alignItems: "center", padding: 12, borderRadius: 10, background: "#0e1830", border: "1px solid #1f2c49", opacity: u.active ? 1 : 0.55 }}>
+              <div key={u.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, alignItems: "center", padding: 12, borderRadius: 10, background: "var(--bg)", border: "var(--border)", opacity: u.active ? 1 : 0.55 }}>
                 {/* Initial badge */}
-                <div aria-hidden style={{ width: 38, height: 38, borderRadius: 999, background: ROLE_COLOR[u.role] || "#9ca3af", color: "#0b1220", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }}>
+                <div aria-hidden style={{ width: 38, height: 38, borderRadius: 999, background: ROLE_COLOR[u.role] || "#9ca3af", color: "var(--bg)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }}>
                   {(u.name || u.username).charAt(0).toUpperCase()}
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <strong style={{ fontSize: 15 }}>{u.name || u.username}</strong>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#0b1220", background: ROLE_COLOR[u.role] || "#9ca3af", padding: "2px 8px", borderRadius: 999 }}>{ROLE_LABEL[u.role] || u.role}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--bg)", background: ROLE_COLOR[u.role] || "#9ca3af", padding: "2px 8px", borderRadius: 999 }}>{ROLE_LABEL[u.role] || u.role}</span>
                     {!u.active ? <span style={{ fontSize: 11, color: "#fca5a5" }}>disabled</span> : null}
                   </div>
-                  <div style={{ fontSize: 12, color: "#8aa0c9", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : "never"}
                   </div>
                 </div>
-                <button style={btn("#1f2c49")} onClick={() => setEditId(u.id)}>Edit</button>
+                <button style={{ ...btn("transparent"), border: "var(--border)", color: "var(--text)" }} onClick={() => setEditId(u.id)}>Edit</button>
               </div>
             ))}
           </div>
@@ -169,7 +168,7 @@ export default function AdminUsers() {
           onDeleted={() => { setEditId(null); load(); }}
         />
       ) : null}
-    </main>
+    </>
   );
 }
 
@@ -272,15 +271,15 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
       <div role="dialog" aria-modal="true" aria-label={`Edit ${user.name || user.username}`} style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
         <div style={{ ...card, pointerEvents: "auto", width: "min(96vw, 460px)", maxHeight: "90vh", overflowY: "auto", padding: 0, animation: "lfhPop 180ms cubic-bezier(0.16,1,0.3,1)" }}>
           {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: "1px solid #1f2c49", position: "sticky", top: 0, background: "#111a2e", borderRadius: "14px 14px 0 0" }}>
-            <div aria-hidden style={{ width: 36, height: 36, borderRadius: 999, background: ROLE_COLOR[user.role] || "#9ca3af", color: "#0b1220", display: "grid", placeItems: "center", fontWeight: 800 }}>{(user.name || user.username).charAt(0).toUpperCase()}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: "var(--border)", position: "sticky", top: 0, background: "var(--card)", borderRadius: "14px 14px 0 0" }}>
+            <div aria-hidden style={{ width: 36, height: 36, borderRadius: 999, background: ROLE_COLOR[user.role] || "#9ca3af", color: "var(--bg)", display: "grid", placeItems: "center", fontWeight: 800 }}>{(user.name || user.username).charAt(0).toUpperCase()}</div>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 16, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name || user.username}</div>
-              <div style={{ fontSize: 11, color: "#8aa0c9" }}>
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>
                 {user.hasPin ? "🔑 PIN set · " : ""}created {new Date(user.created_at).toLocaleDateString()} · last seen {user.last_seen_at ? new Date(user.last_seen_at).toLocaleString() : "never"}
               </div>
             </div>
-            <button onClick={onClose} aria-label="Close" style={{ marginLeft: "auto", background: "transparent", border: 0, color: "#8aa0c9", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: 6 }}>×</button>
+            <button onClick={onClose} aria-label="Close" style={{ marginLeft: "auto", background: "transparent", border: 0, color: "var(--muted)", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: 6 }}>×</button>
           </div>
 
           <div style={{ padding: 18, display: "grid", gap: 16 }}>
@@ -289,7 +288,7 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
 
             {/* Details */}
             <div style={{ display: "grid", gap: 10 }}>
-              <label style={label}>Name <span style={{ color: "#6f86b0" }}>· this is their login</span>
+              <label style={label}>Name <span style={{ color: "var(--muted)" }}>· this is their login</span>
                 <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Raj" style={field} />
               </label>
               <label style={label}>Phone
@@ -319,20 +318,20 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
             </button>
 
             {/* Password area */}
-            <div style={{ ...card, padding: 14, background: "#0e1830" }}>
+            <div style={{ ...card, padding: 14, background: "var(--bg)" }}>
               <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>🔒 Password</div>
               {pwReveal ? (
                 <div style={{ marginBottom: 10 }}>
                   <div style={{ fontSize: 12, color: "#86efac" }}>New password — copy it now, it won&apos;t be shown again:</div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
-                    <code style={{ fontSize: 17, background: "#0b1220", padding: "8px 12px", borderRadius: 8, letterSpacing: 1 }}>{pwReveal}</code>
+                    <code style={{ fontSize: 17, background: "var(--bg)", padding: "8px 12px", borderRadius: 8, letterSpacing: 1 }}>{pwReveal}</code>
                     <button style={btn("#3b82f6")} onClick={() => navigator.clipboard?.writeText(pwReveal)}>Copy</button>
                   </div>
                 </div>
               ) : null}
               <span style={{ position: "relative", display: "block" }}>
                 <input type={showPw ? "text" : "password"} value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Type a new password…" autoComplete="new-password" style={{ ...field, paddingRight: 44 }} />
-                <button type="button" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? "Hide password" : "Show password"} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "transparent", border: 0, color: "#8aa0c9", cursor: "pointer", fontSize: 16, padding: 6 }}>
+                <button type="button" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? "Hide password" : "Show password"} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", fontSize: 16, padding: 6 }}>
                   {showPw ? "🙈" : "👁️"}
                 </button>
               </span>
@@ -375,10 +374,10 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
 // A simple labelled on/off toggle row used inside the modal.
 function ToggleRow({ title, desc, on, onChange }: { title: string; desc: string; on: boolean; onChange: (v: boolean) => void }) {
   return (
-    <button type="button" onClick={() => onChange(!on)} style={{ display: "flex", alignItems: "center", gap: 12, textAlign: "left", padding: 12, borderRadius: 10, background: "#0e1830", border: "1px solid #1f2c49", cursor: "pointer", color: "#dbe7ff" }}>
+    <button type="button" onClick={() => onChange(!on)} style={{ display: "flex", alignItems: "center", gap: 12, textAlign: "left", padding: 12, borderRadius: 10, background: "var(--bg)", border: "var(--border)", cursor: "pointer", color: "var(--text)" }}>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
-        <div style={{ fontSize: 11, color: "#8aa0c9", marginTop: 2 }}>{desc}</div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{desc}</div>
       </div>
       {/* Track + knob */}
       <span aria-hidden style={{ width: 42, height: 24, borderRadius: 999, background: on ? "#22c55e" : "#374151", position: "relative", flexShrink: 0, transition: "background 160ms ease" }}>

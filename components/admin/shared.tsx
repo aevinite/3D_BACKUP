@@ -1,0 +1,113 @@
+"use client";
+// Shared bits for the admin pages: types, formatting, the live-floor grid, the
+// activity feed, and a tiny polling hook. Keeps Overview/Floor/Logs DRY.
+import { useEffect, useRef } from "react";
+
+export type Tile = {
+  table_number: string;
+  state: "free" | "seated" | "new" | "preparing" | "served" | "cleared";
+  open: boolean; members: number; pending_members: number;
+  has_new: boolean; has_call: boolean; due: number; pay: "" | "red" | "green";
+};
+export type Overview = {
+  maintenance: boolean; sessionsEnabled: boolean; tableCount: number;
+  features: Record<string, boolean>;
+  openTables: number; activeOrders: number; unpaidOrders: number;
+  revenueToday: number; ordersToday: number;
+};
+export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string };
+
+export const STATE_LABEL: Record<Tile["state"], string> = {
+  free: "Free", seated: "Seated", new: "New order", preparing: "Preparing", served: "Served", cleared: "Cleared",
+};
+// Vivid status colours (white text) — read clearly on both light & dark themes.
+export const STATE_COLOR: Record<Tile["state"], string> = {
+  free: "", seated: "#2563eb", new: "#ea580c", preparing: "#7c3aed", served: "#ca8a04", cleared: "#15803d",
+};
+export const PANEL_COLOR: Record<string, string> = { editor: "#d4a574", manager: "#d4a574", kitchen: "#7ec88a", tablet: "#60a5fa", admin: "#e8a13c" };
+export const ACT_LABEL: Record<string, string> = {
+  order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
+  order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
+  table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",
+  call_attend: "Attended call", member_approve: "Approved guest", sold_out_on: "Marked sold-out", sold_out_off: "Back in stock",
+  login: "Signed in", logout: "Signed out", profile_setup: "Completed profile", profile_update: "Updated profile",
+  pin_set: "Set PIN", password_change: "Changed password",
+  user_create: "Created user", user_delete: "Deleted user", user_reset_password: "Reset password",
+  user_enable: "Enabled user", user_disable: "Disabled user", user_set_role: "Changed role", user_set_access: "Changed access",
+};
+
+export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
+export const timeAgo = (iso: string) => {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
+};
+
+// Poll a callback on an interval, cleaning up on unmount. Runs once immediately.
+export function usePoll(fn: () => void, ms: number) {
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    ref.current();
+    const id = setInterval(() => ref.current(), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+}
+
+export function StatCards({ ov }: { ov: Overview | null }) {
+  const cells: [string, string | number][] = [
+    ["Open tables", ov ? ov.openTables : "…"],
+    ["Active orders", ov ? ov.activeOrders : "…"],
+    ["Unpaid bills", ov ? ov.unpaidOrders : "…"],
+    ["Revenue today", ov ? inr(ov.revenueToday) : "…"],
+    ["Orders today", ov ? ov.ordersToday : "…"],
+  ];
+  return (
+    <div className="adm-stats">
+      {cells.map(([k, v]) => (
+        <div key={k} className="adm-stat"><div className="k">{k}</div><div className="v">{v}</div></div>
+      ))}
+    </div>
+  );
+}
+
+export function FloorGrid({ tiles, err }: { tiles: Tile[]; err: string | null }) {
+  if (err) return <p style={{ color: "var(--adm-danger, #d14b48)" }}>Couldn&apos;t load the floor: {err}</p>;
+  if (tiles.length === 0) return <div className="adm-empty">No tables yet.</div>;
+  return (
+    <div className="adm-floor">
+      {tiles.map((t) => (
+        <div key={t.table_number}
+          className={`adm-tile ${t.state === "free" ? "free" : ""}`}
+          style={{
+            background: t.state === "free" ? undefined : STATE_COLOR[t.state],
+            borderColor: t.pay === "red" ? "#f87171" : t.pay === "green" ? "#34d399" : "transparent",
+          }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span className="tnum">Table {t.table_number}</span>
+            <span style={{ fontSize: 16 }}>{t.has_call ? "🔔" : ""}{t.has_new ? "🆕" : ""}</span>
+          </div>
+          <div className="tstate">{STATE_LABEL[t.state]}</div>
+          <div className="tsub">{t.open ? `${t.members} seated` : "—"}{Number(t.due) > 0 ? ` · ${inr(Number(t.due))} due` : ""}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ActivityFeed({ rows }: { rows: Action[] }) {
+  if (rows.length === 0) return <p className="adm-muted" style={{ fontSize: 13, margin: 0 }}>No staff actions yet.</p>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", maxHeight: 340, overflowY: "auto" }}>
+      {rows.map((a) => (
+        <div key={a.id} style={{ display: "grid", gridTemplateColumns: "84px 1fr auto", gap: 10, alignItems: "center", fontSize: 13, padding: "8px 0", borderBottom: "var(--border)" }}>
+          <span className="adm-chip" style={{ background: "color-mix(in srgb, " + (PANEL_COLOR[a.panel] || "#888") + " 22%, transparent)", color: PANEL_COLOR[a.panel] || "var(--muted)" }}>{a.panel}</span>
+          <span>{ACT_LABEL[a.action] || a.action}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : a.detail ? ` · ${a.detail}` : ""}</span>
+          <span className="adm-when">{timeAgo(a.created_at)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}

@@ -218,8 +218,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     if (p === "oplog") {
-      // The operation log: recent staff actions across all panels.
-      return ok(must(await sb.from("staff_actions").select("*").order("created_at", { ascending: false }).limit(200)));
+      // The operation log: recent staff actions across all panels. The ADMIN's own
+      // user-management actions (panel='admin' — create/delete/reset users) are
+      // HIDDEN here; they show only in the admin's own Logs page, never the manager's.
+      return ok(must(await sb.from("staff_actions").select("*").neq("panel", "admin").order("created_at", { ascending: false }).limit(200)));
     }
 
     return err("unknown GET endpoint", 404);

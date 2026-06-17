@@ -3325,3 +3325,104 @@ a:focus:not(:focus-visible) { outline: none; }
   font-size: 13px; font-weight: 700; cursor: pointer;
 }
 .hist-more-btn:hover { border-style: solid; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   ADMIN CONTROL ROOM — a calm, sectioned dashboard shell (sidebar + topbar).
+   Fully token-driven so it inherits the app's warm light/dark themes (no more
+   hardcoded navy). Lives at /aevinite/*. Scoped under .adm so it never leaks.
+   ════════════════════════════════════════════════════════════════════════════ */
+.adm {
+  --adm-ok: #2e9e5b; --adm-danger: #d14b48; --adm-warn: #c98a2b;
+  display: flex; height: 100dvh; width: 100%; overflow: hidden;
+  background: var(--bg); color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+/* ── sidebar ─────────────────────────────────────────────────────────────── */
+.adm-side {
+  width: 236px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--card); border-right: var(--border); padding: 16px 12px; gap: 4px;
+}
+.adm-brand { display: flex; align-items: center; gap: 10px; padding: 6px 10px 16px; }
+.adm-brand .mark { width: 34px; height: 34px; border-radius: 10px; background: var(--accent-grad, var(--accent)); display: grid; place-items: center; color: #fff; font-weight: 800; flex-shrink: 0; }
+.adm-brand .who { min-width: 0; }
+.adm-brand .who b { display: block; font-size: 14px; font-weight: 800; line-height: 1.1; }
+.adm-brand .who span { font-size: 11px; color: var(--muted); }
+.adm-nav { display: flex; flex-direction: column; gap: 2px; }
+.adm-nav a {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px;
+  color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 600;
+  transition: background .15s, color .15s;
+}
+.adm-nav a i { width: 18px; text-align: center; font-size: 15px; }
+.adm-nav a:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); }
+.adm-nav a.active { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); }
+.adm-nav a.active i { color: var(--accent); }
+.adm-side-foot { margin-top: auto; font-size: 11px; color: var(--muted); padding: 10px; }
+/* ── body (topbar + scroll area) ─────────────────────────────────────────── */
+.adm-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.adm-top {
+  display: flex; align-items: center; gap: 12px; padding: 12px 24px;
+  border-bottom: var(--border); background: var(--card); flex-shrink: 0;
+}
+.adm-rest { display: flex; align-items: center; gap: 9px; padding: 7px 13px; border-radius: 999px; border: var(--border); background: var(--bg); font-size: 13.5px; font-weight: 700; }
+.adm-rest .dot { width: 8px; height: 8px; border-radius: 999px; background: var(--adm-ok); flex-shrink: 0; }
+.adm-rest .soon { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.adm-icnbtn { width: 38px; height: 38px; border-radius: 10px; border: var(--border); background: var(--bg); color: var(--text); cursor: pointer; font-size: 15px; display: grid; place-items: center; transition: background .15s; }
+.adm-icnbtn:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.adm-main { flex: 1; overflow-y: auto; padding: 24px; }
+.adm-page-h { margin: 0 0 4px; font-size: 22px; font-weight: 800; }
+.adm-page-sub { margin: 0 0 20px; font-size: 13px; color: var(--muted); }
+/* ── cards / stats / grids ───────────────────────────────────────────────── */
+.adm-card { background: var(--card); border: var(--border); border-radius: 14px; padding: 18px; }
+.adm-card h2 { margin: 0 0 4px; font-size: 15px; font-weight: 800; }
+.adm-card .hint { margin: 0 0 14px; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.adm-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.adm-stat { background: var(--card); border: var(--border); border-radius: 14px; padding: 14px 16px; }
+.adm-stat .k { font-size: 12px; color: var(--muted); }
+.adm-stat .v { font-size: 24px; font-weight: 800; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.adm-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+/* ── buttons / toggles ───────────────────────────────────────────────────── */
+.adm-btn { padding: 10px 15px; border-radius: 10px; border: var(--border); background: var(--bg); color: var(--text); font-weight: 700; font-size: 13.5px; cursor: pointer; transition: filter .15s, background .15s; }
+.adm-btn:hover { filter: brightness(1.05); }
+.adm-btn:disabled { opacity: .55; cursor: default; }
+.adm-btn.primary { background: var(--accent); border-color: transparent; color: #2a1c0c; }
+.adm-btn.danger { background: var(--adm-danger); border-color: transparent; color: #fff; }
+.adm-btn.ok { background: var(--adm-ok); border-color: transparent; color: #fff; }
+.adm-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 13px; border-radius: 11px; border: var(--border); background: var(--bg); color: var(--text); font-size: 13.5px; font-weight: 600; cursor: pointer; text-align: left; transition: background .15s; }
+.adm-toggle:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.adm-toggle .pill { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; flex-shrink: 0; }
+.adm-toggle.on .pill { background: color-mix(in srgb, var(--adm-ok) 22%, transparent); color: var(--adm-ok); }
+.adm-toggle.off .pill { background: var(--muted2, rgba(120,120,120,0.18)); color: var(--muted); }
+.adm-togglegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 9px; }
+/* ── tabs (logs) ─────────────────────────────────────────────────────────── */
+.adm-tabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--card); border: var(--border); margin-bottom: 16px; }
+.adm-tabs button { padding: 8px 16px; border-radius: 9px; border: 0; background: transparent; color: var(--muted); font-weight: 700; font-size: 13.5px; cursor: pointer; }
+.adm-tabs button.active { background: var(--accent); color: #2a1c0c; }
+/* ── log table ───────────────────────────────────────────────────────────── */
+.adm-logwrap { background: var(--card); border: var(--border); border-radius: 14px; overflow: hidden; }
+.adm-logrow { display: grid; gap: 12px; align-items: center; padding: 11px 16px; border-bottom: var(--border); font-size: 13px; }
+.adm-logrow:last-child { border-bottom: 0; }
+.adm-logrow.head { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.adm-chip { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; text-transform: uppercase; white-space: nowrap; }
+.adm-muted { color: var(--muted); }
+.adm-empty { padding: 40px 16px; text-align: center; color: var(--muted); }
+.adm-when { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.adm-ret { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+.adm-ret select { background: var(--bg); color: var(--text); border: var(--border); border-radius: 8px; padding: 5px 8px; font-size: 12.5px; }
+/* ── live floor tiles ────────────────────────────────────────────────────── */
+.adm-floor { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.adm-tile { border-radius: 14px; padding: 14px 16px; color: #fff; border: 2px solid transparent; }
+.adm-tile.free { background: color-mix(in srgb, var(--text) 8%, var(--card)); color: var(--text); opacity: .8; }
+.adm-tile .tnum { font-size: 18px; font-weight: 800; }
+.adm-tile .tstate { margin-top: 6px; font-size: 14px; font-weight: 600; }
+.adm-tile .tsub { margin-top: 4px; font-size: 12px; opacity: .9; }
+/* ── responsive: collapse the sidebar to a horizontal bar on small screens ─── */
+@media (max-width: 900px) {
+  .adm { flex-direction: column; height: auto; min-height: 100dvh; overflow: visible; }
+  .adm-side { width: 100%; flex-direction: column; border-right: 0; border-bottom: var(--border); }
+  .adm-nav { flex-direction: row; overflow-x: auto; gap: 4px; }
+  .adm-nav a { white-space: nowrap; }
+  .adm-side-foot { display: none; }
+  .adm-main { overflow-y: visible; }
+  .adm-grid2 { grid-template-columns: 1fr; }
+}
