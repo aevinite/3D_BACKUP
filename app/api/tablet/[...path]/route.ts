@@ -155,6 +155,67 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok(row[0] || null);
     }
 
+    // members/:id/remove — KICK a guest off the table (works for the head too; the
+    // table stays open). Mirrors the editor's remove. (owner, 2026-06-17 — parity)
+    if (a === "members" && c === "remove") {
+      const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).select());
+      await logAction("tablet", "member_remove", { detail: "kicked", device_id: dev });
+      return ok(row[0] || null);
+    }
+
+    // members/:id/ban — KICK + add to the blocklist so they can't rejoin. Mirrors
+    // the editor's banMember, but done server-side in one call: we look up the
+    // member's phone here (the editor passes it from its row). (owner, 2026-06-17)
+    if (a === "members" && c === "ban") {
+      const found = must(await sb.from("session_members").select("id,phone").eq("id", b).limit(1));
+      const m = found[0];
+      if (!m) return err("member not found", 404);
+      const phone = m.phone ? String(m.phone).trim() : null;
+      must(await sb.from("blocklist").insert({ member_id: b, phone, reason: "banned from tablet" }).select());
+      if (phone) await sb.from("customers").upsert({ phone, blocked: true }, { onConflict: "phone" });
+      const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).select());
+      await logAction("tablet", "member_ban", { detail: phone ? `banned ${phone}` : "banned", device_id: dev });
+      return ok(row[0] || null);
+    }
+
+    // sessions/:id/auto-approve — toggle "join without staff approval". Mirrors the
+    // editor endpoint exactly. (owner, 2026-06-17 — parity)
+    if (a === "sessions" && c === "auto-approve") {
+      const value = !!(body && body.value === true);
+      const row = must(await sb.from("sessions").update({ auto_approve: value }).eq("id", b).select());
+      await logAction("tablet", "auto_approve", { detail: value ? "on" : "off", device_id: dev });
+      return ok(row[0] || null);
+    }
+
+    // orders/:id/discount — reduce ONE order's bill (comp/loyalty/fix). Clamped to
+    // 0..order total, money-safe. Mirrors the editor endpoint. (owner, 2026-06-17)
+    if (a === "orders" && c === "discount") {
+      const cur = must(await sb.from("orders").select("total").eq("id", b).single());
+      const raw = Number(body && body.amount);
+      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number(cur.total) || 0) : 0;
+      const note = String((body && body.note) || "").slice(0, 200) || null;
+      const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).select());
+      await logAction("tablet", "order_discount", { order_id: b, detail: `₹${amount}`, device_id: dev });
+      return ok(row[0] || null);
+    }
+
+    // tables/:t/restart — clear the round off the floor but KEEP the table open:
+    // every active order on the CURRENT party's session becomes served + archived
+    // (a completed order kept in records/revenue — NOT cancelled). Mirrors the
+    // editor's restartTable, done as one scoped bulk update. (owner, 2026-06-17)
+    if (a === "tables" && c === "restart") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      const openSess = (await sb.from("sessions").select("id")
+        .eq("table_number", t).eq("status", "open")
+        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+      let q = sb.from("orders").update({ status: "served", archived: true }).neq("status", "cancelled").eq("archived", false);
+      q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
+      const rows = must(await q.select());
+      await logAction("tablet", "table_restart", { table_number: t, detail: `${rows.length} order(s) cleared`, device_id: dev });
+      return ok({ ok: true, count: rows.length });
+    }
+
     // sessions/:id/shift — move the whole party (session + orders + calls) to
     // another table, atomically, via the service-role RPC.
     if (a === "sessions" && c === "shift") {

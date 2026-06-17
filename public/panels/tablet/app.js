@@ -234,7 +234,11 @@ function renderPanel() {
 
   const reqRows = reqs.map((r) => `<div class="row"><span>📨 ${r.type === "open" ? "Asked to open" : "Asked for access"}${r.name ? ` · ${esc(r.name)}` : ""}</span><span class="reqbtns"><button class="btn small primary" data-req-approve="${esc(r.id)}">Approve</button><button class="btn small" data-req-deny="${esc(r.id)}">Deny</button></span></div>`).join("");
   const joinRows = joiners.map((m) => `<div class="row"><span>🙋 ${esc(m.name || "Guest")} wants to join</span><button class="btn small primary" data-approve="${esc(m.id)}">Approve</button></div>`).join("");
-  const partyRows = members.map((m) => `<div class="row"><span>${m.role === "owner" ? "👑" : "•"} ${esc(m.name || "Guest")}${m.approved ? "" : ` <span class="muted">(pending)</span>`}</span>${m.role === "owner" ? `<span class="muted small">head</span>` : `<button class="btn small" data-makehead="${esc(m.id)}">Make head</button>`}</div>`).join("");
+  const partyRows = members.map((m) => `<div class="row"><span>${m.role === "owner" ? "👑" : "•"} ${esc(m.name || "Guest")}${m.approved ? "" : ` <span class="muted">(pending)</span>`}</span>${m.role === "owner" ? `<span class="muted small">head</span>` : `<span class="reqbtns"><button class="btn small" data-makehead="${esc(m.id)}">Make head</button><button class="btn small" data-kick="${esc(m.id)}">Kick</button><button class="btn small danger" data-ban="${esc(m.id)}">Ban</button></span>`}</div>`).join("");
+  // Live shared cart the table is BUILDING but hasn't sent yet (read-only) — mirrors
+  // the manager's "Building" section; clears itself the moment they place the order.
+  const cart = s && Array.isArray(s.cart) ? s.cart : [];
+  const buildingRows = cart.map((it) => `<div class="row"><span>×${esc(String(it.qty || 1))} ${esc(it.title || "Item")}</span><span class="muted small">building</span></div>`).join("");
 
   // Each order is a card: KOT chip, time, "via app" badge for guest/phone orders,
   // every dish with a tappable status pill, and an Accept button when it's new.
@@ -281,6 +285,7 @@ function renderPanel() {
       <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}${extra.length ? `<span class="muted small">+ ${esc(extra.join(", "))}</span>` : ""}</div>
       <div class="ordctl-row">
         <button class="btn small" data-add-dish="${esc(o.id)}">＋ Add dish</button>
+        <button class="btn small" data-discount="${esc(o.id)}">− Discount${Number(o.discount) > 0 ? ` (${inr(o.discount)})` : ""}</button>
         <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
         <button class="btn small primary" data-done-order="${esc(o.id)}">✓ Done editing</button>
       </div>
@@ -329,14 +334,16 @@ function renderPanel() {
     <div class="detail-body">
       ${reqRows ? `<div class="sec"><h3>Requests</h3>${reqRows}</div>` : ""}
       ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
-      ${callRows ? `<div class="sec"><h3>Calls</h3>${callRows}</div>` : ""}
-      ${members.length ? `<div class="sec"><h3>Party</h3>${partyRows}</div>` : ""}
+      ${callRows ? `<div class="sec"><h3>Calls</h3>${calls.length > 1 ? `<button class="btn small primary" data-attend-all-calls="${esc(t)}">Attend all (${calls.length})</button>` : ""}${callRows}</div>` : ""}
+      ${s ? `<div class="sec"><h3>Party</h3><label class="row autoapp"><span>🔓 Auto-approve joins</span><input type="checkbox" data-autoapp="${esc(s.id)}" ${s.auto_approve ? "checked" : ""}></label>${partyRows || `<div class="muted small">No guests joined yet.</div>`}</div>` : ""}
+      ${buildingRows ? `<div class="sec"><h3>🛒 Building <span class="muted small">· not sent yet</span></h3>${buildingRows}</div>` : ""}
       <div class="sec"><h3>Orders</h3>${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}</div>
     </div>
     <div class="dacts">
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
       <button class="btn primary big" id="takeOrder">＋ Take order</button>
       ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
+      ${s && os.length ? `<button class="btn" id="restartTable">↻ Restart</button>` : ""}
       ${s && os.length && a.unpaid ? `<button class="btn pay" id="payBill">💳 Mark bill paid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
     </div>
@@ -348,6 +355,33 @@ function renderPanel() {
   document.querySelectorAll("[data-attend]").forEach((b) => (b.onclick = () => act(() => api("POST", `/calls/${b.dataset.attend}/attend`))));
   document.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.approve}/approve`))));
   document.querySelectorAll("[data-makehead]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.makehead}/make-head`))));
+  // Kick a guest off the table (table stays open). Confirm first — it ends access.
+  document.querySelectorAll("[data-kick]").forEach((b) => (b.onclick = async () => {
+    if (await confirmDialog("Kick this guest from the table? Their access ends now — the table stays open.", "Kick"))
+      act(() => api("POST", `/members/${b.dataset.kick}/remove`));
+  }));
+  // Ban a guest: kicked now AND blocklisted so they can't rejoin. Destructive — confirm.
+  document.querySelectorAll("[data-ban]").forEach((b) => (b.onclick = async () => {
+    if (await confirmDialog("Ban this guest? They're kicked now and blocked from rejoining this table.", "Ban"))
+      act(() => api("POST", `/members/${b.dataset.ban}/ban`));
+  }));
+  // Auto-approve toggle: future joiners are approved automatically (no staff review).
+  document.querySelectorAll("[data-autoapp]").forEach((cb) => (cb.onchange = () => act(() => api("POST", `/sessions/${cb.dataset.autoapp}/auto-approve`, { value: cb.checked }))));
+  // Attend every waiter call on the table in one tap.
+  document.querySelectorAll("[data-attend-all-calls]").forEach((b) => (b.onclick = () => act(async () => {
+    for (const c of callsOf(b.dataset.attendAllCalls)) await api("POST", `/calls/${c.id}/attend`);
+  })));
+  // Per-order discount (only in edit mode): prompt for an amount + optional reason,
+  // clamped server-side to 0..order total. The merged footer bill nets discounts.
+  document.querySelectorAll("[data-discount]").forEach((b) => (b.onclick = async () => {
+    const o = (state.data.orders || []).find((x) => x.id === b.dataset.discount);
+    const cur = o && Number(o.discount) > 0 ? String(o.discount) : "";
+    const raw = window.prompt("Discount amount (₹) for this order — 0 to clear:", cur);
+    if (raw === null) return; // cancelled
+    const amount = Math.max(0, Number(raw) || 0);
+    const note = amount > 0 ? (window.prompt("Reason (optional, e.g. loyalty/comp):", (o && o.discount_note) || "") || "") : "";
+    act(() => api("POST", `/orders/${b.dataset.discount}/discount`, { amount, note }));
+  }));
   document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => act(() => api("POST", `/orders/${b.dataset.accept}/accept`))));
   // Accept ALL un-accepted orders on the table in one tap.
   document.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () => act(async () => { const recv = ordersOf(b.dataset.acceptAll).filter((o) => o.status === "received"); for (const o of recv) await api("POST", `/orders/${o.id}/accept`); })));
@@ -402,6 +436,12 @@ function renderPanel() {
   }));
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
+  // Restart: clear this round's orders off the floor (they stay served+archived in
+  // records) but keep the table OPEN for a fresh round. Mirrors the manager.
+  const rsb = $("#restartTable"); if (rsb && s) rsb.onclick = async () => {
+    if (await confirmDialog(`Restart table ${t}? Its current orders clear off the floor and the table stays OPEN for a fresh round.`, "Restart"))
+      act(() => api("POST", `/tables/${t}/restart`));
+  };
   const pb = $("#payBill"); if (pb) pb.onclick = async () => {
     if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
       act(() => api("POST", `/tables/${t}/pay`));
