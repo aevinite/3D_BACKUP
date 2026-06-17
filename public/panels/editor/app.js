@@ -2516,17 +2516,18 @@ function itemRowHtml(row, editing = false) {
   // have no per-item row, so we don't offer it there. Deleting recomputes the bill
   // total server-side (see lfh_delete_order_item) so no stale money is left behind.
   const delBtn = row.kind === "session" ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
-  // STAFF EDIT: qty −/＋ + note edit on a real (session) dish that isn't served yet.
-  const editCtl = (editing && row.kind === "session" && row.status !== "served")
-    ? `<span class="sx-item-edit"><button class="sx-qty" data-qty-dec="${esc(row.id)}" data-qty="${esc(row.qty)}" title="Fewer">−</button><button class="sx-qty" data-qty-inc="${esc(row.id)}" data-qty="${esc(row.qty)}" title="More">＋</button><button class="sx-qty" data-note-item="${esc(row.id)}" title="Edit note">✎</button></span>`
-    : "";
   // status label: friendlier words for the chip (class stays the raw status for colour).
   const STLABEL = { received: "new", preparing: "cooking", ready: "ready", served: "served", cancelled: "cancelled" };
-  // STAFF EDIT: on a real, not-yet-served dish, allergens become removable ✕ chips
-  // (+ a "＋ allergy" picker) so a mistake can be UNDONE per dish — not just added.
-  const canEditAlg = editing && row.kind === "session" && row.status !== "served";
-  const algEdit = canEditAlg ? dishAllergenEditHtml(row) : "";
-  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}</span>${itemDetailLine(row, canEditAlg)}${algEdit}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${editCtl}${delBtn}</div></div>`;
+  // STAFF EDIT (a real, not-yet-served dish): the per-dish controls — qty −/＋, note ✎,
+  // and the allergen editor (removable "NO X ✕" chips + "＋ allergy" picker) — live on a
+  // FULL-WIDTH row BELOW the dish (grid-column:1/-1). Keeping them off the top row lets
+  // the dish name keep its room so it doesn't wrap to several lines on a narrow panel.
+  const canEdit = editing && row.kind === "session" && row.status !== "served";
+  const editCtl = canEdit
+    ? `<span class="sx-item-edit"><button class="sx-qty" data-qty-dec="${esc(row.id)}" data-qty="${esc(row.qty)}" title="Fewer">−</button><button class="sx-qty" data-qty-inc="${esc(row.id)}" data-qty="${esc(row.qty)}" title="More">＋</button><button class="sx-qty" data-note-item="${esc(row.id)}" title="Edit note">✎</button></span>`
+    : "";
+  const editRow = canEdit ? `<div class="sx-dish-edit-row">${editCtl}${dishAllergenEditHtml(row)}</div>` : "";
+  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}</span>${itemDetailLine(row, canEdit)}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${delBtn}</div>${editRow}</div>`;
 }
 
 // dishAllergenEditHtml: the per-dish allergen editor shown on a dish row while a
@@ -2537,9 +2538,13 @@ function dishAllergenEditHtml(row) {
   const avoided = Array.isArray(row.removed) ? row.removed : [];
   const labelFor = (slug) => { const a = ALLERGENS.find((x) => x.slug === String(slug).toLowerCase()); return a ? a.label : slug; };
   const chips = avoided.map((slug) =>
-    `<span class="sx-dish-alg" data-dishalg-item="${esc(row.id)}" data-dishalg-slug="${esc(slug)}" title="Tap to remove this allergen from this dish">NO ${esc(labelFor(slug))} <b>✕</b></span>`
+    `<button type="button" class="sx-dish-alg" data-dishalg-item="${esc(row.id)}" data-dishalg-slug="${esc(slug)}" title="Remove this allergen from this dish">NO ${esc(labelFor(slug))} <b>✕</b></button>`
   ).join("");
-  return `<div class="sx-dish-alg-row"><span class="muted small">⚠ Avoid:</span>${chips || `<span class="muted small">none</span>`}<button class="sx-dish-addalg" data-dishalg-add="${esc(row.id)}">＋ allergy</button></div>`;
+  // When the dish already avoids something: a "⚠ Avoid" label + its chips + a compact ＋.
+  // When it avoids nothing: just a quiet "＋ allergy" so we don't clutter every row with "none".
+  const lead = avoided.length ? `<span class="sx-dish-alg-lbl">⚠ Avoid</span>${chips}` : "";
+  const addLabel = avoided.length ? "＋" : "＋ allergy";
+  return `<div class="sx-dish-alg-row">${lead}<button type="button" class="sx-dish-addalg" data-dishalg-add="${esc(row.id)}" title="Add an allergen to this dish">${addLabel}</button></div>`;
 }
 
 // toggleDishAllergen: shared add/remove for ONE dish's allergens, used by both the
