@@ -800,24 +800,26 @@ async function sendOrder() {
 // ── the poll ─────────────────────────────────────────────────────────────────
 // A compact fingerprint of everything the floor + panel draw (now including each
 // dish's status, so advancing a dish anywhere repaints the tiles + detail).
+// BULLETPROOF redraw fingerprint. We serialize the FULL drawn rows (minus a few
+// heartbeat-only columns) so ANY field that affects the floor or the detail panel —
+// including columns added in the FUTURE (a new per-dish flag, a new session field,
+// etc.) — flips the signature and forces a repaint. Do NOT shrink this back to a
+// hand-picked field list: that list silently missed allergy/note/discount/auto-
+// approve edits, so they only appeared after a MANUAL refresh (bug fixed 2026-06-17).
+// See CLAUDE.md "Live-update redraw guard". RT_VOLATILE = columns that change with
+// NO visible effect (heartbeats / derived timestamps) — excluded so idle polls don't
+// churn (last_activity_at ticks constantly; excluding it is what keeps this cheap).
+const RT_VOLATILE = new Set(["last_activity_at", "updated_at", "cart_updated_at", "served_at"]);
+const stableRow = (row) => { const o = {}; for (const k in (row || {})) if (!RT_VOLATILE.has(k)) o[k] = row[k]; return o; };
 function boardSig(d) {
   return JSON.stringify([
-    // s.auto_approve + s.cart so the auto-approve toggle and the live "Building"
-    // cart repaint via realtime (they're drawn but were missing from the sig).
-    (d.sessions || []).map((s) => [s.id, s.table_number, s.status, s.bill_no, s.auto_approve, s.cart]),
-    // o.discount + o.allergies so a discount or an order-wide allergen edit repaints.
-    (d.orders || []).map((o) => [o.id, o.table_number, o.status, o.total, o.kot_no, o.payment_status, o.discount, o.allergies]),
-    // i.removed/note/options so a per-dish allergen, note or option edit repaints.
-    (d.items || []).map((i) => [i.id, i.order_id, i.status, i.removed, i.note, i.options]),
-    (d.calls || []).map((c) => [c.id, c.table_number]),
-    // m.role/name so make-head (role change) and a renamed guest repaint the party.
-    (d.members || []).map((m) => [m.id, m.session_id, m.approved, m.removed, m.role, m.name]),
-    // Pending open/join requests — MUST be in the signature, else a brand-new
-    // request (e.g. a guest asking to open a table) arrives via realtime and gets
-    // fetched, but the board doesn't repaint because the signature looks unchanged
-    // — so the 📨 badge only appeared after some OTHER change. (owner, 2026-06-16)
-    (d.requests || []).map((r) => [r.id, r.table_number, r.type, r.status]),
-    (d.settings || {}).table_count,
+    (d.sessions || []).map(stableRow),
+    (d.orders || []).map(stableRow),
+    (d.items || []).map(stableRow),
+    (d.calls || []).map(stableRow),
+    (d.members || []).map(stableRow),
+    (d.requests || []).map(stableRow),
+    stableRow(d.settings || {}),
   ]);
 }
 let lastSig = null;

@@ -161,6 +161,18 @@ via `ToolSearch` BEFORE planning around it.
 
 ## Known gotchas (read before editing)
 
+- **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The
+  `/kitchen` and `/tablet` panels only repaint when a fingerprint (`boardSig` in
+  their `app.js`) changes, so a realtime refetch whose data "looks the same" is
+  dropped (prevents flicker). `boardSig` now serialises the FULL rows minus a tiny
+  `RT_VOLATILE` set (heartbeat/derived timestamps), so ANY field that affects a
+  ticket/tile auto-repaints — *including columns you add later*. If you ever shrink
+  it back to a hand-picked field list, edits to the omitted field (e.g. a new
+  allergy/note/discount) will silently fail to auto-refresh and only show on a
+  MANUAL refresh — the exact bug fixed 2026-06-17. Adding a new editable order/dish/
+  session field needs NO `boardSig` change now; if you add a new heartbeat-y column,
+  add it to `RT_VOLATILE`. Guarded by `scripts/verify-board-sig.mjs`. (The separate
+  "latest-wins" seq guard in each loader is a DIFFERENT mechanism — don't conflate.)
 - **Supabase HEAD lies about Cache-Control.** Use GET with `Range: bytes=0-0`
   for header checks. `scripts/set-glb-cache.mjs` has this bug.
 - **`/` is now just a redirect to `/menu`** (not a duplicate). No mirroring needed.
