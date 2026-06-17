@@ -1252,31 +1252,45 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .tp-edit-alg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; }
 .tp-edit-extras .chip { padding: 5px 10px; font-size: 12.5px; }
 .tp-edit-toggle { margin-left: auto; }
-/* Per-dish EDIT row (staff edit mode): qty −/＋, note ✎, and the allergen editor.
-   It's a full-width SECOND row of the .sx-item grid (grid-column:1/-1) so the dish
-   name above keeps its room and these controls never wrap awkwardly on a narrow panel. */
+/* Per-dish EDIT row (staff edit mode): qty −/＋ steppers + a single "✎ Edit" button.
+   It's a full-width SECOND row of the .sx-item grid (grid-column:1/-1) so the dish name
+   above keeps its room and the controls never wrap awkwardly on a narrow panel. */
 .tp-order .sx-item .sx-dish-edit-row { grid-column: 1 / -1; }
 .sx-dish-edit-row {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
   padding: 4px 0 2px 44px; /* indent to line up under the dish name (past the qty column) */
 }
-.sx-dish-alg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.sx-dish-alg-lbl { color: var(--muted); font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
-.sx-dish-alg {
-  display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap;
-  font-family: inherit; font-size: 11.5px; font-weight: 800; color: #ff9a9a;
-  background: rgba(239,68,68,.13); border: 1px solid color-mix(in srgb, #ef4444 35%, transparent);
-  border-radius: 999px; padding: 2px 9px; transition: .1s;
+.sx-dish-edit-btn {
+  white-space: nowrap; font-family: inherit; font-size: 12px; font-weight: 700; color: var(--text); cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 13px;
 }
-.sx-dish-alg:hover { background: rgba(239,68,68,.22); color: #ffb4b4; }
-.sx-dish-alg b { font-size: 10px; opacity: .85; }
-.sx-dish-addalg {
-  white-space: nowrap; font-family: inherit; font-size: 11.5px; font-weight: 700; color: var(--text); cursor: pointer;
-  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px;
+.sx-dish-edit-btn:hover { border-color: var(--gold); background: rgba(212,165,116,.12); }
+
+/* Shared centered-modal frame for the .sx-modal-overlay popups (dish editor, add-dish).
+   These classes previously had no positioning, so the popups rendered bottom-left with
+   no backdrop — this gives them the same centered, dimmed scrim as the table modal. */
+.sx-modal-overlay { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; background: rgba(0,0,0,0.6); backdrop-filter: blur(6px); }
+.sx-modal { max-height: 86vh; overflow-y: auto; background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 30px 70px rgba(0,0,0,0.6); }
+
+/* Unified per-dish edit modal: allergen toggle chips (standard + custom) + note. */
+.dish-edit-modal { max-width: 440px; width: 92%; display: flex; flex-direction: column; }
+.dish-edit-body { padding: 14px 16px 4px; }
+.dish-edit-lbl { display: block; font-size: 12.5px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+.dish-alg-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.dish-edit-custom { display: flex; gap: 8px; margin-top: 10px; }
+.dish-edit-custominput {
+  flex: 1; min-width: 0; padding: 8px 11px; border-radius: 9px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--text); font-size: 14px; font-family: inherit;
 }
-.sx-dish-addalg:hover { border-color: var(--gold); background: rgba(212,165,116,.12); }
-.dish-alg-modal { max-width: 420px; width: 92%; display: flex; flex-direction: column; }
-.dish-alg-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px; }
+.dish-edit-custominput:focus { outline: none; border-color: var(--gold); }
+.dish-edit-note {
+  width: 100%; box-sizing: border-box; resize: vertical; padding: 9px 11px; border-radius: 9px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 14px; font-family: inherit;
+}
+.dish-edit-note:focus { outline: none; border-color: var(--gold); }
+.dish-edit-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 16px; border-top: 1px solid var(--line); }
+/* "✎ Edited" badge — order was changed after it was placed (shown on the KOT card head). */
+.edited-badge { margin-left: auto; font-size: 10.5px; font-weight: 800; letter-spacing: .02em; color: #f59e0b; background: rgba(245,158,11,.15); border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
 /* Add-dish picker modal (manager). */
 .add-dish-modal { max-width: 460px; width: 92%; display: flex; flex-direction: column; max-height: 80vh; }
 .add-dish-search { margin: 10px 14px; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 15px; }
