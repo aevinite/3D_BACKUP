@@ -35,6 +35,11 @@ export const ACT_LABEL: Record<string, string> = {
   pin_set: "Set PIN", password_change: "Changed password",
   user_create: "Created user", user_delete: "Deleted user", user_reset_password: "Reset password",
   user_enable: "Enabled user", user_disable: "Disabled user", user_set_role: "Changed role", user_set_access: "Changed access",
+  order_add_item: "Added a dish", order_item_qty: "Changed quantity", order_item_note: "Edited a note",
+  order_item_delete: "Removed a dish", order_delete: "Deleted order", order_move: "Moved order",
+  order_allergies: "Set allergies", order_item_removed: "Removed allergen", item_status: "Updated dish status",
+  bill_paid: "Marked paid", close_unpaid: "Closed unpaid", payment_revert: "Reverted payment",
+  member_remove: "Removed guest", member_ban: "Banned guest", auto_approve: "Auto-approve", table_restart: "Restarted table",
 };
 
 export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
