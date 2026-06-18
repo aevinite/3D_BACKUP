@@ -529,23 +529,16 @@ function renderPanel() {
     const note = amount > 0 ? (window.prompt("Reason (optional, e.g. loyalty/comp):", (o && o.discount_note) || "") || "") : "";
     actGated("POST", `/orders/${b.dataset.discount}/discount`, { amount, note }, { message: "Enter a manager PIN to apply this discount." });
   }));
-  document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => act(() => api("POST", `/orders/${b.dataset.accept}/accept`))));
-  // Accept ALL un-accepted orders on the table in one tap.
-  document.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () => act(async () => {
-    const recv = ordersOf(b.dataset.acceptAll).filter((o) => o.status === "received");
-    // Fire them ALL at once (was a slow one-by-one await loop that hung for seconds
-    // with many orders). Independent calls → no ordering needed. (owner, 2026-06-18)
-    await Promise.all(recv.map((o) => api("POST", `/orders/${o.id}/accept`)));
-  })));
-  // Serve ALL accepted-but-unserved dishes on the table in one tap.
-  document.querySelectorAll("[data-serve-all]").forEach((b) => (b.onclick = () => act(async () => {
-    const orders = ordersOf(b.dataset.serveAll).filter((o) => o.status !== "received" && o.status !== "cancelled");
-    const ids = [];
-    for (const o of orders) for (const r of dishRowsOf(o)) if (r.fromDb && r.status !== "served") ids.push(r.id);
-    // Serve every dish in PARALLEL — the old sequential await loop took ~N round-trips
-    // and visibly hung (3–5s) once a table had 6–7+ orders. (owner, 2026-06-18)
-    await Promise.all(ids.map((id) => api("POST", `/items/${id}/status`, { status: "served" })));
-  })));
+  // Accept ONE order — optimistic (flips received→preparing instantly, persists in bg).
+  document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => optimisticAccept([b.dataset.accept])));
+  // Accept ALL un-accepted orders on the table in one tap — optimistic + bulk.
+  document.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () =>
+    optimisticAccept(ordersOf(b.dataset.acceptAll).filter((o) => o.status === "received").map((o) => o.id))));
+  // Serve ALL accepted-but-unserved dishes on the table in one tap — optimistic + bulk.
+  // Flips every dish to served on screen INSTANTLY, then fires one /serve-all per order
+  // in the background (mirrors the manager + advanceDish). No more waiting on the network.
+  document.querySelectorAll("[data-serve-all]").forEach((b) => (b.onclick = () =>
+    optimisticServeAll(ordersOf(b.dataset.serveAll).filter((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served")).map((o) => o.id))));
   // Per-dish advance: optimistically flip the pill, then persist + reconcile.
   document.querySelectorAll(".ist.tap[data-item]").forEach((el) => (el.onclick = () => advanceDish(el.dataset.item, el.dataset.cur)));
   // Explicit "✓ Serve" button on each cooking/ready dish → serves it directly
@@ -641,6 +634,38 @@ function advanceDish(id, cur) {
   if (!state.ordering) renderPanel();
   // Fire-and-forget; reconcile once after the taps stop (not per tap).
   api("POST", `/items/${id}/status`, { status: next })
+    .then(() => scheduleServeReconcile())
+    .catch((e) => { toast("Failed: " + e.message, false); load(); });
+}
+
+// Bulk order actions (accept / serve-all) the OPTIMISTIC way — flip the orders +
+// their dishes in local state and repaint INSTANTLY, then persist in the background
+// (one bulk call per order), then reconcile once after. Mirrors advanceDish above
+// and the manager's serveAllOrders/acceptTableOrders so it feels instant instead of
+// making the waiter wait on the network. (owner, 2026-06-18)
+function flipOrders(orderIds, { from, to, orderStatus }) {
+  const items = state.data.items || [];
+  orderIds.forEach((oid) => {
+    const o = (state.data.orders || []).find((x) => x.id === oid);
+    if (o) o.status = orderStatus;
+    items.forEach((it) => { if (it.order_id === oid && (from ? it.status === from : it.status !== "served")) it.status = to; });
+    if (o && Array.isArray(o.items)) o.items = o.items.map((i) => ((from ? i.status === from : i.status !== "served") ? { ...i, status: to } : i));
+  });
+  lastSig = boardSig(state.data);      // adopt as baseline so a poll can't flicker it back
+  renderFloor();
+  if (!state.ordering) renderPanel();
+}
+function optimisticAccept(orderIds) {
+  if (!orderIds.length) return;
+  flipOrders(orderIds, { from: "received", to: "preparing", orderStatus: "preparing" });
+  Promise.all(orderIds.map((oid) => api("POST", `/orders/${oid}/accept`)))
+    .then(() => scheduleServeReconcile())
+    .catch((e) => { toast("Failed: " + e.message, false); load(); });
+}
+function optimisticServeAll(orderIds) {
+  if (!orderIds.length) return;
+  flipOrders(orderIds, { from: null, to: "served", orderStatus: "served" });
+  Promise.all(orderIds.map((oid) => api("POST", `/orders/${oid}/serve-all`)))
     .then(() => scheduleServeReconcile())
     .catch((e) => { toast("Failed: " + e.message, false); load(); });
 }
