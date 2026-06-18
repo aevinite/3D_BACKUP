@@ -343,8 +343,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "items" && c === "removed") {
       const raw = Array.isArray(body?.removed) ? body.removed : [];
       const removed = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
-      const item = must(await sb.from("order_items").select("id, order_id, removed, added_allergens, removed_flag").eq("id", b).maybeSingle());
+      const item = must(await sb.from("order_items").select("id, order_id, removed, added_allergens, removed_flag, status").eq("id", b).maybeSingle());
       if (!item) return err(editErrMsg("item_not_found"), 400);
+      // Once a dish is READY or SERVED it's cooked/out — too late to change it.
+      if (item.status === "ready" || item.status === "served") return err("That dish is already " + item.status + " — too late to edit.", 409);
       const order = must(await sb.from("orders").select("payment_status, status").eq("id", item.order_id).maybeSingle());
       if (order?.payment_status === "paid") return err(editErrMsg("order_paid"), 409);
       if (order?.status === "cancelled") return err(editErrMsg("order_cancelled"), 400);

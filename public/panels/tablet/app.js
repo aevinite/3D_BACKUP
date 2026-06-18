@@ -399,7 +399,9 @@ function renderPanel() {
     // "✎ Edit" button that opens ONE modal (allergens + kitchen note) — IDENTICAL to
     // the manager panel. (owner, 2026-06-18)
     const editing = state.editOrders.has(o.id);
-    const editCtl = (editing && r.fromDb && r.status !== "served")
+    // No editing once a dish is READY or SERVED — it's cooked/out, changing it is too
+    // late (mirror the manager; place a new order instead). (owner, 2026-06-18)
+    const editCtl = (editing && r.fromDb && r.status !== "served" && r.status !== "ready")
       ? `<span class="iedit"><button class="qbtn" data-qty-dec="${esc(r.id)}" data-qty="${r.qty}" title="Fewer">−</button><button class="qbtn" data-qty-inc="${esc(r.id)}" data-qty="${r.qty}" title="More">＋</button><button class="qbtn" data-edit-dish="${esc(r.id)}" title="Edit allergens & note for this dish">✎ Edit</button></span>`
       : "";
     return `<div class="iline${editing ? " editing" : ""}"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${remMark}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}${editCtl}${delBtn}</div>`;

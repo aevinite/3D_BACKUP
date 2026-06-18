@@ -2558,7 +2558,8 @@ function itemRowHtml(row, editing = false) {
   // button that opens ONE modal to set allergens (standard + custom) and the kitchen
   // note. The controls sit on a FULL-WIDTH row below the dish so the name keeps its
   // room; the dish's current allergens + note show read-only on the line above.
-  const canEdit = editing && row.kind === "session" && row.status !== "served";
+  // No editing once a dish is READY or SERVED — it's cooked/out, too late to change.
+  const canEdit = editing && row.kind === "session" && row.status !== "served" && row.status !== "ready";
   const editRow = canEdit
     ? `<div class="sx-dish-edit-row"><span class="sx-item-edit"><button class="sx-qty" data-qty-dec="${esc(row.id)}" data-qty="${esc(row.qty)}" title="Fewer">−</button><button class="sx-qty" data-qty-inc="${esc(row.id)}" data-qty="${esc(row.qty)}" title="More">＋</button></span><button class="sx-dish-edit-btn" data-edit-dish="${esc(row.id)}" title="Edit allergens & note for this dish">✎ Edit</button></div>`
     : "";
