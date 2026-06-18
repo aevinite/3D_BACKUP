@@ -2176,8 +2176,12 @@ function tableTileState(t) {
   let st = "free", label = "Free", meta = "tap to open";
   if (os.length) {
     if (anyReceived) { st = "new"; label = "New order"; }
-    else if (anyPreparing) { st = "prep"; label = "Preparing"; }
+    // ANY cooked-but-unserved dish turns the tile pink ("Ready to serve") — even if
+    // OTHER dishes are still cooking — so staff see at a glance there's something to
+    // carry out. (Was: only when EVERY dish was ready, because anyPreparing was checked
+    // first.) Now matches the tablet's tile precedence (new → ready → prep). (2026-06-18)
     else if (anyReady) { st = "ready"; label = "Ready to serve"; } // food cooked, not yet carried out
+    else if (anyPreparing) { st = "prep"; label = "Preparing"; }
 
     // No separate "Bill due" fill anymore (owner, 2026-06-10): payment is
     // already told by the OUTLINE (red = unpaid, green = paid), so a fully

@@ -127,13 +127,48 @@ function render() {
   draw("new", buckets.new); draw("cooking", buckets.cooking); draw("ready", buckets.ready);
   // wire the buttons (we redraw each poll, so we rebind each poll)
   // (No accept handler — the kitchen can't accept orders anymore; the waiter does.)
-  document.querySelectorAll("[data-ready]").forEach((b) => (b.onclick = () => act(() => api("POST", `/orders/${b.dataset.ready}/ready`))));
+  document.querySelectorAll("[data-ready]").forEach((b) => (b.onclick = () => markOrderReady(b.dataset.ready)));
   // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
-  document.querySelectorAll("[data-item-ready]").forEach((b) => (b.onclick = () => act(() => api("POST", `/items/${b.dataset.itemReady}/status`, { status: "ready" }))));
+  // Optimistic + debounced reconcile so rapid one-by-one ✓ taps in a rush stay snappy.
+  document.querySelectorAll("[data-item-ready]").forEach((b) => (b.onclick = () => markItemReady(b.dataset.itemReady)));
 }
 
 // Run an action then refresh immediately (snappier than waiting for the poll).
+// Used by the 86-board toggle/undo — a single deliberate tap, so a reload is fine.
 const act = async (fn) => { try { await fn(); await load(); } catch (e) { toast("Failed: " + e.message); } };
+
+// Marking dishes READY is OPTIMISTIC. In a rush the cook taps ✓ down a long ticket
+// one after another; we flip the dish locally + redraw INSTANTLY, fire the API in the
+// background, and reconcile with ONE refetch after the taps stop. (Was: await POST +
+// a full board reload PER tap → each tap waited a round-trip and the DOM rebuild
+// between taps ate the next tap → "clicking ready one by one doesn't work" in a rush.)
+// pendingReady keeps a just-tapped dish showing ready even if a realtime/poll refetch
+// lands mid-rush before the server caught up. (owner, 2026-06-18)
+const pendingReady = new Set();
+let readyReconcileTimer = null;
+function scheduleReadyReconcile() {
+  if (readyReconcileTimer) clearTimeout(readyReconcileTimer);
+  readyReconcileTimer = setTimeout(() => { readyReconcileTimer = null; pendingReady.clear(); load().catch(() => {}); }, 2500);
+}
+function setLocalReady(matches) {
+  (state.items || []).forEach((i) => { if (i.status !== "served" && matches(i)) { i.status = "ready"; pendingReady.add(i.id); } });
+  // Legacy orders carry their dishes in the order's items JSON (no order_items rows).
+  (state.orders || []).forEach((o) => { if (Array.isArray(o.items)) o.items = o.items.map((i) => (i.status !== "served" && matches({ ...i, order_id: o.id })) ? { ...i, status: "ready" } : i); });
+  // Adopt the optimistic state as the baseline so a poll/realtime refetch carrying the
+  // SAME (server-confirmed) data won't rebuild the tickets under the cook's finger.
+  lastSig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes });
+  render();
+}
+// Mark ONE dish ready (the ✓ tick).
+function markItemReady(id) {
+  setLocalReady((i) => i.id === id);
+  api("POST", `/items/${id}/status`, { status: "ready" }).then(scheduleReadyReconcile).catch((e) => { toast("Failed: " + e.message); load(); });
+}
+// Mark every not-served dish on an order ready (the "ALL READY" button).
+function markOrderReady(orderId) {
+  setLocalReady((i) => i.order_id === orderId);
+  api("POST", `/orders/${orderId}/ready`).then(scheduleReadyReconcile).catch((e) => { toast("Failed: " + e.message); load(); });
+}
 
 // ── the 86 board (sold-out toggles) ──────────────────────────────────────────
 function renderDishes() {
@@ -198,10 +233,15 @@ async function load() {
     if (fresh) chime();
   }
   state.knownIds = ids;
-  state.orders = data.orders; state.items = data.items; state.dishes = data.dishes;
+  state.orders = data.orders; state.dishes = data.dishes;
+  // Keep dishes the cook JUST tapped ready showing ready, even if this refetch landed
+  // before the server caught up (cleared by the reconcile once the rush settles).
+  state.items = pendingReady.size
+    ? data.items.map((i) => (pendingReady.has(i.id) && i.status !== "served" ? { ...i, status: "ready" } : i))
+    : data.items;
   // If the 86-board drawer is open, keep it fresh regardless (its own render).
   if (!$("#drawerOverlay").hidden) renderDishes();
-  const sig = boardSig(data);
+  const sig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes });
   if (sig === lastSig) return; // nothing visible changed — don't rebuild the tickets
   lastSig = sig;
   render();
