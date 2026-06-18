@@ -2125,7 +2125,9 @@ const callsForTable = (t) => {
   if (sessionsOn && !openSessionForTable(t)) return [];
   return list;
 };
-const reqsForTable = (t) => (state.board.requests || []).filter((r) => String(r.table_number) === String(t)); // pending "let me in" requests for t
+// An "open" request is MOOT once the table is open (already fulfilled) — never show it
+// on an open table. join/access requests stay valid on an open table. (owner, 2026-06-18)
+const reqsForTable = (t) => (state.board.requests || []).filter((r) => String(r.table_number) === String(t) && !(r.type === "open" && openSessionForTable(t)));
 const itemsForOrder = (oid) => (state.board.items || []).filter((i) => i.order_id === oid); // the session items belonging to one order
 
 // Per-item rows for an order, unified: session order_items if present, else the items JSON.

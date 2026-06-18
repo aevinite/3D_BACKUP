@@ -145,7 +145,10 @@ const membersOf = (t) => {
   const s = sessionOf(t);
   return s ? state.data.members.filter((m) => m.session_id === s.id) : [];
 };
-const reqsOf = (t) => (state.data.requests || []).filter((r) => String(r.table_number) === String(t));
+// An "open" request is MOOT once the table is open (it's already been fulfilled), so
+// never show it on an open table — that stale "Asked to open · X" with Approve/Deny was
+// a glitch. join/access requests stay valid on an open table. (owner, 2026-06-18)
+const reqsOf = (t) => (state.data.requests || []).filter((r) => String(r.table_number) === String(t) && !(r.type === "open" && sessionOf(t)));
 
 // The dish rows for one order. Prefer the real order_items rows (they have an id,
 // so each dish can be advanced individually); fall back to the order.items JSON
