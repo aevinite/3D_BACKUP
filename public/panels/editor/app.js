@@ -197,7 +197,15 @@ async function loadAll() {
   const seq = ++allSeq;
   const data = await api("GET", "/all");
   if (seq !== allSeq) return; // a newer loadAll started — drop this stale response
-  state.data = data;
+  // /all carries menu CONTENT only (items/categories/filters/settings) — it does
+  // NOT include the live board. PRESERVE the orders/calls that the board loaders
+  // (loadSessions/loadOrders/pollOrders) maintain on state.data; otherwise a loadAll
+  // that lands AFTER them wipes the floor's orders. That happens on tab-wake (the
+  // realtime wake fires BOTH the menu handler → loadAll AND the ops board poll): the
+  // slow /all lands last, blanks state.data.orders, and a table with an order shows
+  // "seated · no orders" until the next board poll repopulates it (~5-7s). (2026-06-18)
+  const prev = state.data || {};
+  state.data = { ...data, orders: prev.orders || [], calls: prev.calls || [] };
   $("#conn").textContent = "connected";
   $("#conn").className = "conn ok";
   renderList();
