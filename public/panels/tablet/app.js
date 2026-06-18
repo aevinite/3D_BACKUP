@@ -268,12 +268,13 @@ function renderFloor() {
   // select the tile underneath).
   document.querySelectorAll(".topen[data-quick='open']").forEach((q) => (q.onclick = (e) => {
     e.stopPropagation();
-    act(() => api("POST", "/sessions/open", { table: q.dataset.qt }));
+    optimisticOpen(q.dataset.qt);
   }));
   // Quick "Accept" on the tile — accept every new order for the table in one tap.
+  // Optimistic (instant), reusing the same helper the Accept-all button uses.
   document.querySelectorAll(".tacc[data-quick='accept']").forEach((q) => (q.onclick = (e) => {
     e.stopPropagation();
-    act(async () => { const recv = ordersOf(q.dataset.qt).filter((o) => o.status === "received"); for (const o of recv) await api("POST", `/orders/${o.id}/accept`); });
+    optimisticAccept(ordersOf(q.dataset.qt).filter((o) => o.status === "received").map((o) => o.id));
   }));
   // Quick "Attend" — open the table's detail to handle the call / join request.
   document.querySelectorAll(".tatt[data-quick='attend']").forEach((q) => (q.onclick = (e) => {
@@ -580,7 +581,7 @@ function renderPanel() {
     if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
     act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }));
   }));
-  const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
+  const ob = $("#openTable"); if (ob) ob.onclick = () => optimisticOpen(t);
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
   // Restart: clear this round's orders off the floor (they stay served+archived in
   // records) but keep the table OPEN for a fresh round. Mirrors the manager.
@@ -595,12 +596,15 @@ function renderPanel() {
   const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
     const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
     if (!(await confirmDialog(`Close table ${t} and free it?${warn}`, "Close table"))) return;
+    // OPTIMISTIC: drop the session locally so the tile frees INSTANTLY, then persist.
+    state.data.sessions = (state.data.sessions || []).filter((x) => x.id !== s.id);
+    state.table = null; state.ordering = false;
+    renderFloor(); renderPanel();
     try {
       await api("POST", `/sessions/${s.id}/close`);
-      await load(); if (!state.ordering) renderPanel();
+      await load();
     } catch (e) {
-      // Server blocks closing while money is owed OR an order is still cooking — all
-      // such messages end with "close anyway". The override needs a manager PIN.
+      await load(); // server refused — refetch so the still-open table reappears
       if (/close anyway/i.test(String(e && e.message))) {
         if (await confirmDialog(`${e.message}`, "Close anyway")) {
           await actGated("POST", `/sessions/${s.id}/close`, { force: true }, { message: "Enter a manager PIN to close this busy table.", toast: "Table closed" });
@@ -738,6 +742,21 @@ async function runOptimistic(mutate, fn) {
 }
 
 const act = async (fn) => { try { await fn(); await load(); } catch (e) { toast("Failed: " + e.message, false); } };
+
+// Open a table INSTANTLY (mirrors the manager): drop a pending "open" session into
+// local state + repaint NOW, then create it on the server and reconcile. On failure
+// runOptimistic's load() refetches and the pending session disappears. (owner, 2026-06-19)
+function optimisticOpen(table) {
+  const t = String(table);
+  if (sessionOf(t)) return; // already open
+  runOptimistic(
+    () => {
+      state.data.sessions = [...(state.data.sessions || []), { id: "pending-" + t, table_number: t, status: "open", auto_approve: false }];
+      if (Array.isArray(state.data.requests)) state.data.requests = state.data.requests.filter((r) => !(r.type === "open" && String(r.table_number) === t));
+    },
+    () => api("POST", "/sessions/open", { table: t }),
+  );
+}
 
 // ── order-taking mode ────────────────────────────────────────────────────────
 const dishPrice = (d) => Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;

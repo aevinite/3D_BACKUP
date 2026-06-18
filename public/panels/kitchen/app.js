@@ -101,7 +101,7 @@ function ticketHtml(o) {
     : (!allCooked
       ? `<button class="big ready" data-ready="${esc(o.id)}">ALL READY</button>`
       : `<div class="awaiting">✓ ready — waiter serving</div>`);
-  return `<div class="ticket st-${esc(o.status)}">
+  return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
     <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span></div>
     ${lines}${action}</div>`;
 }
@@ -173,7 +173,32 @@ function markItemReady(id, btn) {
   // Adopt the optimistic state as the baseline so a poll/realtime refetch carrying the
   // SAME (server-confirmed) data won't rebuild the tickets under the cook's finger.
   lastSig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes });
+  // If THIS tick made the WHOLE order ready, slide its card to the Ready column NOW
+  // (don't wait for the 2.5s reconcile) — moving just this one card, so other tickets'
+  // ✓ buttons survive and the cook's next rapid tap isn't eaten. (owner, 2026-06-19)
+  const o = (state.orders || []).find((x) => x.id === it.order_id);
+  if (o && orderPhase(o) === "ready") moveCardToReady(o);
   api("POST", `/items/${id}/status`, { status: "ready" }).then(scheduleReadyReconcile).catch((e) => { toast("Failed: " + e.message); load(); });
+}
+// Move ONE fully-ready ticket into the Ready column without a whole-board rebuild:
+// re-render just that card (now shows "ready — waiter serving", no buttons), drop it
+// in #list-ready, and recount/refill both columns.
+function moveCardToReady(o) {
+  const card = document.querySelector(`.ticket[data-ticket="${o.id}"]`);
+  const readyList = document.getElementById("list-ready");
+  if (!card || !readyList || card.parentElement === readyList) return;
+  readyList.querySelector(".empty")?.remove();
+  const tmp = document.createElement("div"); tmp.innerHTML = ticketHtml(o);
+  const fresh = tmp.firstElementChild;
+  if (!fresh) return;
+  card.remove();
+  readyList.appendChild(fresh);
+  ["new", "cooking", "ready"].forEach((key) => {
+    const list = document.getElementById("list-" + key); if (!list) return;
+    const n = list.querySelectorAll(".ticket").length;
+    const c = document.getElementById("count-" + key); if (c) c.textContent = n || "";
+    if (n === 0 && !list.querySelector(".empty")) list.innerHTML = `<div class="empty">Nothing here.</div>`;
+  });
 }
 // Mark every not-served dish on an order ready (the "ALL READY" button).
 function markOrderReady(orderId) {
