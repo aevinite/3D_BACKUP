@@ -1323,3 +1323,9 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 
 /* ---- floor-control cards: match the rounder, gradient look ---- */
 .fc-card { border-radius: 16px; background: linear-gradient(180deg, var(--panel-2), var(--panel)); }
+
+/* ---- shift-table picker (mirrors the tablet's free-table grid) ---- */
+.shift-modal { width: min(94vw, 420px); }
+.shiftgrid { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px 14px 18px; }
+.shiftgrid .shiftpick { flex: 1 1 calc(33% - 10px); min-width: 96px; padding: 14px 10px; font-size: 15px; font-weight: 700; }
+.shiftgrid .shiftpick:hover { filter: brightness(1.08); }

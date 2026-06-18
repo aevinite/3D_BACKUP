@@ -2557,7 +2557,9 @@ function itemRowHtml(row, editing = false) {
   // real order_item id the server can delete + reconcile); legacy JSON-only orders
   // have no per-item row, so we don't offer it there. Deleting recomputes the bill
   // total server-side (see lfh_delete_order_item) so no stale money is left behind.
-  const delBtn = row.kind === "session" ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
+  // …but NOT once it's SERVED — a delivered dish is a financial record; you don't
+  // silently delete it (mirror the tablet, which also blocks delete on served).
+  const delBtn = (row.kind === "session" && row.status !== "served") ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
   // status label: friendlier words for the chip (class stays the raw status for colour).
   const STLABEL = { received: "new", preparing: "cooking", ready: "ready", served: "served", cancelled: "cancelled" };
   // STAFF EDIT (a real, not-yet-served dish): qty −/＋ steppers + a single "✎ Edit"
@@ -2837,6 +2839,33 @@ function openAddDishModal(orderId, rerender) {
   search.focus();
 }
 
+// Shift-table PICKER — mirrors the tablet's nice modal (was a bare prompt() here):
+// a grid of the FREE tables to move this party (orders + calls + bill) onto. Only
+// free tables show, so you can't pick an occupied one. (owner, 2026-06-18)
+function openShiftPicker(t, sess) {
+  document.querySelector(".shift-overlay")?.remove();
+  const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+  const free = [];
+  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !openSessionForTable(i)) free.push(i); }
+  const grid = free.length
+    ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">Table ${i}</button>`).join("")
+    : `<div class="muted" style="padding:14px">No free tables to move to right now.</div>`;
+  const wrap = el(`<div class="sx-modal-overlay shift-overlay"><div class="sx-modal shift-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Move Table ${esc(t)} →</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><div class="muted small" style="padding:0 14px 10px">Move this party — orders, calls &amp; bill included — to a free table:</div><div class="shiftgrid">${grid}</div></div></div>`);
+  document.body.appendChild(wrap);
+  const closeM = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = closeM;
+  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
+  wrap.querySelectorAll("[data-shiftto]").forEach((b) => (b.onclick = async () => {
+    const to = b.dataset.shiftto; closeM();
+    try {
+      const r = await api("POST", `/sessions/${sess.id}/shift`, { to });
+      if (!r.ok) { toast(r.reason === "target_occupied" ? `Table ${to} already has a party` : "Couldn't shift: " + (r.reason || ""), "err"); return; }
+      await loadSessions(); toast(`Shifted to table ${to}`, "ok");
+      selectTable(to); // follow the party to its new home
+    } catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+}
+
 // bindTablePanel: wire up every button inside an already-rendered table detail.
 // `root` is the container the detail's HTML lives in (the modal OR the side panel).
 // `rerender` redraws the SAME view after a local-state change (modal vs side panel
@@ -2848,17 +2877,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   const cb = root.querySelector("#sxClose"); if (cb && sess) cb.onclick = () => closeSession(sess.id);
   // Shift the whole party (orders + calls move along) to an EMPTY table.
   const sh = root.querySelector("#sxShift");
-  if (sh && sess) sh.onclick = async () => {
-    const to = (prompt(`Move table ${t}'s party to which table?`) || "").trim();
-    if (!to) return;
-    if (!(await confirmDialog(`Shift everyone (orders, calls, bill) from table ${t} to table ${to}?`, "Shift"))) return;
-    try {
-      const r = await api("POST", `/sessions/${sess.id}/shift`, { to });
-      if (!r.ok) { toast(r.reason === "target_occupied" ? `Table ${to} already has a party` : "Couldn't shift: " + (r.reason || ""), "err"); return; }
-      await loadSessions(); toast(`Shifted to table ${to}`, "ok");
-      selectTable(to); // follow the party to its new home (re-selects in whichever view we're in)
-    } catch (e) { toast("Failed: " + e.message, "err"); }
-  };
+  if (sh && sess) sh.onclick = () => openShiftPicker(t, sess);
   // Print bill: a clean printable window with KOT numbers, discounts and totals.
   const pr = root.querySelector("#sxPrint");
   if (pr) pr.onclick = () => printBill(t, sess, os);
