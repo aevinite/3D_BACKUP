@@ -297,6 +297,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
     }
 
+    // orders/:id/serve-all — mark EVERY dish on one order served in a single call
+    // (the table-wide "Serve all" fans these out, one per order). Mirrors the editor.
+    if (a === "orders" && c === "serve-all") {
+      const cur = must(await sb.from("orders").select("items").eq("id", b).single());
+      const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
+      must(await sb.from("orders").update({ items, status: "served" }).eq("id", b));
+      await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).neq("status", "served");
+      await logAction("tablet", "order_serve", { order_id: b, device_id: dev });
+      return ok(must(await sb.from("orders").select("*").eq("id", b).single()) || null);
+    }
+
     // orders/:id/allergies — staff edit of the order-wide "avoid" list (add a
     // missed allergen / fix a wrong one). Mirrors the editor endpoint exactly.
     // (owner, 2026-06-16)
