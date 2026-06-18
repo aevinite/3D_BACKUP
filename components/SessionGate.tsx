@@ -249,12 +249,6 @@ export default function SessionGate() {
   // open the table, become the host, or ask the existing host to let them in.
   const afterLocation = useCallback(async () => {
     const p = pending.current!;
-    // COMPULSORY NAME FIRST (owner, 2026-06-17): nobody connects to a table —
-    // opening it, joining it, or asking a waiter to open it — without a name. We
-    // ask it ONCE here, before the table-status branches below, so the name is
-    // already known whether the table is open, busy, or not open yet. submitNameFirst
-    // re-enters; downstream paths reuse this name and never re-ask.
-    if (!name.trim()) { setNote(""); setStep("name_first"); return; }
     const st = await tableStatus(p.table);
     if (st.reason === "blocked") { setStep("blocked"); return; }
     // No answer ≠ "table not open" — don't mislabel a network blip; offer a retry.
@@ -263,10 +257,15 @@ export default function SessionGate() {
       setStep("net_error");
       return;
     }
-    if (!st.open) { setStep("not_open"); proceedWhenOpen(); return; } // wait for staff to open it
-    if ((st.members as number) === 0) { await joinAsHead(); return; } // empty table -> you're the host (name already given)
-    setStep("guest_name"); // someone's there -> confirm the name we already have, then ask to join
-  }, [joinAsHead, proceedWhenOpen, name]);
+    // CLOSED table → ONE merged screen that asks the NAME and requests a waiter to
+    // open the table on the same page (no separate name step). proceedWhenOpen keeps
+    // watching so we auto-continue the instant staff opens it. (owner, 2026-06-18)
+    if (!st.open) { setNote(""); setStep("not_open"); proceedWhenOpen(); return; }
+    // OPEN table → ask the name ONCE, then join directly: empty = become the head
+    // (open_name asks the name), others already there = guest_name asks then joins.
+    if ((st.members as number) === 0) { await joinAsHead(); return; }
+    setStep("guest_name");
+  }, [joinAsHead, proceedWhenOpen]);
 
   // Phase 2: actually ask the browser for the location and judge the result. This
   // is where the OS permission prompt appears, so we only reach it AFTER the guest
@@ -500,7 +499,8 @@ export default function SessionGate() {
   // (not a nameless "Someone"). submitRequestName re-enters with the name set; the
   // name is reused when the table opens, so they're never asked twice this visit.
   const doRequestOpen = async () => {
-    if (!name.trim()) { setNote(""); setStep("request_name"); return; }
+    // Name is collected on this SAME screen — if it's blank, stay put and say why.
+    if (!name.trim()) { setNote("Add your name so staff know who's asking."); return; }
     const p = pending.current!; await requestAccess(p.table, "open", name.trim(), null);
     setStep("request_sent");
   };
@@ -683,10 +683,14 @@ export default function SessionGate() {
           </div>
         </>)}
 
-        {/* Table not opened by staff yet -> offer to scan another or request a waiter. */}
+        {/* Table not opened by staff yet -> ONE screen: add your name AND request a
+            waiter to open it, together (no separate name step). Name is required. */}
         {step === "not_open" && (<>
           <div className="sg-badge"><i className="fas fa-bell"></i></div><h3 className="sg-title">Your table isn&apos;t open yet</h3>
-          <p className="sg-sub">A waiter opens your table once you&apos;re seated. We can let them know you&apos;re ready at table {pending.current?.table} — it usually takes a few minutes.</p>
+          <p className="sg-sub">A waiter opens your table once you&apos;re seated. Add your name and we&apos;ll let them know you&apos;re ready at table {pending.current?.table} — it usually takes a few minutes.</p>
+          <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
+            onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doRequestOpen(); }} autoFocus />
+          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={rescan}>Scan another table</button>
             <button className="sg-btn gold" onClick={doRequestOpen}>Request a waiter</button>
