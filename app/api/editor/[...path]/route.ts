@@ -13,6 +13,7 @@ import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole } from "@/lib/userAuth";
 import { closeSession } from "@/lib/sessionClose";
+import { maybeAutoSettle } from "@/lib/autoSettle";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -288,7 +289,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).neq("status", "served");
       await logAction("editor", "order_serve", { order_id: b, device_id: dev });
-      return ok(must(await sb.from("orders").select("*").eq("id", b).single()) || null);
+      const servedRow = must(await sb.from("orders").select("*").eq("id", b).single());
+      await maybeAutoSettle((servedRow as any)?.session_id, { panel: "editor", deviceId: dev }); // serving may complete the table
+      return ok(servedRow || null);
     }
     if (a === "orders" && c === "item") {
       const idx = Number(body && body.index);
@@ -304,6 +307,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const orderStatus = servedCount === items.length ? "served"
         : items.some((i: any) => i.status === "preparing" || i.status === "served") ? "preparing" : "received";
       const row = must(await sb.from("orders").update({ items, status: orderStatus }).eq("id", b).select());
+      if (status === "served") await maybeAutoSettle(row[0]?.session_id, { panel: "editor", deviceId: dev }); // serving may complete the table
       return ok(row[0] || null);
     }
 
@@ -604,6 +608,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         await logAction("editor", "payment_revert", { order_id: id, detail: reason, device_id: deviceIdFrom(req) });
       }
       const data = must(await sb.from("orders").update(patch).eq("id", id).select());
+      if (patch.payment_status === "paid") await maybeAutoSettle(data[0]?.session_id, { panel: "editor", deviceId: deviceIdFrom(req) }); // paying may complete the table
       return ok(data[0] || null);
     }
 
