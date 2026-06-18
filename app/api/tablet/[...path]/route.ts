@@ -11,6 +11,7 @@ import { requireRole } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession } from "@/lib/sessionClose";
+import { maybeAutoSettle } from "@/lib/autoSettle";
 
 export const dynamic = "force-dynamic";
 
@@ -282,6 +283,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         await sb.from("orders").update({ status: overall }).eq("id", item.order_id);
       }
       await logAction("tablet", "item_status", { detail: status, device_id: dev });
+      if (status === "served") await maybeAutoSettle(item?.session_id, { panel: "tablet", deviceId: dev }); // last dish served may complete the table
       return ok(item || null);
     }
 
@@ -305,7 +307,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).neq("status", "served");
       await logAction("tablet", "order_serve", { order_id: b, device_id: dev });
-      return ok(must(await sb.from("orders").select("*").eq("id", b).single()) || null);
+      const served = must(await sb.from("orders").select("*").eq("id", b).single());
+      await maybeAutoSettle((served as any)?.session_id, { panel: "tablet", deviceId: dev }); // serving the order may complete the table
+      return ok(served || null);
     }
 
     // orders/:id/allergies — staff edit of the order-wide "avoid" list (add a
@@ -455,6 +459,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t).eq("archived", false);
       const rows = must(await q.select());
       await logAction("tablet", "bill_paid", { table_number: t, device_id: dev });
+      await maybeAutoSettle(openSess?.id, { panel: "tablet", deviceId: dev }); // auto close/restart if paid + all served
       return ok({ ok: true, count: rows.length });
     }
 

@@ -690,6 +690,21 @@ function formGeneral(s) {
     </p>
     <div style="max-width:200px">${tf("Number of tables", "table_count", s.table_count ?? 12, { type: "number", min: 1, max: 500, step: 1 })}</div>
   </div>
+  <div class="card"><h3>Auto close / restart tables</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      When a table's bill is fully <b>paid</b> and every dish is <b>served</b>, free it
+      automatically. <b>Off</b> = today's behaviour (you close/restart by hand).
+      <b>Auto-close</b> ends the dining session; <b>Auto-restart</b> clears the round but
+      keeps the table open for the next guests.
+    </p>
+    <div style="max-width:280px"><div class="field"><label>When a table is paid &amp; fully served</label>
+      <select data-path="auto_table_action">
+        <option value="off" ${(s.auto_table_action || "off") === "off" ? "selected" : ""}>Off — do nothing</option>
+        <option value="close" ${s.auto_table_action === "close" ? "selected" : ""}>Auto-close the table</option>
+        <option value="restart" ${s.auto_table_action === "restart" ? "selected" : ""}>Auto-restart the table</option>
+      </select>
+    </div></div>
+  </div>
   <div class="card"><h3>Dining sessions — NEW</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       The QR/session system. <b>When OFF, the menu works exactly like today.</b> Turn it
