@@ -36,6 +36,11 @@ export async function maybeAutoSettle(
       // every live order becomes a served + archived bill record; the table stays open.
       await sb.from("orders").update({ status: "served", archived: true })
         .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled");
+      // …and RELEASE the party, exactly like the manual restart does (fresh round →
+      // fresh party; the next guest re-joins). Without this, auto-restart left the old
+      // party still "connected" — a parity gap vs /tables/:t/restart. (owner, 2026-06-18)
+      await sb.from("session_members").update({ removed: true })
+        .eq("session_id", sessionId).eq("removed", false);
       await logAction(ctx.panel, "table_auto_restart", { detail: "auto-restarted: bill paid + all served", device_id: ctx.deviceId ?? undefined });
     }
   } catch { /* best-effort — auto-settle must never break the pay/serve that triggered it */ }
