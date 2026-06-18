@@ -35,7 +35,13 @@ async function managerPinGate(req: NextRequest, body: any): Promise<PinGate> {
 const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName !== "admin" ? ` (by ${g.managerName})` : "");
 
 const nowIso = () => new Date().toISOString();
- 
+// Mark an order EDITED after placement → bumps orders.edited_at so the "✎ Edited"
+// badge shows on every panel (mirrors the manager). Best-effort; never fails the edit.
+const stampEdited = async (orderId?: string | null) => {
+  if (!orderId) return;
+  try { await sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); } catch {}
+};
+
 const must = (r: any) => { if (r.error) throw new Error(r.error.message); return r.data; };
  
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
@@ -324,6 +330,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("tablet", "order_item_qty", { order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
+      await stampEdited(data?.order_id);
       return ok(data);
     }
 
@@ -333,6 +340,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("tablet", "order_item_note", { order_id: data?.order_id, device_id: dev });
+      await stampEdited(data?.order_id);
       return ok(data);
     }
 
@@ -361,6 +369,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).select());
       const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : ""].filter(Boolean).join("; ") || "no change";
       await logAction("tablet", "order_item_removed", { order_id: item.order_id, detail, device_id: dev });
+      await stampEdited(item.order_id);
       return ok(rowU[0] || { ok: true });
     }
 
@@ -380,6 +389,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("tablet", "order_add_item", { order_id: b, detail: dishId, device_id: dev });
+      await stampEdited(b);
       return ok(data);
     }
 
