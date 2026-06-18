@@ -46,8 +46,6 @@ const state = {
   allergies: "",        // order-level allergies (comma list), applied to the whole order
   editOrders: new Set(),// order ids currently in staff EDIT mode (after the kitchen-confirm)
   addToOrderId: null,   // when set, the dish browser ADDS to this existing order (not a new one)
-  algOtherFor: null,    // order id whose "➕ Other" allergen box is open (null = closed)
-  algOtherText: "",     // in-progress custom-allergen text (kept across the panel's auto-refresh)
 };
 
 const api = async (method, path, body) => {
@@ -286,6 +284,79 @@ function renderFloor() {
   }));
 }
 
+// openDishEditModal: ONE editor for a single placed dish — toggle which allergens
+// to AVOID (the 6 standard ones PLUS any custom typed in the box) and write a
+// kitchen note. IDENTICAL to the manager panel's modal, adapted to the tablet's
+// state (state.data.items) + /api/tablet endpoints. Save persists in one go:
+//   • adding an allergen → this dish's own list (order_items.removed)
+//   • removing one → cleared from the dish AND the order-wide "avoid" list
+//   • the note → order_items.note
+function openDishEditModal(itemId) {
+  document.querySelector(".dish-edit-overlay")?.remove();
+  const item = (state.data.items || []).find((i) => i.id === itemId);
+  if (!item) { toast("That dish is no longer on the order.", false); return; }
+  const order = (state.data.orders || []).find((o) => o.id === item.order_id) || {};
+  // Normalise: lowercase, trim, strip a leading "no " so "no water"/"water" both store "water".
+  const norm = (s) => String(s || "").trim().toLowerCase().replace(/^no[\s-]+/, "");
+  const itemRemoved = (Array.isArray(item.removed) ? item.removed : []).map(norm).filter(Boolean);
+  const orderAllergies = (Array.isArray(order.allergies) ? order.allergies : []).map(norm).filter(Boolean);
+  const initial = new Set([...itemRemoved, ...orderAllergies]); // what the dish avoids now
+  const working = new Set(initial);                             // live working copy until Save
+  const STD = ALLERGENS.map((a) => a.slug);
+  const labelFor = (slug) => { const a = ALLERGENS.find((x) => x.slug === slug); return a ? a.label : "🚫 " + slug; };
+  const chipsHtml = () => {
+    const std = ALLERGENS.map((a) => `<span class="chip talg ${working.has(a.slug) ? "on" : ""}" data-slug="${esc(a.slug)}">${esc(a.label)}</span>`).join("");
+    // Custom allergens are their own chips — tap one to REMOVE it (same as a standard chip).
+    const cust = [...working].filter((s) => !STD.includes(s)).map((s) => `<span class="chip talg on" data-slug="${esc(s)}">${esc(labelFor(s))}</span>`).join("");
+    return std + cust;
+  };
+  const ov = document.createElement("div");
+  ov.className = "dish-edit-overlay";
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  ov.innerHTML = `<div class="dish-edit-box" style="width:min(94vw,460px);max-height:90vh;overflow:auto;background:#0f1830;color:#e7eefc;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #1d2944"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Edit dish · ${esc(item.title)}</h3><button class="dish-edit-close" aria-label="Close" style="background:#243049;border:0;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
+    <div style="padding:16px 18px">
+      <div style="font-size:13px;font-weight:700;margin:0 0 8px">⚠ Allergies to avoid <span class="muted small">— tap to add or remove</span></div>
+      <div class="dish-alg-list" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:10px"><input type="text" class="dish-edit-custominput" maxlength="24" placeholder="Type a custom allergen — e.g. water" style="flex:1;min-width:0;padding:9px 11px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px"><button class="btn small dish-edit-customadd">Add</button></div>
+      <div style="font-size:13px;font-weight:700;margin:15px 0 6px">✎ Note for the kitchen</div>
+      <textarea class="dish-edit-note" rows="2" maxlength="200" placeholder="e.g. less ice, extra chocolate" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;resize:vertical"></textarea>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid #1d2944"><button class="btn dish-edit-cancel">Cancel</button><button class="btn primary dish-edit-save">Save</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector(".dish-edit-note").value = item.note || "";
+  const listEl = ov.querySelector(".dish-alg-list");
+  const input = ov.querySelector(".dish-edit-custominput");
+  const bindChips = () => listEl.querySelectorAll("[data-slug]").forEach((c) => (c.onclick = () => { const s = c.dataset.slug; working.has(s) ? working.delete(s) : working.add(s); redraw(); }));
+  const redraw = () => { listEl.innerHTML = chipsHtml(); bindChips(); };
+  redraw();
+  const addCustom = () => { const v = norm(input.value); if (v) working.add(v); input.value = ""; redraw(); input.focus(); };
+  ov.querySelector(".dish-edit-customadd").onclick = addCustom;
+  input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } };
+  const close = () => ov.remove();
+  ov.querySelector(".dish-edit-close").onclick = close;
+  ov.querySelector(".dish-edit-cancel").onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  const same = (a, b) => JSON.stringify(a.slice().sort()) === JSON.stringify(b.slice().sort());
+  ov.querySelector(".dish-edit-save").onclick = async () => {
+    const note = ov.querySelector(".dish-edit-note").value.trim();
+    const removed = [...initial].filter((s) => !working.has(s));  // cleared → drop everywhere
+    const added = [...working].filter((s) => !initial.has(s));    // new avoids → this dish only
+    const newItemRemoved = [...new Set([...itemRemoved.filter((s) => !removed.includes(s)), ...added])];
+    const newOrderAllergies = orderAllergies.filter((s) => !removed.includes(s));
+    try {
+      if (note !== String(item.note || "").trim()) await api("POST", `/items/${item.id}/note`, { note });
+      if (!same(newItemRemoved, itemRemoved)) await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved });
+      if (order.id && !same(newOrderAllergies, orderAllergies)) await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies });
+      close();
+      await load(); if (!state.ordering) renderPanel();
+      toast("Dish updated");
+    } catch (e) { toast("Couldn't save: " + e.message, false); }
+  };
+  setTimeout(() => input.focus(), 30);
+}
+
 // ── the table detail panel (view mode) ───────────────────────────────────────
 function renderPanel() {
   const p = $("#panel");
@@ -324,11 +395,14 @@ function renderPanel() {
     // re-prices the bill server-side. (owner, 2026-06-16)
     const delBtn = (r.fromDb && r.status !== "served")
       ? `<button class="idel" data-del-item="${esc(r.id)}" title="Remove this dish">🗑</button>` : "";
-    // STAFF EDIT mode (gated by the kitchen-confirm): quantity steppers + a note
-    // edit on each real dish that isn't served yet. (owner, 2026-06-17)
+    // STAFF EDIT mode (gated by the kitchen-confirm): quantity steppers + a single
+    // "✎ Edit" button that opens ONE modal (allergens + kitchen note) — IDENTICAL to
+    // the manager panel. (owner, 2026-06-18)
     const editing = state.editOrders.has(o.id);
-    const editCtl = (editing && r.fromDb && r.status !== "served")
-      ? `<span class="iedit"><button class="qbtn" data-qty-dec="${esc(r.id)}" data-qty="${r.qty}" title="Fewer">−</button><button class="qbtn" data-qty-inc="${esc(r.id)}" data-qty="${r.qty}" title="More">＋</button><button class="qbtn" data-note-item="${esc(r.id)}" title="Edit note">✎</button></span>`
+    // No editing once a dish is READY or SERVED — it's cooked/out, changing it is too
+    // late (mirror the manager; place a new order instead). (owner, 2026-06-18)
+    const editCtl = (editing && r.fromDb && r.status !== "served" && r.status !== "ready")
+      ? `<span class="iedit"><button class="qbtn" data-qty-dec="${esc(r.id)}" data-qty="${r.qty}" title="Fewer">−</button><button class="qbtn" data-qty-inc="${esc(r.id)}" data-qty="${r.qty}" title="More">＋</button><button class="qbtn" data-edit-dish="${esc(r.id)}" title="Edit allergens & note for this dish">✎ Edit</button></span>`
       : "";
     return `<div class="iline${editing ? " editing" : ""}"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${remMark}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}${editCtl}${delBtn}</div>`;
   };
@@ -343,21 +417,13 @@ function renderPanel() {
         <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
       </div>`;
     }
-    const list = Array.isArray(o.allergies) ? o.allergies : [];
-    const aSet = new Set(list.map((x) => String(x).toLowerCase()));
-    const extra = list.filter((x) => !ALLERGENS.some((a) => a.slug === String(x).toLowerCase()));
+    // Order-wide allergen chips = the 6 standard toggles only, EXACTLY like the
+    // manager's per-order chips. A CUSTOM ("other") allergen is added per-dish via
+    // the "✎ Edit" modal, not here. (owner, 2026-06-18 — mirror the manager)
+    const aSet = new Set((Array.isArray(o.allergies) ? o.allergies : []).map((x) => String(x).toLowerCase()));
     const chips = ALLERGENS.map((a) => `<span class="chip talg ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("");
-    // Custom allergens are now their OWN chips (tap to remove) — not read-only text.
-    const custChips = extra.map((x) => `<span class="chip talg on" data-alg="${esc(o.id)}" data-slug="${esc(String(x).toLowerCase())}">${esc(x)}</span>`).join("");
-    // The "➕ Other" chip reveals a type-box ONLY for this order; the box (and its
-    // in-progress text) survive the panel's auto-refresh via state.algOtherFor/Text.
-    const otherOn = state.algOtherFor === o.id;
-    const otherChip = `<span class="chip talg ${otherOn ? "on" : ""}" data-other-alg="${esc(o.id)}">➕ Other</span>`;
-    const otherBox = otherOn
-      ? `<div class="ordctl-other" style="display:flex;gap:8px;margin-top:8px"><input type="text" class="talg-other-input" maxlength="24" placeholder="Type a custom allergen — e.g. water" value="${esc(state.algOtherText)}" style="flex:1;min-width:0;padding:8px 10px;border-radius:8px;border:1px solid var(--line,#2a3a5f);background:var(--card,#0a1326);color:inherit;font-size:14px"><button class="btn small primary" data-other-add="${esc(o.id)}">Add</button></div>`
-      : "";
     return `<div class="ordctl ordctl-edit">
-      <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}${custChips}${otherChip}</div>${otherBox}
+      <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}</div>
       <div class="ordctl-row">
         <button class="btn small" data-add-dish="${esc(o.id)}">＋ Add dish</button>
         <button class="btn small" data-discount="${esc(o.id)}">− Discount${Number(o.discount) > 0 ? ` (${inr(o.discount)})` : ""}</button>
@@ -410,7 +476,7 @@ function renderPanel() {
       ${reqRows ? `<div class="sec"><h3>Requests</h3>${reqRows}</div>` : ""}
       ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
       ${callRows ? `<div class="sec"><h3>Calls</h3>${calls.length > 1 ? `<button class="btn small primary" data-attend-all-calls="${esc(t)}">Attend all (${calls.length})</button>` : ""}${callRows}</div>` : ""}
-      ${s ? `<div class="sec"><h3>Party</h3><label class="row autoapp"><span>🔓 Auto-approve joins</span><input type="checkbox" data-autoapp="${esc(s.id)}" ${s.auto_approve ? "checked" : ""}></label>${partyRows || `<div class="muted small">No guests joined yet.</div>`}</div>` : ""}
+      ${s ? `<div class="sec"><h3>Party</h3>${partyRows || `<div class="muted small">No guests joined yet.</div>`}</div>` : ""}
       ${buildingRows ? `<div class="sec"><h3>🛒 Building <span class="muted small">· not sent yet</span></h3>${buildingRows}</div>` : ""}
       <div class="sec"><h3>Orders</h3>${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}</div>
     </div>
@@ -441,7 +507,6 @@ function renderPanel() {
       actGated("POST", `/members/${b.dataset.ban}/ban`, null, { message: "Enter a manager PIN to ban this guest." });
   }));
   // Auto-approve toggle: future joiners are approved automatically (no staff review).
-  document.querySelectorAll("[data-autoapp]").forEach((cb) => (cb.onchange = () => act(() => api("POST", `/sessions/${cb.dataset.autoapp}/auto-approve`, { value: cb.checked }))));
   // Attend every waiter call on the table in one tap.
   document.querySelectorAll("[data-attend-all-calls]").forEach((b) => (b.onclick = () => act(async () => {
     for (const c of callsOf(b.dataset.attendAllCalls)) await api("POST", `/calls/${c.id}/attend`);
@@ -492,12 +557,9 @@ function renderPanel() {
   // Quantity −/＋ on one dish (re-prices the bill server-side, clamped 1..99).
   document.querySelectorAll("[data-qty-inc]").forEach((b) => (b.onclick = () => act(() => api("POST", `/items/${b.dataset.qtyInc}/qty`, { qty: Math.min(99, (parseInt(b.dataset.qty, 10) || 1) + 1) }))));
   document.querySelectorAll("[data-qty-dec]").forEach((b) => (b.onclick = () => { const q = (parseInt(b.dataset.qty, 10) || 1) - 1; if (q < 1) { toast("Use 🗑 to remove the dish", false); return; } act(() => api("POST", `/items/${b.dataset.qtyDec}/qty`, { qty: q })); }));
-  // Edit one dish's note (simple prompt — staff tablet).
-  document.querySelectorAll("[data-note-item]").forEach((b) => (b.onclick = () => {
-    const it = (state.data.items || []).find((x) => x.id === b.dataset.noteItem);
-    const v = window.prompt("Note for this dish (e.g. less ice, extra hot):", (it && it.note) || "");
-    if (v !== null) act(() => api("POST", `/items/${b.dataset.noteItem}/note`, { note: v }));
-  }));
+  // "✎ Edit" one dish → the unified modal (allergens incl. custom + kitchen note),
+  // IDENTICAL to the manager panel's openDishEditModal.
+  document.querySelectorAll("[data-edit-dish]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.editDish)));
   // Add a dish to THIS already-placed order: reuse the dish browser in add mode.
   document.querySelectorAll("[data-add-dish]").forEach((b) => (b.onclick = () => { state.ordering = true; state.addToOrderId = b.dataset.addDish; state.cat = ""; state.dishSearch = ""; renderPanel(); }));
   // Per-order allergen chips: toggle an allergen on/off for the whole order.
@@ -507,32 +569,6 @@ function renderPanel() {
     if (!o) return;
     const cur = new Set((Array.isArray(o.allergies) ? o.allergies : []).map((x) => String(x).toLowerCase()));
     if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
-    act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }));
-  }));
-  // "➕ Other": reveal/hide a custom-allergen box for THIS order (toggle the chip).
-  document.querySelectorAll("[data-other-alg]").forEach((chip) => (chip.onclick = () => {
-    const id = chip.dataset.otherAlg;
-    state.algOtherFor = state.algOtherFor === id ? null : id;
-    state.algOtherText = "";
-    renderPanel();
-  }));
-  // The custom box: keep the typed text in state so the ~2s auto-refresh can't wipe
-  // it mid-type, and restore focus + caret after each re-render.
-  const otherInput = document.querySelector(".talg-other-input");
-  if (otherInput) {
-    otherInput.oninput = () => { state.algOtherText = otherInput.value; };
-    otherInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); document.querySelector("[data-other-add]")?.click(); } };
-    otherInput.focus(); otherInput.setSelectionRange(otherInput.value.length, otherInput.value.length);
-  }
-  document.querySelectorAll("[data-other-add]").forEach((b) => (b.onclick = () => {
-    const id = b.dataset.otherAdd;
-    const o = (state.data.orders || []).find((x) => x.id === id);
-    if (!o) return;
-    const v = String(state.algOtherText || "").trim().toLowerCase().replace(/^no[\s-]+/, "");
-    state.algOtherFor = null; state.algOtherText = "";
-    if (!v) { renderPanel(); return; }
-    const cur = new Set((Array.isArray(o.allergies) ? o.allergies : []).map((x) => String(x).toLowerCase()));
-    cur.add(v);
     act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }));
   }));
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
