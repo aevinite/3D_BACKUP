@@ -528,11 +528,20 @@ function renderPanel() {
   }));
   document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => act(() => api("POST", `/orders/${b.dataset.accept}/accept`))));
   // Accept ALL un-accepted orders on the table in one tap.
-  document.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () => act(async () => { const recv = ordersOf(b.dataset.acceptAll).filter((o) => o.status === "received"); for (const o of recv) await api("POST", `/orders/${o.id}/accept`); })));
+  document.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () => act(async () => {
+    const recv = ordersOf(b.dataset.acceptAll).filter((o) => o.status === "received");
+    // Fire them ALL at once (was a slow one-by-one await loop that hung for seconds
+    // with many orders). Independent calls → no ordering needed. (owner, 2026-06-18)
+    await Promise.all(recv.map((o) => api("POST", `/orders/${o.id}/accept`)));
+  })));
   // Serve ALL accepted-but-unserved dishes on the table in one tap.
   document.querySelectorAll("[data-serve-all]").forEach((b) => (b.onclick = () => act(async () => {
     const orders = ordersOf(b.dataset.serveAll).filter((o) => o.status !== "received" && o.status !== "cancelled");
-    for (const o of orders) for (const r of dishRowsOf(o)) if (r.fromDb && r.status !== "served") await api("POST", `/items/${r.id}/status`, { status: "served" });
+    const ids = [];
+    for (const o of orders) for (const r of dishRowsOf(o)) if (r.fromDb && r.status !== "served") ids.push(r.id);
+    // Serve every dish in PARALLEL — the old sequential await loop took ~N round-trips
+    // and visibly hung (3–5s) once a table had 6–7+ orders. (owner, 2026-06-18)
+    await Promise.all(ids.map((id) => api("POST", `/items/${id}/status`, { status: "served" })));
   })));
   // Per-dish advance: optimistically flip the pill, then persist + reconcile.
   document.querySelectorAll(".ist.tap[data-item]").forEach((el) => (el.onclick = () => advanceDish(el.dataset.item, el.dataset.cur)));
