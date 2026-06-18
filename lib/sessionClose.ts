@@ -69,6 +69,11 @@ export async function closeSession(
       .eq("session_id", sessionId).eq("archived", false).neq("payment_status", "paid").in("status", ["received", "preparing"]).select());
     must(await sb.from("orders").update({ archived: true })
       .eq("session_id", sessionId).eq("archived", false).select());
+    // The round is over — RELEASE the head + every partner from this session, so the
+    // table isn't left "connected" to the last party. A new party re-joins fresh on
+    // the next open/scan. (owner, 2026-06-18)
+    must(await sb.from("session_members").update({ removed: true })
+      .eq("session_id", sessionId).eq("removed", false).select());
   }
   await logAction(ctx.panel, "table_close", { table_number: sess?.table_number ?? null, device_id: ctx.deviceId ?? undefined });
   return { ok: true, session: sess || null };

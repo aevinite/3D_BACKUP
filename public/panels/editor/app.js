@@ -3053,6 +3053,10 @@ async function restartTable(t) {
   const release = () => { if (!released) { released = true; floorOpsInFlight--; ids.forEach((id) => opEnd(id)); } };
   try {
     for (const id of ids) await api("PATCH", "/orders/" + id, { archived: true, status: "served" });
+    // End the round → RELEASE the head + partners from this session (same as a close),
+    // so the next round is a fresh party. (owner, 2026-06-18)
+    const rsess = openSessionForTable(t);
+    if (rsess) { for (const m of membersOf(rsess.id)) { try { await api("POST", "/members/" + m.id + "/remove"); } catch { /* keep clearing the rest */ } } }
     // keep the table OPEN for the next round — open a fresh session if it doesn't have one
     if ((state.data.settings || {}).sessions_enabled && !openSessionForTable(t)) await api("POST", "/sessions/open", { table: String(t) });
     release();

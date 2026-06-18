@@ -186,6 +186,10 @@ function tileState(t) {
   // All dishes served: yellow "bill" tile while money is still due, plain "done" once paid.
   if (a.os.length && a.sv > 0) return { cls: a.unpaid ? "bill" : "done", label: "Served" };
   if (a.session) return a.guests ? { cls: "seated", label: "Seated" } : { cls: "waiting", label: "Open" };
+  // Free table, but a guest has asked to be let in → "Wants in" (amber glow), matching
+  // the manager. NOT a red ring — red is reserved for an UNPAID bill, so a red ring on
+  // a free/requested table is confusing. (owner, 2026-06-18)
+  if (reqsOf(t).length) return { cls: "req", label: "Wants in" };
   return { cls: "free", label: "Free" };
 }
 
@@ -223,8 +227,8 @@ function renderFloor() {
     // Body differs by state: free tables get the big Open button; open tables
     // get guests + KOT, and (once there are dishes) a progress bar + count pills.
     let body = "";
-    if (st.cls === "free") {
-      body = `<span class="tsub">tap to open</span><span class="topen" data-quick="open" data-qt="${i}">Open</span>`;
+    if (st.cls === "free" || st.cls === "req") {
+      body = `<span class="tsub">${st.cls === "req" ? "asked to open" : "tap to open"}</span><span class="topen" data-quick="open" data-qt="${i}">Open</span>`;
     } else {
       const kot = a.kots.length ? `KOT #${a.kots[a.kots.length - 1]}${a.kots.length > 1 ? ` +${a.kots.length - 1}` : ""}` : "no order yet";
       const total = a.nw + a.ck + a.rd + a.sv;
@@ -238,7 +242,7 @@ function renderFloor() {
       else if (st.cls === "bill") quick = `<span class="tpay" data-quick="pay" data-qt="${i}">💳 Mark paid</span>`;
       body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}${quick}`;
     }
-    html += `<button class="tile t-${st.cls} ${payCls} ${called ? "called" : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
+    html += `<button class="tile t-${st.cls} ${payCls} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
       <span class="tbadges">${called ? `<em class="b-call">🔔</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
       <span class="tnum">${i}</span>
       <span class="tlabel">${st.label}</span>

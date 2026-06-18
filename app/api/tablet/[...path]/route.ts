@@ -239,6 +239,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       let q = sb.from("orders").update({ status: "served", archived: true }).neq("status", "cancelled").eq("archived", false);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
       const rows = must(await q.select());
+      // A restart ends the round (fresh round, fresh party) — release the head +
+      // partners from this session, same as a close. (owner, 2026-06-18)
+      if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("removed", false).select());
       await logAction("tablet", "table_restart", { table_number: t, detail: `${rows.length} order(s) cleared` + by, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }

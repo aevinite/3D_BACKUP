@@ -130,7 +130,7 @@ function render() {
   document.querySelectorAll("[data-ready]").forEach((b) => (b.onclick = () => markOrderReady(b.dataset.ready)));
   // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
   // Optimistic + debounced reconcile so rapid one-by-one ✓ taps in a rush stay snappy.
-  document.querySelectorAll("[data-item-ready]").forEach((b) => (b.onclick = () => markItemReady(b.dataset.itemReady)));
+  document.querySelectorAll("[data-item-ready]").forEach((b) => (b.onclick = (e) => markItemReady(b.dataset.itemReady, e.currentTarget)));
 }
 
 // Run an action then refresh immediately (snappier than waiting for the poll).
@@ -159,9 +159,20 @@ function setLocalReady(matches) {
   lastSig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes });
   render();
 }
-// Mark ONE dish ready (the ✓ tick).
-function markItemReady(id) {
-  setLocalReady((i) => i.id === id);
+// Mark ONE dish ready (the ✓ tick). Update ONLY this dish's line IN PLACE — do NOT
+// rebuild the whole board. A full render() per tap (a) re-buckets the ticket so it
+// jumps to the Ready column mid-rush and (b) destroys+recreates the other ✓ buttons,
+// so the cook's next rapid tap lands on a replaced node and is eaten ("clicking ready
+// one by one doesn't work"). The ticket re-buckets to Ready exactly once, on the
+// debounced reconcile after the taps stop. (owner, 2026-06-18)
+function markItemReady(id, btn) {
+  const it = (state.items || []).find((x) => x.id === id);
+  if (!it || it.status === "served") return;
+  it.status = "ready"; pendingReady.add(id);
+  if (btn) { const line = btn.closest(".line"); if (line) { line.classList.add("line-ready"); btn.outerHTML = '<span class="done rdy">ready</span>'; } }
+  // Adopt the optimistic state as the baseline so a poll/realtime refetch carrying the
+  // SAME (server-confirmed) data won't rebuild the tickets under the cook's finger.
+  lastSig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes });
   api("POST", `/items/${id}/status`, { status: "ready" }).then(scheduleReadyReconcile).catch((e) => { toast("Failed: " + e.message); load(); });
 }
 // Mark every not-served dish on an order ready (the "ALL READY" button).

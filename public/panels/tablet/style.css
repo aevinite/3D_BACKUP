@@ -49,8 +49,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 /* OUTLINE = payment (only on tables that have orders) */
 .tile.pay-unpaid { border-color: var(--red); }
 .tile.pay-paid { border-color: var(--green); }
-/* a table that needs you: red ring + glow */
-.tile.called { box-shadow: 0 0 0 2px var(--red), 0 0 18px rgba(239,68,68,.30); }
+/* A waiter call / a join-or-open request is shown by the corner BADGES + the tile's
+   state colour (e.g. amber "Wants in") — NOT a ring. Red is reserved for an UNPAID
+   bill (.pay-unpaid), so ringing a free/requested table red was confusing. (2026-06-18) */
 .tnum { font-size: 24px; font-weight: 900; line-height: 1; }
 .tlabel { font-size: 12px; font-weight: 800; }
 .t-free .tlabel { color: var(--muted); }
@@ -153,6 +154,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .cedit { background: none; border: 0; color: var(--gold); font-size: 12px; cursor: pointer; padding: 0; text-decoration: underline; }
 .allergy { border-color: rgba(239,68,68,.45); }
 .t-new { --c: #f59e0b; box-shadow: 0 0 16px color-mix(in srgb, var(--c) 26%, transparent); }
+/* "Wants in" — a guest asked to be let in: amber glow, like the manager (NOT red) */
+.t-req { --c: #fbbf24; box-shadow: 0 0 16px color-mix(in srgb, var(--c) 28%, transparent); }
 .t-prep { --c: #4f9dff; }
 /* READY to serve — pink, and it glows to nudge the waiter to carry it out */
 .t-ready { --c: #ec4899; box-shadow: 0 0 16px color-mix(in srgb, var(--c) 30%, transparent); }
