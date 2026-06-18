@@ -102,6 +102,12 @@ export default function SessionGate() {
   const videoRef = useRef<HTMLVideoElement | null>(null); // the camera preview on the scan screen
   const scanStream = useRef<MediaStream | null>(null); // the live camera feed while scanning
   const scanTimer = useRef<ReturnType<typeof setInterval> | null>(null); // the repeating "look for a QR" check
+  // Latest typed name, mirrored into a ref. joinAsHead reads THIS (not the `name`
+  // closure) so: (a) the background "wait for open" poll auto-joins with the name
+  // the guest already typed, and (b) joinAsHead stays stable across keystrokes, so
+  // typing the name no longer tears down & restarts the flow's effect (which used
+  // to silently KILL the open-watch poll → guest stuck on "we've let staff know").
+  const nameRef = useRef(name); nameRef.current = name;
 
   // Stops whatever repeating check is currently running.
   const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
@@ -200,7 +206,7 @@ export default function SessionGate() {
   // saved session-scoped and we carry out the queued action.
   const joinAsHead = useCallback(async () => {
     // No name yet → ask for it first, THEN open the table (submitOpenName re-enters).
-    if (!name.trim()) { setNote(""); setStep("open_name"); return; }
+    if (!nameRef.current.trim()) { setNote(""); setStep("open_name"); return; }
     // Double-fire guard: a double-tapped Continue runs the whole flow twice in
     // parallel — the second join would create a ghost "guest" copy of this
     // person (the DB now refuses a second HEAD, but not a stray guest row).
@@ -208,7 +214,7 @@ export default function SessionGate() {
     joining.current = true;
     try {
       const p = pending.current!; setStep("joining");
-      const headName = name.trim();
+      const headName = nameRef.current.trim();
       const r = await joinSession(p.table, headName, coords.current.lat, coords.current.lng);
       if (r.reason === "blocked") { setStep("blocked"); return; }
       if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
@@ -223,7 +229,7 @@ export default function SessionGate() {
       window.dispatchEvent(new Event("lfh:session-changed")); // wake the owner-approve poller
       await act();
     } finally { joining.current = false; }
-  }, [act, name]);
+  }, [act]);
 
   // While the guest waits for staff to open the table, poll until it opens — then
   // continue automatically (become head & place the queued order, or ask to join).
