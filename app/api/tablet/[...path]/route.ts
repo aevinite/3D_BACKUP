@@ -111,6 +111,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const { table, items, allergies, note } = body || {};
       const t = String(table || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
+      // Reject a table that doesn't EXIST (must be 1..table_count). Digits alone let a
+      // typo like "9932" create a phantom order floating on a non-existent table — it
+      // showed orphaned in the order section and couldn't be cleared. (owner, 2026-06-18)
+      const tcRow = await sb.from("settings").select("table_count").eq("id", "site").maybeSingle();
+      const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
+      const tn = Number(t);
+      if (tableCount > 0 && (tn < 1 || tn > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
       if (!Array.isArray(items) || !items.length) return err("items required");
       // Double-tap guard: refuse an IDENTICAL order for the same table within 8s
       // (prevents a fat-fingered "Send" from issuing two KOTs / double-charging).
