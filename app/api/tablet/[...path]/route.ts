@@ -336,6 +336,32 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok(data);
     }
 
+    // items/:id/removed — STAFF EDIT: change ONE dish's removed/allergen list ("NO X")
+    // on a PLACED order. IDENTICAL to the manager (editor) endpoint so the tablet's
+    // "✎ Edit" modal saves the same way; keeps the per-dish edit markers
+    // (added_allergens "＋" / removed_flag "✎−"). Refuses a PAID/cancelled order.
+    if (a === "items" && c === "removed") {
+      const raw = Array.isArray(body?.removed) ? body.removed : [];
+      const removed = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
+      const item = must(await sb.from("order_items").select("id, order_id, removed, added_allergens, removed_flag").eq("id", b).maybeSingle());
+      if (!item) return err(editErrMsg("item_not_found"), 400);
+      const order = must(await sb.from("orders").select("payment_status, status").eq("id", item.order_id).maybeSingle());
+      if (order?.payment_status === "paid") return err(editErrMsg("order_paid"), 409);
+      if (order?.status === "cancelled") return err(editErrMsg("order_cancelled"), 400);
+      const oldSet = new Set((Array.isArray(item.removed) ? item.removed : []).map((x: any) => String(x).toLowerCase()));
+      const justAdded = removed.filter((s) => !oldSet.has(s));
+      const justRemoved = [...oldSet].filter((s) => !removed.includes(s));
+      const addedMark = new Set((Array.isArray(item.added_allergens) ? item.added_allergens : []).map((x: any) => String(x).toLowerCase()));
+      let removedFlag = !!item.removed_flag;
+      for (const s of justAdded) addedMark.add(s);
+      for (const s of justRemoved) { if (addedMark.has(s)) addedMark.delete(s); else removedFlag = true; }
+      const added_allergens = [...addedMark].filter((s) => removed.includes(s));
+      const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).select());
+      const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : ""].filter(Boolean).join("; ") || "no change";
+      await logAction("tablet", "order_item_removed", { order_id: item.order_id, detail, device_id: dev });
+      return ok(rowU[0] || { ok: true });
+    }
+
     // orders/:id/add-item — STAFF EDIT: ADD a new dish to an already-placed order.
     // Server-priced + re-priced. Body: { dishId, qty, options?, removed?, note? }.
     if (a === "orders" && c === "add-item") {

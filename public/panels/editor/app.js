@@ -2587,23 +2587,20 @@ function openDishEditModal(itemId, rerender) {
   const orderAllergies = (Array.isArray(order.allergies) ? order.allergies : []).map(norm).filter(Boolean);
   const initial = new Set([...itemRemoved, ...orderAllergies]); // what the dish avoids now
   const working = new Set(initial);                             // live working copy until Save
-  let otherOpen = false;                                        // the "➕ Other" box shows ONLY when its chip is on
   const STD = ALLERGENS.map((a) => a.slug);
   const labelFor = (slug) => { const a = ALLERGENS.find((x) => x.slug === slug); return a ? a.label : "🚫 " + slug; };
   const chipsHtml = () => {
     const std = ALLERGENS.map((a) => `<span class="chip dish-alg-chip ${working.has(a.slug) ? "on" : ""}" data-slug="${esc(a.slug)}">${esc(a.label)}</span>`).join("");
     // Custom allergens are their own chips — tap one to REMOVE it (same as a standard chip).
     const cust = [...working].filter((s) => !STD.includes(s)).map((s) => `<span class="chip dish-alg-chip on" data-slug="${esc(s)}">${esc(labelFor(s))}</span>`).join("");
-    // The "Other" chip reveals the type-box; it doesn't store an allergen itself.
-    const other = `<span class="chip dish-alg-other ${otherOpen ? "on" : ""}" data-other="1">➕ Other</span>`;
-    return std + cust + other;
+    return std + cust;
   };
   const wrap = el(`<div class="sx-modal-overlay dish-edit-overlay"><div class="sx-modal dish-edit-modal">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Edit dish · ${esc(item.title)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body">
       <div class="dish-edit-lbl">⚠ Allergies to avoid <span class="muted small">— tap to add or remove</span></div>
       <div class="dish-alg-list"></div>
-      <div class="dish-edit-custom" hidden><input type="text" class="dish-edit-custominput" placeholder="Type a custom allergen — e.g. water" maxlength="24"><button type="button" class="btn small dish-edit-customadd">Add</button></div>
+      <div class="dish-edit-custom"><input type="text" class="dish-edit-custominput" placeholder="Type a custom allergen — e.g. water" maxlength="24"><button type="button" class="btn small dish-edit-customadd">Add</button></div>
       <div class="dish-edit-lbl" style="margin-top:15px">✎ Note for the kitchen</div>
       <textarea class="dish-edit-note" rows="2" maxlength="200" placeholder="e.g. less ice, extra chocolate"></textarea>
     </div>
@@ -2612,13 +2609,11 @@ function openDishEditModal(itemId, rerender) {
   document.body.appendChild(wrap);
   wrap.querySelector(".dish-edit-note").value = item.note || "";
   const listEl = wrap.querySelector(".dish-alg-list");
-  const customBox = wrap.querySelector(".dish-edit-custom");
   const input = wrap.querySelector(".dish-edit-custominput");
-  const bindChips = () => listEl.querySelectorAll("[data-slug],[data-other]").forEach((c) => (c.onclick = () => {
-    if (c.dataset.other) { otherOpen = !otherOpen; redraw(); if (otherOpen) setTimeout(() => input.focus(), 20); return; }
+  const bindChips = () => listEl.querySelectorAll("[data-slug]").forEach((c) => (c.onclick = () => {
     const s = c.dataset.slug; working.has(s) ? working.delete(s) : working.add(s); redraw();
   }));
-  const redraw = () => { listEl.innerHTML = chipsHtml(); customBox.hidden = !otherOpen; bindChips(); };
+  const redraw = () => { listEl.innerHTML = chipsHtml(); bindChips(); };
   redraw();
   const addCustom = () => { const v = norm(input.value); if (v) working.add(v); input.value = ""; redraw(); input.focus(); };
   wrap.querySelector(".dish-edit-customadd").onclick = addCustom;
