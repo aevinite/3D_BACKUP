@@ -712,6 +712,18 @@ export default function CartPanel() {
                     {a.icon} {a.label}
                   </button>
                 ))}
+                {/* Custom (typed) allergens become their OWN chips — tap to remove. */}
+                {declared.filter((s) => !ALLERGENS.some((a) => a.slug === s)).map((s) => (
+                  <button
+                    key={`custom-${s}`}
+                    type="button"
+                    className="allergy-toggle on"
+                    aria-pressed={true}
+                    onClick={() => toggleDeclared(s)}
+                  >
+                    🚫 {s}
+                  </button>
+                ))}
                 <button
                   type="button"
                   className={`allergy-toggle ${otherOpen ? "on" : ""}`}
@@ -732,10 +744,19 @@ export default function CartPanel() {
                   type="text"
                   className="table-input"
                   style={{ marginTop: "10px", marginBottom: 0 }}
-                  placeholder="Type your allergy…"
+                  placeholder="Type an allergy, then press Enter…"
                   aria-label="Other allergy"
                   value={otherAllergy}
                   onChange={(e) => setOtherAllergy(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      // Add the typed allergen as its own removable chip in `declared`.
+                      const v = otherAllergy.trim().toLowerCase().replace(/^no[\s-]+/, "");
+                      if (v && !declared.includes(v)) setDeclared((d) => [...d, v]);
+                      setOtherAllergy("");
+                    }
+                  }}
                   autoFocus
                 />
               )}

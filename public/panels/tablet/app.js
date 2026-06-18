@@ -46,6 +46,8 @@ const state = {
   allergies: "",        // order-level allergies (comma list), applied to the whole order
   editOrders: new Set(),// order ids currently in staff EDIT mode (after the kitchen-confirm)
   addToOrderId: null,   // when set, the dish browser ADDS to this existing order (not a new one)
+  algOtherFor: null,    // order id whose "➕ Other" allergen box is open (null = closed)
+  algOtherText: "",     // in-progress custom-allergen text (kept across the panel's auto-refresh)
 };
 
 const api = async (method, path, body) => {
@@ -345,8 +347,17 @@ function renderPanel() {
     const aSet = new Set(list.map((x) => String(x).toLowerCase()));
     const extra = list.filter((x) => !ALLERGENS.some((a) => a.slug === String(x).toLowerCase()));
     const chips = ALLERGENS.map((a) => `<span class="chip talg ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("");
+    // Custom allergens are now their OWN chips (tap to remove) — not read-only text.
+    const custChips = extra.map((x) => `<span class="chip talg on" data-alg="${esc(o.id)}" data-slug="${esc(String(x).toLowerCase())}">${esc(x)}</span>`).join("");
+    // The "➕ Other" chip reveals a type-box ONLY for this order; the box (and its
+    // in-progress text) survive the panel's auto-refresh via state.algOtherFor/Text.
+    const otherOn = state.algOtherFor === o.id;
+    const otherChip = `<span class="chip talg ${otherOn ? "on" : ""}" data-other-alg="${esc(o.id)}">➕ Other</span>`;
+    const otherBox = otherOn
+      ? `<div class="ordctl-other" style="display:flex;gap:8px;margin-top:8px"><input type="text" class="talg-other-input" maxlength="24" placeholder="Type a custom allergen — e.g. water" value="${esc(state.algOtherText)}" style="flex:1;min-width:0;padding:8px 10px;border-radius:8px;border:1px solid var(--line,#2a3a5f);background:var(--card,#0a1326);color:inherit;font-size:14px"><button class="btn small primary" data-other-add="${esc(o.id)}">Add</button></div>`
+      : "";
     return `<div class="ordctl ordctl-edit">
-      <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}${extra.length ? `<span class="muted small">+ ${esc(extra.join(", "))}</span>` : ""}</div>
+      <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}${custChips}${otherChip}</div>${otherBox}
       <div class="ordctl-row">
         <button class="btn small" data-add-dish="${esc(o.id)}">＋ Add dish</button>
         <button class="btn small" data-discount="${esc(o.id)}">− Discount${Number(o.discount) > 0 ? ` (${inr(o.discount)})` : ""}</button>
@@ -496,6 +507,32 @@ function renderPanel() {
     if (!o) return;
     const cur = new Set((Array.isArray(o.allergies) ? o.allergies : []).map((x) => String(x).toLowerCase()));
     if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
+    act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }));
+  }));
+  // "➕ Other": reveal/hide a custom-allergen box for THIS order (toggle the chip).
+  document.querySelectorAll("[data-other-alg]").forEach((chip) => (chip.onclick = () => {
+    const id = chip.dataset.otherAlg;
+    state.algOtherFor = state.algOtherFor === id ? null : id;
+    state.algOtherText = "";
+    renderPanel();
+  }));
+  // The custom box: keep the typed text in state so the ~2s auto-refresh can't wipe
+  // it mid-type, and restore focus + caret after each re-render.
+  const otherInput = document.querySelector(".talg-other-input");
+  if (otherInput) {
+    otherInput.oninput = () => { state.algOtherText = otherInput.value; };
+    otherInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); document.querySelector("[data-other-add]")?.click(); } };
+    otherInput.focus(); otherInput.setSelectionRange(otherInput.value.length, otherInput.value.length);
+  }
+  document.querySelectorAll("[data-other-add]").forEach((b) => (b.onclick = () => {
+    const id = b.dataset.otherAdd;
+    const o = (state.data.orders || []).find((x) => x.id === id);
+    if (!o) return;
+    const v = String(state.algOtherText || "").trim().toLowerCase().replace(/^no[\s-]+/, "");
+    state.algOtherFor = null; state.algOtherText = "";
+    if (!v) { renderPanel(); return; }
+    const cur = new Set((Array.isArray(o.allergies) ? o.allergies : []).map((x) => String(x).toLowerCase()));
+    cur.add(v);
     act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }));
   }));
   const ob = $("#openTable"); if (ob) ob.onclick = () => act(() => api("POST", "/sessions/open", { table: t }));
