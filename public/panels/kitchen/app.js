@@ -10,6 +10,9 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const state = { orders: [], items: [], dishes: [], knownIds: null, muted: localStorage.getItem("kds_muted") === "1" };
+// Which layout the cook is using: "columns" (New/Cooking/Ready) or "wall" (every
+// live order at once, oldest first — the "expansion"). Persisted per device.
+let view = localStorage.getItem("kds_view") === "wall" ? "wall" : "columns";
 
 // ── tiny helpers ─────────────────────────────────────────────────────────────
 const api = async (method, path, body) => {
@@ -117,7 +120,16 @@ function orderPhase(o) {
   if (rows.every((r) => r.status === "ready" || r.status === "served")) return "ready";
   return "cooking";
 }
-function render() {
+// Wire the ✓ (per-dish ready) + ALL READY buttons. Scoped so we can rebind just a
+// refreshed card, or the whole active view, after each redraw.
+function bindButtons(scope) {
+  (scope || document).querySelectorAll("[data-ready]").forEach((b) => (b.onclick = () => markOrderReady(b.dataset.ready)));
+  // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
+  // Optimistic + debounced reconcile so rapid one-by-one ✓ taps in a rush stay snappy.
+  (scope || document).querySelectorAll("[data-item-ready]").forEach((b) => (b.onclick = (e) => markItemReady(b.dataset.itemReady, e.currentTarget)));
+}
+// COLUMNS view — the classic New → Cooking → Ready board.
+function renderColumns() {
   const buckets = { new: [], cooking: [], ready: [], served: [] };
   state.orders.forEach((o) => { if (o.status !== "cancelled") buckets[orderPhase(o)].push(o); });
   const draw = (key, list) => {
@@ -125,12 +137,28 @@ function render() {
     $("#count-" + key).textContent = list.length || "";
   };
   draw("new", buckets.new); draw("cooking", buckets.cooking); draw("ready", buckets.ready);
-  // wire the buttons (we redraw each poll, so we rebind each poll)
-  // (No accept handler — the kitchen can't accept orders anymore; the waiter does.)
-  document.querySelectorAll("[data-ready]").forEach((b) => (b.onclick = () => markOrderReady(b.dataset.ready)));
-  // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
-  // Optimistic + debounced reconcile so rapid one-by-one ✓ taps in a rush stay snappy.
-  document.querySelectorAll("[data-item-ready]").forEach((b) => (b.onclick = (e) => markItemReady(b.dataset.itemReady, e.currentTarget)));
+  bindButtons();
+}
+// WALL view (the "expansion") — EVERY live ticket in one dense grid, FIRST-COME-
+// FIRST-SERVED (oldest top-left); fully-ready tickets sink to the end. Same tickets
+// + same ✓/ALL-READY actions as the columns. (owner, 2026-06-19)
+function renderWall() {
+  const live = state.orders.filter((o) => o.status !== "cancelled" && orderPhase(o) !== "served");
+  live.sort((a, b) => ((orderPhase(a) === "ready") - (orderPhase(b) === "ready")) || (new Date(a.created_at) - new Date(b.created_at)));
+  $("#wall").innerHTML = live.length ? live.map(ticketHtml).join("") : `<div class="empty">Nothing here.</div>`;
+  bindButtons($("#wall"));
+}
+// Paint the ACTIVE view. Every existing render() caller (load, setLocalReady) now
+// repaints whichever layout the cook is on.
+function render() { return view === "wall" ? renderWall() : renderColumns(); }
+// Switch layout: show/hide the two <main>s, clear the inactive one, repaint, persist.
+function applyView() {
+  const wall = view === "wall";
+  $("#cols").hidden = wall; $("#wall").hidden = !wall;
+  $("#viewBtn").textContent = wall ? "▭ Columns" : "▦ Wall view";
+  if (wall) { $("#list-new").innerHTML = $("#list-cooking").innerHTML = $("#list-ready").innerHTML = ""; }
+  else { $("#wall").innerHTML = ""; }
+  render();
 }
 
 // Run an action then refresh immediately (snappier than waiting for the poll).
@@ -185,14 +213,22 @@ function markItemReady(id, btn) {
 // in #list-ready, and recount/refill both columns.
 function moveCardToReady(o) {
   const card = document.querySelector(`.ticket[data-ticket="${o.id}"]`);
-  const readyList = document.getElementById("list-ready");
-  if (!card || !readyList || card.parentElement === readyList) return;
-  readyList.querySelector(".empty")?.remove();
+  if (!card) return;
   const tmp = document.createElement("div"); tmp.innerHTML = ticketHtml(o);
   const fresh = tmp.firstElementChild;
   if (!fresh) return;
+  // WALL view: just refresh this ONE card in place (footer → "ready — waiter serving",
+  // ✓ buttons gone). The full re-sort to the end happens on the debounced reconcile —
+  // rebuilding the whole grid per tap would jump cards + eat the cook's next tap.
+  if (view === "wall") { card.replaceWith(fresh); bindButtons(fresh); return; }
+  // COLUMNS view: slide the finished card into the Ready column + recount, without a
+  // whole-board rebuild (so other tickets' ✓ buttons survive a rapid rush).
+  const readyList = document.getElementById("list-ready");
+  if (!readyList || card.parentElement === readyList) return;
+  readyList.querySelector(".empty")?.remove();
   card.remove();
   readyList.appendChild(fresh);
+  bindButtons(fresh);
   ["new", "cooking", "ready"].forEach((key) => {
     const list = document.getElementById("list-" + key); if (!list) return;
     const n = list.querySelectorAll(".ticket").length;
@@ -294,8 +330,11 @@ $("#boardBtn").onclick = () => { $("#drawerOverlay").hidden = false; renderDishe
 $("#drawerClose").onclick = () => ($("#drawerOverlay").hidden = true);
 $("#drawerOverlay").onclick = (e) => { if (e.target.id === "drawerOverlay") $("#drawerOverlay").hidden = true; };
 $("#dishSearch").oninput = renderDishes;
+// Wall ⇄ Columns toggle (the "expansion"). Persist the choice per device.
+$("#viewBtn").onclick = () => { view = view === "wall" ? "columns" : "wall"; localStorage.setItem("kds_view", view); applyView(); };
 setInterval(() => ($("#clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })), 1000);
 
+applyView(); // honour the saved layout (sets which <main> shows) before the first paint
 load().catch((e) => toast("Can't reach the database: " + e.message));
 // Realtime: refetch only when an order/dish actually changes (instant), instead of
 // polling every second. A slow 60s timer is the backup if the WebSocket drops.
