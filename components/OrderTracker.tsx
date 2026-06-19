@@ -246,16 +246,13 @@ export default function OrderTracker() {
   // (whole ₹ / cents) — never the ₹10 menu snapping. Matches SessionTableBill.
   const showPrice = (n: number) => (currency ? formatAmount(toMinor(n * currency.rate, currency), currency) : `$${n.toFixed(2)}`);
 
-  // openDetail(): tapping the strip. With several orders, open the cart's
-  // "Previous orders" (the full per-dish table view); with one, the details sheet.
+  // openDetail(): tapping the strip ALWAYS opens the cart's "Live status" tab — the
+  // good warm bill card (SessionTableBill / live orders) — for a single order or
+  // many. (Was: a single order opened the tracker's own dark detail sheet, which the
+  // owner didn't like.) The old .ot-sheet below is now unreachable. (owner, 2026-06-19)
   const openDetail = () => {
-    if (multi) {
-      window.dispatchEvent(new Event("lfh:open-cart"));
-      window.dispatchEvent(new Event("lfh:show-previous-orders"));
-      return;
-    }
-    setTableDraft(order.tableNumber || "");
-    setDetailOpen(true);
+    window.dispatchEvent(new Event("lfh:open-cart"));
+    window.dispatchEvent(new Event("lfh:show-previous-orders"));
   };
 
   // saveTable(): send a corrected table number to the server, then update locally.

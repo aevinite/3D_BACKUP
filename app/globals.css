@@ -3124,9 +3124,11 @@ a:focus:not(:focus-visible) { outline: none; }
   z-index: 60; width: min(340px, calc(100vw - 32px));
   display: flex; align-items: center; gap: 12px; padding: 13px 14px;
   border-radius: 16px;
-  background: rgba(20,17,13,0.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(212,165,116,0.28);
-  box-shadow: 0 12px 36px rgba(0,0,0,0.45);
+  /* Warm brand card (matches the cart's good "Live status" card) — solid var(--card)
+     so it reads on both light & dark, with the warm gold edge. (owner, 2026-06-19) */
+  background: var(--card);
+  border: 1px solid rgba(212,165,116,0.34);
+  box-shadow: 0 12px 36px rgba(0,0,0,0.22);
   color: var(--text);
   animation: otRise 0.5s cubic-bezier(0.22,1,0.36,1) both;
   --ot-accent: #d4a574;
@@ -3161,7 +3163,7 @@ a:focus:not(:focus-visible) { outline: none; }
 .ot-steps { display: flex; gap: 5px; margin-top: 9px; }
 .ot-step {
   flex: 1; height: 4px; border-radius: 999px;
-  background: rgba(245,236,221,0.14); transition: background 0.4s ease;
+  background: color-mix(in srgb, var(--text) 14%, transparent); transition: background 0.4s ease;
 }
 .ot-step.done { background: var(--ot-accent); }
 .ot-step.active { animation: otStep 1.4s ease-in-out infinite; }
@@ -3169,17 +3171,15 @@ a:focus:not(:focus-visible) { outline: none; }
 /* Multi-order summary: one segment per ORDER, green once that order is served,
    blue while preparing, grey when just received. Scales to any number of orders. */
 .ot-orderbar { display: flex; gap: 5px; margin-top: 9px; }
-.ot-oseg { flex: 1; height: 5px; min-width: 4px; border-radius: 999px; background: rgba(245,236,221,0.16); transition: background 0.4s ease; }
-.ot-oseg.received { background: rgba(245,236,221,0.22); }
+.ot-oseg { flex: 1; height: 5px; min-width: 4px; border-radius: 999px; background: color-mix(in srgb, var(--text) 14%, transparent); transition: background 0.4s ease; }
+.ot-oseg.received { background: color-mix(in srgb, var(--text) 22%, transparent); }
 .ot-oseg.preparing { background: #4f9dff; }
 .ot-oseg.served { background: #4ade80; }
-[data-theme="light"] .ot-oseg { background: rgba(60,42,30,0.16); }
-[data-theme="light"] .ot-oseg.received { background: rgba(60,42,30,0.24); }
 /* Per-dish progress inside the strip — one segment per DISH so the guest sees
    which dishes are served (green), cooking (blue) or still queued (faded). */
 .ot-dishbar { display: flex; gap: 4px; margin-top: 9px; }
-.ot-dseg { flex: 1; height: 5px; min-width: 3px; border-radius: 999px; background: rgba(245,236,221,0.16); transition: background 0.4s ease; }
-.ot-dseg.received { background: rgba(245,236,221,0.22); }
+.ot-dseg { flex: 1; height: 5px; min-width: 3px; border-radius: 999px; background: color-mix(in srgb, var(--text) 14%, transparent); transition: background 0.4s ease; }
+.ot-dseg.received { background: color-mix(in srgb, var(--text) 22%, transparent); }
 .ot-dseg.preparing { background: #4f9dff; }
 .ot-dseg.served { background: #4ade80; }
 [data-theme="light"] .ot-dseg { background: rgba(60,42,30,0.16); }
