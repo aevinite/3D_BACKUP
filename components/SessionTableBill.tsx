@@ -42,6 +42,7 @@ const STATUS_LABEL: Record<string, string> = { received: "Received", preparing: 
 export default function SessionTableBill() {
   // Tracks each piece of what we show on screen:
   const [active, setActive] = useState(false); // sessions on + we hold a valid session token
+  const [loaded, setLoaded] = useState(false); // first server fetch is back — until then show a skeleton, NOT the empty "no dishes" message (that flash was the glitch)
   const [table, setTable] = useState(""); // which table number we're showing
   const [items, setItems] = useState<SItem[]>([]); // the list of dishes ordered
   const [bill, setBill] = useState<SBill | null>(null); // the running money totals
@@ -85,6 +86,7 @@ export default function SessionTableBill() {
         setItems(((st.items as SItem[]) || []).map((i) => ((i.status as string) === "ready" ? { ...i, status: "preparing" } : i)));
         setBill((st.bill as SBill) || null);
         setMembers(Array.isArray(st.members) ? (st.members as unknown[]).length : 0);
+        setLoaded(true); // real data is in — safe to show the bill (or a true empty)
       };
       // Check right away; realtime nudges drive instant refetches, with a slow 60s
       // backup poll for when the WebSocket is asleep/dropped.
@@ -119,8 +121,14 @@ export default function SessionTableBill() {
         {/* Only show the guest count when more than one person shares the table. */}
         {members > 1 && <span className="stb-members">{members} guests</span>}
       </div>
-      {/* If nothing's been ordered yet, show a friendly empty message... */}
-      {items.length === 0 ? (
+      {/* Until the FIRST server fetch is back, show a shimmer skeleton — never the
+          "no dishes" empty message (that split-second flash before data loaded was
+          the glitch). (owner, 2026-06-19) */}
+      {!loaded ? (
+        <div className="stb-loading" aria-live="polite" aria-label="Loading your table…">
+          <span className="stb-skel" /><span className="stb-skel" /><span className="stb-skel short" />
+        </div>
+      ) : items.length === 0 ? (
         <div className="stb-empty">No dishes sent to the kitchen yet. When anyone at your table orders, it shows up here with its live status.</div>
       ) : (
         // ...otherwise show the progress line, the dish list, and the totals.

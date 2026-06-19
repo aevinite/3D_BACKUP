@@ -791,6 +791,12 @@ body.menu-frost .nav {
 .stb-dot { width: 9px; height: 9px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 0 0 rgba(74,222,128,0.6); animation: livePulse 1.6s ease-out infinite; }
 .stb-members { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: none; letter-spacing: 0; }
 .stb-empty { font-size: 13px; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+/* Loading skeleton shown until the first live-table fetch returns (prevents the
+   "no dishes" flash). Theme-aware shimmer. */
+.stb-loading { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.stb-skel { height: 13px; border-radius: 6px; background: color-mix(in srgb, var(--text) 10%, transparent); background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 10%, transparent), transparent); background-size: 200% 100%; animation: stbShimmer 1.25s ease-in-out infinite; }
+.stb-skel.short { width: 55%; }
+@keyframes stbShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 .stb-progress { font-size: 12px; color: var(--muted); margin-top: 8px; }
 /* Segmented served-progress bar: one segment per dish. Scales to any count
    (flex:1 each), turns amber while preparing and green once served. */
