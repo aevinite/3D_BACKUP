@@ -3293,9 +3293,11 @@ a:focus:not(:focus-visible) { outline: none; }
 /* The strip and sheet are ALWAYS dark glass, so lock their text to cream/gold
    regardless of the site theme — otherwise light mode turns var(--text)/
    var(--muted) dark and they vanish (dark-on-dark). */
-.order-tracker .ot-label, .ot-sheet .ot-label, .ot-item-line.total { color: #f5ecdd; }
-.order-tracker .ot-sub, .ot-sheet .ot-sub, .ot-table,
-.ot-item-line, .ot-table-edit label, .ot-note { color: rgba(245,236,221,0.74); }
+/* Collapsed tracker text is theme-aware (var(--text)/var(--muted)) so it reads on
+   the warm card in BOTH light & dark. Only the (unreachable) dark .ot-sheet keeps
+   cream text. (owner, 2026-06-19) */
+.ot-sheet .ot-label, .ot-item-line.total { color: #f5ecdd; }
+.ot-sheet .ot-sub, .ot-item-line, .ot-table-edit label, .ot-note { color: rgba(245,236,221,0.74); }
 .ot-sheet, .ot-sheet-close, .ot-table-row input { color: #f5ecdd; }
 
 @media (prefers-reduced-motion: reduce) {
