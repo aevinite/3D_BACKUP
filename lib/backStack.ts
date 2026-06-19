@@ -64,11 +64,14 @@ function reconcile() {
     }
     s.pushed = target;
   } else if (target < s.pushed) {
-    // Popups closed by their own UI (X / backdrop / completion). Rewind the same
-    // number of buffer entries in one go; swallow the popstate events it fires.
+    // Popups closed by their own UI (X / backdrop / completion). Rewind the buffer
+    // entries in one hop. CRITICAL: history.go(-N) fires exactly ONE popstate (not
+    // N) for same-document entries — so we swallow exactly ONE, regardless of N.
+    // (Counting N here left a stale `ignore` that ate the NEXT real back press,
+    // e.g. the Leave dialog right after close-all — verified 2026-06-19.)
     const remove = s.pushed - target;
     s.pushed = target;
-    s.ignore += remove;
+    s.ignore += 1;
     history.go(-remove);
   }
 }

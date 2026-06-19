@@ -30,9 +30,11 @@
       for (var i = pushed; i < target; i++) history.pushState({ __lfhPanelLayer: true }, "");
       pushed = target;
     } else if (target < pushed) {
+      // history.go(-N) fires exactly ONE popstate (not N) for same-document
+      // entries, so swallow exactly ONE regardless of N (see lib/backStack.ts).
       var remove = pushed - target;
       pushed = target;
-      ignore += remove;
+      ignore += 1;
       history.go(-remove);
     }
   }
