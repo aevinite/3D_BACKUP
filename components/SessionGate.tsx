@@ -31,6 +31,8 @@ import {
   checkLocation, tableStatus, joinSession, getSessionState, requestAccess,
   placeSessionOrder, callWaiterSession, setMemberName,
 } from "@/lib/session";
+// Phone back button: while this sheet is open, back closes it (not the site).
+import { useBackClose } from "@/lib/backStack";
 
 // Once you're in a session, that table becomes your default everywhere (cart +
 // call-waiter prefill from the scanned-table key, and re-read on lfh:table-scanned).
@@ -135,6 +137,10 @@ export default function SessionGate() {
     fireDone({ ok: false, reason: "cancelled", action: pending.current?.action });
     stopPoll(); stopScan(); setOpen(false); setStep("idle"); setName(""); setNote(""); pending.current = null;
   }, []);
+
+  // Phone back button closes the sheet (and reports the action cancelled, exactly
+  // like the backdrop/X) instead of leaving the site.
+  useBackClose("session-gate", open, close);
 
   // ── perform the queued action once the session is ready ────────────────────
   // Now that we're in the session, actually do the job: place the order or call

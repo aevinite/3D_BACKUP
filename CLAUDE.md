@@ -159,6 +159,37 @@ Use the right skill the moment the task fits — don't ask permission.
 When a deferred tool is needed (e.g. `TaskCreate`, MCP browser tools), load it
 via `ToolSearch` BEFORE planning around it.
 
+## Mobile hardware BACK button — every screen & popup is a "back step" (2026-06-19)
+
+The Android/phone hardware back button must NEVER quit the site in one press. It
+peels off ONE layer at a time: open popup → its parent → … → menu → a "Leave this
+site?" dialog (and only THEN, one more back, does the tab close). This is **Option A**
+(owner-chosen 2026-06-19): popups stay state-driven (NO URL change, so **zero extra
+egress / DB load** — it's pure browser history), and a tiny central manager syncs
+them to the History API. Real PAGES (`/item`, `/view`) already have their own URL, so
+the browser handles their back for free; only state-driven overlays need wiring.
+
+- **Guest app:** the manager is `lib/backStack.ts`. ANY popup/overlay/drawer/sheet/
+  dialog MUST register itself while open with the hook — ONE line, called
+  unconditionally near the top of the component (it self-noops while closed):
+  ```ts
+  useBackClose("cart", open, () => setOpen(false)); // id must be unique per overlay
+  ```
+  The manager pushes a history entry when the layer opens and, on a back press,
+  closes the TOP layer instead of leaving the site. The root "Leave this site?
+  [Stay] [Leave]" dialog + the menu exit-guard live ONCE in
+  `components/BackQuitDialog.tsx` (mounted in `GuestChrome`) — never duplicate it.
+- **Staff panels (vanilla JS):** the sibling manager is `public/panels/backstack.js`,
+  loaded via `<script>` like `maint.js`/`realtime.js`. When you OPEN any drawer/modal/
+  confirm: `const off = LFH_BACK.layer("86-board", () => closeBoard());` and call
+  `off()` if it closes by other means (X, backdrop, completion).
+- **RULE FOR ALL FUTURE WORK (guest OR staff):** every NEW popup/modal/drawer/sheet/
+  dialog MUST be registered the moment it's built, or the back button will skip it
+  and quit the site — the exact bug this feature fixed. New full PAGES need nothing.
+- **Never hand-roll `history.pushState`/`popstate` in a component.** All the tricky
+  bookkeeping (rapid double-back, `lfh:close-all`, reconcile, the exit-guard) lives
+  in the two manager files above; components only ever call `useBackClose` / `LFH_BACK.layer`.
+
 ## Known gotchas (read before editing)
 
 - **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The

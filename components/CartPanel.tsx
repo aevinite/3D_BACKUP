@@ -10,6 +10,7 @@ import { useFeatures } from "@/lib/features";
 import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
 import { getStoredSession } from "@/lib/session";
 import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
+import { useBackClose } from "@/lib/backStack"; // phone back button closes the panel
 import SessionTableBill from "@/components/SessionTableBill";
 import {
   STEPS,
@@ -89,6 +90,11 @@ export default function CartPanel() {
   const [otherOpen, setOtherOpen] = useState(false); // reveal the free-text field
   const [placing, setPlacing] = useState(false); // true while an order is being sent, to block double taps
   const declaredHydrated = useRef(false); // skip the first persist so restore can't be clobbered
+
+  // Phone back button closes the bill instead of leaving the site. When editing a
+  // line (which opens the customize popup ON TOP), back closes the popup first,
+  // then this bill, then reaches the menu — exactly the owner's expected flow.
+  useBackClose("cart", open, () => setOpen(false));
 
   // loadCart(): read the saved cart from localStorage and clean it up.
   const loadCart = () => {

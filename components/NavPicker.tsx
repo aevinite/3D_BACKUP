@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+// Phone back button: while this dropdown is open, back closes it (not the site).
+import { useBackClose } from "@/lib/backStack";
 
 // The shape of one choice in the dropdown. For each option we know:
 // a unique `key`, what to show (`label`), whether it's currently picked
@@ -28,6 +30,10 @@ export default function NavPicker({
   const [open, setOpen] = useState(false);
   // A handle to the wrapping <div> so we can tell if a click landed inside it.
   const ref = useRef<HTMLDivElement>(null);
+
+  // Phone back button closes the dropdown instead of leaving the site. The id is
+  // keyed off buttonLabel so the language and currency pickers register separately.
+  useBackClose(`nav-${buttonLabel}`, open, () => setOpen(false));
 
   // While the dropdown is open, watch for ways to close it: clicking anywhere
   // outside it, or pressing the Escape key. We add these listeners only when

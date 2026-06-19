@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { prettyUsd, unitDisplay, minorDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import type { OptionGroup } from "@/lib/menu";
 import { allergenIcon, allergenLabel } from "@/lib/allergens";
+// Phone back button: while this popup is open, back closes it (not the site).
+import { useBackClose } from "@/lib/backStack";
 
 // The minimal info we keep about the dish being customized.
 interface OrderItem {
@@ -44,6 +46,10 @@ export default function OrderConfirmModal() {
   const [editSig, setEditSig] = useState<string | null>(null); // set when editing an existing line
   const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null); // which currency to show
   const [submitting, setSubmitting] = useState(false); // true briefly while saving, to block double-taps
+
+  // Phone back button closes this popup instead of leaving the site (or, when
+  // editing from the bill, returns to the bill underneath).
+  useBackClose("order-confirm", open, () => setOpen(false));
 
   // This useEffect runs once on mount: load the currency and start listening
   // for the "please open me" message (and the messages to close/refresh).
