@@ -28,6 +28,8 @@ import { getStoredSession, storeSession, clearStoredSession, getSessionState, le
 // it synchronously (this widget already polls the session, so we reuse that poll).
 import { setTableConnection } from "@/lib/tableConnection";
 import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
+// Phone back button: while a confirm/blocked popup shows, back closes it (not the site).
+import { useBackClose } from "@/lib/backStack";
 
 // localStorage keys for remembering where the user dragged the card and whether
 // they collapsed it to the small bubble.
@@ -210,6 +212,10 @@ export default function SessionStatusWidget() {
   useEffect(() => {
     setTableConnection({ sessionsEnabled: enabled, connected: !!st && !!st.approved });
   }, [enabled, st]);
+
+  // Phone back button closes these confirmations instead of leaving the site.
+  useBackClose("ssw-blocked", blocked, () => setBlocked(false));
+  useBackClose("ssw-confirm-leave", confirming, () => setConfirming(false));
 
   // ── actions ────────────────────────────────────────────────────────────────
   // This runs when the guest taps "Leave": tell the server, clean up locally,

@@ -10,6 +10,8 @@ import { validateTable, flagTableInput, getScannedTable, setScannedTable } from 
 import { getStoredSession } from "@/lib/session";
 // Per-restaurant feature switches: waiter calls can be turned off entirely.
 import { useFeatures } from "@/lib/features";
+// Phone back button: while this popup is open, back closes it (not the site).
+import { useBackClose } from "@/lib/backStack";
 
 // ChefPopup — the little "Need something?" pop-up where a guest picks a request
 // (water, cutlery, the bill, etc.) and it gets sent to the staff for their table.
@@ -23,6 +25,9 @@ export default function ChefPopup() {
   const [tableCount, setTableCount] = useState(0); // how many tables exist; 0 = no limit known
   const [sessionsEnabled, setSessionsEnabled] = useState(false); // v2 dining-session system
   const [sending, setSending] = useState(false); // true while a request is being sent
+
+  // Phone back button closes the popup instead of leaving the site.
+  useBackClose("chef-popup", open, () => setOpen(false));
 
   // This runs once when the pop-up component first appears. It wires up the
   // pre-filling of the table number and listens for events that open/close it.

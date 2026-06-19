@@ -17,6 +17,8 @@ import {
   writeActiveOrders as write,
   liveActiveOrders,
 } from "@/lib/orderStatus";
+// Phone back button: while the details sheet is open, back closes it (not the site).
+import { useBackClose } from "@/lib/backStack";
 
 // Tell the open cart (same tab) that an order's status changed, so its
 // "Live now" section can re-read. The browser's native `storage` event only
@@ -50,6 +52,9 @@ export default function OrderTracker() {
   // The order being animated into the cross — frozen so a newly-arrived order
   // can't swap into the strip mid-animation and play the fly-out on the wrong one.
   const dismissingOrderRef = useRef<ActiveOrder | null>(null);
+
+  // Phone back button closes the details sheet instead of leaving the site.
+  useBackClose("order-detail", detailOpen, () => setDetailOpen(false));
 
   // refresh(): re-read the saved orders into state. Also patches any already-
   // finished order that's missing a "finished at" time so it can auto-clear.

@@ -326,9 +326,20 @@ $("#muteBtn").onclick = () => {
   localStorage.setItem("kds_muted", state.muted ? "1" : "0");
   $("#muteBtn").textContent = state.muted ? "🔕" : "🔔";
 };
-$("#boardBtn").onclick = () => { $("#drawerOverlay").hidden = false; renderDishes(); };
-$("#drawerClose").onclick = () => ($("#drawerOverlay").hidden = true);
-$("#drawerOverlay").onclick = (e) => { if (e.target.id === "drawerOverlay") $("#drawerOverlay").hidden = true; };
+// 86-board drawer. open/close are wrapped so the phone's BACK button closes the
+// drawer (via LFH_BACK) instead of leaving the kitchen panel.
+let drawerOff = null;
+function openDrawer() {
+  $("#drawerOverlay").hidden = false; renderDishes();
+  drawerOff = window.LFH_BACK ? LFH_BACK.layer("86-board", closeDrawer) : null;
+}
+function closeDrawer() {
+  $("#drawerOverlay").hidden = true;
+  if (drawerOff) { const off = drawerOff; drawerOff = null; off(); }
+}
+$("#boardBtn").onclick = openDrawer;
+$("#drawerClose").onclick = closeDrawer;
+$("#drawerOverlay").onclick = (e) => { if (e.target.id === "drawerOverlay") closeDrawer(); };
 $("#dishSearch").oninput = renderDishes;
 // Wall ⇄ Columns toggle (the "expansion"). Persist the choice per device.
 $("#viewBtn").onclick = () => { view = view === "wall" ? "columns" : "wall"; localStorage.setItem("kds_view", view); applyView(); };
