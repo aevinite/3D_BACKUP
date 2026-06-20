@@ -288,7 +288,7 @@ function renderFloor() {
     e.stopPropagation();
     const t = q.dataset.qt, a = tableAgg(t);
     if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
-      act(() => api("POST", `/tables/${t}/pay`));
+      optimisticPay(t);
   }));
 }
 
@@ -586,12 +586,21 @@ function renderPanel() {
   // Restart: clear this round's orders off the floor (they stay served+archived in
   // records) but keep the table OPEN for a fresh round. Mirrors the manager.
   const rsb = $("#restartTable"); if (rsb && s) rsb.onclick = async () => {
-    if (await confirmDialog(`Restart table ${t}? Its current orders clear off the floor and the table stays OPEN for a fresh round.`, "Restart"))
-      actGated("POST", `/tables/${t}/restart`, null, { message: "This table has a round going — enter a manager PIN to restart it." });
+    if (!(await confirmDialog(`Restart table ${t}? Its current orders clear off the floor and the table stays OPEN for a fresh round.`, "Restart"))) return;
+    // Restart means NO ONE is sitting and the round is cleared — show that INSTANTLY.
+    // Clear this table's orders + free its seats locally so the tile never flashes the
+    // old "1 seated"/round state during the (gated) round-trip. The final load() below
+    // reconciles — and reverts this if the manager PIN is cancelled. (owner, 2026-06-20)
+    const sid = s.id;
+    state.data.orders = state.data.orders.filter((o) => String(o.table_number) !== String(t));
+    state.data.members = state.data.members.filter((m) => m.session_id !== sid);
+    renderFloor(); renderPanel();
+    await actGated("POST", `/tables/${t}/restart`, null, { message: "This table has a round going — enter a manager PIN to restart it." });
+    await load(); // reconcile (also reverts the optimistic clear if the PIN was cancelled)
   };
   const pb = $("#payBill"); if (pb) pb.onclick = async () => {
     if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
-      act(() => api("POST", `/tables/${t}/pay`));
+      optimisticPay(t);
   };
   const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
     const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
@@ -755,6 +764,16 @@ function optimisticOpen(table) {
       if (Array.isArray(state.data.requests)) state.data.requests = state.data.requests.filter((r) => !(r.type === "open" && String(r.table_number) === t));
     },
     () => api("POST", "/sessions/open", { table: t }),
+  );
+}
+
+// Mark a table's whole bill paid INSTANTLY: flip every order's payment_status to
+// "paid" locally so the tile/detail re-read as paid (no due) right away, then persist
+// + reconcile. runOptimistic's load() reverts on failure. (owner, 2026-06-20)
+function optimisticPay(t) {
+  runOptimistic(
+    () => { state.data.orders.forEach((o) => { if (String(o.table_number) === String(t)) o.payment_status = "paid"; }); },
+    () => api("POST", `/tables/${t}/pay`),
   );
 }
 
