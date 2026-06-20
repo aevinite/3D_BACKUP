@@ -3374,7 +3374,6 @@ function platformHtml() {
   return `<div class="ed-head plat-head">
       <h2>Platform <span class="sub">· Zomato · Swiggy · Takeaway</span></h2>
       <div class="plat-head-actions">
-        <label class="plat-toggle"><input type="checkbox" id="platKitchenAccept" ${tg.kitchen_can_accept_platform ? "checked" : ""}/> Kitchen can accept</label>
         <label class="plat-toggle"><input type="checkbox" id="platInBills" ${tg.platform_in_bills ? "checked" : ""}/> Show in bills</label>
         <button class="btn primary" id="platTestBtn">＋ Add test order</button>
         <button class="btn" id="platRefresh" title="Refresh">↻</button>
@@ -3388,8 +3387,6 @@ function bindPlatform() {
   const tb = document.getElementById("platTestBtn");
   if (tb) tb.onclick = async () => { tb.disabled = true; try { await api("POST", "/platform/test"); await loadPlatform(); toast("Test order added", "ok"); } catch (e) { toast("Failed: " + e.message, "err"); } tb.disabled = false; };
   const rf = document.getElementById("platRefresh"); if (rf) rf.onclick = loadPlatform;
-  const ka = document.getElementById("platKitchenAccept");
-  if (ka) ka.onchange = async () => { try { await api("POST", "/platform/toggles", { kitchen_can_accept_platform: ka.checked }); toast(ka.checked ? "Kitchen can now accept platform orders" : "Only the manager accepts platform orders now", "ok"); } catch (e) { toast("Failed: " + e.message, "err"); ka.checked = !ka.checked; } };
   const ib = document.getElementById("platInBills");
   if (ib) ib.onchange = async () => { try { await api("POST", "/platform/toggles", { platform_in_bills: ib.checked }); toast(ib.checked ? "Platform orders will show in bills" : "Platform orders hidden from bills", "ok"); } catch (e) { toast("Failed: " + e.message, "err"); ib.checked = !ib.checked; } };
   document.querySelectorAll("[data-plat-act]").forEach((b) => b.onclick = async () => {
@@ -3397,6 +3394,13 @@ function bindPlatform() {
     try { await api("POST", `/platform/${b.dataset.platId}/status`, { status: b.dataset.platAct }); await loadPlatform(); }
     catch (e) { toast("Failed: " + e.message, "err"); b.disabled = false; }
   });
+}
+// Count of platform orders STILL in play (not handed over / cancelled) — shown on
+// the Platform tab so the manager sees how many are live without opening the tab.
+function updatePlatformBadge() {
+  const live = (state.data.platform || []).filter((o) => o.status !== "handed_over" && o.status !== "cancelled").length;
+  const b = $("#platformBadge");
+  if (b) { b.textContent = live; b.hidden = live === 0; }
 }
 let platSeq = 0; // own latest-wins guard so platform loads never cancel the board loaders
 async function loadPlatform() {
@@ -3406,6 +3410,7 @@ async function loadPlatform() {
     if (seq !== platSeq) return;
     state.data.platform = res.orders || [];
     state.platformToggles = res.toggles || {};
+    updatePlatformBadge();
     if (state.tab === "platform") renderEditor();
   } catch { /* keep last good board */ }
 }
@@ -3655,7 +3660,7 @@ function startOrderWatch() {
     // Split by topic: ops churn → cheap pollOrders(); menu content edits (dishes,
     // categories, filters, settings) → loadAll() so the dish lists refresh live too.
     LFH_RT.start({ handlers: {
-      ops:  () => { pollOrders(); if (state.tab === "platform") loadPlatform(); },
+      ops:  () => { pollOrders(); loadPlatform(); /* keeps the Platform tab badge live on every tab */ },
       menu: () => loadAll(),
     }});
     setInterval(pollOrders, 60000); // backup sync
@@ -3705,7 +3710,7 @@ setTab(state.tab);
 // If the very first load fails, show "connection failed" so it's obvious the local
 // server probably isn't running.
 loadAll()
-  .then(() => { renderCatFilter(); renderList(); renderEditor(); startOrderWatch(); })
+  .then(() => { renderCatFilter(); renderList(); renderEditor(); startOrderWatch(); loadPlatform(); /* populate the Platform tab badge on boot */ })
   .catch((e) => {
     $("#conn").textContent = "connection failed";
     $("#conn").className = "conn err";
