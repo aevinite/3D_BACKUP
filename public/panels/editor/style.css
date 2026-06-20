@@ -1329,3 +1329,35 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .shiftgrid { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px 14px 18px; }
 .shiftgrid .shiftpick { flex: 1 1 calc(33% - 10px); min-width: 96px; padding: 14px 10px; font-size: 15px; font-weight: 700; }
 .shiftgrid .shiftpick:hover { filter: brightness(1.08); }
+
+/* ── Platform tab (Zomato / Swiggy / takeaway board) ─────────────────────── */
+.plat-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.plat-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.plat-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; }
+.plat-toggle input { width: 15px; height: 15px; accent-color: var(--gold); }
+.btn.ghost { background: transparent; }
+.plat-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; padding: 4px 0 18px; align-items: start; }
+.plat-col { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; display: flex; flex-direction: column; min-height: 120px; }
+.plat-col-h { padding: 12px 15px; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.plat-col-h .ct { margin-left: auto; background: var(--panel); border-radius: 8px; padding: 1px 9px; font-size: 13px; color: var(--text); }
+.plat-col-body { padding: 11px; display: flex; flex-direction: column; gap: 11px; }
+.plat-col-empty { color: var(--muted); text-align: center; font-size: 13px; padding: 10px 0; opacity: .6; }
+
+.plat-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 13px; padding: 12px 13px; box-shadow: var(--shadow-sm); }
+.plat-card.z { border-left-color: #e23744; }
+.plat-card.s { border-left-color: #fc8019; }
+.plat-card.t { border-left-color: #6f9a6a; }
+.plat-ch { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.plat-badge { font-size: 11px; font-weight: 800; color: #fff; padding: 3px 9px; border-radius: 7px; letter-spacing: .03em; }
+.plat-badge.z { background: #e23744; } .plat-badge.s { background: #fc8019; } .plat-badge.t { background: #6f9a6a; } .plat-badge.o { background: var(--muted); }
+.plat-kot { font-weight: 800; font-size: 14px; }
+.plat-age { margin-left: auto; font-size: 12px; color: var(--muted); font-weight: 600; }
+.plat-cust { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.plat-items { font-size: 14px; line-height: 1.55; margin-bottom: 9px; }
+.plat-line .q { color: var(--gold); font-weight: 700; }
+.plat-line .no { color: var(--red); font-weight: 600; font-size: 12.5px; }
+.plat-cf { display: flex; align-items: center; gap: 9px; border-top: 1px solid var(--line); padding-top: 9px; }
+.plat-tot { font-weight: 800; font-size: 15px; }
+.plat-acts { margin-left: auto; display: flex; gap: 7px; }
+.plat-acts .btn { padding: 7px 12px; font-size: 12.5px; }
+@media (max-width: 1000px) { .plat-board { grid-template-columns: repeat(2, 1fr); } }

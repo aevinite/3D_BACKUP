@@ -24,7 +24,7 @@ const ALLERGENS = [
 const TAB_LABEL = { items: "Dish", categories: "Category", filters: "Tag", general: "Settings" };
 
 // The tabs across the top of the editor. Anything not in this list is ignored.
-const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "dash", "log", "features", "general"];
+const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "features", "general"];
 // Remember which tab you were on so a refresh keeps you there (e.g. stay on
 // Orders during a busy service instead of snapping back to Dishes).
 const savedTab = (() => { try { return localStorage.getItem("lfh_editor_tab"); } catch { return null; } })();
@@ -1403,6 +1403,11 @@ function renderEditor() {
     ed.innerHTML = `<div class="ed-head"><h2>Dashboard <span class="sub">· last 30 days</span></h2><button class="btn" id="dashRefresh">↻ Refresh</button></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
     document.getElementById("dashRefresh").onclick = () => renderEditor();
     loadDashboard();
+    return;
+  }
+  if (state.tab === "platform") {
+    ed.innerHTML = platformHtml();
+    bindPlatform();
     return;
   }
   if (state.tab === "orders") {
@@ -3326,6 +3331,85 @@ async function unblockLog(id) {
 // setTab: switch the editor to a different tab. It records the choice (so a refresh
 // stays here), resets the selection, shows/hides the search + "New" controls as
 // appropriate, redraws, and kicks off any data load that tab needs.
+// ── Platform (Zomato / Swiggy / takeaway) orders ────────────────────────────
+// Reads the separate aggregator_orders table via GET /platform; renders a
+// status board (New → Preparing → Ready → Handed over). Dine-in is untouched.
+const PLAT_META = {
+  zomato:   { label: "Zomato",   cls: "z" },
+  swiggy:   { label: "Swiggy",   cls: "s" },
+  takeaway: { label: "Takeaway", cls: "t" },
+  other:    { label: "Other",    cls: "o" },
+};
+const platMoney = (n) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
+function platAge(iso) { const m = Math.floor(Math.max(0, (Date.now() - new Date(iso).getTime()) / 60000)); return m < 1 ? "just now" : m + "m"; }
+function platColOf(st) {
+  if (st === "new") return "new";
+  if (st === "accepted" || st === "preparing") return "prep";
+  if (st === "ready") return "ready";
+  if (st === "handed_over") return "done";
+  return null; // cancelled etc. are not shown on the board
+}
+function platCardHtml(o) {
+  const m = PLAT_META[o.source] || PLAT_META.other;
+  const items = Array.isArray(o.items) ? o.items : [];
+  const lines = items.map((it) =>
+    `<div class="plat-line"><span class="q">${esc(it.qty)}×</span> ${esc(it.title)}${Array.isArray(it.removed) && it.removed.length ? `<span class="no"> no ${esc(it.removed.join(", "))}</span>` : ""}</div>`).join("");
+  let action = "";
+  if (o.status === "new") action = `<button class="btn primary" data-plat-act="accepted" data-plat-id="${esc(o.id)}">Accept</button><button class="btn ghost" data-plat-act="cancelled" data-plat-id="${esc(o.id)}" title="Reject">✕</button>`;
+  else if (o.status === "accepted" || o.status === "preparing") action = `<button class="btn primary" data-plat-act="ready" data-plat-id="${esc(o.id)}">Mark ready</button>`;
+  else if (o.status === "ready") action = `<button class="btn primary" data-plat-act="handed_over" data-plat-id="${esc(o.id)}">Hand over</button>`;
+  return `<div class="plat-card ${m.cls}">
+    <div class="plat-ch"><span class="plat-badge ${m.cls}">${esc(m.label)}</span><span class="plat-kot">#${esc(o.kot_no ?? "—")}</span><span class="plat-age">${esc(platAge(o.created_at))}</span></div>
+    <div class="plat-cust">${esc(o.customer_name || "—")}</div>
+    <div class="plat-items">${lines || '<span class="plat-empty">no items</span>'}</div>
+    <div class="plat-cf"><span class="plat-tot">${platMoney(o.total)}</span><span class="plat-acts">${action}</span></div>
+  </div>`;
+}
+function platformHtml() {
+  const all = state.data.platform || [];
+  const tg = state.platformToggles || {};
+  const cols = { new: [], prep: [], ready: [], done: [] };
+  all.forEach((o) => { const c = platColOf(o.status); if (c) cols[c].push(o); });
+  const col = (key, label) => `<div class="plat-col"><div class="plat-col-h">${label} <span class="ct">${cols[key].length}</span></div><div class="plat-col-body">${cols[key].map(platCardHtml).join("") || '<div class="plat-col-empty">—</div>'}</div></div>`;
+  return `<div class="ed-head plat-head">
+      <h2>Platform <span class="sub">· Zomato · Swiggy · Takeaway</span></h2>
+      <div class="plat-head-actions">
+        <label class="plat-toggle"><input type="checkbox" id="platKitchenAccept" ${tg.kitchen_can_accept_platform ? "checked" : ""}/> Kitchen can accept</label>
+        <label class="plat-toggle"><input type="checkbox" id="platInBills" ${tg.platform_in_bills ? "checked" : ""}/> Show in bills</label>
+        <button class="btn primary" id="platTestBtn">＋ Add test order</button>
+        <button class="btn" id="platRefresh" title="Refresh">↻</button>
+      </div>
+    </div>
+    <div class="plat-board">
+      ${col("new", "🆕 New")}${col("prep", "🍳 Preparing")}${col("ready", "✅ Ready")}${col("done", "📦 Handed over")}
+    </div>`;
+}
+function bindPlatform() {
+  const tb = document.getElementById("platTestBtn");
+  if (tb) tb.onclick = async () => { tb.disabled = true; try { await api("POST", "/platform/test"); await loadPlatform(); toast("Test order added", "ok"); } catch (e) { toast("Failed: " + e.message, "err"); } tb.disabled = false; };
+  const rf = document.getElementById("platRefresh"); if (rf) rf.onclick = loadPlatform;
+  const ka = document.getElementById("platKitchenAccept");
+  if (ka) ka.onchange = async () => { try { await api("POST", "/platform/toggles", { kitchen_can_accept_platform: ka.checked }); toast(ka.checked ? "Kitchen can now accept platform orders" : "Only the manager accepts platform orders now", "ok"); } catch (e) { toast("Failed: " + e.message, "err"); ka.checked = !ka.checked; } };
+  const ib = document.getElementById("platInBills");
+  if (ib) ib.onchange = async () => { try { await api("POST", "/platform/toggles", { platform_in_bills: ib.checked }); toast(ib.checked ? "Platform orders will show in bills" : "Platform orders hidden from bills", "ok"); } catch (e) { toast("Failed: " + e.message, "err"); ib.checked = !ib.checked; } };
+  document.querySelectorAll("[data-plat-act]").forEach((b) => b.onclick = async () => {
+    b.disabled = true;
+    try { await api("POST", `/platform/${b.dataset.platId}/status`, { status: b.dataset.platAct }); await loadPlatform(); }
+    catch (e) { toast("Failed: " + e.message, "err"); b.disabled = false; }
+  });
+}
+let platSeq = 0; // own latest-wins guard so platform loads never cancel the board loaders
+async function loadPlatform() {
+  const seq = ++platSeq;
+  try {
+    const res = await api("GET", "/platform");
+    if (seq !== platSeq) return;
+    state.data.platform = res.orders || [];
+    state.platformToggles = res.toggles || {};
+    if (state.tab === "platform") renderEditor();
+  } catch { /* keep last good board */ }
+}
+
 function setTab(tab) {
   state.tab = tab;
   try { localStorage.setItem("lfh_editor_tab", tab); } catch {}
@@ -3345,14 +3429,14 @@ function setTab(tab) {
     sub.querySelectorAll(".subtab").forEach((s) => s.classList.toggle("active", s.dataset.tab === tab));
   }
   // The search box and "+ New" don't apply to the General/Orders/Tables tabs.
-  const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "log" || tab === "features" || tab === "dash";
+  const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "platform" || tab === "log" || tab === "features" || tab === "dash";
   $("#newBtn").style.display = noList ? "none" : "";
   $("#search").style.display = noList ? "none" : "";
   // Tables tab: drop the whole left sidebar (it only held a dead "Floor map" label).
   // The floor already has its own left tiles + right detail, so it takes the full
   // width — the .no-sidebar class collapses the grid's first column to nothing.
   const layout = document.querySelector(".layout");
-  if (layout) layout.classList.toggle("no-sidebar", tab === "tables");
+  if (layout) layout.classList.toggle("no-sidebar", tab === "tables" || tab === "platform");
   renderCatFilter(); // show category chips on Dishes, hide elsewhere
   renderList();
   renderEditor();
@@ -3372,6 +3456,7 @@ function setTab(tab) {
     // there), fetch its data too — otherwise the table would be empty.
     if (state.logView === "operations") loadOplog();
   }
+  if (tab === "platform") loadPlatform();
 }
 
 // loadOrders: fetch the latest orders (and waiter calls) and redraw if we're on
@@ -3570,7 +3655,7 @@ function startOrderWatch() {
     // Split by topic: ops churn → cheap pollOrders(); menu content edits (dishes,
     // categories, filters, settings) → loadAll() so the dish lists refresh live too.
     LFH_RT.start({ handlers: {
-      ops:  () => pollOrders(),
+      ops:  () => { pollOrders(); if (state.tab === "platform") loadPlatform(); },
       menu: () => loadAll(),
     }});
     setInterval(pollOrders, 60000); // backup sync
