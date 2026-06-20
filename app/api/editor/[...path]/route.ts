@@ -14,6 +14,7 @@ import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole } from "@/lib/userAuth";
 import { closeSession } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
+import { notifyAggregator } from "@/lib/aggregators";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -265,8 +266,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (!ALLOWED.includes(status)) return err("invalid status");
       const { data, error } = await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "manager" });
       if (error) throw new Error(error.message);
+      const row = Array.isArray(data) ? data[0] : data;
+      void notifyAggregator(row?.source, row?.external_id, status); // best-effort push back to the platform (dormant w/o keys)
       await logAction("manager", "platform_status", { detail: status, device_id: dev });
-      return ok(Array.isArray(data) ? data[0] : data);
+      return ok(row);
     }
 
     // platform/toggles — flip "kitchen can accept" / "show in bills"

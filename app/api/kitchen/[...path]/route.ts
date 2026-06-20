@@ -8,6 +8,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole } from "@/lib/userAuth";
+import { notifyAggregator } from "@/lib/aggregators";
 
 export const dynamic = "force-dynamic";
 
@@ -128,8 +129,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       }
       const { data, error } = await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "kitchen" });
       if (error) throw new Error(error.message);
+      const row = Array.isArray(data) ? data[0] : data;
+      void notifyAggregator(row?.source, row?.external_id, status); // best-effort push back to the platform (dormant w/o keys)
       await logAction("kitchen", "platform_status", { detail: status, device_id: dev });
-      return ok(Array.isArray(data) ? data[0] : data);
+      return ok(row);
     }
 
     // dishes/:id/sold-out — toggle the 'sold-out' tag (the 86 board)
