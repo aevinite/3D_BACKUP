@@ -34,13 +34,15 @@ export function useRealtime(handlers: Handlers) {
     const timers: Partial<Record<Topic, ReturnType<typeof setTimeout>>> = {};
     const topics = Object.keys(ref.current) as Topic[];
 
-    // Debounced refetch per topic (bursts coalesce into one call of that handler).
+    // Run a topic's handler right now (no delay).
+    const run = (topic: Topic) => {
+      const fn = ref.current[topic];
+      if (fn) Promise.resolve(fn()).catch(() => {});
+    };
+    // Debounced refetch per topic (realtime bursts coalesce into one call).
     const fire = (topic: Topic) => {
       clearTimeout(timers[topic]);
-      timers[topic] = setTimeout(() => {
-        const fn = ref.current[topic];
-        if (fn) Promise.resolve(fn()).catch(() => {});
-      }, 300);
+      timers[topic] = setTimeout(() => run(topic), 300);
     };
     const fireAll = () => topics.forEach(fire);
 
@@ -64,7 +66,7 @@ export function useRealtime(handlers: Handlers) {
     window.addEventListener("online", wake);
     const poll = setInterval(fireAll, 60000); // safety net if the socket drops
 
-    fireAll(); // initial load
+    topics.forEach(run); // initial load — fire IMMEDIATELY (the 300ms debounce is only to coalesce realtime bursts, and was costing every page 300ms of dead time before its first fetch)
 
     return () => {
       disposed = true;

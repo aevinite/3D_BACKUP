@@ -65,6 +65,10 @@ export default function RootLayout({
             early, so the fonts arrive a little faster. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        {/* Warm up the icon CDN too — the Font Awesome stylesheet below is
+            render-blocking, so starting its DNS/TLS handshake early shaves
+            time off the very first (cold-cache) paint. */}
+        <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossOrigin="" />
         {/* Load the two web fonts the design uses (Inter + Playfair Display). */}
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,50&display=swap" rel="stylesheet" />
         {/* Font Awesome — the icon set used for all the little symbols. */}
