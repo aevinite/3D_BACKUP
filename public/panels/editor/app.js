@@ -1215,7 +1215,27 @@ async function resolveCall(id) {
 // ---------- Dashboard tab: the restaurant's numbers as graphs ----------
 let dashCharts = []; // live Chart.js instances (destroyed before each redraw)
 
-let dashRange = "30d"; // today | 30d | year — which window the dashboard shows
+let dashRange = "today"; // today | 30d | year — Today leads (the live summary box); 30d/year still a click away
+// The Today summary box: a live snapshot across every channel (dine-in tables +
+// Zomato/Swiggy/takeaway live orders) and today's combined totals. Built from the
+// `live` + `platformToday` fields the /stats endpoint adds.
+function dashTodayBox(s) {
+  const live = s.live || {}; const pt = s.platformToday || { count: 0, revenue: 0 };
+  const totalOrders = (s.orderCount || 0) + (pt.count || 0);
+  const totalRev = (s.revenue || 0) + (pt.revenue || 0);
+  const card = (cls, ico, lbl, n, meta) =>
+    `<div class="tbox ${cls}"><span class="tbox-bar"></span><div class="tbox-top"><span class="tbox-ico"><i class="fas ${ico}"></i></span><span class="tbox-lbl">${lbl}</span></div><div class="tbox-n">${n}</div><div class="tbox-meta">${esc(meta)}</div></div>`;
+  return `<div class="dash-today">
+    <div class="dash-today-h">Right now <span class="sub">· live across every channel</span></div>
+    <div class="dash-today-strip">
+      ${card("dine", "fa-chair", "Dine-in", live.dineIn || 0, "tables running")}
+      ${card("z", "fa-bolt", "Zomato", live.zomato || 0, "live orders")}
+      ${card("s", "fa-bowl-food", "Swiggy", live.swiggy || 0, "live orders")}
+      ${card("t", "fa-bag-shopping", "Takeaway", live.takeaway || 0, "live orders")}
+      ${card("tot", "fa-indian-rupee-sign", "Today", inr(totalRev), totalOrders + " orders")}
+    </div>
+  </div>`;
+}
 async function loadDashboard() {
   const body = document.getElementById("dashBody");
   let s;
@@ -1223,26 +1243,33 @@ async function loadDashboard() {
   catch (e) { body.innerHTML = `<div class="empty">Couldn't load stats: ${esc(e.message)}</div>`; return; }
   const RL = { today: "today", "30d": "last 30 days", year: "last 12 months" };
   const rangeLabel = RL[dashRange] || dashRange;
-  // Range toggle, then headline numbers, then four graphs.
-  const toggle = [["today", "Today"], ["30d", "30 days"], ["year", "Year"]]
-    .map(([r, lbl]) => `<button class="dash-range ${dashRange === r ? "active" : ""}" data-range="${r}">${lbl}</button>`).join("");
+  // Left sub-nav (Today / 30 days / Year) + right content. The Today view leads
+  // with a live per-channel summary box (dine-in + Zomato/Swiggy/takeaway).
+  const nav = [["today", "Today", "fa-bolt"], ["30d", "30 days", "fa-calendar-days"], ["year", "Year", "fa-chart-line"]]
+    .map(([r, lbl, ic]) => `<button class="dash-navitem ${dashRange === r ? "active" : ""}" data-range="${r}"><i class="fas ${ic}"></i><span>${lbl}</span></button>`).join("");
+  const summary = dashRange === "today" ? dashTodayBox(s) : "";
   body.innerHTML = `
-    <div class="dash-head"><div class="dash-toggle">${toggle}</div></div>
-    <div class="dash-cards">
-      <div class="dash-card"><small>Revenue · ${rangeLabel}</small><b>${inr(s.revenue)}</b></div>
-      <div class="dash-card"><small>Orders</small><b>${s.orderCount}</b></div>
-      <div class="dash-card"><small>Avg order</small><b>${inr(s.avgOrder)}</b></div>
-      <div class="dash-card"><small>Paid / unpaid</small><b>${s.paid} / ${s.unpaid}</b></div>
-      <div class="dash-card"><small>Cancelled</small><b>${s.cancelled}</b></div>
-    </div>
-    <div class="dash-grid">
-      <div class="dash-chart"><h4>Sales · ${rangeLabel}</h4><canvas id="chSales"></canvas></div>
-      <div class="dash-chart"><h4>Top dishes</h4><canvas id="chTop"></canvas></div>
-      <div class="dash-chart"><h4>Orders by hour</h4><canvas id="chHours"></canvas></div>
-      <div class="dash-chart"><h4>Category share</h4><canvas id="chCats"></canvas></div>
+    <div class="dash-layout">
+      <aside class="dash-nav">${nav}</aside>
+      <div class="dash-content">
+        ${summary}
+        <div class="dash-cards">
+          <div class="dash-card"><small>Revenue · ${rangeLabel}</small><b>${inr(s.revenue)}</b></div>
+          <div class="dash-card"><small>Orders</small><b>${s.orderCount}</b></div>
+          <div class="dash-card"><small>Avg order</small><b>${inr(s.avgOrder)}</b></div>
+          <div class="dash-card"><small>Paid / unpaid</small><b>${s.paid} / ${s.unpaid}</b></div>
+          <div class="dash-card"><small>Cancelled</small><b>${s.cancelled}</b></div>
+        </div>
+        <div class="dash-grid">
+          <div class="dash-chart"><h4>Sales · ${rangeLabel}</h4><canvas id="chSales"></canvas></div>
+          <div class="dash-chart"><h4>Top dishes</h4><canvas id="chTop"></canvas></div>
+          <div class="dash-chart"><h4>Orders by hour</h4><canvas id="chHours"></canvas></div>
+          <div class="dash-chart"><h4>Category share</h4><canvas id="chCats"></canvas></div>
+        </div>
+      </div>
     </div>`;
   // Switch the window and reload.
-  body.querySelectorAll(".dash-range").forEach((b) => (b.onclick = () => { dashRange = b.dataset.range; loadDashboard(); }));
+  body.querySelectorAll(".dash-navitem").forEach((b) => (b.onclick = () => { dashRange = b.dataset.range; loadDashboard(); }));
   dashCharts.forEach((c) => { try { c.destroy(); } catch {} });
   dashCharts = [];
   if (typeof Chart === "undefined") { body.insertAdjacentHTML("beforeend", `<div class="empty">Charts library didn't load (offline?) — the numbers above still work.</div>`); return; }
@@ -1400,7 +1427,7 @@ function renderEditor() {
     return;
   }
   if (state.tab === "dash") {
-    ed.innerHTML = `<div class="ed-head"><h2>Dashboard <span class="sub">· last 30 days</span></h2><button class="btn" id="dashRefresh">↻ Refresh</button></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
+    ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><button class="btn" id="dashRefresh">↻ Refresh</button></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
     document.getElementById("dashRefresh").onclick = () => renderEditor();
     loadDashboard();
     return;

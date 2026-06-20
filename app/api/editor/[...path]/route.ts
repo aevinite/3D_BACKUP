@@ -186,10 +186,29 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         for (let i = 11; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; series.push({ label: MN[d.getMonth()], revenue: r2(seriesMap[k] || 0) }); }
       }
       const avgOrder = (paid + unpaid) > 0 ? r2(revenue / (paid + unpaid)) : 0;
+      // Live per-channel snapshot for the Today summary box: open dine-in tables,
+      // active platform orders by source, and today's platform totals (platform
+      // orders live in aggregator_orders, separate from dine-in `orders`).
+      const todayStart = new Date(businessDayStartIso()).toISOString();
+      const [openSessQ, platActiveQ, platTodayQ] = await Promise.all([
+        sb.from("sessions").select("id").eq("status", "open"),
+        sb.from("aggregator_orders").select("source").in("status", ["new", "accepted", "preparing", "ready"]),
+        sb.from("aggregator_orders").select("total").gte("created_at", todayStart),
+      ]);
+      const platActive = (must(platActiveQ) || []) as { source: string }[];
+      const platToday = (must(platTodayQ) || []) as { total: number }[];
+      const live = {
+        dineIn: ((must(openSessQ) || []) as unknown[]).length,
+        zomato: platActive.filter((r) => r.source === "zomato").length,
+        swiggy: platActive.filter((r) => r.source === "swiggy").length,
+        takeaway: platActive.filter((r) => r.source === "takeaway").length,
+      };
+      const platformToday = { count: platToday.length, revenue: r2(platToday.reduce((sum, r) => sum + (Number(r.total) || 0), 0)) };
       return ok({
         range, series, hours, cats, paid, unpaid, cancelled, revenue: r2(revenue),
         orderCount: orders.length, avgOrder,
         topDishes: Object.entries(topD).sort((a, b) => b[1] - a[1]).slice(0, 10),
+        live, platformToday,
       });
     }
 
