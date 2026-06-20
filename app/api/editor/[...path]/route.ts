@@ -105,6 +105,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       return ok(must(await sb.from("waiter_calls").select("*").order("created_at", { ascending: false }).limit(100)));
     }
 
+    // Platform (Zomato/Swiggy/takeaway) orders + the two operator toggles. Read
+    // from the separate aggregator_orders table — dine-in `orders` is untouched.
+    if (p === "platform") {
+      const [rows, settings] = await Promise.all([
+        sb.from("aggregator_orders").select("*").order("created_at", { ascending: false }).limit(200),
+        sb.from("settings").select("kitchen_can_accept_platform, platform_in_bills").eq("id", "site").maybeSingle(),
+      ]);
+      return ok({ orders: must(rows) || [], toggles: must(settings) || {} });
+    }
+
     if (p === "sessions") {
       const sessions = must(
         await sb.from("sessions").select("*").neq("status", "closed").order("last_activity_at", { ascending: false })
@@ -217,6 +227,58 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const [a, b, c] = path;
     const body = await readBody(req);
     const dev = deviceIdFrom(req); // which device (this editor screen) is acting
+
+    // ── Platform (Zomato/Swiggy/takeaway) orders ──────────────────────────────
+    // platform/test — drop a random test order in (stands in for the real
+    // aggregator webhook until API keys exist). Same insert path the webhook will use.
+    if (a === "platform" && b === "test") {
+      const SRC = ["zomato", "swiggy", "takeaway"];
+      const src = SRC[Math.floor(Math.random() * SRC.length)];
+      const dishes = must(await sb.from("menu_items").select("title, price").limit(50)) || [];
+      const pick: { title: string; qty: number; price: number }[] = [];
+      let total = 0;
+      const n = 1 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < n && dishes.length; i++) {
+        const d = dishes[Math.floor(Math.random() * dishes.length)];
+        const qty = 1 + Math.floor(Math.random() * 2);
+        const price = Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
+        pick.push({ title: d.title, qty, price });
+        total += price * qty;
+      }
+      const NAMES = ["Aarav S.", "Meera K.", "Priya R.", "Rohan B.", "Sana M.", "Kunal D.", "Diya P.", "Vikram J."];
+      const cust = src === "takeaway" ? `Walk-in · ${NAMES[Math.floor(Math.random() * NAMES.length)].split(" ")[0]}` : NAMES[Math.floor(Math.random() * NAMES.length)];
+      const ext = `${src.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const { data, error } = await sb.rpc("lfh_platform_insert", {
+        p_source: src, p_external_id: ext, p_customer: cust,
+        p_phone: `+9190${Math.floor(10000000 + Math.random() * 89999999)}`,
+        p_items: pick, p_total: total,
+      });
+      if (error) throw new Error(error.message);
+      await logAction("manager", "platform_test_order", { detail: `${src} test order`, device_id: dev });
+      return ok(Array.isArray(data) ? data[0] : data);
+    }
+
+    // platform/:id/status — advance a platform order (accept/preparing/ready/handed_over/cancelled)
+    if (a === "platform" && c === "status") {
+      const status = body && body.status;
+      const ALLOWED = ["new", "accepted", "preparing", "ready", "handed_over", "cancelled"];
+      if (!ALLOWED.includes(status)) return err("invalid status");
+      const { data, error } = await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "manager" });
+      if (error) throw new Error(error.message);
+      await logAction("manager", "platform_status", { detail: status, device_id: dev });
+      return ok(Array.isArray(data) ? data[0] : data);
+    }
+
+    // platform/toggles — flip "kitchen can accept" / "show in bills"
+    if (a === "platform" && b === "toggles") {
+      const patch: Record<string, boolean> = {};
+      if (typeof body.kitchen_can_accept_platform === "boolean") patch.kitchen_can_accept_platform = body.kitchen_can_accept_platform;
+      if (typeof body.platform_in_bills === "boolean") patch.platform_in_bills = body.platform_in_bills;
+      if (!Object.keys(patch).length) return err("no toggle given");
+      must(await sb.from("settings").update(patch).eq("id", "site").select());
+      await logAction("manager", "platform_toggle", { detail: JSON.stringify(patch), device_id: dev });
+      return ok({ ok: true, ...patch });
+    }
 
     // orders/delete (bulk/clear) — keep settled bills.
     if (a === "orders" && b === "delete") {

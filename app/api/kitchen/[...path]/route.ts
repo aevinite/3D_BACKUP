@@ -37,11 +37,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Orders + dishes from the shared "live board" helper — today's tickets PLUS
       // any still-open session's, so a dish left cooking on an overnight table keeps
       // showing here (and matches the manager). Was a day-clipped fetch before.
-      const [live, dishes] = await Promise.all([
+      const [live, dishes, platform, settings] = await Promise.all([
         liveOrdersAndItems(),
         sb.from("menu_items").select("id,title,category,tags").order("category"),
+        // active platform (Zomato/Swiggy/takeaway) tickets — separate table, so dine-in is untouched
+        sb.from("aggregator_orders").select("*").in("status", ["new", "accepted", "preparing", "ready"]).order("created_at"),
+        sb.from("settings").select("kitchen_can_accept_platform").eq("id", "site").maybeSingle(),
       ]);
-      return ok({ orders: live.orders, items: live.items, dishes: must(dishes) });
+      return ok({
+        orders: live.orders, items: live.items, dishes: must(dishes),
+        platform: must(platform) || [],
+        platformAccept: !!(must(settings) || {}).kitchen_can_accept_platform,
+      });
     }
     return err("unknown GET endpoint", 404);
   } catch (e) {
@@ -105,6 +112,24 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         await sb.from("orders").update({ status: overall }).eq("id", item.order_id);
       }
       return ok(item || null);
+    }
+
+    // platform/:id/status — kitchen advances a platform (Zomato/Swiggy/takeaway)
+    // order. ACCEPTING is gated by the manager's "kitchen can accept platform
+    // orders" toggle; once it's in the queue, cooking it through is the kitchen's job.
+    if (a === "platform" && c === "status") {
+      const status = body && body.status;
+      if (!["accepted", "preparing", "ready", "handed_over"].includes(status)) return err("invalid status");
+      if (status === "accepted") {
+        const s = await sb.from("settings").select("kitchen_can_accept_platform").eq("id", "site").maybeSingle();
+        if (!(s.data && s.data.kitchen_can_accept_platform)) {
+          return err("The kitchen isn't allowed to accept platform orders — the manager accepts them.", 403);
+        }
+      }
+      const { data, error } = await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "kitchen" });
+      if (error) throw new Error(error.message);
+      await logAction("kitchen", "platform_status", { detail: status, device_id: dev });
+      return ok(Array.isArray(data) ? data[0] : data);
     }
 
     // dishes/:id/sold-out — toggle the 'sold-out' tag (the 86 board)
