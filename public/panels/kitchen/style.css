@@ -1,18 +1,19 @@
-/* kitchen/ui/style.css — the kitchen screen. BLUE theme on purpose (owner asked
-   for blue on the new staff panels) so nobody confuses it with the gold guest
-   menu or the editor. Big type + big touch targets: it's read from arm's length
-   on a greasy tablet. */
+/* kitchen/ui/style.css — the kitchen screen. WARM espresso theme to match the
+   rest of the app (was a cold navy that clashed; owner asked to redesign it,
+   2026-06-20). Big type + big touch targets: it's read from arm's length on a
+   greasy tablet. Status colours (green=ready, amber=new, red=allergy) stay
+   meaningful; the old --blue accent is now the house gold. */
 
 :root {
-  --bg: #0b1220;        /* deep navy backdrop */
-  --panel: #111a2e;     /* ticket/card surface */
-  --line: #1f2c49;      /* hairline borders */
-  --text: #dbe7ff;      /* main text */
-  --muted: #7e93bd;     /* secondary text */
-  --blue: #3b82f6;      /* the accent */
-  --green: #4ade80;     /* ready */
-  --amber: #fbbf24;     /* new/attention */
-  --red: #ef4444;       /* allergies/sold-out */
+  --bg: #14100b;        /* warm espresso backdrop */
+  --panel: #211913;     /* ticket/card surface */
+  --line: #38301f;      /* hairline borders */
+  --text: #f3e9da;      /* warm cream text */
+  --muted: #b6a48d;     /* secondary text */
+  --blue: #d8a657;      /* the accent (house gold; keeps the var name so all refs work) */
+  --green: #5fae6e;     /* ready */
+  --amber: #e6b450;     /* new/attention */
+  --red: #e2664f;       /* allergies/sold-out */
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -41,7 +42,7 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 /* one KOT ticket */
 .ticket { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
 .ticket.st-received { border-color: rgba(251,191,36,0.55); box-shadow: 0 0 0 1px rgba(251,191,36,0.25); }
-.ticket.st-preparing { border-color: rgba(59,130,246,0.55); }
+.ticket.st-preparing { border-color: rgba(216,166,87,0.55); }
 .ticket.st-served { opacity: 0.75; }
 .thead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
 .kot { font-size: 24px; font-weight: 900; letter-spacing: 0.5px; }           /* the shoutable number */
@@ -93,7 +94,22 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
    the line can see ~12-15 orders at once. Toggle in the top bar. (owner, 2026-06-19) */
 .wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; padding: 14px 18px; align-items: start; }
 .wall .ticket { margin: 0; }
-.btn.viewtgl { font-weight: 800; border-color: var(--blue); color: #cfe0ff; }
+.btn.viewtgl { font-weight: 800; border-color: var(--blue); color: var(--text); }
 /* A class with display:* (.cols/.wall are display:grid) outranks the [hidden] UA
    rule, so toggling the `hidden` attribute alone wouldn't hide them — force it. */
 [hidden] { display: none !important; }
+
+/* ── platform (Zomato / Swiggy / takeaway) tickets ───────────────────────── */
+/* A coloured source badge stands in for the table number; a left border in the
+   platform's brand colour makes the source obvious at arm's length. */
+.ticket.plat { border-left: 5px solid var(--line); }
+.ticket.plat.plat-z { border-left-color: #e23744; }
+.ticket.plat.plat-s { border-left-color: #fc8019; }
+.ticket.plat.plat-t { border-left-color: #6f9a6a; }
+.ticket.plat.st-plat-new { box-shadow: 0 0 0 1px rgba(230,180,80,0.28); }
+.src-badge { font-size: 13px; font-weight: 900; color: #fff; padding: 3px 10px; border-radius: 8px; letter-spacing: .04em; }
+.src-badge.z { background: #e23744; }
+.src-badge.s { background: #fc8019; }
+.src-badge.t { background: #6f9a6a; }
+.src-badge.o { background: var(--blue); color: #201500; }
+.plat-cust-line { color: var(--muted); font-size: 13.5px; margin: -2px 0 8px; }

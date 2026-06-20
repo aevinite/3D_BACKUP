@@ -9,7 +9,14 @@
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-const state = { orders: [], items: [], dishes: [], knownIds: null, muted: localStorage.getItem("kds_muted") === "1" };
+const state = { orders: [], items: [], dishes: [], platform: [], platformAccept: false, knownIds: null, muted: localStorage.getItem("kds_muted") === "1" };
+// Platform (Zomato/Swiggy/takeaway) source badges shown on a platform ticket.
+const PLAT_META = {
+  zomato:   { label: "ZOMATO",   cls: "z" },
+  swiggy:   { label: "SWIGGY",   cls: "s" },
+  takeaway: { label: "TAKEAWAY", cls: "t" },
+  other:    { label: "PLATFORM", cls: "o" },
+};
 // Which layout the cook is using: "columns" (New/Cooking/Ready) or "wall" (every
 // live order at once, oldest first — the "expansion"). Persisted per device.
 let view = localStorage.getItem("kds_view") === "wall" ? "wall" : "columns";
@@ -127,16 +134,63 @@ function bindButtons(scope) {
   // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
   // Optimistic + debounced reconcile so rapid one-by-one ✓ taps in a rush stay snappy.
   (scope || document).querySelectorAll("[data-item-ready]").forEach((b) => (b.onclick = (e) => markItemReady(b.dataset.itemReady, e.currentTarget)));
+  // Platform-order actions (accept gated by the manager toggle on the server too).
+  (scope || document).querySelectorAll("[data-plat-accept]").forEach((b) => (b.onclick = () => platAct(b.dataset.platAccept, "accepted")));
+  (scope || document).querySelectorAll("[data-plat-ready]").forEach((b) => (b.onclick = () => platAct(b.dataset.platReady, "ready")));
+  (scope || document).querySelectorAll("[data-plat-hand]").forEach((b) => (b.onclick = () => platAct(b.dataset.platHand, "handed_over")));
 }
-// COLUMNS view — the classic New → Cooking → Ready board.
+// ── platform (Zomato/Swiggy/takeaway) tickets ────────────────────────────────
+// Which kitchen column a platform order sits in (mirrors orderPhase for dine-in).
+function platPhase(st) {
+  if (st === "new") return "new";
+  if (st === "accepted" || st === "preparing") return "cooking";
+  if (st === "ready") return "ready";
+  return "served"; // handed_over/cancelled — already filtered out by the board API
+}
+// One platform ticket. Same ticket look as dine-in but with a coloured source
+// badge instead of a table number, and platform actions. ACCEPT only shows when
+// the manager toggle (state.platformAccept) allows the kitchen to accept.
+function platTicketHtml(p) {
+  const meta = PLAT_META[p.source] || PLAT_META.other;
+  const items = Array.isArray(p.items) ? p.items : [];
+  const lines = items.map((it) => {
+    const rem = Array.isArray(it.removed) && it.removed.length ? `<small>${it.removed.map((x) => `NO ${esc(String(x).toUpperCase())}`).join(", ")}</small>` : "";
+    const note = it.note ? `<small>${esc("✎ " + it.note)}</small>` : "";
+    return `<div class="line"><span class="qty">${esc(it.qty)}×</span><span class="ltitle">${esc(it.title)}${rem}${note}</span></div>`;
+  }).join("");
+  let action;
+  if (p.status === "new") {
+    action = state.platformAccept
+      ? `<button class="big" data-plat-accept="${esc(p.id)}">ACCEPT</button>`
+      : `<div class="awaiting">🆕 new — manager will accept</div>`;
+  } else if (p.status === "accepted" || p.status === "preparing") {
+    action = `<button class="big ready" data-plat-ready="${esc(p.id)}">ALL READY</button>`;
+  } else {
+    action = `<button class="big" data-plat-hand="${esc(p.id)}">HANDED OVER</button>`;
+  }
+  return `<div class="ticket plat plat-${esc(meta.cls)} st-plat-${esc(p.status)}" data-ticket="plat-${esc(p.id)}">
+    <div class="thead"><span class="src-badge ${esc(meta.cls)}">${esc(meta.label)}</span><span class="kot">#${esc(p.kot_no ?? "—")}</span><span class="age">${esc(timeAgo(p.created_at))}</span></div>
+    ${p.customer_name ? `<div class="plat-cust-line">${esc(p.customer_name)}</div>` : ""}
+    ${lines}${action}</div>`;
+}
+// Advance a platform order (accept/ready/handed_over), then refresh.
+function platAct(id, status) {
+  api("POST", `/platform/${id}/status`, { status }).then(() => load()).catch((e) => { toast("Failed: " + e.message); load(); });
+}
+
+// COLUMNS view — the classic New → Cooking → Ready board. Dine-in tickets first,
+// then platform tickets, in each column.
 function renderColumns() {
   const buckets = { new: [], cooking: [], ready: [], served: [] };
   state.orders.forEach((o) => { if (o.status !== "cancelled") buckets[orderPhase(o)].push(o); });
-  const draw = (key, list) => {
-    $("#list-" + key).innerHTML = list.length ? list.map(ticketHtml).join("") : `<div class="empty">Nothing here.</div>`;
-    $("#count-" + key).textContent = list.length || "";
+  const pb = { new: [], cooking: [], ready: [] };
+  (state.platform || []).forEach((p) => { const c = platPhase(p.status); if (pb[c]) pb[c].push(p); });
+  const draw = (key, list, plist) => {
+    const html = list.map(ticketHtml).join("") + (plist || []).map(platTicketHtml).join("");
+    $("#list-" + key).innerHTML = html || `<div class="empty">Nothing here.</div>`;
+    $("#count-" + key).textContent = (list.length + (plist ? plist.length : 0)) || "";
   };
-  draw("new", buckets.new); draw("cooking", buckets.cooking); draw("ready", buckets.ready);
+  draw("new", buckets.new, pb.new); draw("cooking", buckets.cooking, pb.cooking); draw("ready", buckets.ready, pb.ready);
   bindButtons();
 }
 // WALL view (the "expansion") — EVERY live ticket in one dense grid, FIRST-COME-
@@ -145,7 +199,9 @@ function renderColumns() {
 function renderWall() {
   const live = state.orders.filter((o) => o.status !== "cancelled" && orderPhase(o) !== "served");
   live.sort((a, b) => ((orderPhase(a) === "ready") - (orderPhase(b) === "ready")) || (new Date(a.created_at) - new Date(b.created_at)));
-  $("#wall").innerHTML = live.length ? live.map(ticketHtml).join("") : `<div class="empty">Nothing here.</div>`;
+  const plat = (state.platform || []).slice().sort((a, b) => ((platPhase(a.status) === "ready") - (platPhase(b.status) === "ready")) || (new Date(a.created_at) - new Date(b.created_at)));
+  const html = live.map(ticketHtml).join("") + plat.map(platTicketHtml).join("");
+  $("#wall").innerHTML = html || `<div class="empty">Nothing here.</div>`;
   bindButtons($("#wall"));
 }
 // Paint the ACTIVE view. Every existing render() caller (load, setLocalReady) now
@@ -184,7 +240,7 @@ function setLocalReady(matches) {
   (state.orders || []).forEach((o) => { if (Array.isArray(o.items)) o.items = o.items.map((i) => (i.status !== "served" && matches({ ...i, order_id: o.id })) ? { ...i, status: "ready" } : i); });
   // Adopt the optimistic state as the baseline so a poll/realtime refetch carrying the
   // SAME (server-confirmed) data won't rebuild the tickets under the cook's finger.
-  lastSig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes });
+  lastSig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes, platform: state.platform, platformAccept: state.platformAccept });
   render();
 }
 // Mark ONE dish ready (the ✓ tick). Update ONLY this dish's line IN PLACE — do NOT
@@ -200,7 +256,7 @@ function markItemReady(id, btn) {
   if (btn) { const line = btn.closest(".line"); if (line) { line.classList.add("line-ready"); btn.outerHTML = '<span class="done rdy">ready</span>'; } }
   // Adopt the optimistic state as the baseline so a poll/realtime refetch carrying the
   // SAME (server-confirmed) data won't rebuild the tickets under the cook's finger.
-  lastSig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes });
+  lastSig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes, platform: state.platform, platformAccept: state.platformAccept });
   // If THIS tick made the WHOLE order ready, slide its card to the Ready column NOW
   // (don't wait for the 2.5s reconcile) — moving just this one card, so other tickets'
   // ✓ buttons survive and the cook's next rapid tap isn't eaten. (owner, 2026-06-19)
@@ -285,6 +341,8 @@ function boardSig(d) {
     (d.orders || []).map(stableRow),
     (d.items || []).map(stableRow),
     (d.dishes || []).map(stableRow),
+    (d.platform || []).map(stableRow),
+    d.platformAccept,
   ]);
 }
 let lastSig = null;
@@ -298,14 +356,17 @@ async function load() {
   const seq = ++loadSeq;
   const data = await api("GET", "/board");
   if (seq !== loadSeq) return; // a newer refresh started — drop this stale response
-  // Chime only for orders we have NEVER seen (not on the very first load).
-  const ids = new Set(data.orders.map((o) => o.id));
+  // Chime only for orders we have NEVER seen (not on the very first load) — dine-in
+  // 'received' OR a brand-new platform order.
+  const ids = new Set([...data.orders.map((o) => o.id), ...((data.platform || []).map((p) => p.id))]);
   if (state.knownIds) {
-    const fresh = data.orders.some((o) => o.status === "received" && !state.knownIds.has(o.id));
-    if (fresh) chime();
+    const freshDine = data.orders.some((o) => o.status === "received" && !state.knownIds.has(o.id));
+    const freshPlat = (data.platform || []).some((p) => p.status === "new" && !state.knownIds.has(p.id));
+    if (freshDine || freshPlat) chime();
   }
   state.knownIds = ids;
   state.orders = data.orders; state.dishes = data.dishes;
+  state.platform = data.platform || []; state.platformAccept = !!data.platformAccept;
   // Keep dishes the cook JUST tapped ready showing ready, even if this refetch landed
   // before the server caught up (cleared by the reconcile once the rush settles).
   state.items = pendingReady.size
@@ -313,7 +374,7 @@ async function load() {
     : data.items;
   // If the 86-board drawer is open, keep it fresh regardless (its own render).
   if (!$("#drawerOverlay").hidden) renderDishes();
-  const sig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes });
+  const sig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes, platform: state.platform, platformAccept: state.platformAccept });
   if (sig === lastSig) return; // nothing visible changed — don't rebuild the tickets
   lastSig = sig;
   render();
