@@ -434,7 +434,6 @@ function renderPanel() {
       <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}</div>
       <div class="ordctl-row">
         <button class="btn small" data-add-dish="${esc(o.id)}">＋ Add dish</button>
-        <button class="btn small" data-discount="${esc(o.id)}">− Discount${Number(o.discount) > 0 ? ` (${inr(o.discount)})` : ""}</button>
         <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
         <button class="btn small primary" data-done-order="${esc(o.id)}">✓ Done editing</button>
       </div>
@@ -519,17 +518,9 @@ function renderPanel() {
   document.querySelectorAll("[data-attend-all-calls]").forEach((b) => (b.onclick = () => act(async () => {
     for (const c of callsOf(b.dataset.attendAllCalls)) await api("POST", `/calls/${c.id}/attend`);
   })));
-  // Per-order discount (only in edit mode): prompt for an amount + optional reason,
-  // clamped server-side to 0..order total. The merged footer bill nets discounts.
-  document.querySelectorAll("[data-discount]").forEach((b) => (b.onclick = async () => {
-    const o = (state.data.orders || []).find((x) => x.id === b.dataset.discount);
-    const cur = o && Number(o.discount) > 0 ? String(o.discount) : "";
-    const raw = window.prompt("Discount amount (₹) for this order — 0 to clear:", cur);
-    if (raw === null) return; // cancelled
-    const amount = Math.max(0, Number(raw) || 0);
-    const note = amount > 0 ? (window.prompt("Reason (optional, e.g. loyalty/comp):", (o && o.discount_note) || "") || "") : "";
-    actGated("POST", `/orders/${b.dataset.discount}/discount`, { amount, note }, { message: "Enter a manager PIN to apply this discount." });
-  }));
+  // Discount is a MANAGER-only action — it is intentionally NOT on the tablet
+  // (waiter) anymore (owner, 2026-06-21). The /orders/:id/discount endpoint still
+  // exists (manager-PIN-gated) but the tablet no longer surfaces a button for it.
   // Accept ONE order — optimistic (flips received→preparing instantly, persists in bg).
   document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => optimisticAccept([b.dataset.accept])));
   // Accept ALL un-accepted orders on the table in one tap — optimistic + bulk.
