@@ -1555,6 +1555,50 @@ ${invNo ? `<div class="kv"><span>Invoice</span><b>${invNo}</b></div>` : ""}
   w.document.close();
 }
 
+// Day-close "Z report" — one tap prints the business-day totals (server-computed).
+async function printZReport() {
+  let z;
+  try { z = await api("GET", "/zreport"); } catch (e) { toast("Couldn't build the report: " + e.message, "err"); return; }
+  const di = z.dineIn;
+  const row = (l, v, b) => `<div class="zr${b ? " b" : ""}"><span>${esc(l)}</span><span>${v}</span></div>`;
+  const w = window.open("", "_blank", "width=380,height=720");
+  if (!w) { toast("Allow popups to print the report", "err"); return; }
+  w.document.write(`<!doctype html><title>Day-close Z report — ${esc(z.date)}</title>
+<style>
+  body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:20px;color:#111}
+  h2{font-family:Georgia,serif;font-size:18px;margin:0;text-align:center}
+  .sub{text-align:center;color:#444;font-size:10.5px;margin:3px 0 12px}
+  .sec{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#777;border-bottom:1px solid #111;padding-bottom:4px;margin:14px 0 6px}
+  .zr{display:flex;justify-content:space-between;padding:3px 0;font-variant-numeric:tabular-nums}
+  .zr.b{font-weight:700;border-top:1px dashed #aaa;margin-top:4px;padding-top:6px}
+  .grand{display:flex;justify-content:space-between;border-top:2px solid #111;border-bottom:2px solid #111;margin-top:10px;padding:9px 0;font-weight:700;font-size:15px}
+  .foot{text-align:center;color:#777;font-size:9px;margin-top:14px}
+</style>
+<h2>${esc(z.restaurant.name)}</h2>
+<div class="sub">DAY-CLOSE · Z REPORT${z.restaurant.gstin ? "<br/>GSTIN " + esc(z.restaurant.gstin) : ""}<br/>${esc(z.date)} · printed ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+<div class="sec">Dine-in</div>
+${row("Bills", di.bills)}
+${row("Orders (KOTs)", di.orderCount)}
+${row("Gross (subtotal)", inr(di.gross))}
+${row("Discounts", "− " + inr(di.discount))}
+${row("Taxable value", inr(di.taxable))}
+${row("Tax (CGST + SGST)", inr(di.tax))}
+${row("Net sales", inr(di.net), true)}
+${row("Paid bills", di.paidCount + " · " + inr(di.paidNet))}
+${row("Unpaid bills", di.unpaidCount + " · " + inr(di.unpaidNet))}
+${row("Cancelled orders", di.cancelled)}
+<div class="sec">Platform (Zomato / Swiggy / takeaway)</div>
+${row("Orders", z.platform.count)}
+${row("Revenue", inr(z.platform.revenue), true)}
+<div class="sec">Invoices</div>
+${row("Generated today", z.invoicesGenerated)}
+${row("Voided today", z.invoicesVoided)}
+<div class="grand"><span>GRAND TOTAL</span><span>${inr(z.grandTotal)}</span></div>
+<div class="foot">Computer-generated day-close report</div>
+<script>setTimeout(()=>print(),300)<\/script>`);
+  w.document.close();
+}
+
 // ---------- Features tab: per-restaurant on/off switches ----------
 // The catalogue of GUEST-FACING switches. Each key matches lib/features.ts in
 // the menu app (absent in the DB = the default below). The four backend-only
@@ -1640,8 +1684,9 @@ function renderEditor() {
     return;
   }
   if (state.tab === "dash") {
-    ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><button class="btn" id="dashRefresh">↻ Refresh</button></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
+    ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><div style="display:flex;gap:8px"><button class="btn" id="zReport">📋 Day-close (Z)</button><button class="btn" id="dashRefresh">↻ Refresh</button></div></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
     document.getElementById("dashRefresh").onclick = () => renderEditor();
+    document.getElementById("zReport").onclick = () => printZReport();
     loadDashboard();
     return;
   }

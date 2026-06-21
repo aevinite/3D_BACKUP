@@ -155,6 +155,60 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       return ok({ orders: must(rows) || [], toggles: must(settings) || {} });
     }
 
+    // Day-close "Z report": the business-day totals, computed SERVER-SIDE from the DB
+    // (discount BEFORE tax, same as billMath). Dine-in + platform + invoices/voids.
+    if (p === "zreport") {
+      const since = businessDayStartIso();
+      const [ordQ, invQ, voidQ, platQ, setQ] = await Promise.all([
+        sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status").gte("created_at", since),
+        sb.from("sessions").select("id").gte("invoice_at", since),     // invoices GENERATED today
+        sb.from("sessions").select("id").gte("void_at", since),        // invoices VOIDED today
+        sb.from("aggregator_orders").select("total,status").gte("created_at", since),
+        sb.from("settings").select("tax_rate,restaurant_name,gstin,invoice_prefix").eq("id", "site").maybeSingle(),
+      ]);
+      const orders = (must(ordQ) || []) as any[];
+      const set = (must(setQ) || {}) as any;
+      const rate = Number(set.tax_rate) || 0.05;
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      // Group orders into BILLS by session_id (a solo order is its own bill) so the
+      // tax is computed per-bill — IDENTICAL to billMath()/the printed receipt — and the
+      // Z-report net reconciles to the penny with the sum of the day's printed bills.
+      // (Taxing each order separately could drift a rupee or two on multi-order tables.)
+      const groups = new Map<string, any[]>();
+      let orderCount = 0, cancelled = 0;
+      for (const o of orders) {
+        if (o.status === "cancelled") { cancelled++; continue; }
+        orderCount++;
+        const key = o.session_id || ("solo:" + o.id);
+        (groups.get(key) || (groups.set(key, []), groups.get(key)!)).push(o);
+      }
+      let gross = 0, disc = 0, taxable = 0, tax = 0, net = 0;
+      let paidCount = 0, paidNet = 0, unpaidCount = 0, unpaidNet = 0; // counts are BILLS, not orders
+      for (const g of groups.values()) {
+        const sub = g.reduce((a, o) => a + (Number(o.subtotal) || 0), 0);
+        const d = g.reduce((a, o) => a + (Number(o.discount) || 0), 0);
+        const tx = Math.max(0, sub - d), t = r2(tx * rate), tot = r2(tx + t);
+        gross += sub; disc += d; taxable += tx; tax += t; net += tot;
+        // A bill counts as collected only when EVERY order on it is paid (a table
+        // settles in one go via maybeAutoSettle, so this matches real behaviour).
+        if (g.every((o) => o.payment_status === "paid")) { paidCount++; paidNet += tot; }
+        else { unpaidCount++; unpaidNet += tot; }
+      }
+      const plat = (must(platQ) || []) as any[];
+      const platActive = plat.filter((p2) => p2.status !== "cancelled");
+      const platRevenue = r2(platActive.reduce((a, p2) => a + (Number(p2.total) || 0), 0));
+      return ok({
+        date: new Date().toLocaleDateString(), since,
+        dineIn: { orderCount, bills: groups.size, gross: r2(gross), discount: r2(disc), taxable: r2(taxable), tax: r2(tax), net: r2(net),
+          paidCount, paidNet: r2(paidNet), unpaidCount, unpaidNet: r2(unpaidNet), cancelled },
+        platform: { count: platActive.length, revenue: platRevenue },
+        invoicesGenerated: (must(invQ) || []).length,
+        invoicesVoided: (must(voidQ) || []).length,
+        grandTotal: r2(net + platRevenue), rate,
+        restaurant: { name: set.restaurant_name || "Little French House", gstin: set.gstin || "" },
+      });
+    }
+
     if (p === "sessions") {
       const sessions = must(
         await sb.from("sessions").select("*").neq("status", "closed").order("last_activity_at", { ascending: false })
