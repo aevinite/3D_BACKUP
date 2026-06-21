@@ -743,6 +743,21 @@ function formGeneral(s) {
       ${triSel("Generate invoice", "tablet_invoice", s.tablet_invoice)}
     </div>
   </div>
+  <div class="card"><h3>Billing &amp; invoice</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      These appear on the printed tax invoice exactly as typed. Set your real name,
+      address, phone and GSTIN. <b>Invoice prefix</b> + financial year build the number
+      (e.g. <code>LFH/2025-26/000042</code>). <b>Tax rate</b> 0.05 = 5% (blank = 5%).
+    </p>
+    ${tf("Restaurant name", "restaurant_name", s.restaurant_name ?? "")}
+    ${tf("Address", "restaurant_address", s.restaurant_address ?? "")}
+    <div class="grid cols-3">
+      ${tf("Phone", "restaurant_phone", s.restaurant_phone ?? "")}
+      ${tf("GSTIN", "gstin", s.gstin ?? "")}
+      ${tf("Invoice prefix", "invoice_prefix", s.invoice_prefix ?? "")}
+    </div>
+    <div style="max-width:200px">${tf("Tax rate (0.05 = 5%)", "tax_rate", s.tax_rate ?? "", { type: "number", step: "any", min: 0 })}</div>
+  </div>
   <div class="card"><h3>Dining sessions — NEW</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       The QR/session system. <b>When OFF, the menu works exactly like today.</b> Turn it
@@ -898,6 +913,19 @@ function invFmt(no) {
   const pfx = (state.data.settings || {}).invoice_prefix || "INV";
   return `${pfx}/${financialYear()}/${String(no).padStart(6, "0")}`;
 }
+// Single source of truth for a bill's money — discount comes off BEFORE tax (GST is
+// charged on the taxable amount). All inputs are DB values (server-priced items,
+// server-clamped discount, configured rate); the frontend never sets a price.
+function billMath(orders) {
+  const live = (orders || []).filter((o) => o.status !== "cancelled");
+  const subtotal = live.reduce((a, o) => a + (parseFloat(o.subtotal) || 0), 0);
+  const disc = live.reduce((a, o) => a + (parseFloat(o.discount) || 0), 0);
+  const taxable = Math.max(0, subtotal - disc);
+  const rate = Number((state.data.settings || {}).tax_rate) || 0.05;
+  const tax = Math.round(taxable * rate * 100) / 100;
+  const total = Math.round((taxable + tax) * 100) / 100;
+  return { subtotal, disc, taxable, rate, tax, total };
+}
 function mergedOrderCardHtml(g) {
   const o0 = g[0];
   const tnum = (o0.table_number || "").trim();
@@ -924,8 +952,7 @@ function mergedOrderCardHtml(g) {
     // now lives in the gated staff EDIT flow.
     return (gi > 0 ? `<div class="ord-grp-sep" aria-hidden="true"></div>` : "") + rows;
   }).join("");
-  const total = g.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
-  const disc = g.reduce((s, o) => s + (Number(o.discount) || 0), 0);
+  const _m = billMath(g); const total = _m.total; const disc = _m.disc;
   const anyReceived = g.some((o) => o.status === "received");
   const anyPreparing = g.some((o) => o.status === "preparing");
   const paid = live.length > 0 && live.every((o) => o.payment_status === "paid");
@@ -1078,7 +1105,7 @@ function ordersLiveHtml(live) {
     String(a[0].table_number || "").localeCompare(String(b[0].table_number || ""), undefined, { numeric: true }));
   // "Pending bills" banner counts SESSIONS (merged bills) still unpaid, not orders.
   const unpaidGroups = groups.filter((g) => g.some((o) => o.status !== "cancelled" && o.payment_status !== "paid"));
-  const pendingTotal = unpaidGroups.reduce((s, g) => s + g.reduce((t, o) => t + ((o.status !== "cancelled" && o.payment_status !== "paid") ? (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0) : 0), 0), 0);
+  const pendingTotal = unpaidGroups.reduce((s, g) => s + billMath(g).total, 0);
   const note = unpaidGroups.length
     ? `<div class="ord-note">⏳ <b>Pending bills:</b> ${unpaidGroups.length} bill${unpaidGroups.length !== 1 ? "s" : ""} · ${inr(pendingTotal)} unpaid — mark each "Paid" once the guest settles up.</div>`
     : "";
@@ -1096,7 +1123,7 @@ function ordersPreviousHtml(previous, kind = "previous") {
   const groups = groupOrdersBySession(previous);
   const bills = groups.map((g) => {
     const o0 = g[0];
-    const total = g.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
+    const total = billMath(g).total;
     return {
       key: o0.session_id || ("solo:" + o0.id), table: (o0.table_number || "").trim(),
       billNo: o0.bill_no, invNo: o0.invoice_no, voided: !!o0.invoice_voided,
@@ -1160,8 +1187,7 @@ function openBillModal(key) {
     : (state.data.orders || []).filter((o) => o.session_id === key);
   if (!g.length) return;
   const o0 = g[0];
-  const total = g.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
-  const disc = g.reduce((s, o) => s + (Number(o.discount) || 0), 0);
+  const _bm = billMath(g); const total = _bm.total; const disc = _bm.disc;
   const lines = g.map((o) => (o.items || []).map((i) => {
     const det = itemDetailLine(i);
     return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span></div>`;
@@ -1459,40 +1485,72 @@ async function loadDashboard() {
 // number, items, discounts, and the grand total. When the (backend-only)
 // gst_invoice switch is ON and a GSTIN is configured, it also prints the GST
 // fields — until then it's a simple receipt, exactly as the owner asked.
+// The printable TAX INVOICE — "Classic" B&W design (thermal/mono printer). All
+// money via billMath (discount BEFORE tax). Restaurant identity from settings.
 function printBill(t, sess, os) {
   const s = state.data.settings || {};
+  const m = billMath(os);
   const gstOn = !!((s.features || {}).gst_invoice) && s.gstin;
   const live = os.filter((o) => o.status !== "cancelled");
-  const sub = live.reduce((a, o) => a + (parseFloat(o.subtotal) || 0), 0);
-  const tax = live.reduce((a, o) => a + (parseFloat(o.tax) || 0), 0);
-  const disc = live.reduce((a, o) => a + (parseFloat(o.discount) || 0), 0);
-  const grand = live.reduce((a, o) => a + (parseFloat(o.total) || 0), 0) - disc;
-  const lines = live.map((o) => {
-    const items = (Array.isArray(o.items) ? o.items : []).map((i) =>
-      `<tr><td>${esc(i.qty || 1)}× ${esc(i.title || "")}</td><td class="r">${inr((parseFloat(i.price) || 0) * (i.qty || 1))}</td></tr>`).join("");
-    return `<tr class="oh"><td>Ticket #${esc(o.kot_no ?? "—")}</td><td class="r">${new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td></tr>${items}
-      ${Number(o.discount) > 0 ? `<tr><td>Discount${o.discount_note ? ` (${esc(o.discount_note)})` : ""}</td><td class="r">− ${inr(o.discount)}</td></tr>` : ""}`;
-  }).join("");
-  const w = window.open("", "_blank", "width=400,height=640");
-  // A popup blocker returns null — say so instead of throwing into the void.
+  // Item rows: base + each priced add-on as an italic sub-line (the unit price
+  // already includes add-ons, so base = unit − add-ons → the lines sum to subtotal).
+  const rows = live.map((o) => (Array.isArray(o.items) ? o.items : []).map((i) => {
+    const q = Number(i.qty) || 1;
+    const opts = Array.isArray(i.options) ? i.options.filter((x) => Number(x.price)) : [];
+    const addUnit = opts.reduce((a, x) => a + (Number(x.price) || 0), 0);
+    const baseUnit = (parseFloat(i.price) || 0) - addUnit;
+    let r = `<tr><td>${esc(i.title)}</td><td class="c">${q}</td><td class="r">${Math.round(baseUnit)}</td><td class="r">${Math.round(baseUnit * q)}</td></tr>`;
+    for (const x of opts) r += `<tr class="ex"><td colspan="2">+ ${esc(x.label)}</td><td class="r">${Math.round(Number(x.price))}</td><td class="r">${Math.round(Number(x.price) * q)}</td></tr>`;
+    return r;
+  }).join("")).join("");
+  const name = esc(s.restaurant_name || "Little French House");
+  const addr = esc(s.restaurant_address || "");
+  const phone = esc(s.restaurant_phone || "+91 90999 14418");
+  const gstin = esc(s.gstin || "");
+  const invNo = sess && sess.invoice_no != null ? esc(invFmt(sess.invoice_no)) : "";
+  const billNo = sess && sess.bill_no != null ? esc(sess.bill_no) : "";
+  const now = new Date();
+  const pct = Math.round(m.rate * 10000) / 100; // e.g. 5
+  const half = Math.round((m.tax / 2) * 100) / 100;
+  const w = window.open("", "_blank", "width=380,height=680");
   if (!w) { toast("Allow popups for this site to print the bill", "err"); return; }
-  w.document.write(`<!doctype html><title>Bill — Table ${esc(t)}</title>
-<style>body{font-family:ui-monospace,Consolas,monospace;font-size:13px;margin:18px;color:#111}
-h2{font-size:16px;margin:0;text-align:center}.sub{text-align:center;color:#555;font-size:11.5px;margin:2px 0 12px}
-table{width:100%;border-collapse:collapse}td{padding:3px 0}.r{text-align:right}
-.oh td{border-top:1px dashed #999;padding-top:8px;font-weight:700}
-.tot td{border-top:2px solid #111;font-weight:700;padding-top:8px;font-size:14px}
-.foot{text-align:center;color:#555;font-size:11px;margin-top:14px}</style>
-<h2>My Little French House</h2>
-<div class="sub">Table ${esc(t)}${sess && sess.bill_no != null ? ` · Bill #${esc(sess.bill_no)}` : ""} · ${new Date().toLocaleString()}</div>
-${gstOn ? `<div class="sub">GSTIN: ${esc(s.gstin)}${sess && sess.invoice_no != null ? ` · Invoice ${esc(s.invoice_prefix || "INV")}-${esc(sess.invoice_no)}` : ""}</div>` : ""}
-<table>${lines}
-<tr class="oh"><td>Subtotal</td><td class="r">${inr(sub)}</td></tr>
-<tr><td>${gstOn ? "GST (CGST + SGST)" : "Tax"}</td><td class="r">${inr(tax)}</td></tr>
-${disc > 0 ? `<tr><td>Discounts</td><td class="r">− ${inr(disc)}</td></tr>` : ""}
-<tr class="tot"><td>TOTAL</td><td class="r">${inr(grand)}</td></tr></table>
-<div class="foot">Merci — see you again soon! 🥐</div>
-<script>setTimeout(()=>print(),250)<\/script>`);
+  w.document.write(`<!doctype html><title>Tax Invoice — ${name}</title>
+<style>
+  body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:20px;color:#111}
+  .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.1)}
+  h2{font-family:Georgia,'Times New Roman',serif;font-size:19px;margin:0;text-align:center}
+  .sub{text-align:center;color:#444;font-size:10px;margin-top:3px;line-height:1.5}
+  .dash{border-top:1px dashed #999;margin:11px 0}
+  .kv{display:flex;justify-content:space-between;font-size:10.5px;padding:2px 0}.kv span:first-child{color:#777}
+  table{width:100%;border-collapse:collapse;margin-top:4px}
+  th{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:#777;text-align:left;border-bottom:1px solid #111;padding-bottom:5px}
+  th.c,td.c{text-align:center}th.r,td.r{text-align:right}
+  td{font-size:12px;padding:5px 0;border-bottom:1px dotted #e2e2e2;font-variant-numeric:tabular-nums}
+  tr.ex td{font-size:10px;font-style:italic;color:#777;padding:1px 0 5px 10px;border-bottom:1px dotted #eee}
+  .t{display:flex;justify-content:space-between;font-size:11.5px;padding:3px 0;color:#333}
+  .t.tx{border-top:1px dashed #aaa;margin-top:4px;padding-top:6px;color:#111;font-weight:700}
+  .g{display:flex;justify-content:space-between;border-top:2px solid #111;margin-top:7px;padding-top:7px;font-weight:700;font-size:14px}
+  .foot{text-align:center;color:#555;font-size:10px;margin-top:13px}
+</style>
+<img class="logo" src="https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png" onerror="this.style.display='none'"/>
+<h2>${name}</h2>
+<div class="sub">${addr ? addr + "<br/>" : ""}Phone ${phone}${gstin ? " · GSTIN " + gstin : ""}</div>
+<div class="dash"></div>
+${invNo ? `<div class="kv"><span>Invoice</span><b>${invNo}</b></div>` : ""}
+<div class="kv"><span>${billNo !== "" ? "Bill · Table" : "Table"}</span><b>${billNo !== "" ? "#" + billNo + " · " : ""}${esc(t || "—")}</b></div>
+<div class="kv"><span>Date · Time</span><b>${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b></div>
+<div class="dash"></div>
+<table><thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
+<div style="margin-top:8px">
+  <div class="t"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
+  ${m.disc > 0 ? `<div class="t"><span>Discount</span><span>− ${inr(m.disc)}</span></div><div class="t tx"><span>Taxable value</span><span>${inr(m.taxable)}</span></div>` : ""}
+  ${gstOn
+      ? `<div class="t"><span>CGST ${pct / 2}%</span><span>${inr(half)}</span></div><div class="t"><span>SGST ${pct / 2}%</span><span>${inr(half)}</span></div>`
+      : `<div class="t"><span>Tax (${pct}%)</span><span>${inr(m.tax)}</span></div>`}
+  <div class="g"><span>TOTAL</span><span>${inr(m.total)}</span></div>
+</div>
+<div class="foot">Merci — see you again soon 🥐<br/><span style="font-size:8.5px;color:#999">Computer-generated tax invoice</span></div>
+<script>setTimeout(()=>print(),300)<\/script>`);
   w.document.close();
 }
 
