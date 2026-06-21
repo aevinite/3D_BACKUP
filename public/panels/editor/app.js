@@ -104,7 +104,11 @@ function setPath(obj, path, val) {
 let toastTimer;
 function toast(msg, type = "ok", action, ms) {
   const t = $("#toast");
-  t.textContent = msg;
+  t.innerHTML = "";                       // rebuild fresh each time (message + optional action + close ✕)
+  const span = document.createElement("span");
+  span.className = "toast-msg";
+  span.textContent = msg;
+  t.appendChild(span);
   if (action) {
     const b = document.createElement("button");
     b.className = "toast-act";
@@ -113,6 +117,14 @@ function toast(msg, type = "ok", action, ms) {
     b.onclick = () => { t.hidden = true; clearTimeout(toastTimer); action.fn(); };
     t.appendChild(b);
   }
+  // Manual dismiss — staff can clear a notification the moment they've seen it,
+  // instead of waiting for it to time out (owner, 2026-06-21).
+  const x = document.createElement("button");
+  x.className = "toast-x";
+  x.setAttribute("aria-label", "Dismiss");
+  x.textContent = "✕";
+  x.onclick = () => { t.hidden = true; clearTimeout(toastTimer); };
+  t.appendChild(x);
   t.className = "toast " + type;
   t.hidden = false;
   clearTimeout(toastTimer);
@@ -3809,7 +3821,13 @@ async function loadOrders() {
 // The editor polls the orders endpoint and chimes + badges when a new order
 // lands, no matter which tab the owner is on.
 let lastOrderCount = null; // baseline; set on first poll so we don't alert on startup
-let lastCallCount = null;  // pending waiter calls baseline
+let lastCallCount = null;  // pending waiter calls baseline (kept for the unseen badge)
+// New-call alerts are keyed by CALL ID, not by count. A count can re-trip a toast
+// when several pollers fire for the same call (realtime tick + backup poll + wake)
+// — the owner saw one call buzz ~3 times. Tracking which call ids we've already
+// announced makes the alert fire EXACTLY once per real call, no matter how many
+// times we re-poll. null = not baselined yet (don't alert for calls already there).
+let seenCallIds = null;
 // Optimistic-click bookkeeping: while a save is still travelling to the
 // server, the 1-second poll must not overwrite that order with stale data
 // (it would flicker the click back). Deletes get the same protection.
@@ -3913,8 +3931,7 @@ async function pollOrders() {
   const prev = lastOrderCount;
   lastOrderCount = orders.length;
   const pending = (calls || []).filter((c) => !c.resolved).length;
-  const prevC = lastCallCount;
-  lastCallCount = pending;
+  lastCallCount = pending; // kept for any external reader; alerts now use seenCallIds
   const reqCount = (board.requests || []).length;
   const prevR = lastReqCount;
   lastReqCount = reqCount;
@@ -3943,16 +3960,24 @@ async function pollOrders() {
     const latest = orders[0];
     const where = latest && latest.table_number ? "Table " + latest.table_number : "Walk-in";
     playOrderChime();
-    toast(`🔔 ${newCount} new order${newCount > 1 ? "s" : ""} — ${where}`, "ok");
+    toast(`🔔 ${newCount} new order${newCount > 1 ? "s" : ""} — ${where}`, "ok", null, 6000);
     if (state.tab !== "orders") { unseenOrders += newCount; updateOrdersBadge(); }
   }
-  // new waiter-call alert
-  if (prevC !== null && pending > prevC) {
-    const latest = (calls || []).find((c) => !c.resolved);
-    const where = latest && latest.table_number ? "Table " + latest.table_number : "a guest";
-    playOrderChime();
-    toast(`🔔 Waiter call — ${where}`, "ok");
-    if (state.tab !== "orders") { unseenOrders += (pending - prevC); updateOrdersBadge(); }
+  // new waiter-call alert — fire ONCE per call id (see seenCallIds note above)
+  const openCalls = (calls || []).filter((c) => !c.resolved);
+  const openIds = openCalls.map((c) => c.id);
+  if (seenCallIds === null) {
+    seenCallIds = new Set(openIds); // first poll: baseline, don't alert for existing calls
+  } else {
+    const fresh = openCalls.filter((c) => !seenCallIds.has(c.id));
+    if (fresh.length) {
+      const latest = fresh[0];
+      const where = latest && latest.table_number ? "Table " + latest.table_number : "a guest";
+      playOrderChime();
+      toast(`🔔 ${fresh.length > 1 ? fresh.length + " waiter calls" : "Waiter call"} — ${where}`, "ok", null, 6000);
+      if (state.tab !== "orders") { unseenOrders += fresh.length; updateOrdersBadge(); }
+    }
+    seenCallIds = new Set(openIds); // track exactly the calls still open; a re-call gets a new id
   }
   // new request alert (a guest asked to join/access a table, or requested a waiter
   // when they couldn't be auto-let-in). Newest request is last (queue is ascending).
@@ -3961,7 +3986,7 @@ async function pollOrders() {
     const verb = latest && latest.type === "open" ? "wants to open" : latest && latest.type === "join" ? "wants to join" : "needs access to";
     const where = latest && latest.table_number ? `Table ${latest.table_number}` : "a table";
     playOrderChime();
-    toast(`🙋 Request — ${verb} ${where}`, "ok");
+    toast(`🙋 Request — ${verb} ${where}`, "ok", null, 6000);
     // Floor request → light the TABLES badge (not Orders). The table tile itself
     // already shows the 📨 badge + "Wants in", so this just points the owner there.
     if (state.tab !== "tables") { unseenTables += (reqCount - prevR); updateTablesBadge(); }

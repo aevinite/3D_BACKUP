@@ -71,6 +71,22 @@ const setNicknameFor = (token: string | undefined, name: string) => {
   try { localStorage.setItem(NICKNAME_KEY, JSON.stringify({ token, name })); } catch {}
 };
 
+// The name also persists per (table + SESSION): once a device gives a name for a
+// table's open session, LEAVING and RE-JOINING the SAME open session must reuse it
+// instead of re-asking (owner, 2026-06-21). Keyed by the session id (from
+// lfh_table_status / join), so a brand-new session staff open later on the same
+// table correctly asks again — the ids won't match.
+const TABLE_NAME_KEY = "lfh_table_name";
+const getTableName = (table: string, sessionId?: string): string => {
+  try {
+    const v = JSON.parse(localStorage.getItem(TABLE_NAME_KEY) || "null") as { table?: string; sessionId?: string; name?: string } | null;
+    return v && sessionId && v.table === table && v.sessionId === sessionId ? String(v.name || "").trim() : "";
+  } catch { return ""; }
+};
+const setTableName = (table: string, sessionId: string | undefined, name: string) => {
+  try { localStorage.setItem(TABLE_NAME_KEY, JSON.stringify({ table, sessionId, name })); } catch {}
+};
+
 // The job we were asked to do, for which table, with whatever data it needs:
 //  • "order" / "call" — the original server actions.
 //  • "connect" — just get the guest connected + approved to the table, then report
@@ -110,6 +126,10 @@ export default function SessionGate() {
   // typing the name no longer tears down & restarts the flow's effect (which used
   // to silently KILL the open-watch poll → guest stuck on "we've let staff know").
   const nameRef = useRef(name); nameRef.current = name;
+  // doJoinAsGuest is defined far below (it depends on helpers declared after this
+  // point). afterLocation needs to trigger a silent re-join, so we reach it through
+  // a ref — assigned once doJoinAsGuest exists — to avoid a forward reference.
+  const joinGuestRef = useRef<(n?: string) => Promise<void> | void>(() => {});
 
   // Stops whatever repeating check is currently running.
   const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
@@ -232,6 +252,7 @@ export default function SessionGate() {
       const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
       sess.current = s; storeSession(s); rememberTable(s.table);
       setNicknameFor(s.token, headName); // session-scoped name for the head (asked above)
+      setTableName(s.table, r.session_id as string, headName); // reused if this device rejoins the SAME session
       window.dispatchEvent(new Event("lfh:session-changed")); // wake the owner-approve poller
       await act();
     } finally { joining.current = false; }
@@ -276,6 +297,11 @@ export default function SessionGate() {
     // OPEN table → ask the name ONCE, then join directly: empty = become the head
     // (open_name asks the name), others already there = guest_name asks then joins.
     if ((st.members as number) === 0) { await joinAsHead(); return; }
+    // RE-JOIN, NO RE-ASK: if this device already named itself for THIS exact open
+    // session (same session id), reuse that name and ask to join silently — the
+    // owner's "the name should stay for the same table" fix (2026-06-21).
+    const remembered = getTableName(p.table, st.session_id as string | undefined);
+    if (remembered) { setName(remembered); nameRef.current = remembered; await joinGuestRef.current?.(remembered); return; }
     setStep("guest_name");
   }, [joinAsHead, proceedWhenOpen]);
 
@@ -463,9 +489,12 @@ export default function SessionGate() {
   };
   // This runs when the guest taps "Ask to join this table": send their name to
   // the host. If auto-approved, act now; otherwise wait for the host's OK.
-  const doJoinAsGuest = async () => {
+  // `preset` lets the flow REJOIN silently with a remembered name (no name screen);
+  // normal taps pass nothing and use whatever the guest typed.
+  const doJoinAsGuest = async (preset?: string) => {
+    const nm = (preset ?? name).trim();
     // Compulsory name — never join a table without one (owner, 2026-06-17).
-    if (!name.trim()) { setNote("Add your name to join the table."); return; }
+    if (!nm) { setNote("Add your name to join the table."); return; }
     // Double-tap guard: two fast taps on "Ask to join" would create the same
     // person TWICE in the head's approve list (one of them a permanent ghost).
     if (joining.current) return;
@@ -478,7 +507,7 @@ export default function SessionGate() {
       const already = getStoredSession(p.table);
       if (already) { sess.current = already; await ensureReadyAndAct(); return; }
       setStep("joining");
-      const r = await joinSession(p.table, name.trim(), coords.current.lat, coords.current.lng);
+      const r = await joinSession(p.table, nm, coords.current.lat, coords.current.lng);
       if (r.reason === "blocked") { setStep("blocked"); return; }
       if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
       if (r.reason === "no_open_session") { setStep("not_open"); return; }
@@ -490,13 +519,16 @@ export default function SessionGate() {
       sess.current = s; storeSession(s); rememberTable(s.table);
       // They just typed a name to join → reuse it as their nickname so the order
       // step never re-asks. (Joining as head sends no name, so the head still gets asked.)
-      if (name.trim()) setNicknameFor(s.token, name.trim()); // session-scoped name
+      setNicknameFor(s.token, nm);                              // session-scoped name
+      setTableName(p.table, r.session_id as string, nm);        // table+session name → survives leave/rejoin
       window.dispatchEvent(new Event("lfh:session-changed"));
       // If the table auto-approves, go straight to acting; else wait for the host.
       if (r.approved) await ensureReadyAndAct();
       else { setStep("waiting_approval"); startApprovalPoll(); }
     } finally { joining.current = false; }
   };
+  // Expose doJoinAsGuest to afterLocation (declared above) without a forward ref.
+  joinGuestRef.current = doJoinAsGuest;
 
   // Formal "request a waiter to your table" — used when location can't be
   // confirmed, or as the escape hatch on a table someone else holds.
@@ -748,7 +780,7 @@ export default function SessionGate() {
           {/* e.g. "couldn't reach the café's system" after a failed join attempt */}
           {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
           <div className="sg-actions">
-            <button className="sg-btn gold" onClick={doJoinAsGuest}>Ask to join this table</button>
+            <button className="sg-btn gold" onClick={() => doJoinAsGuest()}>Ask to join this table</button>
           </div>
           <div className="sg-links">
             <button className="sg-link" onClick={rescan}>Wrong table? Scan again</button>

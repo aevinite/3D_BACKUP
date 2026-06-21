@@ -269,9 +269,18 @@ input:disabled { opacity: .55; cursor: not-allowed; }
      what you JUST did, so no overlay is ever allowed to hide it. */
   padding: 12px 20px; border-radius: 10px; font-size: 14px; z-index: 1300;
   box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  display: inline-flex; align-items: center; gap: 6px;
 }
+/* Singleton toast toggled via [hidden]: an explicit display on .toast overrides
+   the UA [hidden]{display:none}, so keep this or the toast never hides. */
+.toast[hidden] { display: none; }
 .toast.ok { border-color: var(--green); }
 .toast.err { border-color: var(--red); }
+.toast .toast-x {
+  margin-left: 8px; border: none; background: transparent; cursor: pointer;
+  color: var(--muted); font-size: 15px; line-height: 1; padding: 2px 4px; border-radius: 6px;
+}
+.toast .toast-x:hover { color: var(--text); background: rgba(255,255,255,0.08); }
 /* The toast's optional action button (e.g. UNDO after "Close all") — kept
    high-contrast so the take-it-back option is impossible to miss. */
 .toast .toast-act {

@@ -167,6 +167,11 @@ export default function OrderTracker() {
         const st = await getSessionState(s.token);
         if (!alive) return;
         if (!st.ok) { setDishProg({ served: 0, segs: [] }); return; } // session ended -> drop the per-dish bar
+        // PENDING members must NOT see the live table. The server already withholds
+        // orders/items from an unapproved member (migration 076); this is the matching
+        // client guard so a guest still "waiting for the head" shows no live progress.
+        const mem = st.member as { approved?: boolean } | undefined;
+        if (!mem?.approved) { setDishProg({ served: 0, segs: [] }); return; }
         // Per-dish progress across the whole table — one status per dish — so the
         // strip can show "2 of 3 dishes served" + a segment per dish.
         const sItems = (st.items as Array<{ status: string }>) || [];
