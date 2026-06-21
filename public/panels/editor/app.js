@@ -292,7 +292,19 @@ function renderList() {
     return;
   }
   if (state.tab === "dash") {
-    ul.appendChild(el(`<li class="list-item active"><div class="thumb"><i class="fas fa-chart-line"></i></div><div class="meta"><b>Dashboard</b><small>last 30 days</small></div></li>`));
+    // The left column IS the dashboard's range sub-nav (Today / 30 days / Year) —
+    // same pattern as Orders — instead of a second menu inside the content.
+    const mk = (key, icon, label, sub) => {
+      const li = el(`<li class="list-item${dashRange === key ? " active" : ""}" data-dash-range="${key}">
+        <div class="thumb">${icon}</div>
+        <div class="meta"><b>${label}</b><small>${sub}</small></div>
+      </li>`);
+      li.onclick = () => { dashRange = key; renderList(); loadDashboard(); };
+      return li;
+    };
+    ul.appendChild(mk("today", '<i class="fas fa-bolt"></i>', "Today", "live snapshot"));
+    ul.appendChild(mk("30d", '<i class="fas fa-calendar-days"></i>', "30 days", "trends"));
+    ul.appendChild(mk("year", '<i class="fas fa-chart-line"></i>', "Year", "12 months"));
     return;
   }
   if (state.tab === "log") {
@@ -1243,33 +1255,24 @@ async function loadDashboard() {
   catch (e) { body.innerHTML = `<div class="empty">Couldn't load stats: ${esc(e.message)}</div>`; return; }
   const RL = { today: "today", "30d": "last 30 days", year: "last 12 months" };
   const rangeLabel = RL[dashRange] || dashRange;
-  // Left sub-nav (Today / 30 days / Year) + right content. The Today view leads
-  // with a live per-channel summary box (dine-in + Zomato/Swiggy/takeaway).
-  const nav = [["today", "Today", "fa-bolt"], ["30d", "30 days", "fa-calendar-days"], ["year", "Year", "fa-chart-line"]]
-    .map(([r, lbl, ic]) => `<button class="dash-navitem ${dashRange === r ? "active" : ""}" data-range="${r}"><i class="fas ${ic}"></i><span>${lbl}</span></button>`).join("");
+  // The range sub-nav lives in the LEFT SIDEBAR (renderList), so the content is
+  // full-width: the Today view leads with the live per-channel summary box.
   const summary = dashRange === "today" ? dashTodayBox(s) : "";
   body.innerHTML = `
-    <div class="dash-layout">
-      <aside class="dash-nav">${nav}</aside>
-      <div class="dash-content">
-        ${summary}
-        <div class="dash-cards">
-          <div class="dash-card"><small>Revenue · ${rangeLabel}</small><b>${inr(s.revenue)}</b></div>
-          <div class="dash-card"><small>Orders</small><b>${s.orderCount}</b></div>
-          <div class="dash-card"><small>Avg order</small><b>${inr(s.avgOrder)}</b></div>
-          <div class="dash-card"><small>Paid / unpaid</small><b>${s.paid} / ${s.unpaid}</b></div>
-          <div class="dash-card"><small>Cancelled</small><b>${s.cancelled}</b></div>
-        </div>
-        <div class="dash-grid">
-          <div class="dash-chart"><h4>Sales · ${rangeLabel}</h4><canvas id="chSales"></canvas></div>
-          <div class="dash-chart"><h4>Top dishes</h4><canvas id="chTop"></canvas></div>
-          <div class="dash-chart"><h4>Orders by hour</h4><canvas id="chHours"></canvas></div>
-          <div class="dash-chart"><h4>Category share</h4><canvas id="chCats"></canvas></div>
-        </div>
-      </div>
+    ${summary}
+    <div class="dash-cards">
+      <div class="dash-card"><small>Revenue · ${rangeLabel}</small><b>${inr(s.revenue)}</b></div>
+      <div class="dash-card"><small>Orders</small><b>${s.orderCount}</b></div>
+      <div class="dash-card"><small>Avg order</small><b>${inr(s.avgOrder)}</b></div>
+      <div class="dash-card"><small>Paid / unpaid</small><b>${s.paid} / ${s.unpaid}</b></div>
+      <div class="dash-card"><small>Cancelled</small><b>${s.cancelled}</b></div>
+    </div>
+    <div class="dash-grid">
+      <div class="dash-chart"><h4>Sales · ${rangeLabel}</h4><canvas id="chSales"></canvas></div>
+      <div class="dash-chart"><h4>Top dishes</h4><canvas id="chTop"></canvas></div>
+      <div class="dash-chart"><h4>Orders by hour</h4><canvas id="chHours"></canvas></div>
+      <div class="dash-chart"><h4>Category share</h4><canvas id="chCats"></canvas></div>
     </div>`;
-  // Switch the window and reload.
-  body.querySelectorAll(".dash-navitem").forEach((b) => (b.onclick = () => { dashRange = b.dataset.range; loadDashboard(); }));
   dashCharts.forEach((c) => { try { c.destroy(); } catch {} });
   dashCharts = [];
   if (typeof Chart === "undefined") { body.insertAdjacentHTML("beforeend", `<div class="empty">Charts library didn't load (offline?) — the numbers above still work.</div>`); return; }
