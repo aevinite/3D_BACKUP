@@ -174,6 +174,15 @@ export default function SessionStatusWidget() {
           window.dispatchEvent(new Event("lfh:session-changed"));
         }
         const m = state.member as { role: "owner" | "guest"; approved?: boolean } | undefined;
+        // ROLE PROMOTION SYNC. When the head leaves, the server hands ownership to
+        // the next member (us) — but our STORED role stays "guest" until we write it
+        // back. SessionOwner's approve-prompt poller only runs while the stored role
+        // is "owner", so without this the new head silently never sees anyone asking
+        // to join. Persist the new role + nudge SessionOwner to start polling.
+        if (m?.role && m.role !== s.role) {
+          storeSession({ ...s, role: m.role });
+          window.dispatchEvent(new Event("lfh:session-changed"));
+        }
         setSt({
           table: sess.table_number || s.table,
           role: m?.role || "guest",

@@ -38,8 +38,10 @@ const timeAgo = (ts) => {
 const toast = (msg, undoFn) => {
   const t = document.createElement("div");
   t.className = "toast";
-  t.innerHTML = `<span>${esc(msg)}</span>${undoFn ? '<button class="undo">UNDO</button>' : ""}`;
+  // message · optional UNDO · always a ✕ so staff can dismiss it now (owner, 2026-06-21)
+  t.innerHTML = `<span>${esc(msg)}</span>${undoFn ? '<button class="undo">UNDO</button>' : ""}<button class="toast-x" aria-label="Dismiss">✕</button>`;
   if (undoFn) t.querySelector(".undo").onclick = () => { undoFn(); t.remove(); };
+  t.querySelector(".toast-x").onclick = () => t.remove();
   $("#toasts").appendChild(t);
   setTimeout(() => t.remove(), 4000);
 };

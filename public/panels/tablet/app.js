@@ -58,7 +58,16 @@ const api = async (method, path, body) => {
 const toast = (msg, ok = true) => {
   const t = document.createElement("div");
   t.className = "toast" + (ok ? "" : " bad");
-  t.textContent = msg;
+  const span = document.createElement("span");
+  span.textContent = msg;
+  t.appendChild(span);
+  // ✕ so staff can dismiss the notification immediately (owner, 2026-06-21)
+  const x = document.createElement("button");
+  x.className = "toast-x";
+  x.setAttribute("aria-label", "Dismiss");
+  x.textContent = "✕";
+  x.onclick = () => t.remove();
+  t.appendChild(x);
   $("#toasts").appendChild(t);
   setTimeout(() => t.remove(), 2600);
 };
