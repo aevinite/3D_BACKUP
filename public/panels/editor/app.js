@@ -261,7 +261,7 @@ function renderList() {
     // The left column IS the order navigation now — Today / Previous / Calls —
     // instead of a single redundant "Orders / incoming" card. Clicking a row
     // switches which set of order cards shows in the main area on the right.
-    const { today, previous, callCount } = ordersBuckets();
+    const { live, today, previous, callCount } = ordersBuckets();
     const view = ordersViewKey();
     const mk = (key, icon, label, count) => {
       const li = el(`<li class="list-item${view === key ? " active" : ""}" data-orders-view="${key}">
@@ -273,11 +273,12 @@ function renderList() {
         state.ordersView = key;
         lsSet("lfh_editor_ordersview", key); // remember across refresh
         renderList();   // re-highlight the chosen row
-        renderEditor(); // redraw the order cards on the right
+        renderEditor(); // redraw the cards on the right
       };
       return li;
     };
-    ul.appendChild(mk("today", '<i class="fas fa-circle" style="color:#7ec88a"></i>', "Live", today.length));
+    ul.appendChild(mk("live", '<i class="fas fa-circle" style="color:#7ec88a"></i>', "Live", live.length));
+    ul.appendChild(mk("daybills", '<i class="fas fa-calendar-day"></i>', "Today", today.length));
     ul.appendChild(mk("previous", '<i class="fas fa-receipt"></i>', "Previous", previous.length));
     ul.appendChild(mk("calls", "🔔", "Calls", callCount));
     return;
@@ -985,42 +986,54 @@ function callsHtml() {
 // current "today"/"previous". Shared by the sidebar nav and the main view so they
 // always agree on what's selected.
 function ordersViewKey() {
-  return (state.ordersView === "bills" || state.ordersView === "live")
-    ? (state.ordersView === "bills" ? "previous" : "today")
-    : (state.ordersView || "today");
+  const v = state.ordersView;
+  if (v === "today") return "live";      // legacy: the old Live row stored the key "today"
+  if (v === "bills") return "previous";  // legacy alias
+  return ["live", "daybills", "previous", "calls"].includes(v) ? v : "live";
 }
 
 // Split orders by DAY: TODAY's (live AND already-served, shown together) vs
 // PREVIOUS (anything archived, cancelled, or older than today — the bill records),
 // plus the count of unresolved waiter calls. ONE source of truth for both the
 // sidebar nav counts and the main view, so they can never disagree.
+// Start of TODAY's business day (05:00 IST) in ms — same rule the server uses, so
+// "Today" vs "Previous" bills line up. (The owner's browser is in the café's TZ.)
+function businessDayStartMs() {
+  const d = new Date(); const s = new Date(d);
+  s.setHours(5, 0, 0, 0);
+  if (d.getHours() < 5) s.setDate(s.getDate() - 1);
+  return s.getTime();
+}
 function ordersBuckets() {
   const all = state.data.orders || [];
-  // LIVE = the active working set: not archived and not cancelled. PREVIOUS =
-  // the records: archived (freed) OR cancelled. Date is deliberately NOT part of
-  // this split — an order is a "record" only once it's been freed or voided, so
-  // (a) a still-open bill never hides in Previous wearing live buttons, and
-  // (b) "Restore to floor" genuinely returns an order to the live set.
-  const today = all.filter((o) => !o.archived && o.status !== "cancelled");
-  const previous = all.filter((o) => o.archived || o.status === "cancelled");
+  // LIVE = the active working set: not archived and not cancelled (a still-open bill
+  // never hides in a records view wearing live buttons; "Restore to floor" returns
+  // it here). RECORDS = archived (freed/settled) OR cancelled — split by day into
+  // TODAY (this business day) and PREVIOUS (older).
+  const live = all.filter((o) => !o.archived && o.status !== "cancelled");
+  const records = all.filter((o) => o.archived || o.status === "cancelled");
+  const dayStart = businessDayStartMs();
+  const today = records.filter((o) => new Date(o.created_at || 0).getTime() >= dayStart);
+  const previous = records.filter((o) => new Date(o.created_at || 0).getTime() < dayStart);
   const callCount = (state.data.calls || []).filter((c) => !c.resolved).length;
-  return { today, previous, callCount };
+  return { live, today, previous, callCount };
 }
 
 function ordersHtml() {
   // The Today / Previous / Calls nav lives in the LEFT SIDEBAR now (see renderList).
   // Here we only build the heading + the selected view's cards in the main area.
-  const { today, previous } = ordersBuckets();
-  const active = today.filter((o) => o.status === "received" || o.status === "preparing").length;
+  const { live, today, previous } = ordersBuckets();
+  const active = live.filter((o) => o.status === "received" || o.status === "preparing").length;
   const view = ordersViewKey();
 
   let main;
-  if (view === "previous") main = ordersPreviousHtml(previous);
+  if (view === "previous") main = ordersPreviousHtml(previous, "previous");
+  else if (view === "daybills") main = ordersPreviousHtml(today, "today");
   else if (view === "calls") main = ordersCallsHtml();
-  else main = ordersLiveHtml(today);
+  else main = ordersLiveHtml(live);
 
   const head = `<div class="ed-head">
-      <h2>Orders <span class="sub">· ${active} active / ${today.length} today</span></h2>
+      <h2>Bills <span class="sub">· ${active} cooking / ${live.length} live</span></h2>
       <button class="btn" id="refreshOrders">↻ Refresh</button>
     </div>`;
   return head + `<div class="ord-wrap"><div class="ord-main">${main}</div></div>`;
@@ -1047,8 +1060,9 @@ function ordersLiveHtml(live) {
 // PREVIOUS view: the bill records — freed/cleared orders AND cancelled orders,
 // newest first. Each archived order gets an un-archive "restore"; each cancelled
 // order gets a status-restore (back to received). This is where bills live now.
-function ordersPreviousHtml(previous) {
-  if (!previous.length) return `<div class="empty">No previous orders yet. Freed &amp; cancelled orders land here as bills.</div>`;
+function ordersPreviousHtml(previous, kind = "previous") {
+  const isToday = kind === "today";
+  if (!previous.length) return `<div class="empty">${isToday ? "No settled bills today yet. Paid &amp; closed bills for today land here." : "No previous bills yet. Freed &amp; cancelled bills from earlier days land here."}</div>`;
   const sorted = [...previous].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
   // freed=true for archived rows (restore = un-archive); freed=false for a
   // cancelled-but-not-archived row (its card offers a status restore instead).
@@ -1057,9 +1071,9 @@ function ordersPreviousHtml(previous) {
   // bill you restore it to the live floor first, then edit it there — a record
   // must never carry live buttons (Mark paid / Reopen / Free table) that would
   // silently mutate the current floor.
-  return `<div class="ord-section-divider"><h3>✓ Previous orders <span class="sub">· ${previous.length}</span></h3>
-       <span class="ord-section-hint">Past bills — settled, freed, or cancelled. Read-only records; restore one to the floor to change it.</span>
-       <button class="btn danger" id="clearFreed">🗑 Clear all</button></div>
+  return `<div class="ord-section-divider"><h3>${isToday ? "📅 Today's bills" : "✓ Previous bills"} <span class="sub">· ${previous.length}</span></h3>
+       <span class="ord-section-hint">${isToday ? "Bills settled today — read-only records; restore one to the floor to change it." : "Past bills from earlier days — read-only records; restore one to the floor to change it."}</span>
+       ${isToday ? "" : `<button class="btn danger" id="clearFreed">🗑 Clear all</button>`}</div>
      <div class="ord-grid ord-grid-freed">${sorted.map((o) => orderCardHtml(o, true)).join("")}</div>`;
 }
 
