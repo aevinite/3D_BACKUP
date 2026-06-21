@@ -44,6 +44,21 @@ const must = (r: any) => {
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 
+// Money-integrity lock: while a session holds a LIVE (non-voided) invoice, its bill
+// is frozen — reject any money-changing edit so the printed invoice total can't drift.
+// Reopen (void) the invoice first. (work-checker 2026-06-21)
+const LOCKED_MSG = "This bill is invoiced — reopen it (void the invoice) before changing the order.";
+async function invoiceLockedByOrder(orderId: string): Promise<boolean> {
+  const o = (await sb.from("orders").select("session_id").eq("id", orderId).maybeSingle()).data as { session_id?: string } | null;
+  if (!o?.session_id) return false;
+  const s = (await sb.from("sessions").select("invoice_no,invoice_voided").eq("id", o.session_id).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean } | null;
+  return !!(s && s.invoice_no != null && !s.invoice_voided);
+}
+async function invoiceLockedByItem(itemId: string): Promise<boolean> {
+  const it = (await sb.from("order_items").select("order_id").eq("id", itemId).maybeSingle()).data as { order_id?: string } | null;
+  return it?.order_id ? invoiceLockedByOrder(it.order_id) : false;
+}
+
 // Friendly message for a staff-edit RPC's { ok:false, reason } (shared by the
 // edit-qty / edit-note / add-item / delete endpoints).
 const editErrMsg = (reason?: string) =>
@@ -342,6 +357,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // orders/:id/discount | accept | serve-all | item
     if (a === "orders" && c === "discount") {
+      if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
       const cur = must(await sb.from("orders").select("total").eq("id", b).single());
       const raw = Number(body && body.amount);
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number(cur.total) || 0) : 0;
@@ -505,6 +521,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // dishes (and cancels the order if it's now empty), all in one transaction.
     // The RPC refuses to touch a PAID bill. Returns { ok, items_left, total, ... }.
     if (a === "items" && c === "delete") {
+      if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
       const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) {
@@ -526,6 +543,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // from order_items (orders.total is a stored server-priced number). Refuses a
     // PAID/cancelled order. (owner, 2026-06-17 — gated behind the UI confirm.)
     if (a === "items" && c === "qty") {
+      if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
       const qty = Math.round(Number(body?.qty));
       if (!Number.isFinite(qty) || qty < 1) return err("invalid quantity");
       const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
@@ -584,6 +602,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // Server-priced (rejects unknown/sold-out), inserted as 'received', then the
     // bill is re-priced. Body: { dishId, qty, options?, removed?, note? }.
     if (a === "orders" && c === "add-item") {
+      if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
       const dishId = String(body?.dishId || body?.id || "").trim();
       if (!dishId) return err("dish required");
       const line = {

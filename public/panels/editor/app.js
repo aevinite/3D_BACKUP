@@ -740,7 +740,6 @@ function formGeneral(s) {
     <div class="grid cols-3">
       ${triSel("Apply discount", "tablet_discount", s.tablet_discount)}
       ${triSel("Mark bill paid", "tablet_mark_paid", s.tablet_mark_paid)}
-      ${triSel("Generate invoice", "tablet_invoice", s.tablet_invoice)}
     </div>
   </div>
   <div class="card"><h3>Billing &amp; invoice</h3>
@@ -1209,7 +1208,9 @@ function openBillModal(key) {
     </div>`;
   document.body.appendChild(wrap);
   requestAnimationFrame(() => wrap.classList.add("show"));
-  const close = () => { wrap.classList.remove("show"); setTimeout(() => wrap.remove(), 180); };
+  const onEsc = (e) => { if (e.key === "Escape") close(); };
+  const close = () => { wrap.classList.remove("show"); document.removeEventListener("keydown", onEsc); setTimeout(() => wrap.remove(), 180); };
+  document.addEventListener("keydown", onEsc);
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   wrap.querySelector("[data-bm-close]").onclick = close;
   wrap.querySelector("[data-bm-print]").onclick = () => printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, g);
