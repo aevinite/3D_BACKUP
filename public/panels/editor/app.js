@@ -3693,9 +3693,9 @@ function startOrderWatch() {
       ops:  () => { pollOrders(); loadPlatform(); /* keeps the Platform tab badge live on every tab */ },
       menu: () => loadAll(),
     }});
-    setInterval(pollOrders, 60000); // backup sync
+    setInterval(() => { pollOrders(); loadPlatform(); }, 60000); // backup sync (also ages out handed-over platform tickets)
   } else {
-    setInterval(pollOrders, 2000); // fallback poll
+    setInterval(() => { pollOrders(); loadPlatform(); }, 2000); // fallback poll
   }
 }
 

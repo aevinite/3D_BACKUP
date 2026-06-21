@@ -109,8 +109,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // Platform (Zomato/Swiggy/takeaway) orders + the two operator toggles. Read
     // from the separate aggregator_orders table — dine-in `orders` is untouched.
     if (p === "platform") {
+      // Active orders (any age) + just-handed-over ones (last 6 min): a handed-over
+      // ticket lingers ~6 min in the board's "Handed over" column for a final glance,
+      // then drops off the live board. Cancelled never show. (owner, 2026-06-21)
+      const handoverCutoff = new Date(Date.now() - 6 * 60 * 1000).toISOString();
       const [rows, settings] = await Promise.all([
-        sb.from("aggregator_orders").select("*").order("created_at", { ascending: false }).limit(200),
+        sb.from("aggregator_orders").select("*")
+          .or(`status.eq.new,status.eq.accepted,status.eq.preparing,status.eq.ready,and(status.eq.handed_over,updated_at.gte.${handoverCutoff})`)
+          .order("created_at", { ascending: false }).limit(200),
         sb.from("settings").select("kitchen_can_accept_platform, platform_in_bills").eq("id", "site").maybeSingle(),
       ]);
       return ok({ orders: must(rows) || [], toggles: must(settings) || {} });
