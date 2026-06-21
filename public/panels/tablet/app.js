@@ -201,6 +201,9 @@ function tileState(t) {
 const needsAttention = (i) => { const a = tableAgg(i); return callsOf(i).length > 0 || reqsOf(i).length > 0 || a.nw > 0 || a.rd > 0; };
 
 function tableCount() { return Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12); }
+// Tablet billing permission for an action (set by the manager in General settings):
+// 'off' (hidden — default) | 'on' (waiter can do it) | 'pin' (needs a manager PIN).
+const tperm = (k) => ((state.data.settings || {})[k] || "off");
 
 // ── the floor ────────────────────────────────────────────────────────────────
 function renderFloor() {
@@ -242,7 +245,7 @@ function renderFloor() {
       let quick = "";
       if (a.nw > 0) quick = `<span class="tacc" data-quick="accept" data-qt="${i}">✓ Accept</span>`;
       else if (called || joiners) quick = `<span class="tatt" data-quick="attend" data-qt="${i}">Attend</span>`;
-      else if (st.cls === "bill") quick = `<span class="tpay" data-quick="pay" data-qt="${i}">💳 Mark paid</span>`;
+      else if (st.cls === "bill" && tperm("tablet_mark_paid") !== "off") quick = `<span class="tpay" data-quick="pay" data-qt="${i}">💳 Mark paid</span>`;
       body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}${quick}`;
     }
     html += `<button class="tile t-${st.cls} ${payCls} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
@@ -288,7 +291,7 @@ function renderFloor() {
     e.stopPropagation();
     const t = q.dataset.qt, a = tableAgg(t);
     if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
-      optimisticPay(t);
+      payBill(t);
   }));
 }
 
@@ -434,6 +437,7 @@ function renderPanel() {
       <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}</div>
       <div class="ordctl-row">
         <button class="btn small" data-add-dish="${esc(o.id)}">＋ Add dish</button>
+        ${tperm("tablet_discount") !== "off" ? `<button class="btn small" data-discount="${esc(o.id)}">− Discount${Number(o.discount) > 0 ? ` (${inr(o.discount)})` : ""}</button>` : ""}
         <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
         <button class="btn small primary" data-done-order="${esc(o.id)}">✓ Done editing</button>
       </div>
@@ -492,7 +496,7 @@ function renderPanel() {
       <button class="btn primary big" id="takeOrder">＋ Take order</button>
       ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
       ${s && os.length ? `<button class="btn" id="restartTable">↻ Restart</button>` : ""}
-      ${s && os.length && a.unpaid ? `<button class="btn pay" id="payBill">💳 Mark bill paid</button>` : ""}
+      ${s && os.length && a.unpaid && tperm("tablet_mark_paid") !== "off" ? `<button class="btn pay" id="payBill">💳 Mark bill paid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
     </div>
     ${foot}`;
@@ -518,9 +522,10 @@ function renderPanel() {
   document.querySelectorAll("[data-attend-all-calls]").forEach((b) => (b.onclick = () => act(async () => {
     for (const c of callsOf(b.dataset.attendAllCalls)) await api("POST", `/calls/${c.id}/attend`);
   })));
-  // Discount is a MANAGER-only action — it is intentionally NOT on the tablet
-  // (waiter) anymore (owner, 2026-06-21). The /orders/:id/discount endpoint still
-  // exists (manager-PIN-gated) but the tablet no longer surfaces a button for it.
+  // Discount: shown only when the manager enables it for the tablet (General settings
+  // → tablet_discount = on/pin; default off = no button). tabletDiscount() applies
+  // the on/pin rule; the server enforces it too.
+  document.querySelectorAll("[data-discount]").forEach((b) => (b.onclick = () => tabletDiscount(b.dataset.discount)));
   // Accept ONE order — optimistic (flips received→preparing instantly, persists in bg).
   document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => optimisticAccept([b.dataset.accept])));
   // Accept ALL un-accepted orders on the table in one tap — optimistic + bulk.
@@ -591,7 +596,7 @@ function renderPanel() {
   };
   const pb = $("#payBill"); if (pb) pb.onclick = async () => {
     if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
-      optimisticPay(t);
+      payBill(t);
   };
   const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
     const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
@@ -766,6 +771,30 @@ function optimisticPay(t) {
     () => { state.data.orders.forEach((o) => { if (String(o.table_number) === String(t)) o.payment_status = "paid"; }); },
     () => api("POST", `/tables/${t}/pay`),
   );
+}
+// Settle a table's bill respecting the manager's tablet_mark_paid setting: 'on' →
+// instant optimistic pay; 'pin' → manager-PIN-gated (the server also enforces it).
+function payBill(t) {
+  if (tperm("tablet_mark_paid") === "pin") {
+    actGated("POST", `/tables/${t}/pay`, null, { message: "Enter a manager PIN to mark this bill paid.", toast: "Bill paid" });
+  } else {
+    optimisticPay(t);
+  }
+}
+// Apply a per-order discount respecting tablet_discount: prompt amount + reason, then
+// 'on' → apply directly, 'pin' → manager-PIN-gated. (Discount is clamped server-side.)
+async function tabletDiscount(orderId) {
+  const o = (state.data.orders || []).find((x) => x.id === orderId);
+  const cur = o && Number(o.discount) > 0 ? String(o.discount) : "";
+  const raw = window.prompt("Discount amount (₹) for this order — 0 to clear:", cur);
+  if (raw === null) return;
+  const amount = Math.max(0, Number(raw) || 0);
+  const note = amount > 0 ? (window.prompt("Reason (optional, e.g. loyalty/comp):", (o && o.discount_note) || "") || "") : "";
+  if (tperm("tablet_discount") === "pin") {
+    actGated("POST", `/orders/${orderId}/discount`, { amount, note }, { message: "Enter a manager PIN to apply this discount." });
+  } else {
+    act(() => api("POST", `/orders/${orderId}/discount`, { amount, note }));
+  }
 }
 
 // ── order-taking mode ────────────────────────────────────────────────────────

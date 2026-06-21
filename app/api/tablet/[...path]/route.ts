@@ -35,6 +35,18 @@ async function managerPinGate(req: NextRequest, body: any): Promise<PinGate> {
 }
 const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName !== "admin" ? ` (by ${g.managerName})` : "");
 
+// Setting-aware gate for a tablet BILLING action. The manager's General settings
+// hold a tri-state per action (tablet_discount / tablet_mark_paid / tablet_invoice):
+//   'off' → blocked (default; waiter has no access)   'pin' → manager PIN required
+//   'on'  → allowed directly.  Server-enforced so hiding the button isn't the only guard.
+async function tabletPerm(key: string, req: NextRequest, body: any): Promise<PinGate> {
+  const s = await sb.from("settings").select(key).eq("id", "site").maybeSingle();
+  const mode = ((s.data as Record<string, string> | null)?.[key]) || "off";
+  if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for the tablet — ask a manager.", disabled: true }, { status: 403 }) };
+  if (mode === "pin") return managerPinGate(req, body);
+  return { allow: true }; // 'on'
+}
+
 const nowIso = () => new Date().toISOString();
 // Mark an order EDITED after placement → bumps orders.edited_at so the "✎ Edited"
 // badge shows on every panel (mirrors the manager). Best-effort; never fails the edit.
@@ -222,7 +234,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/:id/discount — reduce ONE order's bill (comp/loyalty/fix). Clamped to
     // 0..order total, money-safe. Mirrors the editor endpoint. (owner, 2026-06-17)
     if (a === "orders" && c === "discount") {
-      const g = await managerPinGate(req, body); if (!g.allow) return g.resp; // manager PIN required
+      const g = await tabletPerm("tablet_discount", req, body); if (!g.allow) return g.resp; // off/pin/on per settings
       const cur = must(await sb.from("orders").select("total").eq("id", b).single());
       const raw = Number(body && body.amount);
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number(cur.total) || 0) : 0;
@@ -455,6 +467,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "pay") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
+      const g = await tabletPerm("tablet_mark_paid", req, body); if (!g.allow) return g.resp; // off/pin/on per settings
       // Settle only the CURRENT party's bill: scope to the table's open session
       // so we never mark a previous party's leftover order paid. Sessions-off
       // mode (no open session) falls back to the table's active orders.

@@ -448,6 +448,17 @@ function toggle(label, path, val) {
 function lbl(text) {
   return `<label style="font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:8px">${esc(text)}</label>`;
 }
+// triSel: a tri-state permission select (Off / On / On-with-manager-PIN). Saves via
+// data-path like every other settings field. Used for the tablet billing controls.
+function triSel(label, path, val) {
+  const v = val || "off";
+  return `<div class="field"><label>${esc(label)}</label>
+    <select data-path="${path}">
+      <option value="off" ${v === "off" ? "selected" : ""}>Off — hidden from waiter</option>
+      <option value="on"  ${v === "on" ? "selected" : ""}>On — waiter can do it</option>
+      <option value="pin" ${v === "pin" ? "selected" : ""}>On · needs manager PIN</option>
+    </select></div>`;
+}
 
 // catSelect: a drop-down listing every category, used to pick a dish's category.
 function catSelect(val) {
@@ -716,6 +727,19 @@ function formGeneral(s) {
         <option value="restart" ${s.auto_table_action === "restart" ? "selected" : ""}>Auto-restart the table</option>
       </select>
     </div></div>
+  </div>
+  <div class="card"><h3>Tablet (waiter) permissions</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      What the waiter can do with a bill on the tablet. Each is independent and starts
+      <b>Off</b> (hidden). <b>On</b> = the waiter can do it directly; <b>On · needs manager PIN</b>
+      = allowed but a manager PIN is required each time. Applying a discount, marking a bill
+      paid, and generating an invoice are separate controls.
+    </p>
+    <div class="grid cols-3">
+      ${triSel("Apply discount", "tablet_discount", s.tablet_discount)}
+      ${triSel("Mark bill paid", "tablet_mark_paid", s.tablet_mark_paid)}
+      ${triSel("Generate invoice", "tablet_invoice", s.tablet_invoice)}
+    </div>
   </div>
   <div class="card"><h3>Dining sessions — NEW</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
