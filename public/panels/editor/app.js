@@ -49,6 +49,7 @@ const state = {
   openSess: null, // table number whose session modal is open
   selectedTable: null, // table number whose DETAIL is shown IN the right side panel (Tables tab master-detail). null = show the floor controls instead.
   ordersView: lsGet("lfh_editor_ordersview", "live"), // Orders left-bar: live | previous | bills | calls — remembered across refresh
+  billSearch: "", billSearchType: "inv", billSort: "new", // Bills → Today/Previous search + sort
   logView: lsGet("lfh_editor_logview", "customers"),  // Log left-bar: customers | operations — remembered across refresh
   users: { members: [], customers: [], blocklist: [] }, // Log tab data
 };
@@ -1087,21 +1088,106 @@ function ordersLiveHtml(live) {
 // PREVIOUS view: the bill records — freed/cleared orders AND cancelled orders,
 // newest first. Each archived order gets an un-archive "restore"; each cancelled
 // order gets a status-restore (back to received). This is where bills live now.
+// TODAY / PREVIOUS: settled bill RECORDS as small cards (one per visit/session) —
+// click a card to expand the full bill in a modal (Print / Restore). A search bar
+// (by invoice/bill/table/customer/date, starts-with ranked first) + sort dropdown.
 function ordersPreviousHtml(previous, kind = "previous") {
   const isToday = kind === "today";
-  if (!previous.length) return `<div class="empty">${isToday ? "No settled bills today yet. Paid &amp; closed bills for today land here." : "No previous bills yet. Freed &amp; cancelled bills from earlier days land here."}</div>`;
-  const sorted = [...previous].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
-  // freed=true for archived rows (restore = un-archive); freed=false for a
-  // cancelled-but-not-archived row (its card offers a status restore instead).
-  // Previous orders are READ-ONLY records: every card offers ONLY "Restore to
-  // floor" (freed=true forces the restore-only action set). To change a past
-  // bill you restore it to the live floor first, then edit it there — a record
-  // must never carry live buttons (Mark paid / Reopen / Free table) that would
-  // silently mutate the current floor.
-  return `<div class="ord-section-divider"><h3>${isToday ? "📅 Today's bills" : "✓ Previous bills"} <span class="sub">· ${previous.length}</span></h3>
-       <span class="ord-section-hint">${isToday ? "Bills settled today — read-only records; restore one to the floor to change it." : "Past bills from earlier days — read-only records; restore one to the floor to change it."}</span>
-       ${isToday ? "" : `<button class="btn danger" id="clearFreed">🗑 Clear all</button>`}</div>
-     <div class="ord-grid ord-grid-freed">${sorted.map((o) => orderCardHtml(o, true)).join("")}</div>`;
+  const groups = groupOrdersBySession(previous);
+  const bills = groups.map((g) => {
+    const o0 = g[0];
+    const total = g.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
+    return {
+      key: o0.session_id || ("solo:" + o0.id), table: (o0.table_number || "").trim(),
+      billNo: o0.bill_no, invNo: o0.invoice_no, voided: !!o0.invoice_voided,
+      customer: o0.customer_name || "", total, ts: new Date(o0.created_at || 0).getTime(),
+      when: o0.created_at ? new Date(o0.created_at).toLocaleString() : "",
+      cancelled: g.every((o) => o.status === "cancelled"),
+    };
+  });
+  const q = (state.billSearch || "").toLowerCase().trim();
+  const stype = state.billSearchType || "inv", sort = state.billSort || "new";
+  const fieldOf = (b) => stype === "inv" ? String(invFmt(b.invNo)).toLowerCase()
+    : stype === "bill" ? String(b.billNo ?? "")
+    : stype === "table" ? String(b.table)
+    : stype === "cust" ? b.customer.toLowerCase()
+    : new Date(b.ts).toISOString().slice(0, 10);
+  const matchB = (b) => !q || (stype === "date" ? fieldOf(b) === q : fieldOf(b).includes(q));
+  const rankB = (b) => (!q ? 0 : fieldOf(b).startsWith(stype === "bill" ? q.replace(/[^0-9]/g, "") : q) ? 0 : 1);
+  const list = bills.filter(matchB).sort((x, y) => (rankB(x) - rankB(y))
+    || (sort === "new" ? y.ts - x.ts : sort === "old" ? x.ts - y.ts : sort === "hi" ? y.total - x.total : x.total - y.total));
+  const bar = `<div class="bill-bar">
+      <div class="bill-search">
+        <select class="stype" data-bill-stype>
+          <option value="inv"${stype === "inv" ? " selected" : ""}>Invoice no.</option>
+          <option value="bill"${stype === "bill" ? " selected" : ""}>Bill no.</option>
+          <option value="table"${stype === "table" ? " selected" : ""}>Table</option>
+          <option value="cust"${stype === "cust" ? " selected" : ""}>Customer</option>
+          <option value="date"${stype === "date" ? " selected" : ""}>Date</option>
+        </select>
+        <span class="vline"></span><i class="fas fa-magnifying-glass"></i>
+        <input type="${stype === "date" ? "date" : "text"}" data-bill-q value="${esc(state.billSearch || "")}" placeholder="Search bills…" autocomplete="off"/>
+      </div>
+      <select class="bill-sort" data-bill-sort>
+        <option value="new"${sort === "new" ? " selected" : ""}>Newest</option>
+        <option value="old"${sort === "old" ? " selected" : ""}>Oldest</option>
+        <option value="hi"${sort === "hi" ? " selected" : ""}>Highest ₹</option>
+        <option value="lo"${sort === "lo" ? " selected" : ""}>Lowest ₹</option>
+      </select>
+      <span class="bill-count">${list.length} bill${list.length === 1 ? "" : "s"} · ${inr(list.reduce((s, b) => s + b.total, 0))}</span>
+    </div>`;
+  const grid = list.length
+    ? `<div class="bill-grid">${list.map(billCardHtml).join("")}</div>`
+    : `<div class="empty">${q ? "No bills match that search." : (isToday ? "No bills settled today yet." : "No previous bills yet.")}</div>`;
+  const headRow = `<div class="ord-section-divider"><h3>${isToday ? "📅 Today's bills" : "✓ Previous bills"}</h3>${isToday ? "" : `<button class="btn danger" id="clearFreed">🗑 Clear all</button>`}</div>`;
+  return headRow + bar + grid;
+}
+function billCardHtml(b) {
+  const dot = b.cancelled ? "cancelled" : (b.voided ? "voided" : "paid");
+  return `<div class="bill-card" data-bill-open="${esc(b.key)}">
+    <span class="bill-dot ${dot}"></span>
+    <div class="bill-bn">${b.table ? "Table " + esc(b.table) + " · " : ""}#${esc(b.billNo ?? "—")}</div>
+    <div class="bill-cust">${esc(b.customer || "—")}</div>
+    <div class="bill-amt">${inr(b.total)}</div>
+    <div class="bill-when">${esc(b.when)}</div>
+    ${b.invNo != null ? `<div class="bill-inv">${esc(invFmt(b.invNo))}${b.voided ? " · voided" : ""}</div>` : ""}
+  </div>`;
+}
+// Expand one bill into a modal: full item list + totals + Print / Restore / Close.
+function openBillModal(key) {
+  const g = (key || "").startsWith("solo:")
+    ? (state.data.orders || []).filter((o) => o.id === key.slice(5))
+    : (state.data.orders || []).filter((o) => o.session_id === key);
+  if (!g.length) return;
+  const o0 = g[0];
+  const total = g.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
+  const disc = g.reduce((s, o) => s + (Number(o.discount) || 0), 0);
+  const lines = g.map((o) => (o.items || []).map((i) => {
+    const det = itemDetailLine(i);
+    return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span></div>`;
+  }).join("")).join("");
+  const wrap = document.createElement("div");
+  wrap.className = "bill-overlay";
+  wrap.innerHTML = `<div class="bill-modal">
+      <div class="bm-head"><b>${o0.table_number ? "Table " + esc(o0.table_number) : "Walk-in"} · Bill #${esc(o0.bill_no ?? "—")}</b>
+        ${o0.invoice_no != null ? `<span class="inv-chip${o0.invoice_voided ? " voided" : ""}">${esc(invFmt(o0.invoice_no))}${o0.invoice_voided ? " · voided" : ""}</span>` : ""}</div>
+      <div class="bm-sub">${esc(o0.customer_name || "")}${o0.created_at ? " · " + esc(new Date(o0.created_at).toLocaleString()) : ""}</div>
+      <div class="bm-items">${lines}</div>
+      ${disc > 0 ? `<div class="bm-trow"><span>Discount</span><span>− ${inr(disc)}</span></div>` : ""}
+      <div class="bm-trow grand"><span>Total</span><span>${inr(total)}</span></div>
+      <div class="bm-actions">
+        <button class="btn primary" data-bm-print>🖨 Print</button>
+        <button class="btn" data-bm-restore>↩ Restore to floor</button>
+        <button class="btn confirm-cancel" data-bm-close>Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  requestAnimationFrame(() => wrap.classList.add("show"));
+  const close = () => { wrap.classList.remove("show"); setTimeout(() => wrap.remove(), 180); };
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  wrap.querySelector("[data-bm-close]").onclick = close;
+  wrap.querySelector("[data-bm-print]").onclick = () => printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, g);
+  wrap.querySelector("[data-bm-restore]").onclick = async () => { close(); for (const o of g) await restoreTable(o.id); };
 }
 
 // CALLS view: the live waiter-call list (water/cutlery/bill…), or an empty note.
@@ -1565,6 +1651,18 @@ function renderEditor() {
         toast("Bill marked paid 💳", "ok");
       };
     });
+    // Today/Previous: bill cards open a modal; search + sort drive the grid.
+    ed.querySelectorAll("[data-bill-open]").forEach((c) => { c.onclick = () => openBillModal(c.dataset.billOpen); });
+    const _bst = ed.querySelector("[data-bill-stype]");
+    if (_bst) _bst.onchange = () => { state.billSearchType = _bst.value; state.billSearch = ""; renderEditor(); };
+    const _bso = ed.querySelector("[data-bill-sort]");
+    if (_bso) _bso.onchange = () => { state.billSort = _bso.value; renderEditor(); };
+    const _bq = ed.querySelector("[data-bill-q]");
+    if (_bq) _bq.oninput = () => {
+      state.billSearch = _bq.value;
+      renderEditor();
+      const ne = $("#editor [data-bill-q]"); if (ne) { ne.focus(); const v = ne.value; try { ne.setSelectionRange(v.length, v.length); } catch {} }
+    };
     // Invoice pipeline buttons on the bill card.
     ed.querySelectorAll("[data-gen-invoice]").forEach((btn) => { btn.onclick = () => generateInvoice(btn.dataset.genInvoice); });
     ed.querySelectorAll("[data-void-invoice]").forEach((btn) => { btn.onclick = () => voidInvoice(btn.dataset.voidInvoice); });

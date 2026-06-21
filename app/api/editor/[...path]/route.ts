@@ -104,11 +104,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // whether it's invoiced/locked (invoice lives on the session, not the order).
       const sids = [...new Set(orders.map((o: any) => o.session_id).filter(Boolean))];
       if (sids.length) {
-        const sess = must(await sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no").in("id", sids)) || [];
-        const map: Record<string, any> = Object.fromEntries((sess as any[]).map((s) => [s.id, s]));
+        const [sessQ, memQ] = await Promise.all([
+          sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no").in("id", sids),
+          sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
+        ]);
+        const map: Record<string, any> = Object.fromEntries(((must(sessQ) || []) as any[]).map((s) => [s.id, s]));
+        const nameMap: Record<string, string> = {};
+        for (const m of (must(memQ) || []) as any[]) { if (m.name && !nameMap[m.session_id]) nameMap[m.session_id] = m.name; }
         for (const o of orders as any[]) {
           const s = map[o.session_id];
           if (s) { o.invoice_no = s.invoice_no; o.invoice_voided = s.invoice_voided; o.invoice_at = s.invoice_at; o.bill_no = s.bill_no; }
+          if (nameMap[o.session_id]) o.customer_name = nameMap[o.session_id];
         }
       }
       return ok(orders);
