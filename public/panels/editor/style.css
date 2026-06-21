@@ -1389,3 +1389,10 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .tbox.tot .tbox-ico { background: #3a2d1a; color: var(--gold); } .tbox.tot .tbox-bar { background: var(--gold); }
 .tbox.tot .tbox-n { color: var(--gold); }
 @media (max-width: 760px) { .dash-layout { grid-template-columns: 1fr; } .dash-nav { flex-direction: row; flex-wrap: wrap; } }
+
+/* ── invoice chip + buttons on the bill card ─────────────────────────────── */
+.inv-chip { font-size: 11px; font-weight: 700; color: var(--gold); background: rgba(212,165,116,.14); border: 1px solid rgba(212,165,116,.38); padding: 2px 9px; border-radius: 7px; font-variant-numeric: tabular-nums; }
+.inv-chip.voided { color: var(--muted); background: transparent; border-color: var(--line); font-weight: 600; }
+.ord-btn.invoice { background: var(--gold); color: #2a1d0c; border-color: var(--gold); font-weight: 700; }
+.ord-btn.invoice:hover { background: var(--gold-strong); }
+.ord-btn.ghost { background: transparent; }

@@ -99,7 +99,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     if (p === "orders") {
-      return ok(must(await sb.from("orders").select("*").order("created_at", { ascending: false }).limit(200)));
+      const orders = must(await sb.from("orders").select("*").order("created_at", { ascending: false }).limit(200));
+      // Attach each order's SESSION invoice/bill state so the merged bill card knows
+      // whether it's invoiced/locked (invoice lives on the session, not the order).
+      const sids = [...new Set(orders.map((o: any) => o.session_id).filter(Boolean))];
+      if (sids.length) {
+        const sess = must(await sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no").in("id", sids)) || [];
+        const map: Record<string, any> = Object.fromEntries((sess as any[]).map((s) => [s.id, s]));
+        for (const o of orders as any[]) {
+          const s = map[o.session_id];
+          if (s) { o.invoice_no = s.invoice_no; o.invoice_voided = s.invoice_voided; o.invoice_at = s.invoice_at; o.bill_no = s.bill_no; }
+        }
+      }
+      return ok(orders);
     }
 
     if (p === "calls") {
@@ -435,6 +447,21 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const value = !!(body && body.value === true);
       const row = must(await sb.from("sessions").update({ auto_approve: value }).eq("id", b).select());
       return ok(row[0] || null);
+    }
+    // sessions/:id/invoice — GENERATE the tax invoice (assign a permanent number,
+    // lock the bill). Server-authoritative (totals computed from DB order rows).
+    if (a === "sessions" && c === "invoice") {
+      const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
+      if (error) throw new Error(error.message);
+      await logAction("editor", "invoice_generate", { detail: `session ${b}`, device_id: dev });
+      return ok(Array.isArray(data) ? data[0] : data);
+    }
+    // sessions/:id/void-invoice — VOID it (reopen the bill for edits; number kept in record).
+    if (a === "sessions" && c === "void-invoice") {
+      const { data, error } = await sb.rpc("lfh_void_invoice", { p_session: b, p_reason: (body && body.reason) || null });
+      if (error) throw new Error(error.message);
+      await logAction("editor", "invoice_void", { detail: `session ${b}` + ((body && body.reason) ? ` · ${body.reason}` : ""), device_id: dev });
+      return ok(Array.isArray(data) ? data[0] : data);
     }
     if (a === "sessions" && c === "shift") {
       const to = String((body && body.to) || "").trim();

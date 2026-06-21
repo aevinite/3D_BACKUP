@@ -885,6 +885,18 @@ function orderCardHtml(o, freed = false) {
 // combined list with a SINGLE bill (owner: merge the orders, one bill). The
 // separate order rows still exist underneath as the record. Per-order accept/serve/
 // pay become session-level (they reuse the table-wide helpers).
+// Financial-year string for invoice numbers, e.g. "2025-26" (FY starts April).
+function financialYear() {
+  const d = new Date(); const y = d.getFullYear();
+  const start = d.getMonth() >= 3 ? y : y - 1;
+  return `${start}-${String(start + 1).slice(2)}`;
+}
+// Display an invoice number: <prefix>/<FY>/<6-digit>, e.g. LFH/2025-26/000042.
+function invFmt(no) {
+  if (no == null) return "";
+  const pfx = (state.data.settings || {}).invoice_prefix || "INV";
+  return `${pfx}/${financialYear()}/${String(no).padStart(6, "0")}`;
+}
 function mergedOrderCardHtml(g) {
   const o0 = g[0];
   const tnum = (o0.table_number || "").trim();
@@ -925,7 +937,21 @@ function mergedOrderCardHtml(g) {
   let stage = "";
   if (anyReceived) stage = `<button class="ord-btn accept" data-sess-accept="${esc(sessKey)}">✓ Accept &amp; Prepare</button>`;
   else if (anyPreparing) stage = `<button class="ord-btn serve" data-sess-serve="${esc(sessKey)}">🍽️ Mark Served</button>`;
-  const payBtn = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}">💳 Mark paid</button>` : "";
+  // Invoice-first flow: a running tab shows "Generate invoice"; once invoiced (locked)
+  // it shows Mark paid + Print + Reopen(void). Invoice lives on the session.
+  const sid = o0.session_id || null;
+  const invNo = o0.invoice_no, invVoided = !!o0.invoice_voided;
+  const invoiced = !!sid && invNo != null && !invVoided;
+  let billBtns;
+  if (sid && !invoiced) {
+    billBtns = anyUnpaid ? `<button class="ord-btn invoice" data-gen-invoice="${esc(sid)}">🧾 Generate invoice</button>` : "";
+  } else if (sid && invoiced) {
+    const pay = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}">💳 Mark paid</button>` : "";
+    billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">🖨 Print</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button>`;
+  } else {
+    // legacy non-session order — keep the direct pay
+    billBtns = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}">💳 Mark paid</button>` : "";
+  }
   const tableDue = live.filter((o) => o.payment_status !== "paid").reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
   const freeBtn = (tnum && paid)
     ? (tableDue === 0 ? `<button class="ord-btn free-table" data-free-table="${esc(tnum)}">🪑 Free table ${esc(tnum)}</button>` : "")
@@ -936,12 +962,13 @@ function mergedOrderCardHtml(g) {
       <b>${tnum ? "Table " + esc(tnum) : "Walk-in / no table"}</b>
       <span class="ord-pill ${cls}">${label}</span>
       <span class="pay-pill ${paid ? "paid" : "pending"}">${paid ? "💳 Paid" : "⏳ Unpaid"}</span>
+      ${invoiced ? `<span class="inv-chip" title="Tax invoice">${esc(invFmt(invNo))}</span>` : (sid && invVoided ? `<span class="inv-chip voided">invoice voided</span>` : "")}
     </div>
     <small class="ord-when">${esc(when)}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
     <div class="ord-items">${items}</div>
     ${disc > 0 ? `<div class="ord-disc">Discount<span>− ${inr(disc)}</span></div>` : ""}
     <div class="ord-total"><span>Total</span><span>${inr(total)}</span></div>
-    <div class="ord-actions">${payBtn}${stage}${freeBtn}</div>
+    <div class="ord-actions">${billBtns}${stage}${freeBtn}</div>
   </div>`;
 }
 
@@ -1536,6 +1563,17 @@ function renderEditor() {
         if (!(await confirmDialog("Mark this whole bill PAID? Only confirm if the payment has actually been collected.", "Yes, payment done"))) return;
         for (const o of grp) await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true });
         toast("Bill marked paid 💳", "ok");
+      };
+    });
+    // Invoice pipeline buttons on the bill card.
+    ed.querySelectorAll("[data-gen-invoice]").forEach((btn) => { btn.onclick = () => generateInvoice(btn.dataset.genInvoice); });
+    ed.querySelectorAll("[data-void-invoice]").forEach((btn) => { btn.onclick = () => voidInvoice(btn.dataset.voidInvoice); });
+    ed.querySelectorAll("[data-print-group]").forEach((btn) => {
+      btn.onclick = () => {
+        const os = ordersInGroup(btn.dataset.printGroup);
+        if (!os.length) return;
+        const o0 = os[0];
+        printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, os);
       };
     });
     ed.querySelectorAll("[data-sess-del]").forEach((btn) => {
@@ -3534,6 +3572,18 @@ function setTab(tab) {
 
 // loadOrders: fetch the latest orders (and waiter calls) and redraw if we're on
 // the Orders tab. Used by the Refresh button and after any order change.
+// Invoice pipeline (manager). generate locks the bill + assigns a permanent number;
+// void reopens it for edits (number kept in record). Server-authoritative (migration 073).
+async function generateInvoice(sid) {
+  try { await api("POST", `/sessions/${sid}/invoice`); await loadOrders(); toast("Invoice generated", "ok"); }
+  catch (e) { toast("Failed: " + e.message, "err"); }
+}
+async function voidInvoice(sid) {
+  if (!(await confirmDialog("Reopen this bill? Its invoice is voided (kept in records) and the bill unlocks for edits — a new invoice number is issued next time.", "Reopen bill"))) return;
+  const reason = window.prompt("Reason for voiding (optional):", "") || null;
+  try { await api("POST", `/sessions/${sid}/void-invoice`, { reason }); await loadOrders(); toast("Invoice voided — bill reopened", "ok"); }
+  catch (e) { toast("Failed: " + e.message, "err"); }
+}
 async function loadOrders() {
   const seq = ++dataSeq;
   try {
