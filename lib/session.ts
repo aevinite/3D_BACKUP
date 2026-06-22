@@ -5,6 +5,8 @@
 
 // Grab the shared database connection we set up in supabase.ts.
 import { supabase } from "./supabase";
+// This device's stable anonymous id, so a ban can target the device (not just a phone).
+import { getGuestDeviceId } from "./guestDevice";
 
 // ── per-device session token, keyed by table ──────────────────────────────
 // Re-scanning a DIFFERENT table must not reuse the old token, so we store the
@@ -142,7 +144,14 @@ export const tableStatus = (table: string) => rpc("lfh_table_status", { p_table:
 // Join (auto-opens the table for the first scanner). Coords are sent so the
 // server can enforce the geofence itself; pass null when location is bypassed.
 export const joinSession = (table: string, name: string | null, lat: number | null, lng: number | null) =>
-  rpc("lfh_join_session", { p_table: table, p_name: name, p_lat: lat, p_lng: lng });
+  rpc("lfh_join_session", { p_table: table, p_name: name, p_lat: lat, p_lng: lng, p_device: getGuestDeviceId() });
+// Is THIS device (or phone) banned? The guest app calls this on load to decide
+// whether to show the full "you're banned" screen instead of the menu (migration 077).
+export const checkBan = () => rpc("lfh_check_ban", { p_device: getGuestDeviceId(), p_phone: null });
+// A banned guest leaves a mobile number to ask staff to unban them; it surfaces on
+// the manager's ban panel (migration 077).
+export const requestUnban = (phone: string) =>
+  rpc("lfh_request_unban", { p_device: getGuestDeviceId(), p_phone: phone });
 // Fetch the current state of a session (who's in it, status, etc.) by token.
 export const getSessionState = (token: string) => rpc("lfh_session_state", { p_token: token });
 // Leave the table (the widget's "leave" / "change table" / "unmerge"). If the

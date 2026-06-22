@@ -710,11 +710,20 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // blocklist (add)
     if (a === "blocklist" && path.length === 1) {
-      const phone = body.phone ? String(body.phone).trim() : null;
       const table = body.table ? String(body.table).trim() : null;
-      const device = body.device_id ? String(body.device_id).trim() : null; // block a staff device (tablet/kitchen)
-      if (!phone && !table && !device && !body.member_id) return err("phone, table, device_id, or member_id required");
-      const row = must(await sb.from("blocklist").insert({ phone, table_number: table, device_id: device, member_id: body.member_id || null, reason: body.reason || null }).select())[0];
+      let phone = body.phone ? String(body.phone).trim() : null;
+      let device = body.device_id ? String(body.device_id).trim() : null; // block a staff device (tablet/kitchen)
+      const memberId = body.member_id || null;
+      if (!phone && !table && !device && !memberId) return err("phone, table, device_id, or member_id required");
+      // Banning a specific member → also pull THEIR guest device id (and phone) so the
+      // ban targets the device the guest actually uses, not just a phone they may never
+      // have given. This is what makes the guest "you're blocked" wall stick. (077)
+      if (memberId && !device) {
+        const m = (await sb.from("session_members").select("device_id, phone").eq("id", memberId).maybeSingle()).data as { device_id?: string | null; phone?: string | null } | null;
+        if (m?.device_id) device = m.device_id;
+        if (!phone && m?.phone) phone = m.phone;
+      }
+      const row = must(await sb.from("blocklist").insert({ phone, table_number: table, device_id: device, member_id: memberId, reason: body.reason || "banned" }).select())[0];
       if (phone) await sb.from("customers").upsert({ phone, blocked: true }, { onConflict: "phone" });
       return ok(row || null);
     }
