@@ -23,6 +23,7 @@ import SessionCartSync from "@/components/SessionCartSync";
 import SessionStatusWidget from "@/components/SessionStatusWidget";
 import BackQuitDialog from "@/components/BackQuitDialog";
 import PointerCaptureGuard from "@/components/PointerCaptureGuard";
+import BanGate from "@/components/BanGate";
 
 // Staff routes never get guest chrome.
 const STAFF_PREFIXES = ["/aevinite", "/admin", "/manager", "/editor", "/kitchen", "/tablet", "/staff-login", "/login"];
@@ -46,6 +47,7 @@ export default function GuestChrome() {
       <SessionStatusWidget />
       <BackQuitDialog />
       <PointerCaptureGuard />
+      <BanGate />
     </>
   );
 }

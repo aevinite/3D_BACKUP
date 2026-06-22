@@ -2703,7 +2703,17 @@ function floorHtml() {
     `<div class="sx-req"><div class="sx-req-info">${callEmoji(c.note)} T${esc(c.table_number)} · ${esc(c.note || "Waiter")}<small>${esc(timeAgo(c.created_at))}</small></div><div class="sx-req-actions"><button class="btn small primary" data-call-attend="${esc(c.id)}">Done</button></div></div>`
   ).join("") : `<div class="sx-empty">No active calls.</div>`}</div>` : "";
 
-  const blkCard = sessionsOn ? `<div class="fc-card"><h3>Blocked <span class="sub">· ${blocks.length}</span></h3>${blocks.length ? blocks.map((b) => `<div class="sx-blk"><span>${b.phone ? "📵 " + esc(b.phone) : "🚫 T" + esc(b.table_number)}</span><button class="btn small" data-unblock="${esc(b.id)}">Unblock</button></div>`).join("") : `<div class="sx-empty">Nobody blocked.</div>`}<div class="sx-blk-add"><input class="sx-input" id="blkPhone" placeholder="Phone/email"/><input class="sx-input sx-input-sm" id="blkTable" placeholder="T#"/><button class="btn small" id="blkAdd">Block</button></div></div>` : "";
+  // Blocked list: device/phone/table bans, each with its reason; rows where the
+  // banned guest left a number asking to be unblocked float to the TOP and are
+  // highlighted so staff can act on them. (owner, 2026-06-22 — ban system)
+  const blkRow = (b) => {
+    const who = b.phone ? "📵 " + esc(b.phone) : b.device_id ? "🚫 Device" : b.table_number ? "🚫 T" + esc(b.table_number) : "🚫 Blocked";
+    const reason = b.reason ? ` <small>${esc(b.reason)}</small>` : "";
+    const unban = b.unban_phone ? `<div class="sx-blk-unban">🙋 Wants unblock · <b>${esc(b.unban_phone)}</b></div>` : "";
+    return `<div class="sx-blk${b.unban_phone ? " has-req" : ""}"><div class="sx-blk-top"><span>${who}${reason}</span><button class="btn small" data-unblock="${esc(b.id)}">Unblock</button></div>${unban}</div>`;
+  };
+  const blkSorted = [...blocks].sort((a, c) => (c.unban_phone ? 1 : 0) - (a.unban_phone ? 1 : 0));
+  const blkCard = sessionsOn ? `<div class="fc-card"><h3>Blocked <span class="sub">· ${blocks.length}</span></h3>${blocks.length ? blkSorted.map(blkRow).join("") : `<div class="sx-empty">Nobody blocked.</div>`}<div class="sx-blk-add"><input class="sx-input" id="blkPhone" placeholder="Phone/email"/><input class="sx-input sx-input-sm" id="blkTable" placeholder="T#"/><button class="btn small" id="blkAdd">Block</button></div></div>` : "";
 
   // The detail pane wants more room than the compact controls — so when a table is
   // selected we use a wider default (and its own remembered width, floorDetailW).

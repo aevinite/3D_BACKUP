@@ -211,11 +211,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // member's phone here (the editor passes it from its row). (owner, 2026-06-17)
     if (a === "members" && c === "ban") {
       const g = await managerPinGate(req, body); if (!g.allow) return g.resp; // manager PIN required
-      const found = must(await sb.from("session_members").select("id,phone").eq("id", b).limit(1));
+      const found = must(await sb.from("session_members").select("id,phone,device_id").eq("id", b).limit(1));
       const m = found[0];
       if (!m) return err("member not found", 404);
       const phone = m.phone ? String(m.phone).trim() : null;
-      must(await sb.from("blocklist").insert({ member_id: b, phone, reason: "banned from tablet" }).select());
+      // Capture the guest's DEVICE id too, so the ban targets their device (and the
+      // guest "you're blocked" wall sticks), not just a phone they may not have. (077)
+      const device = m.device_id ? String(m.device_id).trim() : null;
+      must(await sb.from("blocklist").insert({ member_id: b, phone, device_id: device, reason: "banned from tablet" }).select());
       if (phone) await sb.from("customers").upsert({ phone, blocked: true }, { onConflict: "phone" });
       const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).select());
       await logAction("tablet", "member_ban", { detail: (phone ? `banned ${phone}` : "banned") + byNote(g), device_id: dev });
