@@ -120,6 +120,9 @@ export default function OrderTracker() {
                 kicker: "order update",
                 variant: res.status === "cancelled" ? "error" : "success",
                 icon: res.status === "cancelled" ? "✕" : "🛎",
+                // Tapping an order notification opens the LIVE STATUS tab (not the bill)
+                // so the guest jumps straight to their order's progress. (owner, 2026-06-22)
+                event: "lfh:show-previous-orders",
               } })
             );
           }

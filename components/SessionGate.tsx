@@ -466,6 +466,12 @@ export default function SessionGate() {
   const submitTable = () => {
     const t = (tableInput || "").trim();
     if (!/^\d+$/.test(t) || Number(t) < 1) { setNote("Please enter your table number."); return; }
+    // Limit to the tables that actually exist (1..tableCount) — otherwise a typo like
+    // "5555" creates a phantom table that has no open session and just dead-ends on
+    // the "we'll let staff know to open it" screen. Mirrors the waiter-call / tablet
+    // place-order range check. (tableCount 0 = unknown → don't enforce.) (owner, 2026-06-22)
+    const max = settingsRef.current?.tableCount || 0;
+    if (max > 0 && Number(t) > max) { setNote(`This place has tables 1–${max}. Please check your table number.`); return; }
     pending.current = { ...(pending.current as Pending), table: t };
     rememberTable(t);
     setNote("");
