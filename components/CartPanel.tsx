@@ -483,6 +483,8 @@ export default function CartPanel() {
         kicker: "to the kitchen",
         icon: "🧾",
         variant: "success",
+        // Tapping it opens the LIVE STATUS tab (the order's progress), not the bill. (owner, 2026-06-22)
+        event: "lfh:show-previous-orders",
       } }));
       // Empty the cart + reset the allergy fields, then refresh and close the panel.
       setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);

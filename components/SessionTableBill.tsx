@@ -35,7 +35,9 @@ interface SItem {
 interface SBill { subtotal: number; tax: number; total: number; }
 
 // Turns the short status codes into friendly words shown on the little pills.
-const STATUS_LABEL: Record<string, string> = { received: "Received", preparing: "Preparing", served: "Served" };
+// "received" reads "Awaiting accept" so the guest knows the order is placed but the
+// kitchen hasn't accepted it yet — "Received" was confusing (owner, 2026-06-22).
+const STATUS_LABEL: Record<string, string> = { received: "Awaiting accept", preparing: "Preparing", served: "Served" };
 
 // This component shows the guest a live, read-only summary of everything their
 // table has ordered, plus the running total — and updates it every couple seconds.
@@ -47,6 +49,7 @@ export default function SessionTableBill() {
   const [items, setItems] = useState<SItem[]>([]); // the list of dishes ordered
   const [bill, setBill] = useState<SBill | null>(null); // the running money totals
   const [members, setMembers] = useState(0); // how many people are sharing this table
+  const [calls, setCalls] = useState<{ note?: string | null }[]>([]); // active (unattended) waiter calls for this table
   const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // which currency to display
   // Holds the session token. A ref (not state) because changing it shouldn't redraw.
   const tokenRef = useRef<string | null>(null);
@@ -86,6 +89,9 @@ export default function SessionTableBill() {
         setItems(((st.items as SItem[]) || []).map((i) => ((i.status as string) === "ready" ? { ...i, status: "preparing" } : i)));
         setBill((st.bill as SBill) || null);
         setMembers(Array.isArray(st.members) ? (st.members as unknown[]).length : 0);
+        // Active waiter calls for the table, so the live status shows "waiter called"
+        // (the RPC only returns unresolved calls). (owner, 2026-06-22)
+        setCalls(Array.isArray(st.calls) ? (st.calls as { note?: string | null }[]) : []);
         setLoaded(true); // real data is in — safe to show the bill (or a true empty)
       };
       // Check right away; realtime nudges drive instant refetches, with a slow 60s
@@ -121,6 +127,17 @@ export default function SessionTableBill() {
         {/* Only show the guest count when more than one person shares the table. */}
         {members > 1 && <span className="stb-members">{members} guests</span>}
       </div>
+      {/* Active waiter call(s): reassure the table that staff have been notified and
+          are on the way. Shows what was asked for if a note was given. (owner, 2026-06-22) */}
+      {calls.length > 0 && (
+        <div className="stb-called">
+          <i className="fas fa-bell" aria-hidden="true" /> Waiter called — on the way
+          {(() => {
+            const notes = calls.map((c) => (c.note || "").trim()).filter(Boolean);
+            return notes.length ? <span className="stb-called-note"> · {notes.join(", ")}</span> : null;
+          })()}
+        </div>
+      )}
       {/* Until the FIRST server fetch is back, show a shimmer skeleton — never the
           "no dishes" empty message (that split-second flash before data loaded was
           the glitch). (owner, 2026-06-19) */}

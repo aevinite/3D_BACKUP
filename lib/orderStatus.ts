@@ -15,7 +15,7 @@ export const STEPS: OrderStatus[] = ["received", "preparing", "served"];
 // "label" is the headline, "sub" is the smaller line under it, "icon" is a
 // Font Awesome icon class (e.g. fa-receipt).
 export const STATUS_COPY: Record<OrderStatus, { label: string; sub: string; icon: string }> = {
-  received: { label: "Order received", sub: "Waiting for the kitchen to confirm…", icon: "fa-receipt" },
+  received: { label: "Awaiting accept", sub: "Waiting for the kitchen to accept your order…", icon: "fa-receipt" },
   preparing: { label: "Preparing your order", sub: "The kitchen is on it 👨‍🍳", icon: "fa-fire-burner" },
   served: { label: "Served — enjoy!", sub: "Bon appétit 🍽️", icon: "fa-utensils" },
   cancelled: { label: "Order cancelled", sub: "Please ask a member of staff.", icon: "fa-circle-xmark" },
