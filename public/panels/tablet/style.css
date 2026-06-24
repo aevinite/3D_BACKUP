@@ -31,6 +31,17 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 
 /* floor tiles — fluid grid, no dead gap */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; align-items: start; }
+
+/* First-paint SKELETON tiles: shimmer placeholders written into the HTML so the
+   floor shows structure instantly instead of a blank grid while /state loads. The
+   first render of #tiles overwrites them, so they vanish when real tiles arrive. */
+.skel-tile { min-height: 140px; border-radius: 16px; border: 1.5px solid var(--line); background: var(--panel); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.skel-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--line) 25%, #4a3f29 37%, var(--line) 63%); background-size: 400% 100%; animation: skel-shimmer 1.3s ease-in-out infinite; }
+.skel-line.title { height: 18px; width: 45%; }
+.skel-line.short { width: 60%; }
+.skel-line.foot { margin-top: auto; width: 75%; }
+@keyframes skel-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .skel-line { animation: none; } }
 /* Tiles match the editor's floor exactly: a per-state --c accent driving a soft
    gradient fill + border (editor ft-* colors). Open tables grow to hold real
    info (guests, KOT, kitchen progress); free tables stay compact. */
