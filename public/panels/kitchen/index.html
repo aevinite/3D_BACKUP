@@ -22,9 +22,11 @@
 
   <!-- The three columns every kitchen thinks in: New → Cooking → Ready. -->
   <main class="cols" id="cols">
-    <section class="col" id="col-new"><h2>🆕 New <span class="count" id="count-new"></span></h2><div class="tickets" id="list-new"></div></section>
-    <section class="col" id="col-cooking"><h2>🔥 Cooking <span class="count" id="count-cooking"></span></h2><div class="tickets" id="list-cooking"></div></section>
-    <section class="col" id="col-ready"><h2>✅ Ready <span class="count" id="count-ready"></span></h2><div class="tickets" id="list-ready"></div></section>
+    <!-- Each list pre-renders two shimmer skeleton tickets so the board shows
+         structure instantly on open; the first render() (app.js) overwrites them. -->
+    <section class="col" id="col-new"><h2>🆕 New <span class="count" id="count-new"></span></h2><div class="tickets" id="list-new"><div class="skel-ticket"><div class="skel-line title"></div><div class="skel-line wide"></div><div class="skel-line short"></div></div><div class="skel-ticket"><div class="skel-line title"></div><div class="skel-line wide"></div></div></div></section>
+    <section class="col" id="col-cooking"><h2>🔥 Cooking <span class="count" id="count-cooking"></span></h2><div class="tickets" id="list-cooking"><div class="skel-ticket"><div class="skel-line title"></div><div class="skel-line wide"></div><div class="skel-line short"></div></div></div></section>
+    <section class="col" id="col-ready"><h2>✅ Ready <span class="count" id="count-ready"></span></h2><div class="tickets" id="list-ready"><div class="skel-ticket"><div class="skel-line title"></div><div class="skel-line short"></div></div></div></section>
   </main>
 
   <!-- WALL view (the "expansion"): EVERY live ticket in one dense grid, oldest first.

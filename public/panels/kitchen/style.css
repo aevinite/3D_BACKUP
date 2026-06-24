@@ -39,6 +39,18 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .tickets { display: flex; flex-direction: column; gap: 12px; }
 .empty { color: var(--muted); font-size: 13px; padding: 18px; text-align: center; border: 1px dashed var(--line); border-radius: 12px; }
 
+/* First-paint SKELETON: static shimmer "tickets" written straight into the HTML so
+   the board never flashes blank while the first /board fetch is in flight. The first
+   render() overwrites these lists, so the skeleton vanishes the moment real data
+   (or a true "Nothing here") arrives — no JS needed to show or hide it. */
+.skel-ticket { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; overflow: hidden; }
+.skel-line { height: 12px; border-radius: 6px; margin: 8px 0; background: linear-gradient(90deg, var(--line) 25%, #4a3f29 37%, var(--line) 63%); background-size: 400% 100%; animation: skel-shimmer 1.3s ease-in-out infinite; }
+.skel-line.title { height: 16px; width: 55%; margin-top: 0; }
+.skel-line.short { width: 40%; }
+.skel-line.wide { width: 80%; }
+@keyframes skel-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .skel-line { animation: none; } }
+
 /* one KOT ticket */
 .ticket { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
 .ticket.st-received { border-color: rgba(251,191,36,0.55); box-shadow: 0 0 0 1px rgba(251,191,36,0.25); }

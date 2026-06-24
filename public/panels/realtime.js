@@ -24,8 +24,14 @@
     if (sbPromise) return sbPromise;
     sbPromise = (async () => {
       const cfg = await (await fetch("/api/rt-config", { cache: "no-store" })).json();
-      const mod = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
-      return mod.createClient(cfg.url, cfg.anonKey, { realtime: { params: { eventsPerSecond: 10 } } });
+      // SELF-HOSTED: import the Supabase client from OUR origin (built by
+      // scripts/build-vendor.mjs), not the jsdelivr CDN. A restaurant's wifi can be
+      // slow or block public CDNs, which made the panel hang or silently fall back
+      // to slow polling — a same-origin file removes that whole failure mode.
+      // worker:true keeps the websocket heartbeat alive in a Web Worker so a
+      // backgrounded tablet tab doesn't silently drop the live connection.
+      const mod = await import("/vendor/supabase.js");
+      return mod.createClient(cfg.url, cfg.anonKey, { realtime: { worker: true, params: { eventsPerSecond: 10 } } });
     })();
     return sbPromise;
   }
@@ -58,15 +64,21 @@
         metrics.refetch_count++;
         try { await handlers[topic](); } catch (e) { metrics.sync_failures++; }
       };
-      firePerTopic[topic] = debounce(run, 300);
+      firePerTopic[topic] = debounce(run, 200); // coalesce a burst into one refetch; 200ms feels instant while still collapsing a Preparing→Ready→Served burst
     });
     // Wake/reconnect/initial → refetch every topic once (each debounced).
     const fireAll = () => topicList.forEach((t) => firePerTopic[t]());
 
     let everSubscribed = false;
-    try {
-      const sb = await getClient();
-      topicList.forEach((topic) => {
+    let sb = null;
+    let channels = [];
+    // Build (or REBUILD) the per-topic channels. Tears down any existing ones first
+    // so we can call it again on tab wake to replace a socket that died while the
+    // tablet was backgrounded — the same "force reconnect" the guest app uses.
+    const subscribe = () => {
+      if (!sb) return;
+      channels.forEach((c) => { try { sb.removeChannel(c); } catch (e) {} });
+      channels = topicList.map((topic) =>
         sb.channel("rt:" + topic)
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "realtime_events", filter: "topic=eq." + topic },
             (payload) => {
@@ -79,19 +91,33 @@
           .subscribe((status) => {
             if (status === "SUBSCRIBED") { metrics.subscribed++; if (everSubscribed) { metrics.reconnects++; fireAll(); } everSubscribed = true; }
             else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") { metrics.errors++; }
-          });
-      });
+          })
+      );
+    };
+    try {
+      sb = await getClient();
+      subscribe();
     } catch (e) {
       metrics.errors++; // realtime failed to boot — the backup poll keeps the panel alive
     }
 
-    // Catch anything missed while the tab slept / lost focus / dropped network.
-    // All routed through the debounced fires so they can't stack up.
-    const wake = () => { if (!document.hidden) fireAll(); };
+    // Catch anything missed while the tab slept / lost focus / dropped network, AND
+    // rebuild the (likely dead) socket on wake. visibilitychange + focus + pageshow
+    // (and sometimes online) all fire on return, so THROTTLE the rebuild to once per
+    // wake (1.5s); the rest just refetch. Refetches route through the debounced fires.
+    let lastWake = 0;
+    const wake = () => {
+      if (document.hidden) return;
+      const now = Date.now();
+      if (now - lastWake < 1500) { fireAll(); return; } // already rebuilt this wake — just refetch
+      lastWake = now;
+      subscribe();  // force a fresh socket
+      fireAll();
+    };
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("focus", wake);
     window.addEventListener("pageshow", wake);   // fires on bfcache restore (phone wake)
-    window.addEventListener("online", () => { metrics.reconnects++; fireAll(); });
+    window.addEventListener("online", () => { metrics.reconnects++; wake(); });
 
     fireAll(); // initial load
   }

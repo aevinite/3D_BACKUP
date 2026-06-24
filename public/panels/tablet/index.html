@@ -38,7 +38,16 @@
         </div>
       </div>
       <div class="floor-nav" id="floorNav"></div>
-      <div class="tiles" id="tiles"></div>
+      <!-- Skeleton tiles show instantly on open; the first render of #tiles (app.js)
+           replaces them with the live floor. Six is enough to fill the first row. -->
+      <div class="tiles" id="tiles">
+        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
+        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
+        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
+        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
+        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
+        <div class="skel-tile"><div class="skel-line title"></div><div class="skel-line short"></div><div class="skel-line foot"></div></div>
+      </div>
     </section>
 
     <!-- RIGHT: the work panel for the selected table (or the order-taking flow). -->
