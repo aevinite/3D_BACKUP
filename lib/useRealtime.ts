@@ -18,7 +18,9 @@ async function getClient(): Promise<SupabaseClient> {
   if (clientPromise) return clientPromise;
   clientPromise = (async () => {
     const cfg = await (await fetch("/api/rt-config", { cache: "no-store" })).json();
-    return createClient(cfg.url, cfg.anonKey, { realtime: { params: { eventsPerSecond: 10 } } });
+    // worker:true keeps the websocket heartbeat alive in a Web Worker so a
+    // backgrounded phone tab doesn't silently drop the connection (see lib/supabase.ts).
+    return createClient(cfg.url, cfg.anonKey, { realtime: { worker: true, params: { eventsPerSecond: 10 } } });
   })();
   return clientPromise;
 }
@@ -47,10 +49,14 @@ export function useRealtime(handlers: Handlers) {
     const fireAll = () => topics.forEach(fire);
 
     let channels: RealtimeChannel[] = [];
-    getClient().then((sb) => {
-      if (disposed) return;
+    let sb: SupabaseClient | null = null;
+    // Build (or REBUILD) the per-topic channels. Tears down any existing ones first
+    // so calling it again on wake replaces a possibly-dead socket with a live one.
+    const subscribe = () => {
+      if (!sb || disposed) return;
+      channels.forEach((c) => { try { sb!.removeChannel(c); } catch {} });
       channels = topics.map((topic) =>
-        sb.channel("rt:" + topic)
+        sb!.channel("rt:" + topic)
           .on(
             "postgres_changes" as never,
             { event: "INSERT", schema: "public", table: "realtime_events", filter: "topic=eq." + topic } as never,
@@ -58,9 +64,27 @@ export function useRealtime(handlers: Handlers) {
           )
           .subscribe()
       );
+    };
+    getClient().then((client) => {
+      if (disposed) return;
+      sb = client;
+      subscribe();
     }).catch(() => {});
 
-    const wake = () => { if (!document.hidden) fireAll(); };
+    // On tab wake, the backgrounded socket may be dead. Rebuild the channels (force
+    // a reconnect) AND refetch immediately so the screen is live again at once,
+    // instead of staying stale until the 60s backup poll fires. visibilitychange +
+    // focus + online often fire together on return, so THROTTLE the rebuild: first
+    // signal rebuilds, the rest within 1.5s only refetch (avoids 2-3× socket churn).
+    let lastWake = 0;
+    const wake = () => {
+      if (document.hidden) return;
+      const now = Date.now();
+      if (now - lastWake < 1500) { fireAll(); return; } // already rebuilt this wake — just refetch
+      lastWake = now;
+      subscribe();
+      fireAll();
+    };
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("focus", wake);
     window.addEventListener("online", wake);

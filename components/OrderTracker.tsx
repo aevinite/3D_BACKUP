@@ -169,7 +169,22 @@ export default function OrderTracker() {
         if (!s) { if (alive) setDishProg({ served: 0, segs: [] }); return; } // not in a session -> no per-dish bar
         const st = await getSessionState(s.token);
         if (!alive) return;
-        if (!st.ok) { setDishProg({ served: 0, segs: [] }); return; } // session ended -> drop the per-dish bar
+        if (!st.ok) {
+          // DEFENCE IN DEPTH for the "ghost order" bug: when staff CLOSE the table
+          // (or we were removed / the token died) the floating "preparing" strip must
+          // disappear — not linger after the meal. SessionStatusWidget normally does
+          // this cleanup, but if its poll/realtime is slow we self-heal here too.
+          // Only the three DEFINITIVE endings clear local orders; any other reason is
+          // a transient network blip, so we keep what we have and retry next tick
+          // (otherwise a momentary drop would wrongly wipe a live order).
+          const reason = st.reason as string | undefined;
+          if (reason === "session_closed" || reason === "removed" || reason === "invalid_token") {
+            try { localStorage.removeItem("lfh_active_orders"); } catch {}
+            window.dispatchEvent(new Event("lfh:order-placed")); // make the strip re-read + vanish
+          }
+          setDishProg({ served: 0, segs: [] });
+          return;
+        }
         // PENDING members must NOT see the live table. The server already withholds
         // orders/items from an unapproved member (migration 076); this is the matching
         // client guard so a guest still "waiting for the head" shows no live progress.

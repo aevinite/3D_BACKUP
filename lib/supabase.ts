@@ -15,4 +15,13 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 // The shared client. Import this anywhere in the app to talk to the database.
-export const supabase = createClient(url, anon);
+// `realtime.worker: true` runs the websocket heartbeat in a Web Worker thread.
+// Phone browsers (esp. Android Chrome) THROTTLE normal timers when the tab is in
+// the background, so the heartbeat stops, the server thinks we vanished, and the
+// live socket silently dies — which is why the page looked "frozen" until a manual
+// refresh. A worker thread is throttled far less, so the connection survives a
+// trip to the camera/another app. (Recovery on return is handled by the forced
+// reconnect in RealtimeProvider; this just keeps it alive in the first place.)
+export const supabase = createClient(url, anon, {
+  realtime: { worker: true, params: { eventsPerSecond: 10 } },
+});
