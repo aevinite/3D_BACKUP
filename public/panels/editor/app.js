@@ -1495,15 +1495,14 @@ async function loadDashboard() {
 
 // ---------- printable bill ----------
 // Opens a clean print window for one table's bill: every order with its KOT
-// number, items, discounts, and the grand total. When the (backend-only)
-// gst_invoice switch is ON and a GSTIN is configured, it also prints the GST
-// fields — until then it's a simple receipt, exactly as the owner asked.
+// number, items, discounts, and the grand total. Tax always prints as a
+// CGST + SGST split (half the rate each); GSTIN, address, customer name and a
+// T-prefixed table number print when their data is present.
 // The printable TAX INVOICE — "Classic" B&W design (thermal/mono printer). All
 // money via billMath (discount BEFORE tax). Restaurant identity from settings.
 function printBill(t, sess, os) {
   const s = state.data.settings || {};
   const m = billMath(os);
-  const gstOn = !!((s.features || {}).gst_invoice) && s.gstin;
   const live = os.filter((o) => o.status !== "cancelled");
   // Item rows: base + each priced add-on as an italic sub-line (the unit price
   // already includes add-ons, so base = unit − add-ons → the lines sum to subtotal).
@@ -1520,6 +1519,13 @@ function printBill(t, sess, os) {
   const addr = esc(s.restaurant_address || "");
   const phone = esc(s.restaurant_phone || "+91 90999 14418");
   const gstin = esc(s.gstin || "");
+  // Customer name: orders carry a customer_name (dine-in head / aggregator buyer);
+  // use the first order that has one. Blank → the line is hidden, never empty.
+  const cust = esc((os.find((o) => (o.customer_name || "").toString().trim()) || {}).customer_name || "");
+  // Table shown as "T5": prefix a plain numeric table with "T". Non-numeric
+  // values (e.g. "Takeaway", "T5") are left exactly as entered.
+  const tnum = (t || "").toString().trim();
+  const tableDisp = /^\d+$/.test(tnum) ? "T" + tnum : esc(tnum || "—");
   const invNo = sess && sess.invoice_no != null ? esc(invFmt(sess.invoice_no)) : "";
   const billNo = sess && sess.bill_no != null ? esc(sess.bill_no) : "";
   const now = new Date();
@@ -1529,7 +1535,7 @@ function printBill(t, sess, os) {
   if (!w) { toast("Allow popups for this site to print the bill", "err"); return; }
   w.document.write(`<!doctype html><title>Tax Invoice — ${name}</title>
 <style>
-  body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:20px;color:#111}
+  body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:22px 34px;color:#111}
   .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.1)}
   h2{font-family:Georgia,'Times New Roman',serif;font-size:19px;margin:0;text-align:center}
   .sub{text-align:center;color:#444;font-size:10px;margin-top:3px;line-height:1.5}
@@ -1550,19 +1556,19 @@ function printBill(t, sess, os) {
 <div class="sub">${addr ? addr + "<br/>" : ""}Phone ${phone}${gstin ? " · GSTIN " + gstin : ""}</div>
 <div class="dash"></div>
 ${invNo ? `<div class="kv"><span>Invoice</span><b>${invNo}</b></div>` : ""}
-<div class="kv"><span>${billNo !== "" ? "Bill · Table" : "Table"}</span><b>${billNo !== "" ? "#" + billNo + " · " : ""}${esc(t || "—")}</b></div>
+<div class="kv"><span>${billNo !== "" ? "Bill · Table" : "Table"}</span><b>${billNo !== "" ? "#" + billNo + " · " : ""}${tableDisp}</b></div>
+${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}
 <div class="kv"><span>Date · Time</span><b>${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b></div>
 <div class="dash"></div>
 <table><thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
 <div style="margin-top:8px">
   <div class="t"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
   ${m.disc > 0 ? `<div class="t"><span>Discount</span><span>− ${inr(m.disc)}</span></div><div class="t tx"><span>Taxable value</span><span>${inr(m.taxable)}</span></div>` : ""}
-  ${gstOn
-      ? `<div class="t"><span>CGST ${pct / 2}%</span><span>${inr(half)}</span></div><div class="t"><span>SGST ${pct / 2}%</span><span>${inr(half)}</span></div>`
-      : `<div class="t"><span>Tax (${pct}%)</span><span>${inr(m.tax)}</span></div>`}
+  <div class="t"><span>CGST ${pct / 2}%</span><span>${inr(half)}</span></div>
+  <div class="t"><span>SGST ${pct / 2}%</span><span>${inr(half)}</span></div>
   <div class="g"><span>TOTAL</span><span>${inr(m.total)}</span></div>
 </div>
-<div class="foot">Merci — see you again soon 🥐<br/><span style="font-size:8.5px;color:#999">Computer-generated tax invoice</span></div>
+<div class="foot">Merci — see you again soon 🥐</div>
 <script>setTimeout(()=>print(),300)<\/script>`);
   w.document.close();
 }
