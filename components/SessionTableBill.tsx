@@ -82,6 +82,19 @@ export default function SessionTableBill() {
         if (!st.ok) { setActive(false); return; } // token gone / session ended
         const sess = st.session as { table_number?: string; status?: string } | undefined;
         if (sess?.status !== "open") { setActive(false); return; }
+        // PENDING members must NOT see the live table. The server already withholds
+        // the dishes/orders/bill from an unapproved member (migration 076), but this
+        // widget would still show the "connected" shell (table header, guest count,
+        // waiter-call line) to a partner the head NEVER accepted. Hide it entirely
+        // until they're approved — matching the guard in OrderTracker. (Fixes the
+        // "unaccepted partner looks connected / sees the live table" bug.)
+        const mem = st.member as { approved?: boolean } | undefined;
+        if (!mem?.approved) { setActive(false); return; }
+        // Approved (now or all along): make sure the widget is shown. This MUST be
+        // re-asserted on every good poll, not just once on mount — a partner who
+        // started PENDING had `active` turned off above, and when the head finally
+        // accepts them this is what brings their live table back WITHOUT a reload.
+        setActive(true);
         // Refresh everything we display from the server's answer.
         setTable(sess?.table_number || "");
         // The guest never sees "ready" (a staff-only stage) — show a ready dish as

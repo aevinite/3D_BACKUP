@@ -32,10 +32,15 @@ export default function RealtimeProvider() {
 
     // (Re)subscribe to the current table's topic. Called on mount and whenever the
     // guest's table changes (e.g. they connect to a session after scanning a QR).
-    const resubscribe = () => {
+    // `force` rebuilds the channel even when the topic is unchanged — needed on tab
+    // wake, because the underlying websocket may have silently died while the phone
+    // was backgrounded. Without force we'd bail here ("already on the right topic")
+    // and keep a DEAD channel, so the page stayed stale until a manual refresh —
+    // that was the root of the "not live when I come back to Chrome" bug.
+    const resubscribe = (force = false) => {
       const table = intendedTable();
       const topic = table ? `table:${table}` : null;
-      if (topic === currentTopic) return; // already on the right topic
+      if (topic === currentTopic && !force) return; // already on the right topic
       if (channel) { supabase.removeChannel(channel); channel = null; }
       currentTopic = topic;
       metrics.topic = topic;
@@ -53,13 +58,27 @@ export default function RealtimeProvider() {
     // The table can appear/change while browsing; re-check on these signals. Each
     // also nudges a refetch so a freshly-woken/connected screen isn't stale.
     const onSession = () => { resubscribe(); tick(); };
-    const onWake = () => { if (!document.hidden) { resubscribe(); tick(); } };
+    // On wake/reconnect, FORCE a fresh channel (the old socket is probably dead) and
+    // refetch so a returning phone is instantly live again. Returning to a tab fires
+    // visibilitychange + focus + pageshow (and sometimes online) back-to-back, so we
+    // THROTTLE the rebuild: the first signal rebuilds the socket, the rest within
+    // 1.5s just refetch — avoids tearing the socket down/up 2-3× per wake.
+    let lastForce = 0;
+    const forceReconnect = () => {
+      const now = Date.now();
+      if (now - lastForce < 1500) { tick(); return; } // already rebuilt this wake — just refetch
+      lastForce = now;
+      resubscribe(true);
+      tick();
+    };
+    const onWake = () => { if (!document.hidden) forceReconnect(); };
     window.addEventListener("lfh:session-changed", onSession);
     window.addEventListener("lfh:cart-updated", onSession);
     document.addEventListener("visibilitychange", onWake);
     window.addEventListener("focus", onWake);
     window.addEventListener("pageshow", onWake); // bfcache restore (phone wake)
-    window.addEventListener("online", () => { metrics.reconnects++; tick(); });
+    const onOnline = () => { metrics.reconnects++; forceReconnect(); };
+    window.addEventListener("online", onOnline);
 
     return () => {
       if (tTimer) clearTimeout(tTimer);
@@ -69,6 +88,7 @@ export default function RealtimeProvider() {
       document.removeEventListener("visibilitychange", onWake);
       window.removeEventListener("focus", onWake);
       window.removeEventListener("pageshow", onWake);
+      window.removeEventListener("online", onOnline);
     };
   }, []);
 
