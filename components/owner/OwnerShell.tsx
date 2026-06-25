@@ -37,7 +37,7 @@ export default function OwnerShell({ children }: { children: React.ReactNode }) 
       <aside className="adm-side">
         <div className="adm-brand">
           <span className="mark">👑</span>
-          <span className="who"><b>Owner</b><span>All restaurants</span></span>
+          <span className="who"><b>Owner</b><span>Aevidine</span></span>
         </div>
         <nav className="adm-nav">
           {NAV.map((n) => (
@@ -50,7 +50,7 @@ export default function OwnerShell({ children }: { children: React.ReactNode }) 
             <i className="fas fa-gauge-high" aria-hidden="true" /> Control room
           </Link>
         </nav>
-        <div className="adm-side-foot">4D Menu · multi-restaurant SaaS</div>
+        <div className="adm-side-foot">Aevidine · Restaurant OS</div>
       </aside>
 
       <div className="adm-body">

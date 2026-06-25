@@ -51,9 +51,9 @@ export default function LoginForm({ next }: { next: string }) {
     <main style={{ margin: 0, minHeight: "100vh", display: "grid", placeItems: "center", background: "radial-gradient(1200px 600px at 50% -10%, #16223e 0%, #0b1220 60%)", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", padding: 16 }}>
       <form onSubmit={submit} style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 18, padding: 28, width: "min(92vw, 380px)", boxShadow: "0 20px 60px rgba(0,0,0,.45)" }}>
         <div style={{ textAlign: "center", marginBottom: 18 }}>
-          <div style={{ fontSize: 30 }}>🏠</div>
-          <h1 style={{ fontSize: 19, margin: "8px 0 2px", fontWeight: 800 }}>My Little French House</h1>
-          <p style={{ margin: 0, fontSize: 13, color: "#8aa0c9" }}>Staff sign in</p>
+          <div style={{ fontSize: 30, letterSpacing: "0.04em" }}>✦</div>
+          <h1 style={{ fontSize: 22, margin: "8px 0 2px", fontWeight: 800, letterSpacing: "0.02em" }}>Aevidine</h1>
+          <p style={{ margin: 0, fontSize: 13, color: "#8aa0c9" }}>Restaurant OS · staff sign in</p>
         </div>
 
         <label style={{ fontSize: 12, color: "#8aa0c9" }}>Name</label>

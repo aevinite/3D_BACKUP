@@ -8,6 +8,13 @@ import { notFound } from "next/navigation";
 import MenuView from "@/components/MenuView";
 import { getRestaurantBySlug } from "@/lib/tenant";
 
+// White-label: a guest's browser tab shows THIS restaurant's name, not the SaaS brand.
+export async function generateMetadata({ params }: { params: Promise<{ restaurant: string }> }) {
+  const { restaurant } = await params;
+  const r = await getRestaurantBySlug(restaurant);
+  return { title: r?.name ? `${r.name} — Menu` : "Menu" };
+}
+
 export default async function RestaurantMenuPage({
   params,
 }: {
