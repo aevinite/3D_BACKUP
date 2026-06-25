@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -38,13 +39,17 @@ function genPassword(): string {
 
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
-  const { data, error } = await sb
-    .from("staff_users")
-    .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset, can_self_set_pin")
-    .order("created_at", { ascending: true });
-  if (error) return bad(error.message, 500);
-  // Strip the PIN hash to a boolean — never ship hashes to the browser.
-  const users = (data || []).map(({ pin_hash, ...u }) => ({ ...u, hasPin: !!pin_hash }));
+  const [usersQ, restsQ] = await Promise.all([
+    sb.from("staff_users")
+      .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset, can_self_set_pin, restaurant_id")
+      .order("created_at", { ascending: true }),
+    sb.from("restaurants").select("id, name"),
+  ]);
+  if (usersQ.error) return bad(usersQ.error.message, 500);
+  const nameById: Record<string, string> = Object.fromEntries((restsQ.data || []).map((r) => [r.id, r.name]));
+  // Strip the PIN hash to a boolean; attach the restaurant name (mapped, not a
+  // PostgREST embed) so the admin sees WHICH restaurant each user belongs to.
+  const users = (usersQ.data || []).map(({ pin_hash, ...u }: any) => ({ ...u, hasPin: !!pin_hash, restaurantName: nameById[u.restaurant_id] || null }));
   return ok({ users });
 }
 
@@ -57,15 +62,19 @@ export async function POST(req: NextRequest) {
   const display = String(body?.name ?? body?.username ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
   const role = String(body?.role || "") as Role;
+  // WHICH restaurant this user works at. Admin picks it; defaults to #1 for back-compat.
+  const restaurantId = String(body?.restaurant_id || "").trim() || DEFAULT_RESTAURANT_ID;
   if (key.length < 2) return bad("Name must be at least 2 characters.");
   if (!ROLES.includes(role)) return bad("Pick a valid role.");
-  // Friendly duplicate check (there's also a unique index as the hard guarantee).
-  const dup = (await sb.from("staff_users").select("id").eq("username", key).limit(1)).data?.[0];
-  if (dup) return bad("That name is taken — pick another.", 409);
+  const rest = (await sb.from("restaurants").select("id").eq("id", restaurantId).limit(1)).data?.[0];
+  if (!rest) return bad("Pick a valid restaurant.");
+  // Names are unique PER restaurant (mig 091) — clash-check within this one only.
+  const dup = (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", restaurantId).limit(1)).data?.[0];
+  if (dup) return bad("That name is taken at this restaurant — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const row = {
-    username: key, role,
+    username: key, role, restaurant_id: restaurantId,
     password_hash: await hashSecret(password),
     name: display,
     phone: String(body?.phone || "").trim().slice(0, 20) || null,
