@@ -73,8 +73,14 @@ async function runMigration() {
 }
 
 // --- step 2: map camelCase JSON -> snake_case DB rows, then upsert ---
+
+// All seeded rows belong to restaurant #1 (My Little French House).
+// Must match DEFAULT_RESTAURANT_ID in lib/tenant.ts and the seed in migration 078.
+const DEFAULT_RESTAURANT_ID = "00000000-0000-0000-0000-000000000001";
+
 function toRow(item, index) {
   return {
+    restaurant_id: DEFAULT_RESTAURANT_ID,
     id: item.id,
     slug: item.slug,
     title: item.title,
@@ -108,6 +114,7 @@ function toRow(item, index) {
 // camelCase JSON -> snake_case row for the categories / filters tables.
 function toCategoryRow(c, index) {
   return {
+    restaurant_id: DEFAULT_RESTAURANT_ID,
     slug: c.slug,
     name: c.name,
     icon: c.icon ?? null,
@@ -119,6 +126,7 @@ function toCategoryRow(c, index) {
 
 function toFilterRow(f, index) {
   return {
+    restaurant_id: DEFAULT_RESTAURANT_ID,
     slug: f.slug,
     name: f.name,
     icon: f.icon ?? null,
@@ -170,10 +178,10 @@ async function seed() {
 
   // Categories and filters first (menu_items.category references a category slug).
   if (menu.categories?.length) {
-    await upsertRows(admin, "categories", menu.categories.map(toCategoryRow), "slug");
+    await upsertRows(admin, "categories", menu.categories.map(toCategoryRow), "restaurant_id,slug");
   }
   if (menu.filters?.length) {
-    await upsertRows(admin, "filters", menu.filters.map(toFilterRow), "slug");
+    await upsertRows(admin, "filters", menu.filters.map(toFilterRow), "restaurant_id,slug");
   }
   await upsertRows(admin, "menu_items", menu.items.map(toRow), "id");
 }
