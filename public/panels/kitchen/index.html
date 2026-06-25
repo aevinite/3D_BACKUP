@@ -7,6 +7,8 @@
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍳</text></svg>">
   <link rel="stylesheet" href="style.css">
+  <!-- Light/dark toggle (default dark); sets data-theme before paint to avoid a flash. -->
+  <script src="/panels/theme.js"></script>
 </head>
 <body>
   <!-- Top bar: title, the live clock, sound toggle, and the 86 (sold-out) board. -->
@@ -17,6 +19,7 @@
       <button id="muteBtn" class="btn" title="New-order sound on/off">🔔</button>
       <button id="boardBtn" class="btn">🚫 86 board</button>
       <button id="viewBtn" class="btn viewtgl">▦ Wall view</button>
+      <button id="themeToggle" class="theme-toggle" type="button"></button>
     </div>
   </header>
 

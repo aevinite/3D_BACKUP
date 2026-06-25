@@ -127,3 +127,28 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .src-badge.t { background: #6f9a6a; }
 .src-badge.o { background: var(--blue); color: #201500; }
 .plat-cust-line { color: var(--muted); font-size: 13.5px; margin: -2px 0 8px; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LIGHT THEME  —  opt-in via the header toggle (☀/🌙); DARK stays default.
+   Kitchen is almost entirely token-driven, so the :root override does the
+   work; only the pink "ready" cues are deepened for white. (panels/theme.js)
+   ═══════════════════════════════════════════════════════════════════════ */
+.theme-toggle{
+  -webkit-appearance:none; appearance:none; cursor:pointer;
+  width:40px; height:40px; flex:0 0 auto; padding:0;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-size:18px; line-height:1; border-radius:10px;
+  border:1px solid var(--line); background:var(--panel); color:var(--text);
+  transition:border-color .15s, transform .1s;
+}
+.theme-toggle:hover{ border-color:var(--blue); }
+.theme-toggle:active{ transform:scale(.93); }
+
+html[data-theme="light"]{
+  --bg:#f1ebe1; --panel:#ffffff; --line:#e6dcc9; --text:#2c2219; --muted:#857655;
+  --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
+}
+html[data-theme="light"] .done.rdy{ color:#be185d; }
+html[data-theme="light"] .line-ready .ltitle{ color:#9d174d; }
+html[data-theme="light"] .alg-removed, html[data-theme="light"] .ltitle .alg-removed{ color:#b45309; }
+html[data-theme="light"] .alg-add{ color:#15803d; }

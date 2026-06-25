@@ -154,6 +154,8 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
       <OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} />
 
+      <EnterCard restaurant={restaurant} />
+
       <div className="adm-card">
         <h2>Guest features</h2>
         <p className="hint">Each switch shows or hides a feature across <b>{restaurant.name}</b>&apos;s guest menu.</p>
@@ -215,6 +217,62 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
           <b>{reveal.name}</b> created. Password (copy now — shown once): <code style={{ fontWeight: 700 }}>{reveal.password}</code>
         </div>
       )}
+    </div>
+  );
+}
+
+// Admin "view as": the admin ENTERS this restaurant (sets a short-lived act-as
+// cookie via /api/admin/act-as), then opens its operational panels in a new tab.
+// Because the panel APIs scope by panelRestaurantId (which reads that cookie for
+// the admin), the manager/kitchen/tablet show THIS restaurant's live data —
+// exactly what its own staff see — instead of the default restaurant. "Stop"
+// clears the cookie so the admin's panels revert to the default restaurant.
+function EnterCard({ restaurant }: { restaurant: Restaurant }) {
+  const [busy, setBusy] = useState(false);
+  const [viewing, setViewing] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const PANELS: [string, string, string][] = [
+    ["/editor", "Manager panel", "fa-table-columns"],
+    ["/kitchen", "Kitchen display", "fa-fire-burner"],
+    ["/tablet", "Waiter tablet", "fa-mobile-screen-button"],
+  ];
+
+  const openPanel = async (path: string) => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't enter restaurant.");
+      setViewing(true);
+      window.open(path, "_blank", "noopener");
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+  const stop = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) });
+      setViewing(false); setMsg("Stopped — your panels show the default restaurant again.");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="adm-card" style={{ marginBottom: 14 }}>
+      <h2>Open this restaurant&apos;s panels</h2>
+      <p className="hint">Enter <b>{restaurant.name}</b> and open its live panels scoped to it — exactly what its own staff see. Each opens in a new tab.</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {PANELS.map(([path, label, icon]) => (
+          <button key={path} className="adm-btn" disabled={busy} onClick={() => openPanel(path)} title={`Open ${label} as ${restaurant.name}`}>
+            <i className={`fas ${icon}`} style={{ marginRight: 7 }} aria-hidden="true" />{label}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
+        <button className="adm-btn" disabled={busy} onClick={stop}>
+          <i className="fas fa-arrow-rotate-left" style={{ marginRight: 7 }} aria-hidden="true" />Stop viewing as this restaurant
+        </button>
+        {viewing && <span style={{ fontSize: 12, fontWeight: 700, color: "var(--adm-ok)" }}>Now viewing panels as {restaurant.name}.</span>}
+        {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
+      </div>
     </div>
   );
 }

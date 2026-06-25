@@ -579,13 +579,22 @@ export default function MenuView({ restaurantId, restaurantSlug, logoText, heroT
         {features.search && (
         <div className="items-header search-row">
           <div className="search-container">
-            {/* The little logo tucked inside the search box. */}
-            <img
-              className="search-logo"
-              src="https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png"
-              alt=""
-              aria-hidden="true"
-            />
+            {/* The little mark inside the search box: the French House logo on the
+                flagship (#1) only; every OTHER restaurant gets a neutral, accent-tinted
+                search glyph — never leak #1's logo onto another tenant's menu (white-label). */}
+            {isDefault ? (
+              <img
+                className="search-logo"
+                src="https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png"
+                alt=""
+                aria-hidden="true"
+              />
+            ) : (
+              <svg className="search-logo" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <line x1="21" y1="21" x2="16.5" y2="16.5" />
+              </svg>
+            )}
             {/* The search box. value shows what's typed; onChange updates our
                 searchQuery memory every keystroke. */}
             <input

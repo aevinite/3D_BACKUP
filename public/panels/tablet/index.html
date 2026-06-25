@@ -7,12 +7,14 @@
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
   <link rel="stylesheet" href="style.css">
+  <!-- Light/dark toggle (default dark); sets data-theme before paint to avoid a flash. -->
+  <script src="/panels/theme.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand">🧑‍🍳 Waiter <span class="sub">live floor</span></div>
     <!-- Live count chips beside the brand (tap to filter) + clock. -->
-    <div class="top-actions"><div class="counts" id="counts"></div><span id="clock" class="clock"></span></div>
+    <div class="top-actions"><div class="counts" id="counts"></div><span id="clock" class="clock"></span><button id="themeToggle" class="theme-toggle" type="button"></button></div>
   </header>
 
   <main class="layout">

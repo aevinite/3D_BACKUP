@@ -12,7 +12,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
-import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { panelRestaurantId } from "@/lib/panelScope";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +22,8 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
   if (!g.ok) return NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
   return { user: g.user };
 }
-// The logged-in waiter's restaurant (admin super-user → default restaurant #1).
-function ridOf(g: { user: StaffUser | null }): string {
-  return g.user?.restaurant_id || DEFAULT_RESTAURANT_ID;
-}
+// (panel restaurant scope now comes from lib/panelScope → panelRestaurantId, which
+//  also honours the admin's "view as" restaurant.)
 
 // Manager-PIN gate for the tablet's sensitive actions (ban, discount, and the
 // unpaid/cooking close|restart override). The admin super-user bypasses it; and
@@ -84,7 +82,7 @@ type Ctx = { params: Promise<{ path?: string[] }> };
 // ── GET /api/tablet/state — everything the tablet floor needs in one call ─────
 export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
-  const rid = ridOf(g);
+  const rid = panelRestaurantId(req, g);
   try {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "state") {
@@ -117,7 +115,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 // ── POST: place order / attend call / approve member / open session ──────────
 export async function POST(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
-  const rid = ridOf(g);
+  const rid = panelRestaurantId(req, g);
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;

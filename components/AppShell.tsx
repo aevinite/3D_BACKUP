@@ -40,6 +40,7 @@ function accentVars(accentColor: string): React.CSSProperties {
     "--gold": accentColor,
     "--accent-grad": grad,
     "--gold-grad": grad,
+    "--brand-highlight": accentColor, // brand name in the header follows the restaurant
   };
   if (rgb) {
     base["--accent-dim"] = `rgba(${rgb}, 0.6)`;

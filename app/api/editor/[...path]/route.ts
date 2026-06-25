@@ -13,6 +13,7 @@ import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { panelRestaurantId } from "@/lib/panelScope";
 import { closeSession } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
@@ -26,10 +27,9 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
   if (!g.ok) return NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
   return { user: g.user };
 }
-// The logged-in manager's restaurant (admin super-user → default restaurant #1).
-function ridOf(g: { user: StaffUser | null }): string {
-  return g.user?.restaurant_id || DEFAULT_RESTAURANT_ID;
-}
+// (panel restaurant scope now comes from lib/panelScope → panelRestaurantId, which
+//  also honours the admin's "view as" restaurant. DEFAULT_RESTAURANT_ID is still used
+//  below for menu-item id namespacing.)
 // Whether the acting staff may perform an owner-gated MANAGER action. The admin
 // super-user (g.user===null) and the OWNER always may; a plain manager only if the
 // owner switched that capability flag ON for this restaurant (mig 091 + the owner's
@@ -112,7 +112,7 @@ type Ctx = { params: Promise<{ path?: string[] }> };
 // ── GET ──────────────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
-  const rid = ridOf(g);
+  const rid = panelRestaurantId(req, g);
   try {
     const { path = [] } = await ctx.params;
     const p = path.join("/");
@@ -356,7 +356,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 // ── POST ─────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
-  const rid = ridOf(g);
+  const rid = panelRestaurantId(req, g);
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
@@ -822,7 +822,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 // ── PATCH ────────────────────────────────────────────────────────────────────
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
-  const rid = ridOf(g);
+  const rid = panelRestaurantId(req, g);
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;
@@ -873,7 +873,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 // ── DELETE ───────────────────────────────────────────────────────────────────
 export async function DELETE(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
-  const rid = ridOf(g);
+  const rid = panelRestaurantId(req, g);
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;
