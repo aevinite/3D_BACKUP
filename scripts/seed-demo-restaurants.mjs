@@ -63,7 +63,7 @@ const DEMO = [
       ["buffalo-wings", "Buffalo Wings", "249", "sides", false, ["spicy"], U("1567620905732-2d1ec7ab7445")],
       ["classic-cola", "Classic Cola", "60", "drinks", true, [], U("1624378439575-d8705ad7ae80")],
       ["choco-lava-cake", "Choco Lava Cake", "129", "desserts", true, ["bestseller"], U("1571877227200-a0d98ea607e9")],
-      ["tiramisu", "Tiramisu", "159", "desserts", true, [], U("1571877227200-a0d98ea607e9")],
+      ["tiramisu", "Tiramisu", "159", "desserts", true, [], U("1571115177098-24ec42ed204d")],
     ],
   },
   {
@@ -104,11 +104,11 @@ const DEMO = [
     items: [
       ["salmon-nigiri", "Salmon Nigiri", "249", "sushi", false, ["bestseller"], U("1579871494447-9811cf80d66c")],
       ["tuna-roll", "Tuna Roll", "279", "sushi", false, ["bestseller"], U("1611143669185-af224c5e3252")],
-      ["california-roll", "California Roll", "229", "sushi", false, [], U("1579871494447-9811cf80d66c")],
+      ["california-roll", "California Roll", "229", "sushi", false, [], U("1553621042-f6e147245754")],
       ["avocado-roll", "Avocado Roll", "199", "sushi", true, ["vegetarian", "new"], U("1540189549336-e6e99c3679fe")],
       ["tonkotsu-ramen", "Tonkotsu Ramen", "329", "ramen", false, ["bestseller"], U("1569050467447-ce54b3bbc37d")],
       ["miso-ramen", "Miso Ramen", "299", "ramen", true, ["vegetarian"], U("1512058564366-18510be2db19")],
-      ["spicy-ramen", "Spicy Miso Ramen", "319", "ramen", false, ["spicy"], U("1569050467447-ce54b3bbc37d")],
+      ["spicy-ramen", "Spicy Miso Ramen", "319", "ramen", false, ["spicy"], U("1591814468924-caf88d1232e1")],
       ["edamame", "Edamame", "129", "sides", true, ["vegetarian"], U("1547592166-23ac45744acd")],
       ["gyoza", "Pork Gyoza", "189", "sides", false, [], U("1583608205776-bfd35f0d9f83")],
       ["matcha-latte", "Matcha Latte", "139", "drinks", true, ["new"], U("1515823064-d6e0c04616a7")],
@@ -119,12 +119,12 @@ const DEMO = [
     categories: [cat("tacos", "Tacos", "fa-solid fa-pepper-hot", "#ca8a04", 0), cat("burritos", "Burritos", "fa-solid fa-bowl-food", "#16a34a", 1), cat("sides", "Sides", "fa-solid fa-cheese", "#d97706", 2), cat("drinks", "Drinks", "fa-solid fa-glass-water", "#0ea5e9", 3)],
     items: [
       ["chicken-taco", "Chicken Taco", "129", "tacos", false, ["bestseller"], U("1561758033-d89a9ad46330")],
-      ["carnitas-taco", "Carnitas Taco", "149", "tacos", false, ["bestseller"], U("1561758033-d89a9ad46330")],
+      ["carnitas-taco", "Carnitas Taco", "149", "tacos", false, ["bestseller"], U("1565299585323-38d6b0865b47")],
       ["veggie-taco", "Veggie Taco", "119", "tacos", true, ["vegetarian"], U("1540189549336-e6e99c3679fe")],
       ["fish-taco", "Baja Fish Taco", "159", "tacos", false, ["spicy", "new"], U("1555126634-323283e090fa")],
       ["beef-burrito", "Beef Burrito", "239", "burritos", false, ["bestseller"], U("1593504049359-74330189a345")],
       ["bean-burrito", "Bean Burrito", "199", "burritos", true, ["vegetarian"], U("1517093157656-b9eccef91cb1")],
-      ["quesadilla", "Cheese Quesadilla", "179", "sides", true, ["vegetarian"], U("1517093157656-b9eccef91cb1")],
+      ["quesadilla", "Cheese Quesadilla", "179", "sides", true, ["vegetarian"], U("1618040996337-56904b7850b9")],
       ["loaded-nachos", "Loaded Nachos", "199", "sides", true, ["vegetarian", "spicy"], U("1552332386-f8dd00dc2f85")],
       ["guacamole", "Guacamole & Chips", "149", "sides", true, ["vegetarian"], U("1600335895229-6e75511892c8")],
       ["horchata", "Horchata", "89", "drinks", true, [], U("1576618148400-f54bed99fcfd")],
@@ -139,7 +139,7 @@ const DEMO = [
       ["poke-bowl", "Salmon Poke Bowl", "329", "bowls", false, ["bestseller", "new"], U("1505253758473-96b7015fcd40")],
       ["caesar-salad", "Caesar Salad", "229", "salads", false, [], U("1550304943-4f24f54ddde9")],
       ["greek-salad", "Greek Salad", "219", "salads", true, ["vegetarian"], U("1607532941433-304659e8198a")],
-      ["kale-salad", "Kale & Avocado Salad", "239", "salads", true, ["vegetarian", "new"], U("1505253758473-96b7015fcd40")],
+      ["kale-salad", "Kale & Avocado Salad", "239", "salads", true, ["vegetarian", "new"], U("1512621776951-a57141f2eefd")],
       ["berry-smoothie", "Mixed Berry Smoothie", "169", "smoothies", true, ["bestseller"], U("1505144808419-1957a94ca61e")],
       ["green-detox-smoothie", "Green Detox Smoothie", "179", "smoothies", true, ["vegetarian"], U("1502741338009-cac2772e18bc")],
       ["avocado-toast", "Avocado Toast", "149", "snacks", true, ["vegetarian"], U("1482049016688-2d3e1b311543")],
@@ -184,7 +184,25 @@ for (const d of DEMO) {
   ({ error: e } = await db.from("menu_items").upsert(items, { onConflict: "id" }));
   if (e) throw new Error(`menu_items (${d.restaurant.slug}): ${e.message}`);
 
-  console.log(`✓ ${d.restaurant.name}: ${d.categories.length} categories, ${items.length} items`);
+  // Authoritative cleanup: drop any item left on THIS demo restaurant that is no
+  // longer in the list above (e.g. renamed/removed dishes from an earlier seeder
+  // version). Upsert alone never deletes, so without this, old rows linger with
+  // stale/mismatched images — the "blank/wrong photo" bug. Scoped to rid only;
+  // restaurant #1 (French House) is never in DEMO, so it is never touched.
+  const keepIds = items.map((it) => it.id);
+  let staleRemoved = 0;
+  {
+    const { data: removed, error: de } = await db
+      .from("menu_items")
+      .delete()
+      .eq("restaurant_id", rid)
+      .not("id", "in", `(${keepIds.map((id) => `"${id}"`).join(",")})`)
+      .select("id");
+    if (de) throw new Error(`menu_items cleanup (${d.restaurant.slug}): ${de.message}`);
+    staleRemoved = removed?.length ?? 0;
+  }
+
+  console.log(`✓ ${d.restaurant.name}: ${d.categories.length} categories, ${items.length} items${staleRemoved ? ` (removed ${staleRemoved} stale)` : ""}`);
 }
 
 console.log(`Done. Seeded ${DEMO.length} demo restaurants (+ French House #1 = ${DEMO.length + 1} total).`);

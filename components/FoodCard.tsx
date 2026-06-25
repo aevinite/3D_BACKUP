@@ -215,6 +215,10 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId }:
             loading="lazy"
             decoding="async"
             onLoad={() => setImgLoaded(true)}
+            // If the photo URL ever fails (dead host/404), stop the shimmer and
+            // settle the card instead of leaving it pulsing forever — that
+            // endless "loading" shimmer is what reads as a blank card.
+            onError={() => setImgLoaded(true)}
           />
           {/* Show a little "4D" cube badge only if this dish has a 3D model
               (and the restaurant hasn't switched the 3D feature off). */}
