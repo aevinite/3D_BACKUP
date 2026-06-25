@@ -29,6 +29,74 @@ backend (RPCs/endpoints, not the UI), keep features cleanly separable, and avoid
 hard-wiring single-restaurant assumptions deeper than necessary. Nothing multi-tenant
 is to be built until the owner says so.
 
+> **STATUS 2026-06-25: APPROVED & ACTIVE — see the SaaS section directly below.** The
+> owner approved this pivot. Build still starts ONLY on the owner's explicit "go".
+
+## SaaS multi-tenant build — APPROVED 2026-06-25 (plan: `docs/SAAS-ARCHITECTURE-PLAN.html`)
+
+Converting this single-restaurant app into a multi-tenant SaaS (many restaurants, ONE
+backend). Full visual plan: `docs/SAAS-ARCHITECTURE-PLAN.html`. **Do NOT write feature
+code until the owner explicitly says "go."** Agreed core decisions:
+
+- **One shared database, POOL model.** Every tenant-scoped row carries a `restaurant_id`;
+  Row-Level Security enforces isolation AT THE DB LEVEL — never rely on app-code filtering
+  alone. NO database-per-restaurant. (plan §2)
+- **Build order (each phase = its own plan):** `0` Tenancy core (keystone) → `1` Guest
+  tenant resolution → `2` Per-restaurant features + white-label → `3` Roles & permissions
+  → `4` Owner panel (the new 5th panel) → `5` Admin super-panel. Phase 0 first; everything
+  depends on it.
+- **LIVE-SITE SAFETY (non-negotiable):** every schema change is ADDITIVE — add
+  `restaurant_id` defaulting to the existing restaurant (#1), backfill, THEN enforce
+  NOT NULL / RLS. Verify the live menu still works at each step. No big-bang rewrite;
+  Phase 0 on one careful branch.
+- **Scale discipline baked in from day one (all cheap, do them now):** use Supabase's
+  POOLED connection, never a direct one (this is what prevents the "too many connections"
+  peak-load crash — the PetPooja-at-300-tables failure); INDEX every column we filter by;
+  realtime channels keyed PER restaurant (never one global firehose); scoped queries only
+  (`WHERE restaurant_id = …`, never "select all then filter in code"). **Redis / job
+  queues / read replicas are Stage-3 (50–300+ restaurants) — do NOT add them early (YAGNI).**
+- **Dashboards read pre-aggregated summary tables**, never live scans of millions of order
+  rows (owner's all-restaurants profit view). (plan §4-F)
+
+### Routing — path NOW, subdomains LATER (owner, 2026-06-25)
+- Ship **path-based** first: `/r/<restaurant-slug>/t/<table>` (the QR encodes slug + table).
+- Tenant resolution is ONE resolver (e.g. `lib/tenant.ts`). It reads the slug from the PATH
+  today, but is written so it can ALSO read a **subdomain** (`<slug>.app.com`) or a
+  restaurant's **own custom domain** later. KEEP that abstraction in every route so the
+  switch is a config/DNS flip, NOT a rewrite.
+- **When we switch to subdomains:** ONLY on the owner's explicit go — expected trigger is
+  the first real/paying restaurant wanting a branded link, or just before public launch.
+  The switch is small: add a wildcard domain + wildcard TLS on Vercel, point the resolver
+  at the Host header, keep path-based as fallback. Until then, path is the source of truth.
+
+### EVERY new feature is a toggleable, permission-scoped MODULE (owner, 2026-06-25)
+Planned future systems (CONTEXT ONLY — do NOT build until told): **inventory management,
+staff analysis/performance, staff payments/payroll** — and more (this list will grow).
+
+**NEW-FEATURE CHECKLIST — apply to EVERY new feature/section from now on, automatically,
+without being reminded.** When you add anything, wire ALL of these that apply:
+1. **Admin entitlement.** Gate the feature by a per-restaurant entitlement the ADMIN
+   controls (admin decides whether a restaurant is even ALLOWED the feature). New modules
+   default OFF. Extends the existing `settings.features` / `useFeatures()` pattern, scoped
+   per `restaurant_id`.
+2. **Feature on/off is ADMIN-controlled, NOT the owner.** Per owner 2026-06-25 the OWNER
+   panel has NO feature-toggle screen — owners get staff management, manager-power grants,
+   and analytics, not feature flags. (Re-confirm with owner before Phase 2 if in doubt.)
+3. **Permission-scoped, least-privilege.** Gate by role (admin > owner > manager >
+   kitchen/tablet). NO role — admin included — gets blanket "access to everything"; each
+   capability is granted deliberately. If a manager should use it, add a manager-power
+   switch the OWNER can grant/revoke (same on/off pattern as features).
+4. **Backend-first.** Business rules live in RPCs / route handlers scoped by
+   `restaurant_id` (not the UI); queries indexed + scoped; realtime per restaurant.
+5. **Surface in the right panels.** For each new feature ask: does ADMIN need an
+   entitlement toggle? does the OWNER panel need a control / a new manager-power switch?
+   does the operational panel (manager/kitchen/tablet) that uses it need UI? Wire every
+   one that applies — this is what keeps the panels in sync as we grow.
+6. **Render nothing when its flag/permission is off** (the existing guest `useFeatures()`
+   habit) — no dead UI for restaurants that don't have the module.
+7. **Great, easy UI/UX.** Every new section gets a clean, beginner-simple interface.
+8. **Register new popups/drawers in the back-button manager** (existing rule, below).
+
 ## Stack at a glance
 
 - Next 16.2.6, App Router, async `params`. React 19.2.4. TS strict.
