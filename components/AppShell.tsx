@@ -45,6 +45,12 @@ function accentVars(accentColor: string): React.CSSProperties {
     base["--accent-dim"] = `rgba(${rgb}, 0.6)`;
     base["--accent-glow"] = `rgba(${rgb}, 0.34)`;
     base["--gold-glow"] = `rgba(${rgb}, 0.42)`;
+    // Per-restaurant ATMOSPHERE: a soft brand-coloured glow at the top + a faint
+    // brand wash over the whole menu, so each restaurant feels distinctly its own
+    // (not just a different accent). Subtle enough that cards/text stay readable.
+    // Only NON-#1 restaurants pass accentColor, so the live French House (#1) is
+    // never washed — it keeps its exact warm theme.
+    base["background"] = `radial-gradient(1200px 620px at 50% -240px, rgba(${rgb}, 0.16), transparent 68%), color-mix(in srgb, ${accentColor} 6%, var(--bg))`;
   }
   return base as React.CSSProperties;
 }
