@@ -118,17 +118,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const p = path.join("/");
 
     if (p === "all") {
-      const [items, categories, filters, settings] = await Promise.all([
+      const [items, categories, filters, settings, restaurant] = await Promise.all([
         sb.from("menu_items").select("*").eq("restaurant_id", rid).order("sort_order"),
         sb.from("categories").select("*").eq("restaurant_id", rid).order("sort_order"),
         sb.from("filters").select("*").eq("restaurant_id", rid).order("sort_order"),
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
+        // The restaurant's own identity, so the printed bill is white-labelled to
+        // THIS restaurant (its name/logo/footer) instead of the French House default.
+        sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
       ]);
       return ok({
         items: must(items),
         categories: must(categories),
         filters: must(filters),
         settings: must(settings) || { id: "site", bubbles_enabled: true, service_mode: false },
+        restaurant: must(restaurant) || null,
       });
     }
 

@@ -1515,10 +1515,25 @@ function printBill(t, sess, os) {
     for (const x of opts) r += `<tr class="ex"><td colspan="2">+ ${esc(x.label)}</td><td class="r">${Math.round(Number(x.price))}</td><td class="r">${Math.round(Number(x.price) * q)}</td></tr>`;
     return r;
   }).join("")).join("");
-  const name = esc(s.restaurant_name || "Little French House");
+  // White-label identity: prefer THIS restaurant's own settings, then its menu
+  // wordmark. The French House logo / phone / "Merci" footer apply ONLY to the
+  // flagship (#1); every other restaurant prints its own name + sign-off.
+  const r = state.data.restaurant || {};
+  const isDefault = r.slug === "french-house" || r.id === "00000000-0000-0000-0000-000000000001";
+  const name = esc(s.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")));
   const addr = esc(s.restaurant_address || "");
-  const phone = esc(s.restaurant_phone || "+91 90999 14418");
+  const phone = esc(s.restaurant_phone || (isDefault ? "+91 90999 14418" : ""));
   const gstin = esc(s.gstin || "");
+  // Per-cuisine sign-off so each bill feels native to its restaurant.
+  const FOOTERS = {
+    "pizza-palace": "Grazie — a presto! 🍕",
+    "sakura-sushi": "Arigato — mata kite ne 🍣",
+    "taco-fiesta": "¡Gracias — vuelve pronto! 🌮",
+    "burger-barn": "Y'all come back now! 🍔",
+    "spice-route": "Dhanyavaad — padharo! 🍛",
+    "green-bowl": "Stay fresh — see you soon! 🥗",
+  };
+  const footer = s.bill_footer || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again");
   // Customer name: orders carry a customer_name (dine-in head / aggregator buyer);
   // use the first order that has one. Blank → the line is hidden, never empty.
   const cust = esc((os.find((o) => (o.customer_name || "").toString().trim()) || {}).customer_name || "");
@@ -1551,9 +1566,9 @@ function printBill(t, sess, os) {
   .g{display:flex;justify-content:space-between;border-top:2px solid #111;margin-top:7px;padding-top:7px;font-weight:700;font-size:14px}
   .foot{text-align:center;color:#555;font-size:10px;margin-top:13px}
 </style>
-<img class="logo" src="https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png" onerror="this.style.display='none'"/>
+${isDefault ? '<img class="logo" src="https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png" onerror="this.style.display=\'none\'"/>' : ""}
 <h2>${name}</h2>
-<div class="sub">${addr ? addr + "<br/>" : ""}Phone ${phone}${gstin ? " · GSTIN " + gstin : ""}</div>
+<div class="sub">${addr ? addr + "<br/>" : ""}${phone ? "Phone " + phone : ""}${phone && gstin ? " · " : ""}${gstin ? "GSTIN " + gstin : ""}</div>
 <div class="dash"></div>
 ${invNo ? `<div class="kv"><span>Invoice</span><b>${invNo}</b></div>` : ""}
 <div class="kv"><span>${billNo !== "" ? "Bill · Table" : "Table"}</span><b>${billNo !== "" ? "#" + billNo + " · " : ""}${tableDisp}</b></div>
@@ -1568,7 +1583,7 @@ ${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}
   <div class="t"><span>SGST ${pct / 2}%</span><span>${inr(half)}</span></div>
   <div class="g"><span>TOTAL</span><span>${inr(m.total)}</span></div>
 </div>
-<div class="foot">Merci — see you again soon 🥐</div>
+<div class="foot">${footer}</div>
 <script>setTimeout(()=>print(),300)<\/script>`);
   w.document.close();
 }
