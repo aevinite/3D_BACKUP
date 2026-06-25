@@ -12,6 +12,19 @@
 
 ---
 
+## ✅ AS BUILT (2026-06-25) — scope narrowed for safety, validated offline
+
+During implementation Phase 0 was **narrowed to pure, provably-safe row-stamping**, with the riskier pieces **moved to Phase 1** (where a 2nd restaurant actually exists and they can be tested end-to-end):
+
+- **Shipped:** `restaurants` table + seed #1; `restaurant_id` (NOT NULL, DEFAULT #1, FK, index) on all **23** tenant tables; `lib/tenant.ts` (`DEFAULT_RESTAURANT_ID` + `resolveRestaurantId()` seam). **Zero behaviour change, zero app-code change.**
+- **Deferred to Phase 1:** per-restaurant **uniqueness** on natural keys (Task 3), per-restaurant **counters** + their 6 caller functions (Task 4), and scoping the guest/staff **RPCs** and **realtime topics**. In Phase 0 only restaurant #1 exists, so global counters / unscoped reads stay correct — leaving them untouched is what makes this risk-free.
+- **Validation (done):** built a **local throwaway Postgres 17** (`scripts/local-db-validate.mjs`) and replayed **all 80 migrations incl. 078 → PASS**. Semantic + behavioural checks pass: seed present; 23 columns/FKs/indexes; an order inserted with no `restaurant_id` auto-stamps #1 **and** still gets its KOT number. Nothing in the cloud touched.
+- **Remaining (the only open Phase 0 step):** apply 078 to the **live** DB — deferred to the very end, owner watching. Full app end-to-end testing needs a PostgREST-backed DB (cloud dev Supabase or local Supabase stack); since Phase 0 changes no app code, that's first exercised in Phase 1.
+
+> Tasks 1–2 below are the shipped work. **Tasks 3–4 are DEFERRED to Phase 1.** Task 6's verifier was realised as `scripts/local-db-validate.mjs` plus the semantic checks above.
+
+---
+
 ## File Structure
 
 - **Create:** `supabase/migrations/078_tenancy_core.sql` — the entire Phase 0 schema change (one idempotent migration).
