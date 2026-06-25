@@ -1,25 +1,51 @@
 // lib/tenant.ts
 // Single source of truth for tenant (restaurant) resolution.
 //
-// Phase 0: only the seeded default restaurant exists, so everything resolves to
-// it and the app behaves exactly as before. Phase 1 replaces the body of
-// resolveRestaurantId() with real slug / subdomain resolution — callers that
-// already route through this function won't need to change.
+// Phase 0 seeded one restaurant (#1) and everything defaulted to it. Phase 1
+// resolves the restaurant from the URL slug (/r/<slug>) via getRestaurantBySlug;
+// later a subdomain / custom domain can resolve through the same place.
+
+import { supabase } from "./supabase";
 
 /** The seeded "restaurant #1" (My Little French House). Must match migration 078. */
 export const DEFAULT_RESTAURANT_ID = "00000000-0000-0000-0000-000000000001";
 
-/** Its URL slug, for Phase 1 path-based routing: /r/<slug>/... */
+/** Its URL slug, for path-based routing: /r/<slug>/... */
 export const DEFAULT_RESTAURANT_SLUG = "french-house";
 
+export interface Restaurant {
+  id: string;
+  slug: string;
+  name: string;
+  active: boolean;
+}
+
+// Per-process cache: slug -> restaurant (or null if unknown). Restaurants change
+// rarely, so caching avoids a DB round-trip on every render. A miss is cached as
+// null too, so unknown slugs don't repeatedly hit the DB.
+const bySlug = new Map<string, Restaurant | null>();
+
 /**
- * Resolve the active restaurant id for the current request/context.
- *
- * Phase 0: always the default restaurant.
- * Phase 1: will read the slug from the URL path (/r/<slug>) — and later a
- * subdomain or custom domain — and look up its id. Returning the default here
- * keeps every existing caller behaving identically until Phase 1 wires real
- * resolution in one place.
+ * Resolve a restaurant by its URL slug (anon read on the public `restaurants`
+ * table — migration 078 allows public SELECT). Returns null if the slug is
+ * unknown. Cached per process.
+ */
+export async function getRestaurantBySlug(slug: string): Promise<Restaurant | null> {
+  if (bySlug.has(slug)) return bySlug.get(slug)!;
+  const { data, error } = await supabase
+    .from("restaurants")
+    .select("id, slug, name, active")
+    .eq("slug", slug)
+    .maybeSingle();
+  const r: Restaurant | null =
+    !error && data ? { id: data.id, slug: data.slug, name: data.name, active: !!data.active } : null;
+  bySlug.set(slug, r);
+  return r;
+}
+
+/**
+ * Legacy helper for callers that only have a slug and want an id. Prefer
+ * getRestaurantBySlug() where you need the full row / active check.
  */
 export function resolveRestaurantId(_slug?: string | null): string {
   return DEFAULT_RESTAURANT_ID;

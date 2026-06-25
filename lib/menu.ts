@@ -10,6 +10,7 @@
 
 // Grab the shared database connection we set up in supabase.ts.
 import { supabase } from "./supabase";
+import { DEFAULT_RESTAURANT_ID } from "./tenant";
 
 // The shape of one dish in the app. Every field a menu card / detail page might
 // need lives here. Some fields are optional (marked with "?") because not every
@@ -202,12 +203,15 @@ export async function getOrderStatus(
 
 // All menu items, in the order set by `sort_order`.
 // This is the main "fetch the whole menu from the database" function.
-export async function getMenuItems(): Promise<MenuItem[]> {
+export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<MenuItem[]> {
   // Fetch the dishes AND the real-review aggregates at the same time (parallel
   // requests — no extra waiting). Ratings failing must never hide the menu, so
   // its error is swallowed and dishes just show as unrated.
+  // NOTE: item_ratings is a view that doesn't yet expose restaurant_id; with one
+  // restaurant its slugs are unique so this is correct. When a 2nd restaurant
+  // shares a slug, the view must gain restaurant_id (follow-on) and be filtered.
   const [items, ratings] = await Promise.all([
-    supabase.from("menu_items").select("*").order("sort_order"),
+    supabase.from("menu_items").select("*").eq("restaurant_id", restaurantId).order("sort_order"),
     supabase.from("item_ratings").select("*"),
   ]);
   if (items.error) throw new Error(`Failed to load menu: ${items.error.message}`);
@@ -218,11 +222,13 @@ export async function getMenuItems(): Promise<MenuItem[]> {
 
 // A single item by slug, or null if it doesn't exist.
 // A "slug" is the short URL-friendly name, e.g. "classic-burger".
-export async function getMenuItem(slug: string): Promise<MenuItem | null> {
+export async function getMenuItem(slug: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<MenuItem | null> {
   // Three parallel reads: the dish, its rating aggregate, and its newest
   // real reviews (capped at 20 so a popular dish can't flood the page).
+  // (item_ratings / reviews are still keyed by slug only — correct for one
+  // restaurant; scope by restaurant_id once those gain the column.)
   const [item, agg, revs] = await Promise.all([
-    supabase.from("menu_items").select("*").eq("slug", slug).maybeSingle(),
+    supabase.from("menu_items").select("*").eq("restaurant_id", restaurantId).eq("slug", slug).maybeSingle(),
     supabase.from("item_ratings").select("*").eq("item_slug", slug).maybeSingle(),
     getItemReviews(slug),
   ]);
@@ -261,10 +267,11 @@ export async function submitReview(
 }
 
 // Active categories, in display order. The virtual "All" tab is added by the UI.
-export async function getCategories(): Promise<Category[]> {
+export async function getCategories(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Category[]> {
   const { data, error } = await supabase
     .from("categories")
     .select("*")
+    .eq("restaurant_id", restaurantId)
     .eq("active", true)    // only categories the owner has switched on
     .order("sort_order");
   if (error) throw new Error(`Failed to load categories: ${error.message}`);
@@ -299,11 +306,11 @@ export interface Settings {
 }
 // Reads the single site-wide settings row and returns it with safe defaults,
 // so the app still works even if settings haven't been configured yet.
-export async function getSettings(): Promise<Settings> {
+export async function getSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Settings> {
   const { data, error } = await supabase
     .from("settings")
     .select("*")
-    .eq("id", "site")   // all settings live in one row whose id is "site"
+    .eq("restaurant_id", restaurantId)   // one settings row per restaurant (079)
     .maybeSingle();
   if (error) throw new Error(`Failed to load settings: ${error.message}`);
   // Small helper: turn a value into a number, or null if it's blank/not a number.
