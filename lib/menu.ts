@@ -132,13 +132,14 @@ export interface OrderInput {
 }
 // Guest taps "Call a Waiter" — inserts a row the restaurant sees live in the editor.
 // `async` means this talks to the database and we wait for it to finish.
-export async function callWaiter(tableNumber: string, note?: string): Promise<void> {
+export async function callWaiter(tableNumber: string, note?: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<void> {
   // Go through the GUARDED RPC (not a direct insert): the database function
   // refuses blocked tables, throttles rapid repeats, and caps pile-up. Direct
   // inserts to waiter_calls are no longer allowed (see migration 050).
   const { error } = await supabase.rpc("lfh_call_waiter_table", {
     p_table: tableNumber || null,
     p_note: note || null,
+    p_restaurant_id: restaurantId,
   });
   // Only a real transport/DB failure is an error. A throttled/blocked call comes
   // back ok:false on purpose (anti-spam) — not something to alarm the guest with.
@@ -151,13 +152,14 @@ export type OrderStatus = "received" | "preparing" | "served" | "cancelled";
 // Returns the new order's id. We generate the id on the client so the guest's
 // device can follow ONLY its own order later (the table is insert-only for the
 // public, so we can't read the id back via .select()).
-export async function createOrder(o: OrderInput): Promise<string> {
+export async function createOrder(o: OrderInput, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<string> {
   // Call the server function that prices and stores the order. It returns the
   // new order's id (the SERVER generates it) so the device can poll its status.
   const { data, error } = await supabase.rpc("lfh_place_order_public", {
     p_table: o.tableNumber || "",
     p_items: o.items,
     p_allergies: o.allergies,
+    p_restaurant_id: restaurantId,
   });
   if (error) throw new Error(`Order failed: ${error.message}`);
   // The function answers { ok, order_id } on success, or { ok:false, reason }
@@ -257,10 +259,10 @@ export async function getItemReviews(slug: string): Promise<{ name: string; rati
 // Save (or update) this device's rating for a dish. The server function
 // validates stars/device/dish and upserts, so re-rating never duplicates.
 export async function submitReview(
-  slug: string, deviceId: string, stars: number, name: string, comment: string
+  slug: string, deviceId: string, stars: number, name: string, comment: string, restaurantId: string = DEFAULT_RESTAURANT_ID
 ): Promise<{ ok: boolean; reason?: string }> {
   const { data, error } = await supabase.rpc("lfh_submit_review", {
-    p_slug: slug, p_device: deviceId, p_stars: stars, p_name: name, p_comment: comment,
+    p_slug: slug, p_device: deviceId, p_stars: stars, p_name: name, p_comment: comment, p_restaurant_id: restaurantId,
   });
   if (error) return { ok: false, reason: error.message };
   return (data ?? { ok: false, reason: "no response" }) as { ok: boolean; reason?: string };

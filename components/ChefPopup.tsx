@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 // callWaiter sends a service request; getSettings reads restaurant on/off options.
 import { callWaiter, getSettings } from "@/lib/menu";
+import { useRestaurantId } from "@/lib/restaurant-context";
 // Helpers for checking/cleaning the table number and reading a scanned-QR table.
 import { validateTable, flagTableInput, getScannedTable, setScannedTable } from "@/lib/table";
 // Reads the saved dining session (if the guest is seated at a table).
@@ -16,6 +17,7 @@ import { useBackClose } from "@/lib/backStack";
 // ChefPopup — the little "Need something?" pop-up where a guest picks a request
 // (water, cutlery, the bill, etc.) and it gets sent to the staff for their table.
 export default function ChefPopup() {
+  const restaurantId = useRestaurantId();
   const features = useFeatures(); // which restaurant features are switched on
   // Tracks each piece of what the pop-up needs to remember:
   const [open, setOpen] = useState(false); // is the pop-up showing right now?
@@ -51,13 +53,13 @@ export default function ChefPopup() {
     const handleOpen = () => {
       setOpen(true); prefillScanned(); syncSession();
       // re-read settings on open so a freshly-toggled sessions mode is always respected
-      getSettings().then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
+      getSettings(restaurantId).then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
     };
     // Runs when something asks the pop-up to close: just hide it.
     const handleClose = () => setOpen(false);
 
     // How many tables exist, so we can reject an out-of-range table number.
-    getSettings()
+    getSettings(restaurantId)
       .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); })
       .catch(() => {});
 
@@ -108,7 +110,7 @@ export default function ChefPopup() {
     setSending(true);
     try {
       // Tell the server staff are needed at this table for this reason.
-      await callWaiter(check.value, reason);
+      await callWaiter(check.value, reason, restaurantId);
       // Show a friendly "On our way!" confirmation toast.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
         message: "On our way!",

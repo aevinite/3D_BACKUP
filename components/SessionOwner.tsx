@@ -1,4 +1,5 @@
 "use client";
+import { useRestaurantId } from "@/lib/restaurant-context";
 
 // SessionOwner — runs only on the TABLE OWNER's device when the v2 dining-session
 // system is ON. It quietly polls the owner's own session and, the moment someone
@@ -36,6 +37,7 @@ const SNOOZE_MS = 20000; // "Later" hides the prompt briefly so the owner isn't 
 // the table over and over, and pops up an "approve / deny" card whenever someone
 // new asks to join the host's table.
 export default function SessionOwner() {
+  const restaurantId = useRestaurantId();
   // Tracks each piece of what this component needs:
   const [pending, setPending] = useState<PendingMember[]>([]); // people waiting to be let in
   const [table, setTable] = useState(""); // the host's table number, for the message
@@ -76,7 +78,7 @@ export default function SessionOwner() {
   useEffect(() => {
     let alive = true; // guards against updating state after the component is gone
     // Find out if the session system is on; if so, do an immediate first poll.
-    getSettings()
+    getSettings(restaurantId)
       .then((s) => { if (alive) { enabledRef.current = s.sessionsEnabled; if (s.sessionsEnabled) poll(); } })
       .catch(() => {});
     // Realtime nudges drive instant refetches; this TIGHT 4s timer is the backup so

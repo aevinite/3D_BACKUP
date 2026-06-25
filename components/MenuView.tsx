@@ -183,7 +183,7 @@ export default function MenuView({ restaurantId, logoText, heroTitle, tagline, a
   // Live: when the owner edits the menu (dish/price/sold-out/category) or flips a
   // feature in admin, refetch gently within ~1s. Guests subscribe to the 'menu'
   // topic only — never the staff order firehose.
-  useRealtime({ menu: () => { refreshMenu(); refreshFeatures(restaurantId); } });
+  useRealtime({ menu: () => { refreshMenu(); refreshFeatures(restaurantId); } }, restaurantId);
 
   // The main "load everything" effect — runs once when the page first appears.
   // It fetches the dishes and categories, restores where you last were, and

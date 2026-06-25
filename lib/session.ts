@@ -7,6 +7,9 @@
 import { supabase } from "./supabase";
 // This device's stable anonymous id, so a ban can target the device (not just a phone).
 import { getGuestDeviceId } from "./guestDevice";
+// The restaurant the guest is ordering at — table/phone-based RPCs are scoped to it
+// (default #1 keeps single-restaurant behaviour identical).
+import { DEFAULT_RESTAURANT_ID } from "./tenant";
 
 // ── per-device session token, keyed by table ──────────────────────────────
 // Re-scanning a DIFFERENT table must not reuse the old token, so we store the
@@ -137,14 +140,16 @@ async function rpc(fn: string, args: Record<string, unknown>): Promise<RpcResult
 // Naming each its own function keeps the rest of the app readable.
 
 // Look up a returning customer by phone number.
-export const recognizeCustomer = (phone: string) => rpc("lfh_recognize_customer", { p_phone: phone });
+export const recognizeCustomer = (phone: string, restaurantId: string = DEFAULT_RESTAURANT_ID) =>
+  rpc("lfh_recognize_customer", { p_phone: phone, p_restaurant_id: restaurantId });
 // Pre-check: is this table already held by someone? Drives the head-vs-guest UI
 // branch before we ask the guest for anything.
-export const tableStatus = (table: string) => rpc("lfh_table_status", { p_table: table });
+export const tableStatus = (table: string, restaurantId: string = DEFAULT_RESTAURANT_ID) =>
+  rpc("lfh_table_status", { p_table: table, p_restaurant_id: restaurantId });
 // Join (auto-opens the table for the first scanner). Coords are sent so the
 // server can enforce the geofence itself; pass null when location is bypassed.
-export const joinSession = (table: string, name: string | null, lat: number | null, lng: number | null) =>
-  rpc("lfh_join_session", { p_table: table, p_name: name, p_lat: lat, p_lng: lng, p_device: getGuestDeviceId() });
+export const joinSession = (table: string, name: string | null, lat: number | null, lng: number | null, restaurantId: string = DEFAULT_RESTAURANT_ID) =>
+  rpc("lfh_join_session", { p_table: table, p_name: name, p_lat: lat, p_lng: lng, p_device: getGuestDeviceId(), p_restaurant_id: restaurantId });
 // Is THIS device (or phone) banned? The guest app calls this on load to decide
 // whether to show the full "you're banned" screen instead of the menu (migration 077).
 export const checkBan = () => rpc("lfh_check_ban", { p_device: getGuestDeviceId(), p_phone: null });
@@ -159,8 +164,8 @@ export const getSessionState = (token: string) => rpc("lfh_session_state", { p_t
 export const leaveSession = (token: string) => rpc("lfh_leave_session", { p_token: token });
 // Ask to open/join/access a table (used when a guest can't auto-join, e.g. the
 // table is held and auto-approve is off, so the head must approve them).
-export const requestAccess = (table: string, type: "open" | "join" | "access", name: string | null, phone: string | null) =>
-  rpc("lfh_request", { p_table: table, p_type: type, p_name: name, p_phone: phone });
+export const requestAccess = (table: string, type: "open" | "join" | "access", name: string | null, phone: string | null, restaurantId: string = DEFAULT_RESTAURANT_ID) =>
+  rpc("lfh_request", { p_table: table, p_type: type, p_name: name, p_phone: phone, p_restaurant_id: restaurantId });
 // The table's head approves a pending member (owner-only; proven by ownerToken).
 export const approveMember = (ownerToken: string, memberId: string, name: string | null) =>
   rpc("lfh_approve_member", { p_owner_token: ownerToken, p_member_id: memberId, p_name: name });
@@ -176,7 +181,8 @@ export const setMemberName = (token: string, name: string) =>
 export const setAutoApprove = (ownerToken: string, value: boolean) =>
   rpc("lfh_set_auto_approve", { p_owner_token: ownerToken, p_value: value });
 // Text a one-time code (OTP) to a phone number to confirm it's really theirs.
-export const sendOtp = (phone: string) => rpc("lfh_send_otp", { p_phone: phone });
+export const sendOtp = (phone: string, restaurantId: string = DEFAULT_RESTAURANT_ID) =>
+  rpc("lfh_send_otp", { p_phone: phone, p_restaurant_id: restaurantId });
 // Check the code the guest typed against the one we sent.
 export const verifyOtp = (token: string, phone: string, code: string) =>
   rpc("lfh_verify_otp", { p_token: token, p_phone: phone, p_code: code });

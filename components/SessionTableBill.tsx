@@ -1,4 +1,5 @@
 "use client";
+import { useRestaurantId } from "@/lib/restaurant-context";
 
 // SessionTableBill — the guest's live view of their SHARED table bill when the
 // v2 dining-session system is ON. It mirrors what the editor's session panel
@@ -42,6 +43,7 @@ const STATUS_LABEL: Record<string, string> = { received: "Awaiting accept", prep
 // This component shows the guest a live, read-only summary of everything their
 // table has ordered, plus the running total — and updates it every couple seconds.
 export default function SessionTableBill() {
+  const restaurantId = useRestaurantId();
   // Tracks each piece of what we show on screen:
   const [active, setActive] = useState(false); // sessions on + we hold a valid session token
   const [loaded, setLoaded] = useState(false); // first server fetch is back — until then show a skeleton, NOT the empty "no dishes" message (that flash was the glitch)
@@ -67,7 +69,7 @@ export default function SessionTableBill() {
     (async () => {
       // Ask the server: is the dining-session system even turned on?
       let enabled = false;
-      try { enabled = (await getSettings()).sessionsEnabled; } catch {}
+      try { enabled = (await getSettings(restaurantId)).sessionsEnabled; } catch {}
       // Do we have a saved session on this device?
       const s = getStoredSession();
       if (!alive || !enabled || !s) return; // not in session mode → stay hidden

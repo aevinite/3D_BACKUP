@@ -25,11 +25,15 @@ async function getClient(): Promise<SupabaseClient> {
   return clientPromise;
 }
 
-export function useRealtime(handlers: Handlers) {
+export function useRealtime(handlers: Handlers, restaurantId?: string) {
   // Keep the latest handlers in a ref so the effect subscribes exactly once and
   // never tears down/re-subscribes when the parent re-renders with new closures.
   const ref = useRef(handlers);
   ref.current = handlers;
+  // Restaurant to scope breadcrumbs to (ref so it updates without re-subscribing).
+  // Undefined = no scoping (admin/staff intentionally see everything).
+  const ridRef = useRef(restaurantId);
+  ridRef.current = restaurantId;
 
   useEffect(() => {
     let disposed = false;
@@ -60,7 +64,13 @@ export function useRealtime(handlers: Handlers) {
           .on(
             "postgres_changes" as never,
             { event: "INSERT", schema: "public", table: "realtime_events", filter: "topic=eq." + topic } as never,
-            () => fire(topic)
+            (payload: { new?: Record<string, unknown> }) => {
+              // Per-restaurant scoping: ignore breadcrumbs from other restaurants.
+              const rid = ridRef.current;
+              const evRid = payload?.new?.restaurant_id as string | undefined;
+              if (rid && evRid && evRid !== rid) return;
+              fire(topic);
+            }
           )
           .subscribe()
       );
