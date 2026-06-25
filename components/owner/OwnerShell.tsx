@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 const NAV = [
   { href: "/owner", label: "All restaurants", icon: "fa-store", exact: true },
   { href: "/owner/staff", label: "Staff & powers", icon: "fa-users-gear", exact: false },
+  { href: "/owner/issues", label: "Issues", icon: "fa-triangle-exclamation", exact: false },
   { href: "/owner/report", label: "Earnings report", icon: "fa-file-invoice", exact: false },
 ];
 

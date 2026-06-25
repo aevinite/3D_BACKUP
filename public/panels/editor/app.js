@@ -178,6 +178,39 @@ function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
   });
 }
 
+// Manager (or any staff) raises an operational issue → the owner sees it on their
+// Issues page and the admin sees it as a platform complaint. Mirrors confirmDialog.
+function openIssueModal() {
+  const wrap = document.createElement("div");
+  wrap.className = "confirm-overlay";
+  wrap.innerHTML = `
+    <div class="confirm-box" style="text-align:left;max-width:430px">
+      <div style="font-weight:800;font-size:16px;margin-bottom:4px">🚩 Report an issue</div>
+      <div style="color:var(--muted);font-size:12.5px;margin-bottom:13px">Flag a problem (equipment, stock, staffing…) — the owner sees it on their dashboard.</div>
+      <input id="issSubj" placeholder="Subject — e.g. Fridge not cooling" maxlength="120" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2,var(--bg));color:var(--text);font:inherit;margin-bottom:8px"/>
+      <textarea id="issBody" placeholder="Details (optional)" rows="3" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2,var(--bg));color:var(--text);font:inherit;resize:vertical;margin-bottom:13px"></textarea>
+      <div class="confirm-actions">
+        <button class="btn confirm-cancel">Cancel</button>
+        <button class="btn primary iss-send">Send to owner</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  requestAnimationFrame(() => wrap.classList.add("show"));
+  const close = () => { wrap.classList.remove("show"); setTimeout(() => wrap.remove(), 200); };
+  wrap.querySelector(".confirm-cancel").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  document.addEventListener("keydown", function escI(e) { if (e.key === "Escape") { close(); document.removeEventListener("keydown", escI); } });
+  setTimeout(() => { const f = wrap.querySelector("#issSubj"); if (f) f.focus(); }, 60);
+  wrap.querySelector(".iss-send").onclick = async () => {
+    const subject = wrap.querySelector("#issSubj").value.trim();
+    if (!subject) { toast("Please add a subject", "err"); return; }
+    const body = wrap.querySelector("#issBody").value.trim();
+    const btn = wrap.querySelector(".iss-send"); btn.disabled = true;
+    try { await api("POST", "/issue", { subject, body }); toast("Issue sent to the owner ✓", "ok"); close(); }
+    catch (e) { toast("Couldn't send: " + e.message, "err"); btn.disabled = false; }
+  };
+}
+
 // api: the one helper every server call goes through. Give it the HTTP method
 // ("GET"/"POST"/"PATCH"/"DELETE"), the path (e.g. "/orders"), and optionally a
 // body object. It sends the request to our local server, reads back the JSON,
@@ -4049,6 +4082,7 @@ function startOrderWatch() {
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => setTab(t.dataset.tab))); // top tabs switch views
 document.querySelectorAll(".subtab").forEach((t) => (t.onclick = () => setTab(t.dataset.tab))); // Editor sub-nav: Dishes/Categories/Tags
 $("#newBtn").onclick = newRecord; // the "+ New" button
+{ const _ib = document.getElementById("reportIssueBtn"); if (_ib) _ib.onclick = openIssueModal; } // 🚩 report an issue
 
 // Drag the left sidebar's right edge to resize it (width persists across reloads).
 (function () {

@@ -162,6 +162,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       return ok(must(await sb.from("waiter_calls").select("*").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(100)));
     }
 
+    // Issues this restaurant has raised (newest first, open before resolved) — so the
+    // manager can see what they've reported + its status. Scoped to THIS restaurant.
+    if (p === "issues") {
+      return ok(must(await sb.from("issues").select("*").eq("restaurant_id", rid).order("status", { ascending: true }).order("created_at", { ascending: false }).limit(100)));
+    }
+
     // Platform (Zomato/Swiggy/takeaway) orders + the two operator toggles. Read
     // from the separate aggregator_orders table — dine-in `orders` is untouched.
     if (p === "platform") {
@@ -366,6 +372,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const [a, b, c] = path;
     const body = await readBody(req);
     const dev = deviceIdFrom(req); // which device (this editor screen) is acting
+
+    // ── Raise an issue / complaint ────────────────────────────────────────────
+    // A manager (or any staff) flags an operational problem for THIS restaurant; the
+    // owner sees it on their issues page and the admin sees it as a platform complaint.
+    if (a === "issue") {
+      const subject = String((body as { subject?: string })?.subject || "").trim();
+      if (!subject) return err("Please add a subject.", 400);
+      const ins = await sb.from("issues").insert({
+        restaurant_id: rid,
+        subject,
+        body: String((body as { body?: string })?.body || "").trim(),
+        raised_by: g.user?.name || g.user?.username || "Manager",
+        raised_role: g.user?.role || "manager",
+      });
+      if (ins.error) throw new Error(ins.error.message);
+      return ok({ ok: true });
+    }
 
     // ── Platform (Zomato/Swiggy/takeaway) orders ──────────────────────────────
     // platform/test — drop a random test order in (stands in for the real

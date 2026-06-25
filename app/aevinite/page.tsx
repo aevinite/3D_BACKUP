@@ -25,6 +25,7 @@ export default function AdminOverview() {
   const [maintenance, setMaintenance] = useState(false);
   const [activity, setActivity] = useState<Action[]>([]);
   const [staff, setStaff] = useState<{ name: string | null; username: string; role: string; restaurantName: string | null; last_seen_at: string | null }[]>([]);
+  const [issues, setIssues] = useState<{ id: string; restaurantName: string; subject: string; status: string; raised_by: string | null; created_at: string }[]>([]);
 
   const load = useCallback(() => {
     fetch("/api/admin/restaurants", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) { setRests(j.restaurants || []); setOwners(j.owners || []); } }).catch(() => {});
@@ -33,6 +34,7 @@ export default function AdminOverview() {
     fetch("/api/admin/overview", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setMaintenance(!!j.maintenance); }).catch(() => {});
     fetch("/api/admin/oplog?limit=18", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setActivity(j.actions || []); }).catch(() => {});
     fetch("/api/admin/users", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setStaff(j.users || []); }).catch(() => {});
+    fetch("/api/owner/issues", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setIssues(j.issues || []); }).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
   useLivePoll(load);
@@ -62,10 +64,12 @@ export default function AdminOverview() {
     return { rows: Array.from(byBucket.values()), lines: rev.slice(0, 8).map((r) => ({ key: r.name, name: r.name, color: r.accentColor || FALLBACK })) };
   }, [rev, ts]);
 
+  // Admin = platform oversight, NOT profit (that's the owner's view). Lead with
+  // operational signals: restaurants, owners, open complaints, activity, live tables.
   const KPIS: [string, string | number][] = [
     ["Restaurants", rests.length || "…"],
     ["Owners", totals.ownerCount],
-    ["Revenue · 30d", rev.length ? inr(totals.revenue) : "…"],
+    ["Open issues", issues.filter((i) => i.status === "open").length],
     ["Orders · 30d", rev.length ? totals.orders : "…"],
     ["Open tables now", ov ? totals.openTables : "…"],
   ];
@@ -103,6 +107,25 @@ export default function AdminOverview() {
                 <span style={{ color: "var(--muted)" }}>{u.restaurantName || "—"}</span>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="adm-card" style={{ marginBottom: 8 }}>
+        <div className="adm-ctitle">Complaints &amp; issues <span>· {issues.filter((i) => i.status === "open").length} open across all restaurants</span></div>
+        {issues.filter((i) => i.status === "open").length === 0 ? (
+          <div className="adm-empty" style={{ padding: "6px 0" }}>No open issues right now. 🎉</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {issues.filter((i) => i.status === "open").slice(0, 6).map((i) => (
+              <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 10, background: "color-mix(in srgb, var(--adm-danger, #e5484d) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--adm-danger, #e5484d) 26%, transparent)" }}>
+                <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-danger, #e5484d)" }} aria-hidden="true" />
+                <b style={{ fontSize: 13.5 }}>{i.subject}</b>
+                <span style={{ color: "var(--accent)", fontWeight: 700, fontSize: 12 }}>{i.restaurantName}</span>
+                <span style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11.5 }}>{i.raised_by || "—"} · {new Date(i.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>
+              </div>
+            ))}
+            <Link href="/owner/issues" style={{ fontSize: 12, marginTop: 2, color: "var(--accent)", fontWeight: 700 }}>View all &amp; resolve →</Link>
           </div>
         )}
       </div>
