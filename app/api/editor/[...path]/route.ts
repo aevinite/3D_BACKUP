@@ -30,6 +30,18 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 function ridOf(g: { user: StaffUser | null }): string {
   return g.user?.restaurant_id || DEFAULT_RESTAURANT_ID;
 }
+// Whether the acting staff may perform an owner-gated MANAGER action. The admin
+// super-user (g.user===null) and the OWNER always may; a plain manager only if the
+// owner switched that capability flag ON for this restaurant (mig 091 + the owner's
+// "Staff & powers" page). Enforces give_discounts / void_bills / edit_menu /
+// view_dashboard server-side so hiding a button is never the only guard.
+async function managerCan(g: { user: StaffUser | null }, rid: string, flag: string): Promise<boolean> {
+  const u = g.user;
+  if (!u || u.role === "owner") return true;
+  const r = (await sb.from("restaurants").select("manager_permissions").eq("id", rid).maybeSingle()).data as { manager_permissions?: Record<string, boolean> } | null;
+  return !!r?.manager_permissions?.[flag];
+}
+const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
 
 const nowIso = () => new Date().toISOString();
 // Mark an order as EDITED after it was placed → drives the persistent "✎ Edited"
@@ -165,6 +177,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // Day-close "Z report": the business-day totals, computed SERVER-SIDE from the DB
     // (discount BEFORE tax, same as billMath). Dine-in + platform + invoices/voids.
     if (p === "zreport") {
+      if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
       const since = businessDayStartIso();
       const [ordQ, invQ, voidQ, platQ, setQ] = await Promise.all([
         sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status").eq("restaurant_id", rid).gte("created_at", since),
@@ -238,6 +251,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     if (p === "stats") {
+      if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
       // Range: today | 30d | year. Buckets the revenue series by hour / day / month.
       const range = new URL(req.url).searchParams.get("range") || "30d";
       const now = new Date();
@@ -419,6 +433,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // orders/:id/discount | accept | serve-all | item
     if (a === "orders" && c === "discount") {
+      if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
       if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
       const cur = must(await sb.from("orders").select("total").eq("id", b).single());
       const raw = Number(body && body.amount);
@@ -542,6 +557,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
     // sessions/:id/void-invoice — VOID it (reopen the bill for edits; number kept in record).
     if (a === "sessions" && c === "void-invoice") {
+      if (!(await managerCan(g, rid, "void_bills"))) return permDenied("void bills");
       const { data, error } = await sb.rpc("lfh_void_invoice", { p_session: b, p_reason: (body && body.reason) || null });
       if (error) throw new Error(error.message);
       await logAction("editor", "invoice_void", { detail: `session ${b}` + ((body && body.reason) ? ` · ${body.reason}` : ""), device_id: dev });
@@ -740,6 +756,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (path.length === 1) {
       const t = TABLES[a];
       if (!t) return err("unknown kind", 404);
+      if ((a === "items" || a === "categories" || a === "filters") && !(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the menu");
       if (a === "settings" && body && typeof body === "object") {
         // settings is one row per restaurant (UNIQUE restaurant_id); matched by
         // restaurant_id at the upsert below — don't force the legacy id='site'
@@ -889,6 +906,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     if (a && id) {
       const t = TABLES[a];
       if (!t) return err("unknown kind", 404);
+      if ((a === "items" || a === "categories" || a === "filters") && !(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the menu");
       // slug is unique only PER restaurant now (categories/filters), so a delete by
       // key MUST also pin the restaurant or it would wipe that slug everywhere.
       must(await sb.from(t.name).delete().eq(t.key, id).eq("restaurant_id", rid));
