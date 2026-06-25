@@ -15,25 +15,22 @@ const NAV = [
 
 export default function OwnerShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
-  const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [skin, setSkin] = useState<"light" | "dark">("light");
 
-  // Match the toggle icon to whatever theme the boot script already applied.
+  // Aevidine panel skin: light = Apple frosted glass (default), dark = Neon. Scoped
+  // to this panel via data-skin (shared with the admin shell) — guest menu untouched.
   useEffect(() => {
-    const cur = (document.documentElement.getAttribute("data-theme") as "light" | "dark") || "dark";
-    setTheme(cur);
+    try { const s = localStorage.getItem("aevidine_skin"); if (s === "dark" || s === "light") setSkin(s); } catch {}
   }, []);
 
-  const toggleTheme = () => {
-    const next = theme === "dark" ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", next);
-    try { localStorage.setItem("lfh_theme", next); } catch {}
-    setTheme(next);
+  const toggleSkin = () => {
+    setSkin((cur) => { const next = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("aevidine_skin", next); } catch {} return next; });
   };
 
   const isActive = (n: (typeof NAV)[number]) => (n.exact ? path === n.href : path.startsWith(n.href));
 
   return (
-    <div className="adm">
+    <div className="adm" data-skin={skin}>
       <aside className="adm-side">
         <div className="adm-brand">
           <span className="mark">👑</span>
@@ -59,8 +56,8 @@ export default function OwnerShell({ children }: { children: React.ReactNode }) 
             <span className="dot" /> Owner overview
           </button>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-            <button className="adm-icnbtn" onClick={toggleTheme} title={theme === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">
-              <i className={`fas ${theme === "dark" ? "fa-sun" : "fa-moon"}`} aria-hidden="true" />
+            <button className="adm-icnbtn" onClick={toggleSkin} title={skin === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">
+              <i className={`fas ${skin === "dark" ? "fa-sun" : "fa-moon"}`} aria-hidden="true" />
             </button>
             <a className="adm-icnbtn" href="/api/staff-logout" title="Log out" aria-label="Log out">
               <i className="fas fa-right-from-bracket" aria-hidden="true" />
