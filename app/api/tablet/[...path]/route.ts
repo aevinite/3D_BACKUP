@@ -7,18 +7,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
-import { requireRole } from "@/lib/userAuth";
+import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 // Gate: only a logged-in TABLET (waiter) user (or admin super-user) may touch this.
-async function gate(req: NextRequest): Promise<NextResponse | null> {
+async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | NextResponse> {
   const g = await requireRole(req, "tablet");
-  return g.ok ? null : NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
+  if (!g.ok) return NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
+  return { user: g.user };
+}
+// The logged-in waiter's restaurant (admin super-user → default restaurant #1).
+function ridOf(g: { user: StaffUser | null }): string {
+  return g.user?.restaurant_id || DEFAULT_RESTAURANT_ID;
 }
 
 // Manager-PIN gate for the tablet's sensitive actions (ban, discount, and the
@@ -39,8 +45,8 @@ const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName 
 // hold a tri-state per action (tablet_discount / tablet_mark_paid / tablet_invoice):
 //   'off' → blocked (default; waiter has no access)   'pin' → manager PIN required
 //   'on'  → allowed directly.  Server-enforced so hiding the button isn't the only guard.
-async function tabletPerm(key: string, req: NextRequest, body: any): Promise<PinGate> {
-  const s = await sb.from("settings").select(key).eq("id", "site").maybeSingle();
+async function tabletPerm(key: string, req: NextRequest, body: any, rid: string): Promise<PinGate> {
+  const s = await sb.from("settings").select(key).eq("restaurant_id", rid).maybeSingle();
   const mode = ((s.data as Record<string, string> | null)?.[key]) || "off";
   if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for the tablet — ask a manager.", disabled: true }, { status: 403 }) };
   if (mode === "pin") return managerPinGate(req, body);
@@ -77,7 +83,8 @@ type Ctx = { params: Promise<{ path?: string[] }> };
 
 // ── GET /api/tablet/state — everything the tablet floor needs in one call ─────
 export async function GET(req: NextRequest, ctx: Ctx) {
-  const denied = await gate(req); if (denied) return denied;
+  const g = await gate(req); if (g instanceof NextResponse) return g;
+  const rid = ridOf(g);
   try {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "state") {
@@ -86,14 +93,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // orders, even past the 05:00 IST rollover. (This used to be a day-clipped fetch
       // here, which hid an overnight open table's orders → tablet-vs-manager desync.)
       const [live, settings, sessions, members, calls, dishes, categories, requests] = await Promise.all([
-        liveOrdersAndItems(),
-        sb.from("settings").select("*").eq("id", "site").maybeSingle(),
-        sb.from("sessions").select("*").neq("status", "closed"),
-        sb.from("session_members").select("*").eq("removed", false),
-        sb.from("waiter_calls").select("*").eq("resolved", false),
-        sb.from("menu_items").select("id,title,price,category,tags,veg,options").order("category"),
-        sb.from("categories").select("slug,name,icon,sort_order,active").order("sort_order"),
-        sb.from("requests").select("*").eq("status", "pending").order("created_at"),
+        liveOrdersAndItems(rid),
+        sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("sessions").select("*").neq("status", "closed").eq("restaurant_id", rid),
+        sb.from("session_members").select("*").eq("removed", false).eq("restaurant_id", rid),
+        sb.from("waiter_calls").select("*").eq("resolved", false).eq("restaurant_id", rid),
+        sb.from("menu_items").select("id,title,price,category,tags,veg,options").eq("restaurant_id", rid).order("category"),
+        sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
+        sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid).order("created_at"),
       ]);
       return ok({
         settings: must(settings), sessions: must(sessions), members: must(members),
@@ -109,7 +116,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
 // ── POST: place order / attend call / approve member / open session ──────────
 export async function POST(req: NextRequest, ctx: Ctx) {
-  const denied = await gate(req); if (denied) return denied;
+  const g = await gate(req); if (g instanceof NextResponse) return g;
+  const rid = ridOf(g);
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
@@ -126,7 +134,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // Reject a table that doesn't EXIST (must be 1..table_count). Digits alone let a
       // typo like "9932" create a phantom order floating on a non-existent table — it
       // showed orphaned in the order section and couldn't be cleared. (owner, 2026-06-18)
-      const tcRow = await sb.from("settings").select("table_count").eq("id", "site").maybeSingle();
+      const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
       const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
       const tn = Number(t);
       if (tableCount > 0 && (tn < 1 || tn > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
@@ -135,12 +143,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // (prevents a fat-fingered "Send" from issuing two KOTs / double-charging).
       const sig = JSON.stringify(items.map((i: any) => ({ id: i.id, qty: i.qty, options: i.options })));
       const recent = must(await sb.from("orders").select("items")
-        .eq("table_number", t).gte("created_at", new Date(Date.now() - 8000).toISOString()).limit(5));
+        .eq("table_number", t).eq("restaurant_id", rid).gte("created_at", new Date(Date.now() - 8000).toISOString()).limit(5));
       if (recent.some((o: any) => JSON.stringify((o.items || []).map((i: any) => ({ id: i.id, qty: i.qty, options: i.options }))) === sig)) {
         return err("That order was just sent — check the ticket before re-sending.", 409);
       }
       const { data, error } = await sb.rpc("lfh_staff_place_order", {
         p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
+        p_restaurant_id: rid,
       });
       if (error) throw new Error(error.message);
       // A WAITER placed this on the tablet, so it's already confirmed — skip the
@@ -165,8 +174,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (!["approved", "denied"].includes(status)) return err("invalid status");
       const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).select())[0];
       if (status === "approved" && reqRow && reqRow.type === "open") {
-        const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).neq("status", "closed").limit(1));
-        if (!existing.length) must(await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso() }));
+        const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).eq("restaurant_id", rid).neq("status", "closed").limit(1));
+        if (!existing.length) must(await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }));
       }
       return ok(reqRow || null);
     }
@@ -237,7 +246,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/:id/discount — reduce ONE order's bill (comp/loyalty/fix). Clamped to
     // 0..order total, money-safe. Mirrors the editor endpoint. (owner, 2026-06-17)
     if (a === "orders" && c === "discount") {
-      const g = await tabletPerm("tablet_discount", req, body); if (!g.allow) return g.resp; // off/pin/on per settings
+      const g = await tabletPerm("tablet_discount", req, body, rid); if (!g.allow) return g.resp; // off/pin/on per settings
       const cur = must(await sb.from("orders").select("total").eq("id", b).single());
       const raw = Number(body && body.amount);
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number(cur.total) || 0) : 0;
@@ -255,17 +264,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
       const openSess = (await sb.from("sessions").select("id")
-        .eq("table_number", t).eq("status", "open")
+        .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
         .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
       // A restart needs a manager PIN only when there's an order GOING ON or an
       // UNPAID bill to clear — an empty table can be restarted freely.
-      let peek = sb.from("orders").select("status,payment_status").neq("status", "cancelled").eq("archived", false);
+      let peek = sb.from("orders").select("status,payment_status").neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
       peek = openSess ? peek.eq("session_id", openSess.id) : peek.eq("table_number", t);
       const pending = must(await peek);
       const needsPin = pending.some((o: any) => o.status === "received" || o.status === "preparing" || o.payment_status !== "paid");
       let by = "";
       if (needsPin) { const g = await managerPinGate(req, body); if (!g.allow) return g.resp; by = byNote(g); }
-      let q = sb.from("orders").update({ status: "served", archived: true }).neq("status", "cancelled").eq("archived", false);
+      let q = sb.from("orders").update({ status: "served", archived: true }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
       const rows = must(await q.select());
       // A restart ends the round (fresh round, fresh party) — release the head +
@@ -279,6 +288,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // another table, atomically, via the service-role RPC.
     if (a === "sessions" && c === "shift") {
       const to = String((body && body.to) || "").trim();
+      // lfh_staff_shift_table derives the restaurant from the session itself and
+      // checks the target table within that same restaurant — no rid needed here.
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
       return ok(data);
@@ -450,15 +461,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const to = String((body && body.to) || "").trim();
       if (!/^\d+$/.test(to)) return err("valid target table required");
       // Find (or open) the target table's session, then re-home the order onto it.
-      let target = (must(await sb.from("sessions").select("id").eq("table_number", to).neq("status", "closed").limit(1)))[0];
-      if (!target) target = (must(await sb.from("sessions").insert({ table_number: to, status: "open", opened_by: "waiter", opened_at: nowIso() }).select()))[0];
+      let target = (must(await sb.from("sessions").select("id").eq("table_number", to).eq("restaurant_id", rid).neq("status", "closed").limit(1)))[0];
+      if (!target) target = (must(await sb.from("sessions").insert({ table_number: to, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select()))[0];
       const moved = must(await sb.from("orders").update({ table_number: to, session_id: target.id }).eq("id", b).select());
       await sb.from("order_items").update({ session_id: target.id }).eq("order_id", b);
       // The target now has an order, so make sure it has a bill number (the bill
       // trigger only fires on INSERT, not on this move — assign it if missing).
       const tb = (must(await sb.from("sessions").select("bill_no").eq("id", target.id).limit(1)))[0];
       if (tb && tb.bill_no == null) {
-        try { const { data: bn } = await sb.rpc("lfh_next_counter", { p_key: "bill" }); if (bn != null) await sb.from("sessions").update({ bill_no: bn }).eq("id", target.id).is("bill_no", null); } catch { /* bill stays lazy if the counter isn't callable */ }
+        try { const { data: bn } = await sb.rpc("lfh_next_counter", { p_rid: rid, p_key: "bill" }); if (bn != null) await sb.from("sessions").update({ bill_no: bn }).eq("id", target.id).is("bill_no", null); } catch { /* bill stays lazy if the counter isn't callable */ }
       }
       await logAction("tablet", "order_move", { order_id: b, table_number: to, device_id: dev });
       return ok(moved[0] || null);
@@ -470,15 +481,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "pay") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      const g = await tabletPerm("tablet_mark_paid", req, body); if (!g.allow) return g.resp; // off/pin/on per settings
+      const g = await tabletPerm("tablet_mark_paid", req, body, rid); if (!g.allow) return g.resp; // off/pin/on per settings
       // Settle only the CURRENT party's bill: scope to the table's open session
       // so we never mark a previous party's leftover order paid. Sessions-off
       // mode (no open session) falls back to the table's active orders.
       const openSess = (await sb.from("sessions").select("id")
-        .eq("table_number", t).eq("status", "open")
+        .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
         .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
       let q = sb.from("orders").update({ payment_status: "paid" })
-        .neq("status", "cancelled").neq("payment_status", "paid");
+        .neq("status", "cancelled").neq("payment_status", "paid").eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t).eq("archived", false);
       const rows = must(await q.select());
       await logAction("tablet", "bill_paid", { table_number: t, device_id: dev });
@@ -501,9 +512,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && b === "open") {
       const t = String((body && body.table) || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      const existing = must(await sb.from("sessions").select("id").eq("table_number", t).neq("status", "closed").limit(1));
+      const existing = must(await sb.from("sessions").select("id").eq("table_number", t).eq("restaurant_id", rid).neq("status", "closed").limit(1));
       if (existing.length) return ok(existing[0]);
-      const row = must(await sb.from("sessions").insert({ table_number: t, status: "open", opened_by: "waiter", opened_at: nowIso() }).select());
+      const row = must(await sb.from("sessions").insert({ table_number: t, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select());
       await logAction("tablet", "table_open", { table_number: t, device_id: dev });
       return ok(row[0] || null);
     }
