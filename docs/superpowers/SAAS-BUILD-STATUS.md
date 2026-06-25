@@ -21,8 +21,11 @@ vetted migrations to the live Supabase **with the owner watching** — not befor
 | 1c | Scope RPC settings reads per restaurant | ✅ committed | 085 |
 | 1c | Realtime breadcrumbs carry restaurant_id (`lfh_rt_emit` + platform) | ✅ committed | 086 |
 | — | **DATABASE LAYER COMPLETE** (078–086, all validated on local PG, live untouched) | ✅ | 078–086 |
-| 1d | App side: `/r/<slug>` routing + thread `restaurant_id` through menu/features/settings/realtime + panels + API handlers | ⬜ todo (needs app-testable DB) | — |
-| 1e | Seed a 2nd demo restaurant + full app end-to-end test | ⬜ todo (needs app-testable DB) | — |
+| 1d-guest | `/r/<slug>` routing + restaurant threaded through menu/features/settings/realtime/**ordering** + white-label branding | ✅ done | c64aabf, c825495, da08c94, +mig 087 |
+| 1d-staff | Staff panels (manager/kitchen/tablet/admin) + their API handlers scoped per restaurant | ⬜ todo — needs Phase 3 (RBAC: staff→restaurant) | — |
+| 1e | 7 distinct-cuisine demo restaurants on the sandbox, each verified rendering | ✅ done | 4033654 |
+
+**Guest-side polish / follow-ons (cosmetic or edge, not blocking):** demo dish images use a flaky free image service (loremflickr) — several broken/wrong → swap for curated URLs; `/item` detail page + `item_ratings` view not yet restaurant-routed; a few settings-*display* reads use mount-effect deps that don't re-run on async id resolve (action paths are correct); ban check still global.
 | 2 | Per-restaurant feature flags + white-label theme + fix toggle staleness/merge dup toggle UIs | ⬜ todo | — |
 | 3 | Roles & permissions: owner role, owner-set manager powers, re-lock panels, scope `staff_users.username` per restaurant | ⬜ todo | — |
 | 4 | Owner panel (5th panel) — staff mgmt, manager powers, all-restaurants profit view (see competitor-dashboards research) | ⬜ todo | — |
