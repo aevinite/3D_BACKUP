@@ -10,7 +10,7 @@
 // role only, behind the ADMIN_PASSWORD cookie gate (same as /api/owner/overview).
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { ownerScope } from "@/lib/ownerScope";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +32,8 @@ function windowFor(range: string): { from: string; to: string; bucket: string } 
 const num = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
 
 export async function GET(req: NextRequest) {
-  if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const scope = await ownerScope(req);
+  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const sp = req.nextUrl.searchParams;
   const range = sp.get("range") || "today";
@@ -49,17 +49,26 @@ export async function GET(req: NextRequest) {
       ]);
       if (rev.error) throw rev.error;
       if (ts.error) throw ts.error;
-      const restaurantRevenue = (rev.data ?? []).map((r: Record<string, unknown>) => ({
-        id: r.restaurant_id, slug: r.slug, name: r.name, accentColor: (r.accent_color as string) || "#e3c06f",
-        revenue: num(r.revenue), orders: Number(r.orders) || 0,
-      }));
-      const timeseries = (ts.data ?? []).map((r: Record<string, unknown>) => ({
-        bucket: r.bucket, restaurantId: r.restaurant_id, revenue: num(r.revenue), orders: Number(r.orders) || 0,
-      }));
+      // An owner only ever sees their OWN restaurants; admin sees all. The RPCs sum
+      // across every restaurant, so we filter the tiny pre-summed rows here.
+      const allow = scope.all ? null : new Set(scope.ids);
+      const restaurantRevenue = (rev.data ?? [])
+        .filter((r: Record<string, unknown>) => !allow || allow.has(r.restaurant_id as string))
+        .map((r: Record<string, unknown>) => ({
+          id: r.restaurant_id, slug: r.slug, name: r.name, accentColor: (r.accent_color as string) || "#e3c06f",
+          revenue: num(r.revenue), orders: Number(r.orders) || 0,
+        }));
+      const timeseries = (ts.data ?? [])
+        .filter((r: Record<string, unknown>) => !allow || allow.has(r.restaurant_id as string))
+        .map((r: Record<string, unknown>) => ({
+          bucket: r.bucket, restaurantId: r.restaurant_id, revenue: num(r.revenue), orders: Number(r.orders) || 0,
+        }));
       return NextResponse.json({ scope: "group", range, restaurantRevenue, timeseries });
     }
 
     // Restaurant scope — KPIs + per-dish/category/hourly + this restaurant's trend.
+    // An owner may only drill into a restaurant they actually own.
+    if (!scope.all && !scope.ids.includes(rid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
     const [meta, ts, dishes, cats, hourly, openT] = await Promise.all([
       sb.from("restaurants").select("id, slug, name, accent_color, hero_title").eq("id", rid).maybeSingle(),
       sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: bucket }),

@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { ownerScope } from "@/lib/ownerScope";
 
 export const dynamic = "force-dynamic"; // always fresh — these are live numbers
 
@@ -34,15 +34,16 @@ type OutRow = {
 };
 
 export async function GET(req: NextRequest) {
-  if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const scope = await ownerScope(req);
+  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const { data, error } = await sb.rpc("lfh_owner_overview");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // Numerics arrive as strings over the wire — coerce once here so the client
   // gets clean numbers and the totals add up.
-  const restaurants: OutRow[] = (data ?? []).map((r: Row) => ({
+  const allow = scope.all ? null : new Set(scope.ids);
+  const restaurants: OutRow[] = (data ?? []).filter((r: Row) => !allow || allow.has(r.restaurant_id)).map((r: Row) => ({
     id: r.restaurant_id,
     slug: r.slug,
     name: r.name,
