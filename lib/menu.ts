@@ -244,11 +244,12 @@ export async function getMenuItem(slug: string, restaurantId: string = DEFAULT_R
 
 // The newest real reviews for one dish (capped at 20), reshaped to the
 // { name, rating, text } shape the dish page renders.
-export async function getItemReviews(slug: string): Promise<{ name: string; rating: number; text: string; deviceId?: string }[]> {
+export async function getItemReviews(slug: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<{ name: string; rating: number; text: string; deviceId?: string }[]> {
   const { data, error } = await supabase
     .from("reviews")
     .select("name, stars, comment, device_id, created_at")
     .eq("item_slug", slug)
+    .eq("restaurant_id", restaurantId)
     .order("created_at", { ascending: false })
     .limit(20);
   // Reviews failing to load must never break the dish page — show none instead.

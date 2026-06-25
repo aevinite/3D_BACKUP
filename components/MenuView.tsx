@@ -60,10 +60,13 @@ const DIETS = [
 const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
 
 // This is the menu page, shown at "/menu". It's the main browsing screen.
-export default function MenuView({ restaurantId, logoText, heroTitle, tagline, accentColor }: { restaurantId: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string }) {
+export default function MenuView({ restaurantId, restaurantSlug, logoText, heroTitle, tagline, accentColor }: { restaurantId: string; restaurantSlug?: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string }) {
   // Restaurant #1 keeps its exact current chrome (localized hero, hardcoded
   // wordmark, theme accent); other restaurants get their own brand.
   const isDefault = restaurantId === DEFAULT_RESTAURANT_ID;
+  // Dish links stay inside this restaurant when we're on /r/<slug>/menu; the default
+  // menu passes no slug, so links stay global (/item/...) — unchanged for #1.
+  const itemBase = restaurantSlug ? `/r/${restaurantSlug}` : "";
   const t = useTranslation();   // translated text for the current language
   const lang = useLanguage();   // which language is active right now
   const features = useFeatures(restaurantId); // this restaurant's switched-on features
@@ -600,7 +603,7 @@ export default function MenuView({ restaurantId, logoText, heroTitle, tagline, a
                 {searchResults.map((r) => (
                   <Link
                     key={r.id}
-                    href={`/item/${r.slug}`}
+                    href={`${itemBase}/item/${r.slug}`}
                     className="search-result"
                     onClick={() => setSearchQuery("")}
                   >
@@ -788,7 +791,7 @@ export default function MenuView({ restaurantId, logoText, heroTitle, tagline, a
                   {open && (
                     <div className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}>
                       {g.items.map((item, index) => (
-                        <FoodCard key={item.id} item={item} index={index} viewingCategory={g.slug} restaurantId={restaurantId} />
+                        <FoodCard key={item.id} item={item} index={index} viewingCategory={g.slug} restaurantId={restaurantId} restaurantSlug={restaurantSlug} />
                       ))}
                     </div>
                   )}
@@ -805,7 +808,7 @@ export default function MenuView({ restaurantId, logoText, heroTitle, tagline, a
           >
             {/* One FoodCard tile per dish in the filtered list. */}
             {filteredItems.map((item, index) => (
-              <FoodCard key={item.id} item={item} index={index} viewingCategory={currentCategory} restaurantId={restaurantId} />
+              <FoodCard key={item.id} item={item} index={index} viewingCategory={currentCategory} restaurantId={restaurantId} restaurantSlug={restaurantSlug} />
             ))}
           </div>
         )}

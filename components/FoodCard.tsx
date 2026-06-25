@@ -66,11 +66,14 @@ const writeCart = (cart: CartItem[]) => {
 // One dish "card" in the menu grid: the photo, name, price, veg badge, and the
 // add/customise button. `index` is its position (used to stagger the fade-in);
 // `viewingCategory` is the current filter, remembered in the link.
-export default function FoodCard({ item, index, viewingCategory, restaurantId }: { item: FoodItem; index: number; viewingCategory?: string; restaurantId?: string }) {
+export default function FoodCard({ item, index, viewingCategory, restaurantId, restaurantSlug }: { item: FoodItem; index: number; viewingCategory?: string; restaurantId?: string; restaurantSlug?: string }) {
   // Read THIS restaurant's switches (not the default one's) so a per-restaurant
   // toggle — e.g. turning ratings off for one restaurant — actually shows/hides
   // here. Falls back to the default restaurant when no id is passed.
   const features = useFeatures(restaurantId); // which restaurant features are switched on
+  // Inside a specific restaurant's menu (/r/<slug>/menu) the dish link must stay in
+  // that restaurant (/r/<slug>/item/...). No slug = the default menu → global /item.
+  const base = restaurantSlug ? `/r/${restaurantSlug}` : "";
   // How many of this (plain) dish are in the cart — shows on the +/- counter.
   const [cartQty, setCartQty] = useState(0);
   // The currency to format the price in (e.g. $, €). Loaded on screen.
@@ -195,7 +198,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId }:
   return (
     // The whole card is a link to the dish's detail page. We tack the current
     // category onto the URL (?cat=...) so going back keeps the same filter.
-    <Link href={`/item/${item.slug}${viewingCategory ? `?cat=${viewingCategory}` : ""}`} className="item-card-link">
+    <Link href={`${base}/item/${item.slug}${viewingCategory ? `?cat=${viewingCategory}` : ""}`} className="item-card-link">
       <div
         className={`item-card fade-in ${item.is4d ? "is-4d" : ""} ${soldOut ? "sold-out" : ""}`}
         // Stagger each card's fade-in slightly based on its position.

@@ -61,9 +61,12 @@ interface FoodItem {
 
 // The dish detail component. It receives `slug` (which dish to show) and
 // `fromCat` (which category the guest came from, for prev/next arrows).
-export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: string }) {
+export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug }: { slug: string; fromCat?: string; restaurantId?: string; restaurantSlug?: string }) {
   const t = useTranslation();  // translated text for the current language
-  const features = useFeatures(); // which restaurant features are switched on
+  const features = useFeatures(restaurantId); // THIS restaurant's switched-on features
+  // Links stay inside this restaurant when opened from /r/<slug>/...; on the default
+  // single-restaurant page there's no slug, so links stay global — unchanged for #1.
+  const itemBase = restaurantSlug ? `/r/${restaurantSlug}` : "";
   // All the little pieces of memory this page keeps (current value + setter):
   const [allItems, setAllItems] = useState<FoodItem[]>([]);  // every dish (for related/next/prev)
   const [item, setItem] = useState<FoodItem | null>(null);   // THIS dish (null until found)
@@ -240,7 +243,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
   };
 
   // Go back to the menu.
-  const goToMenu = () => router.push("/menu");
+  const goToMenu = () => router.push(`${itemBase}/menu`);
 
   // Fetch the dishes and find the one matching this page's slug.
   // Re-runs if the slug changes (e.g. navigating to a different dish).
@@ -249,7 +252,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     // previous one resolves; without this flag a slow earlier response could land
     // last and show the WRONG dish (older response clobbering the newer slug).
     let cancelled = false;
-    getMenuItems()
+    getMenuItems(restaurantId)
       .then((items) => {
         if (cancelled) return; // a newer slug's fetch superseded this one
         // Compare ignoring upper/lowercase so "Croissant" and "croissant" match.
@@ -262,7 +265,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
         setItem(found || null);             // this dish (or null if not found)
         // Real reviews load separately (getMenuItems carries only the rating
         // average); a failure here just leaves the list empty.
-        if (found) getItemReviews(found.slug).then((r) => { if (!cancelled) setLocalReviews(r); }).catch(() => {});
+        if (found) getItemReviews(found.slug, restaurantId).then((r) => { if (!cancelled) setLocalReviews(r); }).catch(() => {});
         setLoading(false);                  // done loading
         setTimeout(() => { if (!cancelled) setImageLoaded(true); }, 50); // trigger the photo fade-in
 
@@ -424,7 +427,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
     if (!item) return; // no dish loaded -> nothing to review
     // Server-side save: validates stars/device/dish, upserts on repeat ratings.
     const myDevice = getDeviceId();
-    const res = await submitReviewRpc(item.slug, myDevice, selectedRating, reviewName.trim(), reviewText.trim());
+    const res = await submitReviewRpc(item.slug, myDevice, selectedRating, reviewName.trim(), reviewText.trim(), restaurantId);
     if (!res.ok) {
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't save review", subtitle: "please try again", kicker: "review", variant: "error" } }));
       return;
@@ -468,7 +471,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
         <div className="text-4xl mb-4">⚠️</div>
         <h2 className="text-xl font-bold text-[var(--text)] mb-2">{t.itemNotFound}</h2>
         <p className="text-[var(--muted)] mb-4">{t.itemNotFoundDesc}</p>
-        <Link href="/menu" className="text-[var(--accent)] font-semibold hover:underline">
+        <Link href={`${itemBase}/menu`} className="text-[var(--accent)] font-semibold hover:underline">
           ← {t.backToMenu}
         </Link>
       </div>
@@ -489,7 +492,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
       {/* The floating top bar: a back arrow on the left, the heart on the right. */}
       <div className="nav" style={{ position: 'fixed', top: 0, left: 0, width: '100%', background: 'transparent', backdropFilter: 'none', WebkitBackdropFilter: 'none', borderBottom: 'none', zIndex: 51 }}>
         {/* Back to the menu. */}
-        <Link href="/menu" className="nav-btn" style={{ textDecoration: 'none' }}>
+        <Link href={`${itemBase}/menu`} className="nav-btn" style={{ textDecoration: 'none' }}>
           <i className="fas fa-arrow-left"></i>
         </Link>
         {/* A flexible spacer that pushes the heart to the right edge. */}
@@ -828,7 +831,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
             <div className="related-section" id="related-section">
               {/* One tappable card per suggested dish. */}
               {relatedItems.map((related) => (
-                <Link key={related.slug} href={`/item/${related.slug}`} className="related-card-link" style={{ textDecoration: 'none' }}>
+                <Link key={related.slug} href={`${itemBase}/item/${related.slug}`} className="related-card-link" style={{ textDecoration: 'none' }}>
                   <div className="related-card">
                     <img
                       className="related-img"
@@ -866,7 +869,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
               {/* Left strip: go to the previous dish (only if there is one). */}
               {prev && (
                 <Link
-                  href={`/item/${prev.slug}${catParam}`}
+                  href={`${itemBase}/item/${prev.slug}${catParam}`}
                   className="dish-nav-strip prev"
                   title={prev.title}
                   aria-label={`${t.previous}: ${prev.title}`}
@@ -878,7 +881,7 @@ export default function ItemClient({ slug, fromCat }: { slug: string; fromCat?: 
               {/* Right strip: go to the next dish (only if there is one). */}
               {next && (
                 <Link
-                  href={`/item/${next.slug}${catParam}`}
+                  href={`${itemBase}/item/${next.slug}${catParam}`}
                   className="dish-nav-strip next"
                   title={next.title}
                   aria-label={`${t.next}: ${next.title}`}
