@@ -70,7 +70,7 @@ const normalize = (raw: unknown): CartItem[] => {
 // place the order. It also has a "Previous orders" tab with live + past orders.
 export default function CartPanel() {
   const restaurantId = useRestaurantId();
-  const features = useFeatures(); // which restaurant features are switched on
+  const features = useFeatures(restaurantId); // which restaurant features are switched on
   // Each useState below is a memory box; changing it re-draws the panel:
   const [open, setOpen] = useState(false); // is the panel slid open?
   const [cart, setCart] = useState<CartItem[]>([]); // the current cart lines

@@ -18,7 +18,7 @@ import { useBackClose } from "@/lib/backStack";
 // (water, cutlery, the bill, etc.) and it gets sent to the staff for their table.
 export default function ChefPopup() {
   const restaurantId = useRestaurantId();
-  const features = useFeatures(); // which restaurant features are switched on
+  const features = useFeatures(restaurantId); // which restaurant features are switched on
   // Tracks each piece of what the pop-up needs to remember:
   const [open, setOpen] = useState(false); // is the pop-up showing right now?
   const [tableNumber, setTableNumber] = useState(""); // the table number typed/filled in
