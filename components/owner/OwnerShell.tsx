@@ -43,10 +43,9 @@ export default function OwnerShell({ children }: { children: React.ReactNode }) 
               <i className={`fas ${n.icon}`} aria-hidden="true" /> {n.label}
             </Link>
           ))}
-          {/* Jump back to the single-restaurant control room. */}
-          <Link href="/aevinite">
-            <i className="fas fa-gauge-high" aria-hidden="true" /> Control room
-          </Link>
+          {/* SECURITY: the owner panel deliberately has NO link to the admin control
+              room (/aevinite). Admin is a higher privilege than owner and is gated by
+              the admin password (AUTH_COOKIE) — owners must never see or reach it. */}
         </nav>
         <div className="adm-side-foot">Aevidine · Restaurant OS</div>
       </aside>
