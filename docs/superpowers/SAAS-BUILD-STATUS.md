@@ -1,8 +1,11 @@
 # SaaS Multi-Tenant Build — Live Status
 
 **Branch:** `worktree-feat+saas-multitenant` (isolated git worktree under `.claude/worktrees/`).
-**Live site / `main`:** untouched. Nothing here is deployed yet. Final step is applying the
-vetted migrations to the live Supabase **with the owner watching** — not before.
+**Live site / `main`:** untouched + healthy. **STATUS 2026-06-25: the full build (Phases 0–5) is
+DONE and verified end-to-end on the dev sandbox** (owner login → scoped dashboard, owner staff
+management, manager-permission enforcement, per-restaurant manager panel, guest menus). The only
+remaining step is the LIVE CUTOVER — apply migrations 078–093 to the production Supabase, then
+merge — done **with the owner watching** (runbook below). Not before.
 
 **Design plan:** `docs/SAAS-ARCHITECTURE-PLAN.html` (visual). **Rules/playbook:** `CLAUDE.md` →
 "SaaS multi-tenant build" section. **Phase 0 detail:** `docs/superpowers/plans/2026-06-25-phase0-tenancy-core.md`.
@@ -22,14 +25,25 @@ vetted migrations to the live Supabase **with the owner watching** — not befor
 | 1c | Realtime breadcrumbs carry restaurant_id (`lfh_rt_emit` + platform) | ✅ committed | 086 |
 | — | **DATABASE LAYER COMPLETE** (078–086, all validated on local PG, live untouched) | ✅ | 078–086 |
 | 1d-guest | `/r/<slug>` routing + restaurant threaded through menu/features/settings/realtime/**ordering** + white-label branding | ✅ done | c64aabf, c825495, da08c94, +mig 087 |
-| 1d-staff | Staff panels (manager/kitchen/tablet/admin) + their API handlers scoped per restaurant | ⬜ todo — needs Phase 3 (RBAC: staff→restaurant) | — |
+| 1d-staff | Staff panels (manager/kitchen/tablet) + API handlers scoped per restaurant | ✅ done | 175f82c, dd2b7b9, 89a41b3 |
 | 1e | 7 distinct-cuisine demo restaurants on the sandbox, each verified rendering | ✅ done | 4033654 |
+| 2 | Per-restaurant feature flags + white-label theme + toggle-staleness fix | ✅ done | 4b479e0, b7d2501 |
+| 3 | Roles & permissions: owner role, hierarchy, owner-set manager powers, multi-restaurant login, username per-restaurant | ✅ done | 020cfe5, 45ac971, 092, 093 |
+| 4 | Owner panel — scoped all-restaurants dashboard + staff management + manager-power toggles | ✅ done | d2dd4fc, c72dc80 |
+| 5 | Admin super-panel — restaurants tab, feature entitlements, **owner assign/create** | ✅ done | b7d2501, 0d7ce51 |
+| — | `/item` dish detail restaurant-routed (`/r/<slug>/item/<dish>`) + reviews scoped | ✅ done | 350bba9 |
 
-**Guest-side polish / follow-ons (cosmetic or edge, not blocking):** demo dish images use a flaky free image service (loremflickr) — several broken/wrong → swap for curated URLs; `/item` detail page + `item_ratings` view not yet restaurant-routed; a few settings-*display* reads use mount-effect deps that don't re-run on async id resolve (action paths are correct); ban check still global.
-| 2 | Per-restaurant feature flags + white-label theme + fix toggle staleness/merge dup toggle UIs | ⬜ todo | — |
-| 3 | Roles & permissions: owner role, owner-set manager powers, re-lock panels, scope `staff_users.username` per restaurant | ⬜ todo | — |
-| 4 | Owner panel (5th panel) — staff mgmt, manager powers, all-restaurants profit view (see competitor-dashboards research) | ⬜ todo | — |
-| 5 | Admin super-panel — Owners tab, restaurant search, per-restaurant feature entitlements | ⬜ todo | — |
+**Remaining guest follow-ons (cosmetic/edge, non-blocking):** `item_ratings` average view; per-restaurant stamping of kitchen/tablet/editor operation-log rows (they default to #1 — data isolation is correct, only audit-log attribution is global); guest ban check still global.
+
+### Verified end-to-end on the sandbox (2026-06-25)
+Owner login → 7 owned restaurants + scoped totals; owner created a Pizza Palace manager → that manager's panel returned **Pizza Palace's** menu (not #1's) → staff scoping proven; with `edit_menu` off the manager's dish-create returned **403** → enforcement proven; no-cookie owner call → 401; guest menus for non-#1 restaurants → 200; `tsc` clean; `next build` clean. Demo owner login: name `owner` / pw `owner12345` → `/owner`.
+
+### LIVE CUTOVER runbook (the final, owner-watched step)
+The app code assumes prod has 078–093, so migrate the prod DB FIRST, then merge:
+1. **Apply 078–093 to PRODUCTION** Supabase (additive: `ADD COLUMN … DEFAULT #1`, `CREATE OR REPLACE`, `CREATE INDEX IF NOT EXISTS` — idempotent + non-breaking for #1). From the MAIN repo (its `.env.local` points at prod): for each file in order, `node scripts/apply-migration.mjs supabase/migrations/0XX_*.sql`. (Sandbox used `apply-migration-dev.mjs`; the prod applier targets `NEXT_PUBLIC_SUPABASE_URL` + `SUPABASE_ACCESS_TOKEN`.)
+2. **Verify** the live menu / an order / the panels still work for restaurant #1 (it's the default everywhere — nothing should change for the existing restaurant).
+3. **Merge this branch → `main`** (PR) → Vercel auto-deploys. Production then serves multi-tenant code; #1 behaves exactly as before, and new restaurants/owners get added from `/aevinite`.
+> Until step 1 runs, any branch/PR PREVIEW deploy errors at runtime (it hits prod Supabase, which lacks the columns) — expected, and harmless to the live `main` site.
 
 ---
 
