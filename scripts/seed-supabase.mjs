@@ -29,10 +29,14 @@ function parseEnv(text) {
 }
 
 const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
-const SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL;
-const ANON = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const SERVICE = env.SUPABASE_SERVICE_ROLE_KEY;
-const pat = env.SUPABASE_ACCESS_TOKEN;
+// `--dev` targets the throwaway dev project (SUPABASE_DEV_* in .env.local);
+// default (no flag) targets production. Always pass --dev for the sandbox.
+const DEV = process.argv.includes("--dev");
+const SUPABASE_URL = DEV ? env.SUPABASE_DEV_URL : env.NEXT_PUBLIC_SUPABASE_URL;
+const ANON = DEV ? env.SUPABASE_DEV_ANON_KEY : env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const SERVICE = DEV ? env.SUPABASE_DEV_SERVICE_ROLE_KEY : env.SUPABASE_SERVICE_ROLE_KEY;
+const pat = DEV ? env.SUPABASE_DEV_ACCESS_TOKEN : env.SUPABASE_ACCESS_TOKEN;
+if (DEV) console.log("▶ DEV target:", SUPABASE_URL);
 
 const projectRef = new URL(SUPABASE_URL).hostname.split(".")[0];
 

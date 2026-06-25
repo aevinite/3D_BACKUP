@@ -66,5 +66,34 @@ Details + bootstrap stubs: `scripts/LOCAL-DB-NOTES.md`. (psql:
   cron — needs a per-restaurant loop, a redesign).
 - App-side settings/menu reads (`lib/menu.ts` `getSettings`/`getMenuItems`, `useFeatures`) still
   read globally → scope by the URL-resolved restaurant_id in **Phase 1d** (app routing).
+
+## Dev sandbox (app-side testing)
+
+- Supabase project **`lfh-saas-dev`** (owner's NEW account, org `FRACTIONER1301's Org`, ap-south-1)
+  holds the full schema (078–086) + restaurant #1's 59-item menu — seeded + verified (anon read OK).
+  Creds in `.env.local` as `SUPABASE_DEV_*`. Re-seed any time: `node scripts/seed-supabase.mjs --dev`.
+- Point the app at it by setting `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` /
+  `SUPABASE_SERVICE_ROLE_KEY` to the `SUPABASE_DEV_*` values (the worktree `.env.local` is a throwaway
+  copy — safe to repoint at dev). Production creds stay the real ones in the MAIN repo's `.env.local`.
+
+## Owner direction (2026-06-25)
+
+- The "300 tables" lag is **single-restaurant load** (one busy restaurant, ~300 active tables), NOT
+  cross-tenant mixing → load-test "1 restaurant, 300 concurrent tables, no lag" in the perf pass.
+- Demo (Phase 1e): **SEVEN restaurants** — keep #1 (My Little French House) as-is + SIX more, each a
+  DIFFERENT cuisine (burgers, pizza, café, Indian, sushi, desserts) with its own categories + menu.
+- Revert: #1 data/behaviour intact; migrations additive (default #1); recoverable via git + backup.
+
+## Going to MAIN — the safe cutover sequence (owner OK'd merging main once verified, 2026-06-25)
+
+The app code (once it threads `restaurant_id`) assumes the DB has 078–086, so merging to
+main/production is the FINAL coordinated step, never mid-build:
+1. Verify the CURRENT app runs unchanged against a 078–086-migrated DB (use the sandbox) — proves the
+   migrations are non-breaking for the existing single-restaurant app. (Every RPC signature change
+   defaults to #1, so old 0-arg / fewer-arg call sites still resolve.)
+2. Apply 078–086 to PRODUCTION (additive; `ADD COLUMN … DEFAULT #1` backfills; quick). Verify the live
+   menu / orders / panels still work.
+3. THEN merge the app-side code to main → Vercel deploys → production serves multi-tenant.
+Do 2–3 together, owner watching. **Never merge app code to main before production's DB is migrated.**
 - App end-to-end testing needs a **PostgREST-backed DB** (a free cloud dev Supabase, or local
   Supabase via Docker). Owner to provide/authorize when convenient; not blocking the DB layer.
