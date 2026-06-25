@@ -1,4 +1,5 @@
 "use client";
+import { useRestaurantId } from "@/lib/restaurant-context";
 
 // SessionStatusWidget — a small, DRAGGABLE, collapsible status card that tells a
 // guest they're connected to a table and lets them act on that connection:
@@ -60,6 +61,7 @@ const toast = (message: string, kicker = "table", variant = "success") =>
 // SessionStatusWidget — the small floating card (draggable, collapsible) that tells
 // a guest they're connected to a table and lets them leave or switch tables.
 export default function SessionStatusWidget() {
+  const restaurantId = useRestaurantId();
   // Tracks each piece of what we show and how the card behaves:
   const [enabled, setEnabled] = useState(false); // is the session system turned on?
   const [st, setSt] = useState<SState | null>(null); // the live table info, or null when not connected
@@ -115,7 +117,7 @@ export default function SessionStatusWidget() {
     (async () => {
       // Is the session system even turned on? If not, we'll never show anything.
       let on = false;
-      try { on = (await getSettings()).sessionsEnabled; } catch {}
+      try { on = (await getSettings(restaurantId)).sessionsEnabled; } catch {}
       if (!alive) return;
       setEnabled(on);
       if (!on) return;

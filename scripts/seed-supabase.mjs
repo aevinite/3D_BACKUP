@@ -29,10 +29,14 @@ function parseEnv(text) {
 }
 
 const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
-const SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL;
-const ANON = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const SERVICE = env.SUPABASE_SERVICE_ROLE_KEY;
-const pat = env.SUPABASE_ACCESS_TOKEN;
+// `--dev` targets the throwaway dev project (SUPABASE_DEV_* in .env.local);
+// default (no flag) targets production. Always pass --dev for the sandbox.
+const DEV = process.argv.includes("--dev");
+const SUPABASE_URL = DEV ? env.SUPABASE_DEV_URL : env.NEXT_PUBLIC_SUPABASE_URL;
+const ANON = DEV ? env.SUPABASE_DEV_ANON_KEY : env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const SERVICE = DEV ? env.SUPABASE_DEV_SERVICE_ROLE_KEY : env.SUPABASE_SERVICE_ROLE_KEY;
+const pat = DEV ? env.SUPABASE_DEV_ACCESS_TOKEN : env.SUPABASE_ACCESS_TOKEN;
+if (DEV) console.log("▶ DEV target:", SUPABASE_URL);
 
 const projectRef = new URL(SUPABASE_URL).hostname.split(".")[0];
 
@@ -73,8 +77,14 @@ async function runMigration() {
 }
 
 // --- step 2: map camelCase JSON -> snake_case DB rows, then upsert ---
+
+// All seeded rows belong to restaurant #1 (My Little French House).
+// Must match DEFAULT_RESTAURANT_ID in lib/tenant.ts and the seed in migration 078.
+const DEFAULT_RESTAURANT_ID = "00000000-0000-0000-0000-000000000001";
+
 function toRow(item, index) {
   return {
+    restaurant_id: DEFAULT_RESTAURANT_ID,
     id: item.id,
     slug: item.slug,
     title: item.title,
@@ -108,6 +118,7 @@ function toRow(item, index) {
 // camelCase JSON -> snake_case row for the categories / filters tables.
 function toCategoryRow(c, index) {
   return {
+    restaurant_id: DEFAULT_RESTAURANT_ID,
     slug: c.slug,
     name: c.name,
     icon: c.icon ?? null,
@@ -119,6 +130,7 @@ function toCategoryRow(c, index) {
 
 function toFilterRow(f, index) {
   return {
+    restaurant_id: DEFAULT_RESTAURANT_ID,
     slug: f.slug,
     name: f.name,
     icon: f.icon ?? null,
@@ -170,10 +182,10 @@ async function seed() {
 
   // Categories and filters first (menu_items.category references a category slug).
   if (menu.categories?.length) {
-    await upsertRows(admin, "categories", menu.categories.map(toCategoryRow), "slug");
+    await upsertRows(admin, "categories", menu.categories.map(toCategoryRow), "restaurant_id,slug");
   }
   if (menu.filters?.length) {
-    await upsertRows(admin, "filters", menu.filters.map(toFilterRow), "slug");
+    await upsertRows(admin, "filters", menu.filters.map(toFilterRow), "restaurant_id,slug");
   }
   await upsertRows(admin, "menu_items", menu.items.map(toRow), "id");
 }

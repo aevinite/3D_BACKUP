@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4D Menu → SaaS · Architecture Plan</title>
+<style>
+  :root{
+    --bg:#f6f7fb; --panel:#ffffff; --ink:#161b2e; --soft:#5b6478; --line:#e6e8f0;
+    --accent:#5b46e5; --accent-soft:#eee9ff;
+    --good:#15a05a; --good-soft:#e6f6ec; --good-line:#bfe8cf;
+    --bad:#dc2b35; --bad-soft:#fdecec; --bad-line:#f6c9cc;
+    --warn:#c97a05; --warn-soft:#fdf2dd; --warn-line:#f3dca6;
+    --info:#0a86c4; --info-soft:#e4f4fc; --info-line:#bfe6f5;
+    --radius:14px; --shadow:0 1px 2px rgba(16,24,48,.06),0 8px 24px rgba(16,24,48,.06);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  a{color:var(--accent);text-decoration:none}
+  h1,h2,h3,h4{line-height:1.25;margin:0 0 .4em}
+  h2{font-size:1.6rem;margin-top:.2em}
+  h3{font-size:1.15rem;margin-top:1.6em}
+  p{margin:.5em 0}
+  code{background:#eef0f7;padding:.1em .4em;border-radius:6px;font-size:.86em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .wrap{display:grid;grid-template-columns:250px minmax(0,1fr);gap:42px;
+    max-width:1180px;margin:0 auto;padding:0 26px 120px}
+
+  /* hero */
+  header.hero{background:linear-gradient(135deg,#241b54,#4a37b8 55%,#6a52ff);
+    color:#fff;padding:56px 26px 64px;margin-bottom:38px}
+  header.hero .inner{max-width:1180px;margin:0 auto;padding:0}
+  .kicker{font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;
+    opacity:.8;font-weight:700}
+  header.hero h1{font-size:2.5rem;margin:.18em 0 .25em;font-weight:800;letter-spacing:-.02em}
+  header.hero p{opacity:.92;max-width:760px;font-size:1.06rem}
+  .hero-tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
+  .hero-tags span{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);
+    padding:5px 12px;border-radius:999px;font-size:.82rem;font-weight:600}
+
+  /* TOC */
+  nav.toc{position:sticky;top:18px;align-self:start;font-size:.92rem;max-height:96vh;overflow:auto}
+  nav.toc .t{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--soft);font-weight:700;margin:0 0 10px}
+  nav.toc ol{list-style:none;margin:0;padding:0;counter-reset:s}
+  nav.toc li{counter-increment:s;margin:2px 0}
+  nav.toc a{display:flex;gap:9px;align-items:baseline;color:var(--soft);
+    padding:7px 10px;border-radius:9px;font-weight:600}
+  nav.toc a::before{content:counter(s);font-variant-numeric:tabular-nums;
+    color:var(--accent);font-weight:800;font-size:.8rem;min-width:14px}
+  nav.toc a:hover{background:#fff;color:var(--ink)}
+  nav.toc a.active{background:var(--accent);color:#fff}
+  nav.toc a.active::before{color:#fff}
+
+  /* sections */
+  section{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:28px 30px;margin-bottom:26px;box-shadow:var(--shadow);scroll-margin-top:18px}
+  section>h2{display:flex;align-items:center;gap:12px}
+  .num{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:9px;
+    background:var(--accent);color:#fff;font-size:.95rem;font-weight:800;flex:none}
+  .lead{color:var(--soft);font-size:1.02rem;margin-top:-.2em}
+
+  /* callouts */
+  .call{border-radius:12px;padding:14px 16px;margin:16px 0;border:1px solid;font-size:.96rem}
+  .call b{display:block;margin-bottom:2px}
+  .call.trap{background:var(--bad-soft);border-color:var(--bad-line)}
+  .call.trap b{color:var(--bad)}
+  .call.fix{background:var(--good-soft);border-color:var(--good-line)}
+  .call.fix b{color:var(--good)}
+  .call.note{background:var(--info-soft);border-color:var(--info-line)}
+  .call.note b{color:var(--info)}
+  .call.big{background:var(--accent-soft);border-color:#d8cffb}
+  .call.big b{color:var(--accent)}
+  .biglabel{font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:var(--accent)}
+
+  /* diagram primitives */
+  .fig{background:#fbfbff;border:1px dashed #d7daea;border-radius:12px;padding:20px;margin:18px 0}
+  .figcap{font-size:.82rem;color:var(--soft);margin-top:10px;text-align:center;font-style:italic}
+  .flow{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
+  .flow.col{flex-direction:column}
+  .node{background:#fff;border:1.5px solid var(--line);border-radius:11px;padding:11px 14px;
+    text-align:center;min-width:96px;box-shadow:var(--shadow);font-weight:600;font-size:.9rem}
+  .node small{display:block;font-weight:500;color:var(--soft);font-size:.76rem;margin-top:2px}
+  .node.accent{border-color:var(--accent);background:var(--accent-soft)}
+  .node.good{border-color:var(--good-line);background:var(--good-soft)}
+  .node.bad{border-color:var(--bad-line);background:var(--bad-soft)}
+  .node.dark{background:#241b54;color:#fff;border-color:#241b54}
+  .node.dark small{color:#c9c2ff}
+  .arrow{color:var(--accent);font-size:1.4rem;font-weight:800;line-height:1}
+  .arrow.down{transform:none}
+
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:880px){.g2,.g3,.g4{grid-template-columns:1fr}.wrap{grid-template-columns:1fr}
+    nav.toc{display:none}}
+
+  /* before/after compare */
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+  .panel{border-radius:12px;padding:16px;border:1px solid}
+  .panel.bad{background:var(--bad-soft);border-color:var(--bad-line)}
+  .panel.good{background:var(--good-soft);border-color:var(--good-line)}
+  .panel h4{margin:0 0 8px;font-size:.95rem;display:flex;align-items:center;gap:7px}
+  .panel.bad h4{color:var(--bad)} .panel.good h4{color:var(--good)}
+  .pill{display:inline-block;font-size:.68rem;font-weight:800;letter-spacing:.06em;
+    padding:3px 8px;border-radius:999px;text-transform:uppercase}
+  .pill.bad{background:var(--bad);color:#fff}.pill.good{background:var(--good);color:#fff}
+  @media(max-width:880px){.compare{grid-template-columns:1fr}}
+
+  /* fake table for restaurant_id */
+  table.db{width:100%;border-collapse:collapse;font-size:.86rem;margin-top:6px;background:#fff;border-radius:10px;overflow:hidden}
+  table.db th,table.db td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+  table.db th{background:#f0f1f8;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--soft)}
+  table.db td.key{background:var(--accent-soft);font-weight:800;color:var(--accent)}
+  .r1{box-shadow:inset 4px 0 0 #5b46e5}.r2{box-shadow:inset 4px 0 0 #15a05a}.r3{box-shadow:inset 4px 0 0 #c97a05}
+
+  /* glossary */
+  dl.gloss{margin:8px 0}
+  dl.gloss>div{padding:14px 0;border-top:1px solid var(--line);display:grid;grid-template-columns:170px 1fr;gap:18px}
+  dl.gloss>div:first-child{border-top:0}
+  dl.gloss dt{font-weight:800;color:var(--ink)}
+  dl.gloss dt small{display:block;font-weight:600;color:var(--accent);font-size:.74rem;margin-top:3px}
+  dl.gloss dd{margin:0;color:#2c3346}
+  dl.gloss dd .ana{display:block;margin-top:6px;color:var(--soft);font-style:italic;font-size:.9rem}
+  @media(max-width:880px){dl.gloss>div{grid-template-columns:1fr;gap:4px}}
+
+  /* tree */
+  .tree{display:flex;flex-direction:column;align-items:center;gap:0}
+  .tree .lvl{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;position:relative;padding:14px 0}
+  .tree .conn{width:2px;height:18px;background:var(--line)}
+  .rolebox{border-radius:11px;padding:10px 16px;font-weight:700;text-align:center;border:1.5px solid;min-width:150px;box-shadow:var(--shadow)}
+  .rolebox small{display:block;font-weight:500;font-size:.76rem;margin-top:3px;opacity:.85}
+  .rb-admin{background:#241b54;color:#fff;border-color:#241b54}
+  .rb-owner{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+  .rb-mgr{background:var(--info-soft);border-color:var(--info-line);color:var(--info)}
+  .rb-staff{background:#f1f2f8;border-color:var(--line);color:var(--soft)}
+
+  /* stage timeline */
+  .stages{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .stage{border-radius:12px;border:1px solid var(--line);overflow:hidden;background:#fff}
+  .stage .head{padding:12px 14px;color:#fff;font-weight:800}
+  .stage:nth-child(1) .head{background:var(--good)}
+  .stage:nth-child(2) .head{background:var(--warn)}
+  .stage:nth-child(3) .head{background:var(--bad)}
+  .stage ul{margin:0;padding:14px 14px 16px 30px;font-size:.9rem}
+  .stage li{margin:6px 0}
+  .stage .head small{display:block;font-weight:600;opacity:.9;font-size:.76rem}
+  @media(max-width:880px){.stages{grid-template-columns:1fr}}
+
+  /* phases roadmap */
+  .road{position:relative;margin:8px 0 0;padding-left:30px}
+  .road::before{content:"";position:absolute;left:9px;top:6px;bottom:6px;width:2px;background:var(--line)}
+  .phase{position:relative;margin:0 0 14px;background:#fff;border:1px solid var(--line);
+    border-radius:12px;padding:13px 16px;box-shadow:var(--shadow)}
+  .phase::before{content:attr(data-n);position:absolute;left:-30px;top:14px;width:20px;height:20px;
+    border-radius:50%;background:var(--accent);color:#fff;font-size:.72rem;font-weight:800;
+    display:grid;place-items:center;border:3px solid var(--bg)}
+  .phase.key{border-color:var(--accent);background:var(--accent-soft)}
+  .phase h4{margin:0 0 3px;font-size:1rem}
+  .phase p{margin:0;color:var(--soft);font-size:.9rem}
+  .dep{font-size:.72rem;color:var(--accent);font-weight:700}
+
+  /* panels row */
+  .panels5{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+  .pcard{border:1px solid var(--line);border-radius:11px;padding:13px;text-align:center;background:#fff;box-shadow:var(--shadow)}
+  .pcard .ic{font-size:1.5rem}
+  .pcard b{display:block;margin:6px 0 3px}
+  .pcard small{color:var(--soft);font-size:.78rem;line-height:1.4;display:block}
+  @media(max-width:880px){.panels5{grid-template-columns:1fr 1fr}}
+
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .chip{font-size:.78rem;font-weight:600;padding:4px 10px;border-radius:999px;
+    background:#f1f2f8;border:1px solid var(--line);color:var(--soft)}
+  .chip.on{background:var(--good-soft);border-color:var(--good-line);color:var(--good)}
+
+  .decide{display:grid;grid-template-columns:1fr;gap:10px}
+  .qbox{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:10px;padding:13px 15px;background:#fbfbff}
+  .qbox b{color:var(--accent)}
+  .qbox .rec{font-size:.86rem;color:var(--good);font-weight:700;margin-top:4px}
+
+  .totop{position:fixed;right:22px;bottom:22px;background:var(--accent);color:#fff;
+    width:44px;height:44px;border-radius:50%;display:grid;place-items:center;
+    box-shadow:var(--shadow);font-size:1.2rem;opacity:0;transition:.25s;pointer-events:none}
+  .totop.show{opacity:1;pointer-events:auto}
+  .footnote{color:var(--soft);font-size:.86rem}
+  .whatbig{font-size:.84rem;color:var(--info);font-weight:700;margin-top:8px}
+  .whatbig::before{content:"🏢 What big companies do — "}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="inner">
+    <div class="kicker">My Little French House · 4D Menu</div>
+    <h1>From one restaurant → a multi‑restaurant SaaS</h1>
+    <p>A visual map of how we turn your single‑restaurant app into a platform that can run 7, 70, or 700 restaurants on one backend — fast, cheap, and without the meltdowns that break PetPooja at peak. Plain words, lots of pictures.</p>
+    <div class="hero-tags">
+      <span>One shared backend</span><span>5 panels</span><span>Per‑restaurant features</span>
+      <span>QR‑based routing</span><span>Built to scale in stages</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="toc">
+    <p class="t">On this page</p>
+    <ol>
+      <li><a href="#vision">The vision in one picture</a></li>
+      <li><a href="#db">The one big idea: a shared database</a></li>
+      <li><a href="#glossary">Plain‑English glossary</a></li>
+      <li><a href="#meltdown">Why PetPooja breaks at 300 tables</a></li>
+      <li><a href="#stack">The stack &amp; how it scales</a></li>
+      <li><a href="#routing">Routing &amp; QR codes</a></li>
+      <li><a href="#features">Feature switches &amp; white‑label</a></li>
+      <li><a href="#roles">Roles, panels &amp; owner powers</a></li>
+      <li><a href="#build">The build order (safely)</a></li>
+      <li><a href="#advice">Your AI advice: keep / change</a></li>
+      <li><a href="#decisions">Decisions I need from you</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+  <!-- 1 VISION -->
+  <section id="vision">
+    <h2><span class="num">1</span>The vision in one picture</h2>
+    <p class="lead">One engine. Many restaurants. Each looks and behaves like its own app.</p>
+
+    <div class="fig">
+      <div class="flow col">
+        <div class="node dark">ONE SHARED BACKEND<small>Vercel (app) + Supabase (data)</small></div>
+        <div class="arrow down">↓</div>
+        <div class="flow">
+          <div class="node accent">🍽️ French House<small>own menu · theme · staff · QR</small></div>
+          <div class="node good">🍕 Pizza Place<small>own menu · theme · staff · QR</small></div>
+          <div class="node" style="border-color:#f3dca6;background:#fdf2dd">☕ Café Luna<small>own menu · theme · staff · QR</small></div>
+          <div class="node muted">… up to 300<small>same engine</small></div>
+        </div>
+      </div>
+      <p class="figcap">Same code &amp; database for everyone — but each restaurant only ever sees <b>its own</b> data and its own look.</p>
+    </div>
+
+    <div class="panels5">
+      <div class="pcard"><div class="ic">🛰️</div><b>Admin</b><small>You. Controls owners &amp; what each restaurant is allowed to have.</small></div>
+      <div class="pcard"><div class="ic">👑</div><b>Owner</b><small>Runs their restaurant(s). Sees all their profits on one page.</small></div>
+      <div class="pcard"><div class="ic">📋</div><b>Manager</b><small>Daily ops. Powers the owner chooses to grant.</small></div>
+      <div class="pcard"><div class="ic">🍳</div><b>Kitchen</b><small>Order screen (KDS) — cook &amp; mark ready.</small></div>
+      <div class="pcard"><div class="ic">📱</div><b>Tablet</b><small>Waiter app — take orders, attend calls.</small></div>
+    </div>
+    <p class="footnote" style="margin-top:14px">The <b>Owner</b> panel is the new 5th one. Today you have Admin, Manager (your boss panel), Kitchen and Tablet.</p>
+  </section>
+
+  <!-- 2 SHARED DB -->
+  <section id="db">
+    <h2><span class="num">2</span>The one big idea: a shared database</h2>
+    <p class="lead">This single decision makes everything else cheap and possible. Your instinct (“don’t make a separate database per restaurant”) is exactly right.</p>
+
+    <p>We keep <b>one database</b> with the same tables you already have (menu, orders, settings…). We just add one column to each table — <code>restaurant_id</code> — that stamps every row with “which restaurant does this belong to.” Then a security rule makes sure each restaurant can only ever read its own rows.</p>
+
+    <div class="fig">
+      <table class="db">
+        <tr><th>restaurant_id</th><th>order #</th><th>table</th><th>total</th><th>status</th></tr>
+        <tr class="r1"><td class="key">french-house</td><td>KOT‑12</td><td>4</td><td>₹820</td><td>cooking</td></tr>
+        <tr class="r2"><td class="key">pizza-place</td><td>KOT‑3</td><td>9</td><td>₹540</td><td>ready</td></tr>
+        <tr class="r1"><td class="key">french-house</td><td>KOT‑13</td><td>2</td><td>₹1,240</td><td>new</td></tr>
+        <tr class="r3"><td class="key">cafe-luna</td><td>KOT‑7</td><td>1</td><td>₹260</td><td>served</td></tr>
+      </table>
+      <p class="figcap">🔒 A database‑level filter (Row‑Level Security) guarantees French House <b>cannot</b> see Pizza Place’s rows — even if our app code had a bug.</p>
+    </div>
+
+    <h3>Why not a separate database each? (Pool vs Silo)</h3>
+    <div class="compare">
+      <div class="panel good">
+        <h4>✅ Pool — one DB, rows tagged <span class="pill good">we use this</span></h4>
+        <ul style="margin:6px 0 0;padding-left:18px;font-size:.92rem">
+          <li>Cheapest — one database, one set of updates.</li>
+          <li>“All 300 restaurants’ profit on one page” = <b>one quick query</b>.</li>
+          <li>Add a restaurant = add a row, instant.</li>
+        </ul>
+      </div>
+      <div class="panel bad">
+        <h4>⚠️ Silo — a separate DB per restaurant</h4>
+        <ul style="margin:6px 0 0;padding-left:18px;font-size:.92rem">
+          <li>300 databases to update, back up, monitor — ops nightmare.</li>
+          <li>Owner’s one‑page view = querying 300 databases. Painful.</li>
+          <li>Expensive, slow to add restaurants.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="whatbig">Shopify, Slack, Notion, Atlassian all run the “pool” model (shared tables + a tenant id + row‑level security). Separate databases are reserved for huge enterprise/compliance customers only.</p>
+    <div class="call big"><span class="biglabel">The trade‑off, honestly</span><b style="margin-top:4px">The cost of “pool” is discipline.</b>Because everyone shares tables, a careless query <i>could</i> leak data across restaurants. We prevent that by forcing the filter at the database level (not just in app code). That discipline is the price we pay for the low cost and the easy owner dashboard — and it’s the right price.</div>
+  </section>
+
+  <!-- 3 GLOSSARY -->
+  <section id="glossary">
+    <h2><span class="num">3</span>Plain‑English glossary</h2>
+    <p class="lead">Every scary word you’ve heard, in one or two sentences with an everyday analogy. Read this once and the rest of the page clicks.</p>
+    <dl class="gloss">
+      <div><dt>Database<small>the store of all data</small></dt><dd>An organised store of your data — tables of rows, like giant linked spreadsheets (a menu table, an orders table…).</dd></div>
+      <div><dt>PostgreSQL (“Postgres”)<small>our database engine</small></dt><dd>One of the best free, rock‑solid databases. Great at complex questions, handles JSON, and has built‑in per‑row security. <span class="ana">It’s the engine under the hood of your data.</span></dd></div>
+      <div><dt>MySQL<small>a different engine</small></dt><dd>Another popular SQL database — a bit older and simpler. Postgres is more capable for our needs (especially the per‑row security we rely on), which is why we stay on it.</dd></div>
+      <div><dt>Supabase<small>“Postgres + batteries”</small></dt><dd>A company that hosts your Postgres database <b>and</b> bundles logins (Auth), file storage (your 3D models &amp; photos), instant APIs, and Realtime — all managed, so you run no servers. <span class="ana">You already use it.</span></dd></div>
+      <div><dt>Serverless (Vercel)<small>where your app runs</small></dt><dd>Your app runs as tiny on‑demand copies that Vercel spins up per request and throws away. 300 people scan at once → Vercel runs 300 copies in parallel. <span class="ana">There is no single computer whose CPU hits 100%.</span></dd></div>
+      <div><dt>Connection pool<small>protects the database</small></dt><dd>A database only allows a limited number of live connections. A pooler shares a small set among thousands of requests. <span class="ana">Like a receptionist with 5 phone lines handling 500 callers — nobody gets a busy signal.</span></dd></div>
+      <div><dt>Index<small>makes queries fast</small></dt><dd>A shortcut the database keeps so it can jump straight to the rows you want. <span class="ana">A book’s back‑index vs. reading all 1,000 pages to find “table 42”.</span></dd></div>
+      <div><dt>Polling vs Realtime<small>how screens stay fresh</small></dt><dd><b>Polling</b> = asking “anything new?” every second forever (mostly wasted). <b>Realtime</b> = the database taps you on the shoulder <i>only</i> when something actually changes. <span class="ana">You already moved off polling — good.</span></dd></div>
+      <div><dt>Realtime channel<small>who gets the nudge</small></dt><dd>A live “group” for change‑notifications. <span class="ana">Like a WhatsApp group <b>per restaurant</b>, not one giant group for the whole city.</span></dd></div>
+      <div><dt>Redis<small>a speed cache (later)</small></dt><dd>A lightning‑fast memory store for answers you reuse a lot. <span class="ana">A sticky note for things you’d otherwise recompute constantly. Useful at higher scale — not yet.</span></dd></div>
+      <div><dt>Queue / background job<small>for slow work (later)</small></dt><dd>A waiting line for slow tasks (emailing invoices, exports, Zomato sync) so guests never wait for them. <span class="ana">Drop the task in a tray; a worker does it in the background.</span></dd></div>
+      <div><dt>Read replica<small>for reports (later)</small></dt><dd>A read‑only copy of the database. Heavy reports run on the copy so they don’t slow down live ordering on the main one.</dd></div>
+      <div><dt>Aggregate / summary table<small>fast dashboards</small></dt><dd>A small pre‑added‑up table (e.g. “today’s sales per restaurant”) updated as orders arrive. <span class="ana">The owner dashboard reads 300 tiny rows, not millions of order rows.</span></dd></div>
+    </dl>
+  </section>
+
+  <!-- 4 MELTDOWN -->
+  <section id="meltdown">
+    <h2><span class="num">4</span>Why PetPooja breaks at 300 tables — and how we don’t</h2>
+    <p class="lead">The “all tables full → errors” crash is almost never the screens. It’s 6 classic backend traps. Here’s each one, and our fix.</p>
+
+    <h3>Trap A · One overloaded server</h3>
+    <div class="compare">
+      <div class="panel bad"><h4>✖ The trap</h4>
+        <div class="flow col"><div class="node bad">😵 ONE big server<small>CPU 100% → everything slow</small></div></div>
+        <p style="font-size:.88rem;margin:.6em 0 0">All requests pile onto one machine. At dinner rush it chokes.</p></div>
+      <div class="panel good"><h4>✔ Our way</h4>
+        <div class="flow"><div class="node good">copy</div><div class="node good">copy</div><div class="node good">copy</div><div class="node good">…</div></div>
+        <p style="font-size:.88rem;margin:.6em 0 0">Vercel runs as many copies as needed, in parallel. No single CPU to max out.</p></div>
+    </div>
+
+    <h3>Trap B · Too many database connections (this is the real “300 tables” crash)</h3>
+    <div class="fig">
+      <div class="flow">
+        <div class="node bad">300 app copies<small>each grabbing a DB line</small></div>
+        <div class="arrow">→</div>
+        <div class="node">🧑‍💼 Pooler<small>shares ~10 real lines</small></div>
+        <div class="arrow">→</div>
+        <div class="node dark">🗄️ Database<small>stays calm</small></div>
+      </div>
+      <p class="figcap">Without the pooler, 300 copies open 300 connections, blow the limit, and you get <b>“too many connections”</b> — the exact peak‑hour error. The pooler (built into Supabase) is the fix.</p>
+    </div>
+    <div class="call fix"><b>Our rule</b>Every serverless function uses Supabase’s <b>pooled</b> connection, never a direct one. This single setting prevents the most common peak‑load crash.</div>
+
+    <h3>Trap C · Lazy queries (load a million, use twenty)</h3>
+    <div class="compare">
+      <div class="panel bad"><h4>✖ The trap</h4>
+        <p style="font-size:.9rem;margin:0"><code>SELECT * FROM orders</code> → load <b>1,000,000</b> rows into memory → filter in code → keep 20.</p></div>
+      <div class="panel good"><h4>✔ Our way</h4>
+        <p style="font-size:.9rem;margin:0"><code>… WHERE restaurant_id = X AND table = 42</code> + an <b>index</b> → database returns exactly the <b>20</b> you need.</p></div>
+    </div>
+    <p>We always filter <b>in the database</b>, scope by <code>restaurant_id</code>, and add an index on every column we filter by. Asking for only what you need is rule #1.</p>
+
+    <h3>Trap D · Polling every second</h3>
+    <div class="compare">
+      <div class="panel bad"><h4>✖ Polling</h4>
+        <p style="font-size:.9rem;margin:0">“Anything new?” every 1s × every screen × every restaurant = millions of wasted queries. <span class="pill bad" style="margin-top:6px">worst pattern</span></p></div>
+      <div class="panel good"><h4>✔ Realtime push</h4>
+        <p style="font-size:.9rem;margin:0">DB sends one tiny “changed!” nudge only when it changes — then we fetch just that small bit. <span class="pill good" style="margin-top:6px">you already do this</span></p></div>
+    </div>
+
+    <h3>Trap E · One giant realtime channel for everyone</h3>
+    <div class="compare">
+      <div class="panel bad"><h4>✖ The trap</h4>
+        <p style="font-size:.9rem;margin:0">All 300 restaurants in ONE live group → every kitchen is pinged for every other restaurant’s order. Noise &amp; load explode.</p></div>
+      <div class="panel good"><h4>✔ Our way</h4>
+        <p style="font-size:.9rem;margin:0">One channel <b>per restaurant</b> (keyed by <code>restaurant_id</code>). A kitchen hears only its own restaurant.</p></div>
+    </div>
+
+    <h3>Trap F · Heavy reports during the dinner rush</h3>
+    <div class="fig">
+      <div class="flow">
+        <div class="node bad">Owner opens dashboard<small>“profit, all restaurants”</small></div>
+        <div class="arrow">→</div>
+        <div class="node bad">scan millions of rows<small>during peak service 😱</small></div>
+      </div>
+      <div class="flow" style="margin-top:12px">
+        <div class="node good">orders update a<br><b>summary table</b> as they happen</div>
+        <div class="arrow">→</div>
+        <div class="node good">dashboard reads<br>300 tiny rows ⚡</div>
+      </div>
+      <p class="figcap">We pre‑add‑up the numbers so the owner’s big dashboard never competes with live ordering. (Read replica added later for even heavier reporting.)</p>
+    </div>
+
+    <p class="whatbig">Every serious platform separates <b>live transactions</b> from <b>heavy reporting</b> (often a separate copy/warehouse), uses a connection pooler, indexes everything it filters by, and shards realtime by tenant. None of this is exotic — it’s the standard playbook. We bake the cheap parts in from day one.</p>
+  </section>
+
+  <!-- 5 STACK & SCALE -->
+  <section id="stack">
+    <h2><span class="num">5</span>The stack &amp; how it scales in stages</h2>
+    <p class="lead">Build simple now, but design clean so each upgrade is an <b>addition</b>, not a rewrite. Don’t pre‑build for 300 while you have 7.</p>
+
+    <div class="fig">
+      <div class="flow">
+        <div class="node accent">📱 Guest / Staff<small>browser + QR</small></div>
+        <div class="arrow">→</div>
+        <div class="node dark">▲ Vercel<small>Next.js app + API (serverless)</small></div>
+        <div class="arrow">→</div>
+        <div class="node good">⚡ Supabase<small>Postgres · Auth · Storage · Realtime</small></div>
+      </div>
+      <p class="figcap">Your current stack — and the right one for 0–50 restaurants. The database is the precious shared resource we protect first.</p>
+    </div>
+
+    <div class="stages">
+      <div class="stage"><div class="head">Stage 1 · 0–5 restaurants<small>where you are / the demo</small></div>
+        <ul>
+          <li>Next.js on Vercel + Supabase as‑is</li>
+          <li>Add <code>restaurant_id</code> + indexes</li>
+          <li>Use the <b>connection pooler</b></li>
+          <li>Realtime channel <b>per restaurant</b></li>
+          <li>These are cheap “do‑it‑now” habits</li>
+        </ul></div>
+      <div class="stage"><div class="head">Stage 2 · 5–50<small>growing</small></div>
+        <ul>
+          <li><b>Summary tables</b> for the owner dashboard</li>
+          <li>Basic monitoring (slow‑query alerts)</li>
+          <li>Bump Supabase tier as needed</li>
+          <li>Cache the rarely‑changing menu</li>
+        </ul></div>
+      <div class="stage"><div class="head">Stage 3 · 50–300+<small>scale</small></div>
+        <ul>
+          <li><b>Read replica</b> for heavy reports</li>
+          <li><b>Redis</b> cache for hot reads</li>
+          <li><b>Queue</b> for slow jobs (invoices, exports, Zomato)</li>
+          <li>Only added when measured — not before</li>
+        </ul></div>
+    </div>
+    <div class="call note"><b>The principle (what good teams live by)</b>“Make it work, make it right, make it fast — in that order.” We add Redis / queues / replicas when a real measurement says we need them, not on a hunch. Over‑building early is itself a way startups die.</div>
+  </section>
+
+  <!-- 6 ROUTING -->
+  <section id="routing">
+    <h2><span class="num">6</span>Routing &amp; QR codes — which restaurant am I?</h2>
+    <p class="lead">A guest scans a QR at the table. How does the app know which restaurant and table? Here’s my recommendation.</p>
+
+    <div class="fig">
+      <div class="flow">
+        <div class="node">📷 QR on table</div>
+        <div class="arrow">→</div>
+        <div class="node accent">/r/<b>french-house</b>/t/<b>12</b><small>slug + table in the link</small></div>
+        <div class="arrow">→</div>
+        <div class="node dark">🧭 Resolver<small>slug → restaurant_id</small></div>
+        <div class="arrow">→</div>
+        <div class="node good">🍽️ That restaurant’s<br>menu · theme · table 12</div>
+      </div>
+      <p class="figcap">Start <b>path‑based</b>: the restaurant’s name and table number live right in the QR link. Zero DNS/SSL setup, works today.</p>
+    </div>
+
+    <div class="call fix"><b>The clever bit: one resolver, three address styles</b>We build the “which restaurant?” step as a single function. Today it reads the <b>path</b> (<code>/r/french-house</code>). Later, the very same function can also recognise a <b>subdomain</b> (<code>frenchhouse.app.com</code>) or a restaurant’s <b>own domain</b> (<code>frenchhouse.com</code>) — that becomes a <i>config flip per restaurant</i>, not a rewrite. This is exactly how Vercel &amp; Shopify do it.</div>
+
+    <div class="call note"><b>Trade‑off</b>Path‑based feels a little less “their own brand” than a custom domain. But it’s free, instant, and we keep the upgrade path open — so premium restaurants can get their own domain later as a paid perk.</div>
+  </section>
+
+  <!-- 7 FEATURES -->
+  <section id="features">
+    <h2><span class="num">7</span>Feature switches &amp; white‑label look</h2>
+    <p class="lead">This is where your “turn off ratings for just one restaurant” lives — and why it isn’t working today.</p>
+
+    <h3>Two switches in a row (this clears up admin vs owner)</h3>
+    <div class="fig">
+      <div class="flow">
+        <div class="node dark">🛰️ Admin allows it?<small>your SaaS plan/tier</small></div>
+        <div class="arrow">→</div>
+        <div class="node accent">👑 Owner turns it on?<small>their choice</small></div>
+        <div class="arrow">→</div>
+        <div class="node good">💡 Guest sees the feature<small>only if BOTH say yes</small></div>
+      </div>
+      <p class="figcap">Admin decides what a restaurant is <b>allowed</b> to have; the owner decides what’s <b>switched on</b>. The guest sees it only when both agree.</p>
+    </div>
+
+    <div class="call trap"><b>Why your toggle “doesn’t work” today (my read of the code)</b>The wiring is mostly correct — every feature does check its switch. The two real problems: (1) the guest’s browser <b>remembers the old switches</b> and keeps showing them until a reload; and (2) there are <b>two different toggle screens</b> (your Manager panel’s “Features” tab <i>and</i> the Admin panel) both writing the same place, so it feels random. <i>I’ll confirm this live before fixing.</i></div>
+    <div class="call fix"><b>The fix</b>Make switches <b>per‑restaurant</b>, refresh the guest the instant a switch changes (no stale memory), and keep <b>one</b> toggle screen as the source of truth.</div>
+
+    <h3>White‑label: themeable, not hand‑built per restaurant</h3>
+    <p>Each restaurant stores its <b>brand colour, logo, font, name, hero image</b> as data on its row. The guest app paints itself from those. A “template” choice can handle bigger layout differences later.</p>
+    <div class="call note"><b>Trade‑off</b>A themeable single app gives genuinely distinct‑looking restaurants <b>cheaply and at scale</b>. Fully hand‑built separate frontends per restaurant is an agency model — expensive and doesn’t scale to 300 — so we keep that for special cases only.</div>
+  </section>
+
+  <!-- 8 ROLES -->
+  <section id="roles">
+    <h2><span class="num">8</span>Roles, panels &amp; owner‑controlled manager powers</h2>
+    <p class="lead">Good news: you already have real per‑person logins. We add the <b>Owner</b> role and a small powers layer on top.</p>
+
+    <div class="fig">
+      <div class="tree">
+        <div class="lvl"><div class="rolebox rb-admin">🛰️ Admin (You)<small>above all owners · sets entitlements</small></div></div>
+        <div class="conn"></div>
+        <div class="lvl"><div class="rolebox rb-owner">👑 Owner<small>runs the restaurant · grants manager powers</small></div></div>
+        <div class="conn"></div>
+        <div class="lvl"><div class="rolebox rb-mgr">📋 Manager<small>powers the owner allows</small></div></div>
+        <div class="conn"></div>
+        <div class="lvl">
+          <div class="rolebox rb-staff">🍳 Kitchen</div>
+          <div class="rolebox rb-staff">📱 Tablet</div>
+        </div>
+      </div>
+      <p class="figcap">Owner can always assign/remove anyone below. A manager can only do what the owner switches on:</p>
+      <div class="chips" style="justify-content:center">
+        <span class="chip on">✓ Add/remove kitchen &amp; tablet staff</span>
+        <span class="chip on">✓ Add/edit dishes</span>
+        <span class="chip">Give discounts</span>
+        <span class="chip">View the dashboard</span>
+        <span class="chip">Void bills</span>
+      </div>
+      <p class="figcap">Each restaurant gets these manager‑power switches — same simple on/off pattern you already use for features. The owner flips them.</p>
+    </div>
+    <div class="call note"><b>The Owner panel (your new 5th panel)</b>One place to: manage staff, set those manager powers, toggle the restaurant’s features, and — the headline — see <b>all their restaurants’ profit &amp; key numbers on one page</b> (powered by the fast summary table from §4‑F).</div>
+  </section>
+
+  <!-- 9 BUILD -->
+  <section id="build">
+    <h2><span class="num">9</span>The build order — and how we stay safe</h2>
+    <p class="lead">Six steps in dependency order. Each becomes its own small plan. Step 0 is the keystone everything else needs.</p>
+
+    <div class="road">
+      <div class="phase key" data-n="0"><h4>Tenancy core · the keystone</h4>
+        <p>Add the restaurants table + <code>restaurant_id</code> everywhere, per‑restaurant settings &amp; ticket counters, the “which restaurant?” resolver, and safely move your current live restaurant in as “restaurant #1”.</p></div>
+      <div class="phase" data-n="1"><h4>Guest tenant resolution</h4>
+        <p>QR/slug → the correct restaurant’s menu, settings &amp; theme. <span class="dep">needs 0</span></p></div>
+      <div class="phase" data-n="2"><h4>Per‑restaurant features + white‑label</h4>
+        <p>Move switches per‑restaurant, fix the stale‑memory toggle bug, merge the two toggle screens, add theming. <span class="dep">needs 0,1</span></p></div>
+      <div class="phase" data-n="3"><h4>Roles &amp; permissions</h4>
+        <p>Add the Owner role, manager‑power switches, re‑lock the panels for public hosting. <span class="dep">needs 0</span></p></div>
+      <div class="phase" data-n="4"><h4>Owner panel (5th panel)</h4>
+        <p>Manage staff, set manager powers, toggle features, and the all‑restaurants profit view. <span class="dep">needs 3</span></p></div>
+      <div class="phase" data-n="5"><h4>Admin super‑panel</h4>
+        <p>Owners tab, search restaurants, set each restaurant’s allowed features (entitlements). <span class="dep">needs 0,3</span></p></div>
+    </div>
+
+    <div class="call trap"><b>Biggest risk — said plainly</b>This is a <b>live</b> restaurant. A multi‑tenant change touches every table. So we do every database change <b>additively</b>: add the column defaulting to “restaurant #1”, fill it in, <i>then</i> switch on enforcement — and we check the live menu still works at each step. Never a big‑bang rewrite. Phase 0 especially is one careful branch.</div>
+  </section>
+
+  <!-- 10 ADVICE -->
+  <section id="advice">
+    <h2><span class="num">10</span>The AI advice you got — what to keep, what to change</h2>
+    <div class="grid g2">
+      <div class="panel good"><h4>✔ Keep — it’s right</h4>
+        <ul style="margin:6px 0 0;padding-left:18px;font-size:.92rem">
+          <li>For 0–5: stay on <b>Next.js + Supabase</b> (Postgres, Auth, Storage, Realtime). Correct.</li>
+          <li><b>Separate realtime channels</b> per restaurant. Yes — essential.</li>
+          <li>Don’t put everything on one overloaded server. Agreed — serverless already solves this for you.</li>
+          <li>Scope queries (<code>WHERE table = 42</code>, not “filter a million in code”). 100%.</li>
+        </ul></div>
+      <div class="panel bad"><h4>⚠ Adjust / hold</h4>
+        <ul style="margin:6px 0 0;padding-left:18px;font-size:.92rem">
+          <li><b>Redis, queues, read replicas:</b> good ideas — but <b>not yet</b>. They’re Stage‑3 tools. Adding them at 7 restaurants is wasted effort &amp; complexity.</li>
+          <li>“Separate backend”: you don’t need a separate server — Vercel serverless <b>is</b> the scalable backend. The thing to protect is the <b>database</b> (pooler + indexes + summaries).</li>
+          <li>Your <i>real</i> first bottleneck is connection pooling + indexes + dashboard summaries — cheap, do those first.</li>
+        </ul></div>
+    </div>
+  </section>
+
+  <!-- 11 DECISIONS -->
+  <section id="decisions">
+    <h2><span class="num">11</span>Decisions I need from you (next step)</h2>
+    <p class="lead">Read the page, then we lock these <b>one at a time</b>. My recommendation is on each.</p>
+    <div class="decide">
+      <div class="qbox"><b>1 · Build order</b> — Start with Phase 0 (tenancy core), or do you want the Owner panel sooner for the demo?<div class="rec">→ I recommend Phase 0 first — everything else depends on it.</div></div>
+      <div class="qbox"><b>2 · Routing</b> — Path‑based now (<code>/r/french-house/t/12</code>) with the upgrade path to subdomains/custom domains kept open?<div class="rec">→ I recommend yes — free, instant, no lock‑in.</div></div>
+      <div class="qbox"><b>3 · Demo scope</b> — For the 7‑restaurant demo: full real data each, or a few real + the rest light clones?<div class="rec">→ I recommend 1–2 rich + 5 light clones — proves multi‑tenant without 7× the data work.</div></div>
+      <div class="qbox"><b>4 · How much white‑label for the demo</b> — Just colours+logo+name per restaurant, or also different layouts?<div class="rec">→ I recommend colours+logo+name now; layouts later. Distinct look, low cost.</div></div>
+    </div>
+    <p style="margin-top:18px" class="footnote">Nothing here is built yet — this is the map. Tell me what to change, answer the four above when ready, and I’ll turn the agreed version into a step‑by‑step build plan, starting with Phase 0.</p>
+  </section>
+
+  </main>
+</div>
+
+<a href="#" class="totop" id="totop">↑</a>
+<script>
+  // active TOC highlight
+  const links=[...document.querySelectorAll('nav.toc a')];
+  const map=new Map(links.map(a=>[a.getAttribute('href').slice(1),a]));
+  const io=new IntersectionObserver((es)=>{
+    es.forEach(e=>{if(e.isIntersecting){links.forEach(l=>l.classList.remove('active'));
+      const a=map.get(e.target.id); if(a)a.classList.add('active');}});
+  },{rootMargin:'-20% 0px -70% 0px'});
+  document.querySelectorAll('section[id]').forEach(s=>io.observe(s));
+  // back to top
+  const tt=document.getElementById('totop');
+  addEventListener('scroll',()=>{tt.classList.toggle('show',scrollY>600)});
+  tt.addEventListener('click',e=>{e.preventDefault();scrollTo({top:0,behavior:'smooth'})});
+</script>
+</body>
+</html>

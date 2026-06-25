@@ -18,6 +18,8 @@ import GuestChrome from "@/components/GuestChrome";
 // The admin-only floating panel switcher. It renders nothing unless this browser
 // is signed in as staff, so customers never see it.
 import AdminSwitcher from "@/components/AdminSwitcher";
+// Tells the global guest widgets which restaurant the current /r/<slug> URL is for.
+import { RestaurantProvider } from "@/lib/restaurant-context";
 
 // The browser-tab title and the description search engines show.
 export const metadata: Metadata = {
@@ -75,13 +77,18 @@ export default function RootLayout({
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
       </head>
       <body>
-        {/* The current page gets drawn right here. */}
-        {children}
-        {/* Guest-only always-on widgets (cart, dining session, toasts) — rendered
-            only on customer pages, never on the staff panels. */}
-        <GuestChrome />
-        {/* Admin-only floating panel switcher (self-hides for customers). */}
-        <AdminSwitcher />
+        {/* RestaurantProvider derives the active restaurant from the /r/<slug> URL
+            (defaults to restaurant #1 everywhere else) so the global guest widgets
+            below scope their RPCs/settings/realtime to the right restaurant. */}
+        <RestaurantProvider>
+          {/* The current page gets drawn right here. */}
+          {children}
+          {/* Guest-only always-on widgets (cart, dining session, toasts) — rendered
+              only on customer pages, never on the staff panels. */}
+          <GuestChrome />
+          {/* Admin-only floating panel switcher (self-hides for customers). */}
+          <AdminSwitcher />
+        </RestaurantProvider>
       </body>
     </html>
   );

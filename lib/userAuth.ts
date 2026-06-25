@@ -16,7 +16,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sha256hex, safeEqual, AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 
 export const USER_COOKIE = "lfh_user";
-export type Role = "manager" | "tablet" | "kitchen";
+export type Role = "owner" | "manager" | "tablet" | "kitchen";
 
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // cookies are good for 7 days
 const MAX_FAILS = 5;                            // wrong tries before a lockout
@@ -29,7 +29,7 @@ const SECRET = () =>
   process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || process.env.STAFF_PASSWORD || "lfh-dev-secret";
 
 export type StaffUser = {
-  id: string; username: string; role: Role;
+  id: string; username: string; role: Role; restaurant_id: string;
   name: string | null; phone: string | null; active: boolean; pin_hash: string | null;
   token_version: number; can_self_reset: boolean; can_self_set_pin: boolean; profile_confirmed: boolean;
 };
@@ -101,25 +101,38 @@ export async function loginUser(
 ): Promise<{ ok: true; user: StaffUser; cookie: string } | { ok: false; error: string }> {
   const uname = normalizeLoginName(username);
   if (!uname || !password) return { ok: false, error: "Enter your name and password." };
-  const u = (await sb.from("staff_users").select("*").eq("username", uname).eq("active", true).limit(1)).data?.[0];
-  // Same generic message whether the user is missing or the password is wrong —
+  // Username is unique only PER restaurant (mig 091), so the SAME name can exist at
+  // several restaurants. Fetch every active match and pick the one whose PASSWORD
+  // verifies — so the login form needs no restaurant field. (The only ambiguity is
+  // two restaurants sharing BOTH the same name AND password; then the first wins.)
+  const candidates = ((await sb.from("staff_users").select("*").eq("username", uname).eq("active", true)).data || []) as any[];
+  // Same generic message whether the name is missing or the password is wrong —
   // never reveal which names exist.
-  if (!u) return { ok: false, error: "Wrong name or password." };
-  if (u.locked_until && new Date(u.locked_until) > new Date()) {
+  if (!candidates.length) return { ok: false, error: "Wrong name or password." };
+  // Honour a lockout on ANY matching row (don't let a colliding name dodge it).
+  const now = new Date();
+  if (candidates.some((u) => u.locked_until && new Date(u.locked_until) > now)) {
     return { ok: false, error: "Too many tries — wait a minute and try again." };
   }
-  if (!(await verifySecret(String(password), u.password_hash))) {
-    const fc = (u.failed_count || 0) + 1;
-    const patch = fc >= MAX_FAILS
-      ? { failed_count: 0, locked_until: new Date(Date.now() + LOCK_MS).toISOString() }
-      : { failed_count: fc };
-    await sb.from("staff_users").update(patch).eq("id", u.id);
+  let matched: any = null;
+  for (const u of candidates) {
+    if (await verifySecret(String(password), u.password_hash)) { matched = u; break; }
+  }
+  if (!matched) {
+    // Wrong password → bump the fail counter (and lock past the limit) on each match.
+    for (const u of candidates) {
+      const fc = (u.failed_count || 0) + 1;
+      const patch = fc >= MAX_FAILS
+        ? { failed_count: 0, locked_until: new Date(Date.now() + LOCK_MS).toISOString() }
+        : { failed_count: fc };
+      await sb.from("staff_users").update(patch).eq("id", u.id);
+    }
     return { ok: false, error: "Wrong name or password." };
   }
   await sb.from("staff_users")
     .update({ failed_count: 0, locked_until: null, last_seen_at: new Date().toISOString() })
-    .eq("id", u.id);
-  return { ok: true, user: u as StaffUser, cookie: await sign(u) };
+    .eq("id", matched.id);
+  return { ok: true, user: matched as StaffUser, cookie: await sign(matched) };
 }
 
 // Resolve a USER_COOKIE value to its (active) user: verify the HMAC signature
@@ -140,15 +153,26 @@ export async function userFromCookie(value: string | undefined | null): Promise<
   return u as StaffUser;
 }
 
+// Role hierarchy: an OWNER can do anything a manager can, and a MANAGER can also
+// act on the kitchen/tablet panels (oversight). kitchen and tablet are device
+// siblings — neither may use the other's API. The admin super-user bypasses all.
+export function roleSatisfies(have: Role, need: Role): boolean {
+  if (have === need) return true;
+  if (have === "owner") return true;                                      // owner ⊇ everything
+  if (have === "manager") return need === "kitchen" || need === "tablet"; // manager ⊇ kitchen/tablet
+  return false;
+}
+
 // Authoritative gate for a panel's API route handlers: allow if a valid ADMIN
-// cookie is present (super-access) OR a valid user cookie whose role matches.
-// Returns the acting user (null for admin super-access), or false if denied.
+// cookie is present (super-access) OR a valid user cookie whose role SATISFIES the
+// requirement (per the hierarchy above). Returns the acting user (null for admin
+// super-access), or false if denied.
 export async function requireRole(
   req: { cookies: { get(name: string): { value: string } | undefined } },
   role: Role,
 ): Promise<{ ok: true; user: StaffUser | null } | { ok: false }> {
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { ok: true, user: null }; // admin super
   const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
-  if (u && u.role === role) return { ok: true, user: u };
+  if (u && roleSatisfies(u.role, role)) return { ok: true, user: u };
   return { ok: false };
 }

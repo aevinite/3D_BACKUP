@@ -1,4 +1,5 @@
 "use client";
+import { useRestaurantId } from "@/lib/restaurant-context";
 
 // SessionCartSync — makes the pre-order CART shared across everyone in a v2
 // dining session. The cart still lives in localStorage["lfh_cart"], so every
@@ -48,6 +49,7 @@ const readLocal = (): Line[] => {
 // in a dining session. It pulls the server cart down and pushes local changes up,
 // so every other cart component just keeps reading localStorage like normal.
 export default function SessionCartSync() {
+  const restaurantId = useRestaurantId();
   // These refs hold working state that shouldn't trigger re-draws:
   const enabled = useRef<boolean | null>(null);     // sessions_enabled (cached)
   const activeToken = useRef<string | null>(null);  // token while we're an approved member of an open session
@@ -85,7 +87,7 @@ export default function SessionCartSync() {
     const tick = async () => {
       // First time only: cache whether the session system is even turned on.
       if (enabled.current === null) {
-        try { enabled.current = (await getSettings()).sessionsEnabled; } catch { enabled.current = false; }
+        try { enabled.current = (await getSettings(restaurantId)).sessionsEnabled; } catch { enabled.current = false; }
       }
       if (!alive) return;
       // Only act if sessions are on AND we have a saved session.

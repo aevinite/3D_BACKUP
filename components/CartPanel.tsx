@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
+import { useRestaurantId } from "@/lib/restaurant-context";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 // Per-restaurant feature switches: the allergy section can be turned off.
 import { useFeatures } from "@/lib/features";
@@ -68,7 +69,8 @@ const normalize = (raw: unknown): CartItem[] => {
 // the guest change quantities, flag allergies, enter their table number, and
 // place the order. It also has a "Previous orders" tab with live + past orders.
 export default function CartPanel() {
-  const features = useFeatures(); // which restaurant features are switched on
+  const restaurantId = useRestaurantId();
+  const features = useFeatures(restaurantId); // which restaurant features are switched on
   // Each useState below is a memory box; changing it re-draws the panel:
   const [open, setOpen] = useState(false); // is the panel slid open?
   const [cart, setCart] = useState<CartItem[]>([]); // the current cart lines
@@ -154,7 +156,7 @@ export default function CartPanel() {
       })
       .catch(() => {});
     // How many tables exist, so we can reject an out-of-range table number.
-    getSettings()
+    getSettings(restaurantId)
       .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); })
       .catch(() => {});
 
@@ -187,7 +189,7 @@ export default function CartPanel() {
     const handleOpen = () => {
       setOpen(true); loadCart(); loadLive(); setShowHistory(false); prefillScanned(); syncSession();
       // re-read settings on open so a freshly-toggled sessions mode is always respected
-      getSettings().then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
+      getSettings(restaurantId).then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
     };
     // handleShowPrev: open straight to the LIVE-STATUS tab (the live table view
     // with the served-progress bar). Fired when the multi-order tracker is tapped.
@@ -458,7 +460,7 @@ export default function CartPanel() {
         tableNumber: tableTrim,
         items: cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note })),
         allergies,
-      });
+      }, restaurantId);
       // Remember this order on THIS device so the guest can follow its status.
       try {
         const raw = localStorage.getItem("lfh_active_orders");

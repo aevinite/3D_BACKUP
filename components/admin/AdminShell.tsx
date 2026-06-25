@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 
 const NAV = [
   { href: "/aevinite", label: "Overview", icon: "fa-gauge-high", exact: true },
+  { href: "/aevinite/restaurants", label: "Restaurants", icon: "fa-store" },
   { href: "/aevinite/floor", label: "Live floor", icon: "fa-chair" },
   { href: "/aevinite/users", label: "Users & access", icon: "fa-users" },
   { href: "/aevinite/logs", label: "Logs", icon: "fa-scroll" },

@@ -10,6 +10,7 @@
 
 // Grab the shared database connection we set up in supabase.ts.
 import { supabase } from "./supabase";
+import { DEFAULT_RESTAURANT_ID } from "./tenant";
 
 // The shape of one dish in the app. Every field a menu card / detail page might
 // need lives here. Some fields are optional (marked with "?") because not every
@@ -131,13 +132,14 @@ export interface OrderInput {
 }
 // Guest taps "Call a Waiter" — inserts a row the restaurant sees live in the editor.
 // `async` means this talks to the database and we wait for it to finish.
-export async function callWaiter(tableNumber: string, note?: string): Promise<void> {
+export async function callWaiter(tableNumber: string, note?: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<void> {
   // Go through the GUARDED RPC (not a direct insert): the database function
   // refuses blocked tables, throttles rapid repeats, and caps pile-up. Direct
   // inserts to waiter_calls are no longer allowed (see migration 050).
   const { error } = await supabase.rpc("lfh_call_waiter_table", {
     p_table: tableNumber || null,
     p_note: note || null,
+    p_restaurant_id: restaurantId,
   });
   // Only a real transport/DB failure is an error. A throttled/blocked call comes
   // back ok:false on purpose (anti-spam) — not something to alarm the guest with.
@@ -150,13 +152,14 @@ export type OrderStatus = "received" | "preparing" | "served" | "cancelled";
 // Returns the new order's id. We generate the id on the client so the guest's
 // device can follow ONLY its own order later (the table is insert-only for the
 // public, so we can't read the id back via .select()).
-export async function createOrder(o: OrderInput): Promise<string> {
+export async function createOrder(o: OrderInput, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<string> {
   // Call the server function that prices and stores the order. It returns the
   // new order's id (the SERVER generates it) so the device can poll its status.
   const { data, error } = await supabase.rpc("lfh_place_order_public", {
     p_table: o.tableNumber || "",
     p_items: o.items,
     p_allergies: o.allergies,
+    p_restaurant_id: restaurantId,
   });
   if (error) throw new Error(`Order failed: ${error.message}`);
   // The function answers { ok, order_id } on success, or { ok:false, reason }
@@ -202,12 +205,15 @@ export async function getOrderStatus(
 
 // All menu items, in the order set by `sort_order`.
 // This is the main "fetch the whole menu from the database" function.
-export async function getMenuItems(): Promise<MenuItem[]> {
+export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<MenuItem[]> {
   // Fetch the dishes AND the real-review aggregates at the same time (parallel
   // requests — no extra waiting). Ratings failing must never hide the menu, so
   // its error is swallowed and dishes just show as unrated.
+  // NOTE: item_ratings is a view that doesn't yet expose restaurant_id; with one
+  // restaurant its slugs are unique so this is correct. When a 2nd restaurant
+  // shares a slug, the view must gain restaurant_id (follow-on) and be filtered.
   const [items, ratings] = await Promise.all([
-    supabase.from("menu_items").select("*").order("sort_order"),
+    supabase.from("menu_items").select("*").eq("restaurant_id", restaurantId).order("sort_order"),
     supabase.from("item_ratings").select("*"),
   ]);
   if (items.error) throw new Error(`Failed to load menu: ${items.error.message}`);
@@ -218,11 +224,13 @@ export async function getMenuItems(): Promise<MenuItem[]> {
 
 // A single item by slug, or null if it doesn't exist.
 // A "slug" is the short URL-friendly name, e.g. "classic-burger".
-export async function getMenuItem(slug: string): Promise<MenuItem | null> {
+export async function getMenuItem(slug: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<MenuItem | null> {
   // Three parallel reads: the dish, its rating aggregate, and its newest
   // real reviews (capped at 20 so a popular dish can't flood the page).
+  // (item_ratings / reviews are still keyed by slug only — correct for one
+  // restaurant; scope by restaurant_id once those gain the column.)
   const [item, agg, revs] = await Promise.all([
-    supabase.from("menu_items").select("*").eq("slug", slug).maybeSingle(),
+    supabase.from("menu_items").select("*").eq("restaurant_id", restaurantId).eq("slug", slug).maybeSingle(),
     supabase.from("item_ratings").select("*").eq("item_slug", slug).maybeSingle(),
     getItemReviews(slug),
   ]);
@@ -236,11 +244,12 @@ export async function getMenuItem(slug: string): Promise<MenuItem | null> {
 
 // The newest real reviews for one dish (capped at 20), reshaped to the
 // { name, rating, text } shape the dish page renders.
-export async function getItemReviews(slug: string): Promise<{ name: string; rating: number; text: string; deviceId?: string }[]> {
+export async function getItemReviews(slug: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<{ name: string; rating: number; text: string; deviceId?: string }[]> {
   const { data, error } = await supabase
     .from("reviews")
     .select("name, stars, comment, device_id, created_at")
     .eq("item_slug", slug)
+    .eq("restaurant_id", restaurantId)
     .order("created_at", { ascending: false })
     .limit(20);
   // Reviews failing to load must never break the dish page — show none instead.
@@ -251,20 +260,21 @@ export async function getItemReviews(slug: string): Promise<{ name: string; rati
 // Save (or update) this device's rating for a dish. The server function
 // validates stars/device/dish and upserts, so re-rating never duplicates.
 export async function submitReview(
-  slug: string, deviceId: string, stars: number, name: string, comment: string
+  slug: string, deviceId: string, stars: number, name: string, comment: string, restaurantId: string = DEFAULT_RESTAURANT_ID
 ): Promise<{ ok: boolean; reason?: string }> {
   const { data, error } = await supabase.rpc("lfh_submit_review", {
-    p_slug: slug, p_device: deviceId, p_stars: stars, p_name: name, p_comment: comment,
+    p_slug: slug, p_device: deviceId, p_stars: stars, p_name: name, p_comment: comment, p_restaurant_id: restaurantId,
   });
   if (error) return { ok: false, reason: error.message };
   return (data ?? { ok: false, reason: "no response" }) as { ok: boolean; reason?: string };
 }
 
 // Active categories, in display order. The virtual "All" tab is added by the UI.
-export async function getCategories(): Promise<Category[]> {
+export async function getCategories(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Category[]> {
   const { data, error } = await supabase
     .from("categories")
     .select("*")
+    .eq("restaurant_id", restaurantId)
     .eq("active", true)    // only categories the owner has switched on
     .order("sort_order");
   if (error) throw new Error(`Failed to load categories: ${error.message}`);
@@ -299,11 +309,11 @@ export interface Settings {
 }
 // Reads the single site-wide settings row and returns it with safe defaults,
 // so the app still works even if settings haven't been configured yet.
-export async function getSettings(): Promise<Settings> {
+export async function getSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Settings> {
   const { data, error } = await supabase
     .from("settings")
     .select("*")
-    .eq("id", "site")   // all settings live in one row whose id is "site"
+    .eq("restaurant_id", restaurantId)   // one settings row per restaurant (079)
     .maybeSingle();
   if (error) throw new Error(`Failed to load settings: ${error.message}`);
   // Small helper: turn a value into a number, or null if it's blank/not a number.

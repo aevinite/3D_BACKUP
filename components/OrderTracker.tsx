@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
 import { getOrderStatus, updateOrderTableNumber, getSettings, type OrderStatus } from "@/lib/menu";
+import { useRestaurantId } from "@/lib/restaurant-context";
 import { getStoredSession, getSessionState } from "@/lib/session";
 import { toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import {
@@ -30,6 +31,7 @@ const broadcast = () => window.dispatchEvent(new Event("lfh:orders-updated"));
 // updates, lets you tap to see details/edit the table, and lets you drag it
 // onto an X to hide it (the order stays alive in the cart's history).
 export default function OrderTracker() {
+  const restaurantId = useRestaurantId();
   // useState boxes (re-draw the strip when changed):
   const [orders, setOrders] = useState<ActiveOrder[]>([]); // all orders this device is following
   const [detailOpen, setDetailOpen] = useState(false); // is the details sheet open?
@@ -162,7 +164,7 @@ export default function OrderTracker() {
     let onTick: (() => void) | null = null;
     (async () => {
       let on = false;
-      try { on = (await getSettings()).sessionsEnabled; } catch {}
+      try { on = (await getSettings(restaurantId)).sessionsEnabled; } catch {}
       if (!alive || !on) return;
       const pull = async () => {
         const s = getStoredSession();

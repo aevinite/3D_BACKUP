@@ -13,21 +13,23 @@
 // crept in — the brain was fixed, these two endpoints were not).
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { businessDayStartIso } from "@/lib/businessDay";
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 
 // We only touch id / created_at / session_id here; the rest of the row passes
 // through untouched, hence the index signature.
 type Row = { id: string; created_at: string; session_id?: string | null; [k: string]: unknown };
 
-export async function liveOrdersAndItems(): Promise<{ orders: Row[]; items: Row[] }> {
+export async function liveOrdersAndItems(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<{ orders: Row[]; items: Row[] }> {
   const since = businessDayStartIso();
 
   // Which sessions are open right now — their orders stay visible at any age.
-  const openRes = await sb.from("sessions").select("id").eq("status", "open");
+  // Scoped to this restaurant so a kitchen/tablet only ever sees its own floor.
+  const openRes = await sb.from("sessions").select("id").eq("status", "open").eq("restaurant_id", restaurantId);
   if (openRes.error) throw new Error(openRes.error.message);
   const openIds = (openRes.data ?? []).map((s) => s.id as string);
 
   // Orders: today's, PLUS any belonging to a still-open session (matches the brain).
-  let ordQ = sb.from("orders").select("*").eq("archived", false);
+  let ordQ = sb.from("orders").select("*").eq("archived", false).eq("restaurant_id", restaurantId);
   ordQ = openIds.length
     ? ordQ.or(`created_at.gte.${since},session_id.in.(${openIds.join(",")})`)
     : ordQ.gte("created_at", since);
@@ -40,7 +42,7 @@ export async function liveOrdersAndItems(): Promise<{ orders: Row[]; items: Row[
   // id-list to just those old orders keeps the query small.
   const sinceMs = new Date(since).getTime();
   const oldOrderIds = orders.filter((o) => new Date(o.created_at).getTime() < sinceMs).map((o) => o.id);
-  let itQ = sb.from("order_items").select("*");
+  let itQ = sb.from("order_items").select("*").eq("restaurant_id", restaurantId);
   itQ = oldOrderIds.length
     ? itQ.or(`created_at.gte.${since},order_id.in.(${oldOrderIds.join(",")})`)
     : itQ.gte("created_at", since);

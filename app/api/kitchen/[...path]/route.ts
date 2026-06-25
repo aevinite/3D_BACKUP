@@ -7,15 +7,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
-import { requireRole } from "@/lib/userAuth";
+import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { notifyAggregator } from "@/lib/aggregators";
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 // Gate: only a logged-in KITCHEN user (or the admin super-user) may touch this.
-async function gate(req: NextRequest): Promise<NextResponse | null> {
+async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | NextResponse> {
   const g = await requireRole(req, "kitchen");
-  return g.ok ? null : NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
+  if (!g.ok) return NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
+  return { user: g.user };
+}
+// The logged-in staff member's restaurant (admin super-user → default restaurant #1).
+function ridOf(g: { user: StaffUser | null }): string {
+  return g.user?.restaurant_id || DEFAULT_RESTAURANT_ID;
 }
 
 const nowIso = () => new Date().toISOString();
@@ -31,7 +37,8 @@ type Ctx = { params: Promise<{ path?: string[] }> };
 
 // ── GET /api/kitchen/board — today's live orders + items + dishes ────────────
 export async function GET(req: NextRequest, ctx: Ctx) {
-  const denied = await gate(req); if (denied) return denied;
+  const g = await gate(req); if (g instanceof NextResponse) return g;
+  const rid = ridOf(g);
   try {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "board") {
@@ -39,11 +46,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // any still-open session's, so a dish left cooking on an overnight table keeps
       // showing here (and matches the manager). Was a day-clipped fetch before.
       const [live, dishes, platform, settings] = await Promise.all([
-        liveOrdersAndItems(),
-        sb.from("menu_items").select("id,title,category,tags").order("category"),
+        liveOrdersAndItems(rid),
+        sb.from("menu_items").select("id,title,category,tags").eq("restaurant_id", rid).order("category"),
         // active platform (Zomato/Swiggy/takeaway) tickets — separate table, so dine-in is untouched
-        sb.from("aggregator_orders").select("*").in("status", ["new", "accepted", "preparing", "ready"]).order("created_at"),
-        sb.from("settings").select("kitchen_can_accept_platform").eq("id", "site").maybeSingle(),
+        sb.from("aggregator_orders").select("*").eq("restaurant_id", rid).in("status", ["new", "accepted", "preparing", "ready"]).order("created_at"),
+        sb.from("settings").select("kitchen_can_accept_platform").eq("restaurant_id", rid).maybeSingle(),
       ]);
       return ok({
         orders: live.orders, items: live.items, dishes: must(dishes),
@@ -59,7 +66,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
 // ── POST: accept / ready / item status / sold-out ────────────────────────────
 export async function POST(req: NextRequest, ctx: Ctx) {
-  const denied = await gate(req); if (denied) return denied;
+  const g = await gate(req); if (g instanceof NextResponse) return g;
+  const rid = ridOf(g);
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
@@ -122,7 +130,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const status = body && body.status;
       if (!["accepted", "preparing", "ready", "handed_over"].includes(status)) return err("invalid status");
       if (status === "accepted") {
-        const s = await sb.from("settings").select("kitchen_can_accept_platform").eq("id", "site").maybeSingle();
+        const s = await sb.from("settings").select("kitchen_can_accept_platform").eq("restaurant_id", rid).maybeSingle();
         if (!(s.data && s.data.kitchen_can_accept_platform)) {
           return err("The kitchen isn't allowed to accept platform orders — the manager accepts them.", 403);
         }

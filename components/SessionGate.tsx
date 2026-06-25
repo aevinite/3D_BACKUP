@@ -33,6 +33,8 @@ import {
 } from "@/lib/session";
 // Phone back button: while this sheet is open, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
+// Which restaurant this guest is ordering at (from the /r/<slug> URL).
+import { useRestaurantId } from "@/lib/restaurant-context";
 
 // Once you're in a session, that table becomes your default everywhere (cart +
 // call-waiter prefill from the scanned-table key, and re-read on lfh:table-scanned).
@@ -102,6 +104,7 @@ const toast = (message: string, kicker = "table", variant = "success") =>
 // (location check, joining, waiting for approval) and then carries out their
 // queued action (order / call waiter) once they're in.
 export default function SessionGate() {
+  const restaurantId = useRestaurantId();
   // What the on-screen pop-up needs to remember:
   const [open, setOpen] = useState(false); // is the pop-up showing?
   const [step, setStep] = useState<Step>("idle"); // which screen we're on (see Step above)
@@ -241,7 +244,7 @@ export default function SessionGate() {
     try {
       const p = pending.current!; setStep("joining");
       const headName = nameRef.current.trim();
-      const r = await joinSession(p.table, headName, coords.current.lat, coords.current.lng);
+      const r = await joinSession(p.table, headName, coords.current.lat, coords.current.lng, restaurantId);
       if (r.reason === "blocked") { setStep("blocked"); return; }
       if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
       if (r.reason === "no_open_session") { setStep("not_open"); return; } // staff hasn't opened it
@@ -265,7 +268,7 @@ export default function SessionGate() {
     stopPoll();
     pollRef.current = setInterval(async () => {
       const p = pending.current; if (!p) return stopPoll();
-      const st = await tableStatus(p.table);
+      const st = await tableStatus(p.table, restaurantId);
       if (st.ok && st.open) {
         stopPoll();
         if ((st.members as number) === 0) joinAsHead(); // first one in -> head -> acts
@@ -282,7 +285,7 @@ export default function SessionGate() {
   // open the table, become the host, or ask the existing host to let them in.
   const afterLocation = useCallback(async () => {
     const p = pending.current!;
-    const st = await tableStatus(p.table);
+    const st = await tableStatus(p.table, restaurantId);
     if (st.reason === "blocked") { setStep("blocked"); return; }
     // No answer ≠ "table not open" — don't mislabel a network blip; offer a retry.
     if (!st.ok) {
@@ -425,7 +428,7 @@ export default function SessionGate() {
       // opened — tapping Add-to-cart while offline just did nothing, silently.
       // Now the guest gets the connection-trouble screen with a working Retry.
       try {
-        settingsRef.current = settingsRef.current || (await getSettings());
+        settingsRef.current = settingsRef.current || (await getSettings(restaurantId));
       } catch {
         setNote("We can't reach the café's system right now — check your internet and retry.");
         setOpen(true); setStep("net_error");
@@ -513,7 +516,7 @@ export default function SessionGate() {
       const already = getStoredSession(p.table);
       if (already) { sess.current = already; await ensureReadyAndAct(); return; }
       setStep("joining");
-      const r = await joinSession(p.table, nm, coords.current.lat, coords.current.lng);
+      const r = await joinSession(p.table, nm, coords.current.lat, coords.current.lng, restaurantId);
       if (r.reason === "blocked") { setStep("blocked"); return; }
       if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
       if (r.reason === "no_open_session") { setStep("not_open"); return; }
@@ -539,7 +542,7 @@ export default function SessionGate() {
   // Formal "request a waiter to your table" — used when location can't be
   // confirmed, or as the escape hatch on a table someone else holds.
   const doRequest = async (type: "open" | "access") => {
-    const p = pending.current!; await requestAccess(p.table, type, name.trim() || null, null);
+    const p = pending.current!; await requestAccess(p.table, type, name.trim() || null, null, restaurantId);
     setStep("request_sent");
   };
   // From the "not open" screen: tell staff, then keep waiting — proceedWhenOpen
@@ -551,7 +554,7 @@ export default function SessionGate() {
   const doRequestOpen = async () => {
     // Name is collected on this SAME screen — if it's blank, stay put and say why.
     if (!name.trim()) { setNote("Add your name so staff know who's asking."); return; }
-    const p = pending.current!; await requestAccess(p.table, "open", name.trim(), null);
+    const p = pending.current!; await requestAccess(p.table, "open", name.trim(), null, restaurantId);
     setStep("request_sent");
   };
   // The "request_name" screen's submit: validate, then send the open request with
@@ -567,7 +570,7 @@ export default function SessionGate() {
   // if needed, then resume the normal flow from wherever it can pick up.
   const retryFlow = async () => {
     if (!settingsRef.current) {
-      try { settingsRef.current = await getSettings(); } catch {
+      try { settingsRef.current = await getSettings(restaurantId); } catch {
         setNote("Still can't reach the café's system — check your internet and try again.");
         return;
       }
