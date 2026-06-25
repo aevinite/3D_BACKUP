@@ -13,6 +13,7 @@ type User = {
   id: string; username: string; role: string; name: string | null; phone: string | null;
   active: boolean; last_seen_at: string | null; created_at: string; hasPin: boolean;
   can_self_reset: boolean; can_self_set_pin: boolean;
+  restaurant_id?: string | null; restaurantName?: string | null;
 };
 
 const ROLES = ["manager", "kitchen", "tablet"] as const;
@@ -28,12 +29,13 @@ const label: React.CSSProperties = { display: "grid", gap: 4, fontSize: 12, colo
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<User[]>([]);
+  const [restaurants, setRestaurants] = useState<{ id: string; name: string }[]>([]);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
 
   // New-user form state. The single "Name" is the whole identity (it becomes the
   // login id under the hood) — there is no separate username field any more.
-  const [nu, setNu] = useState({ role: "manager", name: "", phone: "", password: "" });
+  const [nu, setNu] = useState({ role: "manager", restaurant_id: "", name: "", phone: "", password: "" });
   const [showNewPw, setShowNewPw] = useState(false);
   const [creating, setCreating] = useState(false);
   // The password to reveal once after a CREATE (shown at the top until dismissed).
@@ -46,10 +48,18 @@ export default function AdminUsers() {
   const load = useCallback(async () => {
     setErr("");
     try {
-      const r = await fetch("/api/admin/users", { cache: "no-store" });
-      const j = await r.json();
-      if (!r.ok) { setErr(j.error || "Failed to load."); return; }
+      const [ur, rr] = await Promise.all([
+        fetch("/api/admin/users", { cache: "no-store" }),
+        fetch("/api/admin/restaurants", { cache: "no-store" }),
+      ]);
+      const j = await ur.json();
+      if (!ur.ok) { setErr(j.error || "Failed to load."); return; }
       setUsers(j.users || []);
+      const rj = await rr.json().catch(() => ({}));
+      const rests = rj.restaurants || [];
+      setRestaurants(rests);
+      // Default the "Add user" restaurant to the first one until the admin picks.
+      setNu((n) => (n.restaurant_id ? n : { ...n, restaurant_id: rests[0]?.id || "" }));
     } catch { setErr("Network error."); }
     finally { setLoading(false); }
   }, []);
@@ -64,7 +74,7 @@ export default function AdminUsers() {
       const j = await r.json();
       if (!r.ok) { setErr(j.error || "Could not create user."); return; }
       setReveal({ name: j.name || j.username, password: j.password });
-      setNu({ role: "manager", name: "", phone: "", password: "" });
+      setNu((n) => ({ role: "manager", restaurant_id: n.restaurant_id, name: "", phone: "", password: "" }));
       setShowNewPw(false);
       load();
     } catch { setErr("Network error."); }
@@ -74,7 +84,7 @@ export default function AdminUsers() {
   return (
     <>
       <h1 className="adm-page-h">Users &amp; access</h1>
-      <p className="adm-page-sub">Create and manage the logins for the manager, kitchen and tablet panels.</p>
+      <p className="adm-page-sub">Create logins for any restaurant&apos;s manager, kitchen and tablet panels — each user is scoped to the restaurant you pick. (Owners are assigned on the Restaurants page.)</p>
 
       {err ? <div style={{ ...card, borderColor: "#7f1d1d", color: "#fca5a5", marginBottom: 14 }}>{err}</div> : null}
 
@@ -99,6 +109,13 @@ export default function AdminUsers() {
           <label style={label}>
             Name
             <input value={nu.name} onChange={(e) => setNu({ ...nu, name: e.target.value })} placeholder="e.g. Raj" autoCapitalize="words" style={field} required />
+          </label>
+          <label style={label}>
+            Restaurant
+            <select value={nu.restaurant_id} onChange={(e) => setNu({ ...nu, restaurant_id: e.target.value })} style={field} required>
+              {restaurants.length === 0 && <option value="">Loading…</option>}
+              {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
           </label>
           <label style={label}>
             Role
@@ -149,7 +166,7 @@ export default function AdminUsers() {
                     {!u.active ? <span style={{ fontSize: 11, color: "#fca5a5" }}>disabled</span> : null}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : "never"}
+                    {u.restaurantName ? <><b style={{ color: "var(--text)", fontWeight: 600 }}>{u.restaurantName}</b> · </> : ""}{u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : "never"}
                   </div>
                 </div>
                 <button style={{ ...btn("transparent"), border: "var(--border)", color: "var(--text)" }} onClick={() => setEditId(u.id)}>Edit</button>

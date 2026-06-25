@@ -10,7 +10,7 @@ import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import LoginForm from "./LoginForm";
 
 // Where each role lands after login.
-export const ROLE_HOME: Record<string, string> = { manager: "/manager", kitchen: "/kitchen", tablet: "/tablet" };
+export const ROLE_HOME: Record<string, string> = { owner: "/owner", manager: "/manager", kitchen: "/kitchen", tablet: "/tablet" };
 
 export default async function LoginPage({
   searchParams,

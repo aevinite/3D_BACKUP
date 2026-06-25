@@ -21,10 +21,12 @@ import AdminSwitcher from "@/components/AdminSwitcher";
 // Tells the global guest widgets which restaurant the current /r/<slug> URL is for.
 import { RestaurantProvider } from "@/lib/restaurant-context";
 
-// The browser-tab title and the description search engines show.
+// The DEFAULT browser-tab title (staff/login/admin chrome). Each restaurant's guest
+// menu overrides this with its own name via generateMetadata (white-label), so a
+// guest sees the restaurant brand while the SaaS chrome stays "Aevidine".
 export const metadata: Metadata = {
-  title: "Little French House - 4D Menu",
-  description: "Authentic French Cuisine",
+  title: "Aevidine — Restaurant OS",
+  description: "Aevidine — the all-in-one platform that runs your restaurant.",
 };
 
 // How the page fits on a phone screen (zoom, width, etc.).

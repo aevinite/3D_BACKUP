@@ -17,7 +17,7 @@ const NAV = [
   { href: "/aevinite/settings", label: "Settings", icon: "fa-gear" },
 ];
 
-const RESTAURANT = "My Little French House"; // single-tenant for now; visual shell for the future multi-restaurant plan
+const RESTAURANT = "All restaurants"; // admin is top of the hierarchy — it sees every tenant, not one
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
@@ -43,8 +43,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     <div className="adm">
       <aside className="adm-side">
         <div className="adm-brand">
-          <span className="mark">🏠</span>
-          <span className="who"><b>Admin</b><span>Control room</span></span>
+          <span className="mark">✦</span>
+          <span className="who"><b>Aevidine</b><span>Admin · all restaurants</span></span>
         </div>
         <nav className="adm-nav">
           {NAV.map((n) => (
@@ -53,7 +53,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             </Link>
           ))}
         </nav>
-        <div className="adm-side-foot">My Little French House · 4D Menu</div>
+        <div className="adm-side-foot">Aevidine · Restaurant OS</div>
       </aside>
 
       <div className="adm-body">
@@ -69,10 +69,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", borderRadius: 9, background: "color-mix(in srgb, var(--accent) 16%, transparent)", fontWeight: 700, fontSize: 13.5 }}>
                   <i className="fas fa-check" style={{ color: "var(--accent)" }} aria-hidden="true" /> {RESTAURANT}
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", marginTop: 4, color: "var(--muted)", fontSize: 13 }}>
-                  <i className="fas fa-plus" aria-hidden="true" /> Add restaurant
-                  <span className="soon" style={{ marginLeft: "auto" }}>soon</span>
-                </div>
+                <Link href="/aevinite/restaurants" role="menuitem" onClick={() => setRestMenu(false)}
+                  style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", marginTop: 4, color: "var(--muted)", fontSize: 13, textDecoration: "none" }}>
+                  <i className="fas fa-store" aria-hidden="true" /> Manage restaurants
+                  <i className="fas fa-arrow-right" style={{ marginLeft: "auto", fontSize: 11 }} aria-hidden="true" />
+                </Link>
               </div>
             )}
           </div>

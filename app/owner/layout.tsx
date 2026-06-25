@@ -14,7 +14,7 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
   const store = await cookies();
   if (!(await tokenIsValid(store.get(AUTH_COOKIE)?.value))) {
     const u = await userFromCookie(store.get(USER_COOKIE)?.value);
-    if (!u || u.role !== "owner") redirect("/staff-login?next=/owner");
+    if (!u || u.role !== "owner") redirect("/login?next=/owner");
   }
   return <OwnerShell>{children}</OwnerShell>;
 }
