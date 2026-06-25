@@ -3381,6 +3381,17 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm .adm-side, .adm .adm-card, .adm .adm-stat { backdrop-filter: blur(22px) saturate(180%); box-shadow: 0 10px 30px rgba(31,41,80,0.10); }
 .adm[data-skin="dark"] .adm-side, .adm[data-skin="dark"] .adm-card, .adm[data-skin="dark"] .adm-stat { backdrop-filter: none; box-shadow: none; }
 .adm[data-skin="dark"] .adm-side { background: rgba(11,15,26,0.7); }
+/* Buttons don't inherit text color by default (UA "buttontext") — force it so the
+   card-style buttons (.adm-stat, .adm-rest, .own-* tiles) read correctly in BOTH
+   skins. Buttons that set their own color (.adm-btn.primary, .own-range .on, …)
+   override this via higher specificity. */
+.adm button { color: inherit; }
+/* Owner-panel segmented toggles + breadcrumb were leaking the UA button background
+   (#efefef). Pin them to skin tokens here (global so it always applies). */
+.adm .own-range button { background: transparent; color: var(--muted); }
+.adm .own-range button.on { background: var(--accent); color: #fff; }
+.adm .own-crumb .lnk { background: transparent; }
+.adm .own-crumb .cur { color: var(--text); background: transparent; }
 /* ── sidebar ─────────────────────────────────────────────────────────────── */
 .adm-side {
   width: 236px; flex-shrink: 0; display: flex; flex-direction: column;
