@@ -90,11 +90,14 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   text-overflow: ellipsis;
 }
 .brand-highlight {
-  color: #FFD700;
+  /* Falls back to the French House gold for the flagship (#1, which sets no
+     accent var); per-restaurant menus override --brand-highlight with their
+     own accent (see accentVars in AppShell) so the brand name matches the theme. */
+  color: var(--brand-highlight, #FFD700);
   font-style: normal;
 }
 [data-theme="light"] .brand-highlight {
-  color: #F5B400;
+  color: var(--brand-highlight, #F5B400);
   text-shadow: 0 1px 0 rgba(245, 180, 0, 0.15);
 }
 .brand-title:hover { transform: scale(1.05); }

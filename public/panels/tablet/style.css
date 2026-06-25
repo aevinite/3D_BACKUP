@@ -317,3 +317,50 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
   box-shadow: 0 0 0 4px rgba(239,68,68,.16); font-family: inherit; }
 .attend:hover { filter: brightness(1.06); }
 .attend.more { font-size: 13px; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LIGHT THEME  —  opt-in via the header toggle (☀/🌙); DARK stays default.
+   :root override re-colours the var() refs; tablet has several hardcoded dark
+   surfaces (order cards, KOT chips, bill box) + cream text that are patched to
+   tokens here so light mode is clean. (panels/theme.js)
+   ═══════════════════════════════════════════════════════════════════════ */
+.theme-toggle{
+  -webkit-appearance:none; appearance:none; cursor:pointer;
+  width:38px; height:38px; flex:0 0 auto; padding:0; margin-left:4px;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-size:17px; line-height:1; border-radius:10px;
+  border:1px solid var(--line); background:var(--panel-2); color:var(--text);
+  transition:border-color .15s, transform .1s;
+}
+.theme-toggle:hover{ border-color:var(--gold); }
+.theme-toggle:active{ transform:scale(.93); }
+
+html[data-theme="light"]{
+  --bg:#f1ebe1; --panel:#ffffff; --panel-2:#f6f0e6; --line:#e6dcc9;
+  --text:#2c2219; --muted:#857655; --gold:#c98f3f; --gold-strong:#b07a28;
+  --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
+}
+/* Hardcoded dark surfaces → light. */
+html[data-theme="light"] .ord{ background:var(--panel); border-color:var(--line); }
+html[data-theme="light"] .ordh{ background:var(--panel-2); border-bottom-color:var(--line); }
+html[data-theme="light"] .kot{ background:var(--panel-2); }
+html[data-theme="light"] .iline{ border-bottom-color:var(--line); }
+html[data-theme="light"] .ordctl{ border-top-color:var(--line); }
+html[data-theme="light"] .billbox{ background:var(--panel-2); }
+html[data-theme="light"] .tstrip{ background:#e6dcc9; }
+html[data-theme="light"] .tpill.kot{ background:var(--panel-2); }
+/* Hardcoded cream text → dark ink. */
+html[data-theme="light"] .leg-it,
+html[data-theme="light"] .iprice{ color:var(--text); }
+html[data-theme="light"] .leg-key{ color:var(--muted); }
+/* Pale status text → deepened for white. */
+html[data-theme="light"] .cchip.needs b,
+html[data-theme="light"] .inm .irem,
+html[data-theme="light"] .callergy{ color:#c0392b; }
+html[data-theme="light"] .inm .alg-removed{ color:#b45309; }
+html[data-theme="light"] .t-seated .tlabel{ color:#0d9488; }
+html[data-theme="light"] .t-waiting .tlabel, html[data-theme="light"] .t-bill .tlabel,
+html[data-theme="light"] .t-new .tlabel{ color:#b45309; }
+html[data-theme="light"] .t-prep .tlabel{ color:#1d4ed8; }
+html[data-theme="light"] .t-ready .tlabel{ color:#be185d; }
+html[data-theme="light"] .t-done .tlabel{ color:#15803d; }

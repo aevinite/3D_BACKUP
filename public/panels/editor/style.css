@@ -1442,3 +1442,53 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .bm-trow { display: flex; justify-content: space-between; padding: 6px 2px; font-size: 14px; color: var(--muted); }
 .bm-trow.grand { font-size: 18px; font-weight: 800; color: var(--text); border-top: 1px solid var(--line); margin-top: 4px; padding-top: 10px; }
 .bm-actions { display: flex; gap: 9px; margin-top: 16px; flex-wrap: wrap; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LIGHT THEME  —  opt-in via the header toggle (☀/🌙); DARK stays the default
+   (no regression for existing staff). Overriding the :root tokens re-colours
+   the hundreds of var() references automatically; the handful of hardcoded
+   dark surfaces + pale status colours are patched under the token block so
+   light mode is clean. Driven by data-theme on <html> (see panels/theme.js).
+   ═══════════════════════════════════════════════════════════════════════ */
+.theme-toggle{
+  -webkit-appearance:none; appearance:none; cursor:pointer;
+  width:38px; height:38px; flex:0 0 auto; padding:0; margin:0 2px;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-size:17px; line-height:1; border-radius:10px;
+  border:1px solid var(--line); background:var(--panel-2); color:var(--text);
+  transition:border-color .15s, transform .1s;
+}
+.theme-toggle:hover{ border-color:var(--gold); }
+.theme-toggle:active{ transform:scale(.93); }
+
+html[data-theme="light"]{
+  --bg:#f1ebe1;
+  --panel:#ffffff;
+  --panel-2:#f6f0e6;
+  --line:#e6dcc9;
+  --text:#2c2219;
+  --muted:#897a61;
+  --gold:#c98f3f;
+  --gold-strong:#b07a28;
+  --green:#15803d;
+  --red:#dc2626;
+  --shadow-sm:0 1px 2px rgba(60,45,20,.07);
+  --shadow-md:0 16px 36px rgba(60,45,20,.13);
+}
+/* Hardcoded dark surfaces → light equivalents. */
+html[data-theme="light"] body{ background:radial-gradient(1100px 560px at 78% -12%, #fdfaf4 0%, var(--bg) 58%) fixed; }
+html[data-theme="light"] .topbar{ background:linear-gradient(180deg,#ffffff,var(--panel-2)); box-shadow:0 1px 0 rgba(0,0,0,.02), 0 6px 18px rgba(60,45,20,.08); }
+html[data-theme="light"] .tbox.tot .tbox-ico{ background:var(--panel-2); }
+html[data-theme="light"] .tbl-free{ border-color:var(--line); }
+/* Pale status TEXT colours deepened so they read on white. */
+html[data-theme="light"] .ord-disc,
+html[data-theme="light"] .op-kitchen,
+html[data-theme="light"] .alg-add,
+html[data-theme="light"] .tbl-paid .tbl-num, html[data-theme="light"] .tbl-paid .tbl-state{ color:#15803d; }
+html[data-theme="light"] .ol-no, html[data-theme="light"] .icon-del{ color:#c0392b; }
+html[data-theme="light"] .sx-wait, html[data-theme="light"] .sx-call,
+html[data-theme="light"] .alg-removed, html[data-theme="light"] .fstat.alert .fstat-n,
+html[data-theme="light"] .op-admin,
+html[data-theme="light"] .tbl-unpaid .tbl-num, html[data-theme="light"] .tbl-unpaid .tbl-state{ color:#b45309; }
+html[data-theme="light"] .tbl-active .tbl-num, html[data-theme="light"] .tbl-active .tbl-state,
+html[data-theme="light"] .op-tablet{ color:#1d4ed8; }

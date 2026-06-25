@@ -9,7 +9,7 @@ import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { notifyAggregator } from "@/lib/aggregators";
-import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { panelRestaurantId } from "@/lib/panelScope";
 
 export const dynamic = "force-dynamic";
 
@@ -19,10 +19,8 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
   if (!g.ok) return NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
   return { user: g.user };
 }
-// The logged-in staff member's restaurant (admin super-user → default restaurant #1).
-function ridOf(g: { user: StaffUser | null }): string {
-  return g.user?.restaurant_id || DEFAULT_RESTAURANT_ID;
-}
+// (panel restaurant scope now comes from lib/panelScope → panelRestaurantId, which
+//  also honours the admin's "view as" restaurant.)
 
 const nowIso = () => new Date().toISOString();
  
@@ -38,7 +36,7 @@ type Ctx = { params: Promise<{ path?: string[] }> };
 // ── GET /api/kitchen/board — today's live orders + items + dishes ────────────
 export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
-  const rid = ridOf(g);
+  const rid = panelRestaurantId(req, g);
   try {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "board") {
@@ -67,7 +65,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 // ── POST: accept / ready / item status / sold-out ────────────────────────────
 export async function POST(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
-  const rid = ridOf(g);
+  const rid = panelRestaurantId(req, g);
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
