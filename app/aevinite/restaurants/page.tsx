@@ -7,7 +7,8 @@
 // .adm-* styling, parameterised by restaurant.
 import { useCallback, useEffect, useState } from "react";
 
-type Restaurant = { id: string; slug: string; name: string; active: boolean; hasSettings: boolean };
+type Restaurant = { id: string; slug: string; name: string; active: boolean; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null };
+type Owner = { id: string; name: string };
 
 // The ten guest-facing switches (same set + labels as the Features tab).
 const FEATURES = [
@@ -20,21 +21,24 @@ const FEATURES = [
 
 export default function AdminRestaurants() {
   const [list, setList] = useState<Restaurant[] | null>(null);
+  const [owners, setOwners] = useState<Owner[]>([]);
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Restaurant | null>(null);
 
   // Load the restaurant list once (and again when we come back from a detail view
-  // so a freshly-created settings row shows its "settings" state).
+  // so a freshly-created settings row + owner assignment show their latest state).
   const loadList = useCallback(async () => {
     try {
       const j = await (await fetch("/api/admin/restaurants", { cache: "no-store" })).json();
-      if (!j.error) setList(j.restaurants || []);
+      if (!j.error) { setList(j.restaurants || []); setOwners(j.owners || []); }
     } catch {}
   }, []);
   useEffect(() => { loadList(); }, [loadList]);
 
   if (selected) {
-    return <RestaurantFeatures restaurant={selected} onBack={() => { setSelected(null); loadList(); }} />;
+    // Re-read the freshest copy from the list so the owner shows correctly after a round-trip.
+    const fresh = (list || []).find((r) => r.id === selected.id) || selected;
+    return <RestaurantDetail restaurant={fresh} owners={owners} onBack={() => { setSelected(null); loadList(); }} onChanged={loadList} />;
   }
 
   const needle = q.trim().toLowerCase();
@@ -64,19 +68,20 @@ export default function AdminRestaurants() {
           <div className="adm-empty">No restaurants match “{q}”.</div>
         ) : (
           <div className="adm-logwrap">
-            <div className="adm-logrow head" style={{ gridTemplateColumns: "1fr 1fr 90px 110px" }}>
-              <span>Name</span><span>Slug</span><span>Status</span><span style={{ textAlign: "right" }}>Features</span>
+            <div className="adm-logrow head" style={{ gridTemplateColumns: "1.2fr 1fr 1fr 80px 80px" }}>
+              <span>Name</span><span>Slug</span><span>Owner</span><span>Status</span><span style={{ textAlign: "right" }}>Open</span>
             </div>
             {rows.map((r) => (
               <button
                 key={r.id}
                 className="adm-logrow"
                 onClick={() => setSelected(r)}
-                style={{ gridTemplateColumns: "1fr 1fr 90px 110px", width: "100%", border: 0, background: "transparent", color: "var(--text)", cursor: "pointer", textAlign: "left", font: "inherit" }}
-                title={`Edit ${r.name}'s features`}
+                style={{ gridTemplateColumns: "1.2fr 1fr 1fr 80px 80px", width: "100%", border: 0, background: "transparent", color: "var(--text)", cursor: "pointer", textAlign: "left", font: "inherit" }}
+                title={`Open ${r.name}`}
               >
                 <span style={{ fontWeight: 700 }}>{r.name}</span>
                 <span className="adm-muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{r.slug}</span>
+                <span className="adm-muted" style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ownerName || "—"}</span>
                 <span>
                   <span className="adm-chip" style={r.active
                     ? { background: "color-mix(in srgb, var(--adm-ok) 22%, transparent)", color: "var(--adm-ok)" }
@@ -85,7 +90,7 @@ export default function AdminRestaurants() {
                   </span>
                 </span>
                 <span style={{ textAlign: "right", color: "var(--accent)", fontWeight: 700, fontSize: 13 }}>
-                  Edit <i className="fas fa-chevron-right" style={{ fontSize: 10, marginLeft: 4 }} aria-hidden="true" />
+                  Open <i className="fas fa-chevron-right" style={{ fontSize: 10, marginLeft: 4 }} aria-hidden="true" />
                 </span>
               </button>
             ))}
@@ -96,9 +101,8 @@ export default function AdminRestaurants() {
   );
 }
 
-// The per-restaurant feature toggles. Reads THIS restaurant's merged features
-// (defaults + its overrides) and writes each flip to its own settings row.
-function RestaurantFeatures({ restaurant, onBack }: { restaurant: Restaurant; onBack: () => void }) {
+// The per-restaurant detail: assign its OWNER + flip its guest feature switches.
+function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
   const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -148,6 +152,8 @@ function RestaurantFeatures({ restaurant, onBack }: { restaurant: Restaurant; on
         {" · "}Turn this restaurant&apos;s guest features on or off. Changes affect only its menu.
       </p>
 
+      <OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} />
+
       <div className="adm-card">
         <h2>Guest features</h2>
         <p className="hint">Each switch shows or hides a feature across <b>{restaurant.name}</b>&apos;s guest menu.</p>
@@ -156,5 +162,59 @@ function RestaurantFeatures({ restaurant, onBack }: { restaurant: Restaurant; on
           : <div className="adm-togglegrid">{FEATURES.map((f) => <Toggle key={f.key} k={f.key} label={f.label} />)}</div>}
       </div>
     </>
+  );
+}
+
+// Owner assignment for one restaurant: pick an existing owner, or create a new one
+// (which is auto-assigned here). Writes via /api/admin/restaurants (PATCH/POST).
+function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; owners: Owner[]; onChanged: () => void }) {
+  const [sel, setSel] = useState<string>(restaurant.ownerUserId || "");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
+  const [newName, setNewName] = useState("");
+
+  const assign = async (ownerId: string) => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/api/admin/restaurants", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, owner_user_id: ownerId || null }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
+      setSel(ownerId); setMsg("Saved."); onChanged();
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+  const createOwner = async () => {
+    const name = newName.trim(); if (name.length < 2) { setMsg("Name must be at least 2 characters."); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/api/admin/restaurants", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create_owner", name }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't create.");
+      setReveal({ name: d.name, password: d.password }); setNewName("");
+      await assign(d.id); // auto-assign the brand-new owner to this restaurant
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="adm-card" style={{ marginBottom: 14 }}>
+      <h2>Owner</h2>
+      <p className="hint">Who owns this restaurant — they see it on their owner dashboard and manage its staff &amp; manager powers.</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <select value={sel} disabled={busy} onChange={(e) => assign(e.target.value)}
+          style={{ padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
+          <option value="">— no owner —</option>
+          {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+        {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New owner name"
+          style={{ padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />
+        <button className="adm-btn" disabled={busy} onClick={createOwner}><i className="fas fa-user-plus" style={{ marginRight: 6 }} aria-hidden="true" />Create &amp; assign owner</button>
+      </div>
+      {reveal && (
+        <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 8, background: "color-mix(in srgb, var(--adm-ok) 12%, transparent)" }}>
+          <b>{reveal.name}</b> created. Password (copy now — shown once): <code style={{ fontWeight: 700 }}>{reveal.password}</code>
+        </div>
+      )}
+    </div>
   );
 }
