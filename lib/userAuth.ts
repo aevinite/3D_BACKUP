@@ -173,6 +173,14 @@ export async function requireRole(
 ): Promise<{ ok: true; user: StaffUser | null } | { ok: false }> {
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { ok: true, user: null }; // admin super
   const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
-  if (u && roleSatisfies(u.role, role)) return { ok: true, user: u };
+  if (u && roleSatisfies(u.role, role)) {
+    // Presence heartbeat (throttled ~45s): mark this user active now so admin/owner
+    // see who's working / which panel is open. Fire-and-forget; never blocks the call.
+    const seen = (u as { last_seen_at?: string | null }).last_seen_at;
+    if (!seen || Date.now() - new Date(seen).getTime() > 45_000) {
+      sb.from("staff_users").update({ last_seen_at: new Date().toISOString() }).eq("id", u.id).then(() => {}, () => {});
+    }
+    return { ok: true, user: u };
+  }
   return { ok: false };
 }

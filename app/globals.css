@@ -3349,21 +3349,18 @@ a:focus:not(:focus-visible) { outline: none; }
   font-family: 'Inter', system-ui, sans-serif;
 }
 /* ════════════════════════════════════════════════════════════════════════════
-   AEVIDINE PANEL SKIN — owner + admin chrome. LIGHT = Apple frosted glass
-   (default); DARK = Neon. Scoped to .adm so the guest menu's warm theme is never
-   touched. The shells set data-skin on .adm; default (no attr) = light glass.
+   AEVIDINE PANEL SKIN — owner + admin chrome. LIGHT = clean Minimal (default):
+   crisp white, hairline borders, indigo accent, whitespace. DARK = Neon. Scoped
+   to .adm so the guest menu's warm theme is never touched. The shells set
+   data-skin on .adm; default (no attr) = light minimal.
    ════════════════════════════════════════════════════════════════════════════ */
-.adm {                              /* LIGHT · Apple frosted glass (default) */
-  --bg: #e7ebf3; --card: rgba(255,255,255,0.55); --border: 1px solid rgba(255,255,255,0.75);
-  --text: #1d1d1f; --muted: #6e6e73; --muted2: rgba(29,29,31,0.12);
+.adm {                              /* LIGHT · Minimal (default) */
+  --bg: #f6f7f9; --card: #ffffff; --border: 1px solid #ececef;
+  --text: #18181b; --muted: #6b7280; --muted2: rgba(24,24,27,0.10);
   --accent: #4f46e5; --accent-dim: rgba(79,70,229,0.6);
-  --accent-grad: linear-gradient(135deg,#6366f1,#4f46e5); --accent-glow: rgba(79,70,229,0.22);
+  --accent-grad: linear-gradient(135deg,#6366f1,#4f46e5); --accent-glow: rgba(79,70,229,0.16);
   --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-warn: #d97706;
-  background:
-    radial-gradient(820px 520px at 8% -10%, rgba(99,102,241,0.20), transparent 60%),
-    radial-gradient(720px 520px at 102% -4%, rgba(56,189,248,0.16), transparent 55%),
-    radial-gradient(760px 640px at 52% 122%, rgba(168,85,247,0.13), transparent 55%),
-    #e7ebf3;
+  background: #f6f7f9;
 }
 .adm[data-skin="dark"] {            /* DARK · Neon */
   --bg: #06080f; --card: #0b0f1a; --border: 1px solid #1b2235;
@@ -3376,11 +3373,10 @@ a:focus:not(:focus-visible) { outline: none; }
     linear-gradient(90deg, #0a0e1a 1px, transparent 1px) 0 0 / 46px 46px,
     #06080f;
 }
-/* Frosted-glass material on the light skin; flat solid on dark. backdrop-filter is
-   a SINGLE unprefixed line on purpose (the build auto-prefixes — see CLAUDE.md). */
-.adm .adm-side, .adm .adm-card, .adm .adm-stat { backdrop-filter: blur(22px) saturate(180%); box-shadow: 0 10px 30px rgba(31,41,80,0.10); }
-.adm[data-skin="dark"] .adm-side, .adm[data-skin="dark"] .adm-card, .adm[data-skin="dark"] .adm-stat { backdrop-filter: none; box-shadow: none; }
-.adm[data-skin="dark"] .adm-side { background: rgba(11,15,26,0.7); }
+/* Flat, minimal cards — a whisper shadow in light, none in dark (Neon is flat). */
+.adm .adm-card, .adm .adm-stat { box-shadow: 0 1px 2px rgba(16,24,40,0.04); }
+.adm[data-skin="dark"] .adm-card, .adm[data-skin="dark"] .adm-stat { box-shadow: none; }
+.adm[data-skin="dark"] .adm-side { background: #0a0e17; }
 /* Buttons don't inherit text color by default (UA "buttontext") — force it so the
    card-style buttons (.adm-stat, .adm-rest, .own-* tiles) read correctly in BOTH
    skins. Buttons that set their own color (.adm-btn.primary, .own-range .on, …)
@@ -3392,6 +3388,15 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm .own-range button.on { background: var(--accent); color: #fff; }
 .adm .own-crumb .lnk { background: transparent; }
 .adm .own-crumb .cur { color: var(--text); background: transparent; }
+/* Print: drop the panel chrome + report controls so a printed/PDF'd report is
+   just the clean document on white. */
+@media print {
+  .adm-side, .adm-top, .rep-controls { display: none !important; }
+  .adm, .adm-body { display: block !important; height: auto !important; overflow: visible !important; }
+  .adm-main { overflow: visible !important; padding: 0 !important; }
+  .adm, .adm-body, .adm-main { background: #fff !important; }
+  .rep-doc { border: none !important; box-shadow: none !important; padding: 0 !important; }
+}
 /* ── sidebar ─────────────────────────────────────────────────────────────── */
 .adm-side {
   width: 236px; flex-shrink: 0; display: flex; flex-direction: column;
