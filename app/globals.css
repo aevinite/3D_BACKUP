@@ -3388,6 +3388,15 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm .own-range button.on { background: var(--accent); color: #fff; }
 .adm .own-crumb .lnk { background: transparent; }
 .adm .own-crumb .cur { color: var(--text); background: transparent; }
+/* Print: drop the panel chrome + report controls so a printed/PDF'd report is
+   just the clean document on white. */
+@media print {
+  .adm-side, .adm-top, .rep-controls { display: none !important; }
+  .adm, .adm-body { display: block !important; height: auto !important; overflow: visible !important; }
+  .adm-main { overflow: visible !important; padding: 0 !important; }
+  .adm, .adm-body, .adm-main { background: #fff !important; }
+  .rep-doc { border: none !important; box-shadow: none !important; padding: 0 !important; }
+}
 /* ── sidebar ─────────────────────────────────────────────────────────────── */
 .adm-side {
   width: 236px; flex-shrink: 0; display: flex; flex-direction: column;

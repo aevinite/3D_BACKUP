@@ -24,6 +24,7 @@ export default function AdminOverview() {
   const [ts, setTs] = useState<TsRow[]>([]);
   const [maintenance, setMaintenance] = useState(false);
   const [activity, setActivity] = useState<Action[]>([]);
+  const [staff, setStaff] = useState<{ name: string | null; username: string; role: string; restaurantName: string | null; last_seen_at: string | null }[]>([]);
 
   const load = useCallback(() => {
     fetch("/api/admin/restaurants", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) { setRests(j.restaurants || []); setOwners(j.owners || []); } }).catch(() => {});
@@ -31,6 +32,7 @@ export default function AdminOverview() {
     fetch("/api/owner/analytics?range=30d", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) { setRev(j.restaurantRevenue || []); setTs(j.timeseries || []); } }).catch(() => {});
     fetch("/api/admin/overview", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setMaintenance(!!j.maintenance); }).catch(() => {});
     fetch("/api/admin/oplog?limit=18", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setActivity(j.actions || []); }).catch(() => {});
+    fetch("/api/admin/users", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setStaff(j.users || []); }).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
   useLivePoll(load);
@@ -42,6 +44,10 @@ export default function AdminOverview() {
     openTables: ov?.totals.openTables ?? 0,
     ownerCount: owners.length,
   }), [rev, ov, owners]);
+
+  // Staff "working now" — active within the last 3 minutes (presence heartbeat).
+  const PANEL = (role: string) => (({ owner: "Owner", manager: "Manager", kitchen: "Kitchen", tablet: "Tablet" } as Record<string, string>)[role] || role);
+  const online = useMemo(() => staff.filter((u) => u.last_seen_at && Date.now() - new Date(u.last_seen_at).getTime() < 180_000), [staff]);
 
   // Multi-line trend: rows {label,[restaurantName]:revenue}; one accent-colored line per restaurant.
   const trend = useMemo(() => {
@@ -81,6 +87,24 @@ export default function AdminOverview() {
         {KPIS.map(([k, v]) => (
           <div key={k} className="adm-stat"><div className="k">{k}</div><div className="v">{v}</div></div>
         ))}
+      </div>
+
+      <div className="adm-card" style={{ marginBottom: 8 }}>
+        <div className="adm-ctitle">Working now <span>· {online.length} active across all restaurants</span></div>
+        {online.length === 0 ? (
+          <div className="adm-empty" style={{ padding: "6px 0" }}>No staff active right now.</div>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {online.map((u, i) => (
+              <div key={i} style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 999, background: "color-mix(in srgb, var(--adm-ok) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--adm-ok) 35%, transparent)", fontSize: 12.5 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: "var(--adm-ok)", boxShadow: "0 0 0 3px color-mix(in srgb, var(--adm-ok) 22%, transparent)" }} />
+                <b>{u.name || u.username}</b>
+                <span style={{ color: "var(--accent)", fontWeight: 700 }}>{PANEL(u.role)}</span>
+                <span style={{ color: "var(--muted)" }}>{u.restaurantName || "—"}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="adm-charts2">
