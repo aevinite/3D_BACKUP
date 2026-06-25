@@ -228,7 +228,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // guest "you're blocked" wall sticks), not just a phone they may not have. (077)
       const device = m.device_id ? String(m.device_id).trim() : null;
       must(await sb.from("blocklist").insert({ member_id: b, phone, device_id: device, reason: "banned from tablet" }).select());
-      if (phone) await sb.from("customers").upsert({ phone, blocked: true }, { onConflict: "phone" });
+      if (phone) await sb.from("customers").upsert({ phone, blocked: true, restaurant_id: rid }, { onConflict: "restaurant_id,phone" });
       const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).select());
       await logAction("tablet", "member_ban", { detail: (phone ? `banned ${phone}` : "banned") + byNote(g), device_id: dev });
       return ok(row[0] || null);

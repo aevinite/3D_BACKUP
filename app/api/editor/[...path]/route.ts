@@ -11,7 +11,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
-import { requireRole } from "@/lib/userAuth";
+import { requireRole, type StaffUser } from "@/lib/userAuth";
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { closeSession } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
@@ -20,9 +21,14 @@ export const dynamic = "force-dynamic"; // always live, never cached
 
 // Gate: only a logged-in MANAGER (or the admin super-user) may touch this API.
 // Returns a 401 response to short-circuit, or null to let the handler proceed.
-async function gate(req: NextRequest): Promise<NextResponse | null> {
+async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | NextResponse> {
   const g = await requireRole(req, "manager");
-  return g.ok ? null : NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
+  if (!g.ok) return NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
+  return { user: g.user };
+}
+// The logged-in manager's restaurant (admin super-user → default restaurant #1).
+function ridOf(g: { user: StaffUser | null }): string {
+  return g.user?.restaurant_id || DEFAULT_RESTAURANT_ID;
 }
 
 const nowIso = () => new Date().toISOString();
@@ -93,17 +99,18 @@ type Ctx = { params: Promise<{ path?: string[] }> };
 
 // ── GET ──────────────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest, ctx: Ctx) {
-  const denied = await gate(req); if (denied) return denied;
+  const g = await gate(req); if (g instanceof NextResponse) return g;
+  const rid = ridOf(g);
   try {
     const { path = [] } = await ctx.params;
     const p = path.join("/");
 
     if (p === "all") {
       const [items, categories, filters, settings] = await Promise.all([
-        sb.from("menu_items").select("*").order("sort_order"),
-        sb.from("categories").select("*").order("sort_order"),
-        sb.from("filters").select("*").order("sort_order"),
-        sb.from("settings").select("*").eq("id", "site").maybeSingle(),
+        sb.from("menu_items").select("*").eq("restaurant_id", rid).order("sort_order"),
+        sb.from("categories").select("*").eq("restaurant_id", rid).order("sort_order"),
+        sb.from("filters").select("*").eq("restaurant_id", rid).order("sort_order"),
+        sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
       ]);
       return ok({
         items: must(items),
@@ -114,7 +121,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     if (p === "orders") {
-      const orders = must(await sb.from("orders").select("*").order("created_at", { ascending: false }).limit(200));
+      const orders = must(await sb.from("orders").select("*").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(200));
       // Attach each order's SESSION invoice/bill state so the merged bill card knows
       // whether it's invoiced/locked (invoice lives on the session, not the order).
       const sids = [...new Set(orders.map((o: any) => o.session_id).filter(Boolean))];
@@ -136,7 +143,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     if (p === "calls") {
-      return ok(must(await sb.from("waiter_calls").select("*").order("created_at", { ascending: false }).limit(100)));
+      return ok(must(await sb.from("waiter_calls").select("*").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(100)));
     }
 
     // Platform (Zomato/Swiggy/takeaway) orders + the two operator toggles. Read
@@ -147,10 +154,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // then drops off the live board. Cancelled never show. (owner, 2026-06-21)
       const handoverCutoff = new Date(Date.now() - 6 * 60 * 1000).toISOString();
       const [rows, settings] = await Promise.all([
-        sb.from("aggregator_orders").select("*")
+        sb.from("aggregator_orders").select("*").eq("restaurant_id", rid)
           .or(`status.eq.new,status.eq.accepted,status.eq.preparing,status.eq.ready,and(status.eq.handed_over,updated_at.gte.${handoverCutoff})`)
           .order("created_at", { ascending: false }).limit(200),
-        sb.from("settings").select("kitchen_can_accept_platform, platform_in_bills").eq("id", "site").maybeSingle(),
+        sb.from("settings").select("kitchen_can_accept_platform, platform_in_bills").eq("restaurant_id", rid).maybeSingle(),
       ]);
       return ok({ orders: must(rows) || [], toggles: must(settings) || {} });
     }
@@ -160,11 +167,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "zreport") {
       const since = businessDayStartIso();
       const [ordQ, invQ, voidQ, platQ, setQ] = await Promise.all([
-        sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status").gte("created_at", since),
-        sb.from("sessions").select("id").gte("invoice_at", since),     // invoices GENERATED today
-        sb.from("sessions").select("id").gte("void_at", since),        // invoices VOIDED today
-        sb.from("aggregator_orders").select("total,status").gte("created_at", since),
-        sb.from("settings").select("tax_rate,restaurant_name,gstin,invoice_prefix").eq("id", "site").maybeSingle(),
+        sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status").eq("restaurant_id", rid).gte("created_at", since),
+        sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since),     // invoices GENERATED today
+        sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since),        // invoices VOIDED today
+        sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since),
+        sb.from("settings").select("tax_rate,restaurant_name,gstin,invoice_prefix").eq("restaurant_id", rid).maybeSingle(),
       ]);
       const orders = (must(ordQ) || []) as any[];
       const set = (must(setQ) || {}) as any;
@@ -211,15 +218,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     if (p === "sessions") {
       const sessions = must(
-        await sb.from("sessions").select("*").neq("status", "closed").order("last_activity_at", { ascending: false })
+        await sb.from("sessions").select("*").eq("restaurant_id", rid).neq("status", "closed").order("last_activity_at", { ascending: false })
       );
        
       const ids = sessions.map((s: any) => s.id);
       const [members, items, requests, blocklist] = await Promise.all([
         ids.length ? sb.from("session_members").select("*").in("session_id", ids).eq("removed", false).order("joined_at") : Promise.resolve({ data: [] }),
         ids.length ? sb.from("order_items").select("*").in("session_id", ids).order("created_at") : Promise.resolve({ data: [] }),
-        sb.from("requests").select("*").eq("status", "pending").order("created_at"),
-        sb.from("blocklist").select("*").order("blocked_at", { ascending: false }),
+        sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid).order("created_at"),
+        sb.from("blocklist").select("*").eq("restaurant_id", rid).order("blocked_at", { ascending: false }),
       ]);
       return ok({
         sessions,
@@ -240,8 +247,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       else { since = new Date(Date.now() - 29 * 864e5); since.setHours(0, 0, 0, 0); }
 
       const [ordersQ, dishesQ] = await Promise.all([
-        sb.from("orders").select("id,total,discount,status,payment_status,created_at,items").gte("created_at", since.toISOString()),
-        sb.from("menu_items").select("id,title,category"),
+        sb.from("orders").select("id,total,discount,status,payment_status,created_at,items").eq("restaurant_id", rid).gte("created_at", since.toISOString()),
+        sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
       ]);
       const orders = must(ordersQ), dishes = must(dishesQ);
       const catOf: Record<string, string> = Object.fromEntries(dishes.map((d: { id: string; category?: string }) => [d.id, d.category || "other"]));
@@ -284,9 +291,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // orders live in aggregator_orders, separate from dine-in `orders`).
       const todayStart = new Date(businessDayStartIso()).toISOString();
       const [openSessQ, platActiveQ, platTodayQ] = await Promise.all([
-        sb.from("sessions").select("id").eq("status", "open"),
-        sb.from("aggregator_orders").select("source").in("status", ["new", "accepted", "preparing", "ready"]),
-        sb.from("aggregator_orders").select("total").gte("created_at", todayStart),
+        sb.from("sessions").select("id").eq("status", "open").eq("restaurant_id", rid),
+        sb.from("aggregator_orders").select("source").eq("restaurant_id", rid).in("status", ["new", "accepted", "preparing", "ready"]),
+        sb.from("aggregator_orders").select("total").eq("restaurant_id", rid).gte("created_at", todayStart),
       ]);
       const platActive = (must(platActiveQ) || []) as { source: string }[];
       const platToday = (must(platTodayQ) || []) as { total: number }[];
@@ -310,12 +317,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const members = must(
         await sb.from("session_members")
           .select("id, name, phone, phone_verified, role, approved, removed, location_ok, joined_at, session:sessions(table_number, status)")
-          .order("joined_at", { ascending: false }).limit(120)
+          .eq("restaurant_id", rid).order("joined_at", { ascending: false }).limit(120)
       );
-      const customers = must(await sb.from("customers").select("*").order("last_seen_at", { ascending: false }).limit(120));
-      const blocklist = must(await sb.from("blocklist").select("*").order("blocked_at", { ascending: false }));
-      const orders = must(await sb.from("orders").select("member_id, total, created_at").not("member_id", "is", null).order("created_at", { ascending: false }).limit(400));
-      const calls = must(await sb.from("waiter_calls").select("member_id, note, created_at").not("member_id", "is", null).order("created_at", { ascending: false }).limit(400));
+      const customers = must(await sb.from("customers").select("*").eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(120));
+      const blocklist = must(await sb.from("blocklist").select("*").eq("restaurant_id", rid).order("blocked_at", { ascending: false }));
+      const orders = must(await sb.from("orders").select("member_id, total, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(400));
+      const calls = must(await sb.from("waiter_calls").select("member_id, note, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(400));
       return ok({ members, customers, blocklist, orders, calls });
     }
 
@@ -323,7 +330,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // The operation log: recent staff actions across all panels. The ADMIN's own
       // user-management actions (panel='admin' — create/delete/reset users) are
       // HIDDEN here; they show only in the admin's own Logs page, never the manager's.
-      return ok(must(await sb.from("staff_actions").select("*").neq("panel", "admin").order("created_at", { ascending: false }).limit(200)));
+      return ok(must(await sb.from("staff_actions").select("*").eq("restaurant_id", rid).neq("panel", "admin").order("created_at", { ascending: false }).limit(200)));
     }
 
     return err("unknown GET endpoint", 404);
@@ -334,7 +341,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
 // ── POST ─────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest, ctx: Ctx) {
-  const denied = await gate(req); if (denied) return denied;
+  const g = await gate(req); if (g instanceof NextResponse) return g;
+  const rid = ridOf(g);
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
@@ -347,7 +355,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "platform" && b === "test") {
       const SRC = ["zomato", "swiggy", "takeaway"];
       const src = SRC[Math.floor(Math.random() * SRC.length)];
-      const dishes = must(await sb.from("menu_items").select("title, price").limit(50)) || [];
+      const dishes = must(await sb.from("menu_items").select("title, price").eq("restaurant_id", rid).limit(50)) || [];
       const pick: { title: string; qty: number; price: number }[] = [];
       let total = 0;
       const n = 1 + Math.floor(Math.random() * 3);
@@ -364,7 +372,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_platform_insert", {
         p_source: src, p_external_id: ext, p_customer: cust,
         p_phone: `+9190${Math.floor(10000000 + Math.random() * 89999999)}`,
-        p_items: pick, p_total: total,
+        p_items: pick, p_total: total, p_restaurant_id: rid,
       });
       if (error) throw new Error(error.message);
       await logAction("manager", "platform_test_order", { detail: `${src} test order`, device_id: dev });
@@ -390,7 +398,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (typeof body.kitchen_can_accept_platform === "boolean") patch.kitchen_can_accept_platform = body.kitchen_can_accept_platform;
       if (typeof body.platform_in_bills === "boolean") patch.platform_in_bills = body.platform_in_bills;
       if (!Object.keys(patch).length) return err("no toggle given");
-      must(await sb.from("settings").update(patch).eq("id", "site").select());
+      must(await sb.from("settings").update(patch).eq("restaurant_id", rid).select());
       await logAction("manager", "platform_toggle", { detail: JSON.stringify(patch), device_id: dev });
       return ok({ ok: true, ...patch });
     }
@@ -400,8 +408,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const { ids, all } = body || {};
        
       let candidates: any[];
-      if (all) candidates = must(await sb.from("orders").select("id,payment_status,status"));
-      else if (Array.isArray(ids) && ids.length) candidates = must(await sb.from("orders").select("id,payment_status,status").in("id", ids));
+      if (all) candidates = must(await sb.from("orders").select("id,payment_status,status").eq("restaurant_id", rid));
+      else if (Array.isArray(ids) && ids.length) candidates = must(await sb.from("orders").select("id,payment_status,status").eq("restaurant_id", rid).in("id", ids));
       else return err("no ids");
       const deletable = candidates.filter((o) => !(o.payment_status === "paid" && o.status !== "cancelled")).map((o) => o.id);
       const kept = candidates.length - deletable.length;
@@ -495,17 +503,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (!table) return err("table required");
       const num = Number(table);
       if (!/^\d+$/.test(table) || num < 1) return err("invalid table number");
-      const setRow = await sb.from("settings").select("table_count").eq("id", "site").maybeSingle();
+      const setRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
       const maxTables = setRow.data && setRow.data.table_count ? Number(setRow.data.table_count) : 0;
       if (maxTables > 0 && num > maxTables) return err(`Table ${num} doesn't exist — tables are 1–${maxTables}.`);
-      const existing = must(await sb.from("sessions").select("*").eq("table_number", table).neq("status", "closed").limit(1));
+      const existing = must(await sb.from("sessions").select("*").eq("table_number", table).eq("restaurant_id", rid).neq("status", "closed").limit(1));
       let row;
       if (existing.length) {
         row = must(await sb.from("sessions").update({ status: "open", opened_by: "waiter", opened_at: existing[0].opened_at || nowIso(), last_activity_at: nowIso() }).eq("id", existing[0].id).select())[0];
       } else {
-        row = must(await sb.from("sessions").insert({ table_number: table, status: "open", opened_by: "waiter", opened_at: nowIso() }).select())[0];
+        row = must(await sb.from("sessions").insert({ table_number: table, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select())[0];
       }
-      await sb.from("requests").update({ status: "approved" }).eq("table_number", table).eq("status", "pending");
+      await sb.from("requests").update({ status: "approved" }).eq("table_number", table).eq("restaurant_id", rid).eq("status", "pending");
       await logAction("editor", "table_open", { table_number: table, device_id: dev });
       return ok(row || null);
     }
@@ -702,8 +710,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (!["approved", "denied"].includes(status)) return err("invalid status");
       const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).select())[0];
       if (status === "approved" && reqRow && reqRow.type === "open") {
-        const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).neq("status", "closed").limit(1));
-        if (!existing.length) must(await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso() }));
+        const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).eq("restaurant_id", rid).neq("status", "closed").limit(1));
+        if (!existing.length) must(await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }));
       }
       return ok(reqRow || null);
     }
@@ -723,8 +731,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         if (m?.device_id) device = m.device_id;
         if (!phone && m?.phone) phone = m.phone;
       }
-      const row = must(await sb.from("blocklist").insert({ phone, table_number: table, device_id: device, member_id: memberId, reason: body.reason || "banned" }).select())[0];
-      if (phone) await sb.from("customers").upsert({ phone, blocked: true }, { onConflict: "phone" });
+      const row = must(await sb.from("blocklist").insert({ phone, table_number: table, device_id: device, member_id: memberId, reason: body.reason || "banned", restaurant_id: rid }).select())[0];
+      if (phone) await sb.from("customers").upsert({ phone, blocked: true, restaurant_id: rid }, { onConflict: "restaurant_id,phone" });
       return ok(row || null);
     }
 
@@ -733,7 +741,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const t = TABLES[a];
       if (!t) return err("unknown kind", 404);
       if (a === "settings" && body && typeof body === "object") {
-        body.id = "site";
+        // settings is one row per restaurant (UNIQUE restaurant_id); matched by
+        // restaurant_id at the upsert below — don't force the legacy id='site'
+        // (that only ever matches restaurant #1's row).
         if ("table_count" in body) {
           const n = Math.round(Number(body.table_count));
           body.table_count = Number.isFinite(n) ? Math.min(Math.max(n, 1), 500) : 12;
@@ -766,9 +776,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (a === "items" && body && typeof body === "object") {
         const slugify = (s: string) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
         if (!body.slug && body.title) body.slug = slugify(body.title);
-        if (!body.id) body.id = body.slug || slugify(body.title);
+        // menu_items.id is the GLOBAL primary key, so a new id must be unique across
+        // ALL restaurants. #1 keeps the historical slug-as-id (non-breaking); other
+        // restaurants get a restaurant-namespaced id so two places can both have a
+        // "burger" slug without colliding on the PK (slug stays unique per restaurant).
+        if (!body.id) {
+          const base = body.slug || slugify(body.title);
+          body.id = rid === DEFAULT_RESTAURANT_ID ? base : `${base}__${rid.slice(0, 8)}`;
+        }
       }
-      const data = must(await sb.from(t.name).upsert(body, { onConflict: t.key }).select());
+      // Stamp ownership + match the per-restaurant unique key: categories/filters are
+      // keyed (restaurant_id, slug); settings is keyed (restaurant_id); menu_items
+      // keeps its global id PK. So a save only ever touches THIS restaurant's row.
+      body.restaurant_id = rid;
+      const onConflict = a === "settings" ? "restaurant_id"
+        : (a === "categories" || a === "filters") ? "restaurant_id,slug"
+        : t.key;
+      const data = must(await sb.from(t.name).upsert(body, { onConflict }).select());
       return ok(data[0]);
     }
 
@@ -780,7 +804,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
 // ── PATCH ────────────────────────────────────────────────────────────────────
 export async function PATCH(req: NextRequest, ctx: Ctx) {
-  const denied = await gate(req); if (denied) return denied;
+  const g = await gate(req); if (g instanceof NextResponse) return g;
+  const rid = ridOf(g);
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;
@@ -799,7 +824,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       }
       if (body.archived !== undefined) patch.archived = body.archived === true;
       if (!Object.keys(patch).length) return err("nothing to update");
-      const cur = must(await sb.from("orders").select("status,payment_status").eq("id", id).single());
+      const cur = must(await sb.from("orders").select("status,payment_status").eq("id", id).eq("restaurant_id", rid).single());
       if (patch.status === "cancelled" && cur.payment_status === "paid")
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
       if (patch.payment_status === "paid" && cur.status === "cancelled")
@@ -812,13 +837,13 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         if (!reason) return err("Reverting a PAID bill needs a reason (refund/correction).", 409);
         await logAction("editor", "payment_revert", { order_id: id, detail: reason, device_id: deviceIdFrom(req) });
       }
-      const data = must(await sb.from("orders").update(patch).eq("id", id).select());
+      const data = must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid).select());
       if (patch.payment_status === "paid") await maybeAutoSettle(data[0]?.session_id, { panel: "editor", deviceId: deviceIdFrom(req) }); // paying may complete the table
       return ok(data[0] || null);
     }
 
     if (a === "calls" && id) {
-      const data = must(await sb.from("waiter_calls").update({ resolved: body?.resolved === true }).eq("id", id).select());
+      const data = must(await sb.from("waiter_calls").update({ resolved: body?.resolved === true }).eq("id", id).eq("restaurant_id", rid).select());
       return ok(data[0] || null);
     }
 
@@ -830,31 +855,32 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
 // ── DELETE ───────────────────────────────────────────────────────────────────
 export async function DELETE(req: NextRequest, ctx: Ctx) {
-  const denied = await gate(req); if (denied) return denied;
+  const g = await gate(req); if (g instanceof NextResponse) return g;
+  const rid = ridOf(g);
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;
 
     if (a === "orders" && id) {
-      const cur = must(await sb.from("orders").select("payment_status,status").eq("id", id).single());
+      const cur = must(await sb.from("orders").select("payment_status,status").eq("id", id).eq("restaurant_id", rid).single());
       if (cur && cur.payment_status === "paid" && cur.status !== "cancelled")
         return err("Won't delete a PAID bill — it's a financial record. Mark it unpaid or void it first.", 409);
-      must(await sb.from("orders").delete().eq("id", id));
+      must(await sb.from("orders").delete().eq("id", id).eq("restaurant_id", rid));
       return ok({ ok: true });
     }
 
     if (a === "calls" && id) {
-      must(await sb.from("waiter_calls").delete().eq("id", id));
+      must(await sb.from("waiter_calls").delete().eq("id", id).eq("restaurant_id", rid));
       return ok({ ok: true });
     }
 
     if (a === "blocklist" && id) {
-      const existing = must(await sb.from("blocklist").select("*").eq("id", id).limit(1));
-      must(await sb.from("blocklist").delete().eq("id", id));
+      const existing = must(await sb.from("blocklist").select("*").eq("id", id).eq("restaurant_id", rid).limit(1));
+      must(await sb.from("blocklist").delete().eq("id", id).eq("restaurant_id", rid));
       const phone = existing[0] && existing[0].phone;
       if (phone) {
-        const others = must(await sb.from("blocklist").select("id").eq("phone", phone).limit(1));
-        if (!others.length) await sb.from("customers").update({ blocked: false }).eq("phone", phone);
+        const others = must(await sb.from("blocklist").select("id").eq("phone", phone).eq("restaurant_id", rid).limit(1));
+        if (!others.length) await sb.from("customers").update({ blocked: false }).eq("phone", phone).eq("restaurant_id", rid);
       }
       return ok({ ok: true });
     }
@@ -863,7 +889,9 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     if (a && id) {
       const t = TABLES[a];
       if (!t) return err("unknown kind", 404);
-      must(await sb.from(t.name).delete().eq(t.key, id));
+      // slug is unique only PER restaurant now (categories/filters), so a delete by
+      // key MUST also pin the restaurant or it would wipe that slug everywhere.
+      must(await sb.from(t.name).delete().eq(t.key, id).eq("restaurant_id", rid));
       return ok({ ok: true });
     }
 
