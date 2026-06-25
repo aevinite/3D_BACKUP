@@ -16,7 +16,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sha256hex, safeEqual, AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 
 export const USER_COOKIE = "lfh_user";
-export type Role = "manager" | "tablet" | "kitchen";
+export type Role = "owner" | "manager" | "tablet" | "kitchen";
 
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // cookies are good for 7 days
 const MAX_FAILS = 5;                            // wrong tries before a lockout
@@ -29,7 +29,7 @@ const SECRET = () =>
   process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || process.env.STAFF_PASSWORD || "lfh-dev-secret";
 
 export type StaffUser = {
-  id: string; username: string; role: Role;
+  id: string; username: string; role: Role; restaurant_id: string;
   name: string | null; phone: string | null; active: boolean; pin_hash: string | null;
   token_version: number; can_self_reset: boolean; can_self_set_pin: boolean; profile_confirmed: boolean;
 };

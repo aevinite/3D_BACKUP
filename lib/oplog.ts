@@ -5,7 +5,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 
 // "manager" is the new name for the old "editor" panel (rename is a later task);
 // both are accepted so login/audit rows tag correctly during the transition.
-type Panel = "editor" | "manager" | "kitchen" | "tablet" | "admin";
+type Panel = "editor" | "manager" | "kitchen" | "tablet" | "admin" | "owner";
 type Fields = {
   table_number?: string | null;
   order_id?: string | null;
