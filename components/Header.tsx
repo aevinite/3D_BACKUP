@@ -31,7 +31,7 @@ const readTheme = (): Theme => {
 
 // Header: the top bar with the restaurant name, currency/language pickers, a
 // light/dark toggle, and the cart button (with its item-count badge).
-export default function Header() {
+export default function Header({ logoText }: { logoText?: string }) {
   const features = useFeatures(); // which restaurant features are switched on
   // Each useState below is a labelled memory box the header keeps:
   const [mounted, setMounted] = useState(false); // has the header finished loading in the browser yet?
@@ -124,11 +124,15 @@ export default function Header() {
     <div className="nav">
       {/* Left: the restaurant name, split into styled pieces. */}
       <div className="brand">
-        <h1 className="brand-title">
-          <span className="brand-plain">little</span>{" "}
-          <span className="brand-highlight">French</span>{" "}
-          <span className="brand-plain">house</span>
-        </h1>
+        {logoText ? (
+          <h1 className="brand-title"><span className="brand-highlight">{logoText}</span></h1>
+        ) : (
+          <h1 className="brand-title">
+            <span className="brand-plain">little</span>{" "}
+            <span className="brand-highlight">French</span>{" "}
+            <span className="brand-plain">house</span>
+          </h1>
+        )}
       </div>
       {/* Right: all the action buttons (currency, language, theme, cart). */}
       <div className="nav-actions">

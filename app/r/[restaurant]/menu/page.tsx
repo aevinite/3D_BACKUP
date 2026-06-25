@@ -16,5 +16,13 @@ export default async function RestaurantMenuPage({
   const { restaurant } = await params;
   const r = await getRestaurantBySlug(restaurant);
   if (!r || !r.active) notFound();
-  return <MenuView restaurantId={r.id} />;
+  return (
+    <MenuView
+      restaurantId={r.id}
+      logoText={r.logoText ?? undefined}
+      heroTitle={r.heroTitle ?? undefined}
+      tagline={r.tagline ?? undefined}
+      accentColor={r.accentColor ?? undefined}
+    />
+  );
 }

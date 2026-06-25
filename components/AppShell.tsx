@@ -14,7 +14,7 @@ import { supabase } from "@/lib/supabase";
 // the background bubbles, the header, the chef-call button, and finally the
 // actual page content (`children`). It also listens for site-wide settings the
 // staff control from the editor, so the guest's screen updates live.
-export default function AppShell({ children }: { children: React.ReactNode }) {
+export default function AppShell({ children, logoText, accentColor }: { children: React.ReactNode; logoText?: string; accentColor?: string }) {
   // General-tab toggles: bubble effect on/off, and service (maintenance) mode.
   // These are pieces of remembered state — when they change, the screen redraws.
   const [bubbles, setBubbles] = useState(true);
@@ -73,9 +73,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Floating background bubbles — only if the toggle is on */}
       {bubbles && <Particles />}
       <div id="app">
-        <div id="menu-page" className="page active">
+        <div id="menu-page" className="page active" style={accentColor ? ({ "--accent": accentColor, "--gold": accentColor } as React.CSSProperties) : undefined}>
           {/* The top bar (logo, language/currency, theme toggle, cart) */}
-          <Header />
+          <Header logoText={logoText} />
           {/* Whatever page is currently being shown goes here */}
           {children}
         </div>

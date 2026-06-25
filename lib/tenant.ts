@@ -18,6 +18,10 @@ export interface Restaurant {
   slug: string;
   name: string;
   active: boolean;
+  logoText: string | null;
+  heroTitle: string | null;
+  tagline: string | null;
+  accentColor: string | null;
 }
 
 // Per-process cache: slug -> restaurant (or null if unknown). Restaurants change
@@ -34,11 +38,17 @@ export async function getRestaurantBySlug(slug: string): Promise<Restaurant | nu
   if (bySlug.has(slug)) return bySlug.get(slug)!;
   const { data, error } = await supabase
     .from("restaurants")
-    .select("id, slug, name, active")
+    .select("id, slug, name, active, logo_text, hero_title, tagline, accent_color")
     .eq("slug", slug)
     .maybeSingle();
   const r: Restaurant | null =
-    !error && data ? { id: data.id, slug: data.slug, name: data.name, active: !!data.active } : null;
+    !error && data
+      ? {
+          id: data.id, slug: data.slug, name: data.name, active: !!data.active,
+          logoText: data.logo_text ?? null, heroTitle: data.hero_title ?? null,
+          tagline: data.tagline ?? null, accentColor: data.accent_color ?? null,
+        }
+      : null;
   bySlug.set(slug, r);
   return r;
 }

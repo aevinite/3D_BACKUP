@@ -41,7 +41,8 @@ const { data: s1 } = await db.from("settings").select("*").eq("restaurant_id", R
 
 const DEMO = [
   {
-    restaurant: { id: PIZZA, slug: "pizza-palace", name: "Pizza Palace", active: true },
+    restaurant: { id: PIZZA, slug: "pizza-palace", name: "Pizza Palace", active: true, logo_text: "Pizza Palace", hero_title: "Wood-Fired Pizzeria", tagline: "BUONASERA", accent_color: "#c0392b" },
+    heroImg: "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=500&q=60",
     categories: [
       { slug: "pizzas", name: { en: "Pizzas" }, icon: "fa-solid fa-pizza-slice", color: "#d97706", sort_order: 0, active: true },
       { slug: "sides", name: { en: "Sides" }, icon: "fa-solid fa-bowl-food", color: "#16a34a", sort_order: 1, active: true },
@@ -96,7 +97,7 @@ for (const d of DEMO) {
     slug,
     title,
     price,
-    image: img(i),
+    image: d.heroImg || img(i),
     category,
     veg,
     is4d: false,

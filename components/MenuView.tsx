@@ -35,6 +35,8 @@ import { useFeatures, refreshFeatures } from "@/lib/features";
 // Live updates: refetch the menu the instant the owner edits a dish / toggles a
 // feature, without yanking the guest around.
 import { useRealtime } from "@/lib/useRealtime";
+// The default restaurant id, to keep restaurant #1's chrome byte-for-byte identical.
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 
 // The card list works with the full MenuItem shape from the data layer.
 type FoodItem = MenuItem;
@@ -58,7 +60,10 @@ const DIETS = [
 const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
 
 // This is the menu page, shown at "/menu". It's the main browsing screen.
-export default function MenuView({ restaurantId }: { restaurantId: string }) {
+export default function MenuView({ restaurantId, logoText, heroTitle, tagline, accentColor }: { restaurantId: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string }) {
+  // Restaurant #1 keeps its exact current chrome (localized hero, hardcoded
+  // wordmark, theme accent); other restaurants get their own brand.
+  const isDefault = restaurantId === DEFAULT_RESTAURANT_ID;
   const t = useTranslation();   // translated text for the current language
   const lang = useLanguage();   // which language is active right now
   const features = useFeatures(restaurantId); // this restaurant's switched-on features
@@ -501,7 +506,7 @@ export default function MenuView({ restaurantId }: { restaurantId: string }) {
   // Curly braces { } drop a value or a bit of logic into the markup.
   return (
     // AppShell = the shared outer frame (header, footer, etc.).
-    <AppShell>
+    <AppShell logoText={isDefault ? undefined : (logoText || undefined)} accentColor={isDefault ? undefined : (accentColor || undefined)}>
       {/* ONE fixed frosted backdrop behind the whole pinned header (brand +
           category + search). A single blur region = no seam between the brand
           and the categories. Its height is driven live by the scroll handler. */}
@@ -510,7 +515,7 @@ export default function MenuView({ restaurantId }: { restaurantId: string }) {
       <main id="main-scroll">
         {/* The big animated greeting banner up top. */}
         <div className="hero">
-          <HeroTitle greeting={t.greeting} title={t.heroTitle} />
+          <HeroTitle greeting={!isDefault && tagline ? tagline : t.greeting} title={!isDefault && heroTitle ? heroTitle : t.heroTitle} />
         </div>
 
         {/* "Categories" heading plus a small "slide →" hint. */}
