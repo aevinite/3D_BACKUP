@@ -788,7 +788,7 @@ export default function MenuView({ restaurantId, logoText, heroTitle, tagline, a
                   {open && (
                     <div className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}>
                       {g.items.map((item, index) => (
-                        <FoodCard key={item.id} item={item} index={index} viewingCategory={g.slug} />
+                        <FoodCard key={item.id} item={item} index={index} viewingCategory={g.slug} restaurantId={restaurantId} />
                       ))}
                     </div>
                   )}
@@ -805,7 +805,7 @@ export default function MenuView({ restaurantId, logoText, heroTitle, tagline, a
           >
             {/* One FoodCard tile per dish in the filtered list. */}
             {filteredItems.map((item, index) => (
-              <FoodCard key={item.id} item={item} index={index} viewingCategory={currentCategory} />
+              <FoodCard key={item.id} item={item} index={index} viewingCategory={currentCategory} restaurantId={restaurantId} />
             ))}
           </div>
         )}

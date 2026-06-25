@@ -66,8 +66,11 @@ const writeCart = (cart: CartItem[]) => {
 // One dish "card" in the menu grid: the photo, name, price, veg badge, and the
 // add/customise button. `index` is its position (used to stagger the fade-in);
 // `viewingCategory` is the current filter, remembered in the link.
-export default function FoodCard({ item, index, viewingCategory }: { item: FoodItem; index: number; viewingCategory?: string }) {
-  const features = useFeatures(); // which restaurant features are switched on
+export default function FoodCard({ item, index, viewingCategory, restaurantId }: { item: FoodItem; index: number; viewingCategory?: string; restaurantId?: string }) {
+  // Read THIS restaurant's switches (not the default one's) so a per-restaurant
+  // toggle — e.g. turning ratings off for one restaurant — actually shows/hides
+  // here. Falls back to the default restaurant when no id is passed.
+  const features = useFeatures(restaurantId); // which restaurant features are switched on
   // How many of this (plain) dish are in the cart — shows on the +/- counter.
   const [cartQty, setCartQty] = useState(0);
   // The currency to format the price in (e.g. $, €). Loaded on screen.
