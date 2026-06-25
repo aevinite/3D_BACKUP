@@ -1,0 +1,73 @@
+// /api/owner/issues — the OWNER (their restaurants) + ADMIN (all restaurants)
+// view of staff-raised issues / complaints.
+//   GET   → list issues in scope (open first, newest first) with restaurant names
+//   PATCH → resolve / reopen an issue (must be in the caller's scope)
+//   POST  → owner/admin raises an issue against a restaurant they can see
+// Manager/kitchen/tablet raise issues via /api/editor/issue instead (panel-scoped).
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { ownerScope, inScope } from "@/lib/ownerScope";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest) {
+  const scope = await ownerScope(req);
+  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  let q = sb.from("issues").select("*").order("status", { ascending: true }).order("created_at", { ascending: false }).limit(300);
+  if (!scope.all) {
+    if (!scope.ids.length) return NextResponse.json({ issues: [] });
+    q = q.in("restaurant_id", scope.ids);
+  }
+  const { data, error } = await q;
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Attach restaurant names via a separate small fetch (avoids a PostgREST embed).
+  const list = (data || []) as Array<{ restaurant_id: string; status: string } & Record<string, unknown>>;
+  const rids = [...new Set(list.map((i) => i.restaurant_id))];
+  const names: Record<string, string> = {};
+  if (rids.length) {
+    const r = await sb.from("restaurants").select("id, name").in("id", rids);
+    for (const x of (r.data || []) as { id: string; name: string }[]) names[x.id] = x.name;
+  }
+  const issues = list.map((i) => ({ ...i, restaurantName: names[i.restaurant_id] || "—" }));
+  return NextResponse.json({ issues, openCount: issues.filter((i) => i.status === "open").length });
+}
+
+export async function PATCH(req: NextRequest) {
+  const scope = await ownerScope(req);
+  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const body = await req.json().catch(() => ({}));
+  const id = String(body?.id || "");
+  const status = body?.status === "open" ? "open" : "resolved";
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+  const issue = (await sb.from("issues").select("id, restaurant_id").eq("id", id).maybeSingle()).data as { restaurant_id: string } | null;
+  if (!issue) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!inScope(scope, issue.restaurant_id)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+  const who = scope.all ? "admin" : "owner";
+  const patch = status === "resolved"
+    ? { status, resolved_at: new Date().toISOString(), resolved_by: who }
+    : { status, resolved_at: null, resolved_by: null };
+  const { error } = await sb.from("issues").update(patch).eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
+
+export async function POST(req: NextRequest) {
+  const scope = await ownerScope(req);
+  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const body = await req.json().catch(() => ({}));
+  const rid = String(body?.restaurant_id || "");
+  const subject = String(body?.subject || "").trim();
+  if (!rid || !subject) return NextResponse.json({ error: "restaurant and subject required" }, { status: 400 });
+  if (!inScope(scope, rid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+  const { error } = await sb.from("issues").insert({
+    restaurant_id: rid, subject, body: String(body?.body || "").trim(),
+    raised_by: scope.all ? "admin" : "owner", raised_role: scope.all ? "admin" : "owner",
+  });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
