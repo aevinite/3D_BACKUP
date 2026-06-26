@@ -4222,10 +4222,16 @@ async function pollTables(tables) {
   } catch (e) { return pollOrders(); }      // network/parse blip → safe full reload
   if (seq !== dataSeq) return;              // a newer loader started — drop this stale snapshot
   const tset = new Set(tables.map(String));
+  // Defensive dedup by row id (fetched row wins over a stale cached copy). The drop/add
+  // below keys on table_number; if a row's table_number ever disagrees between cache and
+  // server (e.g. a shift the breadcrumb didn't fully cover) the row could appear twice —
+  // this guarantees it never does. (owner 2026-06-26: "one missed/duplicated update is huge".)
+  const dedupeById = (arr) => { const m = new Map(); for (const x of arr) if (x && x.id != null) m.set(x.id, x); return [...m.values()]; };
 
   // ORDERS — drop the changed tables' old rows, add their fresh rows, keep the rest.
   let orders = (state.data.orders || []).filter((o) => !tset.has(String(o.table_number)));
   for (const r of results) orders = orders.concat(r.orders);
+  orders = dedupeById(orders);
   orders.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))); // newest-first, same as /orders
   // Same in-flight shields pollOrders uses: keep optimistic local copies, keep deletes gone.
   orders = orders
@@ -4256,7 +4262,10 @@ async function pollTables(tables) {
       requests = requests.concat(bd.requests || []);
       if (bd.blocklist) blocklist = bd.blocklist; // restaurant-wide + tiny; take the latest snapshot
     }
-    state.board = Object.assign({}, b, { sessions, members, items, requests, blocklist });
+    state.board = Object.assign({}, b, {
+      sessions: dedupeById(sessions), members: dedupeById(members),
+      items: dedupeById(items), requests: dedupeById(requests), blocklist,
+    });
     state.boardLoaded = true;
   }
 
