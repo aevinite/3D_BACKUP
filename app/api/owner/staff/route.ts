@@ -2,7 +2,8 @@
 //
 // WHO can call (resolved by `scope()` below):
 //   • ADMIN super-user (AUTH_COOKIE)  → every restaurant.
-//   • OWNER (role=owner)              → the restaurants WHERE owner_user_id = them.
+//   • OWNER (role=owner)              → every restaurant they're a member of in
+//                                       restaurant_owners (migration 097).
 //   • MANAGER (role=manager)          → ONLY their own restaurant, and ONLY if the
 //     owner enabled manager_permissions.manage_staff for it (else 403).
 //
@@ -50,7 +51,13 @@ async function scope(req: NextRequest): Promise<Scope> {
   const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   if (!u) return { ok: false, resp: bad("Not authorised — please log in.", 401) };
   if (u.role === "owner") {
-    const { data } = await sb.from("restaurants").select(cols).eq("owner_user_id", u.id).order("name");
+    // Multi-owner (migration 097): the restaurants an owner may staff are EVERY
+    // restaurant they're a member of in restaurant_owners — not just the one where
+    // they're the primary owner. Resolve the ids first, then fetch those rows.
+    const memb = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", u.id)).data;
+    const ownedIds = (memb || []).map((m) => m.restaurant_id as string);
+    if (!ownedIds.length) return { ok: true, actor: "owner", actorId: u.id, restaurants: [] };
+    const { data } = await sb.from("restaurants").select(cols).in("id", ownedIds).order("name");
     return { ok: true, actor: "owner", actorId: u.id, restaurants: (data || []) as Restaurant[] };
   }
   if (u.role === "manager") {

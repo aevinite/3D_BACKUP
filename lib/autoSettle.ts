@@ -15,16 +15,23 @@ export async function maybeAutoSettle(
 ): Promise<void> {
   if (!sessionId) return;
   try {
-    const s = await sb.from("settings").select("auto_table_action").eq("id", "site").maybeSingle();
+    // The session's LIVE orders (not archived, not cancelled). The order's coarse
+    // status already rolls up its dishes (served only when every dish is served).
+    // We fetch these FIRST so we can read the session's restaurant_id off a real
+    // order row, then scope the settings lookup to THAT restaurant (multi-tenant:
+    // settings has one row per restaurant_id; the legacy `id='site'` row only ever
+    // matched restaurant #1, so other tenants used to read #1's auto-settle mode).
+    const res = await sb.from("orders").select("payment_status,status,restaurant_id")
+      .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled");
+    const orders = (res.data || []) as { payment_status?: string; status?: string; restaurant_id?: string | null }[];
+    if (!orders.length) return;                                          // nothing to settle
+    const rid = orders[0]?.restaurant_id;
+    if (!rid) return;                                                    // can't scope settings without it → bail safely
+
+    const s = await sb.from("settings").select("auto_table_action").eq("restaurant_id", rid).maybeSingle();
     const mode = (s.data as { auto_table_action?: string } | null)?.auto_table_action;
     if (mode !== "close" && mode !== "restart") return; // 'off' / unset → never act
 
-    // The session's LIVE orders (not archived, not cancelled). The order's coarse
-    // status already rolls up its dishes (served only when every dish is served).
-    const res = await sb.from("orders").select("payment_status,status")
-      .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled");
-    const orders = (res.data || []) as { payment_status?: string; status?: string }[];
-    if (!orders.length) return;                                          // nothing to settle
     if (!orders.every((o) => o.payment_status === "paid")) return;        // bill not fully paid
     if (!orders.every((o) => o.status === "served")) return;             // something not served
 

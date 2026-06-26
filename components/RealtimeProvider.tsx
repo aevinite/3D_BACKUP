@@ -63,18 +63,38 @@ export default function RealtimeProvider() {
     // visibilitychange + focus + pageshow (and sometimes online) back-to-back, so we
     // THROTTLE the rebuild: the first signal rebuilds the socket, the rest within
     // 1.5s just refetch — avoids tearing the socket down/up 2-3× per wake.
+    // IDLE-DISCONNECT (owner 2026-06-26 — protect the realtime connection budget): a tab
+    // left HIDDEN for IDLE_MS DROPS its channel so it stops holding a websocket connection
+    // (the "stale 41 connections" problem — tabs left open with no one looking). It rebuilds
+    // the channel + refetches the instant the tab is shown again. Mirrors lib/useRealtime.ts.
+    const IDLE_MS = 120000;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let torndown = false;
+    const teardown = () => {
+      if (channel) { supabase.removeChannel(channel); channel = null; }
+      currentTopic = null; // force a fresh subscribe on next wake even if the topic is unchanged
+      torndown = true;
+    };
     let lastForce = 0;
     const forceReconnect = () => {
       const now = Date.now();
+      if (torndown) { torndown = false; lastForce = now; resubscribe(true); tick(); return; } // reconnect after idle
       if (now - lastForce < 1500) { tick(); return; } // already rebuilt this wake — just refetch
       lastForce = now;
       resubscribe(true);
       tick();
     };
-    const onWake = () => { if (!document.hidden) forceReconnect(); };
+    const onWake = () => {
+      clearTimeout(idleTimer);
+      if (!document.hidden) forceReconnect();
+    };
+    const onVisibility = () => {
+      if (document.hidden) { clearTimeout(idleTimer); idleTimer = setTimeout(teardown, IDLE_MS); } // arm the idle drop
+      else onWake();
+    };
     window.addEventListener("lfh:session-changed", onSession);
     window.addEventListener("lfh:cart-updated", onSession);
-    document.addEventListener("visibilitychange", onWake);
+    document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", onWake);
     window.addEventListener("pageshow", onWake); // bfcache restore (phone wake)
     const onOnline = () => { metrics.reconnects++; forceReconnect(); };
@@ -82,10 +102,11 @@ export default function RealtimeProvider() {
 
     return () => {
       if (tTimer) clearTimeout(tTimer);
+      clearTimeout(idleTimer);
       if (channel) supabase.removeChannel(channel);
       window.removeEventListener("lfh:session-changed", onSession);
       window.removeEventListener("lfh:cart-updated", onSession);
-      document.removeEventListener("visibilitychange", onWake);
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onWake);
       window.removeEventListener("pageshow", onWake);
       window.removeEventListener("online", onOnline);
