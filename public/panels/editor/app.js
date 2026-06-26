@@ -253,6 +253,12 @@ async function loadAll() {
   // "seated · no orders" until the next board poll repopulates it (~5-7s). (2026-06-18)
   const prev = state.data || {};
   state.data = { ...data, orders: prev.orders || [], calls: prev.calls || [] };
+  // Name THIS restaurant in the top bar so staff (and the admin viewing as a tenant)
+  // always know which restaurant they're managing. (owner 2026-06-26)
+  const rr = data.restaurant || {};
+  const restName = rr.logo_text || (rr.name && rr.name.en) || rr.name_en || (state.data.settings || {}).restaurant_name || "";
+  const brandEl = document.getElementById("brandRest");
+  if (brandEl) brandEl.textContent = restName ? "· " + restName : "";
   $("#conn").textContent = "connected";
   $("#conn").className = "conn ok";
   renderList();
@@ -1232,7 +1238,11 @@ function openBillModal(key) {
     : (state.data.orders || []).filter((o) => o.session_id === key);
   if (!g.length) return;
   const o0 = g[0];
-  const _bm = billMath(g); const total = _bm.total; const disc = _bm.disc;
+  const m = billMath(g);
+  const pct = Math.round(m.rate * 10000) / 100; // e.g. 5
+  // Receipt-style item rows: dish name · ×qty · add-ons/notes underneath · price right.
+  // (owner 2026-06-26: the bill should read like a clean printable receipt — no invoice
+  // number on screen; subtotal → discount in the middle → total at the bottom.)
   const lines = g.map((o) => (o.items || []).map((i) => {
     const det = itemDetailLine(i);
     return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span></div>`;
@@ -1240,12 +1250,15 @@ function openBillModal(key) {
   const wrap = document.createElement("div");
   wrap.className = "bill-overlay";
   wrap.innerHTML = `<div class="bill-modal">
-      <div class="bm-head"><b>${o0.table_number ? "Table " + esc(o0.table_number) : "Walk-in"} · Bill #${esc(o0.bill_no ?? "—")}</b>
-        ${o0.invoice_no != null ? `<span class="inv-chip${o0.invoice_voided ? " voided" : ""}">${esc(invFmt(o0.invoice_no))}${o0.invoice_voided ? " · voided" : ""}</span>` : ""}</div>
+      <div class="bm-head"><b>${o0.table_number ? "Table " + esc(o0.table_number) : "Walk-in"} · Bill #${esc(o0.bill_no ?? "—")}</b>${o0.invoice_voided ? `<span class="inv-chip voided">voided</span>` : ""}</div>
       <div class="bm-sub">${esc(o0.customer_name || "")}${o0.created_at ? " · " + esc(new Date(o0.created_at).toLocaleString()) : ""}</div>
       <div class="bm-items">${lines}</div>
-      ${disc > 0 ? `<div class="bm-trow"><span>Discount</span><span>− ${inr(disc)}</span></div>` : ""}
-      <div class="bm-trow grand"><span>Total</span><span>${inr(total)}</span></div>
+      <div class="bm-totals">
+        <div class="bm-trow"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
+        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount</span><span>− ${inr(m.disc)}</span></div>` : ""}
+        ${m.tax > 0 ? `<div class="bm-trow"><span>GST ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
+        <div class="bm-trow grand"><span>Total</span><span>${inr(m.total)}</span></div>
+      </div>
       <div class="bm-actions">
         <button class="btn primary" data-bm-print>🖨 Print</button>
         <button class="btn" data-bm-restore>↩ Restore to floor</button>
