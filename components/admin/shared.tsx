@@ -75,12 +75,21 @@ export function useActiveAutoRefresh(fn: () => void, intervalMs = 60000, idleMs 
   ref.current = fn;
   useEffect(() => {
     let last = Date.now();
-    const bump = () => { last = Date.now(); };
+    let wasIdle = false; // were we paused (walked away) before this interaction?
+    const bump = () => {
+      const now = Date.now();
+      // WAKE-ON-RETURN (owner 2026-06-26): if the user comes back — moves the cursor,
+      // scrolls, taps — AFTER we'd gone idle, refresh IMMEDIATELY instead of making them
+      // wait up to a full interval for fresh data. Normal in-session moves don't refetch
+      // (we weren't idle), so this adds no extra egress while they're actively using it.
+      if (wasIdle && !document.hidden) { wasIdle = false; ref.current(); }
+      last = now;
+    };
     const evs: (keyof WindowEventMap)[] = ["pointerdown", "keydown", "scroll", "wheel", "touchstart", "pointermove"];
     evs.forEach((e) => window.addEventListener(e, bump, { passive: true, capture: true }));
     const id = setInterval(() => {
       if (document.hidden) return;                 // hidden tab → don't fetch
-      if (Date.now() - last > idleMs) return;      // user walked away → stop
+      if (Date.now() - last > idleMs) { wasIdle = true; return; } // user walked away → stop, arm wake-on-return
       ref.current();
     }, intervalMs);
     return () => {
