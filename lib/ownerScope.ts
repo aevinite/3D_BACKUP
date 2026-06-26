@@ -24,7 +24,19 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
     // This reuses the same {all:false} path a real owner takes (one id), so no owner
     // route changes. Admin with NO act-as keeps the full all-restaurants view.
     const acting = req.cookies.get(ADMIN_ACT_COOKIE)?.value;
-    if (acting) return { all: false, ids: [acting], ownerId: "admin" };
+    if (acting) {
+      // Show what the OWNER of the entered restaurant sees: ALL restaurants that owner
+      // owns (an owner may run several), not just the one we entered — so the admin's
+      // owner-cockpit view matches the real owner's. Fall back to the single restaurant
+      // if it has no owner assigned. (2026-06-26: was scoped to only the one restaurant.)
+      const r = (await sb.from("restaurants").select("owner_user_id").eq("id", acting).maybeSingle()).data;
+      if (r?.owner_user_id) {
+        const { data } = await sb.from("restaurants").select("id").eq("owner_user_id", r.owner_user_id);
+        const ids = (data || []).map((x) => x.id as string);
+        return { all: false, ids: ids.length ? ids : [acting], ownerId: r.owner_user_id as string };
+      }
+      return { all: false, ids: [acting], ownerId: "admin" };
+    }
     return { all: true };
   }
   const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
