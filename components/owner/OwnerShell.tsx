@@ -8,11 +8,23 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-const NAV = [
-  { href: "/owner", label: "All restaurants", icon: "fa-store", exact: true },
-  { href: "/owner/staff", label: "Staff & powers", icon: "fa-users-gear", exact: false },
-  { href: "/owner/issues", label: "Issues", icon: "fa-triangle-exclamation", exact: false },
-  { href: "/owner/report", label: "Earnings report", icon: "fa-file-invoice", exact: false },
+type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean };
+// Full POS-grade sidebar. Real sections link to live pages; "soon" ones open a
+// branded Coming-soon page so the menu is complete (like PetPooja/Toast) with no
+// dead links — each lands somewhere intentional.
+const NAV: NavItem[] = [
+  { href: "/owner", label: "Dashboard", icon: "fa-gauge-high", exact: true },
+  { href: "/owner/sales", label: "Sales & reports", icon: "fa-chart-line", soon: true },
+  { href: "/owner/orders", label: "Orders & bills", icon: "fa-receipt", soon: true },
+  { href: "/owner/menu", label: "Menu", icon: "fa-book-open", soon: true },
+  { href: "/owner/inventory", label: "Inventory", icon: "fa-boxes-stacked", soon: true },
+  { href: "/owner/staff", label: "Staff & powers", icon: "fa-users-gear" },
+  { href: "/owner/customers", label: "Customers", icon: "fa-user-group", soon: true },
+  { href: "/owner/marketing", label: "Marketing", icon: "fa-bullhorn", soon: true },
+  { href: "/owner/online", label: "Online & apps", icon: "fa-truck-fast", soon: true },
+  { href: "/owner/issues", label: "Feedback & issues", icon: "fa-triangle-exclamation" },
+  { href: "/owner/report", label: "Earnings report", icon: "fa-file-invoice" },
+  { href: "/owner/settings", label: "Settings", icon: "fa-gear", soon: true },
 ];
 
 export default function OwnerShell({ children }: { children: React.ReactNode }) {
@@ -29,7 +41,7 @@ export default function OwnerShell({ children }: { children: React.ReactNode }) 
     setSkin((cur) => { const next = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("aevidine_skin", next); } catch {} return next; });
   };
 
-  const isActive = (n: (typeof NAV)[number]) => (n.exact ? path === n.href : path.startsWith(n.href));
+  const isActive = (n: NavItem) => (n.exact ? path === n.href : path.startsWith(n.href));
 
   return (
     <div className="adm" data-skin={skin}>
@@ -42,6 +54,7 @@ export default function OwnerShell({ children }: { children: React.ReactNode }) 
           {NAV.map((n) => (
             <Link key={n.href} href={n.href} className={isActive(n) ? "active" : ""}>
               <i className={`fas ${n.icon}`} aria-hidden="true" /> {n.label}
+              {n.soon && <span className="navsoon">Soon</span>}
             </Link>
           ))}
           {/* SECURITY: the owner panel deliberately has NO link to the admin control
