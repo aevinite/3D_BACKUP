@@ -146,6 +146,18 @@ async function actGated(method, path, body, opts = {}) {
 const sessionOf = (t) => state.data.sessions.find((s) => String(s.table_number) === String(t) && s.status === "open");
 const ordersOf = (t) => state.data.orders.filter((o) => String(o.table_number) === String(t) && o.status !== "cancelled");
 const callsOf = (t) => state.data.calls.filter((c) => String(c.table_number) === String(t));
+// Waiter-call note → icon (matches the manager's REASON_EMOJI). Case-insensitive so it
+// works whatever casing the guest app sent — shows WHAT was called, not just a bell.
+function callIcon(note) {
+  const n = String(note || "").toLowerCase();
+  if (/water/.test(n)) return "💧";
+  if (/cutler|fork|spoon/.test(n)) return "🍴";
+  if (/napkin/.test(n)) return "🧻";
+  if (/clean/.test(n)) return "🧹";
+  if (/bill|cheque|\bcheck\b/.test(n)) return "🧾";
+  if (/help|waiter|call/.test(n)) return "🙋";
+  return "🔔";
+}
 const joinersOf = (t) => {
   const s = sessionOf(t);
   return s ? state.data.members.filter((m) => m.session_id === s.id && !m.approved) : [];
@@ -258,7 +270,7 @@ function renderFloor() {
       body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}${quick}`;
     }
     html += `<button class="tile t-${st.cls} ${payCls} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
-      <span class="tbadges">${called ? `<em class="b-call">🔔</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
+      <span class="tbadges">${calls.length ? `<em class="b-call" title="${esc(calls.map((c) => c.note || "call").join(", "))}">${[...new Set(calls.map((c) => callIcon(c.note)))].join("")}</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
       <span class="tnum">${i}</span>
       <span class="tlabel">${st.label}</span>
       ${body}

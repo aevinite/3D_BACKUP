@@ -880,6 +880,9 @@ body {
 .ftb.cart { background: rgba(96,165,250,0.18); border-color: rgba(96,165,250,0.45); color: #9cc4fb; } /* table is building a cart */
 .ft-label { margin-top: auto; padding-top: 10px; font-weight: 700; font-size: 13.5px; color: color-mix(in srgb, var(--c) 72%, var(--text)); }
 .ft-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
+/* Status progress bar on each tile (new→cooking→ready→served), like the tablet's .tstrip. */
+.ft-strip { height: 6px; border-radius: 6px; margin-top: 8px; background: var(--line); overflow: hidden; display: flex; }
+.ft-strip i { display: block; height: 100%; }
 
 /* Floor skeleton — shown for the brief moment between opening the Tables tab and
    the live board arriving, so tiles don't flash "Free" then pop to "Open". Same

@@ -2686,6 +2686,13 @@ function tableTileState(t) {
   if (calls.length > 3) badges += `<span class="ftb call ftb-more">+${calls.length - 3}</span>`;
   return {
     st, label, meta, badges,
+    // Per-status dish counts → the tile progress bar (matches the tablet's .tstrip).
+    counts: {
+      nw: items.filter((i) => i.status === "received").length,
+      ck: items.filter((i) => i.status === "preparing").length,
+      rd: items.filter((i) => i.status === "ready").length,
+      sv: items.filter((i) => i.status === "served").length,
+    },
     // Outline = payment, but ONLY once an order is accepted: red = an accepted
     // unpaid bill, green = accepted & fully paid, none = nothing accepted yet (a
     // brand-new "received" order shows no pay ring until staff accepts it).
@@ -2747,7 +2754,10 @@ function floorHtml() {
   let tiles = "";
   let cOcc = 0, cPay = 0, cNew = 0, cCall = 0; // running tallies for the stats strip
   for (let i = 1; i <= n; i++) {
-    const { st, label, meta, badges, pay, done, hasNew, hasCall, hasReq, hasJoin } = tableTileState(i); // everything this tile needs
+    const { st, label, meta, badges, counts, pay, done, hasNew, hasCall, hasReq, hasJoin } = tableTileState(i); // everything this tile needs
+    // Status progress bar (new→cooking→ready→served), same colours as the tablet's .tstrip.
+    const cTot = counts.nw + counts.ck + counts.rd + counts.sv;
+    const strip = cTot > 0 ? `<div class="ft-strip">${counts.nw ? `<i style="width:${(counts.nw / cTot) * 100}%;background:#f59e0b"></i>` : ""}${counts.ck ? `<i style="width:${(counts.ck / cTot) * 100}%;background:#4f9dff"></i>` : ""}${counts.rd ? `<i style="width:${(counts.rd / cTot) * 100}%;background:#ec4899"></i>` : ""}${counts.sv ? `<i style="width:${(counts.sv / cTot) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
     if (st !== "free" && st !== "req") cOcc++;   // occupied = open/seated/ordering (free & "wants in" don't count)
     if (pay === "red" || st === "bill") cPay++;  // a bill still owed
     if (hasNew) cNew++;                          // a new order waiting to be accepted
@@ -2772,7 +2782,7 @@ function floorHtml() {
     tiles += `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0">
         ${offIcon}
         <div class="ft-top"><span class="ft-num">${i}</span>${badges ? `<span class="ft-badges">${badges}</span>` : ""}</div>
-        <div class="ft-label">${esc(label)}</div><div class="ft-meta">${esc(meta)}</div>
+        <div class="ft-label">${esc(label)}</div><div class="ft-meta">${esc(meta)}</div>${strip}
         ${quick ? `<div class="ft-quick">${quick}</div>` : ""}</div>`;
   }
   // The header keeps ONLY the safe Refresh button. Open all / Close all used to
