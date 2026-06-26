@@ -3453,9 +3453,14 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm-btn.ok { background: var(--adm-ok); border-color: transparent; color: #fff; }
 .adm-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 13px; border-radius: 11px; border: var(--border); background: var(--bg); color: var(--text); font-size: 13.5px; font-weight: 600; cursor: pointer; text-align: left; transition: background .15s; }
 .adm-toggle:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
-.adm-toggle .pill { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; flex-shrink: 0; }
-.adm-toggle.on .pill { background: color-mix(in srgb, var(--adm-ok) 22%, transparent); color: var(--adm-ok); }
-.adm-toggle.off .pill { background: var(--muted2, rgba(120,120,120,0.18)); color: var(--muted); }
+/* iOS-style sliding SWITCH (replaces the old ON/OFF pill the owner disliked). The
+   markup still says "ON"/"OFF" inside .pill — we hide that text (font-size:0) and
+   draw a track + sliding knob, so every .adm-toggle becomes a real switch. */
+.adm-toggle .pill { width: 46px; height: 26px; border-radius: 999px; flex-shrink: 0; position: relative; padding: 0; font-size: 0; background: var(--muted2, rgba(120,120,120,0.32)); transition: background .2s; }
+.adm-toggle .pill::after { content: ""; position: absolute; top: 2.5px; left: 2.5px; width: 21px; height: 21px; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35); transition: transform .2s; }
+.adm-toggle.on .pill { background: var(--adm-ok); }
+.adm-toggle.on .pill::after { transform: translateX(20px); }
+.adm-toggle.off .pill { background: var(--muted2, rgba(120,120,120,0.32)); }
 .adm-togglegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 9px; }
 /* ── tabs (logs) ─────────────────────────────────────────────────────────── */
 .adm-tabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--card); border: var(--border); margin-bottom: 16px; }
