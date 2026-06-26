@@ -2482,9 +2482,22 @@ async function setSessAutoApprove(id, value) {
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // memberAction: approve a waiting guest, or remove one from the table.
+// OPTIMISTIC: flip the local member NOW + redraw instantly, so a click feels immediate
+// even with a big party — instead of waiting ~3s for the server round-trip + refetch
+// (owner 2026-06-26: "whenever I click it, instantly it should update"). The awaited
+// server call + loadSessions then confirm; on failure we revert the optimistic change.
 async function memberAction(id, kind) {
-  try { await api("POST", "/members/" + id + "/" + (kind === "approve" ? "approve" : "remove")); await loadSessions(); toast(kind === "approve" ? "Approved" : "Removed", "ok"); }
-  catch (e) { toast("Failed: " + e.message, "err"); }
+  const m = (state.board.members || []).find((x) => x.id === id);
+  const prev = m ? { approved: m.approved, removed: m.removed } : null;
+  if (m) { if (kind === "approve") m.approved = true; else m.removed = true; refreshTableDetail(); }
+  try {
+    await api("POST", "/members/" + id + "/" + (kind === "approve" ? "approve" : "remove"));
+    await loadSessions();
+    toast(kind === "approve" ? "Approved" : "Removed", "ok");
+  } catch (e) {
+    if (m && prev) { m.approved = prev.approved; m.removed = prev.removed; refreshTableDetail(); } // revert on failure
+    toast("Failed: " + e.message, "err");
+  }
 }
 // Kick = remove now (works for the head too; the table stays open). Ban = kick +
 // add to the blocklist (by member id, and phone if we have one).
