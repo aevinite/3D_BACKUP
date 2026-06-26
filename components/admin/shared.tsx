@@ -1,7 +1,7 @@
 "use client";
 // Shared bits for the admin pages: types, formatting, the live-floor grid, the
 // activity feed, and a tiny polling hook. Keeps Overview/Floor/Logs DRY.
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useRealtime } from "@/lib/useRealtime";
 
 export type Tile = {
@@ -60,6 +60,34 @@ export function useLivePoll(fn: () => void) {
   const ref = useRef(fn);
   ref.current = fn;
   useRealtime({ ops: () => ref.current(), menu: () => ref.current() });
+}
+
+// useActiveAutoRefresh — gentle periodic refresh for the HEAVY dashboards (owner +
+// admin), instead of redrawing on every realtime event. Calls fn() every intervalMs
+// ONLY when the tab is VISIBLE and the user interacted within idleMs — interaction
+// counts a click, key, scroll, wheel or touch. When the tab is hidden or the user
+// goes idle (walked away), it stops fetching entirely (protects the DB / connection
+// budget); the next click/scroll resumes it. Pair with a manual ↻ Refresh button.
+// (owner 2026-06-26: "auto-refresh ~60s while it's on + being used, incl scroll;
+// stop when not used.")
+export function useActiveAutoRefresh(fn: () => void, intervalMs = 60000, idleMs = 120000) {
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    let last = Date.now();
+    const bump = () => { last = Date.now(); };
+    const evs: (keyof WindowEventMap)[] = ["pointerdown", "keydown", "scroll", "wheel", "touchstart", "pointermove"];
+    evs.forEach((e) => window.addEventListener(e, bump, { passive: true, capture: true }));
+    const id = setInterval(() => {
+      if (document.hidden) return;                 // hidden tab → don't fetch
+      if (Date.now() - last > idleMs) return;      // user walked away → stop
+      ref.current();
+    }, intervalMs);
+    return () => {
+      clearInterval(id);
+      evs.forEach((e) => window.removeEventListener(e, bump, { capture: true } as EventListenerOptions));
+    };
+  }, [intervalMs, idleMs]);
 }
 
 export function StatCards({ ov }: { ov: Overview | null }) {
