@@ -13,13 +13,24 @@ export async function POST(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   let body: any = {}; try { body = await req.json(); } catch {}
-  const res = NextResponse.json({ ok: true });
-  if (body?.clear) { res.cookies.set(ADMIN_ACT_COOKIE, "", { path: "/", maxAge: 0 }); return res; }
+
+  // EXIT "view as": clear the cookie and return THAT response.
+  if (body?.clear) {
+    const res = NextResponse.json({ ok: true });
+    res.cookies.set(ADMIN_ACT_COOKIE, "", { path: "/", maxAge: 0 });
+    return res;
+  }
+
   const rid = String(body?.restaurant_id || "");
   if (!rid) return NextResponse.json({ error: "restaurant_id required" }, { status: 400 });
   const r = (await sb.from("restaurants").select("id, name").eq("id", rid).limit(1)).data?.[0];
   if (!r) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
-  // Short-lived (6h) view session; HttpOnly so only the server reads it.
+
+  // CRITICAL: set the cookie on the SAME response we return. The old code set it on
+  // one response then returned a fresh NextResponse.json(), silently dropping the
+  // Set-Cookie — so the admin's panels stayed on restaurant #1 (the "I can only
+  // access Little French House" bug). Short-lived (6h) view session; HttpOnly.
+  const res = NextResponse.json({ ok: true, restaurant: r.name });
   res.cookies.set(ADMIN_ACT_COOKIE, rid, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 6 });
-  return NextResponse.json({ ok: true, restaurant: r.name });
+  return res;
 }

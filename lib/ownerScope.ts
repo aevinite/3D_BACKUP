@@ -13,11 +13,32 @@ import type { NextRequest } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
+import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 
 export type OwnerScope = { all: true } | { all: false; ids: string[]; ownerId: string };
 
 export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
-  if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { all: true };
+  if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) {
+    // Admin who has DELIBERATELY entered one restaurant (act-as cookie) is scoped to
+    // JUST that restaurant — so the owner cockpit shows exactly what THAT owner sees.
+    // This reuses the same {all:false} path a real owner takes (one id), so no owner
+    // route changes. Admin with NO act-as keeps the full all-restaurants view.
+    const acting = req.cookies.get(ADMIN_ACT_COOKIE)?.value;
+    if (acting) {
+      // Show what the OWNER of the entered restaurant sees: ALL restaurants that owner
+      // owns (an owner may run several), not just the one we entered — so the admin's
+      // owner-cockpit view matches the real owner's. Fall back to the single restaurant
+      // if it has no owner assigned. (2026-06-26: was scoped to only the one restaurant.)
+      const r = (await sb.from("restaurants").select("owner_user_id").eq("id", acting).maybeSingle()).data;
+      if (r?.owner_user_id) {
+        const { data } = await sb.from("restaurants").select("id").eq("owner_user_id", r.owner_user_id);
+        const ids = (data || []).map((x) => x.id as string);
+        return { all: false, ids: ids.length ? ids : [acting], ownerId: r.owner_user_id as string };
+      }
+      return { all: false, ids: [acting], ownerId: "admin" };
+    }
+    return { all: true };
+  }
   const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   if (u && u.role === "owner") {
     const { data } = await sb.from("restaurants").select("id").eq("owner_user_id", u.id);

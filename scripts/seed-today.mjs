@@ -49,7 +49,7 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
       // Mostly served+paid; a couple live/unpaid; one cancelled.
       let status = "served", payment_status = "paid";
       if (i === 0) { status = "cancelled"; payment_status = "unpaid"; }
-      else if (i <= 2) { status = pick(["new", "preparing"]); payment_status = "unpaid"; }
+      else if (i <= 2) { status = pick(["received", "preparing"]); payment_status = "unpaid"; } // "received" = a new dine-in order awaiting Accept (NOT "new" — that's aggregator-only)
       rows.push({
         restaurant_id: r.id, table_number: rnd(1, 14), items,
         subtotal, tax: Math.round(subtotal * 0.05 * 100) / 100, total: subtotal,

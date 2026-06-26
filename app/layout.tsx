@@ -15,9 +15,9 @@ import "./globals.css";
 // on the staff panels. (Previously these were mounted globally here, which made
 // the guest session logic run on /admin and auto-open tables.)
 import GuestChrome from "@/components/GuestChrome";
-// The admin-only floating panel switcher. It renders nothing unless this browser
-// is signed in as staff, so customers never see it.
-import AdminSwitcher from "@/components/AdminSwitcher";
+// (The old floating "panel shifter" was removed 2026-06-26 — admins now reach every
+// restaurant's panels from /aevinite/restaurants, not a global pill that only ever
+// pointed at restaurant #1.)
 // Tells the global guest widgets which restaurant the current /r/<slug> URL is for.
 import { RestaurantProvider } from "@/lib/restaurant-context";
 
@@ -88,8 +88,6 @@ export default function RootLayout({
           {/* Guest-only always-on widgets (cart, dining session, toasts) — rendered
               only on customer pages, never on the staff panels. */}
           <GuestChrome />
-          {/* Admin-only floating panel switcher (self-hides for customers). */}
-          <AdminSwitcher />
         </RestaurantProvider>
       </body>
     </html>
