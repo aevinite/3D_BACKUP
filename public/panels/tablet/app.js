@@ -584,6 +584,8 @@ function renderPanel() {
     if (!o) return;
     const cur = new Set((Array.isArray(o.allergies) ? o.allergies : []).map((x) => String(x).toLowerCase()));
     if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
+    o.allergies = [...cur];        // OPTIMISTIC: update local state now so any re-render reflects it
+    chip.classList.toggle("on");   // INSTANT visual feedback — before this it only hit the server, so the tap felt dead ("allergy not clicking")
     act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }));
   }));
   const ob = $("#openTable"); if (ob) ob.onclick = () => optimisticOpen(t);
