@@ -159,6 +159,13 @@ export const requestUnban = (phone: string) =>
   rpc("lfh_request_unban", { p_device: getGuestDeviceId(), p_phone: phone });
 // Fetch the current state of a session (who's in it, status, etc.) by token.
 export const getSessionState = (token: string) => rpc("lfh_session_state", { p_token: token });
+// Presence heartbeat: while the guest's menu tab is VISIBLE, bump this open
+// session's last_activity_at so "someone is actively viewing this table" keeps
+// it from being auto-closed. The server only touches an ALREADY-open session
+// (never creates/reopens one), and emits no realtime breadcrumb. Caller MUST
+// gate this on document visibility — do NOT call it from a hidden tab, or a
+// backgrounded phone would keep its table alive forever (migration 099).
+export const touchSession = (token: string) => rpc("lfh_touch_session", { p_token: token });
 // Leave the table (the widget's "leave" / "change table" / "unmerge"). If the
 // head leaves, the RPC hands the table to the next approved member, or closes it.
 export const leaveSession = (token: string) => rpc("lfh_leave_session", { p_token: token });

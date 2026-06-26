@@ -24,7 +24,7 @@ import { getSettings } from "@/lib/menu";
 // Lets us clear the "pre-fill this table" hint when you leave a table.
 import { setScannedTable } from "@/lib/table";
 // Helpers that talk to the server about the table's dining session.
-import { getStoredSession, storeSession, clearStoredSession, getSessionState, leaveSession } from "@/lib/session";
+import { getStoredSession, storeSession, clearStoredSession, getSessionState, leaveSession, touchSession } from "@/lib/session";
 // Publish the live "can this guest order?" answer so the Add-to-cart gate can read
 // it synchronously (this widget already polls the session, so we reuse that poll).
 import { setTableConnection } from "@/lib/tableConnection";
@@ -216,6 +216,42 @@ export default function SessionStatusWidget() {
     // Cleanup when the component disappears: stop the poll, listener and intro timer.
     return () => { alive = false; if (iv) clearInterval(iv); if (onTick) window.removeEventListener("lfh:rt-tick", onTick); if (introTimer.current) clearTimeout(introTimer.current); };
   }, []);
+
+  // ── PRESENCE HEARTBEAT (migration 099) ──────────────────────────────────────
+  // While this guest's menu tab is VISIBLE and we're connected to an OPEN table,
+  // ping the server every 60s so "someone is actively viewing this table" keeps
+  // the session from being auto-closed. We run this as its OWN effect — NOT a
+  // line in the poll above — because that poll keeps ticking even when the tab is
+  // hidden; bumping liveness from it would keep a backgrounded phone's table alive
+  // forever (the exact phantom-table bug). So: beat only while !document.hidden,
+  // STOP on hide, and beat once immediately on re-show. (The server also guards
+  // "open only" so a stray beat can never create/reopen a table.)
+  // Depend on a derived boolean (not the whole `st` object): the poll rebuilds
+  // `st` on every realtime tick, so depending on `st` would tear down + restart
+  // the timer (and fire an extra beat) on every tick — needless anon writes
+  // against the owner's connection budget. `connected` only flips when we join
+  // or leave an open table, so the 60s timer runs steadily.
+  const connected = enabled && !!st;
+  useEffect(() => {
+    // Only heartbeat when sessions are on AND we hold an open table.
+    if (!connected) return;
+    let hbTimer: ReturnType<typeof setInterval> | null = null;
+    const beat = () => {
+      const token = tokenRef.current;
+      if (token && !document.hidden) { touchSession(token); }
+    };
+    const start = () => {
+      if (hbTimer) return;           // already running
+      beat();                        // one immediate beat (e.g. on re-show)
+      hbTimer = setInterval(beat, 60000);
+    };
+    const stop = () => { if (hbTimer) { clearInterval(hbTimer); hbTimer = null; } };
+    const onVisibility = () => { if (document.hidden) stop(); else start(); };
+    // Kick off only if we're currently visible; if hidden, wait for re-show.
+    if (!document.hidden) start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { stop(); document.removeEventListener("visibilitychange", onVisibility); };
+  }, [connected]);
 
   // Publish the live "is this guest allowed to add to the cart?" answer for the
   // Add-to-cart gate (lib/tableConnection). Connected = sessions ON, in an open
