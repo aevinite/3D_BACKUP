@@ -7,7 +7,7 @@
 // admin screens, and ONLY while this page is mounted (useLivePoll subscribes on
 // mount, tears down on unmount) — so when nothing's open, nothing fetches.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { inr, useLivePoll } from "@/components/admin/shared";
+import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import { RevenueBar, TrendLine, HourlyBar, CategoryDonut } from "@/components/owner/Charts";
 
 type Range = "today" | "7d" | "30d" | "all";
@@ -78,9 +78,12 @@ export default function OwnerDashboard() {
   const loadRef = useRef(load); loadRef.current = load;
   // Refetch on navigation / range change.
   useEffect(() => { load(); }, [load]);
-  // Live push while mounted (mount + realtime nudge + tab-wake + 60s net), torn
-  // down on unmount → zero traffic when the dashboard is closed.
-  useLivePoll(() => loadRef.current());
+  // Heavy dashboard: a gentle ~60s auto-refresh that runs ONLY while the tab is visible
+  // AND in use (click/scroll/key); it stops when idle or hidden, and the page never opens
+  // a realtime websocket. Manual ↻ Refresh is instant. (owner 2026-06-26)
+  const [refreshing, setRefreshing] = useState(false);
+  useActiveAutoRefresh(() => loadRef.current(), 60000);
+  const manualRefresh = () => { setRefreshing(true); loadRef.current(); setTimeout(() => setRefreshing(false), 600); };
 
   const goHome = () => { setView({ level: "home" }); setRest(null); };
 
@@ -113,11 +116,16 @@ export default function OwnerDashboard() {
   }, [view, rest]);
 
   const RangeToggle = (
-    <div className="own-range" role="tablist" aria-label="Date range">
-      {RANGES.map((r) => (
-        <button key={r.k} role="tab" aria-selected={range === r.k}
-          className={range === r.k ? "on" : ""} onClick={() => setRange(r.k)}>{r.label}</button>
-      ))}
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <div className="own-range" role="tablist" aria-label="Date range">
+        {RANGES.map((r) => (
+          <button key={r.k} role="tab" aria-selected={range === r.k}
+            className={range === r.k ? "on" : ""} onClick={() => setRange(r.k)}>{r.label}</button>
+        ))}
+      </div>
+      <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now (auto-updates are throttled to save load)">
+        <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
+      </button>
     </div>
   );
 

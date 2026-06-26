@@ -7,7 +7,7 @@
 // via useLivePoll (subscribe on mount, tear down on unmount).
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { inr, useLivePoll, ActivityFeed, type Action } from "@/components/admin/shared";
+import { inr, useActiveAutoRefresh, ActivityFeed, type Action } from "@/components/admin/shared";
 import { RevenueBar, TrendLine, TimeBar } from "@/components/owner/Charts";
 
 const FALLBACK = "#e3c06f";
@@ -37,7 +37,12 @@ export default function AdminOverview() {
     fetch("/api/owner/issues", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setIssues(j.issues || []); }).catch(() => {});
   }, []);
   useEffect(() => { load(); }, [load]);
-  useLivePoll(load);
+  // Heavy dashboard: a gentle ~60s auto-refresh that runs ONLY while the tab is visible
+  // AND in use (click/scroll/key) — it stops when idle or hidden, and the heavy page
+  // never opens a realtime websocket. Manual ↻ Refresh is instant. (owner 2026-06-26)
+  const [refreshing, setRefreshing] = useState(false);
+  useActiveAutoRefresh(load, 60000);
+  const manualRefresh = () => { setRefreshing(true); load(); setTimeout(() => setRefreshing(false), 600); };
 
   const ovById = useMemo(() => Object.fromEntries((ov?.restaurants || []).map((r) => [r.id, r])), [ov]);
   const totals = useMemo(() => ({
@@ -86,7 +91,12 @@ export default function AdminOverview() {
 
   return (
     <>
-      <h1 className="adm-page-h">Aevidine · all restaurants</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Aevidine · all restaurants</h1>
+        <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now (auto-updates are throttled to save load)">
+          <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
+        </button>
+      </div>
       <p className="adm-page-sub">Every restaurant on the platform, who runs it, and how it&apos;s doing.</p>
 
       {maintenance && (
