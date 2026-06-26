@@ -105,16 +105,29 @@
     // rebuild the (likely dead) socket on wake. visibilitychange + focus + pageshow
     // (and sometimes online) all fire on return, so THROTTLE the rebuild to once per
     // wake (1.5s); the rest just refetch. Refetches route through the debounced fires.
+    // IDLE-DISCONNECT (owner 2026-06-26 — protect the realtime connection budget): a tab
+    // left HIDDEN for IDLE_MS drops its channels so a backgrounded/forgotten panel tab stops
+    // holding a websocket connection. It reconnects + refetches the instant it's shown again.
+    // An always-VISIBLE panel (e.g. a kitchen display left on) never disconnects.
+    const IDLE_MS = 120000;
+    let idleTimer = null, torndown = false;
+    const teardown = () => { if (!sb) return; channels.forEach((c) => { try { sb.removeChannel(c); } catch (e) {} }); channels = []; torndown = true; };
     let lastWake = 0;
     const wake = () => {
       if (document.hidden) return;
+      clearTimeout(idleTimer);
       const now = Date.now();
+      if (torndown) { torndown = false; lastWake = now; subscribe(); fireAll(); return; } // reconnect after idle
       if (now - lastWake < 1500) { fireAll(); return; } // already rebuilt this wake — just refetch
       lastWake = now;
       subscribe();  // force a fresh socket
       fireAll();
     };
-    document.addEventListener("visibilitychange", wake);
+    const onVisibility = () => {
+      if (document.hidden) { clearTimeout(idleTimer); idleTimer = setTimeout(teardown, IDLE_MS); } // arm the idle drop
+      else wake();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", wake);
     window.addEventListener("pageshow", wake);   // fires on bfcache restore (phone wake)
     window.addEventListener("online", () => { metrics.reconnects++; wake(); });
