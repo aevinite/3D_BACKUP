@@ -375,6 +375,69 @@ function setRestName(r) {
   if (el) el.textContent = restDisplayName(r);
 }
 
+// loadTables(tables): TARGETED refetch — fetch ONLY the named tables' orders+items
+// (/board?table=N) and merge each table's rows into the cached board, instead of re-reading
+// the WHOLE board on every breadcrumb. Dishes/platform are table-agnostic (a platform/menu
+// event always arrives as `full`), so a targeted pass leaves them untouched. The merge drops
+// the changed orders' old rows by id and adds the fresh ones; then it runs the SAME
+// boardSig/render + chime path as load(). ANY surprise → full load() (safe fallback).
+// (owner 2026-06-26 — 96%+ of egress was whole-board reads; this scopes it.)
+async function loadTables(tables) {
+  if (!tables || !tables.length) return load();
+  if (!state.knownIds) return load(); // not baselined yet — let load() set it (and never chime on first paint)
+  const seq = ++loadSeq;
+  let slices;
+  try {
+    slices = await Promise.all(tables.map((t) => api("GET", "/board?table=" + encodeURIComponent(t))));
+  } catch (e) { return load(); }      // network/parse blip → safe full reload
+  if (seq !== loadSeq) return;        // a newer refresh started — drop this stale snapshot
+
+  // Defensive dedup by row id (fresh row wins over a stale cached copy). The drop/add below
+  // keys orders by id and items by order_id; this guarantees a row can never appear twice
+  // even if a shift left a row's table_number disagreeing between cache and server.
+  const dedupeById = (arr) => { const m = new Map(); for (const x of arr) if (x && x.id != null) m.set(x.id, x); return [...m.values()]; };
+
+  const freshOrders = dedupeById(slices.flatMap((s) => (s && s.orders) || []));
+  const freshItems = dedupeById(slices.flatMap((s) => (s && s.items) || []));
+
+  // CHIME — detect a brand-new dine-in 'received' order in the slice BEFORE touching
+  // knownIds, then ADD each fresh order's id to the baseline (never reassign it — a
+  // reassign would make the next targeted event for a DIFFERENT table false-chime its
+  // existing orders as "new"). Platform tickets only arrive on the FULL path (load()).
+  const freshDine = freshOrders.some((o) => o.status === "received" && !state.knownIds.has(o.id));
+  if (freshDine) chime();
+  for (const o of freshOrders) state.knownIds.add(o.id);
+
+  // The set of orders the changed tables used to show (cached) PLUS the orders the slice
+  // returned — drop ALL of these from the cached items, then add the slice's fresh items.
+  // Keying items by order_id (not session_id) handles today's closed-session items too.
+  const changedTables = new Set(tables.map(String));
+  const purgedOrderIds = new Set(freshOrders.map((o) => o.id));
+  for (const o of (state.orders || [])) if (changedTables.has(String(o.table_number))) purgedOrderIds.add(o.id);
+
+  // ORDERS — drop the changed tables' old rows, add their fresh rows, keep the rest.
+  let orders = (state.orders || []).filter((o) => !changedTables.has(String(o.table_number)));
+  orders = dedupeById(orders.concat(freshOrders));
+  orders.sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || ""))); // ascending, same as liveOrdersAndItems
+  state.orders = orders;
+
+  // ITEMS — drop every item belonging to a purged order, add the slice's fresh items.
+  // Re-apply the pendingReady overlay exactly like load() so a mid-rush ✓ doesn't flicker.
+  let items = (state.items || []).filter((it) => !purgedOrderIds.has(it.order_id));
+  items = dedupeById(items.concat(freshItems));
+  state.items = pendingReady.size
+    ? items.map((i) => (pendingReady.has(i.id) && i.status !== "served" ? { ...i, status: "ready" } : i))
+    : items;
+
+  // If the 86-board drawer is open, keep it fresh (dishes are unchanged on a targeted pass,
+  // but a re-render is cheap and harmless).
+  if (!$("#drawerOverlay").hidden) renderDishes();
+  const sig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes, platform: state.platform, platformAccept: state.platformAccept });
+  if (sig === lastSig) return; // nothing visible changed — don't rebuild the tickets
+  lastSig = sig;
+  render();
+}
+
 async function load() {
   const seq = ++loadSeq;
   const data = await api("GET", "/board");
@@ -439,7 +502,13 @@ load().catch((e) => toast("Can't reach the database: " + e.message));
 // polling every second. A slow 60s timer is the backup if the WebSocket drops.
 // If realtime didn't load for any reason, fall back to a gentle 2s poll.
 if (window.LFH_RT) {
-  LFH_RT.start({ topics: ["ops", "menu"], onEvent: () => load() }); // ops + menu (sold-out/dish edits)
+  // Split by topic: ops churn → TARGETED loadTables() when the breadcrumb names specific
+  // tables, else full load() (platform change, wake, reconnect, initial). menu edits
+  // (sold-out / dish edits) always do a full load() so the dish lists + 86 board refresh.
+  LFH_RT.start({ handlers: {
+    ops: (detail) => (detail && !detail.full && detail.tables && detail.tables.length) ? loadTables(detail.tables) : load(),
+    menu: () => load(),
+  }});
   setInterval(() => load().catch(() => {}), 60000); // backup sync
 } else {
   setInterval(() => load().catch(() => {}), 2000); // fallback poll
