@@ -3482,12 +3482,30 @@ a:focus:not(:focus-visible) { outline: none; }
 /* ── responsive: collapse the sidebar to a horizontal bar on small screens ─── */
 @media (max-width: 900px) {
   .adm { flex-direction: column; height: auto; min-height: 100dvh; overflow: visible; }
-  .adm-side { width: 100%; flex-direction: column; border-right: 0; border-bottom: var(--border); }
-  .adm-nav { flex-direction: row; overflow-x: auto; gap: 4px; }
-  .adm-nav a { white-space: nowrap; }
+  .adm-side { width: 100%; flex-direction: column; border-right: 0; border-bottom: var(--border); padding: 10px 12px; }
+  .adm-brand { padding: 2px 4px 10px; }
+  /* Nav wraps to rows so EVERY item is visible (no hidden/cut-off scroll). */
+  .adm-nav { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .adm-nav a { white-space: nowrap; flex: 1 1 40%; justify-content: flex-start; }
   .adm-side-foot { display: none; }
   .adm-main { overflow-y: visible; }
   .adm-grid2 { grid-template-columns: 1fr; }
+}
+/* ── phone: tighter spacing + let wide tables scroll instead of squishing ─────── */
+@media (max-width: 560px) {
+  .adm-top { padding: 10px 14px; gap: 8px; flex-wrap: wrap; }
+  .adm-main { padding: 14px; }
+  .adm-page-h { font-size: 19px; }
+  .adm-page-sub { margin-bottom: 16px; }
+  .adm-card { padding: 14px; }
+  .adm-stats { gap: 10px; }
+  .adm-stat { padding: 12px 13px; }
+  .adm-stat .v { font-size: 21px; }
+  .adm-rest { font-size: 12.5px; padding: 6px 11px; }
+  /* grid "log" tables (admin restaurants/users/log): scroll sideways, keep columns aligned */
+  .adm-logwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .adm-logrow { min-width: 540px; }
+  .adm-togglegrid { grid-template-columns: 1fr 1fr; }
 }
 
 /* ── Ban wall (components/BanGate.tsx) — covers the whole menu for a blocked

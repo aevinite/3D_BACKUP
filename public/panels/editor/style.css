@@ -1492,3 +1492,22 @@ html[data-theme="light"] .op-admin,
 html[data-theme="light"] .tbl-unpaid .tbl-num, html[data-theme="light"] .tbl-unpaid .tbl-state{ color:#b45309; }
 html[data-theme="light"] .tbl-active .tbl-num, html[data-theme="light"] .tbl-active .tbl-state,
 html[data-theme="light"] .op-tablet{ color:#1d4ed8; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MOBILE (phone) — make the manager panel usable on a small screen. The panel
+   was built desktop-first (fixed 320px dish sidebar + fixed-height panes); on a
+   phone we stack the Editor's dish list above the edit pane and let the whole
+   page scroll, and wrap the top bar + section headers so nothing is cut off.
+   ═══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 760px) {
+  html, body { height: auto; overflow-y: auto; }
+  .topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; gap: 8px 10px; position: sticky; top: 0; z-index: 30; }
+  /* Editor tab: dish list on top (own scroll), edit pane below — was a 320px column. */
+  .layout { grid-template-columns: 1fr; height: auto; }
+  .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 50vh; }
+  .sidebar-resizer { display: none; }
+  .editor { padding: 0 14px 70px; }
+  /* Section headers + their action buttons wrap instead of overflowing. */
+  .ed-head { flex-wrap: wrap; gap: 10px; }
+  .ed-head h2 { font-size: 20px; flex: 1 1 100%; }
+}
