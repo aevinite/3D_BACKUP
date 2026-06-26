@@ -142,11 +142,12 @@ export default function OwnerDashboard() {
       {view.level === "home" && (
         <>
           <div className="adm-stats">
-            {([["Restaurants", ov ? ov.totals.restaurantCount : "…"],
-               ["Revenue (range)", group ? inr(group.restaurantRevenue.reduce((a, r) => a + r.revenue, 0)) : "…"],
-               ["Orders (range)", group ? group.restaurantRevenue.reduce((a, r) => a + r.orders, 0) : "…"],
-               ["Open tables now", ov ? ov.totals.openTables : "…"]] as [string, string | number][]).map(([k, v], i) => (
+            {([["Restaurants", ov ? ov.totals.restaurantCount : "…", "fa-store"],
+               ["Revenue (range)", group ? inr(group.restaurantRevenue.reduce((a, r) => a + r.revenue, 0)) : "…", "fa-indian-rupee-sign"],
+               ["Orders (range)", group ? group.restaurantRevenue.reduce((a, r) => a + r.orders, 0) : "…", "fa-receipt"],
+               ["Open tables now", ov ? ov.totals.openTables : "…", "fa-chair"]] as [string, string | number, string][]).map(([k, v, ic], i) => (
               <button key={k} className={`adm-stat own-stat${i === 1 ? " clickable" : ""}`} onClick={i === 1 ? () => setShowGraphs((s) => !s) : undefined}>
+                <div className="ic"><i className={`fas ${ic}`} aria-hidden="true" /></div>
                 <div className="k">{k}{i === 1 && <i className="fas fa-chevron-down" style={{ marginLeft: 6, fontSize: 9, transform: showGraphs ? "rotate(180deg)" : "none", transition: ".2s" }} />}</div>
                 <div className="v">{v}</div>
               </button>
