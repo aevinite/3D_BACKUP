@@ -115,7 +115,7 @@ export default function AppShell({ children, logoText, accentColor }: { children
   return (
     <>
       {/* The one-time opening logo animation */}
-      <IntroSplash />
+      <IntroSplash wordmark={logoText} accentColor={accentColor} />
       {/* Floating background bubbles — only if the toggle is on */}
       {bubbles && <Particles />}
       <div id="app">

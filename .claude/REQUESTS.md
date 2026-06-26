@@ -6,9 +6,10 @@ don't stop until every single bit is done."
 
 ## 🔴 BUGS / FURY (fix first — these are visibly broken)
 
-- [ ] **Every restaurant must look DIFFERENT — the intro/splash still says "Little French
-  House" on other restaurants.** The `IntroSplash` (+ any hardcoded #1 branding) shows on
-  every tenant. Each restaurant needs its own intro/branding/theme, not #1's.
+- [x] **Per-restaurant intro/splash** — `IntroSplash` now takes the restaurant's wordmark +
+  accent (via AppShell); non-#1 shows ITS name + accent glow/ring + NO French House logo.
+  Verified: Pizza Palace intro = "Pizza Palace" in red, no LFH logo. #1 unchanged (isDefault
+  branch = original). [shipping]
 - [ ] **Kill the floating "panel shifter" (AdminSwitcher ⠿ Panels) in the admin panel** — it's
   confusing and not how to reach restaurants.
 - [ ] **Admin must reach ANY restaurant** — its guest menu, its owner panel, its manager/
