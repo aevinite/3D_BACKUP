@@ -52,8 +52,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
         </div>
         <nav className="adm-nav">
           {NAV.map((n) => (
-            <Link key={n.href} href={n.href} className={isActive(n) ? "active" : ""}>
-              <i className={`fas ${n.icon}`} aria-hidden="true" /> {n.label}
+            <Link key={n.href} href={n.href} className={isActive(n) ? "active" : ""} title={n.label}>
+              <i className={`fas ${n.icon}`} aria-hidden="true" /> <span className="lbl">{n.label}</span>
               {n.soon && <span className="navsoon">Soon</span>}
             </Link>
           ))}
