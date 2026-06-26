@@ -23,6 +23,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 5; }
 .brand { font-size: 20px; font-weight: 800; }
 .brand .sub { color: var(--muted); font-weight: 500; font-size: 13px; margin-left: 6px; }
+/* Which restaurant this panel is scoped to (multi-tenant). Truncates so it can
+   never push the top-bar actions off-screen at narrow (~390px) widths. Hidden
+   when empty (name not loaded yet). */
+.brand .rest-name { display: inline-block; vertical-align: middle; max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; margin-left: 8px; }
+.brand .rest-name:empty { display: none; }
 .clock { color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* two-pane layout: floor left, work panel right (stacks when narrow) */

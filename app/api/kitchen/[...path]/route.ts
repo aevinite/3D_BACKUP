@@ -43,17 +43,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Orders + dishes from the shared "live board" helper — today's tickets PLUS
       // any still-open session's, so a dish left cooking on an overnight table keeps
       // showing here (and matches the manager). Was a day-clipped fetch before.
-      const [live, dishes, platform, settings] = await Promise.all([
+      const [live, dishes, platform, settings, restaurant] = await Promise.all([
         liveOrdersAndItems(rid),
         sb.from("menu_items").select("id,title,category,tags").eq("restaurant_id", rid).order("category"),
         // active platform (Zomato/Swiggy/takeaway) tickets — separate table, so dine-in is untouched
         sb.from("aggregator_orders").select("*").eq("restaurant_id", rid).in("status", ["new", "accepted", "preparing", "ready"]).order("created_at"),
         sb.from("settings").select("kitchen_can_accept_platform").eq("restaurant_id", rid).maybeSingle(),
+        // THIS restaurant's identity, so the kitchen header shows which restaurant the
+        // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
+        sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
       ]);
       return ok({
         orders: live.orders, items: live.items, dishes: must(dishes),
         platform: must(platform) || [],
         platformAccept: !!(must(settings) || {}).kitchen_can_accept_platform,
+        restaurant: must(restaurant) || null,
       });
     }
     return err("unknown GET endpoint", 404);

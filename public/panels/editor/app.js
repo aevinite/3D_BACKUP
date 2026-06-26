@@ -253,6 +253,12 @@ async function loadAll() {
   // "seated · no orders" until the next board poll repopulates it (~5-7s). (2026-06-18)
   const prev = state.data || {};
   state.data = { ...data, orders: prev.orders || [], calls: prev.calls || [] };
+  // Name THIS restaurant in the top bar so staff (and the admin viewing as a tenant)
+  // always know which restaurant they're managing. (owner 2026-06-26)
+  const rr = data.restaurant || {};
+  const restName = rr.logo_text || (rr.name && rr.name.en) || rr.name_en || (state.data.settings || {}).restaurant_name || "";
+  const brandEl = document.getElementById("brandRest");
+  if (brandEl) brandEl.textContent = restName ? "· " + restName : "";
   $("#conn").textContent = "connected";
   $("#conn").className = "conn ok";
   renderList();
@@ -1232,7 +1238,11 @@ function openBillModal(key) {
     : (state.data.orders || []).filter((o) => o.session_id === key);
   if (!g.length) return;
   const o0 = g[0];
-  const _bm = billMath(g); const total = _bm.total; const disc = _bm.disc;
+  const m = billMath(g);
+  const pct = Math.round(m.rate * 10000) / 100; // e.g. 5
+  // Receipt-style item rows: dish name · ×qty · add-ons/notes underneath · price right.
+  // (owner 2026-06-26: the bill should read like a clean printable receipt — no invoice
+  // number on screen; subtotal → discount in the middle → total at the bottom.)
   const lines = g.map((o) => (o.items || []).map((i) => {
     const det = itemDetailLine(i);
     return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span></div>`;
@@ -1240,12 +1250,15 @@ function openBillModal(key) {
   const wrap = document.createElement("div");
   wrap.className = "bill-overlay";
   wrap.innerHTML = `<div class="bill-modal">
-      <div class="bm-head"><b>${o0.table_number ? "Table " + esc(o0.table_number) : "Walk-in"} · Bill #${esc(o0.bill_no ?? "—")}</b>
-        ${o0.invoice_no != null ? `<span class="inv-chip${o0.invoice_voided ? " voided" : ""}">${esc(invFmt(o0.invoice_no))}${o0.invoice_voided ? " · voided" : ""}</span>` : ""}</div>
+      <div class="bm-head"><b>${o0.table_number ? "Table " + esc(o0.table_number) : "Walk-in"} · Bill #${esc(o0.bill_no ?? "—")}</b>${o0.invoice_voided ? `<span class="inv-chip voided">voided</span>` : ""}</div>
       <div class="bm-sub">${esc(o0.customer_name || "")}${o0.created_at ? " · " + esc(new Date(o0.created_at).toLocaleString()) : ""}</div>
       <div class="bm-items">${lines}</div>
-      ${disc > 0 ? `<div class="bm-trow"><span>Discount</span><span>− ${inr(disc)}</span></div>` : ""}
-      <div class="bm-trow grand"><span>Total</span><span>${inr(total)}</span></div>
+      <div class="bm-totals">
+        <div class="bm-trow"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
+        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount</span><span>− ${inr(m.disc)}</span></div>` : ""}
+        ${m.tax > 0 ? `<div class="bm-trow"><span>GST ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
+        <div class="bm-trow grand"><span>Total</span><span>${inr(m.total)}</span></div>
+      </div>
       <div class="bm-actions">
         <button class="btn primary" data-bm-print>🖨 Print</button>
         <button class="btn" data-bm-restore>↩ Restore to floor</button>
@@ -4107,6 +4120,20 @@ async function pollOrders() {
     state.boardLoaded = true; // a poll fetch counts too: we now know the real floor
   } catch { board = state.board || {}; }
 
+  // Counts + alerts + redraw now live in reconcileBoard() so the TARGETED refetch
+  // (pollTables) can reuse the exact same chime/render logic — it reads the merged
+  // state.data.orders / state.data.calls / state.board, so totals stay accurate.
+  reconcileBoard();
+}
+
+// reconcileBoard: from the CURRENT merged board (state.data.orders/calls + state.board),
+// update the live counts, redraw the visible tab only when something changed, and fire
+// the new-order / waiter-call / request chimes. Called by BOTH the full poll (pollOrders)
+// and the targeted refetch (pollTables) so neither path can silently drop an alert.
+function reconcileBoard() {
+  const orders = state.data.orders || [];
+  const calls = state.data.calls || [];
+  const board = state.board || {};
   // Remember the previous counts, then update to the new ones. The "did it grow?"
   // checks below compare prev vs now to detect something brand-new arriving.
   const prev = lastOrderCount;
@@ -4174,6 +4201,68 @@ async function pollOrders() {
   }
 }
 
+// pollTables(tables): TARGETED refetch — fetch ONLY the named tables' orders/calls/
+// session-slice (?table=N) and merge each table's rows into the board, instead of
+// re-reading the WHOLE floor on every breadcrumb. The merge replaces exactly the changed
+// tables' rows and leaves every other table untouched; then reconcileBoard() runs the
+// same counts/chimes/redraw as the full poll. ANY surprise → full pollOrders (safe
+// fallback). (owner 2026-06-26 — 96.6% of egress was whole-board reads; this scopes it.)
+async function pollTables(tables) {
+  if (!tables || !tables.length) return pollOrders();
+  const seq = ++dataSeq;
+  let results;
+  try {
+    results = await Promise.all(tables.map(async (t) => {
+      const q = "?table=" + encodeURIComponent(t);
+      const [orders, calls, board] = await Promise.all([
+        api("GET", "/orders" + q), api("GET", "/calls" + q), api("GET", "/sessions" + q),
+      ]);
+      return { orders: orders || [], calls: calls || [], board: board || {} };
+    }));
+  } catch (e) { return pollOrders(); }      // network/parse blip → safe full reload
+  if (seq !== dataSeq) return;              // a newer loader started — drop this stale snapshot
+  const tset = new Set(tables.map(String));
+
+  // ORDERS — drop the changed tables' old rows, add their fresh rows, keep the rest.
+  let orders = (state.data.orders || []).filter((o) => !tset.has(String(o.table_number)));
+  for (const r of results) orders = orders.concat(r.orders);
+  orders.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))); // newest-first, same as /orders
+  // Same in-flight shields pollOrders uses: keep optimistic local copies, keep deletes gone.
+  orders = orders
+    .filter((o) => !pendingDeletes.has(o.id))
+    .map((o) => (pendingOrderOps.has(o.id) ? ((state.data.orders || []).find((x) => x.id === o.id) || o) : o));
+  state.data.orders = orders;
+
+  // CALLS — same drop/add by table.
+  let calls = (state.data.calls || []).filter((c) => !tset.has(String(c.table_number)));
+  for (const r of results) calls = calls.concat(r.calls);
+  state.data.calls = calls;
+
+  // BOARD slice (sessions/members/items/requests) — only when no floor action is mid-save,
+  // mirroring pollOrders' floorOpsInFlight guard so an optimistic action isn't clobbered.
+  if (!floorOpsInFlight) {
+    const b = state.board || {};
+    const oldSids = new Set((b.sessions || []).filter((s) => tset.has(String(s.table_number))).map((s) => s.id));
+    let sessions = (b.sessions || []).filter((s) => !tset.has(String(s.table_number)));
+    let members = (b.members || []).filter((m) => !oldSids.has(m.session_id));
+    let items = (b.items || []).filter((it) => !oldSids.has(it.session_id));
+    let requests = (b.requests || []).filter((rq) => !tset.has(String(rq.table_number)));
+    let blocklist = b.blocklist || [];
+    for (const r of results) {
+      const bd = r.board;
+      sessions = sessions.concat(bd.sessions || []);
+      members = members.concat(bd.members || []);
+      items = items.concat(bd.items || []);
+      requests = requests.concat(bd.requests || []);
+      if (bd.blocklist) blocklist = bd.blocklist; // restaurant-wide + tiny; take the latest snapshot
+    }
+    state.board = Object.assign({}, b, { sessions, members, items, requests, blocklist });
+    state.boardLoaded = true;
+  }
+
+  reconcileBoard(); // identical counts/chimes/redraw to the full poll
+}
+
 // startOrderWatch: kick off the live polling. The first call sets the "baseline"
 // counts so we don't alert for orders that were already there; then setInterval
 // repeats it every second so the floor and alerts stay near-real-time.
@@ -4186,7 +4275,14 @@ function startOrderWatch() {
     // Split by topic: ops churn → cheap pollOrders(); menu content edits (dishes,
     // categories, filters, settings) → loadAll() so the dish lists refresh live too.
     LFH_RT.start({ handlers: {
-      ops:  () => { pollOrders(); loadPlatform(); /* keeps the Platform tab badge live on every tab */ },
+      // TARGETED when the breadcrumb names specific tables; FULL otherwise (platform
+      // change, wake, reconnect, initial). The full path also refreshes the Platform
+      // tab badge — a dine-in table event can't have changed a platform order, so the
+      // targeted path skips that extra fetch too.
+      ops: (detail) => {
+        if (detail && !detail.full && detail.tables && detail.tables.length) pollTables(detail.tables);
+        else { pollOrders(); loadPlatform(); }
+      },
       menu: () => loadAll(),
     }});
     setInterval(() => { pollOrders(); loadPlatform(); }, 60000); // backup sync (also ages out handed-over platform tickets)

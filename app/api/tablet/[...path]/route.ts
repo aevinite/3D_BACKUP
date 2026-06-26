@@ -90,7 +90,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // EXACTLY what the manager shows — today's orders plus any still-open session's
       // orders, even past the 05:00 IST rollover. (This used to be a day-clipped fetch
       // here, which hid an overnight open table's orders → tablet-vs-manager desync.)
-      const [live, settings, sessions, members, calls, dishes, categories, requests] = await Promise.all([
+      const [live, settings, sessions, members, calls, dishes, categories, requests, restaurant] = await Promise.all([
         liveOrdersAndItems(rid),
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         sb.from("sessions").select("*").neq("status", "closed").eq("restaurant_id", rid),
@@ -99,11 +99,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("menu_items").select("id,title,price,category,tags,veg,options").eq("restaurant_id", rid).order("category"),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
         sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid).order("created_at"),
+        // THIS restaurant's identity, so the tablet header shows which restaurant the
+        // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
+        sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
       ]);
       return ok({
         settings: must(settings), sessions: must(sessions), members: must(members),
         orders: live.orders, items: live.items, calls: must(calls), dishes: must(dishes),
         categories: must(categories), requests: must(requests),
+        restaurant: must(restaurant) || null,
       });
     }
     return err("unknown GET endpoint", 404);

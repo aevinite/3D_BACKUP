@@ -58,16 +58,37 @@
 
     // One debounced refetch PER topic (counts it, runs it, never throws). Bursts on
     // a topic coalesce into a single refetch of THAT topic's handler.
+    // TARGETED REFETCH (owner 2026-06-26 — egress cut): each breadcrumb names the table
+    // that changed (table_number) + what changed (kind). We ACCUMULATE the set of changed
+    // tables during the debounce window and hand it to the handler as { full, tables[] },
+    // so a smart handler can refetch ONLY those tables instead of the whole floor. If any
+    // event in the window can't be scoped to one table (no table_number, or kind that
+    // spans tables like 'platform'), we flag `full` → the handler does a whole-board
+    // reload. SAFE FALLBACK: worst case is one wasted full reload, never a wrong floor.
+    // Handlers that ignore the argument (kitchen/tablet today) keep doing full loads.
+    const acc = {};
     const firePerTopic = {};
     topicList.forEach((topic) => {
+      acc[topic] = { tables: new Set(), full: false };
       const run = async () => {
+        const a = acc[topic];
+        const detail = a.full ? { full: true } : { full: false, tables: [...a.tables] };
+        acc[topic] = { tables: new Set(), full: false }; // reset for the next burst
         metrics.refetch_count++;
-        try { await handlers[topic](); } catch (e) { metrics.sync_failures++; }
+        try { await handlers[topic](detail); } catch (e) { metrics.sync_failures++; }
       };
       firePerTopic[topic] = debounce(run, 200); // coalesce a burst into one refetch; 200ms feels instant while still collapsing a Preparing→Ready→Served burst
     });
-    // Wake/reconnect/initial → refetch every topic once (each debounced).
-    const fireAll = () => topicList.forEach((t) => firePerTopic[t]());
+    // Record one breadcrumb's scope, then schedule the (debounced) refetch.
+    const noteEvent = (topic, row) => {
+      const a = acc[topic]; if (!a) return;
+      const tn = row && row.table_number;
+      const spans = !tn || (row && row.kind === "platform"); // unscopable → full reload
+      if (spans) a.full = true; else a.tables.add(String(tn));
+      firePerTopic[topic]();
+    };
+    // Wake/reconnect/initial → FULL refetch of every topic once (each debounced).
+    const fireAll = () => topicList.forEach((t) => { if (acc[t]) acc[t].full = true; firePerTopic[t](); });
 
     let everSubscribed = false;
     let sb = null;
@@ -86,7 +107,7 @@
               // Delivery latency = now − when the breadcrumb was written.
               const ts = payload && payload.new && payload.new.created_at;
               if (ts) { const lat = Date.now() - Date.parse(ts); if (lat >= 0 && lat < 60000) { metrics._latSum += lat; metrics._latN++; metrics.avgLatencyMs = Math.round(metrics._latSum / metrics._latN); } }
-              firePerTopic[topic]();
+              noteEvent(topic, payload && payload.new);
             })
           .subscribe((status) => {
             if (status === "SUBSCRIBED") { metrics.subscribed++; if (everSubscribed) { metrics.reconnects++; fireAll(); } everSubscribed = true; }

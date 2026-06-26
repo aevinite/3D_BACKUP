@@ -137,7 +137,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     if (p === "orders") {
-      const orders = must(await sb.from("orders").select("*").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(200));
+      // TARGETED REFETCH (owner 2026-06-26 — egress cut): when a realtime breadcrumb
+      // names ONE table, the panel asks for just that table's orders (?table=N) instead
+      // of re-reading the whole floor. No param = full board (unchanged). Scopes the
+      // 159 KB-and-growing whole-orders read down to a few rows.
+      const tbl = new URL(req.url).searchParams.get("table");
+      let oq = sb.from("orders").select("*").eq("restaurant_id", rid);
+      if (tbl) oq = oq.eq("table_number", tbl);
+      const orders = must(await oq.order("created_at", { ascending: false }).limit(200));
       // Attach each order's SESSION invoice/bill state so the merged bill card knows
       // whether it's invoiced/locked (invoice lives on the session, not the order).
       const sids = [...new Set(orders.map((o: any) => o.session_id).filter(Boolean))];
@@ -159,7 +166,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     if (p === "calls") {
-      return ok(must(await sb.from("waiter_calls").select("*").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(100)));
+      const tbl = new URL(req.url).searchParams.get("table"); // targeted refetch (see /orders)
+      let cq = sb.from("waiter_calls").select("*").eq("restaurant_id", rid);
+      if (tbl) cq = cq.eq("table_number", tbl);
+      return ok(must(await cq.order("created_at", { ascending: false }).limit(100)));
     }
 
     // Issues this restaurant has raised (newest first, open before resolved) — so the
@@ -240,15 +250,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     if (p === "sessions") {
-      const sessions = must(
-        await sb.from("sessions").select("*").eq("restaurant_id", rid).neq("status", "closed").order("last_activity_at", { ascending: false })
-      );
-       
+      // TARGETED REFETCH (see /orders): ?table=N returns ONLY that table's open session(s)
+      // + their members/items + that table's pending requests. blocklist stays full (it's
+      // tiny + restaurant-wide). The panel merges this one table's slice into its board.
+      const tbl = new URL(req.url).searchParams.get("table");
+      let sq = sb.from("sessions").select("*").eq("restaurant_id", rid).neq("status", "closed");
+      if (tbl) sq = sq.eq("table_number", tbl);
+      const sessions = must(await sq.order("last_activity_at", { ascending: false }));
+
       const ids = sessions.map((s: any) => s.id);
+      let rq = sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid);
+      if (tbl) rq = rq.eq("table_number", tbl);
       const [members, items, requests, blocklist] = await Promise.all([
         ids.length ? sb.from("session_members").select("*").in("session_id", ids).eq("removed", false).order("joined_at") : Promise.resolve({ data: [] }),
         ids.length ? sb.from("order_items").select("*").in("session_id", ids).order("created_at") : Promise.resolve({ data: [] }),
-        sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid).order("created_at"),
+        rq.order("created_at"),
         sb.from("blocklist").select("*").eq("restaurant_id", rid).order("blocked_at", { ascending: false }),
       ]);
       return ok({

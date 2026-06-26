@@ -16,7 +16,7 @@ export type Overview = {
   openTables: number; activeOrders: number; unpaidOrders: number;
   revenueToday: number; ordersToday: number;
 };
-export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string };
+export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string; restaurant_name?: string | null; restaurant_slug?: string | null };
 
 export const STATE_LABEL: Record<Tile["state"], string> = {
   free: "Free", seated: "Seated", new: "New order", preparing: "Preparing", served: "Served", cleared: "Cleared",
@@ -75,12 +75,21 @@ export function useActiveAutoRefresh(fn: () => void, intervalMs = 60000, idleMs 
   ref.current = fn;
   useEffect(() => {
     let last = Date.now();
-    const bump = () => { last = Date.now(); };
+    let wasIdle = false; // were we paused (walked away) before this interaction?
+    const bump = () => {
+      const now = Date.now();
+      // WAKE-ON-RETURN (owner 2026-06-26): if the user comes back — moves the cursor,
+      // scrolls, taps — AFTER we'd gone idle, refresh IMMEDIATELY instead of making them
+      // wait up to a full interval for fresh data. Normal in-session moves don't refetch
+      // (we weren't idle), so this adds no extra egress while they're actively using it.
+      if (wasIdle && !document.hidden) { wasIdle = false; ref.current(); }
+      last = now;
+    };
     const evs: (keyof WindowEventMap)[] = ["pointerdown", "keydown", "scroll", "wheel", "touchstart", "pointermove"];
     evs.forEach((e) => window.addEventListener(e, bump, { passive: true, capture: true }));
     const id = setInterval(() => {
       if (document.hidden) return;                 // hidden tab → don't fetch
-      if (Date.now() - last > idleMs) return;      // user walked away → stop
+      if (Date.now() - last > idleMs) { wasIdle = true; return; } // user walked away → stop, arm wake-on-return
       ref.current();
     }, intervalMs);
     return () => {
@@ -138,7 +147,10 @@ export function ActivityFeed({ rows }: { rows: Action[] }) {
       {rows.map((a) => (
         <div key={a.id} style={{ display: "grid", gridTemplateColumns: "84px 1fr auto", gap: 10, alignItems: "center", fontSize: 13, padding: "8px 0", borderBottom: "var(--border)" }}>
           <span className="adm-chip" style={{ background: "color-mix(in srgb, " + (PANEL_COLOR[a.panel] || "#888") + " 22%, transparent)", color: PANEL_COLOR[a.panel] || "var(--muted)" }}>{a.panel}</span>
-          <span>{ACT_LABEL[a.action] || a.action}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : a.detail ? ` · ${a.detail}` : ""}</span>
+          <span style={{ minWidth: 0 }}>
+            {ACT_LABEL[a.action] || a.action}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : a.detail ? ` · ${a.detail}` : ""}
+            {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
+          </span>
           <span className="adm-when">{timeAgo(a.created_at)}</span>
         </div>
       ))}

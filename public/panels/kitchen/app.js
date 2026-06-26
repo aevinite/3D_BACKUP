@@ -354,6 +354,27 @@ let lastSig = null;
 // last wins — even an older snapshot — flashing a stale board. Drop any response
 // that a newer load() has already superseded.
 let loadSeq = 0;
+// The restaurant's display name for the header: prefer the short brand label
+// (logo_text), else the English name, else any translation, else a neutral
+// fallback. Renders "" while nothing is loaded yet — never "undefined". NEVER a
+// hardcoded brand (this app is multi-tenant).
+function restDisplayName(r) {
+  if (!r) return "";
+  if (r.logo_text && String(r.logo_text).trim()) return String(r.logo_text).trim();
+  const n = r.name;
+  if (typeof n === "string" && n.trim()) return n.trim();
+  if (n && typeof n === "object") {
+    if (n.en && String(n.en).trim()) return String(n.en).trim();
+    const any = Object.values(n).find((v) => v && String(v).trim());
+    if (any) return String(any).trim();
+  }
+  return "Restaurant";
+}
+function setRestName(r) {
+  const el = document.getElementById("restName");
+  if (el) el.textContent = restDisplayName(r);
+}
+
 async function load() {
   const seq = ++loadSeq;
   const data = await api("GET", "/board");
@@ -369,6 +390,10 @@ async function load() {
   state.knownIds = ids;
   state.orders = data.orders; state.dishes = data.dishes;
   state.platform = data.platform || []; state.platformAccept = !!data.platformAccept;
+  // Show WHICH restaurant this panel is scoped to (multi-tenant). Set here in load()
+  // — NOT in render() — because render() is skipped when the board signature is
+  // unchanged, and the name must still appear on the very first load.
+  setRestName(data.restaurant);
   // Keep dishes the cook JUST tapped ready showing ready, even if this refetch landed
   // before the server caught up (cleared by the reconcile once the rush settles).
   state.items = pendingReady.size
