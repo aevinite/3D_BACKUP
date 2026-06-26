@@ -31,7 +31,10 @@ export async function PATCH(req: NextRequest) {
     const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
     if (!u) return bad("Not authorised — please log in.", 401);
     if (u.role !== "owner") return bad("Only the owner can change manager powers.", 403);
-    const owned = (await sb.from("restaurants").select("id").eq("id", rid).eq("owner_user_id", u.id).limit(1)).data?.[0];
+    // Multi-owner (migration 097): authorise via membership in restaurant_owners,
+    // not the single primary-owner column, so any co-owner of this restaurant can
+    // change its manager powers — and only an actual owner of it can.
+    const owned = (await sb.from("restaurant_owners").select("restaurant_id").eq("restaurant_id", rid).eq("user_id", u.id).limit(1)).data?.[0];
     if (!owned) return bad("That restaurant isn't yours.", 403);
   }
 

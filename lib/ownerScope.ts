@@ -3,7 +3,7 @@
 // The owner cockpit is reachable by TWO kinds of caller:
 //   • the ADMIN super-user (AUTH_COOKIE) — sees EVERY restaurant ({ all:true }), and
 //   • a logged-in OWNER (role=owner) — sees ONLY the restaurants they own
-//     (restaurants.owner_user_id = them), as a concrete id list.
+//     (membership in restaurant_owners, migration 097), as a concrete id list.
 // Anyone else (manager/kitchen/tablet/none) → null, which the routes turn into 401/403.
 //
 // Built on the RBAC primitives in lib/userAuth (cookie → user) + the owner_user_id
@@ -41,8 +41,12 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
   }
   const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   if (u && u.role === "owner") {
-    const { data } = await sb.from("restaurants").select("id").eq("owner_user_id", u.id);
-    return { all: false, ids: (data || []).map((r) => r.id as string), ownerId: u.id };
+    // Multi-owner: resolve EVERY restaurant this owner is a member of via the
+    // restaurant_owners join table (migration 097), not the single primary-owner
+    // column. This is the ONLY scoping change for a real owner — it widens to all
+    // restaurants they co-own AND never leaks one they aren't a member of.
+    const { data } = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", u.id);
+    return { all: false, ids: (data || []).map((r) => r.restaurant_id as string), ownerId: u.id };
   }
   return null;
 }

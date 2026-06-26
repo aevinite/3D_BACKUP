@@ -57,8 +57,30 @@ export async function PATCH(req: NextRequest) {
     const owner = (await sb.from("staff_users").select("id, name").eq("id", ownerId).eq("role", "owner").limit(1)).data?.[0];
     if (!owner) return bad("That user isn't an owner.", 400);
   }
+  // The PRIMARY owner is stored on the restaurant (display / back-compat); the
+  // SCOPING source of truth is the restaurant_owners join table (migration 097).
+  // This dropdown sets a SINGLE primary owner, so we must keep the two in sync:
+  // read the CURRENT primary, swap it in the join table, and leave any hand-added
+  // co-owners (a different user_id) untouched. Skipping this would let the OLD
+  // primary keep seeing this restaurant after a reassign/clear — the exact
+  // cross-owner leak we must prevent now that scope reads the join table.
+  const prev = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];
+  const oldOwner = (prev?.owner_user_id as string | null) || null;
   const { error } = await sb.from("restaurants").update({ owner_user_id: ownerId }).eq("id", rid);
   if (error) return bad(error.message, 500);
+  // Remove the PREVIOUS primary's membership if it's being replaced/cleared
+  // (leave it if it's the same user we're re-assigning, and never touch co-owners).
+  if (oldOwner && oldOwner !== ownerId) {
+    // This delete is the SECURITY-CRITICAL write: it revokes the previous owner's
+    // scope. If it silently fails the old owner keeps seeing this restaurant — the
+    // cross-owner leak we must never ship — so surface the error instead of swallowing it.
+    const del = await sb.from("restaurant_owners").delete().eq("restaurant_id", rid).eq("user_id", oldOwner);
+    if (del.error) return bad(del.error.message, 500);
+  }
+  // Add the NEW primary's membership (idempotent — composite PK + ignoreDuplicates).
+  if (ownerId) {
+    await sb.from("restaurant_owners").upsert({ restaurant_id: rid, user_id: ownerId }, { onConflict: "restaurant_id,user_id", ignoreDuplicates: true });
+  }
   await logAction("admin", "restaurant_set_owner", { restaurant_id: rid, actor: "admin", detail: ownerId ? `assigned owner ${ownerId}` : "cleared owner" });
   return ok({ ok: true, ownerUserId: ownerId });
 }
