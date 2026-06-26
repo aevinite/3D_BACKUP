@@ -747,6 +747,23 @@ body {
    handle, and an inline style would otherwise beat this rule and keep the panel
    its dragged pixel width instead of going full-width on a narrow screen. */
 @media (max-width: 1040px) { .floor-wrap { flex-direction: column; margin-right: 0; } .floor-side { width: 100% !important; flex: none !important; margin-top: 0; } }
+/* F1: collapse / expand the right floor panel. Chevron sits top-right of the panel
+   when open; floats on the floor's right edge when collapsed. Hover-grows (owner:
+   "everything dynamic"). When collapsed, tapping a tile opens the full-screen popup. */
+.floor-side-toggle {
+  align-self: flex-end; flex: 0 0 auto; width: 30px; height: 30px;
+  display: grid; place-items: center; cursor: pointer; margin-bottom: -6px;
+  border: 1px solid var(--line); border-radius: 9px;
+  background: var(--panel-2); color: var(--muted); font-size: 17px; line-height: 1;
+  transition: transform .15s ease, background .15s ease, color .15s ease, border-color .15s ease;
+}
+.floor-side-toggle:hover { transform: scale(1.14); background: var(--gold); color: #1a1208; border-color: var(--gold); }
+.floor-collapsed { position: relative; }
+.floor-side-toggle.is-collapsed {
+  position: absolute; top: 12px; right: 4px; align-self: auto; margin: 0; z-index: 6;
+  box-shadow: 0 3px 12px rgba(0,0,0,.20);
+}
+@media (prefers-reduced-motion: reduce) { .floor-side-toggle { transition: none; } .floor-side-toggle:hover { transform: none; } }
 
 /* Master-detail: the table detail shown IN the right side panel (replacing the
    floor controls when a tile is selected). It reuses all the .sx-* / .tp-order /

@@ -48,6 +48,7 @@ const state = {
   boardLoaded: false, // false until the live board arrives once → drives the floor skeleton (no "all Free" flash on load)
   openSess: null, // table number whose session modal is open
   selectedTable: null, // table number whose DETAIL is shown IN the right side panel (Tables tab master-detail). null = show the floor controls instead.
+  floorSideCollapsed: lsGet("lfh_floor_side_collapsed", "0") === "1", // F1: right floor panel collapsed → clicking a table opens a FULL-SCREEN popup instead of the in-side detail.
   ordersView: lsGet("lfh_editor_ordersview", "live"), // Orders left-bar: live | previous | bills | calls — remembered across refresh
   billSearch: "", billSearchType: "inv", billSort: "new", // Bills → Today/Previous search + sort
   logView: lsGet("lfh_editor_logview", "customers"),  // Log left-bar: customers | operations — remembered across refresh
@@ -2858,7 +2859,16 @@ function floorHtml() {
   } else {
     sideInner = `${bulkCard}${reqCard}${needsCard}${blkCard}${controls}`;
   }
-  return `<div class="floor-wrap">${main}<div class="floor-resizer" id="floorResizer" title="Drag to resize"></div><aside class="floor-side" style="width:${sideW}px;flex:0 0 ${sideW}px">${sideInner}</aside></div>`;
+  // F1: collapsed (controls mode only) → hide the side panel so the floor goes
+  // full-width; a slim chevron re-opens it. While collapsed, tapping a tile opens
+  // the FULL-SCREEN table popup (see bindFloor). A SELECTED table's detail is never
+  // collapsed — it has its own ✕ that returns to the controls.
+  if (state.floorSideCollapsed && state.selectedTable == null) {
+    return `<div class="floor-wrap floor-collapsed">${main}<button class="floor-side-toggle is-collapsed" id="floorSideToggle" title="Show floor controls" aria-label="Show floor controls">‹</button></div>`;
+  }
+  const collapseBtn = state.selectedTable == null
+    ? `<button class="floor-side-toggle" id="floorSideToggle" title="Hide this panel" aria-label="Hide this panel">›</button>` : "";
+  return `<div class="floor-wrap">${main}<div class="floor-resizer" id="floorResizer" title="Drag to resize"></div><aside class="floor-side" style="width:${sideW}px;flex:0 0 ${sideW}px">${collapseBtn}${sideInner}</aside></div>`;
 }
 
 // bindFloor: wire up the unified floor after it's drawn — clicking a tile opens
@@ -2873,7 +2883,14 @@ function bindFloor() {
   if (oa) oa.onclick = () => openAllTables();
   const ca = document.getElementById("floorCloseAll");
   if (ca) ca.onclick = () => closeAllTables();
-  ed.querySelectorAll("[data-floor-table]").forEach((t) => (t.onclick = () => selectTable(t.dataset.floorTable))); // tap a tile → show its detail in the right panel
+  ed.querySelectorAll("[data-floor-table]").forEach((t) => (t.onclick = () => {
+    // F1: collapsed right panel → open a FULL-SCREEN popup; open panel → in-side detail.
+    if (state.floorSideCollapsed) openTablePanel(t.dataset.floorTable);
+    else selectTable(t.dataset.floorTable);
+  }));
+  // F1: collapse / expand the right floor panel (state persisted across reloads).
+  const sideToggle = ed.querySelector("#floorSideToggle");
+  if (sideToggle) sideToggle.onclick = () => { state.floorSideCollapsed = !state.floorSideCollapsed; lsSet("lfh_floor_side_collapsed", state.floorSideCollapsed ? "1" : "0"); renderEditor(); };
   // quick actions on the tile itself — stopPropagation so they don't also open the detail panel
   ed.querySelectorAll("[data-quick-open]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); openTableSession(b.dataset.quickOpen); }));
   ed.querySelectorAll("[data-quick-accept]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); acceptTableOrders(b.dataset.quickAccept); }));
