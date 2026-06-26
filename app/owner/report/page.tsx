@@ -117,6 +117,16 @@ export default function OwnerReport() {
         .rep-empty { text-align: center; color: var(--muted); padding: 18px; }
         .rep-foot { margin-top: 20px; padding-top: 14px; border-top: var(--border); font-size: 11px; color: var(--muted); }
         @media (max-width: 720px) { .rep-kpis { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 560px) {
+          .rep-controls { flex-direction: column; align-items: stretch; }
+          .rep-range { justify-content: center; }
+          .rep-doc { padding: 18px 14px; }
+          .rep-head { flex-direction: column; gap: 8px; }
+          .rep-meta { text-align: left; }
+          .rep-kpis { gap: 10px; margin: 16px 0; }
+          .rep-table { font-size: 12px; }
+          .rep-table th, .rep-table td { padding: 7px 5px; }
+        }
       `}</style>
     </div>
   );
