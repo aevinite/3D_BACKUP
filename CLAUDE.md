@@ -5,6 +5,26 @@ selected dishes. The user is a beginner who vibe-codes; teach as you build,
 keep chat in plain language, explain why before how. See user/feedback
 memory for tone and preferences.
 
+## Owner working agreements (2026-06-26 — FOLLOW EVERY TIME)
+
+- **Design work → ALWAYS load the UI/UX skill (the "UI/UX Pro Max" skill if present)
+  AND superpowers, compare approaches, and ship the best/merged one.** Never restyle
+  by eye alone.
+- **Every restaurant must be genuinely DIFFERENT** — its own theme, accent, hero
+  wording AND its own intro/splash + branding. NOTHING on a non-#1 restaurant may show
+  "Little French House" / #1's branding. (Recurring bug: the IntroSplash + hardcoded #1
+  assets leak onto other tenants.)
+- **Admin = top power, invisibly.** From `/aevinite` the admin must reach ANY
+  restaurant's guest menu + owner panel + manager/kitchen/tablet panels, with NO
+  password and with NO hint to the owner that they're being viewed. Admin and owner are
+  otherwise SEPARATE logins/sessions (see Security gate).
+- **Keep the running request checklist at `.claude/REQUESTS.md`** — add every owner
+  request, check items off ONLY when built AND verified across every panel they touch.
+- **Verify across ALL panels + real-time.** When an order/table/menu changes, confirm it
+  updates INSTANTLY (no flicker, no "old value for 1s then refresh") in owner + admin +
+  manager + kitchen + tablet. Test at desktop AND ~390px mobile. Don't claim done from
+  source alone.
+
 ## What "blur" means (owner's word — 2026-06-13)
 
 When the owner says **"blur"** they mean the brand bar's **frosted glass**: a
