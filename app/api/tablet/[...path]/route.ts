@@ -86,6 +86,27 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "state") {
+      // TARGETED REFETCH (owner 2026-06-26 — egress cut): when a realtime breadcrumb names
+      // ONE table, the tablet asks for just that table's slice (?table=N) instead of re-reading
+      // the whole floor. Only the PER-TABLE collections are scoped — sessions/members/calls/
+      // orders/items/requests; settings/dishes/categories/restaurant are table-agnostic and a
+      // menu event always forces a FULL pass, so they're left OUT of a targeted slice (the panel
+      // keeps its cached copies). Members/items are scoped by the table's open-session ids.
+      const tbl = new URL(req.url).searchParams.get("table");
+      if (tbl) {
+        const live = await liveOrdersAndItems(rid, [tbl]);
+        const sessions = must(await sb.from("sessions").select("*").neq("status", "closed").eq("restaurant_id", rid).eq("table_number", tbl));
+        const sids = (sessions || []).map((s: { id: string }) => s.id);
+        const [members, calls, requests] = await Promise.all([
+          sids.length ? sb.from("session_members").select("*").eq("removed", false).eq("restaurant_id", rid).in("session_id", sids) : Promise.resolve({ data: [] }),
+          sb.from("waiter_calls").select("*").eq("resolved", false).eq("restaurant_id", rid).eq("table_number", tbl),
+          sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid).eq("table_number", tbl),
+        ]);
+        return ok({
+          sessions, members: must(members) || [], calls: must(calls),
+          orders: live.orders, items: live.items, requests: must(requests),
+        });
+      }
       // Orders + dishes come from the shared "live board" helper so the tablet shows
       // EXACTLY what the manager shows — today's orders plus any still-open session's
       // orders, even past the 05:00 IST rollover. (This used to be a day-clipped fetch

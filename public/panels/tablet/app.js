@@ -1114,6 +1114,68 @@ function setRestName(r) {
   if (el) el.textContent = restDisplayName(r);
 }
 
+// loadTables(tables): TARGETED refetch — fetch ONLY the named tables' slice
+// (/state?table=N → sessions/members/calls/orders/items/requests for that table) and merge
+// each into the cached floor, instead of re-reading the WHOLE floor on every breadcrumb.
+// settings/dishes/categories/restaurant are table-agnostic (a menu event always arrives as
+// `full`), so a targeted pass leaves them untouched. The merge drops the changed tables' old
+// rows and adds the fresh ones (orders/calls/requests by table_number; members/items by their
+// session/order, all dedup'd by id), then runs the SAME boardSig/render path as load(). ANY
+// surprise → full load() (safe fallback). The tablet has NO chime, so there's no baseline to
+// preserve here. (owner 2026-06-26 — egress cut; mirrors the manager's pollTables.)
+async function loadTables(tables) {
+  if (!tables || !tables.length) return load();
+  const seq = ++loadSeq;
+  let slices;
+  try {
+    slices = await Promise.all(tables.map((t) => api("GET", "/state?table=" + encodeURIComponent(t))));
+  } catch (e) { return load(); }        // network/parse blip → safe full reload
+  if (seq !== loadSeq) return;          // a newer refresh started — drop this stale snapshot
+
+  const d = state.data || {};
+  const tset = new Set(tables.map(String));
+  // Dedup by row id (fresh row wins). The drop/add keys orders/calls/requests by table_number,
+  // members by session_id, items by order_id; this guarantees no row appears twice even if a
+  // shift left a cached row's table_number disagreeing with the server.
+  const dedupeById = (arr) => { const m = new Map(); for (const x of arr) if (x && x.id != null) m.set(x.id, x); return [...m.values()]; };
+  const slice = (key) => slices.flatMap((s) => (s && s[key]) || []);
+
+  // SESSIONS — drop the changed tables' sessions, add the slice's. The set of session ids
+  // belonging to the changed tables (old cached ∪ fresh) keys the members/items purge so a
+  // closed/shifted-away session's members+items are dropped too.
+  const freshSessions = slice("sessions");
+  const purgeSids = new Set();
+  for (const s of (d.sessions || [])) if (tset.has(String(s.table_number))) purgeSids.add(s.id);
+  for (const s of freshSessions) purgeSids.add(s.id);
+  const sessions = dedupeById((d.sessions || []).filter((s) => !tset.has(String(s.table_number))).concat(freshSessions));
+
+  // ORDERS — drop by table_number. Also collect the changed tables' order ids (old ∪ fresh)
+  // to purge their items, so an order that moved/cleared off the table strands no dish rows.
+  const freshOrders = slice("orders");
+  const purgeOids = new Set();
+  for (const o of (d.orders || [])) if (tset.has(String(o.table_number))) purgeOids.add(o.id);
+  for (const o of freshOrders) purgeOids.add(o.id);
+  const orders = dedupeById((d.orders || []).filter((o) => !tset.has(String(o.table_number))).concat(freshOrders));
+
+  // MEMBERS — drop by (changed) session id, add the slice's.
+  const members = dedupeById((d.members || []).filter((m) => !purgeSids.has(m.session_id)).concat(slice("members")));
+  // ITEMS — drop by (changed) order id, add the slice's. order_id keying (not session_id)
+  // keeps today's closed-session items correct, same as the kitchen.
+  const items = dedupeById((d.items || []).filter((it) => !purgeOids.has(it.order_id)).concat(slice("items")));
+  // CALLS / REQUESTS — drop by table_number, add the slice's.
+  const calls = dedupeById((d.calls || []).filter((c) => !tset.has(String(c.table_number))).concat(slice("calls")));
+  const requests = dedupeById((d.requests || []).filter((r) => !tset.has(String(r.table_number))).concat(slice("requests")));
+
+  // Keep the table-agnostic collections (settings/dishes/categories/restaurant) untouched.
+  state.data = Object.assign({}, d, { sessions, orders, members, items, calls, requests });
+
+  const sig = boardSig(state.data);
+  if (sig === lastSig) return;          // nothing visible changed — don't repaint
+  lastSig = sig;
+  renderFloor();
+  if (!state.ordering) renderPanel();   // never repaint the detail under a mid-order waiter
+}
+
 async function load() {
   const seq = ++loadSeq;
   const data = await api("GET", "/state");
@@ -1135,7 +1197,13 @@ load().catch((e) => toast("Can't reach the database: " + e.message, false));
 // instead of polling every second. A slow 60s timer is the backup if the
 // WebSocket drops; if realtime didn't load, fall back to a gentle 2s poll.
 if (window.LFH_RT) {
-  LFH_RT.start({ topics: ["ops", "menu"], onEvent: () => load() }); // ops + menu (dish/price edits)
+  // Split by topic: ops churn → TARGETED loadTables() when the breadcrumb names specific
+  // tables, else full load() (wake, reconnect, initial, or any unscopable event). menu edits
+  // (dish/price/category changes) always do a full load() so the dish browser refreshes.
+  LFH_RT.start({ handlers: {
+    ops: (detail) => (detail && !detail.full && detail.tables && detail.tables.length) ? loadTables(detail.tables) : load(),
+    menu: () => load(),
+  }});
   setInterval(() => load().catch(() => {}), 60000); // backup sync
 } else {
   setInterval(() => load().catch(() => {}), 2000); // fallback poll

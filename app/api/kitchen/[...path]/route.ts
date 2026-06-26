@@ -40,6 +40,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     if (path.join("/") === "board") {
+      // TARGETED REFETCH (owner 2026-06-26 — egress cut): when a realtime breadcrumb names
+      // ONE table, the kitchen asks for just that table's orders+items (?table=N) instead of
+      // re-reading the whole board. Dishes/platform/settings are table-agnostic and a
+      // platform/menu event always forces a FULL pass, so a targeted slice returns ONLY
+      // { orders, items } — the panel merges them into the cached board. No param = full board.
+      const tbl = new URL(req.url).searchParams.get("table");
+      if (tbl) {
+        const live = await liveOrdersAndItems(rid, [tbl]);
+        return ok({ orders: live.orders, items: live.items });
+      }
       // Orders + dishes from the shared "live board" helper — today's tickets PLUS
       // any still-open session's, so a dish left cooking on an overnight table keeps
       // showing here (and matches the manager). Was a day-clipped fetch before.
