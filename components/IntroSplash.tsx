@@ -15,7 +15,7 @@ const WORDMARK = "little French house";
 // The opening "splash" screen shown once when the app first loads: the logo
 // fades in, the wordmark assembles, then the whole curtain slides up to reveal
 // the menu. After it finishes it removes itself from the page.
-export default function IntroSplash() {
+export default function IntroSplash({ wordmark, accentColor }: { wordmark?: string; accentColor?: string }) {
   // Has the intro finished? When true, this component renders nothing.
   const [done, setDone] = useState(false);
   // A handle to the outer splash <div> so GSAP can animate it.
@@ -90,16 +90,25 @@ export default function IntroSplash() {
   // Once the intro is over, render nothing at all.
   if (done) return null;
 
+  // Per-restaurant intro: a tenant passes its OWN wordmark + accent, so its splash
+  // shows ITS name in ITS colour with NO French House logo. The flagship (#1) passes
+  // nothing → the original LFH logo + "little French house" wordmark (unchanged).
+  const isDefault = !wordmark;
+  const word = wordmark || WORDMARK;
+  const splashStyle = !isDefault && accentColor
+    ? { background: `radial-gradient(circle at 50% 42%, color-mix(in srgb, ${accentColor} 38%, #0d0805) 0%, #0a0a0f 68%, #000 100%)` }
+    : undefined;
+
   return (
     // aria-hidden hides this purely-decorative screen from screen readers.
-    <div ref={root} className="intro-splash" aria-hidden="true">
-      {/* The expanding ring behind the logo */}
-      <div className="intro-ring" />
-      {/* The logo image */}
-      <img className="intro-logo" src={LOGO} alt="" />
+    <div ref={root} className="intro-splash" aria-hidden="true" style={splashStyle}>
+      {/* The expanding ring — tinted to the restaurant's accent for non-#1. */}
+      <div className="intro-ring" style={!isDefault && accentColor ? { borderColor: accentColor } : undefined} />
+      {/* Logo: flagship only. Other tenants are white-label → just their name. */}
+      {isDefault && <img className="intro-logo" src={LOGO} alt="" />}
       {/* The wordmark, split into one <span> per letter so each can pop in */}
       <div className="intro-word">
-        {WORDMARK.split("").map((c, i) => (
+        {word.split("").map((c, i) => (
           <span key={i}>{c === " " ? " " : c}</span>
         ))}
       </div>
