@@ -86,27 +86,48 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
     // instead of staying stale until the 60s backup poll fires. visibilitychange +
     // focus + online often fire together on return, so THROTTLE the rebuild: first
     // signal rebuilds, the rest within 1.5s only refetch (avoids 2-3× socket churn).
+    // IDLE-DISCONNECT (owner 2026-06-26 — protect the realtime connection budget): a tab
+    // left HIDDEN for IDLE_MS drops its realtime channels so it stops holding a websocket
+    // connection (the "stale 41 connections" problem — tabs left open with no one looking).
+    // It reconnects + refetches the instant the tab is shown again; the 60s safety poll also
+    // pauses while hidden so a backgrounded tab does zero work.
+    const IDLE_MS = 120000;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let torndown = false;
+    const teardown = () => {
+      if (!sb) return;
+      channels.forEach((c) => { try { sb!.removeChannel(c); } catch {} });
+      channels = [];
+      torndown = true;
+    };
     let lastWake = 0;
     const wake = () => {
       if (document.hidden) return;
+      clearTimeout(idleTimer);
       const now = Date.now();
+      if (torndown) { torndown = false; lastWake = now; subscribe(); fireAll(); return; } // reconnect after idle
       if (now - lastWake < 1500) { fireAll(); return; } // already rebuilt this wake — just refetch
       lastWake = now;
       subscribe();
       fireAll();
     };
-    document.addEventListener("visibilitychange", wake);
+    const onVisibility = () => {
+      if (document.hidden) { clearTimeout(idleTimer); idleTimer = setTimeout(teardown, IDLE_MS); } // arm the idle drop
+      else wake();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", wake);
     window.addEventListener("online", wake);
-    const poll = setInterval(fireAll, 60000); // safety net if the socket drops
+    const poll = setInterval(() => { if (!document.hidden) fireAll(); }, 60000); // safety net — paused while hidden
 
-    topics.forEach(run); // initial load — fire IMMEDIATELY (the 300ms debounce is only to coalesce realtime bursts, and was costing every page 300ms of dead time before its first fetch)
+    topics.forEach(run); // initial load — fire IMMEDIATELY (the 300ms debounce only coalesces realtime bursts)
 
     return () => {
       disposed = true;
       clearInterval(poll);
+      clearTimeout(idleTimer);
       Object.values(timers).forEach((t) => t && clearTimeout(t));
-      document.removeEventListener("visibilitychange", wake);
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", wake);
       window.removeEventListener("online", wake);
       getClient().then((sb) => channels.forEach((c) => sb.removeChannel(c))).catch(() => {});

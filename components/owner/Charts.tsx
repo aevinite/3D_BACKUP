@@ -98,6 +98,25 @@ export function HourlyBar({ data, color }: { data: { hour: number; orders: numbe
   );
 }
 
+// Revenue-by-DAY bars for ONE restaurant (used when a single restaurant is picked —
+// a bar-per-day reads far clearer than one lonely bar in the by-restaurant chart).
+export function TimeBar({ data, color }: { data: { label: string; revenue: number }[]; color: string }) {
+  if (!data.length) return <Empty />;
+  return (
+    <div style={{ width: "100%", height: 230 }}>
+      <ResponsiveContainer>
+        <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
+          <CartesianGrid stroke={GRID} vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={16} />
+          <YAxis tick={{ fontSize: 11, fill: AXIS }} width={44} tickFormatter={(v) => "₹" + (v >= 1000 ? (v / 1000).toFixed(0) + "k" : v)} />
+          <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
+          <Bar dataKey="revenue" name="Revenue" fill={color} radius={[5, 5, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 // Category donut — shades derived from the restaurant accent + a palette.
 const PALETTE = ["#e3935b", "#5b8def", "#3fb98a", "#e0b341", "#a36bd4", "#e2607a", "#4bbdc9", "#9aa84a"];
 export function CategoryDonut({ data }: { data: { category: string; revenue: number }[] }) {

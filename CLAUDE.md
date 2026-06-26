@@ -46,6 +46,21 @@ restaurant. It is the **gold standard** to copy behaviour from when fixing the m
   → verify it live → implement the next → **do not stop after a check; keep going until every
   feature works for EVERY restaurant** (accept order, bills, real-time, all panels).
 
+## Be brutally honest + protect the DB (owner, 2026-06-26 — FOLLOW EVERY TIME)
+
+- **Brutal honesty is required.** If the owner is heading the wrong way, say so directly and
+  redirect him to the better path with the reason — don't just comply. He explicitly wants to be
+  corrected, not agreed with. Propose the better option first, name the trade-off, let him decide.
+- **Protect the database / connection budget (his #1 scaling fear).** Idle/backgrounded tabs must
+  NOT hold live realtime connections forever (he saw ~41 realtime "users" with almost no real
+  traffic — stale open tabs). Every realtime subscriber (guest menu + all panels) should DROP its
+  realtime channel when the tab is hidden/idle for a few minutes and RE-SUBSCRIBE on focus/
+  interaction (visibilitychange + an idle timer). Keep using the POOLED Supabase connection.
+- **Dashboards/analytics must be indexed + cheap.** Any query that filters/groups `orders` by
+  `created_at`/`restaurant_id` MUST have a covering index (e.g. `orders(restaurant_id, created_at)`)
+  — the owner analytics RPCs were full-scanning `orders` and took ~147s under load (stress test
+  2026-06-26). Index every column we filter by; prefer pre-aggregated summary tables at scale.
+
 ## What "blur" means (owner's word — 2026-06-13)
 
 When the owner says **"blur"** they mean the brand bar's **frosted glass**: a

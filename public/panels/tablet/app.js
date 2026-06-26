@@ -836,7 +836,10 @@ function orderGridHtml() {
     const inCartQty = state.cart.filter((l) => l.id === d.id).reduce((s, l) => s + l.qty, 0);
     return `<button class="dish ${out ? "out" : ""} ${inCartQty ? "in" : ""}" data-dish="${esc(d.id)}" ${out ? "disabled" : ""}>
       <span class="dname">${esc(d.title)}</span>
-      <span class="dprice">${out ? "SOLD OUT" : inr(dishPrice(d))}${inCartQty ? ` · ×${inCartQty}` : ""}</span>
+      <span class="drow">
+        <span class="dprice">${out ? "SOLD OUT" : inr(dishPrice(d))}</span>
+        ${out ? "" : inCartQty ? `<span class="dqty">×${inCartQty}</span>` : `<span class="dadd" aria-hidden="true">＋</span>`}
+      </span>
     </button>`;
   }).join("");
 }
