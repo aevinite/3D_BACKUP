@@ -30,10 +30,10 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 // until ANY active manager has a PIN we stay open (bootstrap) so a waiter is never
 // locked out before setup. Returns { allow:true, managerName? } or a 403 to relay.
 type PinGate = { allow: true; managerName?: string } | { allow: false; resp: NextResponse };
-async function managerPinGate(req: NextRequest, body: any): Promise<PinGate> {
+async function managerPinGate(req: NextRequest, body: any, rid: string): Promise<PinGate> {
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { allow: true, managerName: "admin" };
-  if (!(await anyManagerHasPin())) return { allow: true }; // no manager PIN set yet → open
-  const check = await verifyManagerPin(body?.managerPin || "");
+  if (!(await anyManagerHasPin(rid))) return { allow: true }; // no manager PIN set yet for THIS restaurant → open
+  const check = await verifyManagerPin(body?.managerPin || "", rid);
   if (!check.ok) return { allow: false, resp: NextResponse.json({ error: "A manager PIN is required for this.", needPin: true }, { status: 403 }) };
   return { allow: true, managerName: check.managerName };
 }
@@ -47,7 +47,7 @@ async function tabletPerm(key: string, req: NextRequest, body: any, rid: string)
   const s = await sb.from("settings").select(key).eq("restaurant_id", rid).maybeSingle();
   const mode = ((s.data as Record<string, string> | null)?.[key]) || "off";
   if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for the tablet — ask a manager.", disabled: true }, { status: 403 }) };
-  if (mode === "pin") return managerPinGate(req, body);
+  if (mode === "pin") return managerPinGate(req, body, rid);
   return { allow: true }; // 'on'
 }
 
@@ -221,7 +221,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // the editor's banMember, but done server-side in one call: we look up the
     // member's phone here (the editor passes it from its row). (owner, 2026-06-17)
     if (a === "members" && c === "ban") {
-      const g = await managerPinGate(req, body); if (!g.allow) return g.resp; // manager PIN required
+      const g = await managerPinGate(req, body, rid); if (!g.allow) return g.resp; // manager PIN required
       const found = must(await sb.from("session_members").select("id,phone,device_id").eq("id", b).limit(1));
       const m = found[0];
       if (!m) return err("member not found", 404);
@@ -275,7 +275,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const pending = must(await peek);
       const needsPin = pending.some((o: any) => o.status === "received" || o.status === "preparing" || o.payment_status !== "paid");
       let by = "";
-      if (needsPin) { const g = await managerPinGate(req, body); if (!g.allow) return g.resp; by = byNote(g); }
+      if (needsPin) { const g = await managerPinGate(req, body, rid); if (!g.allow) return g.resp; by = byNote(g); }
       let q = sb.from("orders").update({ status: "served", archived: true }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
       const rows = must(await q.select());
@@ -504,7 +504,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // "close anyway" override (force) for an unpaid/cooking table needs a manager PIN.
     if (a === "sessions" && c === "close") {
       const force = !!(body && body.force === true);
-      if (force) { const g = await managerPinGate(req, body); if (!g.allow) return g.resp; } // override → manager PIN
+      if (force) { const g = await managerPinGate(req, body, rid); if (!g.allow) return g.resp; } // override → manager PIN
       const result = await closeSession(b, { force }, { panel: "tablet", deviceId: dev });
       if (!result.ok) return err(result.message, result.status);
       return ok(result.session);
