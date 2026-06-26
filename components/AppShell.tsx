@@ -87,25 +87,53 @@ export default function AppShell({ children, logoText, accentColor }: { children
     // so the anon client receives these change events.)
     // In plain terms: we "subscribe" to the settings row and re-fetch whenever
     // it changes, so the guest sees the toggle flip almost instantly.
-    const channel = supabase
-      .channel("settings-site")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "settings", filter: "id=eq.site" },
-        () => refresh()
-      )
-      .subscribe();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    const subscribe = () => {
+      if (channel) return; // already connected
+      channel = supabase
+        .channel("settings-site")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "settings", filter: "id=eq.site" },
+          () => refresh()
+        )
+        .subscribe();
+    };
+    subscribe();
+
+    // IDLE-DISCONNECT (owner 2026-06-26 — protect the realtime connection budget): a tab
+    // left HIDDEN for IDLE_MS DROPS this channel so it stops holding a websocket connection
+    // (the "stale 41 connections" problem). It re-subscribes + refetches the instant the tab
+    // is shown again, and the fallback poll below pauses while hidden. Mirrors lib/useRealtime.ts.
+    const IDLE_MS = 120000;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const teardown = () => {
+      if (channel) { supabase.removeChannel(channel); channel = null; }
+    };
+    const onVisibility = () => {
+      if (document.hidden) {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(teardown, IDLE_MS); // arm the idle drop
+      } else {
+        clearTimeout(idleTimer);
+        if (!channel) { subscribe(); refresh(); } // reconnect after idle + refetch so we're not stale
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     // Fallback poll in case the realtime socket can't connect (captive wifi,
     // blocked websockets). Slow on purpose — realtime does the fast path.
-    // This just re-checks every 15 seconds as a safety net.
-    const iv = setInterval(refresh, 15000);
+    // This just re-checks every 15 seconds as a safety net — PAUSED while hidden
+    // so a backgrounded tab does zero work.
+    const iv = setInterval(() => { if (!document.hidden) refresh(); }, 15000);
 
     // Cleanup: stop the timer and the live subscription when AppShell unmounts.
     return () => {
       active = false;
       clearInterval(iv);
-      supabase.removeChannel(channel);
+      clearTimeout(idleTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      teardown();
     };
   }, []);
 
