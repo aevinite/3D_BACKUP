@@ -8,7 +8,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { inr, useLivePoll, ActivityFeed, type Action } from "@/components/admin/shared";
-import { RevenueBar, TrendLine } from "@/components/owner/Charts";
+import { RevenueBar, TrendLine, TimeBar } from "@/components/owner/Charts";
 
 const FALLBACK = "#e3c06f";
 type Rest = { id: string; slug: string; name: string; active: boolean; ownerUserId: string | null; ownerName: string | null };
@@ -63,6 +63,16 @@ export default function AdminOverview() {
     }
     return { rows: Array.from(byBucket.values()), lines: rev.slice(0, 8).map((r) => ({ key: r.name, name: r.name, color: r.accentColor || FALLBACK })) };
   }, [rev, ts]);
+
+  // Chart focus: "all" shows every restaurant (bar by restaurant + all trend lines);
+  // a specific restaurant shows ITS revenue by DAY (clearer than one lonely bar / one
+  // line lost in the pack). Drives both charts via the dropdown above them.
+  const [chartRest, setChartRest] = useState("all");
+  const selRev = rev.find((r) => r.name === chartRest);
+  const timeBar = useMemo(
+    () => trend.rows.map((row) => ({ label: String((row as Record<string, unknown>).label ?? ""), revenue: Number((row as Record<string, unknown>)[chartRest]) || 0 })),
+    [trend, chartRest]
+  );
 
   // Admin = platform oversight, NOT profit (that's the owner's view). Lead with
   // operational signals: restaurants, owners, open complaints, activity, live tables.
@@ -130,14 +140,35 @@ export default function AdminOverview() {
         )}
       </div>
 
+      <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0 8px", flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13.5, fontWeight: 800 }}>Revenue</span>
+        <select value={chartRest} onChange={(e) => setChartRest(e.target.value)}
+          aria-label="Focus a restaurant"
+          style={{ background: "var(--card)", color: "var(--text)", border: "var(--border)", borderRadius: 9, padding: "7px 12px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+          <option value="all">All restaurants</option>
+          {rev.map((r) => <option key={r.id} value={r.name}>{r.name}</option>)}
+        </select>
+        {chartRest !== "all" && <button className="adm-btn" style={{ padding: "6px 12px", fontSize: 12.5 }} onClick={() => setChartRest("all")}>← All restaurants</button>}
+      </div>
       <div className="adm-charts2">
         <div className="adm-card">
-          <div className="adm-ctitle">Who earns more <span>· revenue by restaurant (30d)</span></div>
-          <RevenueBar data={rev.map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: r.accentColor || FALLBACK }))} />
+          {chartRest === "all" ? (
+            <>
+              <div className="adm-ctitle">Who earns more <span>· revenue by restaurant (30d) · tap a bar to focus</span></div>
+              <RevenueBar
+                data={rev.map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: r.accentColor || FALLBACK }))}
+                onSelect={(id) => { const m = rev.find((x) => x.id === id); if (m) setChartRest(m.name); }} />
+            </>
+          ) : (
+            <>
+              <div className="adm-ctitle">{chartRest} <span>· revenue by day (30d)</span></div>
+              <TimeBar data={timeBar} color={selRev?.accentColor || FALLBACK} />
+            </>
+          )}
         </div>
         <div className="adm-card">
-          <div className="adm-ctitle">Revenue over time <span>· by day, per restaurant</span></div>
-          <TrendLine data={trend.rows} lines={trend.lines} />
+          <div className="adm-ctitle">Revenue over time <span>· {chartRest === "all" ? "by day, per restaurant" : chartRest}</span></div>
+          <TrendLine data={trend.rows} lines={chartRest === "all" ? trend.lines : trend.lines.filter((l) => l.name === chartRest)} />
         </div>
       </div>
 
