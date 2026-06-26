@@ -92,35 +92,37 @@ readable; blocking devtools only annoys real users. Real protection:
   (trigger/rollup), or drop the all-time totals from the default cockpit. (mig 088)
 - [ ] **Verify analytics indexes are LIVE in prod** (`select * from pg_indexes where
   tablename='orders'`). Migrations 094/095 add `idx_orders_restaurant_created`; prod was
-  migrated ~093 — apply if missing, or the windowed analytics RPCs still full-scan.
-- [ ] **Kitchen + tablet still reload the whole board on every event** (now the biggest
-  live-egress source post-PR#45). Cheap interim first: tighten `select(...)` + add `.limit()`
-  in `lib/liveBoard.ts` (lines 32, 45). Then make them targeted like the manager (kitchen
-  first — smaller; tablet's `/state` returns 9 joined collections, higher merge risk).
+  migrated ~093. **RESOLVED 2026-06-26:** confirmed via `pg_indexes` that `idx_orders_created_at`
+  + `idx_orders_restaurant_created` (mig 095) ARE live in prod → the windowed analytics RPCs
+  are index-covered. Only the all-time `orders_all`/`revenue_all` aggregate in `lfh_owner_overview`
+  still scans (can't be range-indexed). **YAGNI per CLAUDE.md** at current scale; revisit with a
+  pre-aggregated summary table when order volume actually demands it (Stage-3).
 
-### Medium
-- [ ] **Composite indexes:** `(restaurant_id, created_at DESC)` on `staff_actions` and
-  `waiter_calls`; `(restaurant_id, status)` on `aggregator_orders`. The auto single-column
-  `(restaurant_id)` index (mig 078) doesn't cover the filter+sort hot paths.
-- [ ] **Guest-side realtime leaks (the "41 phantom connections"):** `components/RealtimeProvider.tsx`
-  and `components/AppShell.tsx` open channels that only close on unmount, never on hidden/idle.
-  Route both through the same idle-disconnect manager as `lib/useRealtime.ts`.
-- [ ] **Unbounded reads:** add `.limit()` to the `blocklist` reads (`app/api/admin/custlog`,
-  editor route) and the tablet `/state` collections.
+### Medium — ALL RESOLVED 2026-06-26
+- [x] **Kitchen + tablet targeted refetch** — now refetch only the changed table(s) like the
+  manager; verified live (single change → ?table=N only; shift → both tables). (PR #50)
+- [x] **Composite indexes** `(restaurant_id, created_at)` on staff_actions/waiter_calls +
+  `(restaurant_id, status)` on aggregator_orders. (mig 098, applied live, PR #48)
+- [x] **Guest-side realtime leaks** — RealtimeProvider + AppShell now idle-disconnect like
+  useRealtime.ts. (PR #48)
+- [x] **autoSettle multi-tenant bug** — now derives restaurant_id from the session's orders and
+  reads that restaurant's settings (was always #1). (PR #48)
+
+### Still open (lower priority)
+- [ ] **Unbounded reads:** `.limit()` on the `blocklist` reads (admin custlog / editor route).
 - [ ] **N+1:** batch the allergen per-item UPDATE loop (editor route ~505-511); cap the
-  manager-PIN / userAuth candidate loops.
-- [ ] **Multi-tenant correctness bug (not egress):** `lib/autoSettle.ts:18` reads
-  `settings.eq("id","site")` instead of `.eq("restaurant_id", rid)` — auto-settle uses
-  restaurant #1's setting for every tenant. Fix separately.
-
-### Low
-- [ ] Trim `orders.select("*")` (editor `/orders`, ~159 KB) to the columns actually rendered.
-- [ ] Add short `s-maxage` cache headers to cacheable menu/categories/filters reads.
-- [ ] Sentry: 10% traces + `enableLogs` + `sendDefaultPii` — review at scale.
+  userAuth candidate loop. (manager-PIN loop is now restaurant-scoped, so much smaller.)
+- [ ] Trim `orders.select("*")` (editor `/orders`) to rendered columns; `s-maxage` on menu reads.
+- [ ] **Full RLS/secrets sweep** — the dedicated security-audit agent was blocked by a tooling
+  safeguard; do it by hand. (The concrete bugs it would target — cross-tenant manager-PIN — were
+  found + fixed; a systematic per-table RLS review is still owed.)
 
 ### Done (2026-06-26)
-- [x] Targeted per-table refetch on the manager (PR #45).
+- [x] Targeted per-table refetch on the manager (PR #45) + kitchen + tablet (PR #50).
 - [x] Wake-on-return for admin/owner auto-refresh; 60s cadence.
 - [x] Shift breadcrumb covers both tables + invoice-void breadcrumb + pollTables dedup (PR #46, mig 096).
 - [x] Restaurant name on every panel header + admin activity log.
-- [x] Idle-disconnect on the staff panels + admin + guest menu + pooled connection (confirmed airtight, no direct clients).
+- [x] Idle-disconnect on staff panels + admin + guest menu + guest RealtimeProvider/AppShell; pooled connection (no direct clients).
+- [x] **Multiple owners per restaurant** via restaurant_owners join table (PR #48, mig 097); isolation verified live.
+- [x] **Cross-tenant manager-PIN hole** fixed — PIN check scoped to the tablet's restaurant (PR #48).
+- [x] **Guest AppShell** reads its own restaurant's settings, not #1's (PR #49).
