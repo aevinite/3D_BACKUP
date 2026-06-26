@@ -7,13 +7,20 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-const NAV = [
+type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean };
+// Full platform sidebar. Real sections link to live pages; "soon" ones open a
+// branded Coming-soon page so the menu reads complete with no dead ends.
+const NAV: NavItem[] = [
   { href: "/aevinite", label: "Overview", icon: "fa-gauge-high", exact: true },
   { href: "/aevinite/restaurants", label: "Restaurants", icon: "fa-store" },
-  { href: "/aevinite/floor", label: "Live floor", icon: "fa-chair" },
+  { href: "/aevinite/owners", label: "Owners", icon: "fa-crown", soon: true },
   { href: "/aevinite/users", label: "Users & access", icon: "fa-users" },
-  { href: "/aevinite/logs", label: "Logs", icon: "fa-scroll" },
+  { href: "/aevinite/floor", label: "Live floor", icon: "fa-chair" },
+  { href: "/aevinite/analytics", label: "Analytics", icon: "fa-chart-pie", soon: true },
+  { href: "/aevinite/logs", label: "Activity log", icon: "fa-scroll" },
   { href: "/aevinite/features", label: "Features", icon: "fa-toggle-on" },
+  { href: "/aevinite/billing", label: "Billing & plans", icon: "fa-file-invoice-dollar", soon: true },
+  { href: "/aevinite/health", label: "System health", icon: "fa-heart-pulse", soon: true },
   { href: "/aevinite/settings", label: "Settings", icon: "fa-gear" },
 ];
 
@@ -34,7 +41,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     setSkin((cur) => { const next = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("aevidine_skin", next); } catch {} return next; });
   };
 
-  const isActive = (n: (typeof NAV)[number]) => (n.exact ? path === n.href : path.startsWith(n.href));
+  const isActive = (n: NavItem) => (n.exact ? path === n.href : path.startsWith(n.href));
 
   return (
     <div className="adm" data-skin={skin}>
@@ -47,6 +54,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           {NAV.map((n) => (
             <Link key={n.href} href={n.href} className={isActive(n) ? "active" : ""}>
               <i className={`fas ${n.icon}`} aria-hidden="true" /> {n.label}
+              {n.soon && <span className="navsoon">Soon</span>}
             </Link>
           ))}
         </nav>

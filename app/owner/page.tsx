@@ -197,6 +197,24 @@ export default function OwnerDashboard() {
               </button>
             ))}
           </div>
+
+          {/* More tools — roadmap teasers (each opens a branded Coming-soon page) */}
+          <h2 className="own-h2">More tools</h2>
+          <div className="adm-teasers">
+            {([
+              ["/owner/sales", "fa-chart-line", "Sales & reports", "Day / item / tax reports, exportable"],
+              ["/owner/inventory", "fa-boxes-stacked", "Inventory", "Stock, recipes & low-stock alerts"],
+              ["/owner/customers", "fa-user-group", "Customers & loyalty", "Profiles, points & win-backs"],
+              ["/owner/marketing", "fa-bullhorn", "Marketing", "Coupons, campaigns & ROI"],
+              ["/owner/online", "fa-truck-fast", "Online & apps", "Zomato, Swiggy & direct ordering"],
+              ["/owner/menu", "fa-book-open", "Menu", "Edit items, prices & modifiers"],
+            ] as [string, string, string, string][]).map(([href, icon, title, blurb]) => (
+              <a key={href} href={href} className="adm-teaser">
+                <span className="ti"><i className={`fas ${icon}`} aria-hidden="true" /></span>
+                <span style={{ minWidth: 0 }}><span className="tt">{title}<span className="soon">Soon</span></span><span className="tb">{blurb}</span></span>
+              </a>
+            ))}
+          </div>
         </>
       )}
 

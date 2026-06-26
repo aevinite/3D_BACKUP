@@ -172,6 +172,21 @@ export default function AdminOverview() {
         })}
       </div>
 
+      <h2 className="adm-h2">Platform tools</h2>
+      <div className="adm-teasers" style={{ marginBottom: 18 }}>
+        {([
+          ["/aevinite/owners", "fa-crown", "Owners", "Directory & account status"],
+          ["/aevinite/analytics", "fa-chart-pie", "Analytics", "Platform GMV, growth & cohorts"],
+          ["/aevinite/billing", "fa-file-invoice-dollar", "Billing & plans", "Subscriptions & invoices"],
+          ["/aevinite/health", "fa-heart-pulse", "System health", "Uptime, errors & jobs"],
+        ] as [string, string, string, string][]).map(([href, icon, title, blurb]) => (
+          <Link key={href} href={href} className="adm-teaser">
+            <span className="ti"><i className={`fas ${icon}`} aria-hidden="true" /></span>
+            <span style={{ minWidth: 0 }}><span className="tt">{title}<span className="soon">Soon</span></span><span className="tb">{blurb}</span></span>
+          </Link>
+        ))}
+      </div>
+
       <div className="adm-card" style={{ marginTop: 18 }}>
         <h2>Recent activity <span className="adm-muted" style={{ fontWeight: 400 }}>· across all restaurants &amp; panels</span></h2>
         <ActivityFeed rows={activity} />
