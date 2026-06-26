@@ -8,7 +8,7 @@ import { inr } from "@/components/admin/shared";
 
 type Range = "today" | "7d" | "30d" | "all";
 const RANGE_LABEL: Record<Range, string> = { today: "Today", "7d": "Last 7 days", "30d": "Last 30 days", all: "All time" };
-type RevRow = { id: string; name: string; revenue: number; orders: number };
+type RevRow = { id: string; name: string; revenue: number; orders: number; accentColor?: string };
 
 export default function OwnerReport() {
   const [range, setRange] = useState<Range>("30d");
@@ -75,7 +75,8 @@ export default function OwnerReport() {
             {loaded && rev.length === 0 && <tr><td colSpan={5} className="rep-empty">No sales in this range.</td></tr>}
             {rev.map((r, i) => (
               <tr key={r.id}>
-                <td>{i + 1}</td><td>{r.name}</td>
+                <td>{i + 1}</td>
+                <td><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 9, background: r.accentColor || "var(--accent)", marginRight: 8, verticalAlign: "middle" }} aria-hidden="true" />{r.name}</td>
                 <td className="num">{r.orders.toLocaleString("en-IN")}</td>
                 <td className="num">{inr(r.revenue)}</td>
                 <td className="num">{totals.revenue ? Math.round((r.revenue / totals.revenue) * 100) : 0}%</td>
