@@ -3256,7 +3256,11 @@ function tablePanelParts(t) {
 
   // The PRIMARY table-wide action: accept everything that's new, else serve everything
   // that's cooked. (Per-order Accept stays on each new card; per-dish Serve on each row.)
-  const newOrdersN = os.filter((o) => o.status === "received").length;
+  // Count orders with un-accepted (received) DISHES — item-level, so it matches the
+  // floor tile's "New order" cue and the accept action (acceptTableOrders). Was
+  // order-level (o.status==="received"), which hid "Accept all" for a preparing order
+  // that still had a freshly-added received dish. (2026-06-26)
+  const newOrdersN = os.filter((o) => o.status !== "cancelled" && orderItemRows(o).some((r) => r.status === "received")).length;
   const anyUnservedAccepted = os.some((o) => o.status !== "cancelled" && o.status !== "received" && orderItemRows(o).some((r) => r.status !== "served"));
   let primaryBtn = "";
   if (newOrdersN) primaryBtn = `<button class="btn primary tp-accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare${newOrdersN > 1 ? ` (${newOrdersN})` : ""}</button>`;
@@ -3484,7 +3488,14 @@ async function serveAllOrder(orderId) {
 // floor tile's Accept AND the detail's "Accept all & prepare" button — one tap
 // accepts the whole table (owner: never open the detail just to accept each).
 async function acceptTableOrders(t) {
-  const recv = ordersForTable(t).filter((o) => o.status === "received");
+  // Accept every order that still has un-accepted (received) DISHES — this matches
+  // the tile's "New order" cue, which is ITEM-level (anyReceived). An order can be
+  // order-level "preparing" yet still carry a freshly-added dish at "received" (e.g.
+  // a dish added after accepting); the old order-LEVEL filter (o.status==="received")
+  // silently did NOTHING for those, so the tile showed "Accept" but clicking it fired
+  // no request — the "Accept doesn't work" bug. The /accept endpoint flips received
+  // item rows → preparing regardless of order status, so this is safe. (2026-06-26)
+  const recv = ordersForTable(t).filter((o) => o.status !== "cancelled" && orderItemRows(o).some((r) => r.status === "received"));
   if (!recv.length) return;
   // OPTIMISTIC: tile flips to "Preparing" instantly, server told in background.
   recv.forEach((o) => { o.status = "preparing"; flipOrderItems(o, "received", "preparing"); opBegin(o.id); });
