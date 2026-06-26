@@ -8,6 +8,7 @@ import Particles from "./Particles";
 import IntroSplash from "./IntroSplash";
 import Maintenance from "./Maintenance";
 import { getSettings } from "@/lib/menu";
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { supabase } from "@/lib/supabase";
 
 // Turn a brand hex (e.g. "#c0392b") into "r, g, b" so we can build rgba() glows
@@ -60,7 +61,7 @@ function accentVars(accentColor: string): React.CSSProperties {
 // the background bubbles, the header, the chef-call button, and finally the
 // actual page content (`children`). It also listens for site-wide settings the
 // staff control from the editor, so the guest's screen updates live.
-export default function AppShell({ children, logoText, accentColor }: { children: React.ReactNode; logoText?: string; accentColor?: string }) {
+export default function AppShell({ children, logoText, accentColor, restaurantId }: { children: React.ReactNode; logoText?: string; accentColor?: string; restaurantId?: string }) {
   // General-tab toggles: bubble effect on/off, and service (maintenance) mode.
   // These are pieces of remembered state — when they change, the screen redraws.
   const [bubbles, setBubbles] = useState(true);
@@ -72,7 +73,7 @@ export default function AppShell({ children, logoText, accentColor }: { children
     let active = true;
     // Go ask the database for the current settings and copy them into state.
     const refresh = () =>
-      getSettings()
+      getSettings(restaurantId)
         .then((s) => {
           if (!active) return;
           setBubbles(s.bubblesEnabled);
@@ -90,11 +91,16 @@ export default function AppShell({ children, logoText, accentColor }: { children
     let channel: ReturnType<typeof supabase.channel> | null = null;
     const subscribe = () => {
       if (channel) return; // already connected
+      // Per-restaurant channel + filter: each tenant has its OWN settings row
+      // (settings.restaurant_id), so a guest at restaurant B must watch B's row, not
+      // #1's "site" row. Keying the channel name per restaurant also keeps the realtime
+      // topics tenant-scoped (the SaaS rule). Falls back to the #1 default if no rid.
+      const rid = restaurantId || DEFAULT_RESTAURANT_ID;
       channel = supabase
-        .channel("settings-site")
+        .channel("settings-" + rid)
         .on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "settings", filter: "id=eq.site" },
+          { event: "*", schema: "public", table: "settings", filter: "restaurant_id=eq." + rid },
           () => refresh()
         )
         .subscribe();
@@ -135,7 +141,7 @@ export default function AppShell({ children, logoText, accentColor }: { children
       document.removeEventListener("visibilitychange", onVisibility);
       teardown();
     };
-  }, []);
+  }, [restaurantId]);
 
   // Service mode replaces the whole menu with the maintenance screen.
   if (serviceMode) return <Maintenance />;
