@@ -66,12 +66,12 @@ export default function AdminOverview() {
 
   // Admin = platform oversight, NOT profit (that's the owner's view). Lead with
   // operational signals: restaurants, owners, open complaints, activity, live tables.
-  const KPIS: [string, string | number][] = [
-    ["Restaurants", rests.length || "…"],
-    ["Owners", totals.ownerCount],
-    ["Open issues", issues.filter((i) => i.status === "open").length],
-    ["Orders · 30d", rev.length ? totals.orders : "…"],
-    ["Open tables now", ov ? totals.openTables : "…"],
+  const KPIS: [string, string | number, string][] = [
+    ["Restaurants", rests.length || "…", "fa-store"],
+    ["Owners", totals.ownerCount, "fa-crown"],
+    ["Open issues", issues.filter((i) => i.status === "open").length, "fa-triangle-exclamation"],
+    ["Orders · 30d", rev.length ? totals.orders : "…", "fa-receipt"],
+    ["Open tables now", ov ? totals.openTables : "…", "fa-chair"],
   ];
 
   return (
@@ -88,8 +88,8 @@ export default function AdminOverview() {
       )}
 
       <div className="adm-stats">
-        {KPIS.map(([k, v]) => (
-          <div key={k} className="adm-stat"><div className="k">{k}</div><div className="v">{v}</div></div>
+        {KPIS.map(([k, v, ic]) => (
+          <div key={k} className="adm-stat"><div className="ic"><i className={`fas ${ic}`} aria-hidden="true" /></div><div className="k">{k}</div><div className="v">{v}</div></div>
         ))}
       </div>
 

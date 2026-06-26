@@ -3357,13 +3357,18 @@ a:focus:not(:focus-visible) { outline: none; }
    to .adm so the guest menu's warm theme is never touched. The shells set
    data-skin on .adm; default (no attr) = light minimal.
    ════════════════════════════════════════════════════════════════════════════ */
-.adm {                              /* LIGHT · Minimal (default) */
-  --bg: #f6f7f9; --card: #ffffff; --border: 1px solid #ececef;
-  --text: #18181b; --muted: #6b7280; --muted2: rgba(24,24,27,0.10);
-  --accent: #4f46e5; --accent-dim: rgba(79,70,229,0.6);
-  --accent-grad: linear-gradient(135deg,#6366f1,#4f46e5); --accent-glow: rgba(79,70,229,0.16);
+.adm {                              /* LIGHT · Bold premium (default) */
+  --bg: #f3f4fb; --card: #ffffff; --border: 1px solid #ebebf3;
+  --text: #15151d; --muted: #6b7280; --muted2: rgba(24,24,27,0.10);
+  --accent: #6d28d9; --accent-dim: rgba(109,40,217,0.6);
+  --accent-grad: linear-gradient(135deg,#8b5cf6 0%,#6366f1 100%); --accent-glow: rgba(109,40,217,0.18);
   --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-warn: #d97706;
-  background: #f6f7f9;
+  --elev: 0 1px 2px rgba(16,24,40,.05), 0 14px 30px -18px rgba(20,16,50,.30);
+  --elev-hi: 0 16px 40px -14px rgba(20,16,50,.34);
+  background:
+    radial-gradient(1000px 540px at 100% -12%, rgba(139,92,246,.08), transparent 60%),
+    radial-gradient(820px 460px at -8% 8%, rgba(99,102,241,.06), transparent 60%),
+    #f3f4fb;
 }
 .adm[data-skin="dark"] {            /* DARK · Neon */
   --bg: #06080f; --card: #0b0f1a; --border: 1px solid #1b2235;
@@ -3371,15 +3376,15 @@ a:focus:not(:focus-visible) { outline: none; }
   --accent: #22d3ee; --accent-dim: rgba(34,211,238,0.6);
   --accent-grad: linear-gradient(135deg,#22d3ee,#0ea5e9); --accent-glow: rgba(34,211,238,0.40);
   --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24;
+  --elev: 0 1px 0 rgba(255,255,255,.04); --elev-hi: 0 0 0 1px var(--accent-glow), 0 22px 48px -24px #000;
   background:
     linear-gradient(#0a0e1a 1px, transparent 1px) 0 0 / 46px 46px,
     linear-gradient(90deg, #0a0e1a 1px, transparent 1px) 0 0 / 46px 46px,
     #06080f;
 }
-/* Flat, minimal cards — a whisper shadow in light, none in dark (Neon is flat). */
-.adm .adm-card, .adm .adm-stat { box-shadow: 0 1px 2px rgba(16,24,40,0.04); }
-.adm[data-skin="dark"] .adm-card, .adm[data-skin="dark"] .adm-stat { box-shadow: none; }
-.adm[data-skin="dark"] .adm-side { background: #0a0e17; }
+/* Layered depth on cards (premium), flatter in dark (Neon). */
+.adm .adm-card, .adm .adm-stat { box-shadow: var(--elev); }
+.adm[data-skin="dark"] .adm-card, .adm[data-skin="dark"] .adm-stat { box-shadow: var(--elev); }
 /* Buttons don't inherit text color by default (UA "buttontext") — force it so the
    card-style buttons (.adm-stat, .adm-rest, .own-* tiles) read correctly in BOTH
    skins. Buttons that set their own color (.adm-btn.primary, .own-range .on, …)
@@ -3402,25 +3407,29 @@ a:focus:not(:focus-visible) { outline: none; }
 }
 /* ── sidebar ─────────────────────────────────────────────────────────────── */
 .adm-side {
-  width: 236px; flex-shrink: 0; display: flex; flex-direction: column;
-  background: var(--card); border-right: var(--border); padding: 16px 12px; gap: 4px;
+  width: 248px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: linear-gradient(180deg, #1b1639 0%, #131026 60%, #0f0c20 100%);
+  border-right: 0; padding: 18px 14px; gap: 3px;
+  box-shadow: inset -1px 0 0 rgba(255,255,255,.05);
 }
-.adm-brand { display: flex; align-items: center; gap: 10px; padding: 6px 10px 16px; }
-.adm-brand .mark { width: 34px; height: 34px; border-radius: 10px; background: var(--accent-grad, var(--accent)); display: grid; place-items: center; color: #fff; font-weight: 800; flex-shrink: 0; }
+.adm-brand { display: flex; align-items: center; gap: 11px; padding: 6px 8px 16px; margin-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.adm-brand .mark { width: 38px; height: 38px; border-radius: 12px; background: var(--accent-grad, var(--accent)); display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 17px; flex-shrink: 0; box-shadow: 0 8px 18px -6px var(--accent); }
 .adm-brand .who { min-width: 0; }
-.adm-brand .who b { display: block; font-size: 14px; font-weight: 800; line-height: 1.1; }
-.adm-brand .who span { font-size: 11px; color: var(--muted); }
-.adm-nav { display: flex; flex-direction: column; gap: 2px; }
+.adm-brand .who b { display: block; font-size: 14.5px; font-weight: 800; line-height: 1.15; color: #fff; }
+.adm-brand .who span { font-size: 11px; color: rgba(255,255,255,.5); }
+.adm-nav { display: flex; flex-direction: column; gap: 3px; }
 .adm-nav a {
-  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px;
-  color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 600;
-  transition: background .15s, color .15s;
+  display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 11px;
+  /* !important beats the global `a { color: inherit !important }` so the nav reads
+     light on the dark sidebar instead of inheriting the dark page text colour. */
+  color: rgba(255,255,255,.74) !important; text-decoration: none; font-size: 14px; font-weight: 600;
+  transition: background .15s, color .15s, transform .1s;
 }
-.adm-nav a i { width: 18px; text-align: center; font-size: 15px; }
-.adm-nav a:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); }
-.adm-nav a.active { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); }
-.adm-nav a.active i { color: var(--accent); }
-.adm-side-foot { margin-top: auto; font-size: 11px; color: var(--muted); padding: 10px; }
+.adm-nav a i { width: 19px; text-align: center; font-size: 15px; opacity: .9; }
+.adm-nav a:hover { background: rgba(255,255,255,.08); color: #fff !important; }
+.adm-nav a.active { background: var(--accent-grad); color: #fff !important; box-shadow: 0 8px 20px -8px var(--accent); }
+.adm-nav a.active i { color: #fff !important; opacity: 1; }
+.adm-side-foot { margin-top: auto; font-size: 11px; color: rgba(255,255,255,.42); padding: 12px 10px 4px; border-top: 1px solid rgba(255,255,255,.08); }
 /* ── body (topbar + scroll area) ─────────────────────────────────────────── */
 .adm-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .adm-top {
@@ -3436,19 +3445,21 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm-page-h { margin: 0 0 4px; font-size: 22px; font-weight: 800; }
 .adm-page-sub { margin: 0 0 20px; font-size: 13px; color: var(--muted); }
 /* ── cards / stats / grids ───────────────────────────────────────────────── */
-.adm-card { background: var(--card); border: var(--border); border-radius: 14px; padding: 18px; }
+.adm-card { background: var(--card); border: var(--border); border-radius: 18px; padding: 20px; }
 .adm-card h2 { margin: 0 0 4px; font-size: 15px; font-weight: 800; }
 .adm-card .hint { margin: 0 0 14px; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
 .adm-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
-.adm-stat { background: var(--card); border: var(--border); border-radius: 14px; padding: 14px 16px; }
-.adm-stat .k { font-size: 12px; color: var(--muted); }
-.adm-stat .v { font-size: 24px; font-weight: 800; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.adm-stat { background: var(--card); border: var(--border); border-radius: 16px; padding: 16px 18px; position: relative; overflow: hidden; transition: transform .14s, box-shadow .14s; }
+.adm-stat:hover { transform: translateY(-2px); box-shadow: var(--elev-hi); }
+.adm-stat .ic { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; font-size: 16px; color: #fff; background: var(--accent-grad); box-shadow: 0 7px 16px -7px var(--accent); margin-bottom: 12px; }
+.adm-stat .k { font-size: 12px; color: var(--muted); font-weight: 600; }
+.adm-stat .v { font-size: 26px; font-weight: 800; margin-top: 3px; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .adm-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 /* ── buttons / toggles ───────────────────────────────────────────────────── */
 .adm-btn { padding: 10px 15px; border-radius: 10px; border: var(--border); background: var(--bg); color: var(--text); font-weight: 700; font-size: 13.5px; cursor: pointer; transition: filter .15s, background .15s; }
 .adm-btn:hover { filter: brightness(1.05); }
 .adm-btn:disabled { opacity: .55; cursor: default; }
-.adm-btn.primary { background: var(--accent); border-color: transparent; color: #2a1c0c; }
+.adm-btn.primary { background: var(--accent-grad); border-color: transparent; color: #fff; box-shadow: 0 8px 18px -8px var(--accent); }
 .adm-btn.danger { background: var(--adm-danger); border-color: transparent; color: #fff; }
 .adm-btn.ok { background: var(--adm-ok); border-color: transparent; color: #fff; }
 .adm-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 13px; border-radius: 11px; border: var(--border); background: var(--bg); color: var(--text); font-size: 13.5px; font-weight: 600; cursor: pointer; text-align: left; transition: background .15s; }
