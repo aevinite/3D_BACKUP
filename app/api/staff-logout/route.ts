@@ -10,5 +10,6 @@ export async function GET(req: NextRequest) {
   const res = NextResponse.redirect(new URL("/menu", req.url), 303);
   res.cookies.set(AUTH_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(FLAG_COOKIE, "", { path: "/", maxAge: 0 });
+  res.cookies.set("aevidine_admin_rid", "", { path: "/", maxAge: 0 }); // drop any "view as restaurant" context
   return res;
 }

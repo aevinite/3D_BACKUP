@@ -60,7 +60,7 @@ export default function OwnerShell({ children }: { children: React.ReactNode }) 
             <button className="adm-icnbtn" onClick={toggleSkin} title={skin === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">
               <i className={`fas ${skin === "dark" ? "fa-sun" : "fa-moon"}`} aria-hidden="true" />
             </button>
-            <a className="adm-icnbtn" href="/api/staff-logout" title="Log out" aria-label="Log out">
+            <a className="adm-icnbtn" href="/api/panel-logout" title="Log out" aria-label="Log out">
               <i className="fas fa-right-from-bracket" aria-hidden="true" />
             </a>
           </div>
