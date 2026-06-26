@@ -31,6 +31,7 @@ async function floorRead() {
     sb.from("waiter_calls").select("*").eq("restaurant_id", RID).order("created_at", { ascending: false }).limit(100),
   ]);
 }
+async function rpcFloor() { await sb.rpc("lfh_floor_bundle", { p_restaurant_id: RID, p_table: null }); } // NEW: 1 round-trip
 async function placeOrder() {
   const { data: items } = await sb.from("menu_items").select("id").eq("restaurant_id", RID).limit(3);
   const p = (items || []).map((i) => ({ id: i.id, qty: 1 }));
@@ -38,10 +39,11 @@ async function placeOrder() {
 }
 
 (async () => {
-  const samples = { ping: [], floorRead: [], placeOrder: [] };
+  const samples = { ping: [], floorRead: [], rpcFloor: [], placeOrder: [] };
   for (let i = 0; i < N; i++) {
     samples.ping.push(await timeIt(ping));
-    samples.floorRead.push(await timeIt(floorRead));
+    samples.floorRead.push(await timeIt(floorRead));     // OLD multi-query path
+    samples.rpcFloor.push(await timeIt(rpcFloor));        // NEW single-RPC path
     samples.placeOrder.push(await timeIt(placeOrder));
   }
   console.log(`\n[${LABEL}] median / p95 latency (ms), n=${N}:`);

@@ -264,30 +264,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     if (p === "sessions") {
-      // TARGETED REFETCH (see /orders): ?table=N returns ONLY that table's open session(s)
-      // + their members/items + that table's pending requests. blocklist stays full (it's
-      // tiny + restaurant-wide). The panel merges this one table's slice into its board.
+      // ONE ROUND-TRIP (mig 100, lfh_floor_bundle): the whole floor — sessions + members +
+      // items + pending requests + blocklist — is assembled SERVER-SIDE in a single DB call,
+      // so the panel doesn't make ~4 sequential trips to the (Sydney, ~250ms RTT) DB. That was
+      // the panel-jam-under-load cause (~950ms → ~300ms). Same JSON shape as before.
+      // ?table=N → that table's slice (targeted refetch); no param → full board.
       const tbl = new URL(req.url).searchParams.get("table");
-      let sq = sb.from("sessions").select("*").eq("restaurant_id", rid).neq("status", "closed");
-      if (tbl) sq = sq.eq("table_number", tbl);
-      const sessions = must(await sq.order("last_activity_at", { ascending: false }));
-
-      const ids = sessions.map((s: any) => s.id);
-      let rq = sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid);
-      if (tbl) rq = rq.eq("table_number", tbl);
-      const [members, items, requests, blocklist] = await Promise.all([
-        ids.length ? sb.from("session_members").select("*").in("session_id", ids).eq("removed", false).order("joined_at") : Promise.resolve({ data: [] }),
-        ids.length ? sb.from("order_items").select("*").in("session_id", ids).order("created_at") : Promise.resolve({ data: [] }),
-        rq.order("created_at"),
-        sb.from("blocklist").select("*").eq("restaurant_id", rid).order("blocked_at", { ascending: false }),
-      ]);
-      return ok({
-        sessions,
-        members: must(members) || [],
-        items: must(items) || [],
-        requests: must(requests) || [],
-        blocklist: must(blocklist) || [],
-      });
+      const { data, error } = await sb.rpc("lfh_floor_bundle", { p_restaurant_id: rid, p_table: tbl || null });
+      if (error) throw new Error(error.message);
+      return ok(data || { sessions: [], members: [], items: [], requests: [], blocklist: [] });
     }
 
     if (p === "stats") {
