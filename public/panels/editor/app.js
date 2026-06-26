@@ -2900,7 +2900,13 @@ function floorHtml() {
   // the FULL-SCREEN table popup (see bindFloor). A SELECTED table's detail is never
   // collapsed — it has its own ✕ that returns to the controls.
   if (state.floorSideCollapsed && state.selectedTable == null) {
-    return `<div class="floor-wrap floor-collapsed">${main}<button class="floor-side-toggle is-collapsed" id="floorSideToggle" title="Show floor controls" aria-label="Show floor controls">‹</button></div>`;
+    // The bulk Open-all / Close-all live in the side panel — which is hidden while
+    // collapsed. Without this, "Open all" vanished when the floor was collapsed (owner
+    // 2026-06-27: "open all tables button not working"). Surface them in a small bar on
+    // the collapsed floor so they're always reachable. Same ids → bindFloor wires them;
+    // the side panel's copies never co-exist (the panel isn't rendered when collapsed).
+    const cb = sessionsOn ? `<div class="floor-collapsed-bar"><button class="btn small" id="floorOpenAll" title="Open all tables">⬆ Open all</button><button class="btn small danger" id="floorCloseAll" title="Close all tables">⬇ Close all</button></div>` : "";
+    return `<div class="floor-wrap floor-collapsed">${main}${cb}<button class="floor-side-toggle is-collapsed" id="floorSideToggle" title="Show floor controls" aria-label="Show floor controls">‹</button></div>`;
   }
   const collapseBtn = state.selectedTable == null
     ? `<button class="floor-side-toggle" id="floorSideToggle" title="Hide this panel" aria-label="Hide this panel">›</button>` : "";
