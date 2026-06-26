@@ -152,6 +152,22 @@ without being reminded.** When you add anything, wire ALL of these that apply:
    habit) — no dead UI for restaurants that don't have the module.
 7. **Great, easy UI/UX.** Every new section gets a clean, beginner-simple interface.
 8. **Register new popups/drawers in the back-button manager** (existing rule, below).
+9. **Egress-safe by default (NON-NEGOTIABLE — egress hit the quota 2026-06-26; 96.6% was
+   whole-board PostgREST reads).** A new feature may NOT reintroduce a whole-board read.
+   See `docs/SAAS-EFFICIENCY-PLAYBOOK.md` for the full pattern. Before merging, confirm ALL:
+   - **Scoped read:** every query has `.eq("restaurant_id", rid)`, an explicit column list
+     (never `.select("*")` on a hot/polled path), and a `.limit()`. No read-all-then-filter-in-JS.
+   - **Targeted breadcrumb:** if a new table drives a live panel, add an `rt_emit` trigger that
+     carries `table_number` when the change is scopable to ONE table (so the manager's
+     `pollTables` refetches just that table); leave `table_number` NULL when it can't be scoped
+     (forces a safe full reload). For column-scoped triggers (`UPDATE OF …`), **every column a
+     panel renders must be in the watch-list** — a rendered column the trigger ignores = a silent
+     missed instant update (this bit us: invoice-void columns weren't watched, mig 096 fixed it).
+   - **Per-table fetch + merge:** extend the panel's `?table=N` endpoint + client merge to
+     drop/re-add that table's rows **dedup'd by row id** (never table_number alone — it changes
+     on a shift; that shipped a dup-tile bug, mig 096 + pollTables dedup fixed it).
+   - **No new poll faster than the 60s backstop;** realtime channels stay keyed per restaurant
+     and drop on hidden/idle. Verify in the Network tab that one change refetches ONLY that table.
 
 ## Stack at a glance
 
