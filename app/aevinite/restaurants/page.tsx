@@ -257,9 +257,12 @@ function EnterCard({ restaurant }: { restaurant: Restaurant }) {
 
   return (
     <div className="adm-card" style={{ marginBottom: 14 }}>
-      <h2>Open this restaurant&apos;s panels</h2>
-      <p className="hint">Enter <b>{restaurant.name}</b> and open its live panels scoped to it — exactly what its own staff see. Each opens in a new tab.</p>
+      <h2>View &amp; manage this restaurant</h2>
+      <p className="hint">See <b>{restaurant.name}</b> exactly as its guests and staff do, and manage its people. Each opens in a new tab.</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <a className="adm-btn primary" href={`/r/${restaurant.slug}/menu`} target="_blank" rel="noopener" title={`Open ${restaurant.name}'s guest menu`}>
+          <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />View guest menu
+        </a>
         {PANELS.map(([path, label, icon]) => (
           <button key={path} className="adm-btn" disabled={busy} onClick={() => openPanel(path)} title={`Open ${label} as ${restaurant.name}`}>
             <i className={`fas ${icon}`} style={{ marginRight: 7 }} aria-hidden="true" />{label}
@@ -267,6 +270,9 @@ function EnterCard({ restaurant }: { restaurant: Restaurant }) {
         ))}
       </div>
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
+        <a className="adm-btn" href="/aevinite/users" title="Create or manage staff, managers & owners">
+          <i className="fas fa-user-plus" style={{ marginRight: 7 }} aria-hidden="true" />Manage staff &amp; create users
+        </a>
         <button className="adm-btn" disabled={busy} onClick={stop}>
           <i className="fas fa-arrow-rotate-left" style={{ marginRight: 7 }} aria-hidden="true" />Stop viewing as this restaurant
         </button>
