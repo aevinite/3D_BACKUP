@@ -1621,6 +1621,71 @@ ${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}
   w.document.close();
 }
 
+// Manager PERFORMANCE REPORT — a designed, downloadable (print / Save-as-PDF)
+// analysis for THIS restaurant over the selected range: revenue, orders, top
+// dishes, category mix, busiest hours. Branded in the restaurant's own accent
+// colour. Reuses the same /stats the Dashboard already shows.
+async function printManagerReport() {
+  let s;
+  try { s = await api("GET", "/stats?range=" + dashRange); }
+  catch (e) { toast("Couldn't build the report: " + e.message, "err"); return; }
+  const r = state.data.restaurant || {};
+  const set = state.data.settings || {};
+  const isDefault = r.slug === "french-house" || r.id === "00000000-0000-0000-0000-000000000001";
+  const name = esc(set.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")));
+  const accent = (r.accent_color && /^#[0-9a-fA-F]{3,6}$/.test(r.accent_color)) ? r.accent_color : "#d4a574";
+  const RL = { today: "Today", "30d": "Last 30 days", year: "Last 12 months" };
+  const rangeLabel = RL[dashRange] || dashRange;
+  const now = new Date();
+  const top = (s.topDishes || []).slice(0, 8);
+  const topMax = Math.max(1, ...top.map(([, n]) => n));
+  const hours = (s.hours || []).map((n, h) => [h, n]).sort((a, b) => b[1] - a[1]).filter(([, n]) => n > 0).slice(0, 3);
+  const cats = Object.entries(s.cats || {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const catMax = Math.max(1, ...cats.map(([, n]) => n));
+  const w = window.open("", "_blank", "width=760,height=920");
+  if (!w) { toast("Allow popups to download the report", "err"); return; }
+  const kpi = (l, v, sub) => `<div class="kpi"><div class="kl">${l}</div><div class="kv">${v}</div>${sub ? `<div class="ks">${sub}</div>` : ""}</div>`;
+  const barRow = (label, n, max) => `<div class="row"><span class="n">${esc(label)}</span><span class="bar"><i style="width:${Math.round((n / max) * 100)}%"></i></span><span class="c">${n}</span></div>`;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${name} — Performance report</title>
+<style>
+  *{box-sizing:border-box} body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1c1c1e;margin:0;padding:38px 44px;font-size:13px}
+  .head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid ${accent};padding-bottom:14px}
+  .rname{font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:700;margin:0}
+  .rtag{color:#666;font-size:12px;margin-top:3px}
+  .doc{text-align:right} .doc .t{font-size:14px;font-weight:800;letter-spacing:.03em} .doc .m{color:#888;font-size:11px;margin-top:3px}
+  .brand{display:inline-flex;align-items:center;gap:5px;color:${accent};font-weight:800;font-size:12px}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:22px 0}
+  .kpi{border:1px solid #ececec;border-radius:12px;padding:13px 15px}
+  .kl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#999} .kv{font-size:23px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums} .ks{font-size:11px;color:#888;margin-top:1px}
+  h3{font-size:12.5px;font-weight:800;margin:22px 0 10px;text-transform:uppercase;letter-spacing:.04em;color:#444}
+  .row{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px}
+  .row .n{width:165px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .row .c{width:42px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+  .bar{flex:1;height:9px;background:#f1f1f1;border-radius:6px;overflow:hidden} .bar i{display:block;height:100%;background:${accent};border-radius:6px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:30px}
+  .foot{margin-top:30px;padding-top:13px;border-top:1px solid #eee;color:#999;font-size:10.5px;text-align:center}
+  @media print{body{padding:0}}
+</style></head><body>
+  <div class="head">
+    <div><h1 class="rname">${name}</h1><div class="rtag">Performance report · ${rangeLabel}</div></div>
+    <div class="doc"><div class="t">PERFORMANCE REPORT</div><div class="m">Generated ${now.toLocaleString("en-IN")}</div><div class="m brand">✦ Aevidine</div></div>
+  </div>
+  <div class="kpis">
+    ${kpi("Revenue", inr(s.revenue), rangeLabel)}${kpi("Orders", (s.orderCount || 0).toLocaleString("en-IN"))}${kpi("Avg order", inr(s.avgOrder))}
+    ${kpi("Paid", s.paid || 0)}${kpi("Unpaid", s.unpaid || 0)}${kpi("Cancelled", s.cancelled || 0)}
+  </div>
+  <div class="two">
+    <div><h3>Top dishes</h3>${top.length ? top.map(([t, n]) => barRow(t, n, topMax)).join("") : '<div style="color:#999">No sales in this range.</div>'}</div>
+    <div>
+      <h3>Category mix</h3>${cats.length ? cats.map(([c, n]) => barRow(c, n, catMax)).join("") : '<div style="color:#999">—</div>'}
+      <h3 style="margin-top:20px">Busiest hours</h3>${hours.length ? hours.map(([h, n]) => `<div class="row"><span class="n">${String(h).padStart(2, "0")}:00 – ${String((h + 1) % 24).padStart(2, "0")}:00</span><span class="c">${n}</span></div>`).join("") : '<div style="color:#999">—</div>'}
+    </div>
+  </div>
+  <div class="foot">Aevidine · Restaurant OS — figures are net of discounts and exclude cancelled orders. Revenue in ₹.</div>
+  <script>setTimeout(()=>print(),350)<\/script>
+</body></html>`);
+  w.document.close();
+}
+
 // Day-close "Z report" — one tap prints the business-day totals (server-computed).
 async function printZReport() {
   let z;
@@ -1750,9 +1815,10 @@ function renderEditor() {
     return;
   }
   if (state.tab === "dash") {
-    ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><div style="display:flex;gap:8px"><button class="btn" id="zReport">📋 Day-close (Z)</button><button class="btn" id="dashRefresh">↻ Refresh</button></div></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
+    ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><div style="display:flex;gap:8px"><button class="btn primary" id="mgrReport">📄 Download report</button><button class="btn" id="zReport">📋 Day-close (Z)</button><button class="btn" id="dashRefresh">↻ Refresh</button></div></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
     document.getElementById("dashRefresh").onclick = () => renderEditor();
     document.getElementById("zReport").onclick = () => printZReport();
+    document.getElementById("mgrReport").onclick = () => printManagerReport();
     loadDashboard();
     return;
   }
