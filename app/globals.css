@@ -3429,6 +3429,33 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm-nav a:hover { background: rgba(255,255,255,.08); color: #fff !important; }
 .adm-nav a.active { background: var(--accent-grad); color: #fff !important; box-shadow: 0 8px 20px -8px var(--accent); }
 .adm-nav a.active i { color: #fff !important; opacity: 1; }
+/* F3: "Arrange" edit-mode + drag-to-reorder for the sidebar nav (ReorderableNav). */
+.adm-nav-edit {
+  display: flex; align-items: center; gap: 12px; padding: 9px 13px; border-radius: 11px; width: 100%;
+  background: transparent; border: 1px dashed rgba(255,255,255,.18); color: rgba(255,255,255,.55) !important;
+  font-size: 12.5px; font-weight: 600; cursor: pointer; margin-bottom: 4px;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.adm-nav-edit i { width: 19px; text-align: center; font-size: 14px; }
+.adm-nav-edit:hover { background: rgba(255,255,255,.08); color: #fff !important; border-color: rgba(255,255,255,.3); }
+.adm-nav.editing .adm-nav-edit { background: var(--accent-grad); color: #fff !important; border-style: solid; border-color: transparent; }
+.adm-nav-drag {
+  display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 11px; margin-bottom: 3px;
+  color: rgba(255,255,255,.74); font-size: 14px; font-weight: 600;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+  cursor: grab; user-select: none;
+}
+.adm-nav-drag i:not(.adm-nav-grip) { width: 19px; text-align: center; font-size: 15px; opacity: .9; }
+.adm-nav-grip { color: rgba(255,255,255,.4); font-size: 13px; }
+.adm-nav-drag.dragging { opacity: .45; cursor: grabbing; }
+.adm-nav-drag:active { cursor: grabbing; }
+/* While arranging, pin the desktop rail open so labels + drag targets are visible. */
+@media (min-width: 901px) {
+  .adm-side:has(.adm-nav.editing) { width: 248px; box-shadow: 10px 0 44px -10px rgba(0,0,0,.55); }
+  .adm-side:has(.adm-nav.editing) .lbl,
+  .adm-side:has(.adm-nav.editing) .who,
+  .adm-side:has(.adm-nav.editing) .navsoon { opacity: 1; }
+}
 .adm-side-foot { margin-top: auto; font-size: 11px; color: rgba(255,255,255,.42); padding: 12px 10px 4px; border-top: 1px solid rgba(255,255,255,.08); }
 /* ── body (topbar + scroll area) ─────────────────────────────────────────── */
 .adm-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }

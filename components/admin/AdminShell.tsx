@@ -6,8 +6,8 @@
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import ReorderableNav, { type NavItem } from "@/components/admin/ReorderableNav";
 
-type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean };
 // Full platform sidebar. Real sections link to live pages; "soon" ones open a
 // branded Coming-soon page so the menu reads complete with no dead ends.
 const NAV: NavItem[] = [
@@ -41,8 +41,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     setSkin((cur) => { const next = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("aevidine_skin", next); } catch {} return next; });
   };
 
-  const isActive = (n: NavItem) => (n.exact ? path === n.href : path.startsWith(n.href));
-
   return (
     <div className="adm" data-skin={skin}>
       <aside className="adm-side">
@@ -50,14 +48,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <span className="mark">✦</span>
           <span className="who"><b>Aevidine</b><span>Admin · all restaurants</span></span>
         </div>
-        <nav className="adm-nav">
-          {NAV.map((n) => (
-            <Link key={n.href} href={n.href} className={isActive(n) ? "active" : ""} title={n.label}>
-              <i className={`fas ${n.icon}`} aria-hidden="true" /> <span className="lbl">{n.label}</span>
-              {n.soon && <span className="navsoon">Soon</span>}
-            </Link>
-          ))}
-        </nav>
+        <ReorderableNav items={NAV} storageKey="lfh_admin_nav_order" pathname={path} />
         <div className="adm-side-foot">Aevidine · Restaurant OS</div>
       </aside>
 
