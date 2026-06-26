@@ -54,7 +54,10 @@ function OpsTable({ rows }: { rows: Action[] | null }) {
       {rows.map((a) => (
         <div key={a.id} className="adm-logrow" style={{ gridTemplateColumns: cols }}>
           <div><span className="adm-chip" style={{ background: "color-mix(in srgb, " + (PANEL_COLOR[a.panel] || "#888") + " 22%, transparent)", color: PANEL_COLOR[a.panel] || "var(--muted)" }}>{a.panel}</span></div>
-          <div>{ACT_LABEL[a.action] || a.action}{a.actor ? <span className="adm-muted"> · {a.actor}</span> : a.detail ? <span className="adm-muted"> · {a.detail}</span> : a.table_number ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}</div>
+          <div style={{ minWidth: 0 }}>
+            {ACT_LABEL[a.action] || a.action}{a.actor ? <span className="adm-muted"> · {a.actor}</span> : a.detail ? <span className="adm-muted"> · {a.detail}</span> : a.table_number ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
+            {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
+          </div>
           <div className="adm-when">{timeAgo(a.created_at)}</div>
         </div>
       ))}

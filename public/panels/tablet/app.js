@@ -1093,11 +1093,36 @@ let lastSig = null;
 // snapshot is what made the panel flash the pre-open "Attend/request" view,
 // drop an order that's actually there, then pop it back a moment later.
 let loadSeq = 0;
+// The restaurant's display name for the header: prefer the short brand label
+// (logo_text), else the English name, else any translation, else a neutral
+// fallback. Renders "" while nothing is loaded yet — never "undefined". NEVER a
+// hardcoded brand (this app is multi-tenant).
+function restDisplayName(r) {
+  if (!r) return "";
+  if (r.logo_text && String(r.logo_text).trim()) return String(r.logo_text).trim();
+  const n = r.name;
+  if (typeof n === "string" && n.trim()) return n.trim();
+  if (n && typeof n === "object") {
+    if (n.en && String(n.en).trim()) return String(n.en).trim();
+    const any = Object.values(n).find((v) => v && String(v).trim());
+    if (any) return String(any).trim();
+  }
+  return "Restaurant";
+}
+function setRestName(r) {
+  const el = document.getElementById("restName");
+  if (el) el.textContent = restDisplayName(r);
+}
+
 async function load() {
   const seq = ++loadSeq;
   const data = await api("GET", "/state");
   if (seq !== loadSeq) return;          // a newer refresh started — this one is stale, drop it
   state.data = data;
+  // Show WHICH restaurant this panel is scoped to (multi-tenant). Set here in load()
+  // — NOT in renderFloor()/renderPanel() — because they're skipped when the board
+  // signature is unchanged, and the name must still appear on the very first load.
+  setRestName(data && data.restaurant);
   const sig = boardSig(state.data);
   if (sig === lastSig) return;
   lastSig = sig;

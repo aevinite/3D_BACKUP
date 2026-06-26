@@ -16,7 +16,7 @@ export type Overview = {
   openTables: number; activeOrders: number; unpaidOrders: number;
   revenueToday: number; ordersToday: number;
 };
-export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string };
+export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string; restaurant_name?: string | null; restaurant_slug?: string | null };
 
 export const STATE_LABEL: Record<Tile["state"], string> = {
   free: "Free", seated: "Seated", new: "New order", preparing: "Preparing", served: "Served", cleared: "Cleared",
@@ -147,7 +147,10 @@ export function ActivityFeed({ rows }: { rows: Action[] }) {
       {rows.map((a) => (
         <div key={a.id} style={{ display: "grid", gridTemplateColumns: "84px 1fr auto", gap: 10, alignItems: "center", fontSize: 13, padding: "8px 0", borderBottom: "var(--border)" }}>
           <span className="adm-chip" style={{ background: "color-mix(in srgb, " + (PANEL_COLOR[a.panel] || "#888") + " 22%, transparent)", color: PANEL_COLOR[a.panel] || "var(--muted)" }}>{a.panel}</span>
-          <span>{ACT_LABEL[a.action] || a.action}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : a.detail ? ` · ${a.detail}` : ""}</span>
+          <span style={{ minWidth: 0 }}>
+            {ACT_LABEL[a.action] || a.action}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : a.detail ? ` · ${a.detail}` : ""}
+            {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
+          </span>
           <span className="adm-when">{timeAgo(a.created_at)}</span>
         </div>
       ))}
