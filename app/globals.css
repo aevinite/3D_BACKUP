@@ -3429,6 +3429,51 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm-nav a:hover { background: rgba(255,255,255,.08); color: #fff !important; }
 .adm-nav a.active { background: var(--accent-grad); color: #fff !important; box-shadow: 0 8px 20px -8px var(--accent); }
 .adm-nav a.active i { color: #fff !important; opacity: 1; }
+/* F3: "Arrange" edit-mode + drag-to-reorder for the sidebar nav (ReorderableNav). */
+.adm-nav-edit {
+  display: flex; align-items: center; gap: 12px; padding: 9px 13px; border-radius: 11px; width: 100%;
+  background: transparent; border: 1px dashed rgba(255,255,255,.18); color: rgba(255,255,255,.55) !important;
+  font-size: 12.5px; font-weight: 600; cursor: pointer; margin-bottom: 4px;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.adm-nav-edit i { width: 19px; text-align: center; font-size: 14px; }
+.adm-nav-edit:hover { background: rgba(255,255,255,.08); color: #fff !important; border-color: rgba(255,255,255,.3); }
+.adm-nav.editing .adm-nav-edit { background: var(--accent-grad); color: #fff !important; border-style: solid; border-color: transparent; }
+.adm-nav-drag {
+  display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 11px; margin-bottom: 3px;
+  color: rgba(255,255,255,.74); font-size: 14px; font-weight: 600;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+  cursor: grab; user-select: none;
+}
+.adm-nav-drag i:not(.adm-nav-grip) { width: 19px; text-align: center; font-size: 15px; opacity: .9; }
+.adm-nav-grip { color: rgba(255,255,255,.4); font-size: 13px; }
+.adm-nav-drag.dragging { opacity: .45; cursor: grabbing; }
+.adm-nav-drag:active { cursor: grabbing; }
+/* While arranging, pin the desktop rail open so labels + drag targets are visible. */
+@media (min-width: 901px) {
+  .adm-side:has(.adm-nav.editing) { width: 248px; box-shadow: 10px 0 44px -10px rgba(0,0,0,.55); }
+  .adm-side:has(.adm-nav.editing) .lbl,
+  .adm-side:has(.adm-nav.editing) .who,
+  .adm-side:has(.adm-nav.editing) .navsoon { opacity: 1; }
+}
+/* ── shadcn-style ANIMATION KIT (plain CSS, framework-agnostic) ───────────────
+   The signature shadcn/Radix enter animations (fade + zoom + slide) as portable
+   classes — work in the React shells AND the vanilla panels with NO Tailwind. Add
+   one class to any popover/menu/modal/toast to make it "pop". Respects reduced motion.
+   (owner 2026-06-26: "the animation functions are crazy — apply anywhere possible".) */
+@keyframes lfh-enter {
+  from { opacity: var(--lfh-eo, 0);
+         transform: translate3d(var(--lfh-ex, 0), var(--lfh-ey, 0), 0) scale(var(--lfh-es, 1)); }
+}
+.anim-pop   { --lfh-es: .96; --lfh-ey: -6px; transform-origin: var(--lfh-origin, top center);
+              animation: lfh-enter var(--lfh-dur, .16s) cubic-bezier(.16,1,.3,1) both; }
+.anim-zoom  { --lfh-es: .94; animation: lfh-enter var(--lfh-dur, .2s) cubic-bezier(.16,1,.3,1) both; }
+.anim-fade  { animation: lfh-enter var(--lfh-dur, .18s) ease both; }
+.anim-up    { --lfh-ey: 14px; animation: lfh-enter var(--lfh-dur, .24s) cubic-bezier(.16,1,.3,1) both; }
+.anim-right { --lfh-ex: -16px; animation: lfh-enter var(--lfh-dur, .24s) cubic-bezier(.16,1,.3,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .anim-pop, .anim-zoom, .anim-fade, .anim-up, .anim-right { animation: none; }
+}
 .adm-side-foot { margin-top: auto; font-size: 11px; color: rgba(255,255,255,.42); padding: 12px 10px 4px; border-top: 1px solid rgba(255,255,255,.08); }
 /* ── body (topbar + scroll area) ─────────────────────────────────────────── */
 .adm-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -3463,6 +3508,35 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm-icnbtn { width: 38px; height: 38px; border-radius: 10px; border: var(--border); background: var(--bg); color: var(--text); cursor: pointer; font-size: 15px; display: grid; place-items: center; transition: background .15s; }
 .adm-icnbtn:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .adm-main { flex: 1; overflow-y: auto; padding: 24px; }
+/* ── Hover-expand icon RAIL (desktop > 900px only) ───────────────────────────
+   The sidebar collapses to a 76px icon rail and expands to 248px on hover, as an
+   OVERLAY so the main content never shifts (Linear/Vercel pattern). Labels stay in
+   the DOM (faded via opacity, not display:none) so screen readers still read them,
+   and each link has a title= tooltip. Icons keep the SAME x in both states (no jump).
+   Pointer-only by design; on ≤900px the sidebar is a full-width top bar (rules below).
+   (owner 2026-06-26: "everything small, hover to make it big".) */
+@media (min-width: 901px) {
+  .adm { position: relative; }
+  .adm-side {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 76px; z-index: 60; overflow: hidden;
+    transition: width .2s ease, box-shadow .2s ease;
+  }
+  .adm-side:hover, .adm-side:focus-within {
+    width: 248px; box-shadow: 10px 0 44px -10px rgba(0,0,0,.55);
+  }
+  .adm-body { margin-left: 76px; }            /* reserve the rail; body never reflows on hover */
+  .adm-side .lbl, .adm-side .who, .adm-side .navsoon {
+    opacity: 0; transition: opacity .18s ease; white-space: nowrap;
+  }
+  .adm-side:hover .lbl, .adm-side:hover .who, .adm-side:hover .navsoon { opacity: 1; }
+  .adm-side-foot { opacity: 0; transition: opacity .18s ease; }
+  .adm-side:hover .adm-side-foot { opacity: 1; }
+}
+@media (min-width: 901px) and (prefers-reduced-motion: reduce) {
+  .adm-side { transition: none; }
+  .adm-side .lbl, .adm-side .who, .adm-side .navsoon, .adm-side-foot { transition: none; }
+}
 .adm-page-h { margin: 0 0 4px; font-size: 22px; font-weight: 800; }
 .adm-page-sub { margin: 0 0 20px; font-size: 13px; color: var(--muted); }
 /* ── cards / stats / grids ───────────────────────────────────────────────── */

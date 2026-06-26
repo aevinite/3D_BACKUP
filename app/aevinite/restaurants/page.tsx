@@ -143,9 +143,13 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
   return (
     <>
-      <button className="adm-btn" onClick={onBack} style={{ marginBottom: 14 }}>
-        <i className="fas fa-arrow-left" style={{ marginRight: 7 }} aria-hidden="true" />All restaurants
-      </button>
+      {/* Breadcrumb: Restaurants › <name> — matches the owner-view breadcrumb (.adm-crumbs)
+          so stepping back up is consistent everywhere inside a restaurant (owner request). */}
+      <nav className="adm-crumbs" aria-label="Breadcrumb" style={{ marginBottom: 14 }}>
+        <a href="/aevinite/restaurants" onClick={(e) => { e.preventDefault(); onBack(); }}>Restaurants</a>
+        <i className="fas fa-chevron-right sep" aria-hidden="true" />
+        <span className="cur">{restaurant.name}</span>
+      </nav>
       <h1 className="adm-page-h">{restaurant.name}</h1>
       <p className="adm-page-sub">
         <span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{restaurant.slug}/menu</span>

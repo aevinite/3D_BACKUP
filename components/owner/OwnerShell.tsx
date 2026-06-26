@@ -7,6 +7,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import ReorderableNav from "@/components/admin/ReorderableNav";
 
 type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean };
 // Full POS-grade sidebar. Real sections link to live pages; "soon" ones open a
@@ -49,7 +50,6 @@ export default function OwnerShell({ children, adminViewing, restaurantName }: {
     setSkin((cur) => { const next = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("aevidine_skin", next); } catch {} return next; });
   };
 
-  const isActive = (n: NavItem) => (n.exact ? path === n.href : path.startsWith(n.href));
 
   return (
     <div className="adm" data-skin={skin}>
@@ -58,17 +58,10 @@ export default function OwnerShell({ children, adminViewing, restaurantName }: {
           <span className="mark">👑</span>
           <span className="who"><b>Owner</b><span>Aevidine</span></span>
         </div>
-        <nav className="adm-nav">
-          {NAV.map((n) => (
-            <Link key={n.href} href={n.href} className={isActive(n) ? "active" : ""}>
-              <i className={`fas ${n.icon}`} aria-hidden="true" /> {n.label}
-              {n.soon && <span className="navsoon">Soon</span>}
-            </Link>
-          ))}
-          {/* SECURITY: the owner panel deliberately has NO link to the admin control
-              room (/aevinite). Admin is a higher privilege than owner and is gated by
-              the admin password (AUTH_COOKIE) — owners must never see or reach it. */}
-        </nav>
+        {/* SECURITY: the owner panel deliberately has NO link to the admin control
+            room (/aevinite). Admin is a higher privilege than owner and is gated by
+            the admin password (AUTH_COOKIE) — owners must never see or reach it. */}
+        <ReorderableNav items={NAV} storageKey="lfh_owner_nav_order" pathname={path} />
         <div className="adm-side-foot">Aevidine · Restaurant OS</div>
       </aside>
 

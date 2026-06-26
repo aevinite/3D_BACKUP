@@ -1,9 +1,10 @@
 // public/panels/theme.js — light/dark theme for the staff panels (manager /
 // kitchen / tablet), the panel-side echo of the guest menu's theme toggle.
 //
-// The panels have always been dark, so DARK stays the DEFAULT (zero regression
-// for existing staff); light is opt-in and remembered per browser in
-// localStorage("lfh_panel_theme"). The choice is expressed as data-theme on the
+// DEFAULT is LIGHT for every panel (owner 2026-06-26: "default mode should be the
+// light one for every"). Staff who explicitly chose dark keep it via the saved
+// localStorage("lfh_panel_theme") pref; only a brand-new browser with no saved
+// choice now starts light. The choice is expressed as data-theme on the
 // <html> element; each panel's style.css defines its light palette under
 //   html[data-theme="light"] { … }
 // so the hundreds of var(--token) references re-colour automatically.
@@ -34,11 +35,12 @@
     paintButton(theme);
   }
 
-  // Set the theme synchronously, before CSS paints, to avoid a flash.
-  apply(saved() === "light" ? "light" : "dark");
+  // Set the theme synchronously, before CSS paints, to avoid a flash. Default LIGHT;
+  // only an explicit saved "dark" stays dark.
+  apply(saved() === "dark" ? "dark" : "light");
 
   window.LFH_THEME = {
-    get: function () { return document.documentElement.getAttribute("data-theme") || "dark"; },
+    get: function () { return document.documentElement.getAttribute("data-theme") || "light"; },
     set: apply,
     toggle: function () { apply(window.LFH_THEME.get() === "dark" ? "light" : "dark"); },
   };
