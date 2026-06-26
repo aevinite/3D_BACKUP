@@ -13,11 +13,20 @@ import type { NextRequest } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
+import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 
 export type OwnerScope = { all: true } | { all: false; ids: string[]; ownerId: string };
 
 export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
-  if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { all: true };
+  if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) {
+    // Admin who has DELIBERATELY entered one restaurant (act-as cookie) is scoped to
+    // JUST that restaurant — so the owner cockpit shows exactly what THAT owner sees.
+    // This reuses the same {all:false} path a real owner takes (one id), so no owner
+    // route changes. Admin with NO act-as keeps the full all-restaurants view.
+    const acting = req.cookies.get(ADMIN_ACT_COOKIE)?.value;
+    if (acting) return { all: false, ids: [acting], ownerId: "admin" };
+    return { all: true };
+  }
   const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   if (u && u.role === "owner") {
     const { data } = await sb.from("restaurants").select("id").eq("owner_user_id", u.id);

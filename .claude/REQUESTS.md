@@ -10,12 +10,18 @@ don't stop until every single bit is done."
   accent (via AppShell); non-#1 shows ITS name + accent glow/ring + NO French House logo.
   Verified: Pizza Palace intro = "Pizza Palace" in red, no LFH logo. #1 unchanged (isDefault
   branch = original). [shipping]
-- [ ] **Kill the floating "panel shifter" (AdminSwitcher ⠿ Panels) in the admin panel** — it's
-  confusing and not how to reach restaurants.
-- [ ] **Admin must reach ANY restaurant** — its guest menu, its owner panel, its manager/
-  kitchen/tablet panels — with NO password and INVISIBLY (the owner gets no hint they're being
-  viewed). Admin = top power. Right now only French House is reachable; e.g. there's no way to
-  open Pizza Palace's menu. Make it obvious + working from `/aevinite/restaurants`.
+- [x] **Kill the floating "panel shifter" (AdminSwitcher ⠿ Panels)** — removed from `app/layout.tsx`
+  (import + render). Admins reach restaurants from `/aevinite/restaurants` now. tsc green. [verified]
+- [x] **Admin reaches ANY restaurant — guest menu + owner panel + manager/kitchen/tablet,
+  invisibly.** ROOT CAUSE of "I can only access Little French House": `/api/admin/act-as` set the
+  Set-Cookie on one response then `return`ed a *fresh* `NextResponse.json()`, silently dropping it —
+  so every panel stayed on restaurant #1. FIXED (return the cookie-carrying response). PLUS added a
+  **"Owner dashboard"** button + let `/owner` admit the admin ONLY when act-as is set (bare admin
+  login still bounced — keeps admin/owner separate) + scoped `ownerScope` to that one restaurant.
+  Verified in Chrome at desktop + 390px: Pizza Palace guest menu (its brand, no LFH leak), manager
+  `/all` scoped to Pizza Palace, owner dashboard shows ONLY Pizza Palace with the
+  `Restaurants › Pizza Palace › Owner dashboard` breadcrumb + "ADMIN VIEW" + "Exit view". Read-only,
+  so invisible to the owner. [verified]
 - [~] **"Accept order"** — ROOT CAUSE FOUND (systematic): the server endpoint
   `POST /api/editor/orders/<id>/accept` WORKS (verified 200, status received→preparing, even via
   admin act-as). The bug is CLIENT-SIDE: `renderTablePanel()` (the table-detail view) renders NO
@@ -33,8 +39,10 @@ don't stop until every single bit is done."
 - [ ] **Nav as a hover-expand icon rail** — icons only by default; hover expands to show the
   label. Less screen space.
 - [ ] **Customizable nav** — an "edit" mode (top-right) to drag-reorder which icons show first.
-- [ ] **Breadcrumb inside a restaurant** — `Restaurants › Little French House › …` so you can
-  step back up.
+- [~] **Breadcrumb inside a restaurant** — `Restaurants › <name> › …` so you can step back up.
+  DONE for the admin's owner-dashboard view (amber breadcrumb bar in OwnerShell). STILL TODO: the
+  admin restaurant-detail drill-in (`/aevinite/restaurants` → a restaurant) still uses a plain
+  "All restaurants" back button — upgrade it to the same breadcrumb for consistency.
 - [ ] Add small, great UX touches proactively (don't ask).
 
 ## ⚙️ PROCESS / MEMORY (durable — into CLAUDE.md)

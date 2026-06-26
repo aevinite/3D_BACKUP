@@ -263,6 +263,9 @@ function EnterCard({ restaurant }: { restaurant: Restaurant }) {
         <a className="adm-btn primary" href={`/r/${restaurant.slug}/menu`} target="_blank" rel="noopener" title={`Open ${restaurant.name}'s guest menu`}>
           <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />View guest menu
         </a>
+        <button className="adm-btn primary" disabled={busy} onClick={() => openPanel("/owner")} title={`Open ${restaurant.name}'s owner dashboard`}>
+          <i className="fas fa-crown" style={{ marginRight: 7 }} aria-hidden="true" />Owner dashboard
+        </button>
         {PANELS.map(([path, label, icon]) => (
           <button key={path} className="adm-btn" disabled={busy} onClick={() => openPanel(path)} title={`Open ${label} as ${restaurant.name}`}>
             <i className={`fas ${icon}`} style={{ marginRight: 7 }} aria-hidden="true" />{label}

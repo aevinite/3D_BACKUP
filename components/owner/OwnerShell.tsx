@@ -4,7 +4,7 @@
 // and feel identical: a left sidebar, a topbar with a light/dark toggle + logout,
 // and a scrollable content area. Token-driven, so it follows the warm light/dark
 // themes automatically (the root layout's boot script sets data-theme on first paint).
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -27,9 +27,17 @@ const NAV: NavItem[] = [
   { href: "/owner/settings", label: "Settings", icon: "fa-gear", soon: true },
 ];
 
-export default function OwnerShell({ children }: { children: React.ReactNode }) {
+export default function OwnerShell({ children, adminViewing, restaurantName }: { children: React.ReactNode; adminViewing?: boolean; restaurantName?: string }) {
   const path = usePathname();
+  const router = useRouter();
   const [skin, setSkin] = useState<"light" | "dark">("light");
+
+  // Admin "exit view": clear the act-as cookie, then go back to the admin restaurants
+  // hub. Only ever shown to the admin (the owner never reaches the adminViewing branch).
+  const exitAdminView = async () => {
+    try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
+    router.push("/aevinite/restaurants");
+  };
 
   // Aevidine panel skin: light = Apple frosted glass (default), dark = Neon. Scoped
   // to this panel via data-skin (shared with the admin shell) — guest menu untouched.
@@ -65,17 +73,40 @@ export default function OwnerShell({ children }: { children: React.ReactNode }) 
       </aside>
 
       <div className="adm-body">
+        {/* ADMIN-ONLY breadcrumb/exit bar (never rendered for the real owner). Lets
+            the admin see WHERE they are and step back: Restaurants › <name> › Owner. */}
+        {adminViewing && (
+          <div className="adm-adminbar" role="status">
+            <nav className="adm-crumbs" aria-label="Breadcrumb">
+              <Link href="/aevinite/restaurants">Restaurants</Link>
+              <i className="fas fa-chevron-right sep" aria-hidden="true" />
+              <span className="cur">{restaurantName}</span>
+              <i className="fas fa-chevron-right sep" aria-hidden="true" />
+              <span className="cur">Owner dashboard</span>
+            </nav>
+            <span className="adm-adminbar-tag"><i className="fas fa-user-shield" aria-hidden="true" /> Admin view</span>
+            <button className="adm-btn" onClick={exitAdminView} title="Stop viewing this owner dashboard">
+              <i className="fas fa-arrow-rotate-left" style={{ marginRight: 6 }} aria-hidden="true" /> Exit view
+            </button>
+          </div>
+        )}
         <header className="adm-top">
           <button className="adm-rest" type="button" aria-label="Owner scope">
-            <span className="dot" /> Owner overview
+            <span className="dot" /> {adminViewing ? restaurantName : "Owner overview"}
           </button>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             <button className="adm-icnbtn" onClick={toggleSkin} title={skin === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">
               <i className={`fas ${skin === "dark" ? "fa-sun" : "fa-moon"}`} aria-hidden="true" />
             </button>
-            <a className="adm-icnbtn" href="/api/panel-logout" title="Log out" aria-label="Log out">
-              <i className="fas fa-right-from-bracket" aria-hidden="true" />
-            </a>
+            {adminViewing ? (
+              <button className="adm-icnbtn" onClick={exitAdminView} title="Exit admin view" aria-label="Exit admin view">
+                <i className="fas fa-arrow-rotate-left" aria-hidden="true" />
+              </button>
+            ) : (
+              <a className="adm-icnbtn" href="/api/panel-logout" title="Log out" aria-label="Log out">
+                <i className="fas fa-right-from-bracket" aria-hidden="true" />
+              </a>
+            )}
           </div>
         </header>
 
