@@ -171,16 +171,37 @@ export default function MenuView({ restaurantId, restaurantSlug, logoText, heroT
   // Re-fetch dishes + categories and store them. Used on first mount AND by the
   // live updater below. The render keys dishes by id, so re-setting this state
   // doesn't jump the scroll — a sold-out dish just flips its badge in place.
+  //
+  // EGRESS WIN (the #1 scaling-cost lever): instead of every guest's browser
+  // reading the SHARED menu straight from Supabase, we fetch ONE server endpoint
+  // (/api/r/<slug>/menu-data) whose data is cached server-side per restaurant for
+  // 120s (and busted instantly when the owner edits — see lib/menuDataServer.ts +
+  // the editor route). So repeat guest views read from the cache, not the DB. If
+  // that endpoint ever fails (or there's no slug), we fall back to the original
+  // direct reads so the menu can never go blank.
   const refreshMenu = () => {
     const seq = ++menuReqRef.current; // tag this refresh; only the latest may apply
-    getMenuItems(restaurantId)
-      .then((items) => { if (seq === menuReqRef.current) setMenuData(items); }) // drop stale replies
-      .catch((err) => console.error("Error loading menu data:", err));
-    // The menu is ALWAYS the full "all" view now — tapping a category just scrolls
-    // to its section, it never narrows. So there's no per-category state to restore.
-    getCategories(restaurantId)
-      .then((cats) => { if (seq === menuReqRef.current) setDbCategories(cats); }) // drop stale replies
-      .catch((err) => console.error("Error loading categories:", err));
+    const applyDirect = () => {
+      getMenuItems(restaurantId)
+        .then((items) => { if (seq === menuReqRef.current) setMenuData(items); }) // drop stale replies
+        .catch((err) => console.error("Error loading menu data:", err));
+      // The menu is ALWAYS the full "all" view now — tapping a category just scrolls
+      // to its section, it never narrows. So there's no per-category state to restore.
+      getCategories(restaurantId)
+        .then((cats) => { if (seq === menuReqRef.current) setDbCategories(cats); }) // drop stale replies
+        .catch((err) => console.error("Error loading categories:", err));
+    };
+    if (!restaurantSlug) { applyDirect(); return; } // legacy callers w/o a slug
+    // Cache-busting query so the BROWSER never holds a stale copy — the dedup we
+    // want is the SERVER data cache inside the endpoint, not an HTTP cache.
+    fetch(`/api/r/${restaurantSlug}/menu-data`, { cache: "no-store" })
+      .then((res) => { if (!res.ok) throw new Error(`menu-data ${res.status}`); return res.json(); })
+      .then((bundle: { items?: FoodItem[]; categories?: Category[] }) => {
+        if (seq !== menuReqRef.current) return; // drop stale replies
+        if (Array.isArray(bundle.items)) setMenuData(bundle.items);
+        if (Array.isArray(bundle.categories)) setDbCategories(bundle.categories);
+      })
+      .catch((err) => { console.error("Error loading menu data (cached endpoint):", err); applyDirect(); });
   };
 
   // Live: when the owner edits the menu (dish/price/sold-out/category) or flips a

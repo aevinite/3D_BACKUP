@@ -8,7 +8,9 @@
 // + path), so e.g. /api/editor/all, /api/editor/orders/:id, etc. land here.
 
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { menuTag } from "@/lib/menuDataServer";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
@@ -61,6 +63,18 @@ const must = (r: any) => {
 
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
+
+// Owner edited the SHARED menu (a dish/category/filter/guest-safe setting) → bust
+// THIS restaurant's cached menu bundle so guests get the change within seconds via
+// their realtime 'menu' refetch (which would otherwise hit a stale 120s cache),
+// not after the 120s revalidate window. Scoped to one restaurant's tag — never
+// invalidates anyone else's menu. Best-effort: a bust failure must never fail the
+// save (the 120s revalidate is the backstop).
+const bustMenuCache = (rid: string) => {
+  // 'max' = stale-while-revalidate: purge the tag and let the next read refresh
+  // it (the documented profile for route-handler / webhook busting in Next 16).
+  try { revalidateTag(menuTag(rid), "max"); } catch {}
+};
 
 // Money-integrity lock: while a session holds a LIVE (non-voided) invoice, its bill
 // is frozen — reject any money-changing edit so the printed invoice total can't drift.
@@ -853,6 +867,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         : (a === "categories" || a === "filters") ? "restaurant_id,slug"
         : t.key;
       const data = must(await sb.from(t.name).upsert(body, { onConflict }).select());
+      // Any of items/categories/filters/settings changes the SHARED guest menu →
+      // bust this restaurant's cached bundle so guests see it within seconds.
+      bustMenuCache(rid);
       return ok(data[0]);
     }
 
@@ -953,6 +970,8 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
       // slug is unique only PER restaurant now (categories/filters), so a delete by
       // key MUST also pin the restaurant or it would wipe that slug everywhere.
       must(await sb.from(t.name).delete().eq(t.key, id).eq("restaurant_id", rid));
+      // Deleting a dish/category/filter changes the SHARED guest menu → bust cache.
+      bustMenuCache(rid);
       return ok({ ok: true });
     }
 
