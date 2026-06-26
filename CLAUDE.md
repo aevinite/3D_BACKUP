@@ -24,6 +24,27 @@ memory for tone and preferences.
   updates INSTANTLY (no flicker, no "old value for 1s then refresh") in owner + admin +
   manager + kitchen + tablet. Test at desktop AND ~390px mobile. Don't claim done from
   source alone.
+- **Use shadcn/ui for EVERY new feature** (owner 2026-06-26: "this thing is great"). shadcn
+  not yet initialised (no `components.json`) → `npx shadcn@latest init` (Tailwind 4) first.
+- **Verify in the SAME place the owner looks, with cache busting.** The owner tests on
+  `localhost:4000`. `public/panels/editor/app.js` loads with NO version query → the browser
+  caches it and a `/manager` reload keeps STALE app.js in the iframe. Bust it (query string /
+  ignoreCache) before claiming an app.js change works. **ONE codebase only: main.** The
+  `worktree-feat+saas-multitenant` worktree was deleted 2026-06-26 — never reintroduce a
+  worktree dev server on 4000 (that served stale code and looked like "nothing got fixed").
+
+## READ-ONLY reference: the working single-restaurant app (owner, 2026-06-26 — HARD RULE)
+
+`/Users/aevinite/Documents/LIVE_PROJECTS/3D_Menu_Av` is the **live, working single-restaurant**
+version where EVERYTHING (accepting orders → bills → every panel) works perfectly for one
+restaurant. It is the **gold standard** to copy behaviour from when fixing the multi-tenant app.
+
+- **NEVER modify ANYTHING in that folder** — no file edits, no writes, no DB changes to its
+  Supabase project. **READ ONLY.** You may read its code AND read its database to learn the
+  working approach, then re-implement the same behaviour PER restaurant here in `backup_Menu`.
+- Approach the owner wants: study the reference's working flow → plan → implement ONE thing here
+  → verify it live → implement the next → **do not stop after a check; keep going until every
+  feature works for EVERY restaurant** (accept order, bills, real-time, all panels).
 
 ## What "blur" means (owner's word — 2026-06-13)
 

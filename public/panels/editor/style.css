@@ -772,6 +772,7 @@ body {
 .ldot-free { background: #6b6253; } .ldot-seated { background: #2dd4bf; } .ldot-new { background: #f59e0b; }
 .ldot-prep { background: #4f9dff; } .ldot-done { background: #4ade80; } /* (bill dot removed — payment lives in the outline) */
 .ldot-req { background: #e7b75a; }
+.ldot-ready { background: #ec4899; } /* cooked, waiting for the waiter — pink, matches the .ft-ready tile */
 .ldot-call { background: transparent; width: auto; }
 
 /* floor tiles — outline AND fill tint vary per state via --c */

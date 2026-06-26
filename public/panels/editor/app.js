@@ -2705,7 +2705,7 @@ function floorHtml() {
 
   // legend — every state + its colour. ("Bill due" was removed: payment is
   // already shown by the red/green outline, so a fill colour for it was noise.)
-  const LEG = [["free", "Free"], ["req", "Wants in"], ["seated", "Seated"], ["new", "New order"], ["prep", "Preparing"]];
+  const LEG = [["free", "Free"], ["req", "Wants in"], ["seated", "Seated"], ["new", "New order"], ["prep", "Preparing"], ["ready", "Ready to serve"]];
   const legend = `<div class="floor-legend"><span class="lgcap">inside:</span>${LEG.map(([k, v]) => `<span class="lgi"><i class="ldot ldot-${k}"></i>${v}</span>`).join("")}<span class="lgi"><i class="ldot ldot-call">🔔</i>called</span><span class="lgcap">outline:</span><span class="lgi"><i class="lring lring-red"></i>unpaid</span><span class="lgi"><i class="lring lring-green"></i>paid</span></div>`;
 
   // FIRST PAINT before the live board has arrived: show a shimmer skeleton sized
