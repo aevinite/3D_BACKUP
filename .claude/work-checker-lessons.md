@@ -31,3 +31,29 @@
   twice "why are you in worktree, work should be in backup_Menu" — they were looking at stale
   code. Fix: explain the worktree↔main relationship plainly AND, after merges, fast-forward their
   main checkout (`git -C <main> pull --ff-only origin main`) so what they open matches what's live.
+
+- **A slow endpoint? MEASURE each layer before guessing a fix.** The owner dashboard took ~135s;
+  I guessed "missing index" (added it — no change), then "DB connection saturation" — both wrong.
+  Timing each layer showed: the RPCs are fast direct (~300ms over 1142 rows), and the endpoint
+  was 1.2s with load OFF — so it was load-induced request queuing on the single-process DEV server
+  (many open polling/realtime tabs + a write storm), NOT the DB/query. Lesson: time direct-RPC vs
+  through-the-app, and with-load vs without-load, to localize the bottleneck before shipping a fix;
+  don't pattern-match to "index/connection." (The real fix was idle-disconnect for stale tabs.)
+
+- **A CLI auto-init failing ≠ the tool "doesn't work" — find the manual path before recommending defer.**
+  I concluded shadcn was unusable because `npx shadcn init` bailed on the Tailwind-4/PostCSS preflight,
+  and recommended deferring. The owner pushed back ("it will work, find where to edit") — and was right:
+  shadcn works here with MANUAL setup (deps + cn + components.json + `tw-animate-css` import), and its
+  animation utilities are the valuable part. Lesson: when an owner clearly wants a library, the auto-installer
+  failing is a signal to wire it by hand, not to recommend skipping it. Offer the manual path proactively.
+
+- **"Claimed fixed but still broken" was usually a STALE DEV SERVER + a missing dep — verify the
+  server's source.** The owner raged that the panel shifter, multi-restaurant access, and
+  per-tenant branding were all still broken. On main they were ALL already fixed; the dev server
+  on :4000 was running from the WORKTREE (`lsof -p <pid> -d cwd`), serving stale code. WORSE: a
+  branch that merged into main added `recharts` to package.json but main's node_modules was never
+  reinstalled → `/aevinite` died with a build error, so the whole admin panel looked broken.
+  Lessons: (1) before trusting/denying a "still broken" report, confirm WHICH checkout the dev
+  server runs from (`lsof`), and verify on a server you KNOW is main; (2) after merging a branch
+  that touched package.json, run `npm install` in the consolidated checkout; (3) don't blanket-
+  blame "stale cache" — verify each reported bug independently (some are real, some aren't).
