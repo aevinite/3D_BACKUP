@@ -60,8 +60,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
               <span className="dot" /> {RESTAURANT} <i className="fas fa-chevron-down" style={{ fontSize: 11, opacity: 0.6 }} aria-hidden="true" />
             </button>
             {restMenu && (
-              <div role="menu" onMouseLeave={() => setRestMenu(false)}
-                style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, minWidth: 240, background: "var(--card)", border: "var(--border)", borderRadius: 12, padding: 8, boxShadow: "0 16px 40px rgba(0,0,0,.28)" }}>
+              <div role="menu" className="anim-pop" onMouseLeave={() => setRestMenu(false)}
+                style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, minWidth: 240, background: "var(--card)", border: "var(--border)", borderRadius: 12, padding: 8, boxShadow: "0 16px 40px rgba(0,0,0,.28)", "--lfh-origin": "top left" } as React.CSSProperties}>
                 <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", borderRadius: 9, background: "color-mix(in srgb, var(--accent) 16%, transparent)", fontWeight: 700, fontSize: 13.5 }}>
                   <i className="fas fa-check" style={{ color: "var(--accent)" }} aria-hidden="true" /> {RESTAURANT}
                 </div>

@@ -3456,6 +3456,24 @@ a:focus:not(:focus-visible) { outline: none; }
   .adm-side:has(.adm-nav.editing) .who,
   .adm-side:has(.adm-nav.editing) .navsoon { opacity: 1; }
 }
+/* ── shadcn-style ANIMATION KIT (plain CSS, framework-agnostic) ───────────────
+   The signature shadcn/Radix enter animations (fade + zoom + slide) as portable
+   classes — work in the React shells AND the vanilla panels with NO Tailwind. Add
+   one class to any popover/menu/modal/toast to make it "pop". Respects reduced motion.
+   (owner 2026-06-26: "the animation functions are crazy — apply anywhere possible".) */
+@keyframes lfh-enter {
+  from { opacity: var(--lfh-eo, 0);
+         transform: translate3d(var(--lfh-ex, 0), var(--lfh-ey, 0), 0) scale(var(--lfh-es, 1)); }
+}
+.anim-pop   { --lfh-es: .96; --lfh-ey: -6px; transform-origin: var(--lfh-origin, top center);
+              animation: lfh-enter var(--lfh-dur, .16s) cubic-bezier(.16,1,.3,1) both; }
+.anim-zoom  { --lfh-es: .94; animation: lfh-enter var(--lfh-dur, .2s) cubic-bezier(.16,1,.3,1) both; }
+.anim-fade  { animation: lfh-enter var(--lfh-dur, .18s) ease both; }
+.anim-up    { --lfh-ey: 14px; animation: lfh-enter var(--lfh-dur, .24s) cubic-bezier(.16,1,.3,1) both; }
+.anim-right { --lfh-ex: -16px; animation: lfh-enter var(--lfh-dur, .24s) cubic-bezier(.16,1,.3,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .anim-pop, .anim-zoom, .anim-fade, .anim-up, .anim-right { animation: none; }
+}
 .adm-side-foot { margin-top: auto; font-size: 11px; color: rgba(255,255,255,.42); padding: 12px 10px 4px; border-top: 1px solid rgba(255,255,255,.08); }
 /* ── body (topbar + scroll area) ─────────────────────────────────────────── */
 .adm-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }

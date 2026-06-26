@@ -626,6 +626,13 @@ body {
 /* table detail modal */
 .tbl-modal-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); backdrop-filter: blur(5px); }
 .tbl-modal { width: min(460px, calc(100vw - 36px)); max-height: 84vh; overflow-y: auto; background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 30px 70px rgba(0,0,0,0.6); }
+/* shadcn-style OPEN animation for the F1 full-screen table popup: overlay fades in,
+   the card zooms up from 94% (the signature dialog feel). Respects reduced motion. */
+.tbl-modal-overlay { animation: edOverlayIn .18s ease both; }
+.tbl-modal { animation: edModalIn .2s cubic-bezier(.16,1,.3,1) both; }
+@keyframes edOverlayIn { from { opacity: 0; } }
+@keyframes edModalIn { from { opacity: 0; transform: scale(.94) translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .tbl-modal-overlay, .tbl-modal { animation: none; } }
 /* z-index keeps this sticky header ABOVE scrolled body content — without it the
    header has no stacking order, so dish KOT chips (e.g. "#21") painted through it
    as the list scrolled up. */
