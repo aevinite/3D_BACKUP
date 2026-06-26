@@ -20,6 +20,11 @@
   without ever looking. They were right that I hadn't. Actually view the reference screenshots,
   match the concrete patterns (e.g. sliding switches, not ON/OFF pills), then show it.
 
+- **Seed demo data with the app's VALID status enum.** My `seed-today.mjs` set dine-in orders to
+  `status:"new"`, but valid dine-in statuses are `received/preparing/served/cancelled` ("new" is
+  aggregator-only, per `ORDER_STATUSES` in the editor route). Invalid statuses silently break the
+  accept/render flow. Always check the real enum before inserting fixture data.
+
 - **In a git worktree, keep the user's MAIN checkout synced or they think work vanished.** This
   session ran in `.claude/worktrees/feat+saas-multitenant`; the owner's `backup_Menu` folder sat
   on the session-start commit (6a3c499) the whole time because nothing pulled it. They asked

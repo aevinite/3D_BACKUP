@@ -16,9 +16,12 @@ don't stop until every single bit is done."
   kitchen/tablet panels — with NO password and INVISIBLY (the owner gets no hint they're being
   viewed). Admin = top power. Right now only French House is reachable; e.g. there's no way to
   open Pizza Palace's menu. Make it obvious + working from `/aevinite/restaurants`.
-- [ ] **"Accept order" is broken** from admin → French House manager panel (clicking does
-  nothing / console errors). Fix it. Also: the manager table-DETAIL may have no Accept button —
-  add it so an order can be accepted from the table view too.
+- [~] **"Accept order"** — ROOT CAUSE FOUND (systematic): the server endpoint
+  `POST /api/editor/orders/<id>/accept` WORKS (verified 200, status received→preparing, even via
+  admin act-as). The bug is CLIENT-SIDE: `renderTablePanel()` (the table-detail view) renders NO
+  accept control — so clicking a table gives you no way to accept. `acceptOrder(id)` exists +
+  works. FIX = surface Accept (+ serve/pay) in the table detail — folds into the table-detail
+  REBUILD below (collapsible sidebar / full-screen popup with all actions). NEXT.
 - [ ] **Real-time across ALL panels:** an order change made anywhere must update owner + admin +
   manager + tablet INSTANTLY, with no flicker (no "show old value 1s → refresh to new"). Verify
   on every restaurant.
