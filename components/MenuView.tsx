@@ -509,7 +509,7 @@ export default function MenuView({ restaurantId, restaurantSlug, logoText, heroT
   // Curly braces { } drop a value or a bit of logic into the markup.
   return (
     // AppShell = the shared outer frame (header, footer, etc.).
-    <AppShell logoText={isDefault ? undefined : (logoText || undefined)} accentColor={isDefault ? undefined : (accentColor || undefined)}>
+    <AppShell restaurantId={restaurantId} logoText={isDefault ? undefined : (logoText || undefined)} accentColor={isDefault ? undefined : (accentColor || undefined)}>
       {/* ONE fixed frosted backdrop behind the whole pinned header (brand +
           category + search). A single blur region = no seam between the brand
           and the categories. Its height is driven live by the scroll handler. */}
