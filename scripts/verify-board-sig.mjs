@@ -20,11 +20,24 @@ const stableRow = (row) => { const o = {}; for (const k in (row || {})) if (!RT_
 const kitchenSig = (d) => JSON.stringify([
   (d.orders || []).map(stableRow), (d.items || []).map(stableRow), (d.dishes || []).map(stableRow),
 ]);
-const tabletSig = (d) => JSON.stringify([
-  (d.sessions || []).map(stableRow), (d.orders || []).map(stableRow), (d.items || []).map(stableRow),
-  (d.calls || []).map(stableRow), (d.members || []).map(stableRow), (d.requests || []).map(stableRow),
-  stableRow(d.settings || {}),
-]);
+// TWO-TIER tablet sig (mig 101 — must mirror public/panels/tablet/app.js boardSig). The GRID
+// draws from the slim server `summary`; the DETAIL draws from the SELECTED table's full slice in
+// `data`. So the sig hashes the whole summary PLUS the selected table's rows. `d.table` = which
+// table's detail is open. Unselected tables have no rows in `data` (the whole point of two-tier),
+// so a grid change is caught ONLY via the summary — which is why it's hashed whole here.
+const tabletSig = (d) => {
+  const t = d.table != null ? String(d.table) : null;
+  const data = d.data || {};
+  const selRows = t == null ? [] : [
+    (data.sessions || []).filter((s) => String(s.table_number) === t).map(stableRow),
+    (data.orders || []).filter((o) => String(o.table_number) === t).map(stableRow),
+    (data.calls || []).filter((c) => String(c.table_number) === t).map(stableRow),
+    (data.requests || []).filter((r) => String(r.table_number) === t).map(stableRow),
+    (data.members || []).map(stableRow),
+    (data.items || []).map(stableRow),
+  ];
+  return JSON.stringify([d.summary || {}, t, selRows, stableRow(data.settings || {})]);
+};
 
 let pass = true;
 const check = (label, cond) => { console.log((cond ? "✓ " : "✗ ") + label); if (!cond) pass = false; };
@@ -48,16 +61,36 @@ check("kitchen sig flips on a NEW unforeseen field (dish)", kFlip((c) => c.items
 // 4) Heartbeat-only fields do NOT churn the sig (no needless repaints).
 check("kitchen sig IGNORES served_at-only change (no churn)", !kFlip((c) => c.items[0].served_at = "2026-01-01"));
 
-const tb = { sessions: [{ id: "s1", table_number: "3", status: "open", bill_no: 1, auto_approve: false, cart: [], last_activity_at: "t0" }], orders: [{ id: "o1", table_number: "3", status: "preparing", total: 100, kot_no: 5, payment_status: "pending", discount: 0, allergies: [] }], items: [{ id: "i1", order_id: "o1", status: "preparing", removed: [], note: "", options: [] }], calls: [], members: [{ id: "m1", session_id: "s1", approved: true, removed: false, role: "guest", name: "A" }], requests: [], settings: { table_count: 12 } };
+// Two-tier shape: table "3" is the SELECTED table (its slice lives in `data`); `summary` is the
+// slim grid the server computes for ALL tables. Detail edits mutate `data`; grid changes mutate
+// `summary`.
+const tb = {
+  table: "3",
+  summary: { tiles: { "3": { state: "prep", label: "Preparing", meta: "0/2 served", counts: { nw: 0, ck: 2, rd: 0, sv: 0 }, due: 0, pay: "", reqs: 0, pending: 0, hasNew: false, hasCall: false, hasReq: false, hasJoin: false } }, calls: [], requests: [], joiners: [], blocklist: [] },
+  data: {
+    sessions: [{ id: "s1", table_number: "3", status: "open", bill_no: 1, auto_approve: false, cart: [], last_activity_at: "t0" }],
+    orders: [{ id: "o1", table_number: "3", status: "preparing", total: 100, kot_no: 5, payment_status: "pending", discount: 0, allergies: [] }],
+    items: [{ id: "i1", order_id: "o1", status: "preparing", removed: [], note: "", options: [] }],
+    calls: [], members: [{ id: "m1", session_id: "s1", approved: true, removed: false, role: "guest", name: "A" }],
+    requests: [], settings: { table_count: 12 },
+  },
+};
 const tFlip = (mut) => { const c = clone(tb); mut(c); return tabletSig(tb) !== tabletSig(c); };
-check("tablet sig flips on auto-approve", tFlip((c) => c.sessions[0].auto_approve = true));
-check("tablet sig flips on building cart", tFlip((c) => c.sessions[0].cart = [{ id: "x", qty: 1 }]));
-check("tablet sig flips on discount", tFlip((c) => c.orders[0].discount = 20));
-check("tablet sig flips on order allergy", tFlip((c) => c.orders[0].allergies = ["nuts"]));
-check("tablet sig flips on dish note", tFlip((c) => c.items[0].note = "no ice"));
-check("tablet sig flips on member rename", tFlip((c) => c.members[0].name = "Bob"));
-check("tablet sig flips on a NEW unforeseen field", tFlip((c) => c.orders[0].loyalty_tier = "gold"));
-check("tablet sig IGNORES last_activity_at heartbeat (no churn)", !tFlip((c) => c.sessions[0].last_activity_at = "t1"));
+// DETAIL edits (selected table's slice in `data`) must flip the sig so the open detail repaints.
+check("tablet sig flips on auto-approve", tFlip((c) => c.data.sessions[0].auto_approve = true));
+check("tablet sig flips on building cart", tFlip((c) => c.data.sessions[0].cart = [{ id: "x", qty: 1 }]));
+check("tablet sig flips on discount", tFlip((c) => c.data.orders[0].discount = 20));
+check("tablet sig flips on order allergy", tFlip((c) => c.data.orders[0].allergies = ["nuts"]));
+check("tablet sig flips on dish note", tFlip((c) => c.data.items[0].note = "no ice"));
+check("tablet sig flips on member rename", tFlip((c) => c.data.members[0].name = "Bob"));
+check("tablet sig flips on a NEW unforeseen field", tFlip((c) => c.data.orders[0].loyalty_tier = "gold"));
+check("tablet sig IGNORES last_activity_at heartbeat (no churn)", !tFlip((c) => c.data.sessions[0].last_activity_at = "t1"));
+// GRID changes (the slim summary) must ALSO flip the sig — this is the two-tier-specific guard:
+// an unselected table changes ONLY in `summary`, so without hashing it the grid would never repaint.
+check("tablet sig flips on a summary tile state change (grid)", tFlip((c) => c.summary.tiles["3"].state = "ready"));
+check("tablet sig flips on a summary tile count change (grid)", tFlip((c) => c.summary.tiles["3"].counts.rd = 1));
+check("tablet sig flips on a NEW summary tile appearing (grid)", tFlip((c) => c.summary.tiles["7"] = { state: "new", label: "New order" }));
+check("tablet sig flips on a pending waiter call in summary (grid)", tFlip((c) => c.summary.calls = [{ id: "c1", table_number: "5", resolved: false }]));
 
 console.log("\n" + (pass ? "ALL PASS" : "SOME FAILED"));
 process.exit(pass ? 0 : 1);

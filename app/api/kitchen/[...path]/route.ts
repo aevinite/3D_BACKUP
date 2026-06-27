@@ -47,14 +47,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // { orders, items } — the panel merges them into the cached board. No param = full board.
       const tbl = new URL(req.url).searchParams.get("table");
       if (tbl) {
-        const live = await liveOrdersAndItems(rid, [tbl]);
+        // activeOnly=true: the kitchen board only shows received/preparing orders (a served
+        // one has left the board), so we filter server-side — no point shipping served rows.
+        const live = await liveOrdersAndItems(rid, [tbl], true);
         return ok({ orders: live.orders, items: live.items });
       }
       // Orders + dishes from the shared "live board" helper — today's tickets PLUS
       // any still-open session's, so a dish left cooking on an overnight table keeps
       // showing here (and matches the manager). Was a day-clipped fetch before.
       const [live, dishes, platform, settings, restaurant] = await Promise.all([
-        liveOrdersAndItems(rid),
+        liveOrdersAndItems(rid, undefined, true), // activeOnly: received/preparing only (board never shows served)
         sb.from("menu_items").select("id,title,category,tags").eq("restaurant_id", rid).order("category"),
         // active platform (Zomato/Swiggy/takeaway) tickets — separate table, so dine-in is untouched
         sb.from("aggregator_orders").select("*").eq("restaurant_id", rid).in("status", ["new", "accepted", "preparing", "ready"]).order("created_at"),
