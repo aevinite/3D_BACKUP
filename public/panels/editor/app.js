@@ -44,7 +44,12 @@ const state = {
   isNew: false,
   search: "",
   catFilter: "", // Dishes tab: selected category slug to filter by ("" = All)
-  board: { sessions: [], members: [], items: [], requests: [], blocklist: [] }, // v2 sessions live board
+  board: { sessions: [], members: [], items: [], requests: [], blocklist: [] }, // v2 sessions live board (TIER 2: only the SELECTED table's full slice now)
+  // TIER 1 of the two-tier Table view: the slim, server-computed per-tile summary the GRID
+  // renders from (mig 101, lfh_table_view_summary). tiles is keyed by table number → the
+  // computed { state,label,meta,counts,due,pay,members,pending,hasNew/Call/Req/Join,reqs,calls }.
+  // The aggregates (calls/requests/joiners/blocklist + order_count) feed the side panel + chimes.
+  summary: { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] },
   boardLoaded: false, // false until the live board arrives once → drives the floor skeleton (no "all Free" flash on load)
   openSess: null, // table number whose session modal is open
   selectedTable: null, // table number whose DETAIL is shown IN the right side panel (Tables tab master-detail). null = show the floor controls instead.
@@ -1367,7 +1372,9 @@ async function deleteOrders(ids, all = false) {
   const gone = before.filter((o) => targetIds.includes(o.id) && !isRecord(o)).map((o) => o.id);
   const goneSet = new Set(gone);
   state.data.orders = before.filter((o) => !goneSet.has(o.id));
-  lastOrderCount = state.data.orders.length;
+  // (lastOrderCount is owned solely by reconcileBoard now, derived from the summary's
+  //  live order_count — don't set it here from the full-list length or the two baselines
+  //  would disagree and the next poll could fire a spurious "new order" chime.)
   gone.forEach((id) => pendingDeletes.add(id)); // poll must not resurrect them
   renderEditor();
   try {
@@ -1381,7 +1388,6 @@ async function deleteOrders(ids, all = false) {
       : (all ? "All cleared" : "Order(s) deleted"), "ok");
   } catch (e) {
     state.data.orders = before;   // bring the rows back — the delete failed (e.g. a single paid bill: 409)
-    lastOrderCount = before.length;
     renderEditor();
     toast(e.message, "err");
   } finally {
@@ -1431,6 +1437,7 @@ async function setOrderPayment(id, paid, opts = {}) {
 // on-tile quick button AND the "Mark all paid" button in the table popup, so
 // staff don't have to settle three orders separately.
 async function markTablePaid(t) {
+  await ensureTableSlice(t); // a non-selected table's orders aren't cached otherwise
   const os = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
   if (!os.length) { toast("Nothing to settle — already paid", "ok"); return; }
   const due = os.reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
@@ -1438,6 +1445,7 @@ async function markTablePaid(t) {
   // One confirm above; each order flips quietly, then one summary toast.
   for (const o of os) await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true });
   toast(`Table ${t} settled 💳`, "ok");
+  await pollTables([String(t)]); // refresh this tile's summary → green pay ring / "Cleared"
 }
 
 // resolveCall: mark a waiter call as attended and drop it from the list.
@@ -2339,6 +2347,61 @@ function scheduleServeFlush() {
 }
 function serveFlushPending() { return serveFlushTimer != null; }
 
+// mergeTableSlice: drop ONE table's rows from the board/data caches and add the freshly
+// fetched rows for it, leaving every other table untouched. Used wherever we load a single
+// table's FULL slice (the selected-table detail in loadSessions/pollOrders/pollTables, and
+// the ensure-load before a tile quick-action). Last-wins by design — safe to call without a
+// stale-ticket guard; the next poll reconciles. (Factored out so the four call sites can't drift.)
+function mergeTableSlice(t, selBoard, selOrders, selCalls) {
+  t = String(t);
+  let orders = (state.data.orders || []).filter((o) => String(o.table_number) !== t).concat(selOrders || []);
+  orders = orders
+    .filter((o) => !pendingDeletes.has(o.id))
+    .map((o) => (pendingOrderOps.has(o.id) ? ((state.data.orders || []).find((x) => x.id === o.id) || o) : o));
+  state.data.orders = orders;
+  state.data.calls = (state.data.calls || []).filter((c) => String(c.table_number) !== t).concat(selCalls || []);
+  const b = state.board || {};
+  const oldSids = new Set((b.sessions || []).filter((s) => String(s.table_number) === t).map((s) => s.id));
+  state.board = {
+    sessions: (b.sessions || []).filter((s) => String(s.table_number) !== t).concat((selBoard && selBoard.sessions) || []),
+    members: (b.members || []).filter((m) => !oldSids.has(m.session_id)).concat((selBoard && selBoard.members) || []),
+    items: (b.items || []).filter((i) => !oldSids.has(i.session_id)).concat((selBoard && selBoard.items) || []),
+    requests: (selBoard && selBoard.requests) || b.requests || [],
+    blocklist: (selBoard && selBoard.blocklist) || b.blocklist || [],
+  };
+}
+
+// loadTableSlice(t): fetch ONE table's FULL slice (sessions/orders/calls ?table=N) and merge it
+// into the board/data caches, so the helpers that read those caches (ordersForTable /
+// callsForTable / openSessionForTable / itemsForOrder) return real rows for table t. The GRID
+// renders from the slim summary and never needs this; it's for (1) the selected table's detail
+// and (2) ENSURING a tile quick-action on a NON-selected table has the table's order ids to act
+// on — without it those handlers would see an empty cache and do nothing. Last-wins (no ticket).
+async function loadTableSlice(t) {
+  const q = "?table=" + encodeURIComponent(t);
+  const [selBoard, selOrders, selCalls] = await Promise.all([api("GET", "/sessions" + q), api("GET", "/orders" + q), api("GET", "/calls" + q)]);
+  mergeTableSlice(t, selBoard, selOrders, selCalls);
+}
+
+// ensureTableSlice(t): load table t's full slice unless it's already the SELECTED table (whose
+// slice is kept fresh by the pollers). Called at the top of every tile quick-action so the
+// handler has table t's real order/call rows to act on, even when t isn't selected. Best-effort:
+// a fetch failure leaves the caches as-is (the handler then no-ops rather than throwing).
+async function ensureTableSlice(t) {
+  if (detailTable() === String(t)) return; // the open-detail table's slice is already kept fresh
+  try { await loadTableSlice(t); } catch {}
+}
+
+// detailTable(): which ONE table has its full DETAIL open right now — the in-panel master-
+// detail (state.selectedTable, Tables tab) OR the collapsed-mode pop-up modal (state.openSess).
+// Either way that table needs its FULL slice loaded (the grid renders from the slim summary, so
+// only the open detail's table pulls full order/member rows). Returns null when no detail is open.
+function detailTable() {
+  return state.selectedTable != null ? String(state.selectedTable)
+       : state.openSess != null ? String(state.openSess)
+       : null;
+}
+
 // loadSessions: fetch (or reuse) the live tables board and redraw the floor. The
 // `fromPoll` flag means "this was the automatic 1-second refresh", so we stay quiet
 // (no error toast) and avoid redrawing while the owner is typing or clicking.
@@ -2349,35 +2412,39 @@ async function loadSessions(fromPoll) {
   if (!fromPoll) {
     const seq = ++dataSeq;
     try {
-      let [board, orders, calls] = await Promise.all([api("GET", "/sessions"), api("GET", "/orders"), api("GET", "/calls")]);
+      // TIER 1: the slim per-tile SUMMARY drives the GRID + side-panel queues + chimes (mig 101).
+      // TIER 2: if a table's DETAIL is open (in-panel OR collapsed-mode modal), ALSO fetch its
+      // FULL slice (sessions/orders/calls ?table=N) so the detail renders complete order rows +
+      // members. The grid never needs them.
+      const sel = detailTable();
+      const reqs = [api("GET", "/summary")];
+      if (sel != null) {
+        const q = "?table=" + encodeURIComponent(sel);
+        reqs.push(api("GET", "/sessions" + q), api("GET", "/orders" + q), api("GET", "/calls" + q));
+      }
+      const [summary, selBoard, selOrders, selCalls] = await Promise.all(reqs);
       if (seq !== dataSeq) return; // a newer refresh started — drop this stale snapshot
-      // Same shields the 1-second poll uses (see pollOrders). One action's
-      // refresh must not wipe ANOTHER action's optimistic state while that
-      // save is still travelling — e.g. opening tables 1, 2, 3 quickly:
-      // table 1's refresh used to land before the server had processed
-      // table 3, flickering tile 3 back to "Free" for a split second.
-      // Keep local order rows whose saves are in flight, keep optimistic
-      // deletes gone, and only take the server's board once NO floor action
-      // is mid-save (the last one to finish reconciles everything).
-      orders = orders
-        .filter((o) => !pendingDeletes.has(o.id))
-        .map((o) => (pendingOrderOps.has(o.id) ? ((state.data.orders || []).find((x) => x.id === o.id) || o) : o));
-      if (!floorOpsInFlight) state.board = board;
-      state.data.orders = orders; state.data.calls = calls;
-      state.boardLoaded = true; // the live board has arrived at least once → real tiles, not the skeleton
+      // Take the summary unless a floor action's save is still travelling (same shield the
+      // board used) — or a refresh landing mid-action would flicker an optimistic tile back.
+      if (!floorOpsInFlight) state.summary = summary;
+      // Merge ONLY the open-detail table's full slice into the board/data caches (the rest of the
+      // board is no longer fetched whole). The detail's ordersForTable/itemsForOrder read these.
+      if (sel != null && !floorOpsInFlight) mergeTableSlice(sel, selBoard, selOrders, selCalls);
+      state.boardLoaded = true; // the live floor has arrived at least once → real tiles, not the skeleton
     } catch (e) {
       toast("Could not load tables: " + e.message, "err");
       return;
     }
   }
   if (state.tab !== "tables") return;
-  const board = state.board || {}, orders = state.data.orders || [], calls = state.data.calls || [];
-  // Only touch the DOM when something actually changed, so a background poll never
-  // flashes the floor or the open panel (and never steals a click mid-tick).
-  const openCalls = (calls || []).filter((c) => !c.resolved).map((c) => c.id).join(",");
-  // "sig" is a fingerprint of everything on the board. If a poll arrives and the
-  // fingerprint hasn't changed, there's literally nothing new — so skip the redraw.
-  const sig = JSON.stringify(board) + "|" + JSON.stringify(orders) + "|" + openCalls;
+  // "sig" is a fingerprint of everything the GRID draws (the slim summary + the open-detail
+  // table's order rows). If a poll arrives and the fingerprint hasn't changed, there's
+  // literally nothing new — so skip the redraw.
+  const _dt = detailTable();
+  const selOrdersSig = _dt != null
+    ? (state.data.orders || []).filter((o) => String(o.table_number) === _dt)
+    : [];
+  const sig = JSON.stringify(state.summary) + "|" + JSON.stringify(selOrdersSig);
   if (fromPoll && sig === lastBoardSig) return;
   lastBoardSig = sig;
   const ed = $("#editor");
@@ -2412,44 +2479,57 @@ function flipOrderItems(o, from, to) {
 // session; the follow-up refresh swaps in the server's real one.
 async function openTableSession(table) {
   const t = String(table);
-  const pending = { id: "pending-" + t, table_number: t, status: "open", auto_approve: false };
-  state.board.sessions = [...(state.board.sessions || []), pending];
-  // Opening a table ALSO approves its pending "let me in / open" requests on the
-  // server (see /api/editor sessions/open). Clear them from local state in the SAME
-  // tick, or the tile flashes an "Attend" quick-action for ~1s: the optimistic
-  // session makes the tile "seated" (so the Open branch no longer matches) while the
-  // still-pending request keeps hasReq true → it falls to the hasJoin||hasReq→Attend
-  // branch until the refetch lands. Remember the cleared ones so we can undo on error.
-  const reqsBefore = state.board.requests || [];
-  state.board.requests = reqsBefore.filter((r) => String(r.table_number) !== t);
+  // TWO-TIER: the grid tile reads the SUMMARY, so flip THIS tile to "Open / waiting" in the
+  // summary optimistically (and drop its pending requests — opening also approves them
+  // server-side). The targeted refetch on success swaps in the server's real tile.
+  const beforeTiles = Object.assign({}, (state.summary.tiles || {}));
+  const beforeReqs = state.summary.requests || [];
+  const tiles = Object.assign({}, beforeTiles);
+  tiles[t] = Object.assign({}, tiles[t] || {}, { state: "waiting", label: "Open", meta: "waiting for guests", hasReq: false, reqs: 0 });
+  state.summary = Object.assign({}, state.summary, {
+    tiles,
+    requests: beforeReqs.filter((r) => String(r.table_number) !== t),
+  });
   floorOpsInFlight++;
   loadSessions(true); // render-only, no network
-  try { await api("POST", "/sessions/open", { table: t }); floorOpsInFlight--; await loadSessions(); toast("Table opened", "ok"); }
+  try { await api("POST", "/sessions/open", { table: t }); floorOpsInFlight--; await pollTables([t]); toast("Table opened", "ok"); }
   catch (e) {
     floorOpsInFlight--;
-    state.board.sessions = (state.board.sessions || []).filter((s) => s.id !== pending.id); // undo
-    state.board.requests = reqsBefore;                                                      // undo the request clear too
+    state.summary = Object.assign({}, state.summary, { tiles: beforeTiles, requests: beforeReqs }); // undo
     loadSessions(true);
     toast("Could not open: " + e.message, "err");
   }
+}
+// summaryTableOpen(t): is table t currently OPEN, per the slim summary? A tile is open
+// when it has a summary entry whose state is anything but 'free' or 'req' (those two mean
+// no open session). The board is no longer fetched whole, so the bulk actions read this.
+function summaryTableOpen(t) {
+  const tile = (state.summary.tiles || {})[String(t)];
+  return !!tile && tile.state !== "free" && tile.state !== "req";
 }
 // openAllTables: seat every table that isn't open yet, in one go (asks first).
 async function openAllTables() {
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   const targets = [];
-  for (let i = 1; i <= n; i++) if (!openSessionForTable(String(i))) targets.push(String(i));
+  for (let i = 1; i <= n; i++) if (!summaryTableOpen(String(i))) targets.push(String(i));
   if (!targets.length) return toast("Every table is already open", "ok");
   if (!(await confirmDialog(`Open all ${targets.length} remaining table${targets.length > 1 ? "s" : ""}?`, "Open all"))) return;
   // Fire the opens in parallel; count what failed instead of stopping halfway.
   const results = await Promise.allSettled(targets.map((t) => api("POST", "/sessions/open", { table: t })));
   const failed = results.filter((r) => r.status === "rejected").length;
-  await loadSessions();
+  await loadSessions(); // bulk action touches many tiles → one full summary refresh is right here
   toast(failed ? `Opened ${targets.length - failed}, ${failed} failed` : `Opened ${targets.length} table${targets.length > 1 ? "s" : ""}`, failed ? "err" : "ok");
 }
 // closeAllTables: end EVERY open session at once (asks first — guests at those
 // tables can no longer order until reopened).
 async function closeAllTables() {
-  const open = (state.board.sessions || []).filter((s) => s.status === "open");
+  // Closing needs each open session's ID, which the slim summary doesn't carry — fetch the
+  // full board ONCE for this rare floor-wide action to get the open sessions to close.
+  let open;
+  try {
+    const board = await api("GET", "/sessions");
+    open = (board.sessions || []).filter((s) => s.status === "open");
+  } catch (e) { return toast("Could not load tables: " + e.message, "err"); }
   if (!open.length) return toast("No open tables", "ok");
   // Floor-wide = the scary red confirm (see confirmDialog), so it can't be
   // mistaken for the routine one-table popup when speed-clicking.
@@ -2556,12 +2636,15 @@ async function itemStatus(id, status) {
 // OPTIMISTIC: the request row leaves the queue instantly; the real refresh
 // afterwards brings in whatever the approval created (e.g. the new session).
 async function resolveRequest(id, status) {
-  const before = state.board.requests || [];
-  state.board.requests = before.filter((r) => r.id !== id);
+  // The side panel + tile badges read the SUMMARY's requests now, so the optimistic removal
+  // mutates state.summary.requests (the row leaves the queue instantly); the refresh afterwards
+  // brings in whatever the approval created (e.g. the new session) via a fresh summary.
+  const before = (state.summary.requests || []);
+  state.summary = Object.assign({}, state.summary, { requests: before.filter((r) => r.id !== id) });
   floorOpsInFlight++;
   loadSessions(true);
   try { await api("POST", "/requests/" + id + "/resolve", { status }); floorOpsInFlight--; await loadSessions(); toast(status === "approved" ? "Approved" : "Dismissed", "ok"); }
-  catch (e) { floorOpsInFlight--; state.board.requests = before; loadSessions(true); toast("Failed: " + e.message, "err"); }
+  catch (e) { floorOpsInFlight--; state.summary = Object.assign({}, state.summary, { requests: before }); loadSessions(true); toast("Failed: " + e.message, "err"); }
 }
 // block: add a phone/table to the blocklist (opts says which).
 async function block(opts) {
@@ -2574,15 +2657,22 @@ async function unblock(id) {
   catch (e) { toast("Could not unblock: " + e.message, "err"); }
 }
 // attendCall: mark a waiter call as handled.
-// OPTIMISTIC: the row leaves the "Needs" list (and the tile emoji) instantly.
+// OPTIMISTIC: the row leaves the "Needs" list (and the tile emoji) instantly. The "Needs"
+// card + tile emojis read the SUMMARY's calls now, so we mutate state.summary.calls; the
+// refresh on success reconciles (the tile's hasCall flag comes from the server tile).
 async function attendCall(id) {
-  const before = state.data.calls || [];
-  state.data.calls = before.filter((c) => c.id !== id);
+  const before = state.summary.calls || [];
+  const target = before.find((c) => c.id === id);
+  state.summary = Object.assign({}, state.summary, { calls: before.filter((c) => c.id !== id) });
   floorOpsInFlight++;
   loadSessions(true);
-  try { await api("PATCH", "/calls/" + id, { resolved: true }); toast("Marked attended", "ok"); }
-  catch (e) { state.data.calls = before; loadSessions(true); toast("Failed: " + e.message, "err"); }
-  finally { floorOpsInFlight--; }
+  try {
+    await api("PATCH", "/calls/" + id, { resolved: true });
+    floorOpsInFlight--;
+    if (target && target.table_number) await pollTables([String(target.table_number)]); else await loadSessions();
+    toast("Marked attended", "ok");
+  }
+  catch (e) { floorOpsInFlight--; state.summary = Object.assign({}, state.summary, { calls: before }); loadSessions(true); toast("Failed: " + e.message, "err"); }
 }
 
 // ===================== UNIFIED FLOOR — one control center for every table =====================
@@ -2642,7 +2732,51 @@ function callEmoji(note) {
 // its label/sub-label, the little corner badges (requests, joiners, cart, calls),
 // whether the outline should be red (unpaid) or green (paid), and a few flags the
 // floor uses to decide which quick-action button to show.
+//
+// TWO-TIER (2026-06-27): the GRID renders 300 tiles from the slim server SUMMARY
+// (state.summary.tiles) — NOT the full board, which is no longer fetched whole. So
+// tableTileState DISPATCHES: the SELECTED table (whose full slice we DO fetch on tap,
+// into state.board/state.data) is computed live from the board so its detail head-pill
+// and optimistic flips stay pixel-identical; every OTHER tile reads the pre-computed
+// summary tile. The summary is produced by lfh_table_view_summary, which mirrors
+// tableTileStateFromBoard's rules EXACTLY (parity verified DB-side, mig 101).
 function tableTileState(t) {
+  // SELECTED table → live-from-board (we have its full slice; keeps detail + optimism exact).
+  if (state.selectedTable != null && String(state.selectedTable) === String(t) && state.board && (state.board.sessions || []).length >= 0) {
+    // Only use the board path when we actually have this table's slice loaded; otherwise
+    // fall through to the summary so we never render a selected table as blank "Free".
+    const hasSlice = (state.board.sessions || []).some((s) => String(s.table_number) === String(t))
+      || (state.data.orders || []).some((o) => String(o.table_number) === String(t));
+    if (hasSlice) return tableTileStateFromBoard(t);
+  }
+  return tableTileStateFromSummary(t);
+}
+
+// Build a tile from the slim server summary (state.summary.tiles[t]). The summary already
+// carries the computed state/label/meta/counts/due/pay + the badge COUNTS; we only rebuild
+// the small derived bits the renderer wants: the badges HTML (call emojis come from the
+// summary's tiny per-restaurant calls[] list, filtered to this table) and the `done` flag.
+function tableTileStateFromSummary(t) {
+  const tile = (state.summary.tiles || {})[String(t)];
+  if (!tile) return { st: "free", label: "Free", meta: "tap to open", badges: "", counts: { nw: 0, ck: 0, rd: 0, sv: 0 }, pay: "", done: false, hasNew: false, hasCall: false, hasReq: false, hasJoin: false };
+  const calls = (state.summary.calls || []).filter((c) => !c.resolved && (c.table_number || "").trim() === String(t));
+  let badges = "";
+  if (tile.reqs) badges += `<span class="ftb req">📨${tile.reqs}</span>`;
+  if (tile.pending) badges += `<span class="ftb join">🙋${tile.pending}</span>`;
+  calls.slice(0, 3).forEach((c) => { badges += `<span class="ftb call">${callEmoji(c.note)}</span>`; });
+  if (calls.length > 3) badges += `<span class="ftb call ftb-more">+${calls.length - 3}</span>`;
+  return {
+    st: tile.state, label: tile.label, meta: tile.meta, badges,
+    counts: tile.counts || { nw: 0, ck: 0, rd: 0, sv: 0 },
+    pay: tile.pay || "",
+    done: tile.state === "done" && tile.pay !== "red", // served AND paid → offer RST/CLS
+    hasNew: !!tile.hasNew, hasCall: !!tile.hasCall, hasReq: !!tile.hasReq, hasJoin: !!tile.hasJoin,
+  };
+}
+
+// The ORIGINAL full-board computation — now used ONLY for the selected table's detail (and
+// as the parity reference the SQL summary mirrors). Unchanged logic.
+function tableTileStateFromBoard(t) {
   const os = ordersForTable(t);
   const sess = openSessionForTable(t);
   const mem = sess ? membersOf(sess.id) : [];
@@ -2734,8 +2868,10 @@ function floorHtml() {
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
   const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
   if (s.table_count) { try { localStorage.setItem("lfh_editor_table_count", String(parseInt(s.table_count, 10))); } catch {} }
-  const reqs = state.board.requests || [];
-  const blocks = state.board.blocklist || [];
+  // Side-panel queues now come from the slim SUMMARY aggregates (tiny — only pending rows),
+  // not the full board (which is no longer fetched whole). Same shapes the cards expect.
+  const reqs = state.summary.requests || [];
+  const blocks = state.summary.blocklist || [];
 
   // legend — every state + its colour. ("Bill due" was removed: payment is
   // already shown by the red/green outline, so a fill colour for it was noise.)
@@ -2753,7 +2889,7 @@ function floorHtml() {
     for (let i = 1; i <= n; i++) {
       skel += `<div class="ftile ftile-skel" aria-hidden="true"><div class="sk-num"></div><div class="sk-lbl"></div><div class="sk-meta"></div></div>`;
     }
-    const skelMain = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2><button class="btn" id="refreshFloor">↻ Refresh</button></div>${legend}<div class="ftile-grid">${skel}</div></div>`;
+    const skelMain = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2></div>${legend}<div class="ftile-grid">${skel}</div></div>`;
     // right: skeleton versions of the side-panel cards so the whole layout is
     // present from the first frame (no empty gutter that fills in late). A card
     // = a title bar + a few placeholder rows of shimmer.
@@ -2804,10 +2940,10 @@ function floorHtml() {
   // side panel's "Dining sessions" card, well away from the speed-click zone.
   // Stats strip — the whole floor's health at a glance (owner: see it without counting
   // tiles). "Needs you" = new orders + ringing calls + open requests + waiting joiners.
-  const pendingJoinersN = (state.board.sessions || []).filter((ss) => ss.status === "open").reduce((a, ss) => a + membersOf(ss.id).filter((m) => !m.approved && !m.removed).length, 0);
+  const pendingJoinersN = (state.summary.joiners || []).length;
   const needsYou = cNew + cCall + reqs.length + pendingJoinersN;
   const statsStrip = sessionsOn ? `<div class="floor-stats"><div class="fstat"><div class="fstat-n">${cOcc}/${n}</div><div class="fstat-l">Occupied</div></div><div class="fstat warn"><div class="fstat-n">${cPay}</div><div class="fstat-l">To pay</div></div><div class="fstat alert"><div class="fstat-n">${needsYou}</div><div class="fstat-l">Needs you</div></div></div>` : "";
-  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2><button class="btn" id="refreshFloor">↻ Refresh</button></div>${statsStrip}${legend}<div class="ftile-grid">${tiles}</div></div>`;
+  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2></div>${statsStrip}${legend}<div class="ftile-grid">${tiles}</div></div>`;
 
   // side panel — everyday things FIRST (whole-floor open/close, requests, needs),
   // rarely-touched feature switches + café location LAST (owner, 2026-06-12:
@@ -2834,10 +2970,8 @@ function floorHtml() {
   // badge on the tile. Each row offers the full set: ✕ decline, Ban (confirmed,
   // declines AND blocklists), Transfer (they become the head — the current head
   // is kicked; confirmed), and OK (approve into the table).
-  const joiners = [];
-  (state.board.sessions || []).filter((ss) => ss.status === "open").forEach((ss) => {
-    membersOf(ss.id).filter((m) => !m.approved && !m.removed).forEach((m) => joiners.push({ ...m, table_number: ss.table_number }));
-  });
+  // Pending joiners now ship pre-collected in the summary (each already carries table_number).
+  const joiners = state.summary.joiners || [];
   const joinerRows = joiners.map((m) =>
     `<div class="sx-req"><div class="sx-req-info"><span class="sx-tag sx-tag-join">join</span> ${esc(m.name || "Guest")} · join T${esc(m.table_number)}<small>${esc(timeAgo(m.joined_at))}</small></div><div class="sx-req-actions"><button class="btn small" data-mem-deny="${esc(m.id)}" title="Decline this join request">✕</button><button class="btn small danger" data-mem-ban="${esc(m.id)}" data-ban-phone="${esc(m.phone || "")}" title="Decline AND add to the blocklist">Ban</button><button class="btn small" data-mem-head="${esc(m.id)}" title="Make them the table's head — the current head is kicked">Transfer</button><button class="btn small primary" data-mem-approve="${esc(m.id)}">OK</button></div></div>`
   ).join("");
@@ -2855,7 +2989,9 @@ function floorHtml() {
   // Active waiter calls across all OPEN tables (water/napkin/clean…), one row each.
   // This stays in sync with the tile emojis — both read state.data.calls and refresh
   // on the same 1s poll, and "Done" here resolves the same call the tile shows.
-  const liveCalls = (state.data.calls || []).filter((c) => !c.resolved && openSessionForTable((c.table_number || "").trim()));
+  // Active waiter calls come from the summary's aggregate (already only unresolved calls on
+  // open tables, restaurant-wide); no need to cross-check against the (now slim) board.
+  const liveCalls = (state.summary.calls || []).filter((c) => !c.resolved);
   const needsCard = sessionsOn ? `<div class="fc-card"><h3>Needs <span class="sub">· ${liveCalls.length}</span></h3>${liveCalls.length ? liveCalls.map((c) =>
     `<div class="sx-req"><div class="sx-req-info">${callEmoji(c.note)} T${esc(c.table_number)} · ${esc(c.note || "Waiter")}<small>${esc(timeAgo(c.created_at))}</small></div><div class="sx-req-actions"><button class="btn small primary" data-call-attend="${esc(c.id)}">Done</button></div></div>`
   ).join("") : `<div class="sx-empty">No active calls.</div>`}</div>` : "";
@@ -2918,8 +3054,8 @@ function floorHtml() {
 // toggles save settings, and the divider can be dragged to resize the side panel.
 function bindFloor() {
   const ed = $("#editor");
-  const rb = document.getElementById("refreshFloor");
-  if (rb) rb.onclick = () => loadSessions();
+  // (The ↻ Refresh button was removed — the floor is live via realtime + the 60s backup poll,
+  //  so a manual refresh was redundant and looked broken. Coordinator-relayed owner request.)
   // Bulk open/close for the whole floor (both confirm before acting).
   const oa = document.getElementById("floorOpenAll");
   if (oa) oa.onclick = () => openAllTables();
@@ -3379,7 +3515,9 @@ function openShiftPicker(t, sess) {
   document.querySelector(".shift-overlay")?.remove();
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   const free = [];
-  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !openSessionForTable(i)) free.push(i); }
+  // "Free to move to" = not THIS table and not currently open — read from the slim summary
+  // (the board is no longer fetched whole, so openSessionForTable only knows the open-detail table).
+  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !summaryTableOpen(i)) free.push(i); }
   const grid = free.length
     ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">Table ${i}</button>`).join("")
     : `<div class="muted" style="padding:14px">No free tables to move to right now.</div>`;
@@ -3547,6 +3685,11 @@ async function serveAllOrder(orderId) {
 // floor tile's Accept AND the detail's "Accept all & prepare" button — one tap
 // accepts the whole table (owner: never open the detail just to accept each).
 async function acceptTableOrders(t) {
+  // TWO-TIER: a tile quick-action can fire on a NON-selected table, whose full order rows
+  // aren't in the cache (the grid renders from the slim summary). Ensure this table's slice
+  // is loaded so ordersForTable(t) returns its real orders to act on. (No-op cost when it's
+  // the selected table — already loaded — but cheap and correct to always refresh first.)
+  await ensureTableSlice(t);
   // Accept every order that still has un-accepted (received) DISHES — this matches
   // the tile's "New order" cue, which is ITEM-level (anyReceived). An order can be
   // order-level "preparing" yet still carry a freshly-added dish at "received" (e.g.
@@ -3563,13 +3706,18 @@ async function acceptTableOrders(t) {
   // release first, then refresh — see restartTable for why this order matters.
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; recv.forEach((o) => opEnd(o.id)); } };
-  try { for (const o of recv) await api("POST", "/orders/" + o.id + "/accept"); toast(recv.length > 1 ? recv.length + " orders accepted → preparing" : "Order accepted → preparing", "ok"); }
-  catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); } // reload truth on failure
+  try {
+    for (const o of recv) await api("POST", "/orders/" + o.id + "/accept");
+    toast(recv.length > 1 ? recv.length + " orders accepted → preparing" : "Order accepted → preparing", "ok");
+    release(); await pollTables([String(t)]); // refresh THIS tile's summary so the grid reflects truth
+  }
+  catch (e) { release(); toast("Failed: " + e.message, "err"); await pollTables([String(t)]); } // reload truth on failure
   finally { release(); }
 }
 // Serve EVERY order on a table at once (the table-wide "mark all served").
 // OPTIMISTIC like accept: every dish row flips to served on screen first.
 async function serveAllOrders(t) {
+  await ensureTableSlice(t); // see acceptTableOrders: the table may not be selected
   const orders = ordersForTable(t);
   if (!orders.length) return;
   orders.forEach((o) => { o.status = "served"; flipOrderItems(o, null, "served"); opBegin(o.id); });
@@ -3579,25 +3727,35 @@ async function serveAllOrders(t) {
   // release first, then refresh — see restartTable for why this order matters.
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; orders.forEach((o) => opEnd(o.id)); } };
-  try { for (const o of orders) await api("POST", "/orders/" + o.id + "/serve-all"); toast("All orders served", "ok"); }
-  catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
+  try {
+    for (const o of orders) await api("POST", "/orders/" + o.id + "/serve-all");
+    toast("All orders served", "ok");
+    release(); await pollTables([String(t)]);
+  }
+  catch (e) { release(); toast("Failed: " + e.message, "err"); await pollTables([String(t)]); }
   finally { release(); }
 }
 // Quick action: mark every open call on a table attended (clears the tile's emoji).
 async function attendTableCalls(t) {
+  await ensureTableSlice(t); // the call rows for a non-selected table aren't cached otherwise
   const cs = callsForTable(t);
-  // OPTIMISTIC: the call emojis leave the tile instantly.
+  if (!cs.length) return;
+  // OPTIMISTIC: the call emojis leave the tile instantly (detail panel reads state.data.calls).
   const before = state.data.calls || [];
   const ids = new Set(cs.map((c) => c.id));
   state.data.calls = before.filter((c) => !ids.has(c.id));
   floorOpsInFlight++;
   loadSessions(true);
-  try { for (const c of cs) await api("PATCH", "/calls/" + c.id, { resolved: true }); toast("Attended", "ok"); }
-  catch (e) { state.data.calls = before; loadSessions(true); toast("Failed: " + e.message, "err"); }
-  finally { floorOpsInFlight--; }
+  try {
+    for (const c of cs) await api("PATCH", "/calls/" + c.id, { resolved: true });
+    toast("Attended", "ok");
+    floorOpsInFlight--; await pollTables([String(t)]); // clears the tile's call emoji from the summary
+  }
+  catch (e) { floorOpsInFlight--; state.data.calls = before; await pollTables([String(t)]); toast("Failed: " + e.message, "err"); }
 }
 // RST: clear a finished table's orders off the floor but KEEP the table open for a new round.
 async function restartTable(t) {
+  await ensureTableSlice(t); // a non-selected table's orders aren't cached otherwise
   const ids = ordersForTable(t).map((o) => o.id);
   if (!ids.length) return;
   if (!(await confirmDialog(`Restart Table ${t}? Its orders clear off the floor and the table stays OPEN for a fresh round.`, "Restart"))) return;
@@ -3621,13 +3779,13 @@ async function restartTable(t) {
     // keep the table OPEN for the next round — open a fresh session if it doesn't have one
     if ((state.data.settings || {}).sessions_enabled && !openSessionForTable(t)) await api("POST", "/sessions/open", { table: String(t) });
     release();
-    await loadSessions();
+    await pollTables([String(t)]); // refresh this tile's summary (cheap, single-table)
     toast(`Table ${t} restarted — still open`, "ok");
-  } catch (e) { release(); toast("Could not restart: " + e.message, "err"); await loadSessions(); }
+  } catch (e) { release(); toast("Could not restart: " + e.message, "err"); await pollTables([String(t)]); }
   finally { release(); }
 }
 // CLS: free the table (archive orders + close any open session).
-function closeTableQuick(t) { freeTableAll(t, openSessionForTable(t)); }
+async function closeTableQuick(t) { await ensureTableSlice(t); freeTableAll(t, openSessionForTable(t)); }
 
 // Free a table: archive its settled orders off the floor and, if a session is open, close it.
 // OPTIMISTIC after the confirm: the tile turns Free instantly; the server
@@ -3647,9 +3805,9 @@ async function freeTableAll(t, sess) {
     for (const id of ids) await api("PATCH", "/orders/" + id, { archived: true });
     if (sess) await api("POST", "/sessions/" + sess.id + "/close");
     release();
-    await loadSessions();
+    await pollTables([String(t)]); // refresh just this tile's summary (handles drop-to-Free)
     toast(`Table ${t} freed`, "ok");
-  } catch (e) { release(); toast("Could not free: " + e.message, "err"); await loadSessions(); }
+  } catch (e) { release(); toast("Could not free: " + e.message, "err"); await pollTables([String(t)]); }
   finally { release(); }
 }
 
@@ -4004,12 +4162,12 @@ async function loadOrders() {
     const orders = await api("GET", "/orders");
     if (seq !== dataSeq) return; // a newer refresh started — drop this stale response
     state.data.orders = orders;
-    lastOrderCount = state.data.orders.length;
+    // (Don't set lastOrderCount/lastCallCount here — reconcileBoard owns them from the
+    //  summary's live counts; a full-list baseline here would clash and misfire the chime.)
     try {
       const calls = await api("GET", "/calls");
       if (seq !== dataSeq) return; // superseded mid-fetch
       state.data.calls = calls;
-      lastCallCount = (state.data.calls || []).filter((c) => !c.resolved).length;
     } catch {}
     if (state.tab === "orders") { renderList(); renderEditor(); } // sidebar counts + cards
   } catch (e) {
@@ -4094,59 +4252,68 @@ function playOrderChime() {
   } catch {}
 }
 
-// pollOrders: this runs once a second (see startOrderWatch). Each tick it re-fetches
-// orders, waiter calls, and the sessions board, refreshes whatever tab is showing,
-// and — by comparing the new counts to the last counts — chimes + toasts + badges
-// whenever something NEW arrives, no matter which tab the owner is currently on.
+// pollOrders: this runs on every realtime tick / 60s backup (see startOrderWatch). It
+// ALWAYS fetches the slim SUMMARY (tiny — drives the GRID, the side-panel queues, AND the
+// chimes from any tab via order_count/calls/requests). The full /orders + /calls lists are
+// fetched ONLY when the Orders tab is showing (that tab renders all ~200 order cards); the
+// owner's 300-table fear is the floor grid, not that one detail tab. On the Tables tab the
+// SELECTED table's full slice is refreshed so its detail stays live.
 async function pollOrders() {
   const seq = ++dataSeq;
-  let orders, calls, board;
+  let summary;
   try {
-    orders = await api("GET", "/orders");
+    summary = await api("GET", "/summary");
   } catch {
     return; // network blip — try again next tick
   }
   if (seq !== dataSeq) return; // a newer loader started — this poll snapshot is stale
-  // Merge, don't clobber: keep the LOCAL copy of any order whose save is
-  // still in flight, and keep optimistically-deleted rows gone — otherwise
-  // this poll would flicker fresh clicks back to their old state.
-  orders = orders
-    .filter((o) => !pendingDeletes.has(o.id))
-    .map((o) => (pendingOrderOps.has(o.id) ? ((state.data.orders || []).find((x) => x.id === o.id) || o) : o));
-  state.data.orders = orders;
-  try { calls = await api("GET", "/calls"); if (seq !== dataSeq) return; state.data.calls = calls; } catch { calls = state.data.calls || []; }
-  // The session board (sessions + members + the requests queue + blocklist) is now
-  // refreshed on every tick too, so the live cart and the request queue stay fresh
-  // and we can chime for new requests from ANY tab.
-  try {
-    board = await api("GET", "/sessions");
-    if (seq !== dataSeq) return; // superseded by a newer loader — drop this board snapshot
-    // Don't clobber the board while a floor action's save is still in flight.
-    if (!floorOpsInFlight) state.board = board; else board = state.board || {};
-    state.boardLoaded = true; // a poll fetch counts too: we now know the real floor
-  } catch { board = state.board || {}; }
+  if (!floorOpsInFlight) state.summary = summary; // don't clobber an optimistic tile mid-action
+  state.boardLoaded = true;
 
-  // Counts + alerts + redraw now live in reconcileBoard() so the TARGETED refetch
-  // (pollTables) can reuse the exact same chime/render logic — it reads the merged
-  // state.data.orders / state.data.calls / state.board, so totals stay accurate.
+  // Orders tab → also pull the full order/call lists it renders (merged, optimistic-safe).
+  if (state.tab === "orders") {
+    try {
+      let orders = await api("GET", "/orders");
+      if (seq !== dataSeq) return;
+      orders = orders
+        .filter((o) => !pendingDeletes.has(o.id))
+        .map((o) => (pendingOrderOps.has(o.id) ? ((state.data.orders || []).find((x) => x.id === o.id) || o) : o));
+      state.data.orders = orders;
+    } catch {}
+    try { const calls = await api("GET", "/calls"); if (seq !== dataSeq) return; state.data.calls = calls; } catch {}
+  } else if (state.tab === "tables" && detailTable() != null && !floorOpsInFlight) {
+    // Keep the open detail (in-panel OR collapsed-mode modal) order rows + members fresh.
+    try {
+      const t = detailTable();
+      const q = "?table=" + encodeURIComponent(t);
+      const [selBoard, selOrders, selCalls] = await Promise.all([api("GET", "/sessions" + q), api("GET", "/orders" + q), api("GET", "/calls" + q)]);
+      if (seq !== dataSeq) return;
+      mergeTableSlice(t, selBoard, selOrders, selCalls);
+    } catch {}
+  }
+
+  // Counts + alerts + redraw live in reconcileBoard(), now driven by the SUMMARY aggregates
+  // so the chimes fire identically from any tab and the targeted refetch (pollTables) reuses them.
   reconcileBoard();
 }
 
-// reconcileBoard: from the CURRENT merged board (state.data.orders/calls + state.board),
-// update the live counts, redraw the visible tab only when something changed, and fire
-// the new-order / waiter-call / request chimes. Called by BOTH the full poll (pollOrders)
-// and the targeted refetch (pollTables) so neither path can silently drop an alert.
+// reconcileBoard: from the slim SUMMARY aggregates (state.summary), update the live counts,
+// redraw the visible tab only when something changed, and fire the new-order / waiter-call /
+// request chimes. The summary is fetched on every poll regardless of tab, so the chimes fire
+// identically from any tab (no dual-source baseline drift). Called by BOTH the full poll
+// (pollOrders) and the targeted refetch (pollTables) so neither path can silently drop an alert.
 function reconcileBoard() {
-  const orders = state.data.orders || [];
-  const calls = state.data.calls || [];
-  const board = state.board || {};
+  const summary = state.summary || {};
+  // SUMMARY-driven counts (live-only order_count + unresolved calls + pending requests).
+  const orderCount = Number(summary.order_count) || 0;
+  const calls = summary.calls || [];          // already unresolved-only from the RPC
+  const requests = summary.requests || [];    // already pending-only from the RPC
   // Remember the previous counts, then update to the new ones. The "did it grow?"
   // checks below compare prev vs now to detect something brand-new arriving.
   const prev = lastOrderCount;
-  lastOrderCount = orders.length;
-  const pending = (calls || []).filter((c) => !c.resolved).length;
-  lastCallCount = pending; // kept for any external reader; alerts now use seenCallIds
-  const reqCount = (board.requests || []).length;
+  lastOrderCount = orderCount;
+  lastCallCount = calls.length; // kept for any external reader; alerts now use seenCallIds
+  const reqCount = requests.length;
   const prevR = lastReqCount;
   lastReqCount = reqCount;
 
@@ -4156,11 +4323,13 @@ function reconcileBoard() {
   // fetched fresh data above, so the new-order/call/request alerts below still fire.
   if (!serveFlushPending()) {
     // Only redraw the Orders tab when something VISIBLE actually changed —
-    // rebuilding 200 cards every second ate clicks and scroll position.
+    // rebuilding 200 cards every second ate clicks and scroll position. (The Orders
+    // tab still renders from the full state.data.orders fetched in pollOrders.)
+    const orders = state.data.orders || [];
     const sig = JSON.stringify([
       orders.map((o) => [o.id, o.status, o.payment_status, o.archived ? 1 : 0]),
-      (calls || []).filter((c) => !c.resolved).map((c) => c.id),
-      (board && board.requests ? board.requests.length : 0),
+      calls.map((c) => c.id),
+      reqCount,
     ]);
     const typing = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
     if (state.tab === "orders" && sig !== lastPollSig && !typing) { renderList(); renderEditor(); }
@@ -4168,22 +4337,21 @@ function reconcileBoard() {
     if (state.tab === "tables" && !floorOpsInFlight) loadSessions(true); // keep the live floor fresh
   }
 
-  // new order alert
-  if (prev !== null && orders.length > prev) {
-    const newCount = orders.length - prev;
-    const latest = orders[0];
-    const where = latest && latest.table_number ? "Table " + latest.table_number : "Walk-in";
+  // new order alert (order_count is live orders only; the latest order's table comes
+  // alongside it in the summary so the toast still names the table).
+  if (prev !== null && orderCount > prev) {
+    const newCount = orderCount - prev;
+    const where = summary.latest_order_table ? "Table " + summary.latest_order_table : "Walk-in";
     playOrderChime();
     toast(`🔔 ${newCount} new order${newCount > 1 ? "s" : ""} — ${where}`, "ok", null, 6000);
     if (state.tab !== "orders") { unseenOrders += newCount; updateOrdersBadge(); }
   }
   // new waiter-call alert — fire ONCE per call id (see seenCallIds note above)
-  const openCalls = (calls || []).filter((c) => !c.resolved);
-  const openIds = openCalls.map((c) => c.id);
+  const openIds = calls.map((c) => c.id);
   if (seenCallIds === null) {
     seenCallIds = new Set(openIds); // first poll: baseline, don't alert for existing calls
   } else {
-    const fresh = openCalls.filter((c) => !seenCallIds.has(c.id));
+    const fresh = calls.filter((c) => !seenCallIds.has(c.id));
     if (fresh.length) {
       const latest = fresh[0];
       const where = latest && latest.table_number ? "Table " + latest.table_number : "a guest";
@@ -4196,7 +4364,7 @@ function reconcileBoard() {
   // new request alert (a guest asked to join/access a table, or requested a waiter
   // when they couldn't be auto-let-in). Newest request is last (queue is ascending).
   if (prevR !== null && reqCount > prevR) {
-    const latest = (board.requests || [])[reqCount - 1];
+    const latest = requests[reqCount - 1];
     const verb = latest && latest.type === "open" ? "wants to open" : latest && latest.type === "join" ? "wants to join" : "needs access to";
     const where = latest && latest.table_number ? `Table ${latest.table_number}` : "a table";
     playOrderChime();
@@ -4207,72 +4375,58 @@ function reconcileBoard() {
   }
 }
 
-// pollTables(tables): TARGETED refetch — fetch ONLY the named tables' orders/calls/
-// session-slice (?table=N) and merge each table's rows into the board, instead of
-// re-reading the WHOLE floor on every breadcrumb. The merge replaces exactly the changed
-// tables' rows and leaves every other table untouched; then reconcileBoard() runs the
-// same counts/chimes/redraw as the full poll. ANY surprise → full pollOrders (safe
-// fallback). (owner 2026-06-26 — 96.6% of egress was whole-board reads; this scopes it.)
+// pollTables(tables): TARGETED refetch — for each named table fetch ONLY its slim SUMMARY
+// tile (?table=N, ~5 kB) and patch it into state.summary.tiles, instead of re-reading the
+// whole 84 kB floor on every breadcrumb. The aggregates (calls/requests/joiners/blocklist +
+// order_count) are tiny and restaurant-wide, so each per-table call returns them and we take
+// the latest. If a named table is the SELECTED one, ALSO refresh its FULL slice so its detail
+// stays live. Then reconcileBoard() runs the same counts/chimes/redraw as the full poll. ANY
+// surprise → full pollOrders (safe fallback). (owner 2026-06-26 — scope egress per table.)
 async function pollTables(tables) {
   if (!tables || !tables.length) return pollOrders();
   const seq = ++dataSeq;
   let results;
   try {
     results = await Promise.all(tables.map(async (t) => {
-      const q = "?table=" + encodeURIComponent(t);
-      const [orders, calls, board] = await Promise.all([
-        api("GET", "/orders" + q), api("GET", "/calls" + q), api("GET", "/sessions" + q),
-      ]);
-      return { orders: orders || [], calls: calls || [], board: board || {} };
+      const sum = await api("GET", "/summary?table=" + encodeURIComponent(t));
+      return { table: String(t), sum: sum || {} };
     }));
   } catch (e) { return pollOrders(); }      // network/parse blip → safe full reload
   if (seq !== dataSeq) return;              // a newer loader started — drop this stale snapshot
-  const tset = new Set(tables.map(String));
-  // Defensive dedup by row id (fetched row wins over a stale cached copy). The drop/add
-  // below keys on table_number; if a row's table_number ever disagrees between cache and
-  // server (e.g. a shift the breadcrumb didn't fully cover) the row could appear twice —
-  // this guarantees it never does. (owner 2026-06-26: "one missed/duplicated update is huge".)
-  const dedupeById = (arr) => { const m = new Map(); for (const x of arr) if (x && x.id != null) m.set(x.id, x); return [...m.values()]; };
 
-  // ORDERS — drop the changed tables' old rows, add their fresh rows, keep the rest.
-  let orders = (state.data.orders || []).filter((o) => !tset.has(String(o.table_number)));
-  for (const r of results) orders = orders.concat(r.orders);
-  orders = dedupeById(orders);
-  orders.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))); // newest-first, same as /orders
-  // Same in-flight shields pollOrders uses: keep optimistic local copies, keep deletes gone.
-  orders = orders
-    .filter((o) => !pendingDeletes.has(o.id))
-    .map((o) => (pendingOrderOps.has(o.id) ? ((state.data.orders || []).find((x) => x.id === o.id) || o) : o));
-  state.data.orders = orders;
-
-  // CALLS — same drop/add by table.
-  let calls = (state.data.calls || []).filter((c) => !tset.has(String(c.table_number)));
-  for (const r of results) calls = calls.concat(r.calls);
-  state.data.calls = calls;
-
-  // BOARD slice (sessions/members/items/requests) — only when no floor action is mid-save,
-  // mirroring pollOrders' floorOpsInFlight guard so an optimistic action isn't clobbered.
+  // Patch the changed tables' tiles + refresh the restaurant-wide aggregates (unless a floor
+  // action is mid-save, mirroring the board's floorOpsInFlight guard so optimism isn't clobbered).
   if (!floorOpsInFlight) {
-    const b = state.board || {};
-    const oldSids = new Set((b.sessions || []).filter((s) => tset.has(String(s.table_number))).map((s) => s.id));
-    let sessions = (b.sessions || []).filter((s) => !tset.has(String(s.table_number)));
-    let members = (b.members || []).filter((m) => !oldSids.has(m.session_id));
-    let items = (b.items || []).filter((it) => !oldSids.has(it.session_id));
-    let requests = (b.requests || []).filter((rq) => !tset.has(String(rq.table_number)));
-    let blocklist = b.blocklist || [];
+    const s = state.summary || { tiles: {} };
+    const tiles = Object.assign({}, s.tiles || {});
+    const tset = new Set(tables.map(String));
+    let latest = null;
     for (const r of results) {
-      const bd = r.board;
-      sessions = sessions.concat(bd.sessions || []);
-      members = members.concat(bd.members || []);
-      items = items.concat(bd.items || []);
-      requests = requests.concat(bd.requests || []);
-      if (bd.blocklist) blocklist = bd.blocklist; // restaurant-wide + tiny; take the latest snapshot
+      const t = r.table;
+      const tile = r.sum.tiles && r.sum.tiles[t];
+      if (tile) tiles[t] = tile;            // the table now has a tile (occupied)
+      else delete tiles[t];                 // the table dropped off the floor universe → back to plain Free
+      latest = r.sum;                       // aggregates are identical across calls; keep the last
     }
-    state.board = Object.assign({}, b, {
-      sessions: dedupeById(sessions), members: dedupeById(members),
-      items: dedupeById(items), requests: dedupeById(requests), blocklist,
-    });
+    state.summary = Object.assign({}, s, { tiles }, latest ? {
+      order_count: latest.order_count,
+      latest_order_table: latest.latest_order_table,
+      calls: latest.calls || [],
+      requests: latest.requests || [],
+      joiners: latest.joiners || [],
+      blocklist: latest.blocklist || [],
+    } : {});
     state.boardLoaded = true;
+
+    // If the OPEN-DETAIL table (in-panel OR collapsed modal) is among the changed ones,
+    // refresh its full slice for the detail.
+    const _dt = detailTable();
+    if (_dt != null && tset.has(_dt)) {
+      try {
+        if (seq !== dataSeq) return;
+        await loadTableSlice(_dt);
+      } catch {}
+    }
   }
 
   reconcileBoard(); // identical counts/chimes/redraw to the full poll
