@@ -229,14 +229,21 @@ function tableAgg(t) {
     const kots = [];
     os.forEach((o) => {
       if (o.kot_no != null) kots.push(o.kot_no);
-      if (o.payment_status !== "paid") due += (Number(o.total) || 0) - (Number(o.discount) || 0);
+      // Due counts only ACCEPTED unpaid bills (not brand-new 'received' orders) — matches the
+      // summary's due so the grid tile and the detail never disagree on the amount owed.
+      if (o.status !== "cancelled" && o.status !== "received" && o.payment_status !== "paid") due += (Number(o.total) || 0) - (Number(o.discount) || 0);
       dishRowsOf(o).forEach((r) => {
         const q = r.qty || 1;
         if (r.status === "served") sv += q; else if (r.status === "ready") rd += q; else if (r.status === "preparing") ck += q; else nw += q;
       });
     });
-    const unpaid = os.some((o) => o.payment_status !== "paid");
-    return { nw, ck, rd, sv, due, kots, guests: membersOf(t).length, unpaid, paid: os.length > 0 && !unpaid, billNo: s && s.bill_no, hasOrders: os.length > 0 };
+    // Ring rule MUST match the summary/manager: it shows only for ACCEPTED orders — a brand-new
+    // 'received' order rings NOTHING (no green, no red) until staff accept it. unpaid = any accepted
+    // (not received/cancelled) order still owing; paid = any accepted order fully paid.
+    const accepted = os.filter((o) => o.status !== "cancelled" && o.status !== "received");
+    const unpaid = accepted.some((o) => o.payment_status !== "paid");
+    const paid = !unpaid && accepted.some((o) => o.payment_status === "paid");
+    return { nw, ck, rd, sv, due, kots, guests: membersOf(t).length, unpaid, paid, billNo: s && s.bill_no, hasOrders: os.length > 0 };
   }
   // Every other tile → the slim summary. The summary has no KOT numbers (it's a manager RPC;
   // the waiter sees the KOT once they tap the table) — the grid renders `meta` instead. The
@@ -340,7 +347,9 @@ function tileHtml(i) {
   // tableAgg comes from its slice; the summary badge counts still match (same RPC mirror).
   const calls = summaryCallsOf(i), joiners = tile.pending || 0, reqsN = tile.reqs || 0;
   const called = (tile.hasCall || tile.hasReq);
-  const payCls = a.hasOrders ? (a.unpaid ? "pay-unpaid" : "pay-paid") : "";
+  // Three-way: red ring for an accepted-unpaid bill, green for accepted-paid, NOTHING for a
+  // brand-new order (was a 2-way ternary that wrongly painted new orders green/"paid").
+  const payCls = a.unpaid ? "pay-unpaid" : a.paid ? "pay-paid" : "";
   // Body differs by state: free tables get the big Open button; open tables
   // get guests + the meta line, and (once there are dishes) a progress bar + count pills.
   let body = "";
@@ -673,9 +682,9 @@ function renderPanel() {
   let foot = "";
   if (s) {
     const hasOrders = os.length > 0;
-    const payCls = hasOrders ? (a.unpaid ? "unpaid" : "paid") : "";
+    const payCls = a.unpaid ? "unpaid" : a.paid ? "paid" : "";
     const billInner = hasOrders
-      ? `<span class="bn">bill #${esc(a.billNo ?? "—")}</span>${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : "paid ✓"}</span>`
+      ? `<span class="bn">bill #${esc(a.billNo ?? "—")}</span>${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : a.paid ? "paid ✓" : "● new"}</span>`
       : `<span class="bn">no bill yet</span><span class="due">starts on first order</span>`;
     const attend = calls.length
       ? `<button class="attend ${calls.length > 1 ? "more" : ""}" data-attend="${esc(calls[0].id)}">🔔 ATTEND — ${esc(calls[0].note || "call")}${calls.length > 1 ? ` (+${calls.length - 1} more)` : ""}</button>`
