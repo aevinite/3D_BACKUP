@@ -3417,7 +3417,7 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm-brand .who { min-width: 0; }
 .adm-brand .who b { display: block; font-size: 14.5px; font-weight: 800; line-height: 1.15; color: #fff; }
 .adm-brand .who span { font-size: 11px; color: rgba(255,255,255,.5); }
-.adm-nav { display: flex; flex-direction: column; gap: 3px; }
+.adm-nav { display: flex; flex-direction: column; gap: 3px; flex: 1 1 auto; min-height: 0; }
 .adm-nav a {
   display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 11px;
   /* !important beats the global `a { color: inherit !important }` so the nav reads
@@ -3430,15 +3430,20 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm-nav a.active { background: var(--accent-grad); color: #fff !important; box-shadow: 0 8px 20px -8px var(--accent); }
 .adm-nav a.active i { color: #fff !important; opacity: 1; }
 /* F3: "Arrange" edit-mode + drag-to-reorder for the sidebar nav (ReorderableNav). */
+/* Arrange = a subtle FOOTER control at the bottom of the sidebar (owner 2026-06-27:
+   it looked bad up top). margin-top:auto floats it to the bottom of the flex column;
+   a faint top divider sets it apart from the real nav items; muted + smaller so it
+   recedes until needed. */
 .adm-nav-edit {
-  display: flex; align-items: center; gap: 12px; padding: 9px 13px; border-radius: 11px; width: 100%;
-  background: transparent; border: 1px dashed rgba(255,255,255,.18); color: rgba(255,255,255,.55) !important;
-  font-size: 12.5px; font-weight: 600; cursor: pointer; margin-bottom: 4px;
-  transition: background .15s, color .15s, border-color .15s;
+  display: flex; align-items: center; gap: 11px; padding: 8px 13px; border-radius: 9px; width: 100%;
+  margin-top: auto; border-top: 1px solid rgba(255,255,255,.07); padding-top: 11px;
+  background: transparent; border-left: none; border-right: none; border-bottom: none;
+  color: rgba(255,255,255,.42) !important; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  transition: background .15s, color .15s;
 }
-.adm-nav-edit i { width: 19px; text-align: center; font-size: 14px; }
-.adm-nav-edit:hover { background: rgba(255,255,255,.08); color: #fff !important; border-color: rgba(255,255,255,.3); }
-.adm-nav.editing .adm-nav-edit { background: var(--accent-grad); color: #fff !important; border-style: solid; border-color: transparent; }
+.adm-nav-edit i { width: 19px; text-align: center; font-size: 13px; }
+.adm-nav-edit:hover { background: rgba(255,255,255,.06); color: rgba(255,255,255,.85) !important; }
+.adm-nav-edit.editing { background: var(--accent-grad); color: #fff !important; border-top-color: transparent; }
 .adm-nav-drag {
   display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 11px; margin-bottom: 3px;
   color: rgba(255,255,255,.74); font-size: 14px; font-weight: 600;

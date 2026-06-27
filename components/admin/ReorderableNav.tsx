@@ -52,11 +52,6 @@ export default function ReorderableNav({ items, storageKey, pathname }: { items:
 
   return (
     <nav className={"adm-nav" + (editing ? " editing" : "")}>
-      <button type="button" className="adm-nav-edit" onClick={() => setEditing((v) => !v)}
-        title={editing ? "Done arranging" : "Arrange menu order"} aria-pressed={editing}>
-        <i className={`fas ${editing ? "fa-check" : "fa-arrows-up-down-left-right"}`} aria-hidden="true" />
-        <span className="lbl">{editing ? "Done" : "Arrange"}</span>
-      </button>
       {ordered.map((n) =>
         editing ? (
           <div key={n.href} className={"adm-nav-drag" + (dragHref === n.href ? " dragging" : "")}
@@ -76,6 +71,13 @@ export default function ReorderableNav({ items, storageKey, pathname }: { items:
           </Link>
         )
       )}
+      {/* Arrange lives at the BOTTOM as a subtle footer control — it's rarely used, so it
+          no longer clutters the top of the menu (owner 2026-06-27). */}
+      <button type="button" className={"adm-nav-edit" + (editing ? " editing" : "")} onClick={() => setEditing((v) => !v)}
+        title={editing ? "Done arranging" : "Arrange menu order"} aria-pressed={editing}>
+        <i className={`fas ${editing ? "fa-check" : "fa-arrows-up-down-left-right"}`} aria-hidden="true" />
+        <span className="lbl">{editing ? "Done" : "Arrange menu"}</span>
+      </button>
     </nav>
   );
 }
