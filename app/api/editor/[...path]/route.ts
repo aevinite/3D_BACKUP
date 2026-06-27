@@ -263,6 +263,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       });
     }
 
+    if (p === "summary") {
+      // TIER 1 of the two-tier Table view (mig 101, lfh_table_view_summary): a MINIMAL
+      // per-tile summary for the GRID — each tile's computed state/label/meta/counts/due/
+      // pay/badge-flags (NOT the heavy session/member/order_item rows), plus the small
+      // restaurant-wide aggregates the side panel + chimes need (pending calls / requests /
+      // joiners, blocklist, a diffable live-order count + the latest order's table). ~84 kB
+      // at 300 tables vs ~315 kB for the full bundle. The selected table's FULL detail still
+      // comes from /sessions?table=N (tier 2). ?table=N → just that ONE tile (targeted refetch,
+      // ~5 kB) for pollTables; no param → the whole-floor grid. Aggregates always returned.
+      const tbl = new URL(req.url).searchParams.get("table");
+      const { data, error } = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl || null });
+      if (error) throw new Error(error.message);
+      return ok(data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] });
+    }
+
     if (p === "sessions") {
       // ONE ROUND-TRIP (mig 100, lfh_floor_bundle): the whole floor — sessions + members +
       // items + pending requests + blocklist — is assembled SERVER-SIDE in a single DB call,
