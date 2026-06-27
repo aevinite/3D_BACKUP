@@ -63,6 +63,21 @@ const state = {
 // ---------- tiny helpers ----------
 // $  : shorthand for "find the first element matching this CSS selector".
 const $ = (s, r = document) => r.querySelector(s);
+
+// __lfhPerf: cheap, always-on perf counters so the floor's render cost can be measured at
+// scale (300 tables). fullRenders = full floor rebuilds (renderEditor on the Tables tab);
+// patches = incremental tile patches (patchFloorTiles); tilesPatched = how many tiles those
+// patches touched in total; lastMs = how long the most recent render/patch took; longTasks =
+// main-thread tasks >50ms (the freeze symptom). The PerformanceObserver no-ops where the API
+// is unavailable. Read it from the console to confirm a single-table breadcrumb PATCHES (not
+// full-renders) and that long tasks stay near zero under churn.
+window.__lfhPerf = window.__lfhPerf || { fullRenders: 0, patches: 0, tilesPatched: 0, lastMs: 0, longTasks: 0 };
+try {
+  if (typeof PerformanceObserver === "function") {
+    new PerformanceObserver((list) => { for (const e of list.getEntries()) if (e.duration > 50) window.__lfhPerf.longTasks++; })
+      .observe({ entryTypes: ["longtask"] });
+  }
+} catch {}
 // clone: make a deep, independent copy of an object (so editing the copy never
 // changes the original until we deliberately save). structuredClone is the
 // browser's native deep copy — much faster than the old JSON round-trip,
@@ -1822,8 +1837,11 @@ async function saveFeature(key, value) {
 function renderEditor() {
   const ed = $("#editor");
   if (state.tab === "tables") {
+    const _t0 = performance.now();
     ed.innerHTML = floorHtml();
     bindFloor();
+    window.__lfhPerf.fullRenders++;
+    window.__lfhPerf.lastMs = performance.now() - _t0;
     return;
   }
   if (state.tab === "log") {
@@ -2329,6 +2347,11 @@ function logDetailDialog(title, rows) {
 // Fetch the whole board in one call. `fromPoll` = silent (no error toast, and don't
 // stomp the editor while the owner is typing in an input).
 let lastBoardSig = ""; // last rendered board fingerprint — skip needless re-renders on poll
+// When the TARGETED realtime path (pollTables) runs, it sets this to the changed table
+// numbers so reconcileBoard's render step does an INCREMENTAL patchFloorTiles(those) instead
+// of a full renderEditor() — that's the fix for the 300-table freeze (one breadcrumb must not
+// rebuild the whole grid). Null = render full (initial load, full poll, tab switch, etc.).
+let targetedPatchTables = null;
 
 // ── Serve debounce ───────────────────────────────────────────────────────────
 // Marking dishes served one-by-one USED to refetch the whole board (3 network
@@ -2881,6 +2904,100 @@ function tableTileStateFromBoard(t) {
   };
 }
 
+// floorTileHtml(i): build the FULL outer HTML for ONE floor tile (table number i).
+// This is the SINGLE source of truth for a tile's markup — BOTH the full-floor render
+// (floorHtml's loop) AND the incremental patch (patchFloorTiles) call this, so a tile
+// drawn either way is byte-identical (no path-divergent rendering). The state/label/
+// meta/badges/quick all come from tableTileState(i) exactly as before.
+function floorTileHtml(i) {
+  const s = state.data.settings || {};
+  const sessionsOn = !!s.sessions_enabled;
+  const { st, label, meta, badges, counts, pay, done, hasNew, hasCall, hasReq, hasJoin } = tableTileState(i); // everything this tile needs
+  // Status progress bar (new→cooking→ready→served), same colours as the tablet's .tstrip.
+  const cTot = counts.nw + counts.ck + counts.rd + counts.sv;
+  const strip = cTot > 0 ? `<div class="ft-strip">${counts.nw ? `<i style="width:${(counts.nw / cTot) * 100}%;background:#f59e0b"></i>` : ""}${counts.ck ? `<i style="width:${(counts.ck / cTot) * 100}%;background:#4f9dff"></i>` : ""}${counts.rd ? `<i style="width:${(counts.rd / cTot) * 100}%;background:#ec4899"></i>` : ""}${counts.sv ? `<i style="width:${(counts.sv / cTot) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
+  // quick action(s) on the tile itself — no need to open the detail view.
+  // Show the ONE button that matches the table's situation right now.
+  let quick = "";
+  if ((st === "free" || st === "req") && sessionsOn) quick = `<button class="btn small primary ftq" data-quick-open="${i}">Open</button>`;
+  else if (hasNew) quick = `<button class="btn small primary ftq" data-quick-accept="${i}">Accept</button>`;
+  // Someone is ASKING at this table (a partner waiting to join, or a request on
+  // an occupied table) → an Attend button right on the tile (owner, 2026-06-12).
+  // It opens the table's panel, where the decision lives (OK/Transfer/✕/Ban) —
+  // a request needs a choice, so unlike a water call it can't be blind-resolved.
+  else if (hasJoin || hasReq) quick = `<button class="btn small primary ftq" data-quick-requests="${i}">Attend</button>`;
+  else if (done) quick = `<div class="ft-quick2"><button class="btn small ftq2" data-quick-restart="${i}" title="Restart — clear orders, keep table open">RST</button><button class="btn small primary ftq2" data-quick-close="${i}" title="Close & free the table">CLS</button></div>`;
+  // Served but unpaid → a one-tap "Mark paid" right on the tile (it confirms first).
+  else if (st === "bill") quick = `<button class="btn small primary ftq" data-quick-pay="${i}">💳 Mark paid</button>`;
+  else if (hasCall) quick = `<button class="btn small ftq" data-quick-attend="${i}">Attend</button>`;
+  // A faint chair watermark marks an OFF/free table (an empty seat) — a quiet,
+  // premium cue that the table is available.
+  const offIcon = st === "free" ? `<i class="fas fa-chair ft-officon" aria-hidden="true"></i>` : "";
+  return `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0">
+        ${offIcon}
+        <div class="ft-top"><span class="ft-num">${i}</span>${badges ? `<span class="ft-badges">${badges}</span>` : ""}</div>
+        <div class="ft-label">${esc(label)}</div><div class="ft-meta">${esc(meta)}</div>${strip}
+        ${quick ? `<div class="ft-quick">${quick}</div>` : ""}</div>`;
+}
+
+// floorReqCardHtml(): the "Requests" side-panel card (pending joiners + open/join/access
+// requests). Extracted so BOTH the full render (floorHtml) AND the incremental patch
+// (patchFloorTiles) build it from the SAME markup. It carries a stable id (#fcReq) so the
+// patch can swap just this node in place. Its buttons are handled by the ONE delegated
+// click handler (see bindFloorDelegation), so replacing the node never breaks them.
+function floorReqCardHtml() {
+  const s = state.data.settings || {};
+  if (!s.sessions_enabled) return "";
+  const reqs = state.summary.requests || [];
+  const joiners = state.summary.joiners || [];
+  const joinerRows = joiners.map((m) =>
+    `<div class="sx-req"><div class="sx-req-info"><span class="sx-tag sx-tag-join">join</span> ${esc(m.name || "Guest")} · join T${esc(m.table_number)}<small>${esc(timeAgo(m.joined_at))}</small></div><div class="sx-req-actions"><button class="btn small" data-mem-deny="${esc(m.id)}" title="Decline this join request">✕</button><button class="btn small danger" data-mem-ban="${esc(m.id)}" data-ban-phone="${esc(m.phone || "")}" title="Decline AND add to the blocklist">Ban</button><button class="btn small" data-mem-head="${esc(m.id)}" title="Make them the table's head — the current head is kicked">Transfer</button><button class="btn small primary" data-mem-approve="${esc(m.id)}">OK</button></div></div>`
+  ).join("");
+  const reqCount = reqs.length + joiners.length;
+  return `<div class="fc-card" id="fcReq"><h3>Requests <span class="sub">· ${reqCount}</span></h3>${reqCount ? joinerRows + reqs.map((r) => {
+    const who = esc(r.name || r.phone || "Someone");
+    const what = r.type === "open" ? `open T${esc(r.table_number)}` : r.type === "join" ? `join T${esc(r.table_number)}` : `access T${esc(r.table_number)}`;
+    // "access" = a guest asked for a WAITER to come over (e.g. their join was
+    // declined, or location failed) — so the quick action reads "✓ Attend",
+    // exactly like a water call, instead of an ambiguous "OK".
+    const okLabel = r.type === "open" ? "Open" : r.type === "access" ? "✓ Attend" : "OK";
+    return `<div class="sx-req"><div class="sx-req-info"><span class="sx-tag sx-tag-${esc(r.type)}">${esc(r.type)}</span> ${who} · ${what}<small>${esc(timeAgo(r.created_at))}</small></div><div class="sx-req-actions"><button class="btn small" data-req-deny="${esc(r.id)}">✕</button><button class="btn small primary" data-req-approve="${esc(r.id)}">${okLabel}</button></div></div>`;
+  }).join("") : `<div class="sx-empty">No pending requests.</div>`}</div>`;
+}
+
+// floorNeedsCardHtml(): the "Needs" side-panel card (active waiter calls). Same shared-builder
+// pattern as floorReqCardHtml — id #fcNeeds, buttons via the delegated handler.
+function floorNeedsCardHtml() {
+  const s = state.data.settings || {};
+  if (!s.sessions_enabled) return "";
+  const liveCalls = (state.summary.calls || []).filter((c) => !c.resolved);
+  return `<div class="fc-card" id="fcNeeds"><h3>Needs <span class="sub">· ${liveCalls.length}</span></h3>${liveCalls.length ? liveCalls.map((c) =>
+    `<div class="sx-req"><div class="sx-req-info">${callEmoji(c.note)} T${esc(c.table_number)} · ${esc(c.note || "Waiter")}<small>${esc(timeAgo(c.created_at))}</small></div><div class="sx-req-actions"><button class="btn small primary" data-call-attend="${esc(c.id)}">Done</button></div></div>`
+  ).join("") : `<div class="sx-empty">No active calls.</div>`}</div>`;
+}
+
+// floorStatsHtml(): the floor-wide stats strip (Occupied / To pay / Needs you). Computed by
+// looping tableTileState over EVERY table (cheap — no DOM) so the patch can refresh it without
+// rebuilding the grid. Shared by floorHtml and patchFloorTiles.
+function floorStatsHtml() {
+  const s = state.data.settings || {};
+  if (!s.sessions_enabled) return "";
+  let cachedN = parseInt(localStorage.getItem("lfh_editor_table_count"), 10);
+  if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
+  const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
+  let cOcc = 0, cPay = 0, cNew = 0, cCall = 0;
+  for (let i = 1; i <= n; i++) {
+    const { st, pay, hasNew, hasCall } = tableTileState(i);
+    if (st !== "free" && st !== "req") cOcc++;
+    if (pay === "red" || st === "bill") cPay++;
+    if (hasNew) cNew++;
+    if (hasCall) cCall++;
+  }
+  const pendingJoinersN = (state.summary.joiners || []).length;
+  const needsYou = cNew + cCall + (state.summary.requests || []).length + pendingJoinersN;
+  return `<div class="floor-stats"><div class="fstat"><div class="fstat-n">${cOcc}/${n}</div><div class="fstat-l">Occupied</div></div><div class="fstat warn"><div class="fstat-n">${cPay}</div><div class="fstat-l">To pay</div></div><div class="fstat alert"><div class="fstat-n">${needsYou}</div><div class="fstat-l">Needs you</div></div></div>`;
+}
+
 // floorHtml: build the whole unified floor — the grid of table tiles on the left
 // (with a legend and on-tile quick buttons) and a side panel on the right holding
 // the session toggles, café location, requests queue and blocklist.
@@ -2899,7 +3016,7 @@ function floorHtml() {
   if (s.table_count) { try { localStorage.setItem("lfh_editor_table_count", String(parseInt(s.table_count, 10))); } catch {} }
   // Side-panel queues now come from the slim SUMMARY aggregates (tiny — only pending rows),
   // not the full board (which is no longer fetched whole). Same shapes the cards expect.
-  const reqs = state.summary.requests || [];
+  // (Requests/joiners/calls live in the shared floorReqCardHtml/floorNeedsCardHtml builders.)
   const blocks = state.summary.blocklist || [];
 
   // legend — every state + its colour. ("Bill due" was removed: payment is
@@ -2930,48 +3047,16 @@ function floorHtml() {
   }
 
   let tiles = "";
-  let cOcc = 0, cPay = 0, cNew = 0, cCall = 0; // running tallies for the stats strip
   for (let i = 1; i <= n; i++) {
-    const { st, label, meta, badges, counts, pay, done, hasNew, hasCall, hasReq, hasJoin } = tableTileState(i); // everything this tile needs
-    // Status progress bar (new→cooking→ready→served), same colours as the tablet's .tstrip.
-    const cTot = counts.nw + counts.ck + counts.rd + counts.sv;
-    const strip = cTot > 0 ? `<div class="ft-strip">${counts.nw ? `<i style="width:${(counts.nw / cTot) * 100}%;background:#f59e0b"></i>` : ""}${counts.ck ? `<i style="width:${(counts.ck / cTot) * 100}%;background:#4f9dff"></i>` : ""}${counts.rd ? `<i style="width:${(counts.rd / cTot) * 100}%;background:#ec4899"></i>` : ""}${counts.sv ? `<i style="width:${(counts.sv / cTot) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
-    if (st !== "free" && st !== "req") cOcc++;   // occupied = open/seated/ordering (free & "wants in" don't count)
-    if (pay === "red" || st === "bill") cPay++;  // a bill still owed
-    if (hasNew) cNew++;                          // a new order waiting to be accepted
-    if (hasCall) cCall++;                        // a waiter call ringing
-    // quick action(s) on the tile itself — no need to open the detail view.
-    // Show the ONE button that matches the table's situation right now.
-    let quick = "";
-    if ((st === "free" || st === "req") && sessionsOn) quick = `<button class="btn small primary ftq" data-quick-open="${i}">Open</button>`;
-    else if (hasNew) quick = `<button class="btn small primary ftq" data-quick-accept="${i}">Accept</button>`;
-    // Someone is ASKING at this table (a partner waiting to join, or a request on
-    // an occupied table) → an Attend button right on the tile (owner, 2026-06-12).
-    // It opens the table's panel, where the decision lives (OK/Transfer/✕/Ban) —
-    // a request needs a choice, so unlike a water call it can't be blind-resolved.
-    else if (hasJoin || hasReq) quick = `<button class="btn small primary ftq" data-quick-requests="${i}">Attend</button>`;
-    else if (done) quick = `<div class="ft-quick2"><button class="btn small ftq2" data-quick-restart="${i}" title="Restart — clear orders, keep table open">RST</button><button class="btn small primary ftq2" data-quick-close="${i}" title="Close & free the table">CLS</button></div>`;
-    // Served but unpaid → a one-tap "Mark paid" right on the tile (it confirms first).
-    else if (st === "bill") quick = `<button class="btn small primary ftq" data-quick-pay="${i}">💳 Mark paid</button>`;
-    else if (hasCall) quick = `<button class="btn small ftq" data-quick-attend="${i}">Attend</button>`;
-    // A faint chair watermark marks an OFF/free table (an empty seat) — a quiet,
-    // premium cue that the table is available.
-    const offIcon = st === "free" ? `<i class="fas fa-chair ft-officon" aria-hidden="true"></i>` : "";
-    tiles += `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0">
-        ${offIcon}
-        <div class="ft-top"><span class="ft-num">${i}</span>${badges ? `<span class="ft-badges">${badges}</span>` : ""}</div>
-        <div class="ft-label">${esc(label)}</div><div class="ft-meta">${esc(meta)}</div>${strip}
-        ${quick ? `<div class="ft-quick">${quick}</div>` : ""}</div>`;
+    tiles += floorTileHtml(i); // SHARED tile builder — single source of truth (full render + patch)
   }
   // The header keeps ONLY the safe Refresh button. Open all / Close all used to
   // sit right beside it, styled the same — one fast click aimed at Refresh once
   // closed the entire floor (owner hit this 2026-06-11). They now live in the
   // side panel's "Dining sessions" card, well away from the speed-click zone.
-  // Stats strip — the whole floor's health at a glance (owner: see it without counting
-  // tiles). "Needs you" = new orders + ringing calls + open requests + waiting joiners.
-  const pendingJoinersN = (state.summary.joiners || []).length;
-  const needsYou = cNew + cCall + reqs.length + pendingJoinersN;
-  const statsStrip = sessionsOn ? `<div class="floor-stats"><div class="fstat"><div class="fstat-n">${cOcc}/${n}</div><div class="fstat-l">Occupied</div></div><div class="fstat warn"><div class="fstat-n">${cPay}</div><div class="fstat-l">To pay</div></div><div class="fstat alert"><div class="fstat-n">${needsYou}</div><div class="fstat-l">Needs you</div></div></div>` : "";
+  // Stats strip — the whole floor's health at a glance (Occupied / To pay / Needs you).
+  // Built by the shared floorStatsHtml() so the patch path can refresh it identically.
+  const statsStrip = floorStatsHtml();
   const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2></div>${statsStrip}${legend}<div class="ftile-grid">${tiles}</div></div>`;
 
   // side panel — everyday things FIRST (whole-floor open/close, requests, needs),
@@ -2994,36 +3079,13 @@ function floorHtml() {
       </div>
       <button class="btn small primary" id="fcSaveGeo">Save location</button></div>`;
 
-  // Pending JOINERS (partners waiting to be let into an open table) belong in this
-  // queue too (owner, 2026-06-12) — before this they only existed as a tiny 🙋
-  // badge on the tile. Each row offers the full set: ✕ decline, Ban (confirmed,
-  // declines AND blocklists), Transfer (they become the head — the current head
-  // is kicked; confirmed), and OK (approve into the table).
-  // Pending joiners now ship pre-collected in the summary (each already carries table_number).
-  const joiners = state.summary.joiners || [];
-  const joinerRows = joiners.map((m) =>
-    `<div class="sx-req"><div class="sx-req-info"><span class="sx-tag sx-tag-join">join</span> ${esc(m.name || "Guest")} · join T${esc(m.table_number)}<small>${esc(timeAgo(m.joined_at))}</small></div><div class="sx-req-actions"><button class="btn small" data-mem-deny="${esc(m.id)}" title="Decline this join request">✕</button><button class="btn small danger" data-mem-ban="${esc(m.id)}" data-ban-phone="${esc(m.phone || "")}" title="Decline AND add to the blocklist">Ban</button><button class="btn small" data-mem-head="${esc(m.id)}" title="Make them the table's head — the current head is kicked">Transfer</button><button class="btn small primary" data-mem-approve="${esc(m.id)}">OK</button></div></div>`
-  ).join("");
-  const reqCount = reqs.length + joiners.length;
-  const reqCard = sessionsOn ? `<div class="fc-card"><h3>Requests <span class="sub">· ${reqCount}</span></h3>${reqCount ? joinerRows + reqs.map((r) => {
-    const who = esc(r.name || r.phone || "Someone");
-    const what = r.type === "open" ? `open T${esc(r.table_number)}` : r.type === "join" ? `join T${esc(r.table_number)}` : `access T${esc(r.table_number)}`;
-    // "access" = a guest asked for a WAITER to come over (e.g. their join was
-    // declined, or location failed) — so the quick action reads "✓ Attend",
-    // exactly like a water call, instead of an ambiguous "OK".
-    const okLabel = r.type === "open" ? "Open" : r.type === "access" ? "✓ Attend" : "OK";
-    return `<div class="sx-req"><div class="sx-req-info"><span class="sx-tag sx-tag-${esc(r.type)}">${esc(r.type)}</span> ${who} · ${what}<small>${esc(timeAgo(r.created_at))}</small></div><div class="sx-req-actions"><button class="btn small" data-req-deny="${esc(r.id)}">✕</button><button class="btn small primary" data-req-approve="${esc(r.id)}">${okLabel}</button></div></div>`;
-  }).join("") : `<div class="sx-empty">No pending requests.</div>`}</div>` : "";
-
-  // Active waiter calls across all OPEN tables (water/napkin/clean…), one row each.
-  // This stays in sync with the tile emojis — both read state.data.calls and refresh
-  // on the same 1s poll, and "Done" here resolves the same call the tile shows.
-  // Active waiter calls come from the summary's aggregate (already only unresolved calls on
-  // open tables, restaurant-wide); no need to cross-check against the (now slim) board.
-  const liveCalls = (state.summary.calls || []).filter((c) => !c.resolved);
-  const needsCard = sessionsOn ? `<div class="fc-card"><h3>Needs <span class="sub">· ${liveCalls.length}</span></h3>${liveCalls.length ? liveCalls.map((c) =>
-    `<div class="sx-req"><div class="sx-req-info">${callEmoji(c.note)} T${esc(c.table_number)} · ${esc(c.note || "Waiter")}<small>${esc(timeAgo(c.created_at))}</small></div><div class="sx-req-actions"><button class="btn small primary" data-call-attend="${esc(c.id)}">Done</button></div></div>`
-  ).join("") : `<div class="sx-empty">No active calls.</div>`}</div>` : "";
+  // Pending JOINERS + open/join/access requests → the "Requests" card; active waiter
+  // calls → the "Needs" card. Both are now built by SHARED module-level functions
+  // (floorReqCardHtml / floorNeedsCardHtml) so the incremental patch path can refresh
+  // just these two cards in place with byte-identical markup. They carry stable ids
+  // (#fcReq / #fcNeeds) and their buttons are wired by the ONE delegated click handler.
+  const reqCard = floorReqCardHtml();
+  const needsCard = floorNeedsCardHtml();
 
   // Blocked list: device/phone/table bans, each with its reason; rows where the
   // banned guest left a number asking to be unblocked float to the TOP and are
@@ -3078,10 +3140,125 @@ function floorHtml() {
   return `<div class="floor-wrap">${main}<div class="floor-resizer" id="floorResizer" title="Drag to resize"></div><aside class="floor-side" style="width:${sideW}px;flex:0 0 ${sideW}px">${collapseBtn}${sideInner}</aside></div>`;
 }
 
-// bindFloor: wire up the unified floor after it's drawn — clicking a tile opens
-// its detail panel, the on-tile quick buttons do their one action, the side panel
-// toggles save settings, and the divider can be dragged to resize the side panel.
+// patchFloorTiles(tables): the INCREMENTAL update path. Instead of rebuilding all ~300 tiles
+// + re-binding ~300 listeners (the freeze at 300 tables), it replaces ONLY the named tiles'
+// nodes via the shared floorTileHtml builder, then refreshes just the small floor-wide bits
+// (the stats strip + the Requests/Needs queue cards) in place. The grid's .ftile-grid is
+// NOT rebuilt, and the delegated click handler lives on #editor (an ancestor that survives),
+// so replaced tile/card nodes need NO re-binding. If the grid/tile isn't present (different
+// tab, skeleton, or detail open), it falls back to a full renderEditor() so we never leave a
+// half-updated screen. Returns true if it patched, false if it fell back.
+function patchFloorTiles(tables) {
+  // The fallbacks below use loadSessions(true) — NOT a bare renderEditor() — because that's
+  // the exact render step this path replaces in reconcileBoard. loadSessions(true) does three
+  // things a bare renderEditor() drops: it preserves the in-panel detail's scroll, and it calls
+  // renderTablePanel() to refresh the COLLAPSED-MODE MODAL (which lives on document.body, outside
+  // #editor, so renderEditor alone never updates it → a stale modal until the 60s backup poll).
+  // It's fromPoll=true → no fetch, no recursion (the slice was already awaited before reconcile).
+  // Only valid on the Tables tab with the real grid drawn. Skeleton (pre-boardLoaded) or a
+  // missing grid → full render is the safe path.
+  const ed = $("#editor");
+  const grid = ed && ed.querySelector(".ftile-grid");
+  if (state.tab !== "tables" || !state.boardLoaded || !grid) { loadSessions(true); return false; }
+  // While a table's DETAIL is open (in-panel OR collapsed-mode modal), the detail node + its
+  // slice rows (and the modal) need the full render path to refresh — so patch isn't safe; fall
+  // back. (Churn while a single table is open is bounded — not the steady-state freeze case.)
+  if (detailTable() != null) { loadSessions(true); return false; }
+  const _t0 = performance.now();
+  let patched = 0;
+  for (const t of tables) {
+    const el = ed.querySelector('[data-floor-table="' + String(t) + '"]');
+    if (!el) { loadSessions(true); return false; } // a named tile isn't on the grid → safe full render
+    el.outerHTML = floorTileHtml(t); // SHARED builder → byte-identical to a full render's tile
+    patched++;
+  }
+  // Floor-wide bits that a single-table change can still move (occupancy counts, the queues):
+  // refresh ONLY those nodes in place — never the grid. Their buttons are delegated, so swapping
+  // the nodes can't orphan a listener.
+  const statsEl = ed.querySelector(".floor-stats");
+  if (statsEl) statsEl.outerHTML = floorStatsHtml();
+  const reqEl = ed.querySelector("#fcReq");
+  if (reqEl) reqEl.outerHTML = floorReqCardHtml();
+  const needsEl = ed.querySelector("#fcNeeds");
+  if (needsEl) needsEl.outerHTML = floorNeedsCardHtml();
+  // A patch draws the new summary WITHOUT updating loadSessions' lastBoardSig fingerprint.
+  // If a later FULL poll lands carrying the PREVIOUS summary (a wake/reconnect/platform event
+  // whose summary happens to match the pre-patch one), loadSessions(true) would see an unchanged
+  // sig and skip the redraw — leaving the screen on the patched state. Invalidate the sig so the
+  // next full poll always redraws once (cheaper than re-stringifying the summary here).
+  lastBoardSig = "";
+  window.__lfhPerf.patches++;
+  window.__lfhPerf.tilesPatched += patched;
+  window.__lfhPerf.lastMs = performance.now() - _t0;
+  return true;
+}
+
+// bindFloorDelegation: attach the floor's click handling ONCE on the stable #editor
+// container (it never gets replaced — renderEditor only ever rewrites its innerHTML).
+// Why delegation instead of per-tile onclick? At 300 tables the old bindFloor re-bound
+// ~300 listeners on EVERY render; with one delegated handler, patched/replaced tile nodes
+// (and the in-place-refreshed Requests/Needs cards) need NO re-binding — the listener lives
+// on the parent and finds the clicked target via .closest(). A boolean guard means repeated
+// renders never stack duplicate listeners.
+//
+// IMPORTANT: every data-attr handled here lives on a node that the PATCH path may replace
+// (the tiles, and the #fcReq / #fcNeeds cards). That's exactly why they MUST be delegated —
+// id-based handlers on those nodes would die the moment patchFloorTiles swaps them. The
+// id-based controls that the patch NEVER touches (Open all/Close all, the side toggle,
+// settings toggles, Save location, the Block input, the Blocked card's Unblock, the resizer,
+// and the selected-table detail panel) stay in bindFloor and are re-wired on full renders.
+let floorDelegationBound = false;
+function bindFloorDelegation() {
+  if (floorDelegationBound) return;
+  floorDelegationBound = true;
+  const ed = $("#editor");
+  ed.addEventListener("click", (e) => {
+    // Only act while the floor (Tables tab) is showing — #editor is shared by every tab.
+    if (state.tab !== "tables") return;
+    // The SELECTED-table detail panel lives INSIDE #editor too and reuses the same
+    // data-mem-*/data-req-*/data-call-attend attrs — but it's wired by bindTablePanel's
+    // own handlers (it has extra actions like Kick/Attend-all the floor cards don't). So if
+    // the click landed inside the detail panel, let those handlers own it — don't double-fire.
+    // (The collapsed-mode modal renders on document.body, outside #editor, so it never reaches
+    // here at all.)
+    if (e.target.closest("[data-table-detail]")) return;
+    // QUICK ACTIONS + queue-card buttons FIRST (they're nested inside the tile / cards);
+    // matching one and returning replicates the old stopPropagation so a quick button
+    // never ALSO triggers the tile-select below. Check most-specific targets, then the tile.
+    let b;
+    if ((b = e.target.closest("[data-quick-open]")))     { openTableSession(b.dataset.quickOpen); return; }
+    if ((b = e.target.closest("[data-quick-accept]")))   { acceptTableOrders(b.dataset.quickAccept); return; }
+    if ((b = e.target.closest("[data-quick-attend]")))   { attendTableCalls(b.dataset.quickAttend); return; }
+    if ((b = e.target.closest("[data-quick-requests]"))) { selectTable(b.dataset.quickRequests); return; }
+    if ((b = e.target.closest("[data-quick-restart]")))  { restartTable(b.dataset.quickRestart); return; }
+    if ((b = e.target.closest("[data-quick-close]")))    { closeTableQuick(b.dataset.quickClose); return; }
+    if ((b = e.target.closest("[data-quick-pay]")))      { markTablePaid(b.dataset.quickPay); return; }
+    // Requests card — joiner rows (member actions) + open/join/access requests.
+    if ((b = e.target.closest("[data-mem-approve]")))    { memberAction(b.dataset.memApprove, "approve"); return; }
+    if ((b = e.target.closest("[data-mem-deny]")))       { memberAction(b.dataset.memDeny, "remove"); return; }
+    if ((b = e.target.closest("[data-mem-head]")))       { makeHead(b.dataset.memHead); return; }
+    if ((b = e.target.closest("[data-mem-ban]")))        { banMember(b.dataset.memBan, b.dataset.banPhone); return; }
+    if ((b = e.target.closest("[data-req-approve]")))    { resolveRequest(b.dataset.reqApprove, "approved"); return; }
+    if ((b = e.target.closest("[data-req-deny]")))       { resolveRequest(b.dataset.reqDeny, "denied"); return; }
+    // Needs card — Done resolves a single waiter call.
+    if ((b = e.target.closest("[data-call-attend]")))    { attendCall(b.dataset.callAttend); return; }
+    // TILE SELECT last — only reached when no button above matched.
+    const tile = e.target.closest("[data-floor-table]");
+    if (tile) {
+      // F1: collapsed right panel → open a FULL-SCREEN popup; open panel → in-side detail.
+      if (state.floorSideCollapsed) openTablePanel(tile.dataset.floorTable);
+      else selectTable(tile.dataset.floorTable);
+    }
+  });
+}
+
+// bindFloor: wire up the unified floor after a FULL render — the once-attached delegated
+// click handler covers tiles + quick buttons + the Requests/Needs queue cards (so the
+// patch path never has to re-bind them); here we wire only the controls the patch never
+// touches (bulk open/close, the side toggle, settings, location, block, unblock, resizer,
+// and the selected-table detail panel).
 function bindFloor() {
+  bindFloorDelegation(); // attach the delegated tile/quick/queue handler ONCE
   const ed = $("#editor");
   // (The ↻ Refresh button was removed — the floor is live via realtime + the 60s backup poll,
   //  so a manual refresh was redundant and looked broken. Coordinator-relayed owner request.)
@@ -3090,35 +3267,12 @@ function bindFloor() {
   if (oa) oa.onclick = () => openAllTables();
   const ca = document.getElementById("floorCloseAll");
   if (ca) ca.onclick = () => closeAllTables();
-  ed.querySelectorAll("[data-floor-table]").forEach((t) => (t.onclick = () => {
-    // F1: collapsed right panel → open a FULL-SCREEN popup; open panel → in-side detail.
-    if (state.floorSideCollapsed) openTablePanel(t.dataset.floorTable);
-    else selectTable(t.dataset.floorTable);
-  }));
   // F1: collapse / expand the right floor panel (state persisted across reloads).
   const sideToggle = ed.querySelector("#floorSideToggle");
   if (sideToggle) sideToggle.onclick = () => { state.floorSideCollapsed = !state.floorSideCollapsed; lsSet("lfh_floor_side_collapsed", state.floorSideCollapsed ? "1" : "0"); renderEditor(); };
-  // quick actions on the tile itself — stopPropagation so they don't also open the detail panel
-  ed.querySelectorAll("[data-quick-open]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); openTableSession(b.dataset.quickOpen); }));
-  ed.querySelectorAll("[data-quick-accept]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); acceptTableOrders(b.dataset.quickAccept); }));
-  ed.querySelectorAll("[data-quick-attend]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); attendTableCalls(b.dataset.quickAttend); }));
-  // Tile "Attend" for a join/access request: open the table's panel (the request
-  // needs a decision — approve / transfer / decline / ban — not a blind resolve).
-  ed.querySelectorAll("[data-quick-requests]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); selectTable(b.dataset.quickRequests); }));
-  // The Requests card's joiner rows reuse the member actions (same data-attrs as
-  // the table panel, but bound here because these rows live in the side panel).
-  ed.querySelectorAll("[data-mem-approve]").forEach((b) => (b.onclick = () => memberAction(b.dataset.memApprove, "approve")));
-  ed.querySelectorAll("[data-mem-deny]").forEach((b) => (b.onclick = () => memberAction(b.dataset.memDeny, "remove")));
-  ed.querySelectorAll("[data-mem-head]").forEach((b) => (b.onclick = () => makeHead(b.dataset.memHead)));
-  ed.querySelectorAll("[data-mem-ban]").forEach((b) => (b.onclick = () => banMember(b.dataset.memBan, b.dataset.banPhone)));
-  ed.querySelectorAll("[data-quick-restart]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); restartTable(b.dataset.quickRestart); }));
-  ed.querySelectorAll("[data-quick-close]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); closeTableQuick(b.dataset.quickClose); }));
-  ed.querySelectorAll("[data-quick-pay]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); markTablePaid(b.dataset.quickPay); }));
-  ed.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => resolveRequest(b.dataset.reqApprove, "approved")));
-  ed.querySelectorAll("[data-req-deny]").forEach((b) => (b.onclick = () => resolveRequest(b.dataset.reqDeny, "denied")));
+  // The Blocked card's Unblock buttons — that card is NEVER touched by the patch path
+  // (unblock() routes through a full loadSessions()), so id-based binding is safe here.
   ed.querySelectorAll("[data-unblock]").forEach((b) => (b.onclick = () => unblock(b.dataset.unblock)));
-  // The "Needs" card's Done buttons resolve a single waiter call (in sync with the tiles).
-  ed.querySelectorAll("[data-call-attend]").forEach((b) => (b.onclick = () => attendCall(b.dataset.callAttend)));
   ed.querySelectorAll("[data-setting]").forEach((c) => (c.onchange = () => saveSetting(c.dataset.setting, c.checked)));
   const sg = document.getElementById("fcSaveGeo"); if (sg) sg.onclick = saveGeo;
   const add = document.getElementById("blkAdd");
@@ -4363,7 +4517,14 @@ function reconcileBoard() {
     const typing = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
     if (state.tab === "orders" && sig !== lastPollSig && !typing) { renderList(); renderEditor(); }
     lastPollSig = sig;
-    if (state.tab === "tables" && !floorOpsInFlight) loadSessions(true); // keep the live floor fresh
+    if (state.tab === "tables" && !floorOpsInFlight) {
+      // TARGETED realtime path (pollTables named specific tables) → patch JUST those tiles +
+      // the stats/queues, NOT the whole grid. Any other path (full poll, optimistic action,
+      // initial) → the full loadSessions(true) render. patchFloorTiles self-falls-back to a
+      // full render if the grid/tiles aren't present or a table detail is open.
+      if (targetedPatchTables && targetedPatchTables.length) patchFloorTiles(targetedPatchTables);
+      else loadSessions(true); // keep the live floor fresh
+    }
   }
 
   // new order alert (order_count is live orders only; the latest order's table comes
@@ -4458,7 +4619,12 @@ async function pollTables(tables) {
     }
   }
 
-  reconcileBoard(); // identical counts/chimes/redraw to the full poll
+  // Route reconcileBoard's RENDER step through the INCREMENTAL patch for just these tables
+  // (the chimes/alerts/counts are unchanged — only the floor's draw differs). Set the flag
+  // right before, clear it right after: reconcileBoard runs synchronously, so the full-poll
+  // path (pollOrders → reconcileBoard) can never see it set.
+  targetedPatchTables = tables.map(String);
+  try { reconcileBoard(); } finally { targetedPatchTables = null; }
 }
 
 // startOrderWatch: kick off the live polling. The first call sets the "baseline"
