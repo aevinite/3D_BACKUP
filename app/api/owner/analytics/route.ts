@@ -1,5 +1,5 @@
 // GET /api/owner/analytics — drill-down data for the owner dashboard charts.
-//   ?range=today|7d|30d|all  (window; default today)
+//   ?range=today|yesterday|7d|30d|all  (window; default today)
 //   &rid=<uuid>              (optional: restaurant scope; omit = group scope)
 //
 // Group scope  → { scope:'group', restaurantRevenue[], timeseries[] }
@@ -23,10 +23,13 @@ function windowFor(range: string): { from: string; to: string; bucket: string } 
   if (range === "all") return { from: "2020-01-01T00:00:00Z", to, bucket: "day" };
   if (range === "7d") return { from: new Date(now - 7 * DAY).toISOString(), to, bucket: "day" };
   if (range === "30d") return { from: new Date(now - 30 * DAY).toISOString(), to, bucket: "day" };
-  // today: 05:00 IST business-day start
-  const biz = new Date(now + 5.5 * 3600_000 - 5 * 3600_000); // shift to IST, step back 5h
-  const startUtc = Date.UTC(biz.getUTCFullYear(), biz.getUTCMonth(), biz.getUTCDate(), 5, 0, 0) - 5.5 * 3600_000;
-  return { from: new Date(startUtc).toISOString(), to, bucket: "hour" };
+  // today's 05:00 IST business-day start (shift to IST, step back 5h, floor to the day).
+  const biz = new Date(now + 5.5 * 3600_000 - 5 * 3600_000);
+  const todayStart = Date.UTC(biz.getUTCFullYear(), biz.getUTCMonth(), biz.getUTCDate(), 5, 0, 0) - 5.5 * 3600_000;
+  // yesterday: the full previous business day [yesterday 05:00 IST, today 05:00 IST).
+  if (range === "yesterday") return { from: new Date(todayStart - DAY).toISOString(), to: new Date(todayStart).toISOString(), bucket: "hour" };
+  // today (default): 05:00 IST business-day start → now.
+  return { from: new Date(todayStart).toISOString(), to, bucket: "hour" };
 }
 
 const num = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
