@@ -601,6 +601,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok(data || { opened: 0 });
     }
 
+    // sessions/close-all — close every CLOSEABLE open table in ONE round-trip (mig 103). Mirrors
+    // closeSession's guard (skips tables that owe money or are still cooking) + archiving; returns
+    // { closed, skipped, closed_tables } so the client can offer UNDO. force=false → same safety as
+    // the per-table close (won't force-close unpaid/cooking tables).
+    if (a === "sessions" && b === "close-all") {
+      const { data, error } = await sb.rpc("lfh_staff_close_all_tables", { p_restaurant_id: rid, p_force: false });
+      if (error) throw new Error(error.message);
+      await logAction("editor", "table_close_all", { detail: `closed ${(data && data.closed) || 0}, skipped ${(data && data.skipped) || 0}`, device_id: dev });
+      return ok(data || { closed: 0, skipped: 0, closed_tables: [] });
+    }
+
     // sessions/:id/close | auto-approve | shift
     // Uses the SHARED closeSession so the manager's rule is identical to the tablet's
     // (blocked on unpaid OR still-cooking unless force). The manager needs no PIN —

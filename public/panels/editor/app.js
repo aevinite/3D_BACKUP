@@ -2541,32 +2541,43 @@ async function openAllTables() {
 // closeAllTables: end EVERY open session at once (asks first — guests at those
 // tables can no longer order until reopened).
 async function closeAllTables() {
-  // Closing needs each open session's ID, which the slim summary doesn't carry — fetch the
-  // full board ONCE for this rare floor-wide action to get the open sessions to close.
-  let open;
+  // Open tables come from the SLIM summary (state.summary.tiles) — no whole-board fetch needed.
+  // A tile is "open" when it has a session: any state except free/req.
+  const tiles = state.summary.tiles || {};
+  const openTables = Object.keys(tiles).filter((t) => { const st = tiles[t].state; return st && st !== "free" && st !== "req"; });
+  if (!openTables.length) return toast("No open tables", "ok");
+  // Floor-wide = the scary red confirm so it can't be mistaken for the one-table popup.
+  if (!(await confirmDialog(`Close ALL ${openTables.length} open table${openTables.length > 1 ? "s" : ""}? Guests at them can't order until reopened.`, `Close all ${openTables.length}`, { floorwide: true }))) return;
+  // INSTANT: free every CLOSEABLE tile now (same guard the server uses — a table that owes money
+  // [pay red] or is still cooking [received/preparing counts] is NOT closeable, so leave it). One
+  // bulk call (mig 103) closes them server-side, then reconcile. floorOpsInFlight shields optimism.
+  const isBlocked = (t) => { const x = tiles[t] || {}; const c = x.counts || {}; return x.pay === "red" || (c.nw || 0) > 0 || (c.ck || 0) > 0; };
+  floorOpsInFlight++;
+  const nt = Object.assign({}, tiles);
+  for (const t of openTables) if (!isBlocked(t)) delete nt[t]; // dropped tile → renders as Free
+  state.summary = Object.assign({}, state.summary, { tiles: nt });
+  loadSessions(true); // render the optimistic frees immediately (no fetch)
   try {
-    const board = await api("GET", "/sessions");
-    open = (board.sessions || []).filter((s) => s.status === "open");
-  } catch (e) { return toast("Could not load tables: " + e.message, "err"); }
-  if (!open.length) return toast("No open tables", "ok");
-  // Floor-wide = the scary red confirm (see confirmDialog), so it can't be
-  // mistaken for the routine one-table popup when speed-clicking.
-  if (!(await confirmDialog(`Close ALL ${open.length} open table${open.length > 1 ? "s" : ""}? Guests at them can't order until reopened.`, `Close all ${open.length}`, { floorwide: true }))) return;
-  const tables = open.map((s) => String(s.table_number)); // remembered for UNDO
-  const results = await Promise.allSettled(open.map((s) => api("POST", "/sessions/" + s.id + "/close")));
-  const failed = results.filter((r) => r.status === "rejected").length;
-  await loadSessions();
-  if (failed) return toast(`Closed ${open.length - failed}, ${failed} failed`, "err");
-  // Gmail-style safety net: 8 seconds to take it back. UNDO reopens the same
-  // table numbers (fresh sessions — guests who were seated stay disconnected).
-  toast(`Closed ${tables.length} table${tables.length > 1 ? "s" : ""}`, "ok", {
-    label: "UNDO",
-    fn: async () => {
-      await Promise.allSettled(tables.map((tb) => api("POST", "/sessions/open", { table: tb })));
-      await loadSessions();
-      toast(`Reopened ${tables.length} table${tables.length > 1 ? "s" : ""}`, "ok");
-    },
-  }, 8000);
+    const res = await api("POST", "/sessions/close-all", {});
+    floorOpsInFlight--;
+    await loadSessions(); // reconcile to server truth
+    const closed = (res && res.closed) || 0, skipped = (res && res.skipped) || 0;
+    const closedTables = (res && res.closed_tables) || [];
+    if (!closed && skipped) return toast(`Couldn't close ${skipped} table${skipped > 1 ? "s" : ""} — they owe money or still have food cooking.`, "err");
+    // Gmail-style 8s UNDO: reopen exactly the tables we closed (fresh sessions).
+    toast(skipped ? `Closed ${closed}, left ${skipped} (unpaid/cooking)` : `Closed ${closed} table${closed > 1 ? "s" : ""}`, skipped ? "err" : "ok", closedTables.length ? {
+      label: "UNDO",
+      fn: async () => {
+        await Promise.allSettled(closedTables.map((tb) => api("POST", "/sessions/open", { table: tb })));
+        await loadSessions();
+        toast(`Reopened ${closedTables.length} table${closedTables.length > 1 ? "s" : ""}`, "ok");
+      },
+    } : undefined, 8000);
+  } catch (e) {
+    floorOpsInFlight--;
+    await loadSessions(); // reconcile back to truth on failure
+    toast("Could not close all: " + e.message, "err");
+  }
 }
 // closeSession: end a table's session. The SERVER now scopes the order cleanup to
 // this session and archives them (no client-side loop needed), and it BLOCKS the
