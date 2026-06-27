@@ -35,6 +35,12 @@ const ALLERGENS = [
 ];
 
 const state = {
+  // TWO-TIER FLOOR (mig 101, owner perf 2026-06-27): the GRID renders from the slim per-tile
+  // `summary` (state/label/counts/pay/badges only); the SELECTED table's full detail comes from
+  // its slice in `data` (sessions/members/orders/items/calls/requests). The table-agnostic bundle
+  // (settings/dishes/categories) also rides on the full summary load. This is why the tablet no
+  // longer ships the whole floor's order rows on every poll — it mirrors the manager exactly.
+  summary: { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] },
   data: { settings: null, sessions: [], members: [], orders: [], items: [], calls: [], dishes: [], categories: [], requests: [] },
   table: null,          // which table the panel is showing
   ordering: false,      // true while the waiter is building an order (freezes panel redraws)
@@ -181,57 +187,122 @@ function dishRowsOf(o) {
   return js.map((r) => ({ id: null, title: r.title || r.name, qty: r.qty || 1, status: r.status || o.status || "received", options: r.options, removed: r.removed, note: r.note, price: Number(r.price) || 0, fromDb: false }));
 }
 
-// Everything a tile needs about a table in one pass: dish counts by status,
-// KOT numbers, guests, and whether the bill is paid (drives the outline).
+// ── TIER 1: the slim per-tile summary (drives the GRID) ──────────────────────
+// summaryTile(t): the server-computed tile for table t (state/label/meta/counts/due/pay +
+// badge counts), or a synthetic "free" tile when the summary has none. The grid reads ONLY
+// this — never the full board — so an unselected table needs no order rows cached.
+function summaryTile(t) {
+  return (state.summary.tiles || {})[String(t)]
+    || { state: "free", label: "Free", meta: "tap to open", members: 0, pending: 0, counts: { nw: 0, ck: 0, rd: 0, sv: 0 }, due: 0, pay: "", hasNew: false, hasCall: false, hasReq: false, hasJoin: false, reqs: 0, calls: 0 };
+}
+// The per-restaurant waiter calls for table t (with their notes → the call emoji). Comes from
+// the summary's tiny calls[] list (only OPEN-session calls), NOT the full board.
+function summaryCallsOf(t) {
+  return (state.summary.calls || []).filter((c) => !c.resolved && String(c.table_number).trim() === String(t));
+}
+
+// tableAgg(t): a tile's display data. For the SELECTED table we still compute from its full
+// slice (state.data) so the detail + optimistic taps stay exact; for every OTHER tile we read
+// the slim summary. Same shape either way so renderFloor doesn't care which tier it got.
+//   { nw, ck, rd, sv, due, kots, guests, unpaid, paid, billNo, hasOrders }
 function tableAgg(t) {
-  const os = ordersOf(t), s = sessionOf(t);
-  let nw = 0, ck = 0, rd = 0, sv = 0, due = 0;
-  const kots = [];
-  os.forEach((o) => {
-    if (o.kot_no != null) kots.push(o.kot_no);
-    if (o.payment_status !== "paid") due += (Number(o.total) || 0) - (Number(o.discount) || 0);
-    dishRowsOf(o).forEach((r) => {
-      const q = r.qty || 1;
-      if (r.status === "served") sv += q; else if (r.status === "ready") rd += q; else if (r.status === "preparing") ck += q; else nw += q;
+  // SELECTED table with its slice loaded → live-from-board (mirrors the editor's tableTileState).
+  if (String(state.table) === String(t)
+      && (state.data.orders || []).some((o) => String(o.table_number) === String(t) || sessionOf(t))) {
+    const os = ordersOf(t), s = sessionOf(t);
+    let nw = 0, ck = 0, rd = 0, sv = 0, due = 0;
+    const kots = [];
+    os.forEach((o) => {
+      if (o.kot_no != null) kots.push(o.kot_no);
+      if (o.payment_status !== "paid") due += (Number(o.total) || 0) - (Number(o.discount) || 0);
+      dishRowsOf(o).forEach((r) => {
+        const q = r.qty || 1;
+        if (r.status === "served") sv += q; else if (r.status === "ready") rd += q; else if (r.status === "preparing") ck += q; else nw += q;
+      });
     });
-  });
-  const unpaid = os.some((o) => o.payment_status !== "paid");
-  return { os, nw, ck, rd, sv, due, kots, session: s, guests: membersOf(t).length, unpaid, paid: os.length > 0 && !unpaid, billNo: s && s.bill_no };
+    const unpaid = os.some((o) => o.payment_status !== "paid");
+    return { nw, ck, rd, sv, due, kots, guests: membersOf(t).length, unpaid, paid: os.length > 0 && !unpaid, billNo: s && s.bill_no, hasOrders: os.length > 0 };
+  }
+  // Every other tile → the slim summary. The summary has no KOT numbers (it's a manager RPC;
+  // the waiter sees the KOT once they tap the table) — the grid renders `meta` instead. The
+  // summary's `pay` is red ONLY for an ACCEPTED unpaid bill (a brand-new 'received' order rings
+  // nothing), matching the manager; this is a deliberate, documented change from the old tablet
+  // which rang red for any unpaid order.
+  const tile = summaryTile(t);
+  const c = tile.counts || { nw: 0, ck: 0, rd: 0, sv: 0 };
+  const unpaid = tile.pay === "red";
+  return {
+    nw: c.nw || 0, ck: c.ck || 0, rd: c.rd || 0, sv: c.sv || 0,
+    due: Number(tile.due) || 0, kots: [], guests: tile.members || 0,
+    unpaid, paid: tile.pay === "green",
+    billNo: null, hasOrders: (c.nw + c.ck + c.rd + c.sv) > 0 || tile.state === "bill" || tile.state === "done",
+    meta: tile.meta,
+  };
 }
 
-// The tile's colour/label, decided by the most urgent thing for the waiter: a
-// brand-new (unaccepted) dish, then READY-to-serve (pink — go carry it out!),
-// then cooking, then all-served, then just seated, then free.
+// The tile's colour/label — straight from the summary's computed state for non-selected tables,
+// or recomputed from the slice for the selected one (same precedence: new → ready → prep →
+// served/bill → seated/waiting → req → free).
 function tileState(t) {
-  const a = tableAgg(t);
-  if (a.nw > 0) return { cls: "new", label: "New order" };
-  if (a.rd > 0) return { cls: "ready", label: "Ready to serve" };
-  if (a.ck > 0) return { cls: "prep", label: "Preparing" };
-  // All dishes served: yellow "bill" tile while money is still due, plain "done" once paid.
-  if (a.os.length && a.sv > 0) return { cls: a.unpaid ? "bill" : "done", label: "Served" };
-  if (a.session) return a.guests ? { cls: "seated", label: "Seated" } : { cls: "waiting", label: "Open" };
-  // Free table, but a guest has asked to be let in → "Wants in" (amber glow), matching
-  // the manager. NOT a red ring — red is reserved for an UNPAID bill, so a red ring on
-  // a free/requested table is confusing. (owner, 2026-06-18)
-  if (reqsOf(t).length) return { cls: "req", label: "Wants in" };
-  return { cls: "free", label: "Free" };
+  if (String(state.table) === String(t)
+      && (state.data.orders || []).some((o) => String(o.table_number) === String(t) || sessionOf(t))) {
+    const a = tableAgg(t), s = sessionOf(t);
+    if (a.nw > 0) return { cls: "new", label: "New order" };
+    if (a.rd > 0) return { cls: "ready", label: "Ready to serve" };
+    if (a.ck > 0) return { cls: "prep", label: "Preparing" };
+    if (a.hasOrders && a.sv > 0) return { cls: a.unpaid ? "bill" : "done", label: "Served" };
+    if (s) return a.guests ? { cls: "seated", label: "Seated" } : { cls: "waiting", label: "Open" };
+    if (reqsOf(t).length) return { cls: "req", label: "Wants in" };
+    return { cls: "free", label: "Free" };
+  }
+  const tile = summaryTile(t);
+  return { cls: tile.state, label: tile.label };
 }
 
-// A table "needs attention" if it has a waiter call, a pending request, a brand-new
-// order to accept, or food sitting READY that the waiter must carry out.
-const needsAttention = (i) => { const a = tableAgg(i); return callsOf(i).length > 0 || reqsOf(i).length > 0 || a.nw > 0 || a.rd > 0; };
+// A table "needs attention" if it has a waiter call, a pending request, a brand-new order to
+// accept, or food sitting READY to carry out. Driven by the summary tile's badge flags (so it
+// works for every tile, not just the loaded one).
+function needsAttention(i) {
+  const tile = summaryTile(i);
+  return !!(tile.hasCall || tile.hasReq || tile.hasNew || (tile.counts && tile.counts.rd > 0));
+}
 
 function tableCount() { return Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12); }
+// Is table i OPEN (has a dining session / live orders)? Read from the summary tile state so it
+// works for EVERY tile, not just the loaded one — "free" and "req" are the only not-open states.
+function tileIsOpen(i) {
+  const s = summaryTile(i).state;
+  return s !== "free" && s !== "req";
+}
 // Tablet billing permission for an action (set by the manager in General settings):
 // 'off' (hidden — default) | 'on' (waiter can do it) | 'pin' (needs a manager PIN).
 const tperm = (k) => ((state.data.settings || {})[k] || "off");
+
+// selectTable(t): open table t's DETAIL. The grid only had the slim summary, so we pull table t's
+// FULL slice (orders/items/members/calls/…) before the detail can show real rows. Render once
+// immediately for instant feedback (the panel shows what's cached — often a quick skeleton), then
+// re-render after the slice lands. Mirrors the manager selecting a table. (owner 2026-06-27)
+async function selectTable(t) {
+  state.table = String(t);
+  state.ordering = false; state.cart = []; state.note = ""; state.dishSearch = "";
+  renderFloor(); renderPanel();         // instant feedback (selected tile highlights; detail fills in next)
+  // Stacked (phone/narrow) layout: the detail sits below the floor — jump to it.
+  if (window.matchMedia("(max-width: 760px)").matches) {
+    document.getElementById("panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  await ensureTableSlice(t);            // load this table's full detail rows
+  if (String(state.table) !== String(t)) return; // the waiter already moved on — don't clobber
+  lastSig = boardSig(state);            // adopt as baseline so the next poll doesn't re-flicker the detail
+  renderFloor();
+  if (!state.ordering) renderPanel();
+}
 
 // ── the floor ────────────────────────────────────────────────────────────────
 function renderFloor() {
   const n = tableCount();
   const filt = state.floorFilter || "all";
   let cNeeds = 0, cOpen = 0, cFree = 0;
-  for (let i = 1; i <= n; i++) { if (needsAttention(i)) cNeeds++; if (sessionOf(i)) cOpen++; else cFree++; }
+  for (let i = 1; i <= n; i++) { if (needsAttention(i)) cNeeds++; if (tileIsOpen(i)) cOpen++; else cFree++; }
   // The same filter set is shown two ways: as count chips beside the brand (wide
   // screens) and as the floor-nav row (narrow). Tapping either filters the floor.
   const filters = [["all", "All", n], ["needs", "⚠ Needs", cNeeds], ["open", "Active", cOpen], ["free", "Free", cFree]];
@@ -245,19 +316,26 @@ function renderFloor() {
   let html = "";
   for (let i = 1; i <= n; i++) {
     if (filt === "needs" && !needsAttention(i)) continue;
-    if (filt === "open" && !sessionOf(i)) continue;
-    if (filt === "free" && sessionOf(i)) continue;
-    const st = tileState(i), a = tableAgg(i);
-    const calls = callsOf(i), joiners = joinersOf(i).length, reqs = reqsOf(i);
-    const called = calls.length > 0 || reqs.length > 0;
-    const payCls = a.os.length ? (a.unpaid ? "pay-unpaid" : "pay-paid") : "";
+    if (filt === "open" && !tileIsOpen(i)) continue;
+    if (filt === "free" && tileIsOpen(i)) continue;
+    const st = tileState(i), a = tableAgg(i), tile = summaryTile(i);
+    // Badges/quick-action read the SUMMARY (works for every tile). The selected table's
+    // tableAgg comes from its slice; the summary badge counts still match (same RPC mirror).
+    const calls = summaryCallsOf(i), joiners = tile.pending || 0, reqsN = tile.reqs || 0;
+    const called = (tile.hasCall || tile.hasReq);
+    const payCls = a.hasOrders ? (a.unpaid ? "pay-unpaid" : "pay-paid") : "";
     // Body differs by state: free tables get the big Open button; open tables
-    // get guests + KOT, and (once there are dishes) a progress bar + count pills.
+    // get guests + the meta line, and (once there are dishes) a progress bar + count pills.
     let body = "";
     if (st.cls === "free" || st.cls === "req") {
       body = `<span class="tsub">${st.cls === "req" ? "asked to open" : "tap to open"}</span><span class="topen" data-quick="open" data-qt="${i}">Open</span>`;
     } else {
-      const kot = a.kots.length ? `KOT #${a.kots[a.kots.length - 1]}${a.kots.length > 1 ? ` +${a.kots.length - 1}` : ""}` : "no order yet";
+      // KOT # rides on the full slice only (the summary RPC carries no KOT — it's the shared
+      // manager RPC). For the selected table we show "KOT #…"; for every other tile we show the
+      // summary's meta line ("x/y served · ₹z due" / "n orders"), exactly like the manager.
+      const sub = a.kots.length
+        ? `KOT #${a.kots[a.kots.length - 1]}${a.kots.length > 1 ? ` +${a.kots.length - 1}` : ""}`
+        : (a.meta || (a.guests ? "" : "no order yet"));
       const total = a.nw + a.ck + a.rd + a.sv;
       const strip = total > 0 ? `<div class="tstrip">${a.nw ? `<i style="width:${(a.nw / total) * 100}%;background:#f59e0b"></i>` : ""}${a.ck ? `<i style="width:${(a.ck / total) * 100}%;background:#4f9dff"></i>` : ""}${a.rd ? `<i style="width:${(a.rd / total) * 100}%;background:#ec4899"></i>` : ""}${a.sv ? `<i style="width:${(a.sv / total) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
       const pills = total > 0 ? `<div class="tpills">${a.nw ? `<span class="tpill nw">${a.nw} new</span>` : ""}${a.ck ? `<span class="tpill ck">${a.ck} cooking</span>` : ""}${a.rd ? `<span class="tpill rd">${a.rd} ready</span>` : ""}${a.sv ? `<span class="tpill sv">${a.sv} served</span>` : ""}</div>` : "";
@@ -267,10 +345,10 @@ function renderFloor() {
       if (a.nw > 0) quick = `<span class="tacc" data-quick="accept" data-qt="${i}">✓ Accept</span>`;
       else if (called || joiners) quick = `<span class="tatt" data-quick="attend" data-qt="${i}">Attend</span>`;
       else if (st.cls === "bill" && tperm("tablet_mark_paid") !== "off") quick = `<span class="tpay" data-quick="pay" data-qt="${i}">💳 Mark paid</span>`;
-      body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${kot}</span>${strip}${pills}${quick}`;
+      body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${esc(sub)}</span>${strip}${pills}${quick}`;
     }
     html += `<button class="tile t-${st.cls} ${payCls} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
-      <span class="tbadges">${calls.length ? `<em class="b-call" title="${esc(calls.map((c) => c.note || "call").join(", "))}">${[...new Set(calls.map((c) => callIcon(c.note)))].join("")}</em>` : ""}${reqs.length ? `<em class="b-req">📨${reqs.length}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
+      <span class="tbadges">${calls.length ? `<em class="b-call" title="${esc(calls.map((c) => c.note || "call").join(", "))}">${[...new Set(calls.map((c) => callIcon(c.note)))].join("")}</em>` : ""}${reqsN ? `<em class="b-req">📨${reqsN}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
       <span class="tnum">${i}</span>
       <span class="tlabel">${st.label}</span>
       ${body}
@@ -279,15 +357,7 @@ function renderFloor() {
   $("#tiles").innerHTML = html || `<div class="muted" style="padding:14px">No tables here right now.</div>`;
 
   document.querySelectorAll(".fnav, .cchip").forEach((b) => (b.onclick = () => { state.floorFilter = b.dataset.filter; renderFloor(); }));
-  document.querySelectorAll(".tile[data-t]").forEach((b) => (b.onclick = () => {
-    state.table = b.dataset.t;
-    state.ordering = false; state.cart = []; state.note = ""; state.dishSearch = "";
-    renderFloor(); renderPanel();
-    // Stacked (phone/narrow) layout: the detail sits below the floor — jump to it.
-    if (window.matchMedia("(max-width: 760px)").matches) {
-      document.getElementById("panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  }));
+  document.querySelectorAll(".tile[data-t]").forEach((b) => (b.onclick = () => selectTable(b.dataset.t)));
   // The big "Open" button on a free tile (stopPropagation so it doesn't also
   // select the tile underneath).
   document.querySelectorAll(".topen[data-quick='open']").forEach((q) => (q.onclick = (e) => {
@@ -296,21 +366,23 @@ function renderFloor() {
   }));
   // Quick "Accept" on the tile — accept every new order for the table in one tap.
   // Optimistic (instant), reusing the same helper the Accept-all button uses.
-  document.querySelectorAll(".tacc[data-quick='accept']").forEach((q) => (q.onclick = (e) => {
+  document.querySelectorAll(".tacc[data-quick='accept']").forEach((q) => (q.onclick = async (e) => {
     e.stopPropagation();
+    await ensureTableSlice(q.dataset.qt); // load the table's orders first (grid has only the slim summary)
     optimisticAccept(ordersOf(q.dataset.qt).filter((o) => o.status === "received").map((o) => o.id));
   }));
   // Quick "Attend" — open the table's detail to handle the call / join request.
   document.querySelectorAll(".tatt[data-quick='attend']").forEach((q) => (q.onclick = (e) => {
     e.stopPropagation();
-    state.table = q.dataset.qt; state.ordering = false; renderFloor(); renderPanel();
-    if (window.matchMedia("(max-width: 760px)").matches) document.getElementById("panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    selectTable(q.dataset.qt);
   }));
   // Quick "Mark paid" on a served-but-unpaid tile — same confirm + whole-table
   // pay as the detail panel's "Mark bill paid", without opening the table.
   document.querySelectorAll(".tpay[data-quick='pay']").forEach((q) => (q.onclick = async (e) => {
     e.stopPropagation();
-    const t = q.dataset.qt, a = tableAgg(t);
+    const t = q.dataset.qt;
+    await ensureTableSlice(t);  // load the table's orders so billNo/due + optimisticPay have real rows
+    const a = tableAgg(t);
     if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
       payBill(t);
   }));
@@ -396,7 +468,10 @@ function renderPanel() {
   if (!state.table) { p.innerHTML = `<div class="empty">Tap a table to see it — or to take an order for it.</div>`; return; }
   if (state.ordering) { renderOrderMode(); return; }
   const t = state.table, s = sessionOf(t), a = tableAgg(t);
-  const os = a.os, calls = callsOf(t), joiners = joinersOf(t), members = s ? membersOf(t) : [], reqs = reqsOf(t);
+  // renderPanel only ever draws the SELECTED table, whose full slice is loaded — so read its
+  // orders straight from the slice (tableAgg no longer carries `os`, which would be empty for an
+  // unselected table anyway). calls/joiners/members/reqs likewise come from the loaded slice.
+  const os = ordersOf(t), calls = callsOf(t), joiners = joinersOf(t), members = s ? membersOf(t) : [], reqs = reqsOf(t);
 
   const reqRows = reqs.map((r) => `<div class="row"><span>📨 ${r.type === "open" ? "Asked to open" : "Asked for access"}${r.name ? ` · ${esc(r.name)}` : ""}</span><span class="reqbtns"><button class="btn small primary" data-req-approve="${esc(r.id)}">Approve</button><button class="btn small" data-req-deny="${esc(r.id)}">Deny</button></span></div>`).join("");
   const joinRows = joiners.map((m) => `<div class="row"><span>🙋 ${esc(m.name || "Guest")} wants to join</span><button class="btn small primary" data-approve="${esc(m.id)}">Approve</button></div>`).join("");
@@ -661,7 +736,7 @@ function advanceDish(id, cur) {
   if (it) it.status = next;            // optimistic — the pill flips instantly
   // Adopt this state as the baseline so a poll that arrives with the SAME
   // (server-confirmed) data won't repaint the panel under the waiter's finger.
-  lastSig = boardSig(state.data);
+  lastSig = boardSig(state);
   renderFloor();
   if (!state.ordering) renderPanel();
   // Fire-and-forget; reconcile once after the taps stop (not per tap).
@@ -683,7 +758,7 @@ function flipOrders(orderIds, { from, to, orderStatus }) {
     items.forEach((it) => { if (it.order_id === oid && (from ? it.status === from : it.status !== "served")) it.status = to; });
     if (o && Array.isArray(o.items)) o.items = o.items.map((i) => ((from ? i.status === from : i.status !== "served") ? { ...i, status: to } : i));
   });
-  lastSig = boardSig(state.data);      // adopt as baseline so a poll can't flicker it back
+  lastSig = boardSig(state);           // adopt as baseline so a poll can't flicker it back
   renderFloor();
   if (!state.ordering) renderPanel();
 }
@@ -707,7 +782,9 @@ function optimisticServeAll(orderIds) {
 function renderShiftPicker(t, s) {
   const n = tableCount();
   const free = [];
-  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !sessionOf(i)) free.push(i); }
+  // FREE = not open, read from the summary (tileIsOpen) — works for every tile, not just the
+  // selected one whose slice is cached. (Two-tier: the grid no longer holds every table's session.)
+  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !tileIsOpen(i)) free.push(i); }
   const btns = free.length
     ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">Table ${i}</button>`).join("")
     : `<div class="muted">No free tables to shift to.</div>`;
@@ -770,6 +847,39 @@ async function runOptimistic(mutate, fn) {
 }
 
 const act = async (fn) => { try { await fn(); await load(); } catch (e) { toast("Failed: " + e.message, false); } };
+
+// ensureTableSlice(t): make sure table t's FULL slice (sessions/orders/items/calls/…) is in the
+// local cache before a tile QUICK-ACTION on a NON-selected table runs. The grid renders from the
+// slim summary, so an unselected table has NO order rows cached — and Accept/Mark-paid need them
+// (the ids to act on, the due/billNo to confirm). Mirrors the editor's ensureTableSlice. The
+// SELECTED table's slice is already kept fresh by load(); best-effort (a fetch blip just no-ops).
+async function ensureTableSlice(t) {
+  // Already have this table's rows cached (orders OR an open session)? Nothing to fetch.
+  if ((state.data.orders || []).some((o) => String(o.table_number) === String(t))
+      || (state.data.sessions || []).some((s) => String(s.table_number) === String(t))) return;
+  try {
+    const slice = await api("GET", "/state?table=" + encodeURIComponent(t));
+    const tset = String(t);
+    const dedupeById = (arr) => { const m = new Map(); for (const x of arr) if (x && x.id != null) m.set(x.id, x); return [...m.values()]; };
+    const d = state.data || {};
+    const freshSessions = slice.sessions || [];
+    const purgeSids = new Set();
+    for (const s of (d.sessions || [])) if (String(s.table_number) === tset) purgeSids.add(s.id);
+    for (const s of freshSessions) purgeSids.add(s.id);
+    const freshOrders = slice.orders || [];
+    const purgeOids = new Set();
+    for (const o of (d.orders || [])) if (String(o.table_number) === tset) purgeOids.add(o.id);
+    for (const o of freshOrders) purgeOids.add(o.id);
+    state.data = Object.assign({}, d, {
+      sessions: dedupeById((d.sessions || []).filter((s) => String(s.table_number) !== tset).concat(freshSessions)),
+      orders: dedupeById((d.orders || []).filter((o) => String(o.table_number) !== tset).concat(freshOrders)),
+      members: dedupeById((d.members || []).filter((m) => !purgeSids.has(m.session_id)).concat(slice.members || [])),
+      items: dedupeById((d.items || []).filter((it) => !purgeOids.has(it.order_id)).concat(slice.items || [])),
+      calls: dedupeById((d.calls || []).filter((c) => String(c.table_number) !== tset).concat(slice.calls || [])),
+      requests: dedupeById((d.requests || []).filter((r) => String(r.table_number) !== tset).concat(slice.requests || [])),
+    });
+  } catch { /* leave cache as-is; the action then no-ops rather than throwing */ }
+}
 
 // Open a table INSTANTLY (mirrors the manager): drop a pending "open" session into
 // local state + repaint NOW, then create it on the server and reconcile. On failure
@@ -1074,16 +1184,28 @@ async function sendOrder() {
 // churn (last_activity_at ticks constantly; excluding it is what keeps this cheap).
 const RT_VOLATILE = new Set(["last_activity_at", "updated_at", "cart_updated_at", "served_at"]);
 const stableRow = (row) => { const o = {}; for (const k in (row || {})) if (!RT_VOLATILE.has(k)) o[k] = row[k]; return o; };
+// TWO-TIER fingerprint (mirrors the editor's loadSessions sig): the GRID draws from the slim
+// `state.summary`, and the DETAIL draws from the selected table's full slice rows. So we hash
+// BOTH — the whole summary (tiles + side aggregates) PLUS the selected table's sessions/orders/
+// items/members/calls/requests. CRITICAL: after the two-tier switch the unselected tables have
+// no rows in state.data, so hashing only state.data (the old code) would NEVER repaint the grid
+// on a summary change. The summary is server-computed and already minimal, so we hash it whole;
+// the per-table detail rows still go through stableRow to drop heartbeat churn. (owner 2026-06-27)
 function boardSig(d) {
-  return JSON.stringify([
-    (d.sessions || []).map(stableRow),
-    (d.orders || []).map(stableRow),
-    (d.items || []).map(stableRow),
-    (d.calls || []).map(stableRow),
-    (d.members || []).map(stableRow),
-    (d.requests || []).map(stableRow),
-    stableRow(d.settings || {}),
-  ]);
+  const t = d.table != null ? String(d.table) : null;
+  const data = d.data || {};
+  // The selected table's slice: sessions/orders/calls/requests by table_number; members/items
+  // ride along (small once only one table's slice is loaded) so a detail edit (note/qty/allergen)
+  // still flips the sig and repaints the open detail panel.
+  const selRows = t == null ? [] : [
+    (data.sessions || []).filter((s) => String(s.table_number) === t).map(stableRow),
+    (data.orders || []).filter((o) => String(o.table_number) === t).map(stableRow),
+    (data.calls || []).filter((c) => String(c.table_number) === t).map(stableRow),
+    (data.requests || []).filter((r) => String(r.table_number) === t).map(stableRow),
+    (data.members || []).map(stableRow),
+    (data.items || []).map(stableRow),
+  ];
+  return JSON.stringify([d.summary || {}, t, selRows, stableRow(data.settings || {})]);
 }
 let lastSig = null;
 // Every load() gets a rising ticket; only the most-recently-STARTED fetch is
@@ -1123,53 +1245,72 @@ function setRestName(r) {
 // session/order, all dedup'd by id), then runs the SAME boardSig/render path as load(). ANY
 // surprise → full load() (safe fallback). The tablet has NO chime, so there's no baseline to
 // preserve here. (owner 2026-06-26 — egress cut; mirrors the manager's pollTables.)
+// mergeSelectedSlice(t, slice): merge ONE table's FULL detail slice (sessions/members/orders/
+// items/calls/requests) into state.data, so the helpers the DETAIL panel reads (ordersOf /
+// dishRowsOf / membersOf / callsOf …) return real rows for table t. The grid never needs this —
+// it renders from the slim summary; only the selected table (and a quick-action target via
+// ensureTableSlice) pulls full rows. Drops the table's old rows + adds the fresh, dedup'd by id.
+function mergeSelectedSlice(t, slice) {
+  const tset = String(t);
+  const d = state.data || {};
+  const dedupeById = (arr) => { const m = new Map(); for (const x of arr) if (x && x.id != null) m.set(x.id, x); return [...m.values()]; };
+  const freshSessions = (slice && slice.sessions) || [];
+  const purgeSids = new Set();
+  for (const s of (d.sessions || [])) if (String(s.table_number) === tset) purgeSids.add(s.id);
+  for (const s of freshSessions) purgeSids.add(s.id);
+  const freshOrders = (slice && slice.orders) || [];
+  const purgeOids = new Set();
+  for (const o of (d.orders || [])) if (String(o.table_number) === tset) purgeOids.add(o.id);
+  for (const o of freshOrders) purgeOids.add(o.id);
+  state.data = Object.assign({}, d, {
+    sessions: dedupeById((d.sessions || []).filter((s) => String(s.table_number) !== tset).concat(freshSessions)),
+    orders: dedupeById((d.orders || []).filter((o) => String(o.table_number) !== tset).concat(freshOrders)),
+    members: dedupeById((d.members || []).filter((m) => !purgeSids.has(m.session_id)).concat((slice && slice.members) || [])),
+    items: dedupeById((d.items || []).filter((it) => !purgeOids.has(it.order_id)).concat((slice && slice.items) || [])),
+    calls: dedupeById((d.calls || []).filter((c) => String(c.table_number) !== tset).concat((slice && slice.calls) || [])),
+    requests: dedupeById((d.requests || []).filter((r) => String(r.table_number) !== tset).concat((slice && slice.requests) || [])),
+  });
+}
+
+// loadTables(tables): TARGETED refetch — patch ONLY the named tables' SLIM tiles (/summary?table=N,
+// ~5 kB each) into state.summary.tiles, plus refresh the tiny restaurant-wide aggregates (calls/
+// requests/joiners/blocklist) the side panel + badges need. If the SELECTED table is among the
+// changed ones, ALSO re-pull its FULL detail slice (/state?table=N) so the open detail stays
+// correct. This replaces the old "re-read the whole floor on every breadcrumb" — mirrors the
+// manager's pollTables. ANY surprise → full load() (safe fallback). (owner 2026-06-27 — two-tier)
 async function loadTables(tables) {
   if (!tables || !tables.length) return load();
   const seq = ++loadSeq;
-  let slices;
+  const sel = state.table != null ? String(state.table) : null;
+  let tileResps, selSlice;
   try {
-    slices = await Promise.all(tables.map((t) => api("GET", "/state?table=" + encodeURIComponent(t))));
+    [tileResps, selSlice] = await Promise.all([
+      Promise.all(tables.map((t) => api("GET", "/summary?table=" + encodeURIComponent(t)))),
+      (sel != null && tables.map(String).includes(sel)) ? api("GET", "/state?table=" + encodeURIComponent(sel)) : Promise.resolve(null),
+    ]);
   } catch (e) { return load(); }        // network/parse blip → safe full reload
   if (seq !== loadSeq) return;          // a newer refresh started — drop this stale snapshot
 
-  const d = state.data || {};
-  const tset = new Set(tables.map(String));
-  // Dedup by row id (fresh row wins). The drop/add keys orders/calls/requests by table_number,
-  // members by session_id, items by order_id; this guarantees no row appears twice even if a
-  // shift left a cached row's table_number disagreeing with the server.
-  const dedupeById = (arr) => { const m = new Map(); for (const x of arr) if (x && x.id != null) m.set(x.id, x); return [...m.values()]; };
-  const slice = (key) => slices.flatMap((s) => (s && s[key]) || []);
+  // Patch each changed table's tile into the cached summary; a table that's now gone from the
+  // server's tile set (e.g. dropped below table_count) is set to nothing so it renders "free".
+  const tiles = Object.assign({}, state.summary.tiles || {});
+  tileResps.forEach((resp, i) => {
+    const t = String(tables[i]);
+    const tile = resp && resp.tiles ? resp.tiles[t] : null;
+    if (tile) tiles[t] = tile; else delete tiles[t];
+  });
+  // The restaurant-wide aggregates are returned fresh on EVERY targeted call (the RPC always
+  // ships them); take the last response's so the side panel + badges stay current.
+  const agg = tileResps[tileResps.length - 1] || {};
+  state.summary = Object.assign({}, state.summary, { tiles }, {
+    order_count: agg.order_count ?? state.summary.order_count,
+    latest_order_table: agg.latest_order_table ?? state.summary.latest_order_table,
+    calls: agg.calls || [], requests: agg.requests || [], joiners: agg.joiners || [], blocklist: agg.blocklist || [],
+  });
+  // Refresh the selected table's full detail slice if it changed.
+  if (sel != null && selSlice) mergeSelectedSlice(sel, selSlice);
 
-  // SESSIONS — drop the changed tables' sessions, add the slice's. The set of session ids
-  // belonging to the changed tables (old cached ∪ fresh) keys the members/items purge so a
-  // closed/shifted-away session's members+items are dropped too.
-  const freshSessions = slice("sessions");
-  const purgeSids = new Set();
-  for (const s of (d.sessions || [])) if (tset.has(String(s.table_number))) purgeSids.add(s.id);
-  for (const s of freshSessions) purgeSids.add(s.id);
-  const sessions = dedupeById((d.sessions || []).filter((s) => !tset.has(String(s.table_number))).concat(freshSessions));
-
-  // ORDERS — drop by table_number. Also collect the changed tables' order ids (old ∪ fresh)
-  // to purge their items, so an order that moved/cleared off the table strands no dish rows.
-  const freshOrders = slice("orders");
-  const purgeOids = new Set();
-  for (const o of (d.orders || [])) if (tset.has(String(o.table_number))) purgeOids.add(o.id);
-  for (const o of freshOrders) purgeOids.add(o.id);
-  const orders = dedupeById((d.orders || []).filter((o) => !tset.has(String(o.table_number))).concat(freshOrders));
-
-  // MEMBERS — drop by (changed) session id, add the slice's.
-  const members = dedupeById((d.members || []).filter((m) => !purgeSids.has(m.session_id)).concat(slice("members")));
-  // ITEMS — drop by (changed) order id, add the slice's. order_id keying (not session_id)
-  // keeps today's closed-session items correct, same as the kitchen.
-  const items = dedupeById((d.items || []).filter((it) => !purgeOids.has(it.order_id)).concat(slice("items")));
-  // CALLS / REQUESTS — drop by table_number, add the slice's.
-  const calls = dedupeById((d.calls || []).filter((c) => !tset.has(String(c.table_number))).concat(slice("calls")));
-  const requests = dedupeById((d.requests || []).filter((r) => !tset.has(String(r.table_number))).concat(slice("requests")));
-
-  // Keep the table-agnostic collections (settings/dishes/categories/restaurant) untouched.
-  state.data = Object.assign({}, d, { sessions, orders, members, items, calls, requests });
-
-  const sig = boardSig(state.data);
+  const sig = boardSig(state);
   if (sig === lastSig) return;          // nothing visible changed — don't repaint
   lastSig = sig;
   renderFloor();
@@ -1178,14 +1319,33 @@ async function loadTables(tables) {
 
 async function load() {
   const seq = ++loadSeq;
-  const data = await api("GET", "/state");
+  const sel = state.table != null ? String(state.table) : null;
+  // TIER 1: the slim summary drives the GRID + side aggregates + the table-agnostic bundle
+  // (settings/dishes/categories/restaurant). TIER 2: if a table's detail is open, ALSO fetch its
+  // full slice so the detail renders complete order/member rows. The grid never needs the slice.
+  const [summary, selSlice] = await Promise.all([
+    api("GET", "/summary"),
+    sel != null ? api("GET", "/state?table=" + encodeURIComponent(sel)) : Promise.resolve(null),
+  ]);
   if (seq !== loadSeq) return;          // a newer refresh started — this one is stale, drop it
-  state.data = data;
+  // Split the full-summary response into the per-tile summary (+ aggregates) and the agnostic bundle.
+  const { settings, dishes, categories, restaurant, ...summaryOnly } = summary || {};
+  state.summary = summaryOnly;
+  state.data = Object.assign({}, state.data, {
+    settings: settings ?? null,
+    dishes: dishes || [],
+    categories: categories || [],
+    restaurant: restaurant ?? null,
+    // Stale per-table detail rows from a previously-selected table are harmless (the grid ignores
+    // state.data; the detail re-pulls below), but we clear them so a closed table can't linger.
+    sessions: [], members: [], orders: [], items: [], calls: [], requests: [],
+  });
+  if (sel != null && selSlice) mergeSelectedSlice(sel, selSlice);
   // Show WHICH restaurant this panel is scoped to (multi-tenant). Set here in load()
   // — NOT in renderFloor()/renderPanel() — because they're skipped when the board
   // signature is unchanged, and the name must still appear on the very first load.
-  setRestName(data && data.restaurant);
-  const sig = boardSig(state.data);
+  setRestName(restaurant);
+  const sig = boardSig(state);
   if (sig === lastSig) return;
   lastSig = sig;
   renderFloor();

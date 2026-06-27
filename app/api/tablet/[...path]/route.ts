@@ -85,6 +85,35 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const rid = panelRestaurantId(req, g);
   try {
     const { path = [] } = await ctx.params;
+
+    // ── GET /api/tablet/summary — TIER 1 of the two-tier floor (mig 101) ──────
+    // The slim per-tile SUMMARY drives the tablet GRID (each tile's state/label/meta/counts/
+    // due/pay/badge-flags), exactly like the manager. REUSES lfh_table_view_summary — no new
+    // function. ?table=N → just that ONE tile (targeted refetch, ~5 kB); no param → the whole
+    // floor + the table-AGNOSTIC bundle (settings/dishes/categories/restaurant) the grid +
+    // order-taking + header need (so the grid no longer pulls the whole board just to get them).
+    // The selected table's FULL detail still comes from /state?table=N (tier 2).
+    if (path.join("/") === "summary") {
+      const tbl = new URL(req.url).searchParams.get("table");
+      const { data, error } = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl || null });
+      if (error) throw new Error(error.message);
+      const summary = data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] };
+      // Targeted (?table=N): tile only — the panel keeps its cached agnostic bundle.
+      if (tbl) return ok(summary);
+      // Full floor: attach the small table-agnostic collections in ONE round-trip.
+      const [settings, dishes, categories, restaurant] = await Promise.all([
+        sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("menu_items").select("id,title,price,category,tags,veg,options").eq("restaurant_id", rid).order("category"),
+        sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
+        sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
+      ]);
+      return ok({
+        ...summary,
+        settings: must(settings), dishes: must(dishes), categories: must(categories),
+        restaurant: must(restaurant) || null,
+      });
+    }
+
     if (path.join("/") === "state") {
       // TARGETED REFETCH (owner 2026-06-26 — egress cut): when a realtime breadcrumb names
       // ONE table, the tablet asks for just that table's slice (?table=N) instead of re-reading
