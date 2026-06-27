@@ -2753,7 +2753,7 @@ function floorHtml() {
     for (let i = 1; i <= n; i++) {
       skel += `<div class="ftile ftile-skel" aria-hidden="true"><div class="sk-num"></div><div class="sk-lbl"></div><div class="sk-meta"></div></div>`;
     }
-    const skelMain = `<div class="floor-main"><div class="ed-head"><h2>Tables <span class="sub">· live floor</span></h2><button class="btn" id="refreshFloor">↻ Refresh</button></div>${legend}<div class="ftile-grid">${skel}</div></div>`;
+    const skelMain = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2><button class="btn" id="refreshFloor">↻ Refresh</button></div>${legend}<div class="ftile-grid">${skel}</div></div>`;
     // right: skeleton versions of the side-panel cards so the whole layout is
     // present from the first frame (no empty gutter that fills in late). A card
     // = a title bar + a few placeholder rows of shimmer.
@@ -2807,7 +2807,7 @@ function floorHtml() {
   const pendingJoinersN = (state.board.sessions || []).filter((ss) => ss.status === "open").reduce((a, ss) => a + membersOf(ss.id).filter((m) => !m.approved && !m.removed).length, 0);
   const needsYou = cNew + cCall + reqs.length + pendingJoinersN;
   const statsStrip = sessionsOn ? `<div class="floor-stats"><div class="fstat"><div class="fstat-n">${cOcc}/${n}</div><div class="fstat-l">Occupied</div></div><div class="fstat warn"><div class="fstat-n">${cPay}</div><div class="fstat-l">To pay</div></div><div class="fstat alert"><div class="fstat-n">${needsYou}</div><div class="fstat-l">Needs you</div></div></div>` : "";
-  const main = `<div class="floor-main"><div class="ed-head"><h2>Tables <span class="sub">· live floor</span></h2><button class="btn" id="refreshFloor">↻ Refresh</button></div>${statsStrip}${legend}<div class="ftile-grid">${tiles}</div></div>`;
+  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2><button class="btn" id="refreshFloor">↻ Refresh</button></div>${statsStrip}${legend}<div class="ftile-grid">${tiles}</div></div>`;
 
   // side panel — everyday things FIRST (whole-floor open/close, requests, needs),
   // rarely-touched feature switches + café location LAST (owner, 2026-06-12:
