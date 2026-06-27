@@ -2514,11 +2514,29 @@ async function openAllTables() {
   for (let i = 1; i <= n; i++) if (!summaryTableOpen(String(i))) targets.push(String(i));
   if (!targets.length) return toast("Every table is already open", "ok");
   if (!(await confirmDialog(`Open all ${targets.length} remaining table${targets.length > 1 ? "s" : ""}?`, "Open all"))) return;
-  // Fire the opens in parallel; count what failed instead of stopping halfway.
-  const results = await Promise.allSettled(targets.map((t) => api("POST", "/sessions/open", { table: t })));
-  const failed = results.filter((r) => r.status === "rejected").length;
-  await loadSessions(); // bulk action touches many tiles → one full summary refresh is right here
-  toast(failed ? `Opened ${targets.length - failed}, ${failed} failed` : `Opened ${targets.length} table${targets.length > 1 ? "s" : ""}`, failed ? "err" : "ok");
+  // INSTANT: flip every target tile to "Open" (waiting, no guests yet) in the local summary NOW,
+  // so the whole floor looks open immediately — then ONE bulk call (mig 102) opens them all in a
+  // single round-trip server-side, then reconcile to the truth. floorOpsInFlight shields the
+  // optimistic tiles from a background poll clobbering them mid-flight.
+  floorOpsInFlight++;
+  const tiles = Object.assign({}, state.summary.tiles || {});
+  for (const t of targets) tiles[t] = Object.assign({}, tiles[t], {
+    state: "waiting", label: "Open", meta: "waiting for guests",
+    counts: { nw: 0, ck: 0, rd: 0, sv: 0 }, due: 0, pay: "",
+    members: 0, pending: 0, hasNew: false, hasCall: false, hasReq: false, hasJoin: false, reqs: 0, calls: 0,
+  });
+  state.summary = Object.assign({}, state.summary, { tiles });
+  loadSessions(true); // re-render the optimistic tiles immediately (no fetch)
+  try {
+    const res = await api("POST", "/sessions/open-all", {});
+    floorOpsInFlight--;
+    await loadSessions(); // one full summary refresh → reconcile to server truth
+    toast(`Opened ${(res && res.opened) || targets.length} table${(((res && res.opened) || targets.length) > 1) ? "s" : ""}`, "ok");
+  } catch (e) {
+    floorOpsInFlight--;
+    await loadSessions(); // reconcile back to truth on failure
+    toast("Could not open all: " + e.message, "err");
+  }
 }
 // closeAllTables: end EVERY open session at once (asks first — guests at those
 // tables can no longer order until reopened).

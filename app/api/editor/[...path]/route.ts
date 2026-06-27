@@ -590,6 +590,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok(row || null);
     }
 
+    // sessions/open-all — open EVERY not-yet-open table in ONE round-trip (mig 102), instead
+    // of the client firing one POST /sessions/open per table (300 tables = 300 round-trips to
+    // Sydney). The RPC mirrors the single-open logic + approves pending requests; the client
+    // pairs it with optimistic tiles so the floor flips to "open" instantly.
+    if (a === "sessions" && b === "open-all") {
+      const { data, error } = await sb.rpc("lfh_staff_open_all_tables", { p_restaurant_id: rid });
+      if (error) throw new Error(error.message);
+      await logAction("editor", "table_open_all", { detail: `opened ${(data && data.opened) || 0}`, device_id: dev });
+      return ok(data || { opened: 0 });
+    }
+
     // sessions/:id/close | auto-approve | shift
     // Uses the SHARED closeSession so the manager's rule is identical to the tablet's
     // (blocked on unpaid OR still-cooking unless force). The manager needs no PIN —
