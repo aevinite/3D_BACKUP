@@ -11,6 +11,21 @@
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// __lfhPerf: cheap, always-on perf counters so the floor's render cost can be measured at
+// scale (300 tables) — IDENTICAL to the manager's. fullRenders = full floor rebuilds
+// (renderFloor); patches = incremental tile patches (patchTabletTiles); tilesPatched = how
+// many tiles those patches touched in total; lastMs = how long the most recent render/patch
+// took; longTasks = main-thread tasks >50ms (the freeze symptom). The PerformanceObserver
+// no-ops where the API is unavailable. Read it from the console to confirm a single-table
+// breadcrumb PATCHES (not full-renders) and that long tasks stay near zero under churn.
+window.__lfhPerf = window.__lfhPerf || { fullRenders: 0, patches: 0, tilesPatched: 0, lastMs: 0, longTasks: 0 };
+try {
+  if (typeof PerformanceObserver === "function") {
+    new PerformanceObserver((list) => { for (const e of list.getEntries()) if (e.duration > 50) window.__lfhPerf.longTasks++; })
+      .observe({ entryTypes: ["longtask"] });
+  }
+} catch {}
 // Prices are stored in rupees now (migration 043) — no conversion, just format.
 const INR_RATE = 1;
 const inr = (n) => "₹" + Math.round((parseFloat(n) || 0) * INR_RATE).toLocaleString("en-US");
@@ -298,94 +313,190 @@ async function selectTable(t) {
 }
 
 // ── the floor ────────────────────────────────────────────────────────────────
-function renderFloor() {
-  const n = tableCount();
+// passesFilter(i): SHARED visibility predicate — does table i belong on the floor under the
+// current filter? Used by BOTH the full render (renderFloor's loop) AND the incremental patch
+// (patchTabletTiles), so the two paths agree on exactly which tiles exist. This is the tablet's
+// one structural difference from the manager (the manager renders every table unconditionally):
+// a breadcrumb can FLIP a table's filter membership (e.g. "needs" → attended), so the patch must
+// detect that flip and full-render instead of redrawing a tile that should vanish. Under the
+// default "all" filter this is always true, so patching collapses to the manager's behaviour.
+function passesFilter(i) {
   const filt = state.floorFilter || "all";
-  let cNeeds = 0, cOpen = 0, cFree = 0;
-  for (let i = 1; i <= n; i++) { if (needsAttention(i)) cNeeds++; if (tileIsOpen(i)) cOpen++; else cFree++; }
-  // The same filter set is shown two ways: as count chips beside the brand (wide
-  // screens) and as the floor-nav row (narrow). Tapping either filters the floor.
-  const filters = [["all", "All", n], ["needs", "⚠ Needs", cNeeds], ["open", "Active", cOpen], ["free", "Free", cFree]];
-  const countsEl = document.getElementById("counts");
-  if (countsEl) countsEl.innerHTML = filters.map(([k, lbl, c]) =>
-    `<button class="cchip ${k === "needs" && c ? "needs" : ""} ${filt === k ? "on" : ""}" data-filter="${k}"><b>${c}</b> ${lbl.replace("⚠ ", "")}</button>`).join("");
-  const navEl = document.getElementById("floorNav");
-  if (navEl) navEl.innerHTML = filters.map(([k, lbl, c]) =>
-    `<button class="fnav ${filt === k ? "on" : ""}" data-filter="${k}">${lbl} <em>${c}</em></button>`).join("");
+  if (filt === "needs") return needsAttention(i);
+  if (filt === "open") return tileIsOpen(i);
+  if (filt === "free") return !tileIsOpen(i);
+  return true; // "all"
+}
 
-  let html = "";
-  for (let i = 1; i <= n; i++) {
-    if (filt === "needs" && !needsAttention(i)) continue;
-    if (filt === "open" && !tileIsOpen(i)) continue;
-    if (filt === "free" && tileIsOpen(i)) continue;
-    const st = tileState(i), a = tableAgg(i), tile = summaryTile(i);
-    // Badges/quick-action read the SUMMARY (works for every tile). The selected table's
-    // tableAgg comes from its slice; the summary badge counts still match (same RPC mirror).
-    const calls = summaryCallsOf(i), joiners = tile.pending || 0, reqsN = tile.reqs || 0;
-    const called = (tile.hasCall || tile.hasReq);
-    const payCls = a.hasOrders ? (a.unpaid ? "pay-unpaid" : "pay-paid") : "";
-    // Body differs by state: free tables get the big Open button; open tables
-    // get guests + the meta line, and (once there are dishes) a progress bar + count pills.
-    let body = "";
-    if (st.cls === "free" || st.cls === "req") {
-      body = `<span class="tsub">${st.cls === "req" ? "asked to open" : "tap to open"}</span><span class="topen" data-quick="open" data-qt="${i}">Open</span>`;
-    } else {
-      // KOT # rides on the full slice only (the summary RPC carries no KOT — it's the shared
-      // manager RPC). For the selected table we show "KOT #…"; for every other tile we show the
-      // summary's meta line ("x/y served · ₹z due" / "n orders"), exactly like the manager.
-      const sub = a.kots.length
-        ? `KOT #${a.kots[a.kots.length - 1]}${a.kots.length > 1 ? ` +${a.kots.length - 1}` : ""}`
-        : (a.meta || (a.guests ? "" : "no order yet"));
-      const total = a.nw + a.ck + a.rd + a.sv;
-      const strip = total > 0 ? `<div class="tstrip">${a.nw ? `<i style="width:${(a.nw / total) * 100}%;background:#f59e0b"></i>` : ""}${a.ck ? `<i style="width:${(a.ck / total) * 100}%;background:#4f9dff"></i>` : ""}${a.rd ? `<i style="width:${(a.rd / total) * 100}%;background:#ec4899"></i>` : ""}${a.sv ? `<i style="width:${(a.sv / total) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
-      const pills = total > 0 ? `<div class="tpills">${a.nw ? `<span class="tpill nw">${a.nw} new</span>` : ""}${a.ck ? `<span class="tpill ck">${a.ck} cooking</span>` : ""}${a.rd ? `<span class="tpill rd">${a.rd} ready</span>` : ""}${a.sv ? `<span class="tpill sv">${a.sv} served</span>` : ""}</div>` : "";
-      // ONE contextual quick action, same priority as the manager floor tile:
-      // new order → Accept, a call/request → Attend, served-but-unpaid → Mark paid.
-      let quick = "";
-      if (a.nw > 0) quick = `<span class="tacc" data-quick="accept" data-qt="${i}">✓ Accept</span>`;
-      else if (called || joiners) quick = `<span class="tatt" data-quick="attend" data-qt="${i}">Attend</span>`;
-      else if (st.cls === "bill" && tperm("tablet_mark_paid") !== "off") quick = `<span class="tpay" data-quick="pay" data-qt="${i}">💳 Mark paid</span>`;
-      body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${esc(sub)}</span>${strip}${pills}${quick}`;
-    }
-    html += `<button class="tile t-${st.cls} ${payCls} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
+// tileHtml(i): build the FULL outer HTML for ONE floor tile (table number i). This is the
+// SINGLE source of truth for a tile's markup — BOTH the full-floor render (renderFloor's loop)
+// AND the incremental patch (patchTabletTiles) call it, so a tile drawn either way is
+// byte-identical (no path-divergent rendering). All the per-tile state/agg/badges/quick reads
+// live here, exactly as they did inside the old renderFloor loop. Mirrors the manager's
+// floorTileHtml. (owner perf 2026-06-27 — 300-table freeze fix)
+function tileHtml(i) {
+  const st = tileState(i), a = tableAgg(i), tile = summaryTile(i);
+  // Badges/quick-action read the SUMMARY (works for every tile). The selected table's
+  // tableAgg comes from its slice; the summary badge counts still match (same RPC mirror).
+  const calls = summaryCallsOf(i), joiners = tile.pending || 0, reqsN = tile.reqs || 0;
+  const called = (tile.hasCall || tile.hasReq);
+  const payCls = a.hasOrders ? (a.unpaid ? "pay-unpaid" : "pay-paid") : "";
+  // Body differs by state: free tables get the big Open button; open tables
+  // get guests + the meta line, and (once there are dishes) a progress bar + count pills.
+  let body = "";
+  if (st.cls === "free" || st.cls === "req") {
+    body = `<span class="tsub">${st.cls === "req" ? "asked to open" : "tap to open"}</span><span class="topen" data-quick="open" data-qt="${i}">Open</span>`;
+  } else {
+    // KOT # rides on the full slice only (the summary RPC carries no KOT — it's the shared
+    // manager RPC). For the selected table we show "KOT #…"; for every other tile we show the
+    // summary's meta line ("x/y served · ₹z due" / "n orders"), exactly like the manager.
+    const sub = a.kots.length
+      ? `KOT #${a.kots[a.kots.length - 1]}${a.kots.length > 1 ? ` +${a.kots.length - 1}` : ""}`
+      : (a.meta || (a.guests ? "" : "no order yet"));
+    const total = a.nw + a.ck + a.rd + a.sv;
+    const strip = total > 0 ? `<div class="tstrip">${a.nw ? `<i style="width:${(a.nw / total) * 100}%;background:#f59e0b"></i>` : ""}${a.ck ? `<i style="width:${(a.ck / total) * 100}%;background:#4f9dff"></i>` : ""}${a.rd ? `<i style="width:${(a.rd / total) * 100}%;background:#ec4899"></i>` : ""}${a.sv ? `<i style="width:${(a.sv / total) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
+    const pills = total > 0 ? `<div class="tpills">${a.nw ? `<span class="tpill nw">${a.nw} new</span>` : ""}${a.ck ? `<span class="tpill ck">${a.ck} cooking</span>` : ""}${a.rd ? `<span class="tpill rd">${a.rd} ready</span>` : ""}${a.sv ? `<span class="tpill sv">${a.sv} served</span>` : ""}</div>` : "";
+    // ONE contextual quick action, same priority as the manager floor tile:
+    // new order → Accept, a call/request → Attend, served-but-unpaid → Mark paid.
+    let quick = "";
+    if (a.nw > 0) quick = `<span class="tacc" data-quick="accept" data-qt="${i}">✓ Accept</span>`;
+    else if (called || joiners) quick = `<span class="tatt" data-quick="attend" data-qt="${i}">Attend</span>`;
+    else if (st.cls === "bill" && tperm("tablet_mark_paid") !== "off") quick = `<span class="tpay" data-quick="pay" data-qt="${i}">💳 Mark paid</span>`;
+    body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${esc(sub)}</span>${strip}${pills}${quick}`;
+  }
+  return `<button class="tile t-${st.cls} ${payCls} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
       <span class="tbadges">${calls.length ? `<em class="b-call" title="${esc(calls.map((c) => c.note || "call").join(", "))}">${[...new Set(calls.map((c) => callIcon(c.note)))].join("")}</em>` : ""}${reqsN ? `<em class="b-req">📨${reqsN}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
       <span class="tnum">${i}</span>
       <span class="tlabel">${st.label}</span>
       ${body}
     </button>`;
+}
+
+// floorCountsHtml() / floorNavHtml(): the two filter strips (count chips beside the brand on
+// wide screens; the floor-nav row on narrow). Shared so the patch can refresh their counts in
+// place with byte-identical markup. Their buttons are wired ONCE by bindFloorDelegation on the
+// stable #counts / #floorNav containers, so rewriting innerHTML never orphans a handler.
+function floorFilterCounts() {
+  const n = tableCount();
+  let cNeeds = 0, cOpen = 0, cFree = 0;
+  for (let i = 1; i <= n; i++) { if (needsAttention(i)) cNeeds++; if (tileIsOpen(i)) cOpen++; else cFree++; }
+  return [["all", "All", n], ["needs", "⚠ Needs", cNeeds], ["open", "Active", cOpen], ["free", "Free", cFree]];
+}
+function floorCountsHtml() {
+  const filt = state.floorFilter || "all";
+  return floorFilterCounts().map(([k, lbl, c]) =>
+    `<button class="cchip ${k === "needs" && c ? "needs" : ""} ${filt === k ? "on" : ""}" data-filter="${k}"><b>${c}</b> ${lbl.replace("⚠ ", "")}</button>`).join("");
+}
+function floorNavHtml() {
+  const filt = state.floorFilter || "all";
+  return floorFilterCounts().map(([k, lbl, c]) =>
+    `<button class="fnav ${filt === k ? "on" : ""}" data-filter="${k}">${lbl} <em>${c}</em></button>`).join("");
+}
+
+function renderFloor() {
+  bindFloorDelegation(); // attach the ONE delegated tile/quick/chip handler (boolean-guarded)
+  const _t0 = performance.now();
+  const n = tableCount();
+  const countsEl = document.getElementById("counts");
+  if (countsEl) countsEl.innerHTML = floorCountsHtml();
+  const navEl = document.getElementById("floorNav");
+  if (navEl) navEl.innerHTML = floorNavHtml();
+
+  let html = "";
+  for (let i = 1; i <= n; i++) {
+    if (!passesFilter(i)) continue;        // SHARED predicate — patch path agrees on visibility
+    html += tileHtml(i);                   // SHARED tile builder — single source of truth
   }
   $("#tiles").innerHTML = html || `<div class="muted" style="padding:14px">No tables here right now.</div>`;
+  window.__lfhPerf.fullRenders++;
+  window.__lfhPerf.lastMs = performance.now() - _t0;
+}
 
-  document.querySelectorAll(".fnav, .cchip").forEach((b) => (b.onclick = () => { state.floorFilter = b.dataset.filter; renderFloor(); }));
-  document.querySelectorAll(".tile[data-t]").forEach((b) => (b.onclick = () => selectTable(b.dataset.t)));
-  // The big "Open" button on a free tile (stopPropagation so it doesn't also
-  // select the tile underneath).
-  document.querySelectorAll(".topen[data-quick='open']").forEach((q) => (q.onclick = (e) => {
-    e.stopPropagation();
-    optimisticOpen(q.dataset.qt);
-  }));
-  // Quick "Accept" on the tile — accept every new order for the table in one tap.
-  // Optimistic (instant), reusing the same helper the Accept-all button uses.
-  document.querySelectorAll(".tacc[data-quick='accept']").forEach((q) => (q.onclick = async (e) => {
-    e.stopPropagation();
-    await ensureTableSlice(q.dataset.qt); // load the table's orders first (grid has only the slim summary)
-    optimisticAccept(ordersOf(q.dataset.qt).filter((o) => o.status === "received").map((o) => o.id));
-  }));
-  // Quick "Attend" — open the table's detail to handle the call / join request.
-  document.querySelectorAll(".tatt[data-quick='attend']").forEach((q) => (q.onclick = (e) => {
-    e.stopPropagation();
-    selectTable(q.dataset.qt);
-  }));
-  // Quick "Mark paid" on a served-but-unpaid tile — same confirm + whole-table
-  // pay as the detail panel's "Mark bill paid", without opening the table.
-  document.querySelectorAll(".tpay[data-quick='pay']").forEach((q) => (q.onclick = async (e) => {
-    e.stopPropagation();
-    const t = q.dataset.qt;
-    await ensureTableSlice(t);  // load the table's orders so billNo/due + optimisticPay have real rows
-    const a = tableAgg(t);
-    if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
-      payBill(t);
-  }));
+// patchTabletTiles(tables): the INCREMENTAL update path. Instead of rebuilding ALL ~300 tiles
+// + re-binding ~300 listeners (the freeze at 300 tables), it replaces ONLY the named tiles'
+// nodes via the shared tileHtml builder, then refreshes just the small filter-count strips in
+// place. The #tiles grid is NEVER rebuilt wholesale, and the delegated click handler lives on
+// the stable #tiles container, so replaced tile nodes need NO re-binding. Mirrors the manager's
+// patchFloorTiles. Falls back to a full renderFloor() whenever a tile's FILTER membership flips
+// (a tile that should appear/disappear can't be patched in place) or a named tile isn't on the
+// grid — so we never leave a half-updated screen. (owner perf 2026-06-27)
+function patchTabletTiles(tables) {
+  const grid = $("#tiles");
+  // No grid (panel not built yet) → safe full render.
+  if (!grid) { renderFloor(); return; }
+  const _t0 = performance.now();
+  let patched = 0;
+  for (const t of tables) {
+    const el = grid.querySelector('.tile[data-t="' + String(t) + '"]');
+    const visible = passesFilter(t);
+    // Membership FLIP (was visible, now shouldn't be — or vice-versa): the grid's tile SET must
+    // change, which a per-tile patch can't do. Full render is the only correct path. Under the
+    // default "all" filter visible is always true, so this only ever trips with a filter active.
+    if (visible !== !!el) { renderFloor(); return; }
+    if (!visible) continue;                 // not on screen under this filter, and shouldn't be → skip
+    el.outerHTML = tileHtml(t);             // SHARED builder → byte-identical to a full render's tile
+    patched++;
+  }
+  // Filter-count strips can move on any change (e.g. a table flips to/from "needs") → refresh
+  // their counts in place. Their buttons are delegated on #counts/#floorNav, so this is safe.
+  const countsEl = document.getElementById("counts");
+  if (countsEl) countsEl.innerHTML = floorCountsHtml();
+  const navEl = document.getElementById("floorNav");
+  if (navEl) navEl.innerHTML = floorNavHtml();
+  window.__lfhPerf.patches++;
+  window.__lfhPerf.tilesPatched += patched;
+  window.__lfhPerf.lastMs = performance.now() - _t0;
+}
+
+// bindFloorDelegation: attach the floor's click handling ONCE on the stable containers
+// (#tiles for tiles + quick buttons; #counts/#floorNav for the filter chips — all three are
+// static in index.html, only their innerHTML changes). Why delegation instead of per-tile
+// onclick? At 300 tables the old renderFloor re-bound ~300 listeners on EVERY render; with one
+// delegated handler, patched/replaced tile nodes need NO re-binding — the listener lives on the
+// parent and finds the clicked target via .closest(). A boolean guard means repeated renders
+// never stack duplicate listeners. Mirrors the manager's bindFloorDelegation.
+let floorDelegationBound = false;
+function bindFloorDelegation() {
+  if (floorDelegationBound) return;
+  floorDelegationBound = true;
+  // Filter chips (count chips + floor-nav row) — change the floor filter, then full render.
+  const onChip = (e) => { const b = e.target.closest("[data-filter]"); if (b) { state.floorFilter = b.dataset.filter; renderFloor(); } };
+  const countsEl = document.getElementById("counts");
+  if (countsEl) countsEl.addEventListener("click", onChip);
+  const navEl = document.getElementById("floorNav");
+  if (navEl) navEl.addEventListener("click", onChip);
+  // The tile grid — quick actions FIRST (nested inside the tile; matching one and returning
+  // replicates the old stopPropagation so a quick button never ALSO selects the tile), then the
+  // tile-select. Every data-attr handled here lives on a node the PATCH path may replace, which
+  // is exactly why they MUST be delegated. The accept/pay branches inline their original
+  // ensureTableSlice + filter logic verbatim (NOT flattened) so behaviour is unchanged.
+  const tilesEl = $("#tiles");
+  if (tilesEl) tilesEl.addEventListener("click", async (e) => {
+    let q;
+    // Quick "Open" on a free tile.
+    if ((q = e.target.closest(".topen[data-quick='open']"))) { optimisticOpen(q.dataset.qt); return; }
+    // Quick "Accept" — load the table's orders first (grid has only the slim summary), then accept.
+    if ((q = e.target.closest(".tacc[data-quick='accept']"))) {
+      const qt = q.dataset.qt;
+      await ensureTableSlice(qt);
+      optimisticAccept(ordersOf(qt).filter((o) => o.status === "received").map((o) => o.id));
+      return;
+    }
+    // Quick "Attend" — open the table's detail to handle the call / join request.
+    if ((q = e.target.closest(".tatt[data-quick='attend']"))) { selectTable(q.dataset.qt); return; }
+    // Quick "Mark paid" — same confirm + whole-table pay as the detail panel, without opening it.
+    if ((q = e.target.closest(".tpay[data-quick='pay']"))) {
+      const t = q.dataset.qt;
+      await ensureTableSlice(t);  // load the table's orders so billNo/due + optimisticPay have real rows
+      const a = tableAgg(t);
+      if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
+        payBill(t);
+      return;
+    }
+    // TILE SELECT last — only reached when no quick button above matched.
+    const tile = e.target.closest(".tile[data-t]");
+    if (tile) selectTable(tile.dataset.t);
+  });
 }
 
 // openDishEditModal: ONE editor for a single placed dish — toggle which allergens
@@ -1313,7 +1424,11 @@ async function loadTables(tables) {
   const sig = boardSig(state);
   if (sig === lastSig) return;          // nothing visible changed — don't repaint
   lastSig = sig;
-  renderFloor();
+  // TARGETED path → patch JUST the named tiles + the filter counts, NOT the whole grid (the
+  // 300-table freeze fix). patchTabletTiles self-falls-back to a full renderFloor() if a tile's
+  // filter membership flipped or the grid isn't present. The detail panel (#panel) is a separate
+  // container, so patching tiles never disturbs an open detail — keep its same guard below.
+  patchTabletTiles(tables);
   if (!state.ordering) renderPanel();   // never repaint the detail under a mid-order waiter
 }
 
