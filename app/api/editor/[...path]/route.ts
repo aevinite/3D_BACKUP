@@ -928,6 +928,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
       if (patch.payment_status === "paid" && cur.status === "cancelled")
         return err("Can't take payment on a cancelled order.", 409);
+      // RULE (owner 2026-06-29): a bill can only be paid once the order is ACCEPTED (gone to
+      // prepare). A brand-new 'received' order must be accepted first — you can't take payment
+      // on something the kitchen hasn't confirmed. (No payment system yet; when one is added it
+      // will auto-accept on payment and skip this phase — not now.)
+      if (patch.payment_status === "paid" && cur.status === "received")
+        return err("Accept the order first — a bill can only be paid once the order is accepted.", 409);
       // Reverting a PAID bill to unpaid is a refund/correction, not a routine edit:
       // require a reason and ALWAYS log it, so collected cash can't be quietly
       // un-booked without a trace (theft control).

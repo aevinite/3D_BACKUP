@@ -937,7 +937,7 @@ function orderCardHtml(o, freed = false) {
   // Freed cards: just a "restore to floor" affordance. Live cards: full actions.
   const actionsRow = freed
     ? `<button class="ord-btn ghost" data-restore="${esc(o.id)}">↩ Restore to floor</button>`
-    : `${cancelled ? "" : `<button class="ord-btn ${paid ? "ghost" : "pay"}" data-pay="${esc(o.id)}" data-paid="${paid ? "1" : "0"}">
+    : `${cancelled ? "" : `<button class="ord-btn ${paid ? "ghost" : "pay"}" data-pay="${esc(o.id)}" data-paid="${paid ? "1" : "0"}"${status === "received" && !paid ? ' disabled title="Accept the order first — it can only be paid once accepted."' : ""}>
         ${paid ? "↩ Mark unpaid" : "💳 Mark paid"}
       </button>`}
       ${actions}
@@ -1045,11 +1045,11 @@ function mergedOrderCardHtml(g) {
   if (sid && !invoiced) {
     billBtns = anyUnpaid ? `<button class="ord-btn invoice" data-gen-invoice="${esc(sid)}">🧾 Generate invoice</button>` : "";
   } else if (sid && invoiced) {
-    const pay = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}">💳 Mark paid</button>` : "";
+    const pay = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "";
     billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">🖨 Print</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button>`;
   } else {
     // legacy non-session order — keep the direct pay
-    billBtns = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}">💳 Mark paid</button>` : "";
+    billBtns = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "";
   }
   const tableDue = live.filter((o) => o.payment_status !== "paid").reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
   const freeBtn = (tnum && paid)
@@ -2838,6 +2838,9 @@ function tableTileStateFromBoard(t) {
   const calls = callsForTable(t);
   const reqs = reqsForTable(t); // pending open/join/access requests (guest asked staff to let them in)
   const items = os.flatMap((o) => orderItemRows(o));
+  // Counts are by QUANTITY (plates), not row count — a "2× Cappuccino" line is 2 cooking, not 1.
+  // Mirrors the summary RPC (mig 105) and the tablet detail so every tile agrees. (owner 2026-06-29)
+  const qtyOf = (i) => Math.max(0, parseInt(i.qty, 10) || 1);
   const anyReceived = items.some((i) => i.status === "received");
   const anyPreparing = items.some((i) => i.status === "preparing");
   const anyReady = items.some((i) => i.status === "ready"); // cooked, waiting for the waiter
@@ -2863,8 +2866,9 @@ function tableTileStateFromBoard(t) {
     // served table just says "Served" until it's paid, then "Cleared".
     else if (unpaid) { st = "bill"; label = "Served"; } // served but money still due → yellow "to pay" tile
     else { st = "done"; label = "Cleared"; }
-    const served = items.filter((i) => i.status === "served").length;
-    meta = items.length ? `${served}/${items.length} served${due > 0 ? ` · ${inr(due)} due` : ""}` : `${os.length} order${os.length > 1 ? "s" : ""}`;
+    const served = items.filter((i) => i.status === "served").reduce((a, i) => a + qtyOf(i), 0);
+    const totalQ = items.reduce((a, i) => a + qtyOf(i), 0);
+    meta = items.length ? `${served}/${totalQ} served${due > 0 ? ` · ${inr(due)} due` : ""}` : `${os.length} order${os.length > 1 ? "s" : ""}`;
   } else if (sess) {
     // Someone actually seated → teal "Seated". Open but nobody seated yet → a
     // bright YELLOW "waiting" tile (owner: an open-but-empty table should light up
@@ -2887,10 +2891,10 @@ function tableTileStateFromBoard(t) {
     st, label, meta, badges,
     // Per-status dish counts → the tile progress bar (matches the tablet's .tstrip).
     counts: {
-      nw: items.filter((i) => i.status === "received").length,
-      ck: items.filter((i) => i.status === "preparing").length,
-      rd: items.filter((i) => i.status === "ready").length,
-      sv: items.filter((i) => i.status === "served").length,
+      nw: items.filter((i) => i.status === "received").reduce((a, i) => a + qtyOf(i), 0),
+      ck: items.filter((i) => i.status === "preparing").reduce((a, i) => a + qtyOf(i), 0),
+      rd: items.filter((i) => i.status === "ready").reduce((a, i) => a + qtyOf(i), 0),
+      sv: items.filter((i) => i.status === "served").reduce((a, i) => a + qtyOf(i), 0),
     },
     // Outline = payment, but ONLY once an order is accepted: red = an accepted
     // unpaid bill, green = accepted & fully paid, none = nothing accepted yet (a
