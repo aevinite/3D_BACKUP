@@ -127,7 +127,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const sessions = must(await sb.from("sessions").select("*").neq("status", "closed").eq("restaurant_id", rid).eq("table_number", tbl));
         const sids = (sessions || []).map((s: { id: string }) => s.id);
         const [members, calls, requests] = await Promise.all([
-          sids.length ? sb.from("session_members").select("*").eq("removed", false).eq("restaurant_id", rid).in("session_id", sids) : Promise.resolve({ data: [] }),
+          sids.length ? sb.from("session_members").select("id, session_id, phone, phone_verified, name, role, approved, location_ok, removed, joined_at, device_id, restaurant_id").eq("removed", false).eq("restaurant_id", rid).in("session_id", sids) : Promise.resolve({ data: [] }),
           sb.from("waiter_calls").select("*").eq("resolved", false).eq("restaurant_id", rid).eq("table_number", tbl),
           sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid).eq("table_number", tbl),
         ]);
@@ -144,7 +144,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         liveOrdersAndItems(rid),
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         sb.from("sessions").select("*").neq("status", "closed").eq("restaurant_id", rid),
-        sb.from("session_members").select("*").eq("removed", false).eq("restaurant_id", rid),
+        sb.from("session_members").select("id, session_id, phone, phone_verified, name, role, approved, location_ok, removed, joined_at, device_id, restaurant_id").eq("removed", false).eq("restaurant_id", rid),
         sb.from("waiter_calls").select("*").eq("resolved", false).eq("restaurant_id", rid),
         sb.from("menu_items").select("id,title,price,category,tags,veg,options").eq("restaurant_id", rid).order("category"),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
