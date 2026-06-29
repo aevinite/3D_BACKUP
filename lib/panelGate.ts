@@ -8,13 +8,17 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, type Role } from "@/lib/userAuth";
+import { isPanelEnabled } from "@/lib/panelAccess";
 
 export async function requirePanel(role: Role, next: string): Promise<void> {
   const store = await cookies();
-  // Admin super-access: the staff gate cookie lets the owner into every panel.
+  // Admin super-access: the staff gate cookie lets the owner into every panel — even one
+  // that's turned OFF for the restaurant (admin sets up / inspects everything).
   if (await tokenIsValid(store.get(AUTH_COOKIE)?.value)) return;
-  // Otherwise it must be a logged-in user whose role matches this exact panel.
+  // Otherwise it must be a logged-in user whose role matches this exact panel AND whose
+  // restaurant has this panel ENABLED (mig 106) — a disabled panel bounces to login, so an
+  // already-signed-in user is locked out the moment the admin turns their panel off.
   const u = await userFromCookie(store.get(USER_COOKIE)?.value);
-  if (u && u.role === role) return;
+  if (u && u.role === role && (await isPanelEnabled(role, u.restaurant_id))) return;
   redirect(`/login?next=${encodeURIComponent(next)}`);
 }
