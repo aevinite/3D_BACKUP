@@ -844,7 +844,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           const n = Math.round(Number(body.table_count));
           body.table_count = Number.isFinite(n) ? Math.min(Math.max(n, 1), 500) : 12;
         }
-        for (const k of ["sessions_enabled", "require_location", "require_otp"]) {
+        for (const k of ["sessions_enabled", "require_location", "require_otp", "auto_print_kot"]) {
           if (k in body) body[k] = body[k] === true || body[k] === "true";
         }
         for (const g of ["geo_lat", "geo_lng"]) {

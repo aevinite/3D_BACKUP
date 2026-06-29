@@ -814,6 +814,14 @@ function formGeneral(s) {
       ${triSel("Mark bill paid", "tablet_mark_paid", s.tablet_mark_paid)}
     </div>
   </div>
+  ${s.auto_print_kot_allowed ? `<div class="card"><h3>Auto-print KOT</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      When ON, the <b>kitchen screen</b> prints a kitchen ticket automatically the moment a new
+      order arrives — no clicking. Set up the kitchen device's printer first (and launch its
+      Chrome in "kiosk printing" mode for silent prints). Leave OFF until the printer is ready.
+    </p>
+    ${toggle("Auto-print the KOT when a new order arrives", "auto_print_kot", s.auto_print_kot === true)}
+  </div>` : ""}
   <div class="card"><h3>Billing &amp; invoice</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       These appear on the printed tax invoice exactly as typed. Set your real name,

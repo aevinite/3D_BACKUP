@@ -404,8 +404,10 @@ async function loadTables(tables) {
   // knownIds, then ADD each fresh order's id to the baseline (never reassign it — a
   // reassign would make the next targeted event for a DIFFERENT table false-chime its
   // existing orders as "new"). Platform tickets only arrive on the FULL path (load()).
-  const freshDine = freshOrders.some((o) => o.status === "received" && !state.knownIds.has(o.id));
-  if (freshDine) chime();
+  const newReceived = freshOrders.filter((o) => o.status === "received" && !state.knownIds.has(o.id));
+  if (newReceived.length) chime();
+  // Auto-print a KOT for each brand-new dine-in order on the targeted path too (same guard).
+  if (state.autoPrintKot) for (const o of newReceived) printKot(o, freshItems.filter((i) => i.order_id === o.id), state.restaurant);
   for (const o of freshOrders) state.knownIds.add(o.id);
 
   // The set of orders the changed tables used to show (cached) PLUS the orders the slice
@@ -438,6 +440,50 @@ async function loadTables(tables) {
   render();
 }
 
+// Auto-print a KOT (kitchen order ticket) for a brand-new order. Uses a HIDDEN IFRAME (not a
+// popup) so no popup-blocker prompt fires; on a kitchen device launched in Chrome "kiosk
+// printing" mode it prints silently to the default printer. Default OFF — only runs when the
+// admin allowed it AND the owner toggled it on (board.autoPrintKot). Printer-agnostic compact
+// layout (works on an 80mm thermal roll or A4). NO prices — a KOT is for the kitchen, not a bill.
+function printKot(order, itemRows, restaurant) {
+  try {
+    const rname = restDisplayName(restaurant) || "Kitchen";
+    const tnum = order.table_number != null ? order.table_number : "?";
+    const kot = order.kot_no != null ? order.kot_no : "—";
+    const when = order.created_at ? new Date(order.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    const rows = (itemRows && itemRows.length)
+      ? itemRows
+      : (Array.isArray(order.items) ? order.items : []);
+    const linesHtml = rows.map((r) => {
+      const q = r.qty || 1;
+      const opts = Array.isArray(r.options) ? r.options.map((o) => (typeof o === "string" ? o : (o && o.label) || "")).filter(Boolean).join(", ") : "";
+      const rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
+      const note = r.note ? String(r.note) : "";
+      return `<div class="kl"><span class="q">${q}×</span><span class="n">${esc(r.title || "")}${opts ? ` <i>(${esc(opts)})</i>` : ""}${rem ? ` <i>— no ${esc(rem)}</i>` : ""}${note ? `<br><small>📝 ${esc(note)}</small>` : ""}</span></div>`;
+    }).join("");
+    const allerg = Array.isArray(order.allergies) && order.allergies.length ? `<div class="al">⚠ AVOID: ${esc(order.allergies.join(", "))}</div>` : "";
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>KOT ${esc(String(kot))}</title><style>
+      *{margin:0;padding:0;box-sizing:border-box}body{font-family:ui-monospace,monospace;width:280px;padding:8px;color:#000}
+      .h{text-align:center;font-weight:700;font-size:15px;border-bottom:2px dashed #000;padding-bottom:6px;margin-bottom:6px}
+      .meta{display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:4px}
+      .kl{font-size:14px;padding:4px 0;border-bottom:1px dotted #999}.kl .q{font-weight:700;margin-right:6px}.kl i{font-style:italic;color:#333;font-size:12px}
+      .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}
+      @media print{@page{margin:4mm}}
+    </style></head><body>
+      <div class="h">${esc(rname)}<br>KITCHEN TICKET</div>
+      <div class="meta"><span>KOT #${esc(String(kot))}</span><span>Table ${esc(String(tnum))}</span></div>
+      <div class="meta"><span>${esc(when)}</span></div>
+      ${linesHtml || "<div>(no items)</div>"}
+      ${allerg}
+    </body></html>`;
+    const ifr = document.createElement("iframe");
+    ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+    document.body.appendChild(ifr);
+    const d = ifr.contentWindow.document; d.open(); d.write(html); d.close();
+    setTimeout(() => { try { ifr.contentWindow.focus(); ifr.contentWindow.print(); } catch (e) {} setTimeout(() => ifr.remove(), 1500); }, 250);
+  } catch (e) { /* printing must NEVER break the board */ }
+}
+
 async function load() {
   const seq = ++loadSeq;
   const data = await api("GET", "/board");
@@ -446,10 +492,16 @@ async function load() {
   // 'received' OR a brand-new platform order.
   const ids = new Set([...data.orders.map((o) => o.id), ...((data.platform || []).map((p) => p.id))]);
   if (state.knownIds) {
-    const freshDine = data.orders.some((o) => o.status === "received" && !state.knownIds.has(o.id));
+    const newReceived = data.orders.filter((o) => o.status === "received" && !state.knownIds.has(o.id));
     const freshPlat = (data.platform || []).some((p) => p.status === "new" && !state.knownIds.has(p.id));
-    if (freshDine || freshPlat) chime();
+    if (newReceived.length || freshPlat) chime();
+    // Auto-print a KOT for each BRAND-NEW dine-in order (only when enabled). Reuses the same
+    // knownIds guard as the chime, so it NEVER prints the existing board on first open and
+    // NEVER double-prints the same order.
+    if (data.autoPrintKot) for (const o of newReceived) printKot(o, (data.items || []).filter((i) => i.order_id === o.id), data.restaurant);
   }
+  state.autoPrintKot = !!data.autoPrintKot;
+  state.restaurant = data.restaurant || null;
   state.knownIds = ids;
   state.orders = data.orders; state.dishes = data.dishes;
   state.platform = data.platform || []; state.platformAccept = !!data.platformAccept;

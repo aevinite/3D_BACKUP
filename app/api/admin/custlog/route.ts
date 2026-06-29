@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
         .select("id, name, phone, phone_verified, role, approved, removed, location_ok, joined_at, session:sessions(table_number, status)")
         .order("joined_at", { ascending: false }).limit(120),
       sb.from("customers").select("*").order("last_seen_at", { ascending: false }).limit(120),
-      sb.from("blocklist").select("*").order("blocked_at", { ascending: false }),
+      sb.from("blocklist").select("*").order("blocked_at", { ascending: false }).limit(200),
       sb.from("orders").select("member_id, total, created_at").not("member_id", "is", null).order("created_at", { ascending: false }).limit(400),
       sb.from("waiter_calls").select("member_id, note, created_at").not("member_id", "is", null).order("created_at", { ascending: false }).limit(400),
     ]);

@@ -205,6 +205,7 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
 function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
   const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
   const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
+  const [staffFeat, setStaffFeat] = useState<Record<string, boolean> | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -222,6 +223,14 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     } catch {}
   }, [restaurant.id]);
   useEffect(() => { loadPanels(); }, [loadPanels]);
+
+  const loadStaffFeat = useCallback(async () => {
+    try {
+      const j = await (await fetch(`/api/admin/restaurants/staff-features?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
+      if (!j.error) setStaffFeat(j.flags || {});
+    } catch {}
+  }, [restaurant.id]);
+  useEffect(() => { loadStaffFeat(); }, [loadStaffFeat]);
 
   // Each switch defaults ON unless this restaurant explicitly turned it off
   // (matches lib/features.ts FEATURE_DEFAULTS — all ten default true).
@@ -273,6 +282,30 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     );
   };
 
+  // Staff-feature ENTITLEMENTS the admin grants (e.g. allow the restaurant to auto-print KOTs).
+  // Default OFF — the owner's own on/off lives in the manager settings; both must be on.
+  const onS = (key: string) => staffFeat?.[key] === true;
+  const toggleStaffFeat = async (key: string, current: boolean) => {
+    setBusy(true);
+    setStaffFeat((s) => ({ ...(s || {}), [key]: !current }));
+    try {
+      await fetch("/api/admin/restaurants/staff-features", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurant_id: restaurant.id, key, value: !current }),
+      });
+      await loadStaffFeat();
+    } finally { setBusy(false); }
+  };
+  const StaffToggle = ({ k, label }: { k: string; label: string }) => {
+    const isOn = onS(k);
+    return (
+      <button className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!staffFeat || busy} onClick={() => toggleStaffFeat(k, isOn)}
+        title={isOn ? "Allowed — tap to disallow" : "Not allowed — tap to allow"}>
+        <span>{label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
+      </button>
+    );
+  };
+
   return (
     <>
       {/* Breadcrumb: Restaurants › <name> — matches the owner-view breadcrumb (.adm-crumbs)
@@ -298,6 +331,14 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         {panels === null
           ? <div className="adm-empty">Loading panels…</div>
           : <div className="adm-togglegrid">{PANEL_OPTS.map((p) => <PanelToggle key={p.key} k={p.key} label={p.label} />)}</div>}
+      </div>
+
+      <div className="adm-card" style={{ marginBottom: 14 }}>
+        <h2>Staff features</h2>
+        <p className="hint">Operational features you allow <b>{restaurant.name}</b> to use. Allowing one just makes the owner&apos;s own on/off toggle appear — it doesn&apos;t turn it on.</p>
+        {staffFeat === null
+          ? <div className="adm-empty">Loading…</div>
+          : <div className="adm-togglegrid"><StaffToggle k="auto_print_kot_allowed" label="Auto-print KOT (allow)" /></div>}
       </div>
 
       <div className="adm-card">
