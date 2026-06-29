@@ -19,6 +19,13 @@ const FEATURES = [
   { key: "currency", label: "Currency picker" }, { key: "scrollspy", label: "Category scroll-spy" },
 ];
 
+// The four operational PANELS a restaurant can have (mig 106). Turning one OFF blocks that
+// role's login + hides it (e.g. a restaurant that doesn't want an Owner panel).
+const PANEL_OPTS = [
+  { key: "manager", label: "Manager panel" }, { key: "kitchen", label: "Kitchen display" },
+  { key: "tablet", label: "Waiter tablet" }, { key: "owner", label: "Owner dashboard" },
+];
+
 export default function AdminRestaurants() {
   const [list, setList] = useState<Restaurant[] | null>(null);
   const [owners, setOwners] = useState<Owner[]>([]);
@@ -104,6 +111,7 @@ export default function AdminRestaurants() {
 // The per-restaurant detail: assign its OWNER + flip its guest feature switches.
 function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
   const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
+  const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -113,6 +121,14 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     } catch {}
   }, [restaurant.id]);
   useEffect(() => { load(); }, [load]);
+
+  const loadPanels = useCallback(async () => {
+    try {
+      const j = await (await fetch(`/api/admin/restaurants/panels?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
+      if (!j.error) setPanels(j.panels || {});
+    } catch {}
+  }, [restaurant.id]);
+  useEffect(() => { loadPanels(); }, [loadPanels]);
 
   // Each switch defaults ON unless this restaurant explicitly turned it off
   // (matches lib/features.ts FEATURE_DEFAULTS — all ten default true).
@@ -141,6 +157,29 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     );
   };
 
+  // Panels default ON unless this restaurant explicitly turned one off (mig 106).
+  const onP = (key: string) => { const v = panels?.[key]; return v === undefined ? true : v === true; };
+  const togglePanel = async (key: string, current: boolean) => {
+    setBusy(true);
+    setPanels((p) => ({ ...(p || {}), [key]: !current })); // optimistic; reconciled by loadPanels()
+    try {
+      await fetch("/api/admin/restaurants/panels", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurant_id: restaurant.id, panel: key, enabled: !current }),
+      });
+      await loadPanels();
+    } finally { setBusy(false); }
+  };
+  const PanelToggle = ({ k, label }: { k: string; label: string }) => {
+    const isOn = onP(k);
+    return (
+      <button className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!panels || busy} onClick={() => togglePanel(k, isOn)}
+        title={isOn ? "On — tap to turn off (blocks that login)" : "Off — tap to turn on"}>
+        <span>{label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
+      </button>
+    );
+  };
+
   return (
     <>
       {/* Breadcrumb: Restaurants › <name> — matches the owner-view breadcrumb (.adm-crumbs)
@@ -158,7 +197,15 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
       <OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} />
 
-      <EnterCard restaurant={restaurant} />
+      <EnterCard restaurant={restaurant} panels={panels} />
+
+      <div className="adm-card" style={{ marginBottom: 14 }}>
+        <h2>Panels</h2>
+        <p className="hint">Which panels <b>{restaurant.name}</b> has. Turning one OFF blocks that login and removes its Enter button above — e.g. a restaurant with no Owner panel.</p>
+        {panels === null
+          ? <div className="adm-empty">Loading panels…</div>
+          : <div className="adm-togglegrid">{PANEL_OPTS.map((p) => <PanelToggle key={p.key} k={p.key} label={p.label} />)}</div>}
+      </div>
 
       <div className="adm-card">
         <h2>Guest features</h2>
@@ -231,15 +278,18 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
 // the admin), the manager/kitchen/tablet show THIS restaurant's live data —
 // exactly what its own staff see — instead of the default restaurant. "Stop"
 // clears the cookie so the admin's panels revert to the default restaurant.
-function EnterCard({ restaurant }: { restaurant: Restaurant }) {
+function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Record<string, boolean> | null }) {
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const PANELS: [string, string, string][] = [
-    ["/editor", "Manager panel", "fa-table-columns"],
-    ["/kitchen", "Kitchen display", "fa-fire-burner"],
-    ["/tablet", "Waiter tablet", "fa-mobile-screen-button"],
+  // Only show the Enter buttons for panels this restaurant HAS. Until the panels load
+  // (null) show all, so the buttons never flicker missing. (mig 106)
+  const panelOn = (k: string) => !panels || panels[k] !== false;
+  const PANELS: [string, string, string, string][] = [
+    ["/editor", "Manager panel", "fa-table-columns", "manager"],
+    ["/kitchen", "Kitchen display", "fa-fire-burner", "kitchen"],
+    ["/tablet", "Waiter tablet", "fa-mobile-screen-button", "tablet"],
   ];
 
   const openPanel = async (path: string) => {
@@ -267,10 +317,12 @@ function EnterCard({ restaurant }: { restaurant: Restaurant }) {
         <a className="adm-btn primary" href={`/r/${restaurant.slug}/menu`} target="_blank" rel="noopener" title={`Open ${restaurant.name}'s guest menu`}>
           <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />View guest menu
         </a>
-        <button className="adm-btn primary" disabled={busy} onClick={() => openPanel("/owner")} title={`Open ${restaurant.name}'s owner dashboard`}>
-          <i className="fas fa-crown" style={{ marginRight: 7 }} aria-hidden="true" />Owner dashboard
-        </button>
-        {PANELS.map(([path, label, icon]) => (
+        {panelOn("owner") && (
+          <button className="adm-btn primary" disabled={busy} onClick={() => openPanel("/owner")} title={`Open ${restaurant.name}'s owner dashboard`}>
+            <i className="fas fa-crown" style={{ marginRight: 7 }} aria-hidden="true" />Owner dashboard
+          </button>
+        )}
+        {PANELS.filter(([, , , k]) => panelOn(k)).map(([path, label, icon]) => (
           <button key={path} className="adm-btn" disabled={busy} onClick={() => openPanel(path)} title={`Open ${label} as ${restaurant.name}`}>
             <i className={`fas ${icon}`} style={{ marginRight: 7 }} aria-hidden="true" />{label}
           </button>
