@@ -88,7 +88,59 @@ export async function PATCH(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {}; try { body = await req.json(); } catch {}
-  if (String(body?.action || "") !== "create_owner") return bad("Unknown action.");
+  const action = String(body?.action || "");
+
+  // ── create_restaurant — the admin onboards a NEW restaurant in one go (owner 2026-06-29):
+  // make the restaurant row, its settings (cloned from #1 so every NOT NULL column is satisfied,
+  // with the chosen enabled_panels), and ONE starter login per ENABLED panel (passwords shown
+  // ONCE). Default panels: Manager+Kitchen+Tablet on, Owner OFF (owner's choice). ───────────────
+  if (action === "create_restaurant") {
+    const name = String(body?.name ?? "").trim().slice(0, 80);
+    if (name.length < 2) return bad("Restaurant name must be at least 2 characters.");
+    // slug from the name (lowercase, hyphenated), made unique with a numeric suffix if taken.
+    const base = (name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)) || "restaurant";
+    let slug = base, n = 1;
+    while (((await sb.from("restaurants").select("id").eq("slug", slug).limit(1)).data || []).length) slug = `${base}-${++n}`;
+    // Chosen panels (default M+K+T on, Owner off). Coerce to honest booleans.
+    const wp = (body?.panels && typeof body.panels === "object") ? body.panels as Record<string, unknown> : {};
+    const panels = {
+      manager: wp.manager !== false, kitchen: wp.kitchen !== false,
+      tablet: wp.tablet !== false, owner: wp.owner === true,
+    };
+    // 1) the restaurant row (id auto-uuid, active).
+    const rest = await sb.from("restaurants").insert({ slug, name, active: true }).select("id, slug, name").single();
+    if (rest.error) return bad(rest.error.message, 500);
+    const rid = rest.data.id as string;
+    // 2) its settings row — clone #1 as a template, then override id/restaurant_id/enabled_panels
+    //    and start with a modest table_count (a new restaurant shouldn't inherit #1's big floor).
+    const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RID).maybeSingle();
+    const baseRow: Record<string, unknown> = template.data ? { ...template.data } : { bubbles_enabled: true };
+    delete baseRow.updated_at;
+    const settingsRow = { ...baseRow, id: slug, restaurant_id: rid, enabled_panels: panels, table_count: 10 };
+    const setRes = await sb.from("settings").upsert(settingsRow, { onConflict: "restaurant_id" });
+    if (setRes.error) return bad(setRes.error.message, 500);
+    // 3) one starter login per ENABLED panel. Username = the panel name (unique PER restaurant),
+    //    random password returned once. The owner login is also mapped as the restaurant's owner.
+    const logins: { panel: string; role: string; username: string; password: string }[] = [];
+    for (const panel of ["manager", "kitchen", "tablet", "owner"] as const) {
+      if (!panels[panel]) continue;
+      const pw = genPassword();
+      const ins = await sb.from("staff_users")
+        .insert({ username: panel, name: `${name} ${panel}`, role: panel, restaurant_id: rid, password_hash: await hashSecret(pw), active: true })
+        .select("id").single();
+      if (ins.error) continue; // don't fail the whole create over one login; report what we made
+      logins.push({ panel, role: panel, username: panel, password: pw });
+      if (panel === "owner") {
+        await sb.from("restaurants").update({ owner_user_id: ins.data.id }).eq("id", rid);
+        await sb.from("restaurant_owners").upsert({ restaurant_id: rid, user_id: ins.data.id }, { onConflict: "restaurant_id,user_id", ignoreDuplicates: true });
+      }
+    }
+    const onPanels = (Object.keys(panels) as (keyof typeof panels)[]).filter((k) => panels[k]);
+    await logAction("admin", "restaurant_create", { actor: "admin", detail: `created restaurant "${name}" (${slug}) · panels ${onPanels.join("+")}` });
+    return ok({ ok: true, id: rid, slug, name, panels, logins });
+  }
+
+  if (action !== "create_owner") return bad("Unknown action.");
   const display = String(body?.name ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
   if (key.length < 2) return bad("Name must be at least 2 characters.");

@@ -56,6 +56,8 @@ export default function AdminRestaurants() {
       <h1 className="adm-page-h">Restaurants</h1>
       <p className="adm-page-sub">Every restaurant on this backend. Pick one to turn its guest features on or off — the change shows only on that restaurant&apos;s menu.</p>
 
+      <NewRestaurant onCreated={loadList} />
+
       <div className="adm-card">
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
           <i className="fas fa-magnifying-glass adm-muted" aria-hidden="true" />
@@ -105,6 +107,97 @@ export default function AdminRestaurants() {
         )}
       </div>
     </>
+  );
+}
+
+// ＋ New restaurant — create a restaurant in one go: name + which panels it has, and the
+// backend mints one starter login per ENABLED panel (passwords shown ONCE). Default panels:
+// Manager+Kitchen+Tablet on, Owner OFF (owner's choice 2026-06-29).
+function NewRestaurant({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [panels, setPanels] = useState<Record<string, boolean>>({ manager: true, kitchen: true, tablet: true, owner: false });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [done, setDone] = useState<{ name: string; slug: string; logins: { panel: string; username: string; password: string }[] } | null>(null);
+
+  const PANELS = [
+    { key: "manager", label: "Manager panel" }, { key: "kitchen", label: "Kitchen display" },
+    { key: "tablet", label: "Waiter tablet" }, { key: "owner", label: "Owner dashboard" },
+  ];
+
+  const create = async () => {
+    if (name.trim().length < 2) { setMsg("Enter a name (at least 2 characters)."); return; }
+    if (!Object.values(panels).some(Boolean)) { setMsg("Turn on at least one panel."); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/api/admin/restaurants", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create_restaurant", name: name.trim(), panels }),
+      });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't create the restaurant.");
+      setDone({ name: d.name, slug: d.slug, logins: d.logins || [] });
+      setName(""); setPanels({ manager: true, kitchen: true, tablet: true, owner: false });
+      onCreated();
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+
+  if (!open) {
+    return (
+      <div className="adm-card" style={{ marginBottom: 14 }}>
+        <button className="adm-btn primary" onClick={() => { setOpen(true); setDone(null); }}>
+          <i className="fas fa-plus" style={{ marginRight: 7 }} aria-hidden="true" />New restaurant
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="adm-card" style={{ marginBottom: 14 }}>
+      <h2>New restaurant</h2>
+      <p className="hint">Name it and pick which panels it has. We&apos;ll create one starter login per panel you turn on — copy the passwords, they show once.</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 12 }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Restaurant name" disabled={busy}
+          style={{ flex: 1, minWidth: 200, padding: "9px 12px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13.5 }} />
+      </div>
+      <div className="adm-togglegrid">
+        {PANELS.map((p) => {
+          const isOn = panels[p.key] === true;
+          return (
+            <button key={p.key} className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={busy}
+              onClick={() => setPanels((s) => ({ ...s, [p.key]: !isOn }))}
+              title={isOn ? "On — tap to turn off" : "Off — tap to turn on"}>
+              <span>{p.label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14 }}>
+        <button className="adm-btn primary" disabled={busy} onClick={create}>
+          <i className="fas fa-check" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Creating…" : "Create restaurant"}
+        </button>
+        <button className="adm-btn" disabled={busy} onClick={() => { setOpen(false); setMsg(null); }}>Cancel</button>
+        {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
+      </div>
+      {done && (
+        <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 8, background: "color-mix(in srgb, var(--adm-ok) 12%, transparent)" }}>
+          <b>{done.name}</b> created (<span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{done.slug}/menu</span>).
+          {done.logins.length > 0 ? (
+            <>
+              <p className="hint" style={{ margin: "8px 0 6px" }}>Starter logins — copy these passwords now, they won&apos;t be shown again:</p>
+              <div style={{ display: "grid", gap: 4 }}>
+                {done.logins.map((l) => (
+                  <div key={l.panel} style={{ fontSize: 13 }}>
+                    <span style={{ textTransform: "capitalize", fontWeight: 700 }}>{l.panel}</span>{" — name "}
+                    <code style={{ fontWeight: 700 }}>{l.username}</code>{" · password "}<code style={{ fontWeight: 700 }}>{l.password}</code>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : <span> No panels were enabled.</span>}
+        </div>
+      )}
+    </div>
   );
 }
 
