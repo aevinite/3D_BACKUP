@@ -540,8 +540,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const openSess = (await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
         .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+      // RULE (owner 2026-06-29): can't settle a bill while ANY order on it is still 'received'
+      // (not yet accepted). The order must be accepted (gone to prepare) before payment. (When a
+      // payment system is added it will auto-accept on pay and skip this — not now.)
+      let rq = sb.from("orders").select("id").eq("status", "received").eq("restaurant_id", rid);
+      rq = openSess ? rq.eq("session_id", openSess.id) : rq.eq("table_number", t).eq("archived", false);
+      if (((await rq.limit(1)).data || []).length)
+        return err("Accept the order first — a bill can only be paid once the order is accepted.", 409);
+      // Never mark a 'received' order paid even if the check above is bypassed (belt-and-suspenders).
       let q = sb.from("orders").update({ payment_status: "paid" })
-        .neq("status", "cancelled").neq("payment_status", "paid").eq("restaurant_id", rid);
+        .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t).eq("archived", false);
       const rows = must(await q.select());
       await logAction("tablet", "bill_paid", { table_number: t, device_id: dev });
