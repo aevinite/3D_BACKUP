@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 // GSAP is the animation library that drives the logo/wordmark motion.
 import { gsap } from "gsap";
+import { splitBrandSegments } from "@/lib/brandText";
 
 // The logo image and the words that spell out one letter at a time.
 const LOGO = "/lfh-logo.png";
@@ -106,11 +107,15 @@ export default function IntroSplash({ wordmark, accentColor }: { wordmark?: stri
       <div className="intro-ring" style={!isDefault && accentColor ? { borderColor: accentColor } : undefined} />
       {/* Logo: flagship only. Other tenants are white-label → just their name. */}
       {isDefault && <img className="intro-logo" src={LOGO} alt="" />}
-      {/* The wordmark, split into one <span> per letter so each can pop in */}
+      {/* The wordmark, split into one <span> per letter so each can pop in.
+          *asterisk*-marked parts use the restaurant's accent colour; the rest
+          stays the default wordmark colour. #1 passes no markers → unchanged. */}
       <div className="intro-word">
-        {word.split("").map((c, i) => (
-          <span key={i}>{c === " " ? " " : c}</span>
-        ))}
+        {splitBrandSegments(word).flatMap((seg, si) =>
+          seg.text.split("").map((c, ci) => (
+            <span key={`${si}-${ci}`} style={seg.hi && accentColor ? { color: accentColor } : undefined}>{c === " " ? " " : c}</span>
+          ))
+        )}
       </div>
     </div>
   );

@@ -7,6 +7,7 @@
 import { useEffect, useRef } from "react";
 // GSAP is the animation library we use to move/fade things smoothly.
 import { gsap } from "gsap";
+import { splitBrandSegments, stripBrandMarkers, hasBrandMarkers } from "@/lib/brandText";
 
 // Shows the greeting + tagline at the top of the menu, revealing them letter
 // by letter. `greeting` is the small badge line, `title` is the big tagline.
@@ -62,7 +63,17 @@ export default function HeroTitle({ greeting, title }: { greeting: string; title
   // Turns a piece of text into one <span> per character, so each letter can be
   // animated on its own. Spaces are kept as-is so words don't run together.
   const split = (text: string) =>
-    text.split("").map((c, i) => <span key={i}>{c === " " ? " " : c}</span>);
+    stripBrandMarkers(text).split("").map((c, i) => <span key={i}>{c === " " ? " " : c}</span>);
+
+  // The title supports *asterisk* highlight markers: marked letters use the accent,
+  // the rest the mode-adaptive --text. With markers we add `has-split` so the CSS
+  // drops the gradient (per-letter solid colours). No markers → original gradient.
+  const titleSplit = hasBrandMarkers(title);
+  const titleLetters = splitBrandSegments(title).flatMap((seg, si) =>
+    seg.text.split("").map((c, ci) => (
+      <span key={`${si}-${ci}`} className={seg.hi ? "hi" : undefined}>{c === " " ? " " : c}</span>
+    ))
+  );
 
   return (
     <div ref={ref} className="hero-title-wrap">

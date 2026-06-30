@@ -6,6 +6,16 @@
 // menu (/r/<slug>/menu). Mirrors the single-restaurant Features tab's UI + the
 // .adm-* styling, parameterised by restaurant.
 import { useCallback, useEffect, useState } from "react";
+import { splitBrandSegments, stripBrandMarkers } from "@/lib/brandText";
+
+// Render brand text in the live preview: *marked* parts use the accent colour,
+// the rest the mode's text colour — exactly how the guest menu renders it.
+function previewParts(text: string, textColor: string, accentColor: string) {
+  return splitBrandSegments(text).map((seg, i) => (
+    <span key={i} style={{ color: seg.hi ? accentColor : textColor }}>{seg.text}</span>
+  ));
+}
+const stripMarkers = (s: string) => stripBrandMarkers(s);
 
 type Restaurant = { id: string; slug: string; name: string; active: boolean; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null };
 type Owner = { id: string; name: string };
@@ -450,11 +460,13 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
             </div>
           ))}
         </div>
-        {/* Live preview swatch */}
+        {/* Live preview swatch — renders the wordmark + hero with *highlight* markers:
+            marked parts use the accent, the rest the mode's text colour. */}
         <div style={{ borderRadius: 12, overflow: "hidden", border: "var(--border)" }}>
           <div style={{ background: pv.bg, color: pv.text, padding: 14 }}>
-            <div style={{ fontSize: 11, letterSpacing: 2, opacity: 0.7 }}>WELCOME</div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: pv.accent }}>{hero || "Our Menu"}</div>
+            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>{previewParts(logoText || restaurant.name, pv.text, pv.accent)}</div>
+            <div style={{ fontSize: 11, letterSpacing: 2, color: pv.accent }}>{stripMarkers(tagline) || "WELCOME"}</div>
+            <div style={{ fontSize: 20, fontWeight: 800 }}>{previewParts(hero || "Our Menu", pv.text, pv.accent)}</div>
             <div style={{ background: pv.card, borderRadius: 10, padding: 10, marginTop: 10 }}>
               <div style={{ fontWeight: 700 }}>Sample Dish</div>
               <div style={{ display: "inline-block", marginTop: 6, padding: "4px 10px", borderRadius: 999, background: pv.accent, color: pv.bg, fontSize: 12, fontWeight: 700 }}>Add</div>
@@ -466,6 +478,7 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
       {lowContrast && <p className="hint" style={{ color: "var(--adm-bad, #c0392b)", marginTop: 8 }}>⚠ Text and background look low-contrast — guests may struggle to read it.</p>}
 
       <div style={{ display: "grid", gap: 8, marginTop: 14, paddingTop: 12, borderTop: "var(--border)" }}>
+        <p className="hint" style={{ margin: 0 }}>Tip: wrap a word in <code>*stars*</code> to colour it with your <b>accent</b> — the rest stays white (dark) / black (light). e.g. <code>Little *French* House</code>.</p>
         <label style={{ fontSize: 12 }}>Logo text (header + opening screen)<input value={logoText} placeholder={restaurant.name} disabled={busy} onChange={(e) => setLogoText(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
         <label style={{ fontSize: 12 }}>Hero title<input value={hero} placeholder="Our Menu" disabled={busy} onChange={(e) => setHero(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
         <label style={{ fontSize: 12 }}>Greeting / tagline<input value={tagline} placeholder="Welcome" disabled={busy} onChange={(e) => setTagline(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>

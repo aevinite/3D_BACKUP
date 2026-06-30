@@ -553,6 +553,11 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
   animation: gradient 5s ease infinite;
 }
 @keyframes gradient { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+/* Hero with *highlight* markers: drop the gradient and colour each letter solidly —
+   plain letters use the mode-adaptive --text (white in dark / black in light),
+   *marked* letters use the restaurant's accent. Only applies when markers exist. */
+.hero-title.has-split { background: none; animation: none; -webkit-text-fill-color: currentColor; color: var(--text); }
+.hero-title.has-split span.hi { color: var(--accent); -webkit-text-fill-color: var(--accent); }
 
 /* --- CATEGORIES --- */
 .section-header {
