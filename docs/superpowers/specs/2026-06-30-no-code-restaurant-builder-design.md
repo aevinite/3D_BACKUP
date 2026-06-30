@@ -52,16 +52,36 @@ Copy the demo `menu.json` into `public/content/starter-menu.json`. On create-wit
 
 ---
 
-## Phase 2 — Branding editor in the admin panel
+## Phase 2 — Branding editor in the admin panel (full theme palette)
+
+**Theme model — full palette, derived everything (owner choice 2026-06-30).**
+The menu's look reduces to four meaningful colours; all other tokens (glows, gradients, borders, dim/muted variants, button fills) are *derived* from them in `AppShell.accentVars()`:
+- `background` → `--bg`
+- `card / surface` → `--card`
+- `text` → `--text` (plus a derived `--muted`)
+- `accent` → `--accent` / `--gold` and all their derived gradients/glows (existing logic)
+
+The admin sets these four; the derivation recolours the **whole** menu, not just one pill. Each colour is editable **both** by a colour picker **and** a hex-code text field (e.g. `#1a0f09`), validated. Live preview updates as you type.
+
+**Light AND dark mode — each themed separately (owner choice 2026-06-30).** The guest menu has a light/dark toggle, and each mode has its own `--bg/--card/--text/--accent` today. The editor lets the admin set a palette for **each mode**, and the guest's toggle picks the matching one.
+
+**Storage.** Reuse existing columns: `accent_color` (a sensible default/legacy accent) + the already-present unused `theme jsonb`, shaped as:
+```json
+{ "dark":  { "bg": "#…", "card": "#…", "text": "#…", "accent": "#…" },
+  "light": { "bg": "#…", "card": "#…", "text": "#…", "accent": "#…" } }
+```
+Additive, no migration needed for Phase 2. Any missing mode/colour → fall back to the current derived-from-`accent_color` / default behaviour (so #1 and any un-themed tenant are unaffected). Per-mode keys are independent: theming only dark still leaves light on its sensible default.
+
+**Render.** Extend `AppShell.accentVars()` (and the light-mode block) to merge the matching mode's `theme` overrides on top of the accent-derived base: when a mode's `bg`/`card`/`text`/`accent` are set, emit `--bg`/`--card`/`--text`/`--accent` (and derive `--muted`, glows, gradients from them) **scoped to that mode** (`:root` dark vs the light-mode selector). Keep the `isDefault` guard so restaurant #1 keeps its hand-tuned values in both modes. `lib/tenant.ts` returns the full `theme` object alongside `accentColor`.
 
 **API**
-- New action `update_branding` (POST) or `PATCH` on `app/api/admin/restaurants/route.ts`, admin-gated: accepts `{ restaurant_id, accent_color?, hero_title?, tagline?, logo_text? }`, validates (hex colour format; length caps on text), writes the columns on `restaurants`. Bust any cached tenant bundle so guests see changes within seconds.
+- New admin-gated action `update_branding` (POST) on `app/api/admin/restaurants/route.ts`: accepts `{ restaurant_id, accent_color?, theme?: { dark?: {bg?,card?,text?,accent?}, light?: {bg?,card?,text?,accent?} }, hero_title?, tagline?, logo_text? }`. Validate every colour as a hex string (`#rgb`/`#rrggbb`); length-cap text. Write `accent_color`, `theme`, and the text columns on `restaurants`. Bust the cached tenant bundle so guests see changes within seconds.
 
 **UI**
-- In `/aevinite/restaurants`, each restaurant row gets an **"Edit branding"** action opening a panel: colour picker (accent), text inputs for hero title, tagline/greeting, logo text. Live preview swatch. Register the panel/drawer in the back-button manager.
+- In `/aevinite/restaurants`, each restaurant row gets an **"Edit branding"** action opening a panel with a **Dark / Light mode switch** at the top; under each mode, four colour controls (picker + hex input each) for background / card / text / accent. A **live preview** card (a sample menu tile + pill + text) recolours in real time and reflects the mode being edited. Below: text inputs for hero title, tagline/greeting, logo text. A soft contrast hint if text-on-background is hard to read (warn, don't block). Register the panel/drawer in the back-button manager.
 
 **Verify**
-- Set Demo Bistro accent to a distinct colour + custom hero/tagline. Its guest menu shows the new accent on pills, glow, background wash, and the new hero/greeting text. **Zero** "Little French House" text or gold anywhere. Restaurant #1 unchanged (still its gold + LFH hero). Test desktop + ~390px.
+- Set Demo Bistro to a distinct full palette in **both** modes (e.g. dark: teal bg / cream text / magenta accent; light: pale mint bg / charcoal text / magenta accent) + custom hero/tagline. On its guest menu, toggling light/dark switches between the two custom palettes and recolours **everywhere** — background, cards, text, pills, glows, gradients — with the matching hero/greeting. Hex-typed values apply identically to picker values. **Zero** "Little French House" text or gold in either mode. Restaurant #1 unchanged in both modes. Test desktop + ~390px.
 
 ---
 
