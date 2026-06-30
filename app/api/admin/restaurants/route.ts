@@ -11,6 +11,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { hashSecret, normalizeLoginName } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
+import { loadStarterMenu, toCategoryRows, toFilterRows, toItemRows } from "@/lib/starterMenu";
 
 export const dynamic = "force-dynamic";
 const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
@@ -107,6 +108,8 @@ export async function POST(req: NextRequest) {
       manager: wp.manager !== false, kitchen: wp.kitchen !== false,
       tablet: wp.tablet !== false, owner: wp.owner === true,
     };
+    // Seed a starter menu unless the admin turned the toggle off (default ON).
+    const seedMenu = body?.seedMenu !== false;
     // 1) the restaurant row (id auto-uuid, active).
     const rest = await sb.from("restaurants").insert({ slug, name, active: true }).select("id, slug, name").single();
     if (rest.error) return bad(rest.error.message, 500);
@@ -119,6 +122,35 @@ export async function POST(req: NextRequest) {
     const settingsRow = { ...baseRow, id: slug, restaurant_id: rid, enabled_panels: panels, table_count: 10 };
     const setRes = await sb.from("settings").upsert(settingsRow, { onConflict: "restaurant_id" });
     if (setRes.error) return bad(setRes.error.message, 500);
+    // 2b) Seed the starter menu (categories → filters → items), scoped to this restaurant.
+    //     Best-effort: a seed failure must NOT orphan the already-created restaurant — we
+    //     report it in the response so the admin knows, and the restaurant is still usable
+    //     and editable from its manager panel. Egress-safe: scoped inserts, no reads.
+    let menuSeeded = false;
+    let seedError: string | null = null;
+    if (seedMenu) {
+      try {
+        const menu = loadStarterMenu();
+        const cats = toCategoryRows(menu, rid);
+        const filters = toFilterRows(menu, rid);
+        const items = toItemRows(menu, rid);
+        if (cats.length) {
+          const r1 = await sb.from("categories").upsert(cats, { onConflict: "restaurant_id,slug" });
+          if (r1.error) throw new Error(r1.error.message);
+        }
+        if (filters.length) {
+          const r2 = await sb.from("filters").upsert(filters, { onConflict: "restaurant_id,slug" });
+          if (r2.error) throw new Error(r2.error.message);
+        }
+        if (items.length) {
+          const r3 = await sb.from("menu_items").upsert(items, { onConflict: "restaurant_id,slug" });
+          if (r3.error) throw new Error(r3.error.message);
+        }
+        menuSeeded = true;
+      } catch (e) {
+        seedError = e instanceof Error ? e.message : String(e);
+      }
+    }
     // 3) one starter login per ENABLED panel. Username = the panel name (unique PER restaurant),
     //    random password returned once. The owner login is also mapped as the restaurant's owner.
     const logins: { panel: string; role: string; username: string; password: string }[] = [];
@@ -136,8 +168,8 @@ export async function POST(req: NextRequest) {
       }
     }
     const onPanels = (Object.keys(panels) as (keyof typeof panels)[]).filter((k) => panels[k]);
-    await logAction("admin", "restaurant_create", { actor: "admin", detail: `created restaurant "${name}" (${slug}) · panels ${onPanels.join("+")}` });
-    return ok({ ok: true, id: rid, slug, name, panels, logins });
+    await logAction("admin", "restaurant_create", { actor: "admin", detail: `created restaurant "${name}" (${slug}) · panels ${onPanels.join("+")}${seedMenu ? (menuSeeded ? " · menu seeded" : " · menu seed FAILED") : " · no menu"}` });
+    return ok({ ok: true, id: rid, slug, name, panels, logins, menuSeeded, seedError });
   }
 
   if (action !== "create_owner") return bad("Unknown action.");

@@ -1,0 +1,5055 @@
+{
+  "categories": [
+    {
+      "slug": "breakfast",
+      "icon": "fa-egg",
+      "color": "#f59e0b",
+      "name": {
+        "en": "Breakfast",
+        "de": "Frühstück",
+        "fr": "Petit-déjeuner",
+        "ar": "فطور",
+        "hi": "नाश्ता",
+        "ko": "아침"
+      },
+      "sortOrder": 1
+    },
+    {
+      "slug": "starters",
+      "icon": "fa-bowl-food",
+      "color": "#eab308",
+      "name": {
+        "en": "Starters",
+        "de": "Vorspeisen",
+        "fr": "Entrées",
+        "ar": "مقبلات",
+        "hi": "स्टार्टर",
+        "ko": "스타터"
+      },
+      "sortOrder": 2
+    },
+    {
+      "slug": "salads",
+      "icon": "fa-leaf",
+      "color": "#22c55e",
+      "name": {
+        "en": "Garden",
+        "de": "Vegetarisch",
+        "fr": "Végétarien",
+        "ar": "نباتي",
+        "hi": "शाकाहारी",
+        "ko": "채식"
+      },
+      "sortOrder": 3
+    },
+    {
+      "slug": "chicken",
+      "icon": "fa-drumstick-bite",
+      "color": "#f97316",
+      "name": {
+        "en": "Chicken",
+        "de": "Hähnchen",
+        "fr": "Poulet",
+        "ar": "دجاج",
+        "hi": "चिकन",
+        "ko": "치킨"
+      },
+      "sortOrder": 4
+    },
+    {
+      "slug": "seafood",
+      "icon": "fa-fish",
+      "color": "#0ea5e9",
+      "name": {
+        "en": "Seafood",
+        "de": "Meeresfrüchte",
+        "fr": "Fruits de mer",
+        "ar": "مأكولات بحرية",
+        "hi": "सीफ़ूड",
+        "ko": "해산물"
+      },
+      "sortOrder": 5
+    },
+    {
+      "slug": "pasta",
+      "icon": "fa-utensils",
+      "color": "#d4a574",
+      "name": {
+        "en": "Pasta",
+        "de": "Pasta",
+        "fr": "Pâtes",
+        "ar": "باستا",
+        "hi": "पास्ता",
+        "ko": "파스타"
+      },
+      "sortOrder": 6
+    },
+    {
+      "slug": "mains",
+      "icon": "fa-burger",
+      "color": "#ef4444",
+      "name": {
+        "en": "Mains",
+        "de": "Hauptgerichte",
+        "fr": "Plats",
+        "ar": "أطباق رئيسية",
+        "hi": "मेन कोर्स",
+        "ko": "메인"
+      },
+      "sortOrder": 7
+    },
+    {
+      "slug": "desserts",
+      "icon": "fa-ice-cream",
+      "color": "#ec4899",
+      "name": {
+        "en": "Desserts",
+        "de": "Desserts",
+        "fr": "Desserts",
+        "ar": "حلويات",
+        "hi": "डेज़र्ट",
+        "ko": "디저트"
+      },
+      "sortOrder": 8
+    },
+    {
+      "slug": "drinks",
+      "icon": "fa-glass-water",
+      "color": "#06b6d4",
+      "name": {
+        "en": "Drinks",
+        "de": "Getränke",
+        "fr": "Boissons",
+        "ar": "مشروبات",
+        "hi": "पेय",
+        "ko": "음료"
+      },
+      "sortOrder": 9
+    }
+  ],
+  "filters": [
+    {
+      "slug": "bestseller",
+      "icon": "🔥",
+      "name": {
+        "en": "Bestseller",
+        "de": "Bestseller",
+        "fr": "Best-seller",
+        "ar": "الأكثر مبيعاً",
+        "hi": "बेस्टसेलर",
+        "ko": "베스트셀러"
+      },
+      "sortOrder": 1
+    },
+    {
+      "slug": "chef-special",
+      "icon": "👨‍🍳",
+      "name": {
+        "en": "Chef's Special",
+        "de": "Chefempfehlung",
+        "fr": "Spécialité du Chef",
+        "ar": "طبق الشيف",
+        "hi": "शेफ स्पेशल",
+        "ko": "셰프 스페셜"
+      },
+      "sortOrder": 2
+    },
+    {
+      "slug": "top-rated",
+      "icon": "⭐",
+      "name": {
+        "en": "Top Rated",
+        "de": "Top bewertet",
+        "fr": "Mieux notés",
+        "ar": "الأعلى تقييماً",
+        "hi": "टॉप रेटेड",
+        "ko": "인기 평점"
+      },
+      "sortOrder": 3
+    },
+    {
+      "slug": "new",
+      "icon": "🆕",
+      "name": {
+        "en": "New",
+        "de": "Neu",
+        "fr": "Nouveau",
+        "ar": "جديد",
+        "hi": "नया",
+        "ko": "신메뉴"
+      },
+      "sortOrder": 4
+    },
+    {
+      "slug": "vegetarian",
+      "icon": "🌿",
+      "name": {
+        "en": "Vegetarian",
+        "de": "Vegetarisch",
+        "fr": "Végétarien",
+        "ar": "نباتي",
+        "hi": "शाकाहारी",
+        "ko": "채식"
+      },
+      "sortOrder": 5
+    },
+    {
+      "slug": "vegan",
+      "icon": "🥑",
+      "name": {
+        "en": "Vegan",
+        "de": "Vegan",
+        "fr": "Végan",
+        "ar": "نباتي صرف",
+        "hi": "वीगन",
+        "ko": "비건"
+      },
+      "sortOrder": 6
+    },
+    {
+      "slug": "high-protein",
+      "icon": "💪",
+      "name": {
+        "en": "High Protein",
+        "de": "Proteinreich",
+        "fr": "Riche en protéines",
+        "ar": "غني بالبروتين",
+        "hi": "उच्च प्रोटीन",
+        "ko": "고단백"
+      },
+      "sortOrder": 7
+    },
+    {
+      "slug": "healthy",
+      "icon": "🥗",
+      "name": {
+        "en": "Healthy",
+        "de": "Gesund",
+        "fr": "Sain",
+        "ar": "صحي",
+        "hi": "स्वस्थ",
+        "ko": "건강식"
+      },
+      "sortOrder": 8
+    },
+    {
+      "slug": "spicy",
+      "icon": "🌶️",
+      "name": {
+        "en": "Spicy",
+        "de": "Scharf",
+        "fr": "Épicé",
+        "ar": "حار",
+        "hi": "मसालेदार",
+        "ko": "매운맛"
+      },
+      "sortOrder": 9
+    },
+    {
+      "slug": "gluten-free",
+      "icon": "🌾",
+      "name": {
+        "en": "Gluten-Free",
+        "de": "Glutenfrei",
+        "fr": "Sans gluten",
+        "ar": "خالٍ من الغلوتين",
+        "hi": "ग्लूटेन-मुक्त",
+        "ko": "글루텐프리"
+      },
+      "sortOrder": 10
+    }
+  ],
+  "items": [
+    {
+      "id": "all-butter-croissant",
+      "slug": "all-butter-croissant",
+      "title": "All-Butter Croissant",
+      "price": "150",
+      "image": "https://images.unsplash.com/photo-1555507036-ab1f4038808a?w=600&h=600&fit=crop",
+      "category": "breakfast",
+      "veg": true,
+      "is4d": true,
+      "modelFolder": "Croissant",
+      "modelSmallUrl": "/models/croissant_small.glb",
+      "modelOptimizedUrl": "/models/croissant-optimized.glb",
+      "description": "All-Butter Croissant — a warm, generous way to start the day.",
+      "longDescription": "Our All-Butter Croissant is made fresh to order each morning from quality seasonal produce. A comforting plate that sets you up beautifully for the day ahead.",
+      "rating": "4.3",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "380",
+        "protein": "12g",
+        "carbs": "40g",
+        "sugar": "8g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥐",
+          "name": "Butter Croissant"
+        },
+        {
+          "emoji": "🍳",
+          "name": "Free-Range Eggs"
+        },
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy",
+        "eggs"
+      ],
+      "reviews": [
+        {
+          "name": "Aarav",
+          "rating": 5,
+          "text": "Loved the All-Butter Croissant. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Sofia",
+          "rating": 4,
+          "text": "The All-Butter Croissant was excellent — easily my new favourite here."
+        }
+      ],
+      "options": [
+        {
+          "name": "Size",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Regular",
+              "price": 0
+            },
+            {
+              "label": "Large",
+              "price": 60
+            }
+          ]
+        },
+        {
+          "name": "Add-ons",
+          "type": "multi",
+          "choices": [
+            {
+              "label": "Extra Cheese",
+              "price": 40
+            },
+            {
+              "label": "Avocado",
+              "price": 70
+            },
+            {
+              "label": "Smoked Ham",
+              "price": 90
+            }
+          ]
+        }
+      ],
+      "tags": [
+        "vegetarian",
+        "bestseller",
+        "new"
+      ],
+      "sort_order": 0
+    },
+    {
+      "id": "belgian-waffle",
+      "slug": "belgian-waffle",
+      "title": "Belgian Waffle",
+      "price": "240",
+      "image": "https://images.unsplash.com/photo-1562376552-0d160a2f238d?w=600&h=600&fit=crop",
+      "category": "breakfast",
+      "veg": true,
+      "is4d": true,
+      "modelFolder": "Waffle",
+      "modelSmallUrl": "/models/waffle_small.glb",
+      "modelOptimizedUrl": "/models/waffle-optimized.glb",
+      "description": "Belgian Waffle — a warm, generous way to start the day.",
+      "longDescription": "Our Belgian Waffle is made fresh to order each morning from quality seasonal produce. A comforting plate that sets you up beautifully for the day ahead.",
+      "rating": "4.7",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "380",
+        "protein": "12g",
+        "carbs": "40g",
+        "sugar": "8g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧇",
+          "name": "Waffle Batter"
+        },
+        {
+          "emoji": "🍳",
+          "name": "Free-Range Eggs"
+        },
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy",
+        "eggs"
+      ],
+      "reviews": [
+        {
+          "name": "Daniel",
+          "rating": 4,
+          "text": "Came back just for the Belgian Waffle. So good."
+        },
+        {
+          "name": "Diego",
+          "rating": 5,
+          "text": "Belgian Waffle was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Priya",
+          "rating": 4,
+          "text": "Loved the Belgian Waffle. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "chef-special"
+      ],
+      "sort_order": 1
+    },
+    {
+      "id": "bread-omelette",
+      "slug": "bread-omelette",
+      "title": "Bread omelette",
+      "price": "140",
+      "image": "https://www.themealdb.com/images/media/meals/hqaejl1695738653.jpg",
+      "category": "breakfast",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Bread omelette — a warm, generous way to start the day.",
+      "longDescription": "Our Bread omelette is made fresh to order each morning from quality seasonal produce. A comforting plate that sets you up beautifully for the day ahead.",
+      "rating": "4.5",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "380",
+        "protein": "12g",
+        "carbs": "40g",
+        "sugar": "8g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍞",
+          "name": "Artisan Bread"
+        },
+        {
+          "emoji": "🍳",
+          "name": "Free-Range Eggs"
+        },
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy",
+        "eggs"
+      ],
+      "reviews": [
+        {
+          "name": "Hannah",
+          "rating": 4,
+          "text": "The Bread omelette was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Aarav",
+          "rating": 5,
+          "text": "Loved the Bread omelette. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Sofia",
+          "rating": 4,
+          "text": "Best Bread omelette I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "bestseller",
+        "sold-out"
+      ],
+      "sort_order": 2
+    },
+    {
+      "id": "ugali-kenyan-cornmeal",
+      "slug": "ugali-kenyan-cornmeal",
+      "title": "Ugali – Kenyan cornmeal",
+      "price": "220",
+      "image": "https://www.themealdb.com/images/media/meals/smoa3h1762341142.jpg",
+      "category": "breakfast",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Ugali – Kenyan cornmeal — a warm, generous way to start the day.",
+      "longDescription": "Our Ugali – Kenyan cornmeal is made fresh to order each morning from quality seasonal produce. A comforting plate that sets you up beautifully for the day ahead.",
+      "rating": "4.3",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "380",
+        "protein": "12g",
+        "carbs": "40g",
+        "sugar": "8g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🌽",
+          "name": "Sweet Corn"
+        },
+        {
+          "emoji": "🍳",
+          "name": "Free-Range Eggs"
+        },
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        }
+      ],
+      "allergens": [
+        "dairy",
+        "eggs"
+      ],
+      "reviews": [
+        {
+          "name": "Chloe",
+          "rating": 5,
+          "text": "Loved the Ugali – Kenyan cornmeal. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Hannah",
+          "rating": 4,
+          "text": "Best Ugali – Kenyan cornmeal I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "new"
+      ],
+      "sort_order": 3
+    },
+    {
+      "id": "yemeni-lahsa-elite-shakshuka",
+      "slug": "yemeni-lahsa-elite-shakshuka",
+      "title": "Yemeni Lahsa (Elite Shakshuka)",
+      "price": "200",
+      "image": "https://www.themealdb.com/images/media/meals/30s7vf1763741844.jpg",
+      "category": "breakfast",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Yemeni Lahsa (Elite Shakshuka) — a warm, generous way to start the day.",
+      "longDescription": "Our Yemeni Lahsa (Elite Shakshuka) is made fresh to order each morning from quality seasonal produce. A comforting plate that sets you up beautifully for the day ahead.",
+      "rating": "4.3",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "380",
+        "protein": "12g",
+        "carbs": "40g",
+        "sugar": "8g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍳",
+          "name": "Free-Range Eggs"
+        },
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        }
+      ],
+      "allergens": [
+        "dairy",
+        "eggs"
+      ],
+      "reviews": [
+        {
+          "name": "Mei",
+          "rating": 4,
+          "text": "Best Yemeni Lahsa (Elite Shakshuka) I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Aisha",
+          "rating": 5,
+          "text": "Yemeni Lahsa (Elite Shakshuka) was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 4
+    },
+    {
+      "id": "flija-layered-pancake-crepe",
+      "slug": "flija-layered-pancake-crepe",
+      "title": "Flija Layered Pancake / Crepe",
+      "price": "310",
+      "image": "https://www.themealdb.com/images/media/meals/eqnf3p1779649407.jpg",
+      "category": "breakfast",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Flija Layered Pancake / Crepe — a warm, generous way to start the day.",
+      "longDescription": "Our Flija Layered Pancake / Crepe is made fresh to order each morning from quality seasonal produce. A comforting plate that sets you up beautifully for the day ahead.",
+      "rating": "4.7",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "380",
+        "protein": "12g",
+        "carbs": "40g",
+        "sugar": "8g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥞",
+          "name": "Pancake Batter"
+        },
+        {
+          "emoji": "🥞",
+          "name": "Crêpe"
+        },
+        {
+          "emoji": "🍳",
+          "name": "Free-Range Eggs"
+        },
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy",
+        "eggs"
+      ],
+      "reviews": [
+        {
+          "name": "Liam",
+          "rating": 4,
+          "text": "Came back just for the Flija Layered Pancake / Crepe. So good."
+        },
+        {
+          "name": "Emma",
+          "rating": 5,
+          "text": "Flija Layered Pancake / Crepe was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "new",
+        "top-rated"
+      ],
+      "sort_order": 5
+    },
+    {
+      "id": "r-mmegr-t-norwegian-sour-cream-porridge",
+      "slug": "r-mmegr-t-norwegian-sour-cream-porridge",
+      "title": "Rømmegrøt – Norwegian Sour Cream Porridge",
+      "price": "160",
+      "image": "https://www.themealdb.com/images/media/meals/hyk47c1762772689.jpg",
+      "category": "breakfast",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Rømmegrøt – Norwegian Sour Cream Porridge — a warm, generous way to start the day.",
+      "longDescription": "Our Rømmegrøt – Norwegian Sour Cream Porridge is made fresh to order each morning from quality seasonal produce. A comforting plate that sets you up beautifully for the day ahead.",
+      "rating": "4.3",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "380",
+        "protein": "12g",
+        "carbs": "40g",
+        "sugar": "8g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍳",
+          "name": "Free-Range Eggs"
+        },
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        }
+      ],
+      "allergens": [
+        "dairy",
+        "eggs"
+      ],
+      "reviews": [
+        {
+          "name": "Noah",
+          "rating": 5,
+          "text": "Best Rømmegrøt – Norwegian Sour Cream Porridge I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Marco",
+          "rating": 4,
+          "text": "Rømmegrøt – Norwegian Sour Cream Porridge was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 6
+    },
+    {
+      "id": "oatmeal-pancakes",
+      "slug": "oatmeal-pancakes",
+      "title": "Oatmeal pancakes",
+      "price": "260",
+      "image": "https://www.themealdb.com/images/media/meals/c400ok1764439058.jpg",
+      "category": "breakfast",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Oatmeal pancakes — a warm, generous way to start the day.",
+      "longDescription": "Our Oatmeal pancakes is made fresh to order each morning from quality seasonal produce. A comforting plate that sets you up beautifully for the day ahead.",
+      "rating": "4.8",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "380",
+        "protein": "12g",
+        "carbs": "40g",
+        "sugar": "8g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥞",
+          "name": "Pancake Batter"
+        },
+        {
+          "emoji": "🍳",
+          "name": "Free-Range Eggs"
+        },
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy",
+        "eggs"
+      ],
+      "reviews": [
+        {
+          "name": "Hannah",
+          "rating": 4,
+          "text": "Oatmeal pancakes was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Aarav",
+          "rating": 5,
+          "text": "Best Oatmeal pancakes I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Sofia",
+          "rating": 4,
+          "text": "Loved the Oatmeal pancakes. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "top-rated"
+      ],
+      "sort_order": 7
+    },
+    {
+      "id": "zemiakov-placky",
+      "slug": "zemiakov-placky",
+      "title": "Zemiakové Placky",
+      "price": "270",
+      "image": "https://www.themealdb.com/images/media/meals/0umm891763364625.jpg",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Zemiakové Placky — a warm, shareable way to begin.",
+      "longDescription": "Our Zemiakové Placky is prepared fresh to order. A generous, flavourful opener that sets the tone for the meal to come.",
+      "rating": "4.8",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "320",
+        "protein": "9g",
+        "carbs": "30g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        },
+        {
+          "emoji": "🫒",
+          "name": "Olive Oil"
+        },
+        {
+          "emoji": "🧂",
+          "name": "Sea Salt"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Liam",
+          "rating": 4,
+          "text": "Best Zemiakové Placky I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Emma",
+          "rating": 5,
+          "text": "Zemiakové Placky was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "bestseller"
+      ],
+      "sort_order": 8
+    },
+    {
+      "id": "venezuelan-turnovers",
+      "slug": "venezuelan-turnovers",
+      "title": "Venezuelan turnovers",
+      "price": "180",
+      "image": "https://www.themealdb.com/images/media/meals/zjtfp31764440795.jpg",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Venezuelan turnovers — a warm, shareable way to begin.",
+      "longDescription": "Our Venezuelan turnovers is prepared fresh to order. A generous, flavourful opener that sets the tone for the meal to come.",
+      "rating": "4.3",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "320",
+        "protein": "9g",
+        "carbs": "30g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        },
+        {
+          "emoji": "🫒",
+          "name": "Olive Oil"
+        },
+        {
+          "emoji": "🧂",
+          "name": "Sea Salt"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Emma",
+          "rating": 4,
+          "text": "Came back just for the Venezuelan turnovers. So good."
+        },
+        {
+          "name": "Lina",
+          "rating": 5,
+          "text": "The Venezuelan turnovers was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Daniel",
+          "rating": 4,
+          "text": "Loved the Venezuelan turnovers. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "chef-special"
+      ],
+      "sort_order": 9
+    },
+    {
+      "id": "polish-patties-kotlety",
+      "slug": "polish-patties-kotlety",
+      "title": "Polish patties (kotlety)",
+      "price": "180",
+      "image": "https://www.themealdb.com/images/media/meals/vvn5f71764360273.jpg",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Polish patties (kotlety) — a warm, shareable way to begin.",
+      "longDescription": "Our Polish patties (kotlety) is prepared fresh to order. A generous, flavourful opener that sets the tone for the meal to come.",
+      "rating": "4.4",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "320",
+        "protein": "9g",
+        "carbs": "30g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        },
+        {
+          "emoji": "🫒",
+          "name": "Olive Oil"
+        },
+        {
+          "emoji": "🧂",
+          "name": "Sea Salt"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Noah",
+          "rating": 5,
+          "text": "Came back just for the Polish patties (kotlety). So good."
+        },
+        {
+          "name": "Marco",
+          "rating": 4,
+          "text": "The Polish patties (kotlety) was excellent — easily my new favourite here."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "new"
+      ],
+      "sort_order": 10
+    },
+    {
+      "id": "smoked-aubergine-pur-e",
+      "slug": "smoked-aubergine-pur-e",
+      "title": "Smoked aubergine purée",
+      "price": "250",
+      "image": "https://www.themealdb.com/images/media/meals/8c8m4q1763791156.jpg",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Smoked aubergine purée — a warm, shareable way to begin.",
+      "longDescription": "Our Smoked aubergine purée is prepared fresh to order. A generous, flavourful opener that sets the tone for the meal to come.",
+      "rating": "4.3",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "320",
+        "protein": "9g",
+        "carbs": "30g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        },
+        {
+          "emoji": "🫒",
+          "name": "Olive Oil"
+        },
+        {
+          "emoji": "🧂",
+          "name": "Sea Salt"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Marco",
+          "rating": 5,
+          "text": "Best Smoked aubergine purée I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Chloe",
+          "rating": 4,
+          "text": "Smoked aubergine purée was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Hannah",
+          "rating": 5,
+          "text": "The Smoked aubergine purée was excellent — easily my new favourite here."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 11
+    },
+    {
+      "id": "bolani-with-potato-filling",
+      "slug": "bolani-with-potato-filling",
+      "title": "Bolani with Potato Filling",
+      "price": "360",
+      "image": "https://www.themealdb.com/images/media/meals/de0sns1779555283.jpg",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Bolani with Potato Filling — a warm, shareable way to begin.",
+      "longDescription": "Our Bolani with Potato Filling is prepared fresh to order. A generous, flavourful opener that sets the tone for the meal to come.",
+      "rating": "4.4",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "320",
+        "protein": "9g",
+        "carbs": "30g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥔",
+          "name": "Potato"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        },
+        {
+          "emoji": "🫒",
+          "name": "Olive Oil"
+        },
+        {
+          "emoji": "🧂",
+          "name": "Sea Salt"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Daniel",
+          "rating": 4,
+          "text": "Best Bolani with Potato Filling I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Diego",
+          "rating": 5,
+          "text": "Loved the Bolani with Potato Filling. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Priya",
+          "rating": 4,
+          "text": "The Bolani with Potato Filling was excellent — easily my new favourite here."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "top-rated"
+      ],
+      "sort_order": 12
+    },
+    {
+      "id": "clam-chowder",
+      "slug": "clam-chowder",
+      "title": "Clam chowder",
+      "price": "270",
+      "image": "https://www.themealdb.com/images/media/meals/rvtvuw1511190488.jpg",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Clam chowder — a warm, shareable way to begin.",
+      "longDescription": "Our Clam chowder is prepared fresh to order. A generous, flavourful opener that sets the tone for the meal to come.",
+      "rating": "4.7",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "320",
+        "protein": "9g",
+        "carbs": "30g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        },
+        {
+          "emoji": "🫒",
+          "name": "Olive Oil"
+        },
+        {
+          "emoji": "🧂",
+          "name": "Sea Salt"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Omar",
+          "rating": 4,
+          "text": "Best Clam chowder I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Mei",
+          "rating": 5,
+          "text": "Loved the Clam chowder. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Aisha",
+          "rating": 4,
+          "text": "The Clam chowder was excellent — easily my new favourite here."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 13
+    },
+    {
+      "id": "fain",
+      "slug": "fain",
+      "title": "Fainá",
+      "price": "360",
+      "image": "https://www.themealdb.com/images/media/meals/849jd81763075251.jpg",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Fainá — a warm, shareable way to begin.",
+      "longDescription": "Our Fainá is prepared fresh to order. A generous, flavourful opener that sets the tone for the meal to come.",
+      "rating": "4.5",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "320",
+        "protein": "9g",
+        "carbs": "30g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        },
+        {
+          "emoji": "🫒",
+          "name": "Olive Oil"
+        },
+        {
+          "emoji": "🧂",
+          "name": "Sea Salt"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Marco",
+          "rating": 4,
+          "text": "Loved the Fainá. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Chloe",
+          "rating": 5,
+          "text": "Best Fainá I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Hannah",
+          "rating": 4,
+          "text": "Came back just for the Fainá. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "top-rated"
+      ],
+      "sort_order": 14
+    },
+    {
+      "id": "kumpir",
+      "slug": "kumpir",
+      "title": "Kumpir",
+      "price": "270",
+      "image": "https://www.themealdb.com/images/media/meals/mlchx21564916997.jpg",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Kumpir — a warm, shareable way to begin.",
+      "longDescription": "Our Kumpir is prepared fresh to order. A generous, flavourful opener that sets the tone for the meal to come.",
+      "rating": "4.3",
+      "time": "10-15 min",
+      "nutrition": {
+        "calories": "320",
+        "protein": "9g",
+        "carbs": "30g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🌿",
+          "name": "Fresh Herbs"
+        },
+        {
+          "emoji": "🫒",
+          "name": "Olive Oil"
+        },
+        {
+          "emoji": "🧂",
+          "name": "Sea Salt"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Emma",
+          "rating": 5,
+          "text": "Kumpir was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Lina",
+          "rating": 4,
+          "text": "Best Kumpir I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Daniel",
+          "rating": 5,
+          "text": "Loved the Kumpir. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 15
+    },
+    {
+      "id": "ful-medames",
+      "slug": "ful-medames",
+      "title": "Ful Medames",
+      "price": "350",
+      "image": "https://www.themealdb.com/images/media/meals/lvn2d51598732465.jpg",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Ful Medames — crisp, colourful and tossed to order.",
+      "longDescription": "A bright, wholesome bowl — our Ful Medames is tossed in a house dressing with crunch, freshness and a little something unexpected in every forkful.",
+      "rating": "4.9",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "240",
+        "protein": "13g",
+        "carbs": "18g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥬",
+          "name": "Mixed Greens"
+        },
+        {
+          "emoji": "🫒",
+          "name": "House Dressing"
+        },
+        {
+          "emoji": "🥒",
+          "name": "Cucumber"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Aisha",
+          "rating": 4,
+          "text": "Best Ful Medames I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Liam",
+          "rating": 5,
+          "text": "Ful Medames was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Emma",
+          "rating": 4,
+          "text": "Came back just for the Ful Medames. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "healthy",
+        "bestseller"
+      ],
+      "sort_order": 16
+    },
+    {
+      "id": "sauerkraut-pierogi",
+      "slug": "sauerkraut-pierogi",
+      "title": "Sauerkraut pierogi",
+      "price": "320",
+      "image": "https://www.themealdb.com/images/media/meals/ckbx1h1764123606.jpg",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Sauerkraut pierogi — crisp, colourful and tossed to order.",
+      "longDescription": "A bright, wholesome bowl — our Sauerkraut pierogi is tossed in a house dressing with crunch, freshness and a little something unexpected in every forkful.",
+      "rating": "4.3",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "240",
+        "protein": "13g",
+        "carbs": "18g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥬",
+          "name": "Mixed Greens"
+        },
+        {
+          "emoji": "🫒",
+          "name": "House Dressing"
+        },
+        {
+          "emoji": "🥒",
+          "name": "Cucumber"
+        }
+      ],
+      "allergens": [
+        "gluten"
+      ],
+      "reviews": [
+        {
+          "name": "Noah",
+          "rating": 5,
+          "text": "Came back just for the Sauerkraut pierogi. So good."
+        },
+        {
+          "name": "Marco",
+          "rating": 4,
+          "text": "Sauerkraut pierogi was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "healthy",
+        "chef-special",
+        "new"
+      ],
+      "sort_order": 17
+    },
+    {
+      "id": "chickpea-fajitas",
+      "slug": "chickpea-fajitas",
+      "title": "Chickpea Fajitas",
+      "price": "410",
+      "image": "https://www.themealdb.com/images/media/meals/tvtxpq1511464705.jpg",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Chickpea Fajitas — crisp, colourful and tossed to order.",
+      "longDescription": "A bright, wholesome bowl — our Chickpea Fajitas is tossed in a house dressing with crunch, freshness and a little something unexpected in every forkful.",
+      "rating": "4.8",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "240",
+        "protein": "13g",
+        "carbs": "18g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥬",
+          "name": "Mixed Greens"
+        },
+        {
+          "emoji": "🫒",
+          "name": "House Dressing"
+        },
+        {
+          "emoji": "🥒",
+          "name": "Cucumber"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Yuki",
+          "rating": 5,
+          "text": "Best Chickpea Fajitas I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Omar",
+          "rating": 4,
+          "text": "Loved the Chickpea Fajitas. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "healthy",
+        "top-rated"
+      ],
+      "sort_order": 18
+    },
+    {
+      "id": "hodge-podge",
+      "slug": "hodge-podge",
+      "title": "Hodge Podge",
+      "price": "310",
+      "image": "https://www.themealdb.com/images/media/meals/xihv0c1764447887.jpg",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Hodge Podge — crisp, colourful and tossed to order.",
+      "longDescription": "A bright, wholesome bowl — our Hodge Podge is tossed in a house dressing with crunch, freshness and a little something unexpected in every forkful.",
+      "rating": "4.4",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "240",
+        "protein": "13g",
+        "carbs": "18g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥬",
+          "name": "Mixed Greens"
+        },
+        {
+          "emoji": "🫒",
+          "name": "House Dressing"
+        },
+        {
+          "emoji": "🥒",
+          "name": "Cucumber"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Chloe",
+          "rating": 5,
+          "text": "Hodge Podge was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Hannah",
+          "rating": 4,
+          "text": "Best Hodge Podge I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "healthy"
+      ],
+      "sort_order": 19
+    },
+    {
+      "id": "tangy-carrot-cabbage-and-onion-salad",
+      "slug": "tangy-carrot-cabbage-and-onion-salad",
+      "title": "Tangy carrot, cabbage & onion salad",
+      "price": "270",
+      "image": "https://www.themealdb.com/images/media/meals/dbazbg1763779999.jpg",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Tangy carrot, cabbage & onion salad — crisp, colourful and tossed to order.",
+      "longDescription": "A bright, wholesome bowl — our Tangy carrot, cabbage & onion salad is tossed in a house dressing with crunch, freshness and a little something unexpected in every forkful.",
+      "rating": "4.5",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "240",
+        "protein": "13g",
+        "carbs": "18g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧅",
+          "name": "Onion"
+        },
+        {
+          "emoji": "🥬",
+          "name": "Mixed Greens"
+        },
+        {
+          "emoji": "🫒",
+          "name": "House Dressing"
+        },
+        {
+          "emoji": "🥒",
+          "name": "Cucumber"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Chloe",
+          "rating": 4,
+          "text": "Tangy carrot, cabbage & onion salad was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Hannah",
+          "rating": 5,
+          "text": "Best Tangy carrot, cabbage & onion salad I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "healthy",
+        "new"
+      ],
+      "sort_order": 20
+    },
+    {
+      "id": "jamaican-rice-and-peas",
+      "slug": "jamaican-rice-and-peas",
+      "title": "Jamaican Rice and Peas",
+      "price": "290",
+      "image": "https://www.themealdb.com/images/media/meals/pkyvrn1764878267.jpg",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Jamaican Rice and Peas — crisp, colourful and tossed to order.",
+      "longDescription": "A bright, wholesome bowl — our Jamaican Rice and Peas is tossed in a house dressing with crunch, freshness and a little something unexpected in every forkful.",
+      "rating": "4.5",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "240",
+        "protein": "13g",
+        "carbs": "18g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍚",
+          "name": "Rice"
+        },
+        {
+          "emoji": "🥬",
+          "name": "Mixed Greens"
+        },
+        {
+          "emoji": "🫒",
+          "name": "House Dressing"
+        },
+        {
+          "emoji": "🥒",
+          "name": "Cucumber"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Marco",
+          "rating": 4,
+          "text": "Jamaican Rice and Peas was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Chloe",
+          "rating": 5,
+          "text": "Came back just for the Jamaican Rice and Peas. So good."
+        },
+        {
+          "name": "Hannah",
+          "rating": 4,
+          "text": "Loved the Jamaican Rice and Peas. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "healthy"
+      ],
+      "sort_order": 21
+    },
+    {
+      "id": "thai-coconut-and-veg-broth",
+      "slug": "thai-coconut-and-veg-broth",
+      "title": "Thai coconut & veg broth",
+      "price": "230",
+      "image": "https://www.themealdb.com/images/media/meals/4k8nzy1763583384.jpg",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Thai coconut & veg broth — crisp, colourful and tossed to order.",
+      "longDescription": "A bright, wholesome bowl — our Thai coconut & veg broth is tossed in a house dressing with crunch, freshness and a little something unexpected in every forkful.",
+      "rating": "4.7",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "240",
+        "protein": "13g",
+        "carbs": "18g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥥",
+          "name": "Coconut"
+        },
+        {
+          "emoji": "🥬",
+          "name": "Mixed Greens"
+        },
+        {
+          "emoji": "🫒",
+          "name": "House Dressing"
+        },
+        {
+          "emoji": "🥒",
+          "name": "Cucumber"
+        }
+      ],
+      "allergens": [
+        "nuts"
+      ],
+      "reviews": [
+        {
+          "name": "Diego",
+          "rating": 5,
+          "text": "The Thai coconut & veg broth was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Priya",
+          "rating": 4,
+          "text": "Came back just for the Thai coconut & veg broth. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "healthy"
+      ],
+      "sort_order": 22
+    },
+    {
+      "id": "egg-drop-soup",
+      "slug": "egg-drop-soup",
+      "title": "Egg Drop Soup",
+      "price": "360",
+      "image": "https://www.themealdb.com/images/media/meals/1529446137.jpg",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Egg Drop Soup — crisp, colourful and tossed to order.",
+      "longDescription": "A bright, wholesome bowl — our Egg Drop Soup is tossed in a house dressing with crunch, freshness and a little something unexpected in every forkful.",
+      "rating": "4.8",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "240",
+        "protein": "13g",
+        "carbs": "18g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥚",
+          "name": "Egg"
+        },
+        {
+          "emoji": "🥬",
+          "name": "Mixed Greens"
+        },
+        {
+          "emoji": "🫒",
+          "name": "House Dressing"
+        },
+        {
+          "emoji": "🥒",
+          "name": "Cucumber"
+        }
+      ],
+      "allergens": [
+        "eggs"
+      ],
+      "reviews": [
+        {
+          "name": "Noah",
+          "rating": 4,
+          "text": "Came back just for the Egg Drop Soup. So good."
+        },
+        {
+          "name": "Marco",
+          "rating": 5,
+          "text": "The Egg Drop Soup was excellent — easily my new favourite here."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "healthy",
+        "top-rated"
+      ],
+      "sort_order": 23
+    },
+    {
+      "id": "chicken-fried-rice",
+      "slug": "chicken-fried-rice",
+      "title": "Chicken Fried Rice",
+      "price": "510",
+      "image": "https://www.themealdb.com/images/media/meals/wuyd2h1765655837.jpg",
+      "category": "chicken",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Chicken Fried Rice — succulent and full of flavour.",
+      "longDescription": "Our Chicken Fried Rice is marinated and cooked to order until tender and golden. Hearty, satisfying and finished with fresh herbs and a house sauce.",
+      "rating": "4.4",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "560",
+        "protein": "54g",
+        "carbs": "26g",
+        "sugar": "5g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍗",
+          "name": "Chicken"
+        },
+        {
+          "emoji": "🍚",
+          "name": "Rice"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Omar",
+          "rating": 5,
+          "text": "The Chicken Fried Rice was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Mei",
+          "rating": 4,
+          "text": "Came back just for the Chicken Fried Rice. So good."
+        },
+        {
+          "name": "Aisha",
+          "rating": 5,
+          "text": "Chicken Fried Rice was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "bestseller",
+        "top-rated"
+      ],
+      "sort_order": 24
+    },
+    {
+      "id": "potato-gratin-with-chicken",
+      "slug": "potato-gratin-with-chicken",
+      "title": "Potato Gratin with Chicken",
+      "price": "420",
+      "image": "https://www.themealdb.com/images/media/meals/qwrtut1468418027.jpg",
+      "category": "chicken",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Potato Gratin with Chicken — succulent and full of flavour.",
+      "longDescription": "Our Potato Gratin with Chicken is marinated and cooked to order until tender and golden. Hearty, satisfying and finished with fresh herbs and a house sauce.",
+      "rating": "4.4",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "560",
+        "protein": "54g",
+        "carbs": "26g",
+        "sugar": "5g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍗",
+          "name": "Chicken"
+        },
+        {
+          "emoji": "🥔",
+          "name": "Potato"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Hannah",
+          "rating": 4,
+          "text": "Potato Gratin with Chicken was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Aarav",
+          "rating": 5,
+          "text": "Best Potato Gratin with Chicken I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Sofia",
+          "rating": 4,
+          "text": "Loved the Potato Gratin with Chicken. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "chef-special"
+      ],
+      "sort_order": 25
+    },
+    {
+      "id": "spanish-beans-with-chicken-and-chorizo",
+      "slug": "spanish-beans-with-chicken-and-chorizo",
+      "title": "Spanish beans with chicken & chorizo",
+      "price": "340",
+      "image": "https://www.themealdb.com/images/media/meals/bpkxtw1763332446.jpg",
+      "category": "chicken",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Spanish beans with chicken & chorizo — succulent and full of flavour.",
+      "longDescription": "Our Spanish beans with chicken & chorizo is marinated and cooked to order until tender and golden. Hearty, satisfying and finished with fresh herbs and a house sauce.",
+      "rating": "4.4",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "560",
+        "protein": "54g",
+        "carbs": "26g",
+        "sugar": "5g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍗",
+          "name": "Chicken"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Sofia",
+          "rating": 5,
+          "text": "Loved the Spanish beans with chicken & chorizo. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Yuki",
+          "rating": 4,
+          "text": "The Spanish beans with chicken & chorizo was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Omar",
+          "rating": 5,
+          "text": "Came back just for the Spanish beans with chicken & chorizo. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 26
+    },
+    {
+      "id": "vietnamese-chicken-salad",
+      "slug": "vietnamese-chicken-salad",
+      "title": "Vietnamese chicken salad",
+      "price": "460",
+      "image": "https://www.themealdb.com/images/media/meals/pk8wtn1763758591.jpg",
+      "category": "chicken",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Vietnamese chicken salad — succulent and full of flavour.",
+      "longDescription": "Our Vietnamese chicken salad is marinated and cooked to order until tender and golden. Hearty, satisfying and finished with fresh herbs and a house sauce.",
+      "rating": "4.6",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "560",
+        "protein": "54g",
+        "carbs": "26g",
+        "sugar": "5g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍗",
+          "name": "Chicken"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Aarav",
+          "rating": 4,
+          "text": "The Vietnamese chicken salad was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Sofia",
+          "rating": 5,
+          "text": "Came back just for the Vietnamese chicken salad. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 27
+    },
+    {
+      "id": "pollo-en-pepitoria",
+      "slug": "pollo-en-pepitoria",
+      "title": "Pollo en pepitoria",
+      "price": "480",
+      "image": "https://www.themealdb.com/images/media/meals/li30ck1763281992.jpg",
+      "category": "chicken",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Pollo en pepitoria — succulent and full of flavour.",
+      "longDescription": "Our Pollo en pepitoria is marinated and cooked to order until tender and golden. Hearty, satisfying and finished with fresh herbs and a house sauce.",
+      "rating": "4.4",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "560",
+        "protein": "54g",
+        "carbs": "26g",
+        "sugar": "5g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍗",
+          "name": "Chicken"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Daniel",
+          "rating": 5,
+          "text": "The Pollo en pepitoria was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Diego",
+          "rating": 4,
+          "text": "Loved the Pollo en pepitoria. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Priya",
+          "rating": 5,
+          "text": "Best Pollo en pepitoria I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 28
+    },
+    {
+      "id": "chicken-alfredo-primavera",
+      "slug": "chicken-alfredo-primavera",
+      "title": "Chicken Alfredo Primavera",
+      "price": "530",
+      "image": "https://www.themealdb.com/images/media/meals/syqypv1486981727.jpg",
+      "category": "chicken",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Chicken Alfredo Primavera — succulent and full of flavour.",
+      "longDescription": "Our Chicken Alfredo Primavera is marinated and cooked to order until tender and golden. Hearty, satisfying and finished with fresh herbs and a house sauce.",
+      "rating": "4.5",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "560",
+        "protein": "54g",
+        "carbs": "26g",
+        "sugar": "5g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍗",
+          "name": "Chicken"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Yuki",
+          "rating": 4,
+          "text": "The Chicken Alfredo Primavera was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Omar",
+          "rating": 5,
+          "text": "Loved the Chicken Alfredo Primavera. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "top-rated"
+      ],
+      "sort_order": 29
+    },
+    {
+      "id": "bengali-chicken-curry-with-potatoes",
+      "slug": "bengali-chicken-curry-with-potatoes",
+      "title": "Bengali Chicken Curry with Potatoes",
+      "price": "360",
+      "image": "https://www.themealdb.com/images/media/meals/9ya6o71780262651.jpg",
+      "category": "chicken",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Bengali Chicken Curry with Potatoes — succulent and full of flavour.",
+      "longDescription": "Our Bengali Chicken Curry with Potatoes is marinated and cooked to order until tender and golden. Hearty, satisfying and finished with fresh herbs and a house sauce.",
+      "rating": "4.9",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "560",
+        "protein": "54g",
+        "carbs": "26g",
+        "sugar": "5g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍗",
+          "name": "Chicken"
+        },
+        {
+          "emoji": "🥔",
+          "name": "Potato"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Aarav",
+          "rating": 4,
+          "text": "Bengali Chicken Curry with Potatoes was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Sofia",
+          "rating": 5,
+          "text": "Best Bengali Chicken Curry with Potatoes I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 30
+    },
+    {
+      "id": "katsu-chicken-curry",
+      "slug": "katsu-chicken-curry",
+      "title": "Katsu Chicken curry",
+      "price": "500",
+      "image": "https://www.themealdb.com/images/media/meals/vwrpps1503068729.jpg",
+      "category": "chicken",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Katsu Chicken curry — succulent and full of flavour.",
+      "longDescription": "Our Katsu Chicken curry is marinated and cooked to order until tender and golden. Hearty, satisfying and finished with fresh herbs and a house sauce.",
+      "rating": "4.7",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "560",
+        "protein": "54g",
+        "carbs": "26g",
+        "sugar": "5g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍗",
+          "name": "Chicken"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Sofia",
+          "rating": 5,
+          "text": "Loved the Katsu Chicken curry. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Yuki",
+          "rating": 4,
+          "text": "Best Katsu Chicken curry I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Omar",
+          "rating": 5,
+          "text": "Katsu Chicken curry was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 31
+    },
+    {
+      "id": "grilled-portuguese-sardines",
+      "slug": "grilled-portuguese-sardines",
+      "title": "Grilled Portuguese sardines",
+      "price": "400",
+      "image": "https://www.themealdb.com/images/media/meals/lpd4wy1614347943.jpg",
+      "category": "seafood",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Grilled Portuguese sardines — fresh from the day's catch.",
+      "longDescription": "Our Grilled Portuguese sardines is prepared with care from the freshest catch, cooked just right to keep it light, flaky and full of the sea's natural sweetness.",
+      "rating": "4.5",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "480",
+        "protein": "48g",
+        "carbs": "22g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🐟",
+          "name": "Fresh Catch"
+        },
+        {
+          "emoji": "🍋",
+          "name": "Lemon"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Dill"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Yuki",
+          "rating": 4,
+          "text": "Loved the Grilled Portuguese sardines. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Omar",
+          "rating": 5,
+          "text": "Best Grilled Portuguese sardines I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "bestseller"
+      ],
+      "sort_order": 32
+    },
+    {
+      "id": "saltfish-and-ackee",
+      "slug": "saltfish-and-ackee",
+      "title": "Saltfish and Ackee",
+      "price": "460",
+      "image": "https://www.themealdb.com/images/media/meals/vytypy1511883765.jpg",
+      "category": "seafood",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Saltfish and Ackee — fresh from the day's catch.",
+      "longDescription": "Our Saltfish and Ackee is prepared with care from the freshest catch, cooked just right to keep it light, flaky and full of the sea's natural sweetness.",
+      "rating": "4.8",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "480",
+        "protein": "48g",
+        "carbs": "22g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🐟",
+          "name": "Fish"
+        },
+        {
+          "emoji": "🐟",
+          "name": "Fresh Catch"
+        },
+        {
+          "emoji": "🍋",
+          "name": "Lemon"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Dill"
+        }
+      ],
+      "allergens": [
+        "fish"
+      ],
+      "reviews": [
+        {
+          "name": "Daniel",
+          "rating": 5,
+          "text": "Loved the Saltfish and Ackee. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Diego",
+          "rating": 4,
+          "text": "The Saltfish and Ackee was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Priya",
+          "rating": 5,
+          "text": "Saltfish and Ackee was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "chef-special"
+      ],
+      "sort_order": 33
+    },
+    {
+      "id": "sushi",
+      "slug": "sushi",
+      "title": "Sushi",
+      "price": "430",
+      "image": "https://www.themealdb.com/images/media/meals/g046bb1663960946.jpg",
+      "category": "seafood",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Sushi — fresh from the day's catch.",
+      "longDescription": "Our Sushi is prepared with care from the freshest catch, cooked just right to keep it light, flaky and full of the sea's natural sweetness.",
+      "rating": "4.7",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "480",
+        "protein": "48g",
+        "carbs": "22g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🐟",
+          "name": "Fresh Catch"
+        },
+        {
+          "emoji": "🍋",
+          "name": "Lemon"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Dill"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Emma",
+          "rating": 5,
+          "text": "Sushi was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Lina",
+          "rating": 4,
+          "text": "Came back just for the Sushi. So good."
+        },
+        {
+          "name": "Daniel",
+          "rating": 5,
+          "text": "Loved the Sushi. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 34
+    },
+    {
+      "id": "pad-thai",
+      "slug": "pad-thai",
+      "title": "Pad Thai",
+      "price": "660",
+      "image": "https://www.themealdb.com/images/media/meals/rg9ze01763479093.jpg",
+      "category": "seafood",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Pad Thai — fresh from the day's catch.",
+      "longDescription": "Our Pad Thai is prepared with care from the freshest catch, cooked just right to keep it light, flaky and full of the sea's natural sweetness.",
+      "rating": "4.4",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "480",
+        "protein": "48g",
+        "carbs": "22g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🐟",
+          "name": "Fresh Catch"
+        },
+        {
+          "emoji": "🍋",
+          "name": "Lemon"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Dill"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Emma",
+          "rating": 4,
+          "text": "The Pad Thai was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Lina",
+          "rating": 5,
+          "text": "Came back just for the Pad Thai. So good."
+        },
+        {
+          "name": "Daniel",
+          "rating": 4,
+          "text": "Pad Thai was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "top-rated"
+      ],
+      "sort_order": 35
+    },
+    {
+      "id": "three-fish-pie",
+      "slug": "three-fish-pie",
+      "title": "Three Fish Pie",
+      "price": "570",
+      "image": "https://www.themealdb.com/images/media/meals/spswqs1511558697.jpg",
+      "category": "seafood",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Three Fish Pie — fresh from the day's catch.",
+      "longDescription": "Our Three Fish Pie is prepared with care from the freshest catch, cooked just right to keep it light, flaky and full of the sea's natural sweetness.",
+      "rating": "4.3",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "480",
+        "protein": "48g",
+        "carbs": "22g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🐟",
+          "name": "Fish"
+        },
+        {
+          "emoji": "🐟",
+          "name": "Fresh Catch"
+        },
+        {
+          "emoji": "🍋",
+          "name": "Lemon"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Dill"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "fish"
+      ],
+      "reviews": [
+        {
+          "name": "Aisha",
+          "rating": 5,
+          "text": "Loved the Three Fish Pie. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Liam",
+          "rating": 4,
+          "text": "Best Three Fish Pie I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Emma",
+          "rating": 5,
+          "text": "Came back just for the Three Fish Pie. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 36
+    },
+    {
+      "id": "kedgeree",
+      "slug": "kedgeree",
+      "title": "Kedgeree",
+      "price": "630",
+      "image": "https://www.themealdb.com/images/media/meals/utxqpt1511639216.jpg",
+      "category": "seafood",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Kedgeree — fresh from the day's catch.",
+      "longDescription": "Our Kedgeree is prepared with care from the freshest catch, cooked just right to keep it light, flaky and full of the sea's natural sweetness.",
+      "rating": "4.8",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "480",
+        "protein": "48g",
+        "carbs": "22g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🐟",
+          "name": "Fresh Catch"
+        },
+        {
+          "emoji": "🍋",
+          "name": "Lemon"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Dill"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Daniel",
+          "rating": 5,
+          "text": "Loved the Kedgeree. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Diego",
+          "rating": 4,
+          "text": "The Kedgeree was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Priya",
+          "rating": 5,
+          "text": "Kedgeree was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "top-rated"
+      ],
+      "sort_order": 37
+    },
+    {
+      "id": "salmon-prawn-risotto",
+      "slug": "salmon-prawn-risotto",
+      "title": "Salmon Prawn Risotto",
+      "price": "490",
+      "image": "https://www.themealdb.com/images/media/meals/xxrxux1503070723.jpg",
+      "category": "seafood",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Salmon Prawn Risotto — fresh from the day's catch.",
+      "longDescription": "Our Salmon Prawn Risotto is prepared with care from the freshest catch, cooked just right to keep it light, flaky and full of the sea's natural sweetness.",
+      "rating": "4.7",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "480",
+        "protein": "48g",
+        "carbs": "22g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🐟",
+          "name": "Salmon"
+        },
+        {
+          "emoji": "🦐",
+          "name": "Prawn"
+        },
+        {
+          "emoji": "🍚",
+          "name": "Arborio Rice"
+        },
+        {
+          "emoji": "🐟",
+          "name": "Fresh Catch"
+        },
+        {
+          "emoji": "🍋",
+          "name": "Lemon"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "fish"
+      ],
+      "reviews": [
+        {
+          "name": "Omar",
+          "rating": 5,
+          "text": "The Salmon Prawn Risotto was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Mei",
+          "rating": 4,
+          "text": "Came back just for the Salmon Prawn Risotto. So good."
+        },
+        {
+          "name": "Aisha",
+          "rating": 5,
+          "text": "Salmon Prawn Risotto was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 38
+    },
+    {
+      "id": "quick-salt-and-pepper-squid",
+      "slug": "quick-salt-and-pepper-squid",
+      "title": "Quick salt & pepper squid",
+      "price": "610",
+      "image": "https://www.themealdb.com/images/media/meals/cp74zo1762341241.jpg",
+      "category": "seafood",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Quick salt & pepper squid — fresh from the day's catch.",
+      "longDescription": "Our Quick salt & pepper squid is prepared with care from the freshest catch, cooked just right to keep it light, flaky and full of the sea's natural sweetness.",
+      "rating": "4.4",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "480",
+        "protein": "48g",
+        "carbs": "22g",
+        "sugar": "4g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🫑",
+          "name": "Bell Pepper"
+        },
+        {
+          "emoji": "🐟",
+          "name": "Fresh Catch"
+        },
+        {
+          "emoji": "🍋",
+          "name": "Lemon"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Dill"
+        }
+      ],
+      "allergens": [
+        "fish"
+      ],
+      "reviews": [
+        {
+          "name": "Aisha",
+          "rating": 4,
+          "text": "Loved the Quick salt & pepper squid. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Liam",
+          "rating": 5,
+          "text": "Best Quick salt & pepper squid I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Emma",
+          "rating": 4,
+          "text": "Quick salt & pepper squid was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "spicy"
+      ],
+      "sort_order": 39
+    },
+    {
+      "id": "venetian-duck-ragu",
+      "slug": "venetian-duck-ragu",
+      "title": "Venetian Duck Ragu",
+      "price": "330",
+      "image": "https://www.themealdb.com/images/media/meals/qvrwpt1511181864.jpg",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Venetian Duck Ragu — fresh pasta in a house sauce.",
+      "longDescription": "Our Venetian Duck Ragu is cooked to order with fresh pasta and a sauce simmered in-house daily. Comforting, full-flavoured and finished with cheese and herbs.",
+      "rating": "4.9",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "600",
+        "protein": "18g",
+        "carbs": "70g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🧀",
+          "name": "Parmesan"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Sofia",
+          "rating": 5,
+          "text": "The Venetian Duck Ragu was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Yuki",
+          "rating": 4,
+          "text": "Loved the Venetian Duck Ragu. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Omar",
+          "rating": 5,
+          "text": "Best Venetian Duck Ragu I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "bestseller"
+      ],
+      "sort_order": 40
+    },
+    {
+      "id": "fettucine-alfredo",
+      "slug": "fettucine-alfredo",
+      "title": "Fettucine alfredo",
+      "price": "370",
+      "image": "https://www.themealdb.com/images/media/meals/uquqtu1511178042.jpg",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Fettucine alfredo — fresh pasta in a house sauce.",
+      "longDescription": "Our Fettucine alfredo is cooked to order with fresh pasta and a sauce simmered in-house daily. Comforting, full-flavoured and finished with cheese and herbs.",
+      "rating": "4.8",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "600",
+        "protein": "18g",
+        "carbs": "70g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🧀",
+          "name": "Parmesan"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Chloe",
+          "rating": 5,
+          "text": "Fettucine alfredo was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Hannah",
+          "rating": 4,
+          "text": "Best Fettucine alfredo I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "chef-special",
+        "new"
+      ],
+      "sort_order": 41
+    },
+    {
+      "id": "grilled-mac-and-cheese-sandwich",
+      "slug": "grilled-mac-and-cheese-sandwich",
+      "title": "Grilled Mac and Cheese Sandwich",
+      "price": "510",
+      "image": "https://www.themealdb.com/images/media/meals/xutquv1505330523.jpg",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Grilled Mac and Cheese Sandwich — fresh pasta in a house sauce.",
+      "longDescription": "Our Grilled Mac and Cheese Sandwich is cooked to order with fresh pasta and a sauce simmered in-house daily. Comforting, full-flavoured and finished with cheese and herbs.",
+      "rating": "4.4",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "600",
+        "protein": "18g",
+        "carbs": "70g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧀",
+          "name": "Cheese"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🧀",
+          "name": "Parmesan"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Lina",
+          "rating": 4,
+          "text": "Best Grilled Mac and Cheese Sandwich I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Daniel",
+          "rating": 5,
+          "text": "Loved the Grilled Mac and Cheese Sandwich. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "new",
+        "top-rated"
+      ],
+      "sort_order": 42
+    },
+    {
+      "id": "lasagne",
+      "slug": "lasagne",
+      "title": "Lasagne",
+      "price": "390",
+      "image": "https://www.themealdb.com/images/media/meals/wtsvxx1511296896.jpg",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Lasagne — fresh pasta in a house sauce.",
+      "longDescription": "Our Lasagne is cooked to order with fresh pasta and a sauce simmered in-house daily. Comforting, full-flavoured and finished with cheese and herbs.",
+      "rating": "4.6",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "600",
+        "protein": "18g",
+        "carbs": "70g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍝",
+          "name": "Lasagne"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🧀",
+          "name": "Parmesan"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Liam",
+          "rating": 4,
+          "text": "Came back just for the Lasagne. So good."
+        },
+        {
+          "name": "Emma",
+          "rating": 5,
+          "text": "Lasagne was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "new"
+      ],
+      "sort_order": 43
+    },
+    {
+      "id": "fettuccine-alfredo",
+      "slug": "fettuccine-alfredo",
+      "title": "Fettuccine Alfredo",
+      "price": "380",
+      "image": "https://www.themealdb.com/images/media/meals/0jv5gx1661040802.jpg",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Fettuccine Alfredo — fresh pasta in a house sauce.",
+      "longDescription": "Our Fettuccine Alfredo is cooked to order with fresh pasta and a sauce simmered in-house daily. Comforting, full-flavoured and finished with cheese and herbs.",
+      "rating": "4.4",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "600",
+        "protein": "18g",
+        "carbs": "70g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍝",
+          "name": "Fettuccine"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🧀",
+          "name": "Parmesan"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Emma",
+          "rating": 4,
+          "text": "Best Fettuccine Alfredo I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Lina",
+          "rating": 5,
+          "text": "Fettuccine Alfredo was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Daniel",
+          "rating": 4,
+          "text": "Loved the Fettuccine Alfredo. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 44
+    },
+    {
+      "id": "pilchard-puttanesca",
+      "slug": "pilchard-puttanesca",
+      "title": "Pilchard puttanesca",
+      "price": "350",
+      "image": "https://www.themealdb.com/images/media/meals/vvtvtr1511180578.jpg",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Pilchard puttanesca — fresh pasta in a house sauce.",
+      "longDescription": "Our Pilchard puttanesca is cooked to order with fresh pasta and a sauce simmered in-house daily. Comforting, full-flavoured and finished with cheese and herbs.",
+      "rating": "4.4",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "600",
+        "protein": "18g",
+        "carbs": "70g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🧀",
+          "name": "Parmesan"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Daniel",
+          "rating": 4,
+          "text": "Best Pilchard puttanesca I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Diego",
+          "rating": 5,
+          "text": "Loved the Pilchard puttanesca. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Priya",
+          "rating": 4,
+          "text": "Came back just for the Pilchard puttanesca. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 45
+    },
+    {
+      "id": "lasagna-sandwiches",
+      "slug": "lasagna-sandwiches",
+      "title": "Lasagna Sandwiches",
+      "price": "400",
+      "image": "https://www.themealdb.com/images/media/meals/xr0n4r1576788363.jpg",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Lasagna Sandwiches — fresh pasta in a house sauce.",
+      "longDescription": "Our Lasagna Sandwiches is cooked to order with fresh pasta and a sauce simmered in-house daily. Comforting, full-flavoured and finished with cheese and herbs.",
+      "rating": "4.5",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "600",
+        "protein": "18g",
+        "carbs": "70g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🧀",
+          "name": "Parmesan"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Noah",
+          "rating": 5,
+          "text": "The Lasagna Sandwiches was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Marco",
+          "rating": 4,
+          "text": "Came back just for the Lasagna Sandwiches. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "new"
+      ],
+      "sort_order": 46
+    },
+    {
+      "id": "syrian-spaghetti",
+      "slug": "syrian-spaghetti",
+      "title": "Syrian Spaghetti",
+      "price": "520",
+      "image": "https://www.themealdb.com/images/media/meals/5fu4ew1760524857.jpg",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Syrian Spaghetti — fresh pasta in a house sauce.",
+      "longDescription": "Our Syrian Spaghetti is cooked to order with fresh pasta and a sauce simmered in-house daily. Comforting, full-flavoured and finished with cheese and herbs.",
+      "rating": "4.7",
+      "time": "18-25 min",
+      "nutrition": {
+        "calories": "600",
+        "protein": "18g",
+        "carbs": "70g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍝",
+          "name": "Spaghetti"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🧀",
+          "name": "Parmesan"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Marco",
+          "rating": 4,
+          "text": "Came back just for the Syrian Spaghetti. So good."
+        },
+        {
+          "name": "Chloe",
+          "rating": 5,
+          "text": "Syrian Spaghetti was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Hannah",
+          "rating": 4,
+          "text": "Best Syrian Spaghetti I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "top-rated"
+      ],
+      "sort_order": 47
+    },
+    {
+      "id": "arepa-pabell-n",
+      "slug": "arepa-pabell-n",
+      "title": "Arepa Pabellón",
+      "price": "450",
+      "image": "https://www.themealdb.com/images/media/meals/13fg4j1764441982.jpg",
+      "category": "mains",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Arepa Pabellón — a hearty, satisfying main.",
+      "longDescription": "Our Arepa Pabellón is slow-cooked for deep flavour and plated generously. A proper, satisfying main that's the centrepiece of any visit.",
+      "rating": "4.9",
+      "time": "20-30 min",
+      "nutrition": {
+        "calories": "720",
+        "protein": "58g",
+        "carbs": "34g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧅",
+          "name": "Onion"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Lina",
+          "rating": 5,
+          "text": "Arepa Pabellón was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Daniel",
+          "rating": 4,
+          "text": "Came back just for the Arepa Pabellón. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "bestseller"
+      ],
+      "sort_order": 48
+    },
+    {
+      "id": "turkish-lahmacun",
+      "slug": "turkish-lahmacun",
+      "title": "Turkish lahmacun",
+      "price": "430",
+      "image": "https://www.themealdb.com/images/media/meals/tqd3ac1763786065.jpg",
+      "category": "mains",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Turkish lahmacun — a hearty, satisfying main.",
+      "longDescription": "Our Turkish lahmacun is slow-cooked for deep flavour and plated generously. A proper, satisfying main that's the centrepiece of any visit.",
+      "rating": "4.5",
+      "time": "20-30 min",
+      "nutrition": {
+        "calories": "720",
+        "protein": "58g",
+        "carbs": "34g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧅",
+          "name": "Onion"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Sofia",
+          "rating": 4,
+          "text": "Loved the Turkish lahmacun. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Yuki",
+          "rating": 5,
+          "text": "The Turkish lahmacun was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Omar",
+          "rating": 4,
+          "text": "Turkish lahmacun was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "chef-special"
+      ],
+      "sort_order": 49
+    },
+    {
+      "id": "asado",
+      "slug": "asado",
+      "title": "Asado",
+      "price": "640",
+      "image": "https://www.themealdb.com/images/media/meals/kgfh3q1763075438.jpg",
+      "category": "mains",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Asado — a hearty, satisfying main.",
+      "longDescription": "Our Asado is slow-cooked for deep flavour and plated generously. A proper, satisfying main that's the centrepiece of any visit.",
+      "rating": "4.8",
+      "time": "20-30 min",
+      "nutrition": {
+        "calories": "720",
+        "protein": "58g",
+        "carbs": "34g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧅",
+          "name": "Onion"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Hannah",
+          "rating": 5,
+          "text": "Best Asado I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Aarav",
+          "rating": 4,
+          "text": "Loved the Asado. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Sofia",
+          "rating": 5,
+          "text": "Came back just for the Asado. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "top-rated"
+      ],
+      "sort_order": 50
+    },
+    {
+      "id": "shawarma-chuck-roast-wrap",
+      "slug": "shawarma-chuck-roast-wrap",
+      "title": "Shawarma chuck roast wrap",
+      "price": "700",
+      "image": "https://www.themealdb.com/images/media/meals/swo87v1763595282.jpg",
+      "category": "mains",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Shawarma chuck roast wrap — a hearty, satisfying main.",
+      "longDescription": "Our Shawarma chuck roast wrap is slow-cooked for deep flavour and plated generously. A proper, satisfying main that's the centrepiece of any visit.",
+      "rating": "4.6",
+      "time": "20-30 min",
+      "nutrition": {
+        "calories": "720",
+        "protein": "58g",
+        "carbs": "34g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧅",
+          "name": "Onion"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Emma",
+          "rating": 4,
+          "text": "Best Shawarma chuck roast wrap I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Lina",
+          "rating": 5,
+          "text": "Loved the Shawarma chuck roast wrap. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Daniel",
+          "rating": 4,
+          "text": "Came back just for the Shawarma chuck roast wrap. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein",
+        "top-rated"
+      ],
+      "sort_order": 51
+    },
+    {
+      "id": "chivito-uruguayo",
+      "slug": "chivito-uruguayo",
+      "title": "Chivito uruguayo",
+      "price": "570",
+      "image": "https://www.themealdb.com/images/media/meals/n7qnkb1630444129.jpg",
+      "category": "mains",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Chivito uruguayo — a hearty, satisfying main.",
+      "longDescription": "Our Chivito uruguayo is slow-cooked for deep flavour and plated generously. A proper, satisfying main that's the centrepiece of any visit.",
+      "rating": "4.7",
+      "time": "20-30 min",
+      "nutrition": {
+        "calories": "720",
+        "protein": "58g",
+        "carbs": "34g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧅",
+          "name": "Onion"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Priya",
+          "rating": 4,
+          "text": "Loved the Chivito uruguayo. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Noah",
+          "rating": 5,
+          "text": "The Chivito uruguayo was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Marco",
+          "rating": 4,
+          "text": "Chivito uruguayo was lovely, and the place has such a warm vibe."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 52
+    },
+    {
+      "id": "steak-and-kidney-pie",
+      "slug": "steak-and-kidney-pie",
+      "title": "Steak and Kidney Pie",
+      "price": "480",
+      "image": "https://www.themealdb.com/images/media/meals/qysyss1511558054.jpg",
+      "category": "mains",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Steak and Kidney Pie — a hearty, satisfying main.",
+      "longDescription": "Our Steak and Kidney Pie is slow-cooked for deep flavour and plated generously. A proper, satisfying main that's the centrepiece of any visit.",
+      "rating": "4.8",
+      "time": "20-30 min",
+      "nutrition": {
+        "calories": "720",
+        "protein": "58g",
+        "carbs": "34g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥩",
+          "name": "Steak"
+        },
+        {
+          "emoji": "🧅",
+          "name": "Onion"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten"
+      ],
+      "reviews": [
+        {
+          "name": "Omar",
+          "rating": 4,
+          "text": "Came back just for the Steak and Kidney Pie. So good."
+        },
+        {
+          "name": "Mei",
+          "rating": 5,
+          "text": "The Steak and Kidney Pie was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Aisha",
+          "rating": 4,
+          "text": "Best Steak and Kidney Pie I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 53
+    },
+    {
+      "id": "minced-beef-pie",
+      "slug": "minced-beef-pie",
+      "title": "Minced Beef Pie",
+      "price": "510",
+      "image": "https://www.themealdb.com/images/media/meals/xwutvy1511555540.jpg",
+      "category": "mains",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Minced Beef Pie — a hearty, satisfying main.",
+      "longDescription": "Our Minced Beef Pie is slow-cooked for deep flavour and plated generously. A proper, satisfying main that's the centrepiece of any visit.",
+      "rating": "4.8",
+      "time": "20-30 min",
+      "nutrition": {
+        "calories": "720",
+        "protein": "58g",
+        "carbs": "34g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥩",
+          "name": "Beef"
+        },
+        {
+          "emoji": "🧅",
+          "name": "Onion"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [
+        "gluten"
+      ],
+      "reviews": [
+        {
+          "name": "Priya",
+          "rating": 5,
+          "text": "Minced Beef Pie was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Noah",
+          "rating": 4,
+          "text": "Came back just for the Minced Beef Pie. So good."
+        },
+        {
+          "name": "Marco",
+          "rating": 5,
+          "text": "The Minced Beef Pie was excellent — easily my new favourite here."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 54
+    },
+    {
+      "id": "thai-beef-stir-fry",
+      "slug": "thai-beef-stir-fry",
+      "title": "Thai beef stir-fry",
+      "price": "640",
+      "image": "https://www.themealdb.com/images/media/meals/kyuxew1763479470.jpg",
+      "category": "mains",
+      "veg": false,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Thai beef stir-fry — a hearty, satisfying main.",
+      "longDescription": "Our Thai beef stir-fry is slow-cooked for deep flavour and plated generously. A proper, satisfying main that's the centrepiece of any visit.",
+      "rating": "4.5",
+      "time": "20-30 min",
+      "nutrition": {
+        "calories": "720",
+        "protein": "58g",
+        "carbs": "34g",
+        "sugar": "6g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🥩",
+          "name": "Beef"
+        },
+        {
+          "emoji": "🧅",
+          "name": "Onion"
+        },
+        {
+          "emoji": "🧄",
+          "name": "Garlic"
+        },
+        {
+          "emoji": "🌿",
+          "name": "Herbs"
+        }
+      ],
+      "allergens": [],
+      "reviews": [
+        {
+          "name": "Omar",
+          "rating": 5,
+          "text": "Loved the Thai beef stir-fry. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Mei",
+          "rating": 4,
+          "text": "The Thai beef stir-fry was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Aisha",
+          "rating": 5,
+          "text": "Came back just for the Thai beef stir-fry. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "high-protein"
+      ],
+      "sort_order": 55
+    },
+    {
+      "id": "carrot-cake",
+      "slug": "carrot-cake",
+      "title": "Carrot Cake",
+      "price": "330",
+      "image": "https://www.themealdb.com/images/media/meals/vrspxv1511722107.jpg",
+      "category": "desserts",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Carrot Cake — the perfect sweet finish.",
+      "longDescription": "Our Carrot Cake is made fresh and plated with care — indulgent without being heavy, and the ideal way to round off your visit.",
+      "rating": "4.3",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "420",
+        "protein": "8g",
+        "carbs": "56g",
+        "sugar": "32g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Maple Syrup"
+        },
+        {
+          "emoji": "🍓",
+          "name": "Berries"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy",
+        "eggs"
+      ],
+      "reviews": [
+        {
+          "name": "Priya",
+          "rating": 4,
+          "text": "Loved the Carrot Cake. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Noah",
+          "rating": 5,
+          "text": "Best Carrot Cake I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Marco",
+          "rating": 4,
+          "text": "Came back just for the Carrot Cake. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "bestseller",
+        "top-rated"
+      ],
+      "sort_order": 56
+    },
+    {
+      "id": "chocolate-caramel-crispy",
+      "slug": "chocolate-caramel-crispy",
+      "title": "Chocolate Caramel Crispy",
+      "price": "200",
+      "image": "https://www.themealdb.com/images/media/meals/1550442508.jpg",
+      "category": "desserts",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Chocolate Caramel Crispy — the perfect sweet finish.",
+      "longDescription": "Our Chocolate Caramel Crispy is made fresh and plated with care — indulgent without being heavy, and the ideal way to round off your visit.",
+      "rating": "4.3",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "420",
+        "protein": "8g",
+        "carbs": "56g",
+        "sugar": "32g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍮",
+          "name": "Caramel"
+        },
+        {
+          "emoji": "🍫",
+          "name": "Chocolate"
+        },
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Maple Syrup"
+        },
+        {
+          "emoji": "🍓",
+          "name": "Berries"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Chloe",
+          "rating": 4,
+          "text": "The Chocolate Caramel Crispy was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Hannah",
+          "rating": 5,
+          "text": "Loved the Chocolate Caramel Crispy. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "chef-special",
+        "new"
+      ],
+      "sort_order": 57
+    },
+    {
+      "id": "chocolate-churros-with-chocolate-and-salted-caramel-sauce",
+      "slug": "chocolate-churros-with-chocolate-and-salted-caramel-sauce",
+      "title": "Chocolate churros with chocolate & salted caramel sauce",
+      "price": "250",
+      "image": "https://www.themealdb.com/images/media/meals/erzs951763296201.jpg",
+      "category": "desserts",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Chocolate churros with chocolate & salted caramel sauce — the perfect sweet finish.",
+      "longDescription": "Our Chocolate churros with chocolate & salted caramel sauce is made fresh and plated with care — indulgent without being heavy, and the ideal way to round off your visit.",
+      "rating": "4.4",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "420",
+        "protein": "8g",
+        "carbs": "56g",
+        "sugar": "32g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍮",
+          "name": "Caramel"
+        },
+        {
+          "emoji": "🍫",
+          "name": "Chocolate"
+        },
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Maple Syrup"
+        },
+        {
+          "emoji": "🍓",
+          "name": "Berries"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Lina",
+          "rating": 4,
+          "text": "The Chocolate churros with chocolate & salted caramel sauce was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Daniel",
+          "rating": 5,
+          "text": "Came back just for the Chocolate churros with chocolate & salted caramel sauce. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 58
+    },
+    {
+      "id": "dutch-apple-pie",
+      "slug": "dutch-apple-pie",
+      "title": "Dutch Apple Pie",
+      "price": "200",
+      "image": "https://www.themealdb.com/images/media/meals/zy4fs51777540384.jpg",
+      "category": "desserts",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Dutch Apple Pie — the perfect sweet finish.",
+      "longDescription": "Our Dutch Apple Pie is made fresh and plated with care — indulgent without being heavy, and the ideal way to round off your visit.",
+      "rating": "4.6",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "420",
+        "protein": "8g",
+        "carbs": "56g",
+        "sugar": "32g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Maple Syrup"
+        },
+        {
+          "emoji": "🍓",
+          "name": "Berries"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Priya",
+          "rating": 5,
+          "text": "Loved the Dutch Apple Pie. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Noah",
+          "rating": 4,
+          "text": "The Dutch Apple Pie was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Marco",
+          "rating": 5,
+          "text": "Came back just for the Dutch Apple Pie. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 59
+    },
+    {
+      "id": "dutch-doughnuts",
+      "slug": "dutch-doughnuts",
+      "title": "Dutch doughnuts",
+      "price": "280",
+      "image": "https://www.themealdb.com/images/media/meals/cz1d6v1777627421.jpg",
+      "category": "desserts",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Dutch doughnuts — the perfect sweet finish.",
+      "longDescription": "Our Dutch doughnuts is made fresh and plated with care — indulgent without being heavy, and the ideal way to round off your visit.",
+      "rating": "4.5",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "420",
+        "protein": "8g",
+        "carbs": "56g",
+        "sugar": "32g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Maple Syrup"
+        },
+        {
+          "emoji": "🍓",
+          "name": "Berries"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy",
+        "nuts"
+      ],
+      "reviews": [
+        {
+          "name": "Sofia",
+          "rating": 4,
+          "text": "The Dutch doughnuts was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Yuki",
+          "rating": 5,
+          "text": "Came back just for the Dutch doughnuts. So good."
+        },
+        {
+          "name": "Omar",
+          "rating": 4,
+          "text": "Best Dutch doughnuts I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian",
+        "top-rated"
+      ],
+      "sort_order": 60
+    },
+    {
+      "id": "shendetlie-honey-and-nut-cake",
+      "slug": "shendetlie-honey-and-nut-cake",
+      "title": "Shendetlie Honey and Nut Cake",
+      "price": "210",
+      "image": "https://www.themealdb.com/images/media/meals/fx0exq1779646651.jpg",
+      "category": "desserts",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Shendetlie Honey and Nut Cake — the perfect sweet finish.",
+      "longDescription": "Our Shendetlie Honey and Nut Cake is made fresh and plated with care — indulgent without being heavy, and the ideal way to round off your visit.",
+      "rating": "4.9",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "420",
+        "protein": "8g",
+        "carbs": "56g",
+        "sugar": "32g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍯",
+          "name": "Honey"
+        },
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Maple Syrup"
+        },
+        {
+          "emoji": "🍓",
+          "name": "Berries"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy",
+        "eggs",
+        "nuts"
+      ],
+      "reviews": [
+        {
+          "name": "Daniel",
+          "rating": 5,
+          "text": "Shendetlie Honey and Nut Cake was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Diego",
+          "rating": 4,
+          "text": "Best Shendetlie Honey and Nut Cake I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Priya",
+          "rating": 5,
+          "text": "Loved the Shendetlie Honey and Nut Cake. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 61
+    },
+    {
+      "id": "apricot-and-turkish-delight-mess",
+      "slug": "apricot-and-turkish-delight-mess",
+      "title": "Apricot & Turkish delight mess",
+      "price": "240",
+      "image": "https://www.themealdb.com/images/media/meals/p277uc1764109195.jpg",
+      "category": "desserts",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Apricot & Turkish delight mess — the perfect sweet finish.",
+      "longDescription": "Our Apricot & Turkish delight mess is made fresh and plated with care — indulgent without being heavy, and the ideal way to round off your visit.",
+      "rating": "4.4",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "420",
+        "protein": "8g",
+        "carbs": "56g",
+        "sugar": "32g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Maple Syrup"
+        },
+        {
+          "emoji": "🍓",
+          "name": "Berries"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Emma",
+          "rating": 4,
+          "text": "Apricot & Turkish delight mess was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Lina",
+          "rating": 5,
+          "text": "Came back just for the Apricot & Turkish delight mess. So good."
+        },
+        {
+          "name": "Daniel",
+          "rating": 4,
+          "text": "Loved the Apricot & Turkish delight mess. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 62
+    },
+    {
+      "id": "portuguese-custard-tarts",
+      "slug": "portuguese-custard-tarts",
+      "title": "Portuguese custard tarts",
+      "price": "160",
+      "image": "https://www.themealdb.com/images/media/meals/vmz7gl1614350221.jpg",
+      "category": "desserts",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Portuguese custard tarts — the perfect sweet finish.",
+      "longDescription": "Our Portuguese custard tarts is made fresh and plated with care — indulgent without being heavy, and the ideal way to round off your visit.",
+      "rating": "4.8",
+      "time": "8-12 min",
+      "nutrition": {
+        "calories": "420",
+        "protein": "8g",
+        "carbs": "56g",
+        "sugar": "32g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🧈",
+          "name": "Butter"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Maple Syrup"
+        },
+        {
+          "emoji": "🍓",
+          "name": "Berries"
+        }
+      ],
+      "allergens": [
+        "gluten",
+        "dairy",
+        "eggs"
+      ],
+      "reviews": [
+        {
+          "name": "Liam",
+          "rating": 4,
+          "text": "Best Portuguese custard tarts I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Emma",
+          "rating": 5,
+          "text": "Loved the Portuguese custard tarts. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 63
+    },
+    {
+      "id": "espresso",
+      "slug": "espresso",
+      "title": "Espresso",
+      "price": "250",
+      "image": "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=600&h=600&fit=crop",
+      "category": "drinks",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Espresso — made fresh, never from a carton.",
+      "longDescription": "A cool, refreshing Espresso made to order. Light, vibrant and exactly what you want alongside a slow afternoon at Aevidine.",
+      "rating": "4.3",
+      "time": "3-5 min",
+      "nutrition": {
+        "calories": "150",
+        "protein": "4g",
+        "carbs": "22g",
+        "sugar": "16g"
+      },
+      "ingredients": [
+        {
+          "emoji": "☕",
+          "name": "Espresso"
+        },
+        {
+          "emoji": "🧊",
+          "name": "Ice"
+        },
+        {
+          "emoji": "🥛",
+          "name": "Milk"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Honey"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Daniel",
+          "rating": 5,
+          "text": "Espresso was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Diego",
+          "rating": 4,
+          "text": "Best Espresso I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Priya",
+          "rating": 5,
+          "text": "The Espresso was excellent — easily my new favourite here."
+        }
+      ],
+      "options": [
+        {
+          "name": "Size",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Small",
+              "price": 0
+            },
+            {
+              "label": "Regular",
+              "price": 30
+            },
+            {
+              "label": "Large",
+              "price": 60
+            }
+          ]
+        },
+        {
+          "name": "Milk",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Whole",
+              "price": 0
+            },
+            {
+              "label": "Skimmed",
+              "price": 0
+            },
+            {
+              "label": "Oat",
+              "price": 40
+            },
+            {
+              "label": "Almond",
+              "price": 40
+            }
+          ]
+        }
+      ],
+      "tags": [
+        "vegan",
+        "gluten-free",
+        "bestseller",
+        "top-rated"
+      ],
+      "sort_order": 64
+    },
+    {
+      "id": "cappuccino",
+      "slug": "cappuccino",
+      "title": "Cappuccino",
+      "price": "210",
+      "image": "https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=600&h=600&fit=crop",
+      "category": "drinks",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Cappuccino — made fresh, never from a carton.",
+      "longDescription": "A cool, refreshing Cappuccino made to order. Light, vibrant and exactly what you want alongside a slow afternoon at Aevidine.",
+      "rating": "4.3",
+      "time": "3-5 min",
+      "nutrition": {
+        "calories": "150",
+        "protein": "4g",
+        "carbs": "22g",
+        "sugar": "16g"
+      },
+      "ingredients": [
+        {
+          "emoji": "☕",
+          "name": "Espresso"
+        },
+        {
+          "emoji": "🧊",
+          "name": "Ice"
+        },
+        {
+          "emoji": "🥛",
+          "name": "Milk"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Honey"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Diego",
+          "rating": 4,
+          "text": "Loved the Cappuccino. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Priya",
+          "rating": 5,
+          "text": "The Cappuccino was excellent — easily my new favourite here."
+        }
+      ],
+      "options": [
+        {
+          "name": "Size",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Small",
+              "price": 0
+            },
+            {
+              "label": "Regular",
+              "price": 30
+            },
+            {
+              "label": "Large",
+              "price": 60
+            }
+          ]
+        },
+        {
+          "name": "Milk",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Whole",
+              "price": 0
+            },
+            {
+              "label": "Skimmed",
+              "price": 0
+            },
+            {
+              "label": "Oat",
+              "price": 40
+            },
+            {
+              "label": "Almond",
+              "price": 40
+            }
+          ]
+        }
+      ],
+      "tags": [
+        "vegetarian",
+        "gluten-free",
+        "chef-special"
+      ],
+      "sort_order": 65
+    },
+    {
+      "id": "caff-latte",
+      "slug": "caff-latte",
+      "title": "Caffè Latte",
+      "price": "140",
+      "image": "https://images.unsplash.com/photo-1551030173-122aabc4489c?w=600&h=600&fit=crop",
+      "category": "drinks",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Caffè Latte — made fresh, never from a carton.",
+      "longDescription": "A cool, refreshing Caffè Latte made to order. Light, vibrant and exactly what you want alongside a slow afternoon at Aevidine.",
+      "rating": "4.7",
+      "time": "3-5 min",
+      "nutrition": {
+        "calories": "150",
+        "protein": "4g",
+        "carbs": "22g",
+        "sugar": "16g"
+      },
+      "ingredients": [
+        {
+          "emoji": "☕",
+          "name": "Espresso"
+        },
+        {
+          "emoji": "🧊",
+          "name": "Ice"
+        },
+        {
+          "emoji": "🥛",
+          "name": "Milk"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Honey"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Yuki",
+          "rating": 5,
+          "text": "Caffè Latte was lovely, and the place has such a warm vibe."
+        },
+        {
+          "name": "Omar",
+          "rating": 4,
+          "text": "Came back just for the Caffè Latte. So good."
+        }
+      ],
+      "options": [
+        {
+          "name": "Size",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Small",
+              "price": 0
+            },
+            {
+              "label": "Regular",
+              "price": 30
+            },
+            {
+              "label": "Large",
+              "price": 60
+            }
+          ]
+        },
+        {
+          "name": "Milk",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Whole",
+              "price": 0
+            },
+            {
+              "label": "Skimmed",
+              "price": 0
+            },
+            {
+              "label": "Oat",
+              "price": 40
+            },
+            {
+              "label": "Almond",
+              "price": 40
+            }
+          ]
+        }
+      ],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 66
+    },
+    {
+      "id": "mocha-frappe",
+      "slug": "mocha-frappe",
+      "title": "Mocha Frappe",
+      "price": "230",
+      "image": "https://images.unsplash.com/photo-1437418747212-8d9709afab22?w=600&h=600&fit=crop",
+      "category": "drinks",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Mocha Frappe — made fresh, never from a carton.",
+      "longDescription": "A cool, refreshing Mocha Frappe made to order. Light, vibrant and exactly what you want alongside a slow afternoon at Aevidine.",
+      "rating": "4.8",
+      "time": "3-5 min",
+      "nutrition": {
+        "calories": "150",
+        "protein": "4g",
+        "carbs": "22g",
+        "sugar": "16g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍫",
+          "name": "Cocoa"
+        },
+        {
+          "emoji": "🧊",
+          "name": "Ice"
+        },
+        {
+          "emoji": "🥛",
+          "name": "Milk"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Honey"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Chloe",
+          "rating": 5,
+          "text": "Loved the Mocha Frappe. Fresh, beautifully presented and great value."
+        },
+        {
+          "name": "Hannah",
+          "rating": 4,
+          "text": "The Mocha Frappe was excellent — easily my new favourite here."
+        }
+      ],
+      "options": [
+        {
+          "name": "Size",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Small",
+              "price": 0
+            },
+            {
+              "label": "Regular",
+              "price": 30
+            },
+            {
+              "label": "Large",
+              "price": 60
+            }
+          ]
+        },
+        {
+          "name": "Milk",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Whole",
+              "price": 0
+            },
+            {
+              "label": "Skimmed",
+              "price": 0
+            },
+            {
+              "label": "Oat",
+              "price": 40
+            },
+            {
+              "label": "Almond",
+              "price": 40
+            }
+          ]
+        }
+      ],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 67
+    },
+    {
+      "id": "hazelnut-cold-brew",
+      "slug": "hazelnut-cold-brew",
+      "title": "Hazelnut Cold Brew",
+      "price": "150",
+      "image": "https://images.unsplash.com/photo-1572490122747-3968b75cc699?w=600&h=600&fit=crop",
+      "category": "drinks",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Hazelnut Cold Brew — made fresh, never from a carton.",
+      "longDescription": "A cool, refreshing Hazelnut Cold Brew made to order. Light, vibrant and exactly what you want alongside a slow afternoon at Aevidine.",
+      "rating": "4.6",
+      "time": "3-5 min",
+      "nutrition": {
+        "calories": "150",
+        "protein": "4g",
+        "carbs": "22g",
+        "sugar": "16g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🌰",
+          "name": "Hazelnut"
+        },
+        {
+          "emoji": "🧊",
+          "name": "Ice"
+        },
+        {
+          "emoji": "🥛",
+          "name": "Milk"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Honey"
+        }
+      ],
+      "allergens": [
+        "dairy",
+        "nuts"
+      ],
+      "reviews": [
+        {
+          "name": "Noah",
+          "rating": 4,
+          "text": "Came back just for the Hazelnut Cold Brew. So good."
+        },
+        {
+          "name": "Marco",
+          "rating": 5,
+          "text": "The Hazelnut Cold Brew was excellent — easily my new favourite here."
+        }
+      ],
+      "options": [
+        {
+          "name": "Size",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Small",
+              "price": 0
+            },
+            {
+              "label": "Regular",
+              "price": 30
+            },
+            {
+              "label": "Large",
+              "price": 60
+            }
+          ]
+        },
+        {
+          "name": "Milk",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Whole",
+              "price": 0
+            },
+            {
+              "label": "Skimmed",
+              "price": 0
+            },
+            {
+              "label": "Oat",
+              "price": 40
+            },
+            {
+              "label": "Almond",
+              "price": 40
+            }
+          ]
+        }
+      ],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 68
+    },
+    {
+      "id": "caramel-iced-coffee",
+      "slug": "caramel-iced-coffee",
+      "title": "Caramel Iced Coffee",
+      "price": "170",
+      "image": "https://images.unsplash.com/photo-1485808191679-5f86510681a2?w=600&h=600&fit=crop",
+      "category": "drinks",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Caramel Iced Coffee — made fresh, never from a carton.",
+      "longDescription": "A cool, refreshing Caramel Iced Coffee made to order. Light, vibrant and exactly what you want alongside a slow afternoon at Aevidine.",
+      "rating": "4.5",
+      "time": "3-5 min",
+      "nutrition": {
+        "calories": "150",
+        "protein": "4g",
+        "carbs": "22g",
+        "sugar": "16g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍮",
+          "name": "Caramel"
+        },
+        {
+          "emoji": "☕",
+          "name": "Coffee"
+        },
+        {
+          "emoji": "🧊",
+          "name": "Ice"
+        },
+        {
+          "emoji": "🥛",
+          "name": "Milk"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Honey"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Emma",
+          "rating": 5,
+          "text": "The Caramel Iced Coffee was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Lina",
+          "rating": 4,
+          "text": "Came back just for the Caramel Iced Coffee. So good."
+        },
+        {
+          "name": "Daniel",
+          "rating": 5,
+          "text": "Best Caramel Iced Coffee I've had in a long time. Highly recommend."
+        }
+      ],
+      "options": [
+        {
+          "name": "Size",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Small",
+              "price": 0
+            },
+            {
+              "label": "Regular",
+              "price": 30
+            },
+            {
+              "label": "Large",
+              "price": 60
+            }
+          ]
+        },
+        {
+          "name": "Milk",
+          "type": "single",
+          "choices": [
+            {
+              "label": "Whole",
+              "price": 0
+            },
+            {
+              "label": "Skimmed",
+              "price": 0
+            },
+            {
+              "label": "Oat",
+              "price": 40
+            },
+            {
+              "label": "Almond",
+              "price": 40
+            }
+          ]
+        }
+      ],
+      "tags": [
+        "vegetarian"
+      ],
+      "sort_order": 69
+    },
+    {
+      "id": "pineapple-smoothie",
+      "slug": "pineapple-smoothie",
+      "title": "Pineapple Smoothie",
+      "price": "140",
+      "image": "https://images.unsplash.com/photo-1638176066666-ffb2f013c7dd?w=600&h=600&fit=crop",
+      "category": "drinks",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Pineapple Smoothie — made fresh, never from a carton.",
+      "longDescription": "A cool, refreshing Pineapple Smoothie made to order. Light, vibrant and exactly what you want alongside a slow afternoon at Aevidine.",
+      "rating": "4.4",
+      "time": "3-5 min",
+      "nutrition": {
+        "calories": "113",
+        "protein": "4g",
+        "carbs": "18g",
+        "sugar": "10g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍍",
+          "name": "Pineapple"
+        },
+        {
+          "emoji": "🧊",
+          "name": "Ice"
+        },
+        {
+          "emoji": "🥛",
+          "name": "Milk"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Honey"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Noah",
+          "rating": 5,
+          "text": "Best Pineapple Smoothie I've had in a long time. Highly recommend."
+        },
+        {
+          "name": "Marco",
+          "rating": 4,
+          "text": "Loved the Pineapple Smoothie. Fresh, beautifully presented and great value."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegan",
+        "healthy"
+      ],
+      "sort_order": 70
+    },
+    {
+      "id": "blueberry-banana-booster",
+      "slug": "blueberry-banana-booster",
+      "title": "Blueberry Banana Booster",
+      "price": "340",
+      "image": "https://images.unsplash.com/photo-1600271886742-f049cd451bba?w=600&h=600&fit=crop",
+      "category": "drinks",
+      "veg": true,
+      "is4d": false,
+      "modelFolder": null,
+      "modelSmallUrl": null,
+      "modelOptimizedUrl": null,
+      "description": "Blueberry Banana Booster — made fresh, never from a carton.",
+      "longDescription": "A cool, refreshing Blueberry Banana Booster made to order. Light, vibrant and exactly what you want alongside a slow afternoon at Aevidine.",
+      "rating": "4.9",
+      "time": "3-5 min",
+      "nutrition": {
+        "calories": "113",
+        "protein": "20g",
+        "carbs": "18g",
+        "sugar": "10g"
+      },
+      "ingredients": [
+        {
+          "emoji": "🍌",
+          "name": "Banana"
+        },
+        {
+          "emoji": "🫐",
+          "name": "Blueberry"
+        },
+        {
+          "emoji": "🧊",
+          "name": "Ice"
+        },
+        {
+          "emoji": "🥛",
+          "name": "Milk"
+        },
+        {
+          "emoji": "🍯",
+          "name": "Honey"
+        }
+      ],
+      "allergens": [
+        "dairy"
+      ],
+      "reviews": [
+        {
+          "name": "Yuki",
+          "rating": 4,
+          "text": "The Blueberry Banana Booster was excellent — easily my new favourite here."
+        },
+        {
+          "name": "Omar",
+          "rating": 5,
+          "text": "Came back just for the Blueberry Banana Booster. So good."
+        }
+      ],
+      "options": [],
+      "tags": [
+        "vegan",
+        "healthy",
+        "high-protein",
+        "new",
+        "top-rated"
+      ],
+      "sort_order": 71
+    }
+  ]
+}
