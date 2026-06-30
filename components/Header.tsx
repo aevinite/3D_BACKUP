@@ -17,6 +17,7 @@ import {
   type LanguageMeta,
 } from "@/lib/format";
 import { readActiveOrders, hasHiddenLiveOrder } from "@/lib/orderStatus";
+import { splitBrandSegments, hasBrandMarkers } from "@/lib/brandText";
 
 // The site only has two looks: a dark theme and a light theme.
 type Theme = "dark" | "light";
@@ -126,7 +127,16 @@ export default function Header({ logoText }: { logoText?: string }) {
       {/* Left: the restaurant name, split into styled pieces. */}
       <div className="brand">
         {logoText ? (
-          <h1 className="brand-title"><span className="brand-highlight">{logoText}</span></h1>
+          // Custom wordmark. With *asterisks* the marked part uses the accent and the
+          // rest is the mode-adaptive plain colour (white in dark / black in light).
+          // With NO markers the whole name stays the accent — unchanged from before.
+          <h1 className="brand-title">
+            {hasBrandMarkers(logoText)
+              ? splitBrandSegments(logoText).map((seg, i) => (
+                  <span key={i} className={seg.hi ? "brand-highlight" : "brand-plain"}>{seg.text}</span>
+                ))
+              : <span className="brand-highlight">{logoText}</span>}
+          </h1>
         ) : (
           <h1 className="brand-title">
             <span className="brand-plain">little</span>{" "}
