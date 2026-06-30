@@ -64,7 +64,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // two big JSON columns — so we drop ONLY those and keep every small column (verified unused
         // in the route + kitchen/app.js, so the board looks identical). (owner 2026-06-29)
         sb.from("aggregator_orders").select("id, source, external_id, status, order_id, created_at, customer_name, customer_phone, items, total, kot_no, accepted_at, accepted_by, updated_at, restaurant_id").eq("restaurant_id", rid).in("status", ["new", "accepted", "preparing", "ready"]).order("created_at"),
-        sb.from("settings").select("kitchen_can_accept_platform").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle(),
         // THIS restaurant's identity, so the kitchen header shows which restaurant the
         // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
@@ -73,6 +73,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         orders: live.orders, items: live.items, dishes: must(dishes),
         platform: must(platform) || [],
         platformAccept: !!(must(settings) || {}).kitchen_can_accept_platform,
+        // Auto-print KOT is ON only when the ADMIN allowed it AND the owner toggled it on
+        // (mig 107). The kitchen panel prints a ticket for each brand-new order when true.
+        autoPrintKot: !!((must(settings) || {}).auto_print_kot && (must(settings) || {}).auto_print_kot_allowed),
         restaurant: must(restaurant) || null,
       });
     }
