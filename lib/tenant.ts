@@ -22,23 +22,26 @@ export interface Restaurant {
   heroTitle: string | null;
   tagline: string | null;
   accentColor: string | null;
+  theme: Record<string, unknown> | null;
 }
 
-// Per-process cache: slug -> restaurant (or null if unknown). Restaurants change
-// rarely, so caching avoids a DB round-trip on every render. A miss is cached as
-// null too, so unknown slugs don't repeatedly hit the DB.
-const bySlug = new Map<string, Restaurant | null>();
+// Per-process cache: slug -> {value, at}. Short TTL so an admin's branding/menu
+// edit shows on the guest menu within ~15s without a process restart. (Restaurants
+// change rarely; one tiny row read every 15s per active slug is negligible egress.)
+const bySlug = new Map<string, { value: Restaurant | null; at: number }>();
+const TTL_MS = 15000;
 
 /**
  * Resolve a restaurant by its URL slug (anon read on the public `restaurants`
  * table — migration 078 allows public SELECT). Returns null if the slug is
- * unknown. Cached per process.
+ * unknown. Cached per process with a short TTL.
  */
 export async function getRestaurantBySlug(slug: string): Promise<Restaurant | null> {
-  if (bySlug.has(slug)) return bySlug.get(slug)!;
+  const hit = bySlug.get(slug);
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
   const { data, error } = await supabase
     .from("restaurants")
-    .select("id, slug, name, active, logo_text, hero_title, tagline, accent_color")
+    .select("id, slug, name, active, logo_text, hero_title, tagline, accent_color, theme")
     .eq("slug", slug)
     .maybeSingle();
   const r: Restaurant | null =
@@ -47,9 +50,10 @@ export async function getRestaurantBySlug(slug: string): Promise<Restaurant | nu
           id: data.id, slug: data.slug, name: data.name, active: !!data.active,
           logoText: data.logo_text ?? null, heroTitle: data.hero_title ?? null,
           tagline: data.tagline ?? null, accentColor: data.accent_color ?? null,
+          theme: (data.theme && typeof data.theme === "object") ? data.theme as Record<string, unknown> : null,
         }
       : null;
-  bySlug.set(slug, r);
+  bySlug.set(slug, { value: r, at: Date.now() });
   return r;
 }
 
