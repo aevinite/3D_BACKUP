@@ -1492,3 +1492,71 @@ if (window.LFH_RT) {
 } else {
   setInterval(() => load().catch(() => {}), 2000); // fallback poll
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   PHONE RESPONSIVE (2026-06-30): a hamburger drawer (profile + settings + logout)
+   and a full-screen work panel with a top-right ✕ close. Pure UI add-on — it reads
+   the existing global `state` / `renderPanel` / `renderFloor`, so the ordering logic
+   is untouched. All behaviour is gated to phone widths by CSS; desktop is unchanged.
+   ════════════════════════════════════════════════════════════════════════════ */
+(function () {
+  // ── Full-screen panel close (✕) ──────────────────────────────────────────
+  const closeBtn = document.createElement("button");
+  closeBtn.id = "tabletClose"; closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Close"); closeBtn.textContent = "✕";
+  document.body.appendChild(closeBtn);
+  closeBtn.onclick = () => { state.table = null; state.ordering = false; renderPanel(); renderFloor(); };
+
+  // Toggle body.tbl-open whenever the panel shows a table (vs the "tap a table" empty state),
+  // so the CSS can make it a full-screen overlay on phones. Decoupled from the render code.
+  const panelEl = document.getElementById("panel");
+  let backOff = null;
+  const sync = () => {
+    const open = !!panelEl && !panelEl.querySelector(".empty");
+    document.body.classList.toggle("tbl-open", open);
+    if (open && !backOff && window.LFH_BACK) backOff = LFH_BACK.layer("tablet-panel", () => closeBtn.click());
+    else if (!open && backOff) { backOff(); backOff = null; }
+  };
+  if (panelEl) { new MutationObserver(sync).observe(panelEl, { childList: true, subtree: true }); sync(); }
+
+  // ── Hamburger drawer: profile + settings + logout ────────────────────────
+  const backdrop = document.createElement("div"); backdrop.className = "tbl-drawer-backdrop";
+  const drawer = document.createElement("aside"); drawer.className = "tbl-drawer"; drawer.setAttribute("aria-label", "Menu and settings");
+  drawer.innerHTML =
+    '<button class="dw-close" type="button" aria-label="Close menu">✕</button>' +
+    '<div><div class="dw-prof">Signed in as</div><div class="dw-name" id="dwName">…</div><div class="dw-prof" id="dwRole"></div></div>' +
+    '<div class="dw-row"><span>Restaurant</span><span class="dw-prof" id="dwRest"></span></div>' +
+    '<div class="dw-row"><span>Theme</span><button class="btn small" id="dwTheme" type="button">Light / Dark</button></div>' +
+    '<a class="dw-btn danger" id="dwLogout" href="/api/panel-logout">Log out</a>';
+  document.body.appendChild(backdrop); document.body.appendChild(drawer);
+
+  let drawerOff = null;
+  const openDrawer = () => {
+    backdrop.classList.add("open"); drawer.classList.add("open");
+    drawer.querySelector("#dwRest").textContent = (document.getElementById("restName")?.textContent || "").trim() || "—";
+    loadProfile();
+    if (window.LFH_BACK && !drawerOff) drawerOff = LFH_BACK.layer("tablet-drawer", closeDrawer);
+  };
+  function closeDrawer() {
+    backdrop.classList.remove("open"); drawer.classList.remove("open");
+    if (drawerOff) { drawerOff(); drawerOff = null; }
+  }
+  backdrop.onclick = closeDrawer;
+  drawer.querySelector(".dw-close").onclick = closeDrawer;
+  drawer.querySelector("#dwTheme").onclick = () => document.getElementById("themeToggle")?.click();
+  const ham = document.getElementById("hamburger"); if (ham) ham.onclick = openDrawer;
+
+  let profileLoaded = false;
+  async function loadProfile() {
+    if (profileLoaded) return; // name/role don't change within a session
+    try {
+      const r = await fetch("/api/panel-profile", { cache: "no-store" });
+      const j = await r.json();
+      if (!j.error) {
+        drawer.querySelector("#dwName").textContent = j.name || j.username || "Staff";
+        drawer.querySelector("#dwRole").textContent = [j.role, j.username].filter(Boolean).join(" · ");
+        profileLoaded = true;
+      }
+    } catch { /* offline — leave the placeholder */ }
+  }
+})();
