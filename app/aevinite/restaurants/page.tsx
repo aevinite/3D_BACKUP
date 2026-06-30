@@ -336,6 +336,8 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
       <OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} />
 
+      <BrandingCard restaurant={restaurant} />
+
       <EnterCard restaurant={restaurant} panels={panels} />
 
       <div className="adm-card" style={{ marginBottom: 14 }}>
@@ -362,6 +364,118 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
           : <div className="adm-togglegrid">{FEATURES.map((f) => <Toggle key={f.key} k={f.key} label={f.label} />)}</div>}
       </div>
     </>
+  );
+}
+
+// Per-restaurant brand identity: full theme palette (bg/card/text/accent) per
+// light & dark mode, via colour-picker AND hex input, with a live preview, plus
+// hero/tagline/logo-text. Writes /api/admin/restaurants/branding.
+const PALETTE_FIELDS: { key: "bg" | "card" | "text" | "accent"; label: string }[] = [
+  { key: "bg", label: "Background" }, { key: "card", label: "Card / surface" },
+  { key: "text", label: "Text" }, { key: "accent", label: "Accent" },
+];
+const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
+  const [mode, setMode] = useState<"dark" | "light">("dark");
+  const [theme, setTheme] = useState<{ dark: Record<string, string>; light: Record<string, string> }>({ dark: {}, light: {} });
+  const [hero, setHero] = useState(""); const [tagline, setTagline] = useState(""); const [logoText, setLogoText] = useState("");
+  const [accent, setAccent] = useState("");
+  const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const j = await (await fetch(`/api/admin/restaurants/branding?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
+        if (!j.error) {
+          const t = j.theme || {};
+          setTheme({ dark: { ...(t.dark || {}) }, light: { ...(t.light || {}) } });
+          setHero(j.hero_title || ""); setTagline(j.tagline || ""); setLogoText(j.logo_text || ""); setAccent(j.accent_color || "");
+        }
+      } catch {}
+    })();
+  }, [restaurant.id]);
+
+  const cur = theme[mode];
+  const setColor = (key: string, val: string) => setTheme((s) => ({ ...s, [mode]: { ...s[mode], [key]: val } }));
+  const clearColor = (key: string) => setTheme((s) => { const m = { ...s[mode] }; delete m[key]; return { ...s, [mode]: m }; });
+
+  // Preview defaults so an unset slot still renders something sensible in the swatch.
+  const pv = {
+    bg: cur.bg || (mode === "dark" ? "#1a0f09" : "#faf3e8"),
+    card: cur.card || (mode === "dark" ? "#2c1b11" : "#ffffff"),
+    text: cur.text || (mode === "dark" ? "#f3e9db" : "#3c2a1e"),
+    accent: cur.accent || accent || (mode === "dark" ? "#e3c06f" : "#d4a574"),
+  };
+  const lowContrast = (() => {
+    const lum = (hex: string) => { const h = hex.replace("#", ""); const f = h.length === 3 ? h.split("").map(c=>c+c).join("") : h; const n = parseInt(f, 16); const r=(n>>16)&255,g=(n>>8)&255,b=n&255; return (0.299*r+0.587*g+0.114*b)/255; };
+    try { return Math.abs(lum(pv.text) - lum(pv.bg)) < 0.35; } catch { return false; }
+  })();
+
+  const save = async () => {
+    for (const m of ["dark", "light"] as const)
+      for (const k of Object.keys(theme[m]))
+        if (theme[m][k] && !HEX_RE.test(theme[m][k])) { setMsg(`${m} ${k}: "${theme[m][k]}" isn't a hex colour (e.g. #1a0f09).`); return; }
+    if (accent && !HEX_RE.test(accent)) { setMsg(`Accent "${accent}" isn't a hex colour.`); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const r = await fetch("/api/admin/restaurants/branding", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurant_id: restaurant.id, theme, accent_color: accent || null, hero_title: hero || null, tagline: tagline || null, logo_text: logoText || null }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
+      setMsg("Saved — open the guest menu to see it (within ~15s).");
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+
+  const inputStyle: React.CSSProperties = { padding: "7px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 };
+
+  return (
+    <div className="adm-card" style={{ marginBottom: 14 }}>
+      <h2>Branding &amp; theme</h2>
+      <p className="hint">Set <b>{restaurant.name}</b>&apos;s colours, logo text and hero — for light and dark mode. Leave a colour blank to use the sensible default. Changes show on the guest menu within ~15s.</p>
+
+      <div className="adm-togglegrid" style={{ marginBottom: 12 }}>
+        <button className={`adm-toggle ${mode === "dark" ? "on" : "off"}`} onClick={() => setMode("dark")}><span>Dark mode</span><span className="pill">{mode === "dark" ? "EDITING" : ""}</span></button>
+        <button className={`adm-toggle ${mode === "light" ? "on" : "off"}`} onClick={() => setMode("light")}><span>Light mode</span><span className="pill">{mode === "light" ? "EDITING" : ""}</span></button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+        <div style={{ display: "grid", gap: 10 }}>
+          {PALETTE_FIELDS.map((f) => (
+            <div key={f.key} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <label style={{ width: 110, fontSize: 13 }}>{f.label}</label>
+              <input type="color" value={(cur[f.key] && HEX_RE.test(cur[f.key])) ? cur[f.key] : pv[f.key]} disabled={busy}
+                onChange={(e) => setColor(f.key, e.target.value)} style={{ width: 38, height: 30, border: "none", background: "none", cursor: "pointer" }} />
+              <input value={cur[f.key] || ""} placeholder={pv[f.key]} disabled={busy} onChange={(e) => setColor(f.key, e.target.value.trim())} style={{ ...inputStyle, width: 110, fontFamily: "ui-monospace, monospace" }} />
+              {cur[f.key] && <button className="adm-btn" disabled={busy} onClick={() => clearColor(f.key)} title="Reset to default" style={{ padding: "4px 8px" }}>↺</button>}
+            </div>
+          ))}
+        </div>
+        {/* Live preview swatch */}
+        <div style={{ borderRadius: 12, overflow: "hidden", border: "var(--border)" }}>
+          <div style={{ background: pv.bg, color: pv.text, padding: 14 }}>
+            <div style={{ fontSize: 11, letterSpacing: 2, opacity: 0.7 }}>WELCOME</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: pv.accent }}>{hero || "Our Menu"}</div>
+            <div style={{ background: pv.card, borderRadius: 10, padding: 10, marginTop: 10 }}>
+              <div style={{ fontWeight: 700 }}>Sample Dish</div>
+              <div style={{ display: "inline-block", marginTop: 6, padding: "4px 10px", borderRadius: 999, background: pv.accent, color: pv.bg, fontSize: 12, fontWeight: 700 }}>Add</div>
+            </div>
+            <div style={{ fontSize: 11, opacity: 0.7, marginTop: 8 }}>{mode} preview</div>
+          </div>
+        </div>
+      </div>
+      {lowContrast && <p className="hint" style={{ color: "var(--adm-bad, #c0392b)", marginTop: 8 }}>⚠ Text and background look low-contrast — guests may struggle to read it.</p>}
+
+      <div style={{ display: "grid", gap: 8, marginTop: 14, paddingTop: 12, borderTop: "var(--border)" }}>
+        <label style={{ fontSize: 12 }}>Logo text (header + opening screen)<input value={logoText} placeholder={restaurant.name} disabled={busy} onChange={(e) => setLogoText(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
+        <label style={{ fontSize: 12 }}>Hero title<input value={hero} placeholder="Our Menu" disabled={busy} onChange={(e) => setHero(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
+        <label style={{ fontSize: 12 }}>Greeting / tagline<input value={tagline} placeholder="Welcome" disabled={busy} onChange={(e) => setTagline(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14 }}>
+        <button className="adm-btn primary" disabled={busy} onClick={save}><i className="fas fa-check" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Saving…" : "Save branding"}</button>
+        {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
+      </div>
+    </div>
   );
 }
 

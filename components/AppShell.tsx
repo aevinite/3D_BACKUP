@@ -10,6 +10,7 @@ import Maintenance from "./Maintenance";
 import { getSettings } from "@/lib/menu";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { supabase } from "@/lib/supabase";
+import { sanitizeBrandTheme, buildModeBlock } from "@/lib/brandTheme";
 
 // Turn a brand hex (e.g. "#c0392b") into "r, g, b" so we can build rgba() glows
 // at any opacity. Accepts #rgb or #rrggbb; returns null for anything we can't
@@ -61,7 +62,7 @@ function accentVars(accentColor: string): React.CSSProperties {
 // the background bubbles, the header, the chef-call button, and finally the
 // actual page content (`children`). It also listens for site-wide settings the
 // staff control from the editor, so the guest's screen updates live.
-export default function AppShell({ children, logoText, accentColor, restaurantId }: { children: React.ReactNode; logoText?: string; accentColor?: string; restaurantId?: string }) {
+export default function AppShell({ children, logoText, accentColor, restaurantId, theme }: { children: React.ReactNode; logoText?: string; accentColor?: string; restaurantId?: string; theme?: Record<string, unknown> }) {
   // General-tab toggles: bubble effect on/off, and service (maintenance) mode.
   // These are pieces of remembered state — when they change, the screen redraws.
   const [bubbles, setBubbles] = useState(true);
@@ -146,14 +147,32 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
   // Service mode replaces the whole menu with the maintenance screen.
   if (serviceMode) return <Maintenance />;
 
+  // Per-restaurant FULL palette (Phase 2). When a restaurant has theme overrides, we
+  // emit mode-scoped CSS (inline styles can't switch on the [data-theme] toggle). The
+  // block targets #app.brand-themed so the vars cascade to EVERYTHING in the guest app
+  // — menu, header, the floating chef-call button and its popup (which sit OUTSIDE
+  // #menu-page) — never affecting #1 or other pages. Accent falls back to accentColor
+  // per mode. Restaurants with only accentColor (no theme) keep the inline accentVars
+  // path below — unchanged.
+  const bt = theme ? sanitizeBrandTheme(theme) : {};
+  const darkBody = bt.dark ? buildModeBlock("dark", bt.dark, accentColor) : "";
+  const lightBody = bt.light ? buildModeBlock("light", bt.light, accentColor) : "";
+  const themed = !!(darkBody || lightBody);
+  const themedCss = themed
+    ? `${darkBody ? `[data-theme="dark"] #app.brand-themed{${darkBody}}` : ""}` +
+      `${lightBody ? `[data-theme="light"] #app.brand-themed{${lightBody}}` : ""}`
+    : "";
+
   return (
     <>
+      {/* Per-restaurant theme (mode-scoped) — only when this restaurant set a palette. */}
+      {themed && <style dangerouslySetInnerHTML={{ __html: themedCss }} />}
       {/* The one-time opening logo animation */}
       <IntroSplash wordmark={logoText} accentColor={accentColor} />
       {/* Floating background bubbles — only if the toggle is on */}
       {bubbles && <Particles />}
-      <div id="app">
-        <div id="menu-page" className="page active" style={accentColor ? accentVars(accentColor) : undefined}>
+      <div id="app" className={themed ? "brand-themed" : undefined}>
+        <div id="menu-page" className="page active" style={!themed && accentColor ? accentVars(accentColor) : undefined}>
           {/* The top bar (logo, language/currency, theme toggle, cart) */}
           <Header logoText={logoText} />
           {/* Whatever page is currently being shown goes here */}

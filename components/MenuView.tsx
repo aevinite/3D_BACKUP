@@ -60,7 +60,7 @@ const DIETS = [
 const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
 
 // This is the menu page, shown at "/menu". It's the main browsing screen.
-export default function MenuView({ restaurantId, restaurantSlug, restaurantName, logoText, heroTitle, tagline, accentColor }: { restaurantId: string; restaurantSlug?: string; restaurantName?: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string }) {
+export default function MenuView({ restaurantId, restaurantSlug, restaurantName, logoText, heroTitle, tagline, accentColor, theme }: { restaurantId: string; restaurantSlug?: string; restaurantName?: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string; theme?: Record<string, unknown> }) {
   // Restaurant #1 keeps its exact current chrome (localized hero, hardcoded
   // wordmark, theme accent); other restaurants get their own brand.
   const isDefault = restaurantId === DEFAULT_RESTAURANT_ID;
@@ -530,7 +530,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // Curly braces { } drop a value or a bit of logic into the markup.
   return (
     // AppShell = the shared outer frame (header, footer, etc.).
-    <AppShell restaurantId={restaurantId} logoText={isDefault ? undefined : (logoText || restaurantName || undefined)} accentColor={isDefault ? undefined : (accentColor || undefined)}>
+    <AppShell restaurantId={restaurantId} logoText={isDefault ? undefined : (logoText || restaurantName || undefined)} accentColor={isDefault ? undefined : (accentColor || undefined)} theme={isDefault ? undefined : theme}>
       {/* ONE fixed frosted backdrop behind the whole pinned header (brand +
           category + search). A single blur region = no seam between the brand
           and the categories. Its height is driven live by the scroll handler. */}
