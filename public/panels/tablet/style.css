@@ -374,3 +374,39 @@ html[data-theme="light"] .t-new .tlabel{ color:#b45309; }
 html[data-theme="light"] .t-prep .tlabel{ color:#1d4ed8; }
 html[data-theme="light"] .t-ready .tlabel{ color:#be185d; }
 html[data-theme="light"] .t-done .tlabel{ color:#15803d; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   PHONE RESPONSIVE (2026-06-30): hamburger drawer (settings/profile) + the work
+   panel becomes a FULL-SCREEN overlay with a top-right ✕ close. Desktop/tablet
+   layout (side-by-side floor + panel) is unchanged above 760px.
+   ════════════════════════════════════════════════════════════════════════════ */
+.hamburger { display: none; }
+#tabletClose { display: none; }
+
+/* Slide-in settings/profile drawer (built in app.js) */
+.tbl-drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 80; opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+.tbl-drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+.tbl-drawer { position: fixed; top: 0; right: 0; height: 100dvh; width: min(86vw, 340px); background: var(--panel); border-left: 1px solid var(--line); z-index: 81; transform: translateX(100%); transition: transform .24s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; gap: 12px; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); overflow: auto; }
+.tbl-drawer.open { transform: translateX(0); }
+.tbl-drawer .dw-close { align-self: flex-end; width: 40px; height: 40px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 10px; font-size: 18px; cursor: pointer; }
+.tbl-drawer .dw-prof { font-size: 13px; color: var(--muted); }
+.tbl-drawer .dw-name { font-size: 19px; font-weight: 800; color: var(--text); }
+.tbl-drawer .dw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.tbl-drawer .dw-btn { display: block; width: 100%; box-sizing: border-box; text-align: center; padding: 13px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; margin-top: auto; }
+.tbl-drawer .dw-btn.danger { border-color: #7f1d1d; color: #fca5a5; }
+
+@media (max-width: 760px) {
+  .hamburger { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 12px; font-size: 19px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .topbar { padding: 10px 14px; }
+  .brand { font-size: 17px; }
+  .brand .sub { display: none; }
+  .tiles { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+
+  /* When a table is open, the panel fills the screen; the floor hides behind it. */
+  body.tbl-open .floor { display: none; }
+  body.tbl-open #panel { position: fixed; inset: 0; z-index: 50; margin: 0; border: 0; border-radius: 0; min-height: 100dvh; max-height: 100dvh; overflow: auto; background: var(--bg); padding: 56px 14px calc(16px + env(safe-area-inset-bottom)); }
+  body.tbl-open #tabletClose { display: inline-flex; align-items: center; justify-content: center; position: fixed; top: calc(env(safe-area-inset-top) + 10px); right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 22px; line-height: 1; z-index: 52; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+  body.tbl-open .backtop { display: none; } /* the ✕ replaces the "↑ Tables" link */
+  /* comfortable touch targets */
+  .panel .btn, .floor-nav button, .counts button { min-height: 42px; }
+}

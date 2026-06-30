@@ -1,0 +1,2106 @@
+{
+  "categories": [
+    {
+      "slug": "beverages",
+      "icon": "fa-mug-hot",
+      "color": "#e8772e",
+      "sortOrder": 1,
+      "active": true,
+      "name": {
+        "en": "Beverages"
+      }
+    },
+    {
+      "slug": "soups",
+      "icon": "fa-bowl-food",
+      "color": "#c79a3e",
+      "sortOrder": 2,
+      "active": true,
+      "name": {
+        "en": "Soups"
+      }
+    },
+    {
+      "slug": "salads",
+      "icon": "fa-leaf",
+      "color": "#8bbf3c",
+      "sortOrder": 3,
+      "active": true,
+      "name": {
+        "en": "Salads"
+      }
+    },
+    {
+      "slug": "sides",
+      "icon": "fa-plate-wheat",
+      "color": "#c79a3e",
+      "sortOrder": 4,
+      "active": true,
+      "name": {
+        "en": "Sides & Papad"
+      }
+    },
+    {
+      "slug": "starters",
+      "icon": "fa-pepper-hot",
+      "color": "#e8772e",
+      "sortOrder": 5,
+      "active": true,
+      "name": {
+        "en": "Starters"
+      }
+    },
+    {
+      "slug": "tandoor",
+      "icon": "fa-fire",
+      "color": "#e8772e",
+      "sortOrder": 6,
+      "active": true,
+      "name": {
+        "en": "Tandoor Starters"
+      }
+    },
+    {
+      "slug": "sizzlers",
+      "icon": "fa-fire-burner",
+      "color": "#e8772e",
+      "sortOrder": 7,
+      "active": true,
+      "name": {
+        "en": "Sizzlers"
+      }
+    },
+    {
+      "slug": "chinese-starters",
+      "icon": "fa-bowl-rice",
+      "color": "#c79a3e",
+      "sortOrder": 8,
+      "active": true,
+      "name": {
+        "en": "Chinese Starters"
+      }
+    },
+    {
+      "slug": "pasta",
+      "icon": "fa-wheat-awn",
+      "color": "#c79a3e",
+      "sortOrder": 9,
+      "active": true,
+      "name": {
+        "en": "Pasta"
+      }
+    },
+    {
+      "slug": "sandwich",
+      "icon": "fa-bread-slice",
+      "color": "#c79a3e",
+      "sortOrder": 10,
+      "active": true,
+      "name": {
+        "en": "Sandwich"
+      }
+    },
+    {
+      "slug": "pizza",
+      "icon": "fa-pizza-slice",
+      "color": "#e8772e",
+      "sortOrder": 11,
+      "active": true,
+      "name": {
+        "en": "Pizza"
+      }
+    },
+    {
+      "slug": "noodles-rice",
+      "icon": "fa-bowl-rice",
+      "color": "#c79a3e",
+      "sortOrder": 12,
+      "active": true,
+      "name": {
+        "en": "Noodles & Rice"
+      }
+    },
+    {
+      "slug": "thai",
+      "icon": "fa-bowl-food",
+      "color": "#8bbf3c",
+      "sortOrder": 13,
+      "active": true,
+      "name": {
+        "en": "Thai"
+      }
+    },
+    {
+      "slug": "paneer",
+      "icon": "fa-cheese",
+      "color": "#e8772e",
+      "sortOrder": 14,
+      "active": true,
+      "name": {
+        "en": "Paneer Specials"
+      }
+    },
+    {
+      "slug": "kaju-cheese",
+      "icon": "fa-cheese",
+      "color": "#c79a3e",
+      "sortOrder": 15,
+      "active": true,
+      "name": {
+        "en": "Kaju & Cheese"
+      }
+    },
+    {
+      "slug": "indian-mains",
+      "icon": "fa-utensils",
+      "color": "#e8772e",
+      "sortOrder": 16,
+      "active": true,
+      "name": {
+        "en": "Indian Delicacies"
+      }
+    },
+    {
+      "slug": "kofta",
+      "icon": "fa-bowl-food",
+      "color": "#c79a3e",
+      "sortOrder": 17,
+      "active": true,
+      "name": {
+        "en": "Kofta"
+      }
+    },
+    {
+      "slug": "dal",
+      "icon": "fa-bowl-food",
+      "color": "#c79a3e",
+      "sortOrder": 18,
+      "active": true,
+      "name": {
+        "en": "Dal"
+      }
+    },
+    {
+      "slug": "rice-biryani",
+      "icon": "fa-bowl-rice",
+      "color": "#c79a3e",
+      "sortOrder": 19,
+      "active": true,
+      "name": {
+        "en": "Rice & Biryani"
+      }
+    },
+    {
+      "slug": "bread",
+      "icon": "fa-bread-slice",
+      "color": "#c79a3e",
+      "sortOrder": 20,
+      "active": true,
+      "name": {
+        "en": "Indian Bread"
+      }
+    },
+    {
+      "slug": "mexican-rice",
+      "icon": "fa-bowl-rice",
+      "color": "#e8772e",
+      "sortOrder": 21,
+      "active": true,
+      "name": {
+        "en": "Mexican Rice"
+      }
+    },
+    {
+      "slug": "dessert",
+      "icon": "fa-ice-cream",
+      "color": "#8bbf3c",
+      "sortOrder": 22,
+      "active": true,
+      "name": {
+        "en": "Dessert"
+      }
+    }
+  ],
+  "filters": [
+    {
+      "slug": "veg",
+      "icon": "🌿",
+      "sortOrder": 1,
+      "active": true,
+      "name": {
+        "en": "Veg"
+      }
+    },
+    {
+      "slug": "bestseller",
+      "icon": "🔥",
+      "sortOrder": 2,
+      "active": true,
+      "name": {
+        "en": "Bestseller"
+      }
+    },
+    {
+      "slug": "chefs-special",
+      "icon": "⭐",
+      "sortOrder": 3,
+      "active": true,
+      "name": {
+        "en": "Chef's Special"
+      }
+    },
+    {
+      "slug": "jain",
+      "icon": "🟢",
+      "sortOrder": 4,
+      "active": true,
+      "name": {
+        "en": "Jain Available"
+      }
+    },
+    {
+      "slug": "spicy",
+      "icon": "🌶️",
+      "sortOrder": 5,
+      "active": true,
+      "name": {
+        "en": "Spicy"
+      }
+    }
+  ],
+  "items": [
+    {
+      "slug": "virgin-mojito",
+      "title": "Virgin Mojito",
+      "price": "219",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "beverages",
+      "veg": true,
+      "is4d": false,
+      "description": "Crushed lime & mint with brown sugar, mint & lemon",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "litchi-cooler",
+      "title": "Litchi Cooler",
+      "price": "229",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "beverages",
+      "veg": true,
+      "is4d": false,
+      "description": "Litchi with a twist of lemon & fizz",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "blue-perish",
+      "title": "Blue Perish",
+      "price": "219",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "beverages",
+      "veg": true,
+      "is4d": false,
+      "description": "Fizzy blue curacao with lemon juice & sprite",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "fruit-punch",
+      "title": "Fruit Punch",
+      "price": "229",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "beverages",
+      "veg": true,
+      "is4d": false,
+      "description": "Mix fruit juice blended with vanilla & topped fruit",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "strawberry-punch",
+      "title": "Strawberry Punch",
+      "price": "229",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "beverages",
+      "veg": true,
+      "is4d": false,
+      "description": "Strawberry crush & ice cream with sprite",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "mango-hawai",
+      "title": "Mango Hawai",
+      "price": "229",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "beverages",
+      "veg": true,
+      "is4d": false,
+      "description": "Butterscotch & vanilla ice cream with mango & coconut milk",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cold-coffee-with-ice-cream",
+      "title": "Cold Coffee with Ice Cream",
+      "price": "239",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "beverages",
+      "veg": true,
+      "is4d": false,
+      "description": "Creamy cold coffee with a scoop of ice cream",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "oreo-shake",
+      "title": "Oreo Shake",
+      "price": "239",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "beverages",
+      "veg": true,
+      "is4d": false,
+      "description": "Thick Oreo cookie shake",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "tomato-soup",
+      "title": "Tomato Soup",
+      "price": "199",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "soups",
+      "veg": true,
+      "is4d": false,
+      "description": "All-time favourite tomato soup",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cheese-corn-tomato-soup",
+      "title": "Cheese Corn Tomato Soup",
+      "price": "209",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "soups",
+      "veg": true,
+      "is4d": false,
+      "description": "Tomato base with fresh corn & grated cheese",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "hot-and-sour-soup",
+      "title": "Hot & Sour Soup",
+      "price": "219",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "soups",
+      "veg": true,
+      "is4d": false,
+      "description": "Chinese soup with mushroom, bamboo shoot & veggies",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "manchow-soup",
+      "title": "Manchow Soup",
+      "price": "219",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "soups",
+      "veg": true,
+      "is4d": false,
+      "description": "Hot & spicy soup topped with fried noodles",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-sweet-corn-soup",
+      "title": "Veg Sweet Corn Soup",
+      "price": "219",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "soups",
+      "veg": true,
+      "is4d": false,
+      "description": "Sweet corn soup with vegetables",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "tom-yum-soup",
+      "title": "Tom Yum Soup",
+      "price": "229",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "soups",
+      "veg": true,
+      "is4d": false,
+      "description": "Thai clear broth with mushroom, lemongrass & lime",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "broccoli-almond-soup",
+      "title": "Broccoli Almond Soup",
+      "price": "229",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "soups",
+      "veg": true,
+      "is4d": false,
+      "description": "Creamy broccoli soup garnished with almond",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "thai-coconut-soup",
+      "title": "Thai Coconut Soup",
+      "price": "269",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "soups",
+      "veg": true,
+      "is4d": false,
+      "description": "Coconut milk with Thai basil & lemongrass",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "fresh-green-salad",
+      "title": "Fresh Green Salad",
+      "price": "199",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "description": "Cucumber, tomato, beetroot & carrot",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "peanut-salad",
+      "title": "Peanut Salad",
+      "price": "269",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "description": "Onion, tomato, green chillies, peanuts & coriander",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "mexican-tortilla-salad",
+      "title": "Mexican Tortilla Salad",
+      "price": "269",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "description": "Kidney beans, baked beans, bell peppers & tortilla",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "pasta-salad",
+      "title": "Pasta Salad",
+      "price": "199",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "description": "Pasta, bell pepper, basil & chilly sauce",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "russian-salad",
+      "title": "Russian Salad",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "description": "Fruits & veggies in cream",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "waldorf-salad",
+      "title": "Waldorf Salad",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "description": "Rich cream with walnut & apple",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "caesar-salad",
+      "title": "Caesar Salad",
+      "price": "289",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "salads",
+      "veg": true,
+      "is4d": false,
+      "description": "Iceberg, mayo, cream & croutons with chilly flakes",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "masala-papad",
+      "title": "Masala Papad",
+      "price": "69",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sides",
+      "veg": true,
+      "is4d": false,
+      "description": "Cucumber, tomato, onion & salt on crisp papad",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cheese-chilly-papad",
+      "title": "Cheese Chilly Papad",
+      "price": "109",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sides",
+      "veg": true,
+      "is4d": false,
+      "description": "Cheese, green chilly & coriander",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "french-fries",
+      "title": "French Fries",
+      "price": "159",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sides",
+      "veg": true,
+      "is4d": false,
+      "description": "Classic crispy fries",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "peri-peri-french-fries",
+      "title": "Peri Peri French Fries",
+      "price": "179",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sides",
+      "veg": true,
+      "is4d": false,
+      "description": "Spicy peri peri masala fries",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "over-loaded-french-fries",
+      "title": "Over Loaded French Fries",
+      "price": "249",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sides",
+      "veg": true,
+      "is4d": false,
+      "description": "Fries topped with mixed sauce",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "sweet-and-salted-lassi",
+      "title": "Sweet & Salted Lassi",
+      "price": "229",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sides",
+      "veg": true,
+      "is4d": false,
+      "description": "Thick churned yogurt drink",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "choice-of-raita",
+      "title": "Choice of Raita",
+      "price": "169",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sides",
+      "veg": true,
+      "is4d": false,
+      "description": "Boondi / veg / pineapple raita",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "nachos",
+      "title": "Nachos",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Classic nachos with cheese sauce & salsa",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "nachos-supreme",
+      "title": "Nachos Supreme",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Beans, bell pepper & kidney beans in cheese & salsa",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "tacos",
+      "title": "Tacos",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Classic tacos with cheese sauce & salsa",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cheese-cigar",
+      "title": "Cheese Cigar",
+      "price": "309",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Cheese, bell pepper & jalapeno rolls in thousand island",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cheese-ball",
+      "title": "Cheese Ball",
+      "price": "319",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Cheese balls with pesto dip",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "spinach-cheese-ball",
+      "title": "Spinach Cheese Ball",
+      "price": "329",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Cheese & spinach balls with pesto dip",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "bruschetta-veg",
+      "title": "Bruschetta Veg",
+      "price": "349",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Tomato, bell pepper, olives, cheese & basil",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cottage-cheese-pesto",
+      "title": "Cottage Cheese Pesto",
+      "price": "379",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Finger-cut cottage cheese with pesto sauce",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "hara-bhara-kabab",
+      "title": "Hara Bhara Kabab",
+      "price": "309",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "tandoor",
+      "veg": true,
+      "is4d": false,
+      "description": "Spinach & cottage cheese kebabs with green chutney",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-seekh-kabab",
+      "title": "Veg Seekh Kabab",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "tandoor",
+      "veg": true,
+      "is4d": false,
+      "description": "Minced veg seasoned with spices, grilled on charcoal",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "raja-kabab",
+      "title": "Raja Kabab",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "tandoor",
+      "veg": true,
+      "is4d": false,
+      "description": "Potato, green peas & cottage cheese kababs",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "dahi-kabab",
+      "title": "Dahi Kabab",
+      "price": "309",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "tandoor",
+      "veg": true,
+      "is4d": false,
+      "description": "Hung curd with spices, onion & green chilli kebabs",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "paneer-tikka-dry",
+      "title": "Paneer Tikka Dry",
+      "price": "389",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "tandoor",
+      "veg": true,
+      "is4d": false,
+      "description": "Diced paneer in tandoori yogurt marination",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "malai-paneer-tikka",
+      "title": "Malai Paneer Tikka",
+      "price": "389",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "tandoor",
+      "veg": true,
+      "is4d": false,
+      "description": "Soft paneer with cream cheese & cashews",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "paneer-afghani",
+      "title": "Paneer Afghani",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "tandoor",
+      "veg": true,
+      "is4d": false,
+      "description": "Paneer stuffed with dry fruit & cheese in tandoori masala",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "assorted-platter",
+      "title": "Assorted Platter",
+      "price": "469",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "tandoor",
+      "veg": true,
+      "is4d": false,
+      "description": "Tandoori potato, cauliflower, hara bhara, paneer & baby corn",
+      "tags": [
+        "veg",
+        "chefs-special"
+      ]
+    },
+    {
+      "slug": "aangan-special-sizzler",
+      "title": "Aangan Special Sizzler",
+      "price": "599",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sizzlers",
+      "veg": true,
+      "is4d": false,
+      "description": "Our chef's special sizzler",
+      "tags": [
+        "veg",
+        "bestseller",
+        "chefs-special"
+      ]
+    },
+    {
+      "slug": "italian-king-sizzler",
+      "title": "Italian King Sizzler",
+      "price": "549",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sizzlers",
+      "veg": true,
+      "is4d": false,
+      "description": "Spaghetti & exotic veg in garlic olive oil with fries",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "paneer-on-the-rock-sizzler",
+      "title": "Paneer on the Rock Sizzler",
+      "price": "549",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sizzlers",
+      "veg": true,
+      "is4d": false,
+      "description": "Butter rice, veg, pasta & paneer tikka in shashlik sauce",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "sizzling-mexicano-sizzler",
+      "title": "Sizzling Mexicano Sizzler",
+      "price": "549",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sizzlers",
+      "veg": true,
+      "is4d": false,
+      "description": "Crispy potato turnovers with Mexican rice & salsa",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "chinese-sizzler-in-chilli-garlic",
+      "title": "Chinese Sizzler in Chilli Garlic",
+      "price": "549",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sizzlers",
+      "veg": true,
+      "is4d": false,
+      "description": "Paneer chilli & manchurian with rice & noodles",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-manchurian-dry-gravy",
+      "title": "Veg Manchurian Dry/Gravy",
+      "price": "319",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "chinese-starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Fried veg balls in manchurian sauce",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-spring-roll",
+      "title": "Veg Spring Roll",
+      "price": "309",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "chinese-starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Julienne veg wrapped & deep fried",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "paneer-chilly-dry-gravy",
+      "title": "Paneer Chilly Dry/Gravy",
+      "price": "389",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "chinese-starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Diced paneer tossed with green chilli & soya",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-wonton",
+      "title": "Veg Wonton",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "chinese-starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Wonton sautéed with hot schezwan sauce",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "american-corn-and-salt-pepper",
+      "title": "American Corn & Salt Pepper",
+      "price": "329",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "chinese-starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Corn with chilli flakes, capsicum & black pepper",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "honey-chilly-potato",
+      "title": "Honey Chilly Potato",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "chinese-starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Crispy potato in fiery chilli sauce & honey",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "crispy-corn-chilly",
+      "title": "Crispy Corn Chilly",
+      "price": "349",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "chinese-starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Crispy sweet corn with onion, garlic & pepper",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "dragon-paneer",
+      "title": "Dragon Paneer",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "chinese-starters",
+      "veg": true,
+      "is4d": false,
+      "description": "Cottage cheese, schezwan sauce & crackling spinach",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "make-your-own-pasta",
+      "title": "Make Your Own Pasta",
+      "price": "359",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "description": "Penne/fusilli/spaghetti with arrabbiata/alfredo/pesto",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "ravioli-pasta",
+      "title": "Ravioli Pasta",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "description": "Choice of arrabbiata / alfredo / pesto",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "baked-macaroni-with-pineapple",
+      "title": "Baked Macaroni with Pineapple",
+      "price": "349",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "description": "All-time favourite baked macaroni",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "baked-enchiladas",
+      "title": "Baked Enchiladas",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "description": "Corn tortilla stuffed with refried beans & baked cheese",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "baked-lasagna",
+      "title": "Baked Lasagna",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "description": "White sauce & cheese veggies",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "baked-cannelloni",
+      "title": "Baked Cannelloni",
+      "price": "409",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "description": "Veggies baked in white cheese & red sauce",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-florentine",
+      "title": "Veg Florentine",
+      "price": "349",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pasta",
+      "veg": true,
+      "is4d": false,
+      "description": "Assorted veggies baked in cheese sauce",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "bread-butter",
+      "title": "Bread Butter",
+      "price": "149",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sandwich",
+      "veg": true,
+      "is4d": false,
+      "description": "Simple buttered bread",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cheese-chilli-toast",
+      "title": "Cheese Chilli Toast",
+      "price": "209",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sandwich",
+      "veg": true,
+      "is4d": false,
+      "description": "Grilled cheese chilli toast",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cheese-chutney-sandwich",
+      "title": "Cheese Chutney Sandwich",
+      "price": "219",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sandwich",
+      "veg": true,
+      "is4d": false,
+      "description": "Cheese with green chutney",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "bombay-club-veg-sandwich",
+      "title": "Bombay Club Veg Sandwich",
+      "price": "269",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "sandwich",
+      "veg": true,
+      "is4d": false,
+      "description": "Tomato, cucumber, potato-peas stuffing & cheese",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "margherita-double-cheese-pizza",
+      "title": "Margherita Double Cheese Pizza",
+      "price": "449",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pizza",
+      "veg": true,
+      "is4d": false,
+      "description": "Loaded with cheese (8 inch)",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veggie-bite-pizza",
+      "title": "Veggie Bite Pizza",
+      "price": "479",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pizza",
+      "veg": true,
+      "is4d": false,
+      "description": "Onion, green pepper & tomato loaded with cheese",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "rustic-italian-pizza",
+      "title": "Rustic Italian Pizza",
+      "price": "479",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pizza",
+      "veg": true,
+      "is4d": false,
+      "description": "Oven-dried tomatoes, capsicum, black olives & chilli flakes",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "mexican-delight-pizza",
+      "title": "Mexican Delight Pizza",
+      "price": "479",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pizza",
+      "veg": true,
+      "is4d": false,
+      "description": "Kidney beans, sweet corn, tomato, olive & jalapeno",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "tandoori-paneer-pizza",
+      "title": "Tandoori Paneer Pizza",
+      "price": "489",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pizza",
+      "veg": true,
+      "is4d": false,
+      "description": "Tandoori paneer, capsicum & onion with cheese",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "peri-peri-pizza",
+      "title": "Peri Peri Pizza",
+      "price": "419",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "pizza",
+      "veg": true,
+      "is4d": false,
+      "description": "Onion, olives, peri peri sauce & cheese",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "wok-tossed-hakka-noodles",
+      "title": "Wok Tossed Hakka Noodles",
+      "price": "280",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "noodles-rice",
+      "veg": true,
+      "is4d": false,
+      "description": "Noodles tossed with carrot, cabbage, capsicum & beans",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "chilly-garlic-noodles",
+      "title": "Chilly Garlic Noodles",
+      "price": "339",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "noodles-rice",
+      "veg": true,
+      "is4d": false,
+      "description": "Noodles with veg, fried garlic & chilli, spicy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-manchurian-noodles-rice",
+      "title": "Veg Manchurian Noodles/Rice",
+      "price": "349",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "noodles-rice",
+      "veg": true,
+      "is4d": false,
+      "description": "Kids' special manchurian with noodles or rice",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "triple-schezwan-rice",
+      "title": "Triple Schezwan Rice",
+      "price": "339",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "noodles-rice",
+      "veg": true,
+      "is4d": false,
+      "description": "Schezwan rice, crispy noodles & spicy veg gravy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "american-chop-suey",
+      "title": "American Chop Suey",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "noodles-rice",
+      "veg": true,
+      "is4d": false,
+      "description": "Crispy noodles sautéed with veg & tangy sauce",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "schezwan-fried-rice",
+      "title": "Schezwan Fried Rice",
+      "price": "319",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "noodles-rice",
+      "veg": true,
+      "is4d": false,
+      "description": "Rice & diced veg tossed in chilli oil & schezwan",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-fried-rice",
+      "title": "Veg Fried Rice",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "noodles-rice",
+      "veg": true,
+      "is4d": false,
+      "description": "Rice tossed with vegetables",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "chinese-bhel",
+      "title": "Chinese Bhel",
+      "price": "309",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "noodles-rice",
+      "veg": true,
+      "is4d": false,
+      "description": "Rice, noodles, manchurian & veggies, med spicy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "thai-green-curry",
+      "title": "Thai Green Curry",
+      "price": "499",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "thai",
+      "veg": true,
+      "is4d": false,
+      "description": "Exotic mix veg in coconut milk green curry with rice",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "paneer-and-baby-corn-thai-red-curry",
+      "title": "Paneer & Baby Corn Thai Red Curry",
+      "price": "499",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "thai",
+      "veg": true,
+      "is4d": false,
+      "description": "Paneer & baby corn in lemongrass red curry with rice",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "aangan-special-paneer",
+      "title": "Aangan Special Paneer",
+      "price": "459",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "paneer",
+      "veg": true,
+      "is4d": false,
+      "description": "Our chef's special paneer",
+      "tags": [
+        "veg",
+        "bestseller",
+        "chefs-special"
+      ]
+    },
+    {
+      "slug": "paneer-rara",
+      "title": "Paneer Rara",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "paneer",
+      "veg": true,
+      "is4d": false,
+      "description": "Paneer cubes in brown gravy with garlic & kasuri methi",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "paneer-khurchan",
+      "title": "Paneer Khurchan",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "paneer",
+      "veg": true,
+      "is4d": false,
+      "description": "Paneer in rich, creamy, mildly spicy gravy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "paneer-makhani",
+      "title": "Paneer Makhani",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "paneer",
+      "veg": true,
+      "is4d": false,
+      "description": "Malai paneer in silky tomato gravy with butter",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "paneer-tikka-methi-garlic-masala",
+      "title": "Paneer Tikka Methi Garlic Masala",
+      "price": "409",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "paneer",
+      "veg": true,
+      "is4d": false,
+      "description": "Chef's special — just try it",
+      "tags": [
+        "veg",
+        "chefs-special"
+      ]
+    },
+    {
+      "slug": "balti-paneer",
+      "title": "Balti Paneer",
+      "price": "409",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "paneer",
+      "veg": true,
+      "is4d": false,
+      "description": "Two cuts of paneer in red gravy, layered in a balti",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "paneer-pasanda",
+      "title": "Paneer Pasanda",
+      "price": "429",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "paneer",
+      "veg": true,
+      "is4d": false,
+      "description": "Sliced paneer stuffed with herbs & cashew in brown gravy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "all-time-favourite-paneer",
+      "title": "All Time Favourite Paneer",
+      "price": "419",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "paneer",
+      "veg": true,
+      "is4d": false,
+      "description": "Kadai/Handi/Tikka Masala/Butter/Lasuni/Mutter/Palak",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cheese-butter-masala",
+      "title": "Cheese Butter Masala",
+      "price": "449",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "kaju-cheese",
+      "veg": true,
+      "is4d": false,
+      "description": "All-time favourite cheese in butter masala",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "kaju-kadai",
+      "title": "Kaju Kadai",
+      "price": "419",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "kaju-cheese",
+      "veg": true,
+      "is4d": false,
+      "description": "Fried cashew sautéed with onion, tomato & capsicum",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "kaju-butter-masala",
+      "title": "Kaju Butter Masala",
+      "price": "419",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "kaju-cheese",
+      "veg": true,
+      "is4d": false,
+      "description": "Fried cashew in rich makhani gravy, med spicy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "khoya-kaju",
+      "title": "Khoya Kaju",
+      "price": "419",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "kaju-cheese",
+      "veg": true,
+      "is4d": false,
+      "description": "Fried cashew in sweet creamy cashew gravy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "aangan-special-veg",
+      "title": "Aangan Special Veg",
+      "price": "419",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "indian-mains",
+      "veg": true,
+      "is4d": false,
+      "description": "Our chef's special vegetable",
+      "tags": [
+        "veg",
+        "bestseller",
+        "chefs-special"
+      ]
+    },
+    {
+      "slug": "subzi-lababdar",
+      "title": "Subzi Lababdar",
+      "price": "389",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "indian-mains",
+      "veg": true,
+      "is4d": false,
+      "description": "Assorted vegetables in tangy tomato gravy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "teekha-subzi-handi",
+      "title": "Teekha Subzi Handi",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "indian-mains",
+      "veg": true,
+      "is4d": false,
+      "description": "Cauliflower, peas & peppers in richly spiced masala",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "navratna-korma",
+      "title": "Navratna Korma",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "indian-mains",
+      "veg": true,
+      "is4d": false,
+      "description": "Mix veg in rich cashew nut gravy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-jaipuri",
+      "title": "Veg Jaipuri",
+      "price": "349",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "indian-mains",
+      "veg": true,
+      "is4d": false,
+      "description": "Mix veg in spicy brown gravy, garnished with papad",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "baby-corn-achari-masala",
+      "title": "Baby Corn Achari Masala",
+      "price": "359",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "indian-mains",
+      "veg": true,
+      "is4d": false,
+      "description": "Tender baby corn in pickling masala",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-makhanwala",
+      "title": "Veg Makhanwala",
+      "price": "349",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "indian-mains",
+      "veg": true,
+      "is4d": false,
+      "description": "Veggies, khoya, paneer & cheese in red gravy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "aloo-mutter",
+      "title": "Aloo Mutter",
+      "price": "329",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "indian-mains",
+      "veg": true,
+      "is4d": false,
+      "description": "Diced aloo with fresh green peas in brown gravy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "dum-aloo-punjabi",
+      "title": "Dum Aloo Punjabi",
+      "price": "369",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "kofta",
+      "veg": true,
+      "is4d": false,
+      "description": "Stuffed baby potatoes in spicy yogurt gravy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "malai-kofta",
+      "title": "Malai Kofta",
+      "price": "419",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "kofta",
+      "veg": true,
+      "is4d": false,
+      "description": "Kofta in rich cashew gravy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "karachi-kofta",
+      "title": "Karachi Kofta",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "kofta",
+      "veg": true,
+      "is4d": false,
+      "description": "Tender vegetable balls in spicy brown gravy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cheese-kofta-masaledar",
+      "title": "Cheese Kofta Masaledar",
+      "price": "439",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "kofta",
+      "veg": true,
+      "is4d": false,
+      "description": "Grated cheese dumplings in cashew gravy, med sweet",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-kofta-curry",
+      "title": "Veg Kofta Curry",
+      "price": "409",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "kofta",
+      "veg": true,
+      "is4d": false,
+      "description": "Soft cottage cheese & veggie dumplings, med spicy",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "aangan-special-dal",
+      "title": "Aangan Special Dal",
+      "price": "309",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dal",
+      "veg": true,
+      "is4d": false,
+      "description": "Toor & black urad dal, Punjabi style",
+      "tags": [
+        "veg",
+        "bestseller",
+        "chefs-special"
+      ]
+    },
+    {
+      "slug": "dal-fry",
+      "title": "Dal Fry",
+      "price": "259",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dal",
+      "veg": true,
+      "is4d": false,
+      "description": "Lentils tempered with butter, cumin & red chilli",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "dal-tadka",
+      "title": "Dal Tadka",
+      "price": "259",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dal",
+      "veg": true,
+      "is4d": false,
+      "description": "Lentils in thick gravy tempered with butter & cumin",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "dal-makhani",
+      "title": "Dal Makhani",
+      "price": "319",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dal",
+      "veg": true,
+      "is4d": false,
+      "description": "Black urad dal & rajma in butter & cream",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "dal-palak",
+      "title": "Dal Palak",
+      "price": "259",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dal",
+      "veg": true,
+      "is4d": false,
+      "description": "Spinach cooked in toovar dal with spices",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "dal-panchratna",
+      "title": "Dal Panchratna",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dal",
+      "veg": true,
+      "is4d": false,
+      "description": "Five mix dals cooked with Indian spices",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "aangan-special-pulao",
+      "title": "Aangan Special Pulao",
+      "price": "359",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "rice-biryani",
+      "veg": true,
+      "is4d": false,
+      "description": "Our chef's special pulao",
+      "tags": [
+        "veg",
+        "bestseller",
+        "chefs-special"
+      ]
+    },
+    {
+      "slug": "steam-rice",
+      "title": "Steam Rice",
+      "price": "209",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "rice-biryani",
+      "veg": true,
+      "is4d": false,
+      "description": "Steamed basmati rice",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "jeera-rice",
+      "title": "Jeera Rice",
+      "price": "249",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "rice-biryani",
+      "veg": true,
+      "is4d": false,
+      "description": "Cumin tossed in butter with basmati rice & coriander",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-pulao",
+      "title": "Veg Pulao",
+      "price": "279",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "rice-biryani",
+      "veg": true,
+      "is4d": false,
+      "description": "Mix veg tossed in butter with basmati & spices",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-hyderabadi-biryani",
+      "title": "Veg Hyderabadi Biryani",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "rice-biryani",
+      "veg": true,
+      "is4d": false,
+      "description": "Minty flavoured rice with fried onions",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "veg-dum-biryani",
+      "title": "Veg Dum Biryani",
+      "price": "399",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "rice-biryani",
+      "veg": true,
+      "is4d": false,
+      "description": "Long-grain rice with aromatic spices & veg, dum-cooked",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "special-khichdi",
+      "title": "Special Khichdi",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "rice-biryani",
+      "veg": true,
+      "is4d": false,
+      "description": "Plain / masala / vegetable / palak khichdi",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "butter-roti",
+      "title": "Butter Roti",
+      "price": "59",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "bread",
+      "veg": true,
+      "is4d": false,
+      "description": "Tandoori roti with butter",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "lachha-paratha",
+      "title": "Lachha Paratha",
+      "price": "99",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "bread",
+      "veg": true,
+      "is4d": false,
+      "description": "Flaky layered paratha",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "butter-naan",
+      "title": "Butter Naan",
+      "price": "99",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "bread",
+      "veg": true,
+      "is4d": false,
+      "description": "Soft tandoori naan with butter",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "garlic-naan",
+      "title": "Garlic Naan",
+      "price": "140",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "bread",
+      "veg": true,
+      "is4d": false,
+      "description": "Naan topped with garlic",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "hariyali-naan",
+      "title": "Hariyali Naan",
+      "price": "139",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "bread",
+      "veg": true,
+      "is4d": false,
+      "description": "Naan with fresh herbs",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "paneer-kulcha",
+      "title": "Paneer Kulcha",
+      "price": "199",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "bread",
+      "veg": true,
+      "is4d": false,
+      "description": "Kulcha stuffed with spiced paneer",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cheese-naan",
+      "title": "Cheese Naan",
+      "price": "219",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "bread",
+      "veg": true,
+      "is4d": false,
+      "description": "Naan stuffed with cheese",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "cheese-chilli-garlic-naan",
+      "title": "Cheese Chilli Garlic Naan",
+      "price": "219",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "bread",
+      "veg": true,
+      "is4d": false,
+      "description": "Naan with cheese, chilli & garlic",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "mexican-hot-pot-rice",
+      "title": "Mexican Hot Pot Rice",
+      "price": "419",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "mexican-rice",
+      "veg": true,
+      "is4d": false,
+      "description": "Rice with tomato, onion, garlic & kidney beans, sour cream",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "mexican-rice-with-salsa-curry",
+      "title": "Mexican Rice with Salsa Curry",
+      "price": "419",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "mexican-rice",
+      "veg": true,
+      "is4d": false,
+      "description": "Assorted veggies in tangy salsa curry",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "choice-of-ice-cream",
+      "title": "Choice of Ice Cream",
+      "price": "99",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dessert",
+      "veg": true,
+      "is4d": false,
+      "description": "Vanilla / strawberry / chocolate",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "american-nuts-ice-cream",
+      "title": "American Nuts Ice Cream",
+      "price": "139",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dessert",
+      "veg": true,
+      "is4d": false,
+      "description": "Nutty American ice cream",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "almond-carnival-ice-cream",
+      "title": "Almond Carnival Ice Cream",
+      "price": "139",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dessert",
+      "veg": true,
+      "is4d": false,
+      "description": "Almond ice cream",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "sizzling-brownie-with-vanilla",
+      "title": "Sizzling Brownie with Vanilla",
+      "price": "299",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dessert",
+      "veg": true,
+      "is4d": false,
+      "description": "Hot brownie with vanilla ice cream",
+      "tags": [
+        "veg",
+        "chefs-special"
+      ]
+    },
+    {
+      "slug": "gulab-jamun",
+      "title": "Gulab Jamun",
+      "price": "140",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dessert",
+      "veg": true,
+      "is4d": false,
+      "description": "Warm gulab jamun",
+      "tags": [
+        "veg"
+      ]
+    },
+    {
+      "slug": "mung-dal-halvo",
+      "title": "Mung Dal Halvo",
+      "price": "165",
+      "image": "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='120'%20height='120'%3E%3Crect%20width='120'%20height='120'%20fill='%232d3142'/%3E%3Ctext%20x='60'%20y='78'%20font-size='52'%20text-anchor='middle'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E",
+      "category": "dessert",
+      "veg": true,
+      "is4d": false,
+      "description": "Rich moong dal halwa",
+      "tags": [
+        "veg"
+      ]
+    }
+  ]
+}
