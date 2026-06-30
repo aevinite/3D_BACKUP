@@ -2711,9 +2711,11 @@ a *:active,
 .browse-hint i {
   display: inline-block;
   font-size: 13px;
-  color: #F5B400;
+  /* Follow the restaurant's accent (themed tenants set --accent); #1 / unthemed
+     fall back to the original amber. */
+  color: var(--accent, #F5B400);
   animation: browseSlide 1.6s cubic-bezier(0.5, 0, 0.5, 1) infinite;
-  filter: drop-shadow(0 0 6px rgba(245, 180, 0, 0.7));
+  filter: drop-shadow(0 0 6px var(--accent-glow, rgba(245, 180, 0, 0.7)));
 }
 @keyframes browseSlide {
   0%   { transform: translateX(-3px); opacity: 0.35; }

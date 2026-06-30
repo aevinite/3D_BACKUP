@@ -17,6 +17,15 @@ const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "
 // malformed id can't write an orphan storage object before the DB update fails.
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
+// Remove every object under a restaurant's logo folder so old/replaced logos don't
+// pile up in Storage (each upload writes a fresh timestamped name). Best-effort —
+// a cleanup miss never blocks the upload/remove itself.
+async function purgeLogos(rid: string): Promise<void> {
+  const { data } = await sb.storage.from("branding").list(rid);
+  const paths = (data || []).map((f) => `${rid}/${f.name}`);
+  if (paths.length) await sb.storage.from("branding").remove(paths);
+}
+
 export async function POST(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const form = await req.formData().catch(() => null);
@@ -27,6 +36,7 @@ export async function POST(req: NextRequest) {
   const ext = EXT[file.type];
   if (!ext) return bad("Logo must be a PNG, JPG, WEBP or SVG image.");
   if (file.size > 1048576) return bad("Logo must be 1 MB or smaller.");
+  await purgeLogos(rid); // drop any previous logo so Storage keeps just the current one
   const path = `${rid}/logo-${Date.now()}.${ext}`;
   const buf = new Uint8Array(await file.arrayBuffer());
   const up = await sb.storage.from("branding").upload(path, buf, { contentType: file.type, upsert: true });
@@ -44,6 +54,7 @@ export async function DELETE(req: NextRequest) {
   if (!isUuid(rid)) return bad("Invalid restaurant_id.");
   const { error } = await sb.from("restaurants").update({ logo_url: null }).eq("id", rid);
   if (error) return bad(error.message, 500);
+  await purgeLogos(rid); // also delete the stored file(s), not just the DB link
   await logAction("admin", "restaurant_logo", { actor: "admin", restaurant_id: rid, detail: "removed logo" });
   return ok({ ok: true });
 }
