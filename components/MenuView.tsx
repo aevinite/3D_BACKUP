@@ -60,7 +60,7 @@ const DIETS = [
 const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
 
 // This is the menu page, shown at "/menu". It's the main browsing screen.
-export default function MenuView({ restaurantId, restaurantSlug, restaurantName, logoText, heroTitle, tagline, accentColor, theme }: { restaurantId: string; restaurantSlug?: string; restaurantName?: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string; theme?: Record<string, unknown> }) {
+export default function MenuView({ restaurantId, restaurantSlug, restaurantName, logoText, heroTitle, tagline, accentColor, theme, logoUrl }: { restaurantId: string; restaurantSlug?: string; restaurantName?: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string; theme?: Record<string, unknown>; logoUrl?: string }) {
   // Restaurant #1 keeps its exact current chrome (localized hero, hardcoded
   // wordmark, theme accent); other restaurants get their own brand.
   const isDefault = restaurantId === DEFAULT_RESTAURANT_ID;
@@ -530,7 +530,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // Curly braces { } drop a value or a bit of logic into the markup.
   return (
     // AppShell = the shared outer frame (header, footer, etc.).
-    <AppShell restaurantId={restaurantId} logoText={isDefault ? undefined : (logoText || restaurantName || undefined)} accentColor={isDefault ? undefined : (accentColor || undefined)} theme={isDefault ? undefined : theme}>
+    <AppShell restaurantId={restaurantId} logoText={isDefault ? undefined : (logoText || restaurantName || undefined)} accentColor={isDefault ? undefined : (accentColor || undefined)} theme={isDefault ? undefined : theme} logoUrl={isDefault ? undefined : logoUrl}>
       {/* ONE fixed frosted backdrop behind the whole pinned header (brand +
           category + search). A single blur region = no seam between the brand
           and the categories. Its height is driven live by the scroll handler. */}
@@ -612,6 +612,9 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                 alt=""
                 aria-hidden="true"
               />
+            ) : logoUrl ? (
+              // This restaurant uploaded its own logo → show it by the search bar.
+              <img className="search-logo" src={logoUrl} alt="" aria-hidden="true" />
             ) : (
               <svg className="search-logo" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
                 <circle cx="11" cy="11" r="7" />

@@ -23,6 +23,7 @@ export interface Restaurant {
   tagline: string | null;
   accentColor: string | null;
   theme: Record<string, unknown> | null;
+  logoUrl: string | null;
 }
 
 // Per-process cache: slug -> {value, at}. Short TTL so an admin's branding/menu
@@ -41,7 +42,7 @@ export async function getRestaurantBySlug(slug: string): Promise<Restaurant | nu
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
   const { data, error } = await supabase
     .from("restaurants")
-    .select("id, slug, name, active, logo_text, hero_title, tagline, accent_color, theme")
+    .select("id, slug, name, active, logo_text, hero_title, tagline, accent_color, theme, logo_url")
     .eq("slug", slug)
     .maybeSingle();
   const r: Restaurant | null =
@@ -51,6 +52,7 @@ export async function getRestaurantBySlug(slug: string): Promise<Restaurant | nu
           logoText: data.logo_text ?? null, heroTitle: data.hero_title ?? null,
           tagline: data.tagline ?? null, accentColor: data.accent_color ?? null,
           theme: (data.theme && typeof data.theme === "object") ? data.theme as Record<string, unknown> : null,
+          logoUrl: data.logo_url ?? null,
         }
       : null;
   bySlug.set(slug, { value: r, at: Date.now() });

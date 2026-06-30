@@ -391,6 +391,8 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
   const [theme, setTheme] = useState<{ dark: Record<string, string>; light: Record<string, string> }>({ dark: {}, light: {} });
   const [hero, setHero] = useState(""); const [tagline, setTagline] = useState(""); const [logoText, setLogoText] = useState("");
   const [accent, setAccent] = useState("");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoBusy, setLogoBusy] = useState(false); const [logoMsg, setLogoMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -400,11 +402,30 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
         if (!j.error) {
           const t = j.theme || {};
           setTheme({ dark: { ...(t.dark || {}) }, light: { ...(t.light || {}) } });
-          setHero(j.hero_title || ""); setTagline(j.tagline || ""); setLogoText(j.logo_text || ""); setAccent(j.accent_color || "");
+          setHero(j.hero_title || ""); setTagline(j.tagline || ""); setLogoText(j.logo_text || ""); setAccent(j.accent_color || ""); setLogoUrl(j.logo_url || null);
         }
       } catch {}
     })();
   }, [restaurant.id]);
+
+  // Logo IMAGE upload (separate from the text fields — it streams a file to Storage).
+  const uploadLogo = async (file: File) => {
+    setLogoBusy(true); setLogoMsg(null);
+    try {
+      const fd = new FormData(); fd.append("restaurant_id", restaurant.id); fd.append("file", file);
+      const r = await fetch("/api/admin/restaurants/logo", { method: "POST", body: fd });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Upload failed.");
+      setLogoUrl(d.logo_url); setLogoMsg("Logo updated — shows on the menu within ~15s.");
+    } catch (e) { setLogoMsg(e instanceof Error ? e.message : String(e)); } finally { setLogoBusy(false); }
+  };
+  const removeLogo = async () => {
+    setLogoBusy(true); setLogoMsg(null);
+    try {
+      const r = await fetch(`/api/admin/restaurants/logo?restaurant_id=${encodeURIComponent(restaurant.id)}`, { method: "DELETE" });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't remove.");
+      setLogoUrl(null); setLogoMsg("Logo removed — the menu falls back to the name.");
+    } catch (e) { setLogoMsg(e instanceof Error ? e.message : String(e)); } finally { setLogoBusy(false); }
+  };
 
   const cur = theme[mode];
   const setColor = (key: string, val: string) => setTheme((s) => ({ ...s, [mode]: { ...s[mode], [key]: val } }));
@@ -479,6 +500,20 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
 
       <div style={{ display: "grid", gap: 8, marginTop: 14, paddingTop: 12, borderTop: "var(--border)" }}>
         <p className="hint" style={{ margin: 0 }}>Tip: wrap a word in <code>*stars*</code> to colour it with your <b>accent</b> — the rest stays white (dark) / black (light). e.g. <code>Little *French* House</code>.</p>
+        {/* Logo IMAGE — shown on the opening splash AND beside the search bar. */}
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ width: 56, height: 56, borderRadius: 10, border: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", overflow: "hidden" }}>
+            {logoUrl ? <img src={logoUrl} alt="logo" style={{ maxWidth: "100%", maxHeight: "100%" }} /> : <i className="fas fa-image adm-muted" aria-hidden="true" />}
+          </div>
+          <label className="adm-btn" style={{ cursor: logoBusy ? "default" : "pointer" }}>
+            <i className="fas fa-upload" style={{ marginRight: 6 }} aria-hidden="true" />{logoBusy ? "Uploading…" : "Upload logo image"}
+            <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" disabled={logoBusy} style={{ display: "none" }}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadLogo(f); e.target.value = ""; }} />
+          </label>
+          {logoUrl && <button className="adm-btn" disabled={logoBusy} onClick={removeLogo}>Remove logo</button>}
+          {logoMsg && <span className="adm-muted" style={{ fontSize: 12 }}>{logoMsg}</span>}
+        </div>
+        <p className="hint" style={{ margin: 0 }}>PNG / JPG / WEBP / SVG, up to 1 MB. Shows on the opening screen and next to the search bar.</p>
         <label style={{ fontSize: 12 }}>Logo text (header + opening screen)<input value={logoText} placeholder={restaurant.name} disabled={busy} onChange={(e) => setLogoText(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
         <label style={{ fontSize: 12 }}>Hero title<input value={hero} placeholder="Our Menu" disabled={busy} onChange={(e) => setHero(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
         <label style={{ fontSize: 12 }}>Greeting / tagline<input value={tagline} placeholder="Welcome" disabled={busy} onChange={(e) => setTagline(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>

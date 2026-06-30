@@ -33,6 +33,7 @@ export default async function RestaurantMenuPage({
       tagline={r.tagline ?? undefined}
       accentColor={r.accentColor ?? undefined}
       theme={r.theme ?? undefined}
+      logoUrl={r.logoUrl ?? undefined}
     />
   );
 }

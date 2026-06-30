@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const rid = req.nextUrl.searchParams.get("restaurant_id") || "";
   if (!rid) return bad("Missing restaurant_id.");
   const { data, error } = await sb.from("restaurants")
-    .select("accent_color, theme, hero_title, tagline, logo_text").eq("id", rid).maybeSingle();
+    .select("accent_color, theme, hero_title, tagline, logo_text, logo_url").eq("id", rid).maybeSingle();
   if (error) return bad(error.message, 500);
   return ok({
     accent_color: data?.accent_color ?? null,
@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
     hero_title: data?.hero_title ?? null,
     tagline: data?.tagline ?? null,
     logo_text: data?.logo_text ?? null,
+    logo_url: data?.logo_url ?? null,
   });
 }
 
