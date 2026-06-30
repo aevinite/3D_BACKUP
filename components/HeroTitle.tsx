@@ -79,8 +79,8 @@ export default function HeroTitle({ greeting, title }: { greeting: string; title
     <div ref={ref} className="hero-title-wrap">
       {/* The small greeting badge, split into individual letters */}
       <span className="greet-badge">{split(greeting)}</span>
-      {/* The large tagline, also split into individual letters */}
-      <h2 className="hero-title">{split(title)}</h2>
+      {/* The large tagline — letters with optional *accent* highlights */}
+      <h2 className={`hero-title${titleSplit ? " has-split" : ""}`}>{titleLetters}</h2>
     </div>
   );
 }
