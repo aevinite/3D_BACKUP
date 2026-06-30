@@ -355,7 +355,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (!["received", "preparing", "ready", "served"].includes(status)) return err("invalid status");
       const patch: any = { status };
       if (status === "served") patch.served_at = nowIso();
-      const updated = must(await sb.from("order_items").update(patch).eq("id", b).select());
+      // Only order_id + session_id are needed below; the client discards the body → no full row.
+      const updated = must(await sb.from("order_items").update(patch).eq("id", b).select("order_id, session_id"));
       const item = updated[0];
       if (item && item.order_id) {
         // Order-level status stays coarse (received/preparing/served) so the guest
@@ -369,7 +370,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       }
       await logAction("tablet", "item_status", { detail: status, device_id: dev });
       if (status === "served") await maybeAutoSettle(item?.session_id, { panel: "tablet", deviceId: dev }); // last dish served may complete the table
-      return ok(item || null);
+      return ok({ ok: true });
     }
 
     // orders/:id/accept — accept a (often phone/online) order: everything not yet
@@ -377,11 +378,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "accept") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
       const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-      // No .select(): the fetched-back row was discarded; we re-read the full row below.
+      // return=minimal: client re-fetches → skip both the .select() and the full-row re-read.
       must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
       await logAction("tablet", "order_accept", { order_id: b, device_id: dev });
-      return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
+      return ok({ ok: true });
     }
 
     // orders/:id/serve-all — mark EVERY dish on one order served in a single call
@@ -392,9 +393,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).neq("status", "served");
       await logAction("tablet", "order_serve", { order_id: b, device_id: dev });
-      const served = must(await sb.from("orders").select("*").eq("id", b).single());
+      // Only session_id needed (for auto-settle); client discards the body → not the full row.
+      const served = must(await sb.from("orders").select("session_id").eq("id", b).single());
       await maybeAutoSettle((served as any)?.session_id, { panel: "tablet", deviceId: dev }); // serving the order may complete the table
-      return ok(served || null);
+      return ok({ ok: true });
     }
 
     // orders/:id/allergies — staff edit of the order-wide "avoid" list (add a
@@ -403,9 +405,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "allergies") {
       const raw = Array.isArray(body?.allergies) ? body.allergies : [];
       const allergies = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
-      const row = must(await sb.from("orders").update({ allergies }).eq("id", b).select());
+      must(await sb.from("orders").update({ allergies }).eq("id", b));
       await logAction("tablet", "order_allergies", { order_id: b, detail: allergies.join(", ") || "(none)", device_id: dev });
-      return ok(row[0] || null);
+      return ok({ ok: true });
     }
 
     // items/:id/delete — remove ONE dish and reconcile the bill. Same as the
