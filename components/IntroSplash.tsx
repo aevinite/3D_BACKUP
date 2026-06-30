@@ -16,7 +16,7 @@ const WORDMARK = "little French house";
 // The opening "splash" screen shown once when the app first loads: the logo
 // fades in, the wordmark assembles, then the whole curtain slides up to reveal
 // the menu. After it finishes it removes itself from the page.
-export default function IntroSplash({ wordmark, accentColor }: { wordmark?: string; accentColor?: string }) {
+export default function IntroSplash({ wordmark, accentColor, logoUrl }: { wordmark?: string; accentColor?: string; logoUrl?: string }) {
   // Has the intro finished? When true, this component renders nothing.
   const [done, setDone] = useState(false);
   // A handle to the outer splash <div> so GSAP can animate it.
@@ -105,8 +105,9 @@ export default function IntroSplash({ wordmark, accentColor }: { wordmark?: stri
     <div ref={root} className="intro-splash" aria-hidden="true" style={splashStyle}>
       {/* The expanding ring — tinted to the restaurant's accent for non-#1. */}
       <div className="intro-ring" style={!isDefault && accentColor ? { borderColor: accentColor } : undefined} />
-      {/* Logo: flagship only. Other tenants are white-label → just their name. */}
-      {isDefault && <img className="intro-logo" src={LOGO} alt="" />}
+      {/* Logo: the flagship's hardcoded mark for #1; any other restaurant shows its
+          OWN uploaded logo if it has one (else just its name — white-label). */}
+      {logoUrl ? <img className="intro-logo" src={logoUrl} alt="" /> : (isDefault && <img className="intro-logo" src={LOGO} alt="" />)}
       {/* The wordmark, split into one <span> per letter so each can pop in.
           *asterisk*-marked parts use the restaurant's accent colour; the rest
           stays the default wordmark colour. #1 passes no markers → unchanged. */}

@@ -62,7 +62,7 @@ function accentVars(accentColor: string): React.CSSProperties {
 // the background bubbles, the header, the chef-call button, and finally the
 // actual page content (`children`). It also listens for site-wide settings the
 // staff control from the editor, so the guest's screen updates live.
-export default function AppShell({ children, logoText, accentColor, restaurantId, theme }: { children: React.ReactNode; logoText?: string; accentColor?: string; restaurantId?: string; theme?: Record<string, unknown> }) {
+export default function AppShell({ children, logoText, accentColor, restaurantId, theme, logoUrl }: { children: React.ReactNode; logoText?: string; accentColor?: string; restaurantId?: string; theme?: Record<string, unknown>; logoUrl?: string }) {
   // General-tab toggles: bubble effect on/off, and service (maintenance) mode.
   // These are pieces of remembered state — when they change, the screen redraws.
   const [bubbles, setBubbles] = useState(true);
@@ -168,7 +168,7 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
       {/* Per-restaurant theme (mode-scoped) — only when this restaurant set a palette. */}
       {themed && <style dangerouslySetInnerHTML={{ __html: themedCss }} />}
       {/* The one-time opening logo animation */}
-      <IntroSplash wordmark={logoText} accentColor={accentColor} />
+      <IntroSplash wordmark={logoText} accentColor={accentColor} logoUrl={logoUrl} />
       {/* Floating background bubbles — only if the toggle is on */}
       {bubbles && <Particles />}
       <div id="app" className={themed ? "brand-themed" : undefined}>
