@@ -496,8 +496,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const raw = Number(body && body.amount);
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number(cur.total) || 0) : 0;
       const note = String((body && body.note) || "").slice(0, 200) || null;
-      const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).select());
-      return ok(row[0] || null);
+      // return=minimal: client re-fetches the board; no need to pull the full order row back.
+      must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b));
+      return ok({ ok: true });
     }
     // orders/:id/allergies — staff edit of the order-wide "avoid" list (add a
     // missed allergen, fix a wrong one). Stored on orders.allergies; the kitchen/
@@ -513,7 +514,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const oldOW = new Set((Array.isArray(prev?.allergies) ? prev.allergies : []).map((x: any) => String(x).toLowerCase()));
       const addedOW = allergies.filter((s) => !oldOW.has(s));
       const removedOW = [...oldOW].filter((s) => !allergies.includes(s));
-      const row = must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).select());
+      must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b));
       if (addedOW.length || removedOW.length) {
         const items = must(await sb.from("order_items").select("id, added_allergens, removed_flag").eq("order_id", b));
         for (const it of items) {
@@ -526,30 +527,29 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       }
       const detail = [addedOW.length ? `added ${addedOW.join(", ")}` : "", removedOW.length ? `removed ${removedOW.join(", ")}` : ""].filter(Boolean).join("; ") || (allergies.join(", ") || "(none)");
       await logAction("editor", "order_allergies", { order_id: b, detail, device_id: dev });
-      return ok(row[0] || null);
+      return ok({ ok: true });
     }
     if (a === "orders" && c === "accept") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
        
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-      // No .select() here: the updated row was fetched-back then discarded — we re-read the
-      // full row below anyway, so the extra round-trip was dead. `must` still checks the error.
+      // return=minimal: client re-fetches the board → skip both the .select() and the full-row re-read.
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
       await logAction("editor", "order_accept", { order_id: b, device_id: dev });
-      return ok(must(await sb.from("orders").select("*").eq("id", b).single()) || null);
+      return ok({ ok: true });
     }
     if (a === "orders" && c === "serve-all") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
        
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
-      // No .select(): the fetched-back row was discarded; we re-read the full row below.
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).neq("status", "served");
       await logAction("editor", "order_serve", { order_id: b, device_id: dev });
-      const servedRow = must(await sb.from("orders").select("*").eq("id", b).single());
+      // Only session_id is needed (for auto-settle); the client discards the body → not the full row.
+      const servedRow = must(await sb.from("orders").select("session_id").eq("id", b).single());
       await maybeAutoSettle((servedRow as any)?.session_id, { panel: "editor", deviceId: dev }); // serving may complete the table
-      return ok(servedRow || null);
+      return ok({ ok: true });
     }
     if (a === "orders" && c === "item") {
       const idx = Number(body && body.index);
@@ -564,9 +564,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
        
       const orderStatus = servedCount === items.length ? "served"
         : items.some((i: any) => i.status === "preparing" || i.status === "served") ? "preparing" : "received";
-      const row = must(await sb.from("orders").update({ items, status: orderStatus }).eq("id", b).select());
+      // Only session_id is needed (for auto-settle); the client discards the body.
+      const row = must(await sb.from("orders").update({ items, status: orderStatus }).eq("id", b).select("session_id"));
       if (status === "served") await maybeAutoSettle(row[0]?.session_id, { panel: "editor", deviceId: dev }); // serving may complete the table
-      return ok(row[0] || null);
+      return ok({ ok: true });
     }
 
     // sessions/open
@@ -942,9 +943,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         if (!reason) return err("Reverting a PAID bill needs a reason (refund/correction).", 409);
         await logAction("editor", "payment_revert", { order_id: id, detail: reason, device_id: deviceIdFrom(req) });
       }
-      const data = must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid).select());
+      // Only session_id is needed (for auto-settle on pay); the client discards the body → no full row.
+      const data = must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid).select("session_id"));
       if (patch.payment_status === "paid") await maybeAutoSettle(data[0]?.session_id, { panel: "editor", deviceId: deviceIdFrom(req) }); // paying may complete the table
-      return ok(data[0] || null);
+      return ok({ ok: true });
     }
 
     if (a === "calls" && id) {

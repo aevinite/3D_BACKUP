@@ -102,11 +102,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
        
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-      // No .select(): the fetched-back row was discarded; we re-read the full row below.
+      // return=minimal: the client discards the body and re-fetches the board, so we skip
+      // BOTH the .select() on the update and the full-row re-read (server↔DB egress saver).
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
       await logAction("kitchen", "order_accept", { order_id: b, device_id: dev });
-      return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
+      return ok({ ok: true });
     }
 
     // orders/:id/ready — kitchen finished the whole order: every dish → READY
@@ -115,11 +116,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "ready") {
       const cur = must(await sb.from("orders").select("items").eq("id", b).single());
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "ready" })) : [];
-      // No .select(): the fetched-back row was discarded; we re-read the full row below.
+      // return=minimal: client discards the body and re-fetches the board → skip the full-row re-read.
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b));
       await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).neq("status", "served");
       await logAction("kitchen", "order_ready", { order_id: b, device_id: dev });
-      return ok(must(await sb.from("orders").select("*").eq("id", b).single()));
+      return ok({ ok: true });
     }
 
     // items/:id/status — one dish moved along, with order rollup. The kitchen
@@ -130,7 +131,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
       const patch: any = { status };
       if (status === "served") patch.served_at = nowIso();
-      const updated = must(await sb.from("order_items").update(patch).eq("id", b).select());
+      // Only need order_id to roll the parent up; the client discards the body → no full row.
+      const updated = must(await sb.from("order_items").update(patch).eq("id", b).select("order_id"));
       const item = updated[0];
       if (item && item.order_id) {
         const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id));
@@ -141,7 +143,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
         await sb.from("orders").update({ status: overall }).eq("id", item.order_id);
       }
-      return ok(item || null);
+      return ok({ ok: true });
     }
 
     // platform/:id/status — kitchen advances a platform (Zomato/Swiggy/takeaway)
