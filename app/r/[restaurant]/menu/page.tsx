@@ -27,6 +27,7 @@ export default async function RestaurantMenuPage({
     <MenuView
       restaurantId={r.id}
       restaurantSlug={restaurant}
+      restaurantName={r.name ?? undefined}
       logoText={r.logoText ?? undefined}
       heroTitle={r.heroTitle ?? undefined}
       tagline={r.tagline ?? undefined}
