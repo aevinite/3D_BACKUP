@@ -149,16 +149,18 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
 
   // Per-restaurant FULL palette (Phase 2). When a restaurant has theme overrides, we
   // emit mode-scoped CSS (inline styles can't switch on the [data-theme] toggle). The
-  // block targets #menu-page.brand-themed so it never affects #1 or other pages. Accent
-  // falls back to accentColor per mode. Restaurants with only accentColor (no theme) keep
-  // the inline accentVars path below — unchanged.
+  // block targets #app.brand-themed so the vars cascade to EVERYTHING in the guest app
+  // — menu, header, the floating chef-call button and its popup (which sit OUTSIDE
+  // #menu-page) — never affecting #1 or other pages. Accent falls back to accentColor
+  // per mode. Restaurants with only accentColor (no theme) keep the inline accentVars
+  // path below — unchanged.
   const bt = theme ? sanitizeBrandTheme(theme) : {};
   const darkBody = bt.dark ? buildModeBlock("dark", bt.dark, accentColor) : "";
   const lightBody = bt.light ? buildModeBlock("light", bt.light, accentColor) : "";
   const themed = !!(darkBody || lightBody);
   const themedCss = themed
-    ? `${darkBody ? `[data-theme="dark"] #menu-page.brand-themed{${darkBody}}` : ""}` +
-      `${lightBody ? `[data-theme="light"] #menu-page.brand-themed{${lightBody}}` : ""}`
+    ? `${darkBody ? `[data-theme="dark"] #app.brand-themed{${darkBody}}` : ""}` +
+      `${lightBody ? `[data-theme="light"] #app.brand-themed{${lightBody}}` : ""}`
     : "";
 
   return (
@@ -169,8 +171,8 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
       <IntroSplash wordmark={logoText} accentColor={accentColor} />
       {/* Floating background bubbles — only if the toggle is on */}
       {bubbles && <Particles />}
-      <div id="app">
-        <div id="menu-page" className={`page active${themed ? " brand-themed" : ""}`} style={!themed && accentColor ? accentVars(accentColor) : undefined}>
+      <div id="app" className={themed ? "brand-themed" : undefined}>
+        <div id="menu-page" className="page active" style={!themed && accentColor ? accentVars(accentColor) : undefined}>
           {/* The top bar (logo, language/currency, theme toggle, cart) */}
           <Header logoText={logoText} />
           {/* Whatever page is currently being shown goes here */}
