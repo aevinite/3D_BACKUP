@@ -117,9 +117,10 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [panels, setPanels] = useState<Record<string, boolean>>({ manager: true, kitchen: true, tablet: true, owner: false });
+  const [seedMenu, setSeedMenu] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [done, setDone] = useState<{ name: string; slug: string; logins: { panel: string; username: string; password: string }[] } | null>(null);
+  const [done, setDone] = useState<{ name: string; slug: string; logins: { panel: string; username: string; password: string }[]; menuSeeded?: boolean; seedError?: string | null } | null>(null);
 
   const PANELS = [
     { key: "manager", label: "Manager panel" }, { key: "kitchen", label: "Kitchen display" },
@@ -133,11 +134,11 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
     try {
       const r = await fetch("/api/admin/restaurants", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create_restaurant", name: name.trim(), panels }),
+        body: JSON.stringify({ action: "create_restaurant", name: name.trim(), panels, seedMenu }),
       });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't create the restaurant.");
-      setDone({ name: d.name, slug: d.slug, logins: d.logins || [] });
-      setName(""); setPanels({ manager: true, kitchen: true, tablet: true, owner: false });
+      setDone({ name: d.name, slug: d.slug, logins: d.logins || [], menuSeeded: d.menuSeeded, seedError: d.seedError });
+      setName(""); setPanels({ manager: true, kitchen: true, tablet: true, owner: false }); setSeedMenu(true);
       onCreated();
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
@@ -172,6 +173,13 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
           );
         })}
       </div>
+      <div className="adm-togglegrid" style={{ marginTop: 8 }}>
+        <button className={`adm-toggle ${seedMenu ? "on" : "off"}`} disabled={busy}
+          onClick={() => setSeedMenu((v) => !v)}
+          title={seedMenu ? "On — a sample menu will be added" : "Off — start with an empty menu"}>
+          <span>Start with sample menu</span><span className="pill">{seedMenu ? "ON" : "OFF"}</span>
+        </button>
+      </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14 }}>
         <button className="adm-btn primary" disabled={busy} onClick={create}>
           <i className="fas fa-check" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Creating…" : "Create restaurant"}
@@ -182,6 +190,11 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
       {done && (
         <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 8, background: "color-mix(in srgb, var(--adm-ok) 12%, transparent)" }}>
           <b>{done.name}</b> created (<span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{done.slug}/menu</span>).
+          {done.seedError ? (
+            <p className="hint" style={{ margin: "6px 0", color: "var(--adm-bad, #c0392b)" }}>Menu seed failed: {done.seedError}. The restaurant was created — add dishes from its manager panel.</p>
+          ) : done.menuSeeded ? (
+            <p className="hint" style={{ margin: "6px 0" }}>Sample menu added — open the manager panel to edit it.</p>
+          ) : null}
           {done.logins.length > 0 ? (
             <>
               <p className="hint" style={{ margin: "8px 0 6px" }}>Starter logins — copy these passwords now, they won&apos;t be shown again:</p>
