@@ -693,23 +693,9 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                     ❤️ Favorites
                   </button>
                 )}
-                {/* Veg / Non-Veg — mutually exclusive (a dish is one or the other).
-                    Hidden if switched off in admin. */}
-                {DIETS.filter((d) => (features as Record<string, boolean>)[`chip_${d.slug}`] !== false).map((d) => (
-                  <button
-                    key={d.slug}
-                    type="button"
-                    className={`filter-chip ${currentDiet === d.slug ? "active" : ""}`}
-                    aria-pressed={currentDiet === d.slug}
-                    onClick={() => toggleDiet(d.slug)}
-                  >
-                    {d.label}
-                  </button>
-                ))}
-                {/* Divider between the attribute filters and the sort chips. */}
-                <span className="chip-divider" aria-hidden="true"></span>
-                {/* RIGHT group — SORTS (re-order the list): Top Rated, Low Price.
-                    Hidden if the admin switched a chip off. */}
+                {/* "Popular" group — Chef's Special + Favorites (above) round out with the two
+                    SORTS (Top Rated, Low Price) so the FOUR sit together. Pick any one + any one
+                    diet below; they stack independently. Each chip hides if its admin flag is off. */}
                 {SORTS.filter((s) => (features as Record<string, boolean>)[`chip_${s.slug}`] !== false).map((s) => (
                   <button
                     key={s.slug}
@@ -721,6 +707,25 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                     {s.label}
                   </button>
                 ))}
+                {/* SEPARATE diet group — Veg / Non-Veg, sitting next to the layout toggle. The whole
+                    group is shown/hidden by one per-restaurant switch (diet_filter, admin-controlled);
+                    OFF for pure-veg restaurants (e.g. Aangan). A dish is one or the other (single-select). */}
+                {features.diet_filter !== false && (
+                  <>
+                    <span className="chip-divider" aria-hidden="true"></span>
+                    {DIETS.map((d) => (
+                      <button
+                        key={d.slug}
+                        type="button"
+                        className={`filter-chip ${currentDiet === d.slug ? "active" : ""}`}
+                        aria-pressed={currentDiet === d.slug}
+                        onClick={() => toggleDiet(d.slug)}
+                      >
+                        {d.label}
+                      </button>
+                    ))}
+                  </>
+                )}
               </div>
               {/* The two-way switch between list view and gallery view. */}
               <div className="layout-switch" role="group" aria-label="Layout">

@@ -29,6 +29,7 @@ export const FEATURE_DEFAULTS = {
   languages: true,    // the language picker (off = English only)
   currency: true,     // the currency picker (off = ₹ only)
   scrollspy: true,    // the auto-following category strip in the All view
+  diet_filter: true,  // the Veg / Non-Veg filter group on the menu (off for pure-veg restaurants)
   // Backend-only switches (NO UI anywhere; default OFF):
   verification: false, // phone/email OTP before ordering (plumbing only)
   payments: false,     // in-app payment collection (plumbing only)
