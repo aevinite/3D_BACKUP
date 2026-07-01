@@ -3814,6 +3814,118 @@ function openShiftPicker(t, sess) {
   }));
 }
 
+// openDiscountModal: replaces the old "type the ₹ amount to knock off" prompt() with
+// two staff-friendly ways to land on the same number (owner, 2026-07-01 — "I don't want
+// the amount-to-discount option like it's right now"):
+//   "They pay"    — staff types the FINAL amount the customer will pay; we work BACKWARD
+//                   to the discount (bill − pay) and show the % that comes out to.
+//   "Percent off" — staff types a %; we work FORWARD to the discount (bill × %) and show
+//                   what the customer ends up paying.
+// Both modes just compute the same ₹ discount the server has always accepted — the API
+// call at the bottom (POST .../discount {amount, note}) is byte-identical to before, so
+// the clamp-to-bill-total safety net and the note field behave exactly as they did.
+function openDiscountModal(order, rerender) {
+  document.querySelector(".disc-overlay")?.remove();
+  const total = Number(order.total) || 0;
+  const current = Number(order.discount) || 0;
+  let mode = "pay"; // "pay" | "percent"
+  // Seed each mode from whatever discount is already on the bill, so re-opening to
+  // tweak an existing discount doesn't make staff redo the maths from scratch.
+  let payVal = total > 0 ? Math.max(0, total - current) : total;
+  let pctVal = total > 0 ? Math.round((current / total) * 1000) / 10 : 0;
+
+  const wrap = el(`<div class="sx-modal-overlay disc-overlay"><div class="sx-modal disc-modal">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Apply discount</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body disc-body">
+      <div class="disc-bill-row"><span>Bill total</span><b>${inr(total)}</b></div>
+      <div class="disc-mode-row">
+        <span class="chip disc-mode-chip on" data-mode="pay">They pay</span>
+        <span class="chip disc-mode-chip" data-mode="percent">Percent off</span>
+      </div>
+      <div class="disc-field" data-panel="pay">
+        <label class="dish-edit-lbl">Amount they'll pay</label>
+        <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput disc-input" id="discPayInput" placeholder="e.g. 3000">
+      </div>
+      <div class="disc-field" data-panel="percent" style="display:none">
+        <label class="dish-edit-lbl">Percent off</label>
+        <input type="number" inputmode="decimal" min="0" max="100" step="1" class="dish-edit-custominput disc-input" id="discPctInput" placeholder="e.g. 20">
+        <div class="chips disc-pct-quick">${[5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p}%</span>`).join("")}</div>
+      </div>
+      <div class="disc-preview">
+        <div class="disc-prev-row"><span>Discount</span><b id="discPrevAmt">− ${inr(current)}</b></div>
+        <div class="disc-prev-row"><span>That's</span><b id="discPrevPct">${pctVal}% off</b></div>
+        <div class="disc-prev-row grand"><span>They pay</span><b id="discPrevPay">${inr(payVal)}</b></div>
+      </div>
+      <label class="dish-edit-lbl" style="margin-top:14px">Reason <span class="muted small">(optional, shows on the bill)</span></label>
+      <input type="text" class="dish-edit-custominput" id="discNoteInput" maxlength="200" placeholder="e.g. loyalty, comp, manager approval">
+    </div>
+    <div class="dish-edit-foot">
+      ${current > 0 ? `<button type="button" class="btn danger disc-remove">Remove discount</button>` : ""}
+      <span class="disc-foot-spacer"></span>
+      <button type="button" class="btn dish-edit-cancel">Cancel</button>
+      <button type="button" class="btn primary disc-apply">Apply</button>
+    </div>
+  </div></div>`);
+  document.body.appendChild(wrap);
+  wrap.querySelector("#discNoteInput").value = order.discount_note || "";
+  const payInput = wrap.querySelector("#discPayInput");
+  const pctInput = wrap.querySelector("#discPctInput");
+  payInput.value = payVal ? String(payVal) : "";
+  pctInput.value = pctVal ? String(pctVal) : "";
+
+  // discAmount is the ONE number both modes converge on — everything else (the live
+  // preview, the final API call) is derived from it, so the two modes can never disagree.
+  let discAmount = current;
+  const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const updatePreview = () => {
+    if (mode === "pay") {
+      payVal = clamp(parseFloat(payInput.value), 0, total);
+      discAmount = round2(total - payVal);
+    } else {
+      pctVal = clamp(parseFloat(pctInput.value), 0, 100);
+      discAmount = round2((total * pctVal) / 100);
+      payVal = round2(total - discAmount);
+    }
+    pctVal = total > 0 ? Math.round((discAmount / total) * 1000) / 10 : 0;
+    wrap.querySelector("#discPrevAmt").textContent = "− " + inr(discAmount);
+    wrap.querySelector("#discPrevPct").textContent = pctVal + "% off";
+    wrap.querySelector("#discPrevPay").textContent = inr(payVal);
+  };
+  updatePreview();
+
+  const setMode = (m) => {
+    mode = m;
+    wrap.querySelectorAll(".disc-mode-chip").forEach((c) => c.classList.toggle("on", c.dataset.mode === m));
+    wrap.querySelector('[data-panel="pay"]').style.display = m === "pay" ? "" : "none";
+    wrap.querySelector('[data-panel="percent"]').style.display = m === "percent" ? "" : "none";
+    (m === "pay" ? payInput : pctInput).focus();
+    updatePreview();
+  };
+  wrap.querySelectorAll(".disc-mode-chip").forEach((c) => (c.onclick = () => setMode(c.dataset.mode)));
+  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { pctInput.value = c.dataset.pct; updatePreview(); }));
+  payInput.oninput = updatePreview;
+  pctInput.oninput = updatePreview;
+
+  const close = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = close;
+  wrap.querySelector(".dish-edit-cancel").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+
+  const save = async (amount) => {
+    const note = wrap.querySelector("#discNoteInput").value.trim();
+    close();
+    try {
+      await api("POST", `/orders/${order.id}/discount`, { amount, note: amount > 0 ? note : "" });
+      await loadSessions(); if (rerender) rerender();
+      toast(amount > 0 ? `Discount ${inr(amount)} applied — they pay ${inr(round2(total - amount))}` : "Discount removed", "ok");
+    } catch (e) { toast("Failed: " + e.message, "err"); }
+  };
+  wrap.querySelector(".disc-apply").onclick = () => save(discAmount);
+  const removeBtn = wrap.querySelector(".disc-remove"); if (removeBtn) removeBtn.onclick = () => save(0);
+  setTimeout(() => payInput.focus(), 30);
+}
+
 // bindTablePanel: wire up every button inside an already-rendered table detail.
 // `root` is the container the detail's HTML lives in (the modal OR the side panel).
 // `rerender` redraws the SAME view after a local-state change (modal vs side panel
@@ -3871,19 +3983,11 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   }));
   // Add a dish to THIS order: a compact dish-picker modal → /orders/:id/add-item.
   root.querySelectorAll("[data-add-dish-order]").forEach((b) => (b.onclick = () => openAddDishModal(b.dataset.addDishOrder, rerender)));
-  // Per-bill discount: ask for the amount (with the order total as the cap).
-  root.querySelectorAll("[data-disc]").forEach((b) => (b.onclick = async () => {
-    const max = parseFloat(b.dataset.discMax) || 0;
-    const cur = parseFloat(b.dataset.discCur) || 0;
-    const raw = prompt(`Discount for this order (0 – ${max})${cur > 0 ? ` — currently ${cur}` : ""}:`, cur ? String(cur) : "");
-    if (raw === null) return; // cancelled — leave the discount as-is
-    // A non-numeric typo must NOT silently wipe an existing discount: bail out.
-    const parsed = parseFloat(raw);
-    if (raw.trim() !== "" && !Number.isFinite(parsed)) { toast("That's not a number — discount unchanged", "err"); return; }
-    const amount = Math.min(Math.max(parsed || 0, 0), max);
-    const note = amount > 0 ? (prompt("Reason (optional, shows on the bill):") || "") : "";
-    try { await api("POST", `/orders/${b.dataset.disc}/discount`, { amount, note }); await loadSessions(); if (rerender) rerender(); toast(amount > 0 ? `Discount ${inr(amount)} applied` : "Discount removed", "ok"); }
-    catch (e) { toast("Failed: " + e.message, "err"); }
+  // Per-bill discount: opens the "they pay / percent off" modal (openDiscountModal),
+  // capped to this order's own total — same cap the server has always clamped to.
+  root.querySelectorAll("[data-disc]").forEach((b) => (b.onclick = () => {
+    const order = (os || []).find((o) => o.id === b.dataset.disc) || { id: b.dataset.disc, total: parseFloat(b.dataset.discMax) || 0, discount: parseFloat(b.dataset.discCur) || 0 };
+    openDiscountModal(order, rerender);
   }));
   const auto = root.querySelector("#sxAuto"); if (auto && sess) auto.onchange = () => setSessAutoApprove(sess.id, auto.checked);
   root.querySelectorAll("[data-mem-approve]").forEach((b) => (b.onclick = () => memberAction(b.dataset.memApprove, "approve")));

@@ -600,11 +600,6 @@ function renderPanel() {
   const reqRows = reqs.map((r) => `<div class="row"><span>📨 ${r.type === "open" ? "Asked to open" : "Asked for access"}${r.name ? ` · ${esc(r.name)}` : ""}</span><span class="reqbtns"><button class="btn small primary" data-req-approve="${esc(r.id)}">Approve</button><button class="btn small" data-req-deny="${esc(r.id)}">Deny</button></span></div>`).join("");
   const joinRows = joiners.map((m) => `<div class="row"><span>🙋 ${esc(m.name || "Guest")} wants to join</span><button class="btn small primary" data-approve="${esc(m.id)}">Approve</button></div>`).join("");
   const partyRows = members.map((m) => `<div class="row"><span>${m.role === "owner" ? "👑" : "•"} ${esc(m.name || "Guest")}${m.approved ? "" : ` <span class="muted">(pending)</span>`}</span>${m.role === "owner" ? `<span class="muted small">head</span>` : `<span class="reqbtns"><button class="btn small" data-makehead="${esc(m.id)}">Make head</button><button class="btn small" data-kick="${esc(m.id)}">Kick</button><button class="btn small danger" data-ban="${esc(m.id)}">Ban</button></span>`}</div>`).join("");
-  // Live shared cart the table is BUILDING but hasn't sent yet (read-only) — mirrors
-  // the manager's "Building" section; clears itself the moment they place the order.
-  const cart = s && Array.isArray(s.cart) ? s.cart : [];
-  const buildingRows = cart.map((it) => `<div class="row"><span>×${esc(String(it.qty || 1))} ${esc(it.title || "Item")}</span><span class="muted small">building</span></div>`).join("");
-
   // Each order is a card: KOT chip, time, "via app" badge for guest/phone orders,
   // every dish with a tappable status pill, and an Accept button when it's new.
   // One dish row: qty · name · price · status badge · Serve button, with per-item
@@ -708,7 +703,6 @@ function renderPanel() {
       ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
       ${callRows ? `<div class="sec"><h3>Calls</h3>${calls.length > 1 ? `<button class="btn small primary" data-attend-all-calls="${esc(t)}">Attend all (${calls.length})</button>` : ""}${callRows}</div>` : ""}
       ${s ? `<div class="sec"><h3>Party</h3>${partyRows || `<div class="muted small">No guests joined yet.</div>`}</div>` : ""}
-      ${buildingRows ? `<div class="sec"><h3>🛒 Building <span class="muted small">· not sent yet</span></h3>${buildingRows}</div>` : ""}
       <div class="sec"><h3>Orders</h3>${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}</div>
     </div>
     <div class="dacts">
@@ -1038,20 +1032,124 @@ function payBill(t) {
     optimisticPay(t);
   }
 }
-// Apply a per-order discount respecting tablet_discount: prompt amount + reason, then
-// 'on' → apply directly, 'pin' → manager-PIN-gated. (Discount is clamped server-side.)
-async function tabletDiscount(orderId) {
+// openDiscountModal: replaces the old "type the ₹ amount to knock off" prompt() with two
+// staff-friendly ways to land on the same number (owner, 2026-07-01 — "I don't want the
+// amount-to-discount option like it's right now"):
+//   "They pay"    — staff types the FINAL amount the customer will pay; we work BACKWARD
+//                   to the discount (bill − pay) and show the % that comes out to.
+//   "Percent off" — staff types a %; we work FORWARD to the discount (bill × %) and show
+//                   what the customer ends up paying.
+// Both modes converge on the same ₹ discount the server has always accepted, so the final
+// save() below still respects tablet_discount (off/on/pin) exactly like before — only the
+// INPUT changed. Mirrors the manager panel's version, styled inline like this file's other
+// self-contained modals (openDishEditModal, pinPrompt).
+function openDiscountModal(order) {
+  document.querySelector(".disc-overlay")?.remove();
+  const total = Number(order.total) || 0;
+  const current = Number(order.discount) || 0;
+  let mode = "pay"; // "pay" | "percent"
+  let payVal = total > 0 ? Math.max(0, total - current) : total;
+  let pctVal = total > 0 ? Math.round((current / total) * 1000) / 10 : 0;
+
+  const ov = document.createElement("div");
+  ov.className = "disc-overlay";
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  ov.innerHTML = `<div class="disc-box" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:#0f1830;color:#e7eefc;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #1d2944"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Apply discount</h3><button class="disc-close" aria-label="Close" style="background:#243049;border:0;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
+    <div style="padding:16px 18px">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:#9fb2d8;margin-bottom:12px"><span>Bill total</span><b style="color:#e7eefc;font-size:15px">${inr(total)}</b></div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <span class="chip disc-mode-chip on" data-mode="pay" style="flex:1;text-align:center;padding:9px 10px">They pay</span>
+        <span class="chip disc-mode-chip" data-mode="percent" style="flex:1;text-align:center;padding:9px 10px">Percent off</span>
+      </div>
+      <div data-panel="pay">
+        <div style="font-size:13px;font-weight:700;margin:0 0 8px">Amount they'll pay</div>
+        <input type="number" inputmode="decimal" min="0" step="1" class="disc-pay-input" placeholder="e.g. 3000" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:17px;font-weight:700">
+      </div>
+      <div data-panel="percent" style="display:none">
+        <div style="font-size:13px;font-weight:700;margin:0 0 8px">Percent off</div>
+        <input type="number" inputmode="decimal" min="0" max="100" step="1" class="disc-pct-input" placeholder="e.g. 20" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:17px;font-weight:700">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${[5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p}%</span>`).join("")}</div>
+      </div>
+      <div style="margin-top:16px;padding:12px 14px;border-radius:12px;background:#0a1326;border:1px solid #1d2944;display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;justify-content:space-between;font-size:13.5px;color:#9fb2d8"><span>Discount</span><b class="disc-prev-amt" style="color:#e7eefc">− ${inr(current)}</b></div>
+        <div style="display:flex;justify-content:space-between;font-size:13.5px;color:#9fb2d8"><span>That's</span><b class="disc-prev-pct" style="color:#e7eefc">${pctVal}% off</b></div>
+        <div style="display:flex;justify-content:space-between;font-size:14.5px;padding-top:6px;margin-top:2px;border-top:1px dashed #1d2944"><span style="color:#60a5fa;font-weight:800">They pay</span><b class="disc-prev-pay" style="color:#60a5fa;font-weight:800">${inr(payVal)}</b></div>
+      </div>
+      <div style="font-size:13px;font-weight:700;margin:15px 0 6px">Reason <span style="color:#9fb2d8;font-weight:400">(optional)</span></div>
+      <input type="text" class="disc-note-input" maxlength="200" placeholder="e.g. loyalty, comp, manager approval" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px">
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid #1d2944">
+      ${current > 0 ? `<button class="btn danger disc-remove-btn">Remove</button><span style="flex:1"></span>` : ""}
+      <button class="btn disc-cancel-btn">Cancel</button>
+      <button class="btn primary disc-apply-btn">Apply</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector(".disc-note-input").value = order.discount_note || "";
+  const payInput = ov.querySelector(".disc-pay-input");
+  const pctInput = ov.querySelector(".disc-pct-input");
+  payInput.value = payVal ? String(payVal) : "";
+  pctInput.value = pctVal ? String(pctVal) : "";
+
+  let discAmount = current;
+  const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const updatePreview = () => {
+    if (mode === "pay") {
+      payVal = clamp(parseFloat(payInput.value), 0, total);
+      discAmount = round2(total - payVal);
+    } else {
+      pctVal = clamp(parseFloat(pctInput.value), 0, 100);
+      discAmount = round2((total * pctVal) / 100);
+      payVal = round2(total - discAmount);
+    }
+    pctVal = total > 0 ? Math.round((discAmount / total) * 1000) / 10 : 0;
+    ov.querySelector(".disc-prev-amt").textContent = "− " + inr(discAmount);
+    ov.querySelector(".disc-prev-pct").textContent = pctVal + "% off";
+    ov.querySelector(".disc-prev-pay").textContent = inr(payVal);
+  };
+  updatePreview();
+
+  const setMode = (m) => {
+    mode = m;
+    ov.querySelectorAll(".disc-mode-chip").forEach((c) => c.classList.toggle("on", c.dataset.mode === m));
+    ov.querySelector('[data-panel="pay"]').style.display = m === "pay" ? "" : "none";
+    ov.querySelector('[data-panel="percent"]').style.display = m === "percent" ? "" : "none";
+    (m === "pay" ? payInput : pctInput).focus();
+    updatePreview();
+  };
+  ov.querySelectorAll(".disc-mode-chip").forEach((c) => (c.onclick = () => setMode(c.dataset.mode)));
+  ov.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { pctInput.value = c.dataset.pct; updatePreview(); }));
+  payInput.oninput = updatePreview;
+  pctInput.oninput = updatePreview;
+
+  const close = () => ov.remove();
+  ov.querySelector(".disc-close").onclick = close;
+  ov.querySelector(".disc-cancel-btn").onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+
+  const save = (amount) => {
+    const note = ov.querySelector(".disc-note-input").value.trim();
+    close();
+    const body = { amount, note: amount > 0 ? note : "" };
+    if (tperm("tablet_discount") === "pin") {
+      actGated("POST", `/orders/${order.id}/discount`, body, { message: "Enter a manager PIN to apply this discount.", toast: amount > 0 ? `Discount ${inr(amount)} applied` : "Discount removed" });
+    } else {
+      act(() => api("POST", `/orders/${order.id}/discount`, body));
+    }
+  };
+  ov.querySelector(".disc-apply-btn").onclick = () => save(discAmount);
+  const removeBtn = ov.querySelector(".disc-remove-btn"); if (removeBtn) removeBtn.onclick = () => save(0);
+  setTimeout(() => payInput.focus(), 30);
+}
+
+// tabletDiscount: entry point wired from the "− Discount" button on each order card —
+// opens the modal above scoped to that order (clamped to that order's own total).
+function tabletDiscount(orderId) {
   const o = (state.data.orders || []).find((x) => x.id === orderId);
-  const cur = o && Number(o.discount) > 0 ? String(o.discount) : "";
-  const raw = window.prompt("Discount amount (₹) for this order — 0 to clear:", cur);
-  if (raw === null) return;
-  const amount = Math.max(0, Number(raw) || 0);
-  const note = amount > 0 ? (window.prompt("Reason (optional, e.g. loyalty/comp):", (o && o.discount_note) || "") || "") : "";
-  if (tperm("tablet_discount") === "pin") {
-    actGated("POST", `/orders/${orderId}/discount`, { amount, note }, { message: "Enter a manager PIN to apply this discount." });
-  } else {
-    act(() => api("POST", `/orders/${orderId}/discount`, { amount, note }));
-  }
+  if (!o) { toast("That order is no longer on the board.", false); return; }
+  openDiscountModal(o);
 }
 
 // ── order-taking mode ────────────────────────────────────────────────────────
