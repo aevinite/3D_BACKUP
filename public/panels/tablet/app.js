@@ -596,6 +596,10 @@ function renderPanel() {
   // orders straight from the slice (tableAgg no longer carries `os`, which would be empty for an
   // unselected table anyway). calls/joiners/members/reqs likewise come from the loaded slice.
   const os = ordersOf(t), calls = callsOf(t), joiners = joinersOf(t), members = s ? membersOf(t) : [], reqs = reqsOf(t);
+  // Invoice generation (tablet_invoice setting) is independent of Mark bill paid — a
+  // waiter can invoice before or after payment. `s` comes straight from `select("*")`
+  // on sessions, so invoice_no/invoice_voided are already on it, same as the manager reads.
+  const invoiced = !!(s && s.invoice_no != null && !s.invoice_voided);
 
   const reqRows = reqs.map((r) => `<div class="row"><span>📨 ${r.type === "open" ? "Asked to open" : "Asked for access"}${r.name ? ` · ${esc(r.name)}` : ""}</span><span class="reqbtns"><button class="btn small primary" data-req-approve="${esc(r.id)}">Approve</button><button class="btn small" data-req-deny="${esc(r.id)}">Deny</button></span></div>`).join("");
   const joinRows = joiners.map((m) => `<div class="row"><span>🙋 ${esc(m.name || "Guest")} wants to join</span><button class="btn small primary" data-approve="${esc(m.id)}">Approve</button></div>`).join("");
@@ -683,7 +687,7 @@ function renderPanel() {
     const hasOrders = os.length > 0;
     const payCls = a.unpaid ? "unpaid" : a.paid ? "paid" : "";
     const billInner = hasOrders
-      ? `<span class="bn">bill #${esc(a.billNo ?? "—")}</span>${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : a.paid ? "paid ✓" : "● new"}</span>`
+      ? `<span class="bn">bill #${esc(a.billNo ?? "—")}</span>${invoiced ? `<span class="inv">🧾 #${esc(s.invoice_no)}</span>` : ""}${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : a.paid ? "paid ✓" : "● new"}</span>`
       : `<span class="bn">no bill yet</span><span class="due">starts on first order</span>`;
     const attend = calls.length
       ? `<button class="attend ${calls.length > 1 ? "more" : ""}" data-attend="${esc(calls[0].id)}">🔔 ATTEND — ${esc(calls[0].note || "call")}${calls.length > 1 ? ` (+${calls.length - 1} more)` : ""}</button>`
@@ -710,6 +714,7 @@ function renderPanel() {
       <button class="btn primary big" id="takeOrder">＋ Take order</button>
       ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
       ${s && os.length ? `<button class="btn" id="restartTable">↻ Restart</button>` : ""}
+      ${s && os.length && !invoiced && tperm("tablet_invoice") !== "off" ? `<button class="btn" id="genInvoiceBtn">🧾 Generate invoice</button>` : ""}
       ${s && os.length && a.unpaid && tperm("tablet_mark_paid") !== "off" ? `<button class="btn pay" id="payBill"${os.some((o) => o.status === "received") ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
     </div>
@@ -814,6 +819,7 @@ function renderPanel() {
     if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
       payBill(t);
   };
+  const gib = $("#genInvoiceBtn"); if (gib && s) gib.onclick = () => genInvoice(s.id);
   const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
     const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
     if (!(await confirmDialog(`Close table ${t} and free it?${warn}`, "Close table"))) return;
@@ -1030,6 +1036,16 @@ function payBill(t) {
     actGated("POST", `/tables/${t}/pay`, null, { message: "Enter a manager PIN to mark this bill paid.", toast: "Bill paid" });
   } else {
     optimisticPay(t);
+  }
+}
+// Generate this table's invoice number, respecting tablet_invoice: 'on' → direct;
+// 'pin' → manager-PIN-gated (server enforces it too). Independent of Mark bill paid —
+// the RPC is idempotent, so this is safe even if somehow clicked twice.
+function genInvoice(sid) {
+  if (tperm("tablet_invoice") === "pin") {
+    actGated("POST", `/sessions/${sid}/invoice`, null, { message: "Enter a manager PIN to generate this invoice.", toast: "Invoice generated" });
+  } else {
+    act(() => api("POST", `/sessions/${sid}/invoice`));
   }
 }
 // openDiscountModal: replaces the old "type the ₹ amount to knock off" prompt() with two

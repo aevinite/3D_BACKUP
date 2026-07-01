@@ -308,6 +308,18 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok(row[0] || null);
     }
 
+    // sessions/:id/invoice — waiter-side invoice generation, gated by tablet_invoice
+    // (off/pin/on), independent of Mark bill paid. Calls the SAME server-authoritative
+    // RPC the manager panel uses; it's idempotent (a repeat call just returns the
+    // existing invoice), so there's no double-invoice risk.
+    if (a === "sessions" && c === "invoice") {
+      const g = await tabletPerm("tablet_invoice", req, body, rid); if (!g.allow) return g.resp;
+      const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
+      if (error) throw new Error(error.message);
+      await logAction("tablet", "invoice_generate", { detail: `session ${b}` + byNote(g), device_id: dev });
+      return ok(Array.isArray(data) ? data[0] : data);
+    }
+
     // tables/:t/restart — clear the round off the floor but KEEP the table open:
     // every active order on the CURRENT party's session becomes served + archived
     // (a completed order kept in records/revenue — NOT cancelled). Mirrors the

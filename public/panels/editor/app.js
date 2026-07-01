@@ -804,7 +804,7 @@ function formGeneral(s) {
       </select>
     </div></div>
   </div>
-  <div class="card"><h3>Tablet (waiter) permissions</h3>
+  <div class="card"><h3>Tablet panel access</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       What the waiter can do with a bill on the tablet. Each is independent and starts
       <b>Off</b> (hidden). <b>On</b> = the waiter can do it directly; <b>On · needs manager PIN</b>
@@ -814,6 +814,7 @@ function formGeneral(s) {
     <div class="grid cols-3">
       ${triSel("Apply discount", "tablet_discount", s.tablet_discount)}
       ${triSel("Mark bill paid", "tablet_mark_paid", s.tablet_mark_paid)}
+      ${triSel("Generate invoice", "tablet_invoice", s.tablet_invoice)}
     </div>
   </div>
   ${s.auto_print_kot_allowed ? `<div class="card"><h3>Auto-print KOT</h3>
