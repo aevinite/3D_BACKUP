@@ -497,13 +497,13 @@ function bindFloorDelegation() {
     }
     // Quick "Attend" — open the table's detail to handle the call / join request.
     if ((q = e.target.closest(".tatt[data-quick='attend']"))) { selectTable(q.dataset.qt); return; }
-    // Quick "Mark paid" — same confirm + whole-table pay as the detail panel, without opening it.
+    // Quick "Mark paid" — same payment-method modal + whole-table pay as the detail panel,
+    // without opening it.
     if ((q = e.target.closest(".tpay[data-quick='pay']"))) {
       const t = q.dataset.qt;
       await ensureTableSlice(t);  // load the table's orders so billNo/due + optimisticPay have real rows
       const a = tableAgg(t);
-      if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
-        payBill(t);
+      await payBillWithMethod(t, a);
       return;
     }
     // TILE SELECT last — only reached when no quick button above matched.
@@ -815,10 +815,7 @@ function renderPanel() {
     await actGated("POST", `/tables/${t}/restart`, null, { message: "This table has a round going — enter a manager PIN to restart it." });
     await load(); // reconcile (also reverts the optimistic clear if the PIN was cancelled)
   };
-  const pb = $("#payBill"); if (pb) pb.onclick = async () => {
-    if (await confirmDialog(`Mark bill ${a.billNo ? `#${a.billNo} ` : ""}PAID for table ${t}? Total ${inr(a.due)}. Are you sure the payment has been collected?`, "Yes, payment done"))
-      payBill(t);
-  };
+  const pb = $("#payBill"); if (pb) pb.onclick = () => payBillWithMethod(t, a);
   const gib = $("#genInvoiceBtn"); if (gib && s) gib.onclick = () => genInvoice(s.id);
   const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
     const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
@@ -1023,20 +1020,86 @@ function optimisticOpen(table) {
 // Mark a table's whole bill paid INSTANTLY: flip every order's payment_status to
 // "paid" locally so the tile/detail re-read as paid (no due) right away, then persist
 // + reconcile. runOptimistic's load() reverts on failure. (owner, 2026-06-20)
-function optimisticPay(t) {
+function optimisticPay(t, method, note) {
   runOptimistic(
     () => { state.data.orders.forEach((o) => { if (String(o.table_number) === String(t)) o.payment_status = "paid"; }); },
-    () => api("POST", `/tables/${t}/pay`),
+    () => api("POST", `/tables/${t}/pay`, method ? { payment_method: method, payment_note: note || "" } : null),
   );
 }
 // Settle a table's bill respecting the manager's tablet_mark_paid setting: 'on' →
 // instant optimistic pay; 'pin' → manager-PIN-gated (the server also enforces it).
-function payBill(t) {
+// method/note come from openPaymentMethodModal (payBillWithMethod below) — optional
+// so this still works if ever called without them.
+function payBill(t, method, note) {
+  const body = method ? { payment_method: method, payment_note: note || "" } : null;
   if (tperm("tablet_mark_paid") === "pin") {
-    actGated("POST", `/tables/${t}/pay`, null, { message: "Enter a manager PIN to mark this bill paid.", toast: "Bill paid" });
+    actGated("POST", `/tables/${t}/pay`, body, { message: "Enter a manager PIN to mark this bill paid.", toast: method ? `Bill paid via ${method}` : "Bill paid" });
   } else {
-    optimisticPay(t);
+    optimisticPay(t, method, note);
   }
+}
+// openPaymentMethodModal(due, label): "how did they pay?" — UPI/Cash/Card, or Other
+// with a short typed note. Picking a method IS the confirmation (replaces the old
+// plain confirmDialog — one tap instead of two). Resolves { method, note }, or null
+// if cancelled. Mirrors the manager panel's version, styled inline like this file's
+// other self-contained modals (openDishEditModal, openDiscountModal, pinPrompt).
+// (owner, 2026-07-01)
+function openPaymentMethodModal(due, label) {
+  return new Promise((resolve) => {
+    document.querySelector(".pay-overlay")?.remove();
+    const ov = document.createElement("div");
+    ov.className = "pay-overlay";
+    Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+    ov.innerHTML = `<div class="pay-box" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:#0f1830;color:#e7eefc;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+      <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #1d2944"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${esc(label)}</h3><button class="pay-close" aria-label="Close" style="background:#243049;border:0;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
+      <div style="padding:16px 18px">
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:#9fb2d8;margin-bottom:12px"><span>Amount collected</span><b style="color:#e7eefc;font-size:15px">${inr(due)}</b></div>
+        <div style="font-size:13px;font-weight:700;margin:0 0 8px">How did they pay? <span style="color:#9fb2d8;font-weight:400">— only pick one if the money's actually in hand</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <button type="button" class="pay-method-btn" data-method="UPI" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;font-weight:600"><span style="font-size:22px">📱</span>UPI</button>
+          <button type="button" class="pay-method-btn" data-method="Cash" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;font-weight:600"><span style="font-size:22px">💵</span>Cash</button>
+          <button type="button" class="pay-method-btn" data-method="Card" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;font-weight:600"><span style="font-size:22px">💳</span>Card</button>
+          <button type="button" class="pay-method-btn" data-method="Other" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;font-weight:600"><span style="font-size:22px">⋯</span>Other</button>
+        </div>
+        <div class="pay-other-field" style="display:none;margin-top:12px">
+          <div style="font-size:13px;font-weight:700;margin:0 0 8px">What kind?</div>
+          <input type="text" class="pay-other-input" maxlength="60" placeholder="e.g. wallet, bank transfer" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;margin-bottom:10px">
+          <button type="button" class="btn primary pay-other-confirm" style="width:100%">Confirm</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid #1d2944"><button class="btn pay-cancel-btn">Cancel</button></div>
+    </div>`;
+    document.body.appendChild(ov);
+    let resolved = false;
+    const close = () => ov.remove();
+    const finish = (method, note) => { resolved = true; close(); resolve({ method, note }); };
+    const cancel = () => { close(); if (!resolved) resolve(null); };
+    ov.querySelector(".pay-close").onclick = cancel;
+    ov.querySelector(".pay-cancel-btn").onclick = cancel;
+    ov.onclick = (e) => { if (e.target === ov) cancel(); };
+    ov.querySelectorAll(".pay-method-btn").forEach((b) => (b.onclick = () => {
+      const m = b.dataset.method;
+      if (m === "Other") {
+        ov.querySelector(".pay-other-field").style.display = "";
+        ov.querySelector(".pay-other-input").focus();
+        return;
+      }
+      finish(m, null);
+    }));
+    const otherInput = ov.querySelector(".pay-other-input");
+    const confirmOther = () => finish("Other", otherInput.value.trim());
+    ov.querySelector(".pay-other-confirm").onclick = confirmOther;
+    otherInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); confirmOther(); } };
+  });
+}
+// payBillWithMethod: the ONE shared "close this bill" flow for the tablet — opens the
+// payment-method modal, then settles the table with the picked method. Replaces the
+// plain confirmDialog on BOTH entry points (the floor-tile quick pay + the table
+// detail's Mark paid button) with one that also records HOW the money came in.
+async function payBillWithMethod(t, a) {
+  const picked = await openPaymentMethodModal(a.due, `Mark bill ${a.billNo ? `#${a.billNo} ` : ""}paid for table ${t}`);
+  if (!picked) return;
+  payBill(t, picked.method, picked.note);
 }
 // Generate this table's invoice number, respecting tablet_invoice: 'on' → direct;
 // 'pin' → manager-PIN-gated (server enforces it too). Independent of Mark bill paid —
