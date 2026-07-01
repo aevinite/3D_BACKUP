@@ -13,6 +13,7 @@ import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
+import { PAYMENT_METHODS } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
 
@@ -562,11 +563,20 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (((await rq.limit(1)).data || []).length)
         return err("Accept the order first — a bill can only be paid once the order is accepted.", 409);
       // Never mark a 'received' order paid even if the check above is bypassed (belt-and-suspenders).
-      let q = sb.from("orders").update({ payment_status: "paid" })
+      // How the money came in — asked by the "Mark paid" flow (owner, 2026-07-01). Optional so
+      // older/other callers of this endpoint don't break; unset just buckets under "Not recorded"
+      // in the payment-method breakdown.
+      const payUpdate: Record<string, unknown> = { payment_status: "paid" };
+      if (body && body.payment_method !== undefined) {
+        if (!PAYMENT_METHODS.includes(body.payment_method)) return err("invalid payment_method");
+        payUpdate.payment_method = body.payment_method;
+        payUpdate.payment_note = String(body.payment_note || "").slice(0, 200) || null;
+      }
+      let q = sb.from("orders").update(payUpdate)
         .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t).eq("archived", false);
       const rows = must(await q.select());
-      await logAction("tablet", "bill_paid", { table_number: t, device_id: dev });
+      await logAction("tablet", "bill_paid", { table_number: t, device_id: dev, detail: body?.payment_method ? `via ${body.payment_method}` : undefined });
       await maybeAutoSettle(openSess?.id, { panel: "tablet", deviceId: dev }); // auto close/restart if paid + all served
       return ok({ ok: true, count: rows.length });
     }

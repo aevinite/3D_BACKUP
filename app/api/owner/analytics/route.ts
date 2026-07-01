@@ -46,12 +46,20 @@ export async function GET(req: NextRequest) {
   try {
     if (!rid) {
       // Group scope — the "who earns more" bar + multi-line trend.
-      const [rev, ts] = await Promise.all([
+      // NOTE: lfh_owner_payment_breakdown(p_restaurant_id=NULL) sums PLATFORM-WIDE —
+      // there's no per-restaurant-ownership filter available on that shape (unlike the
+      // other two RPCs, which return one row per restaurant so we can filter by scope.ids
+      // below). An owner scoped to a subset of restaurants would see the platform total,
+      // not just theirs. Acceptable for now: only the admin (scope.all) sees this card
+      // today (owner, 2026-07-01 — "on for everyone", no owner-panel UI wired to it yet).
+      const [rev, ts, pm] = await Promise.all([
         sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to }),
         sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket }),
+        sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: null, p_from: from, p_to: to }),
       ]);
       if (rev.error) throw rev.error;
       if (ts.error) throw ts.error;
+      if (pm.error) throw pm.error;
       // An owner only ever sees their OWN restaurants; admin sees all. The RPCs sum
       // across every restaurant, so we filter the tiny pre-summed rows here.
       const allow = scope.all ? null : new Set(scope.ids);
@@ -66,23 +74,27 @@ export async function GET(req: NextRequest) {
         .map((r: Record<string, unknown>) => ({
           bucket: r.bucket, restaurantId: r.restaurant_id, revenue: num(r.revenue), orders: Number(r.orders) || 0,
         }));
-      return NextResponse.json({ scope: "group", range, restaurantRevenue, timeseries });
+      const paymentMethods = (pm.data ?? []).map((r: Record<string, unknown>) => ({
+        method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0,
+      }));
+      return NextResponse.json({ scope: "group", range, restaurantRevenue, timeseries, paymentMethods });
     }
 
     // Restaurant scope — KPIs + per-dish/category/hourly + this restaurant's trend.
     // An owner may only drill into a restaurant they actually own.
     if (!scope.all && !scope.ids.includes(rid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-    const [meta, ts, dishes, cats, hourly, openT] = await Promise.all([
+    const [meta, ts, dishes, cats, hourly, openT, pm] = await Promise.all([
       sb.from("restaurants").select("id, slug, name, accent_color, hero_title").eq("id", rid).maybeSingle(),
       sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: bucket }),
       sb.rpc("lfh_owner_dish_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_hourly", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open"),
+      sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
     ]);
     if (meta.error) throw meta.error;
     if (!meta.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
-    for (const e of [ts, dishes, cats, hourly]) if (e.error) throw e.error;
+    for (const e of [ts, dishes, cats, hourly, pm]) if (e.error) throw e.error;
 
     const dishRows = (dishes.data ?? []).map((r: Record<string, unknown>) => ({
       title: r.title, qty: Number(r.qty) || 0, revenue: num(r.revenue),
@@ -101,6 +113,7 @@ export async function GET(req: NextRequest) {
       dishes: dishRows,
       categories: (cats.data ?? []).map((r: Record<string, unknown>) => ({ category: r.category, qty: Number(r.qty) || 0, revenue: num(r.revenue) })),
       hourly: (hourly.data ?? []).map((r: Record<string, unknown>) => ({ hour: Number(r.hour) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
+      paymentMethods: (pm.data ?? []).map((r: Record<string, unknown>) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 })),
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
