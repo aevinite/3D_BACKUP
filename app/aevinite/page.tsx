@@ -42,6 +42,7 @@ export default function AdminOverview() {
   const [ov, setOv] = useState<{ restaurants: OvRow[]; totals: { openTables: number } } | null>(null);
   const [rev, setRev] = useState<RevRow[]>([]);
   const [ts, setTs] = useState<TsRow[]>([]);
+  const [pay, setPay] = useState<{ method: string; revenue: number; orders: number }[]>([]);
   const [maintenance, setMaintenance] = useState(false);
   const [activity, setActivity] = useState<Action[]>([]);
   const [staff, setStaff] = useState<{ name: string | null; username: string; role: string; restaurantName: string | null; last_seen_at: string | null }[]>([]);
@@ -53,7 +54,7 @@ export default function AdminOverview() {
   // range refetches ONLY the charts — not the other 6 endpoints (egress-safe; the
   // owner's #1 fear is whole-page refetches on every little interaction).
   const loadAnalytics = useCallback(() => {
-    fetch(`/api/owner/analytics?range=${range}`, { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) { setRev(j.restaurantRevenue || []); setTs(j.timeseries || []); } }).catch(() => {});
+    fetch(`/api/owner/analytics?range=${range}`, { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) { setRev(j.restaurantRevenue || []); setTs(j.timeseries || []); setPay(j.paymentMethods || []); } }).catch(() => {});
   }, [range]);
   // Everything else — refreshed on mount, on the 60s active poll, and on manual ↻.
   const loadRest = useCallback(() => {
@@ -240,6 +241,34 @@ export default function AdminOverview() {
           </div>
           <TrendLine data={trend.rows} lines={chartRest === "all" ? trend.lines : trend.lines.filter((l) => l.name === chartRest)} />
         </div>
+      </div>
+
+      {/* Payment methods (owner, 2026-07-01): how bills got paid, summed across every
+          restaurant on the platform for the chosen period. Reuses paymentMethods from
+          the SAME /api/owner/analytics fetch above — no extra request. */}
+      <div className="adm-card" style={{ marginBottom: 8 }}>
+        <div className="adm-chead">
+          <div className="adm-ctitle">Payment methods <span>· {rLong}, across every restaurant</span></div>
+        </div>
+        {pay.length === 0 ? (
+          <div className="adm-empty">No paid bills in this period yet.</div>
+        ) : (() => {
+          const payTotal = pay.reduce((a, p) => a + p.revenue, 0) || 1;
+          const payColor: Record<string, string> = { UPI: "#4f9dff", Cash: "#7ec88a", Card: "#e3c06f", Other: "#b58ae6", "Not recorded": "#9aa3b0" };
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {pay.map((p) => (
+                <div key={p.method} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ width: 96, fontSize: 12.5, fontWeight: 700, flexShrink: 0 }}>{p.method}</span>
+                  <div style={{ flex: 1, height: 8, borderRadius: 999, background: "var(--line)", overflow: "hidden" }}>
+                    <div style={{ width: `${(p.revenue / payTotal) * 100}%`, height: "100%", background: payColor[p.method] || FALLBACK }} />
+                  </div>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, width: 96, textAlign: "right", flexShrink: 0 }}>{inr(p.revenue)}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       <h2 className="adm-h2">Restaurants &amp; owners</h2>
