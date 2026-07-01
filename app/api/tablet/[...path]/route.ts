@@ -339,7 +339,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const needsPin = pending.some((o: any) => o.status === "received" || o.status === "preparing" || o.payment_status !== "paid");
       let by = "";
       if (needsPin) { const g = await managerPinGate(req, body, rid); if (!g.allow) return g.resp; by = byNote(g); }
-      let q = sb.from("orders").update({ status: "served", archived: true }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
+      let q = sb.from("orders").update({ status: "served", archived: true, archived_at: new Date().toISOString() }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
       const rows = must(await q.select());
       // A restart ends the round (fresh round, fresh party) — release the head +
@@ -565,8 +565,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // Never mark a 'received' order paid even if the check above is bypassed (belt-and-suspenders).
       // How the money came in — asked by the "Mark paid" flow (owner, 2026-07-01). Optional so
       // older/other callers of this endpoint don't break; unset just buckets under "Not recorded"
-      // in the payment-method breakdown.
-      const payUpdate: Record<string, unknown> = { payment_status: "paid" };
+      // in the payment-method breakdown. paid_at starts the 30-min "restore to floor" grace
+      // window (migration 112 + the editor's PATCH /orders handler, which enforces + clears it).
+      const payUpdate: Record<string, unknown> = { payment_status: "paid", paid_at: new Date().toISOString() };
       if (body && body.payment_method !== undefined) {
         if (!PAYMENT_METHODS.includes(body.payment_method)) return err("invalid payment_method");
         payUpdate.payment_method = body.payment_method;

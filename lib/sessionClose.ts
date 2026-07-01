@@ -65,9 +65,11 @@ export async function closeSession(
       const owed = owedRows.reduce((s: number, o: any) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
       await logAction(ctx.panel, "close_unpaid", { table_number: sess.table_number ?? null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${owed} owed`, device_id: ctx.deviceId ?? undefined });
     }
-    must(await sb.from("orders").update({ status: "cancelled", archived: true })
+    // archived_at/cancelled_at start the 30-min "restore to floor" grace window
+    // (migration 112) — every path that archives/cancels an order stamps it.
+    must(await sb.from("orders").update({ status: "cancelled", archived: true, archived_at: nowIso(), cancelled_at: nowIso() })
       .eq("session_id", sessionId).eq("archived", false).neq("payment_status", "paid").in("status", ["received", "preparing"]).select());
-    must(await sb.from("orders").update({ archived: true })
+    must(await sb.from("orders").update({ archived: true, archived_at: nowIso() })
       .eq("session_id", sessionId).eq("archived", false).select());
     // The round is over — RELEASE the head + every partner from this session, so the
     // table isn't left "connected" to the last party. A new party re-joins fresh on

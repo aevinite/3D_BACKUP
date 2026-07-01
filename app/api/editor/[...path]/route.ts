@@ -321,14 +321,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (o.status === "cancelled") { cancelled++; continue; }
         const dt = new Date(o.created_at);
         const amt = (Number(o.total) || 0) - (Number(o.discount) || 0);
-        revenue += amt;
-        const k = keyFor(dt); seriesMap[k] = (seriesMap[k] || 0) + amt;
-        hours[dt.getHours()] += 1;
+        // Revenue = money actually COLLECTED, not "orders placed" — same rule as the
+        // Bills tab (a bill only counts once settled) and the Z-report's paidNet.
+        // Un-paid orders still count toward hours/top-dishes (kitchen load), just
+        // not toward the ₹ figure (owner, 2026-07-02 — the dashboard number must
+        // never disagree with what the Bills tab shows as settled today).
         if (o.payment_status === "paid") {
+          revenue += amt;
+          const k = keyFor(dt); seriesMap[k] = (seriesMap[k] || 0) + amt;
           paid++;
           const m = o.payment_method || "Not recorded";
           paymentMethods[m] = (paymentMethods[m] || 0) + amt;
         } else unpaid++;
+        hours[dt.getHours()] += 1;
         for (const it of (Array.isArray(o.items) ? o.items : [])) {
           const q = Number(it.qty) || 1;
           if (it.title) topD[it.title] = (topD[it.title] || 0) + q;
@@ -347,7 +352,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         for (let i = 11; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; series.push({ label: MN[d.getMonth()], revenue: r2(seriesMap[k] || 0) }); }
       }
-      const avgOrder = (paid + unpaid) > 0 ? r2(revenue / (paid + unpaid)) : 0;
+      const avgOrder = paid > 0 ? r2(revenue / paid) : 0;
       // Live per-channel snapshot for the Today summary box: open dine-in tables,
       // active platform orders by source, and today's platform totals (platform
       // orders live in aggregator_orders, separate from dine-in `orders`).
@@ -957,7 +962,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       }
       if (body.archived !== undefined) patch.archived = body.archived === true;
       if (!Object.keys(patch).length) return err("nothing to update");
-      const cur = must(await sb.from("orders").select("status,payment_status").eq("id", id).eq("restaurant_id", rid).single());
+      const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at").eq("id", id).eq("restaurant_id", rid).single());
       if (patch.status === "cancelled" && cur.payment_status === "paid")
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
       if (patch.payment_status === "paid" && cur.status === "cancelled")
@@ -968,14 +973,35 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       // will auto-accept on payment and skip this phase — not now.)
       if (patch.payment_status === "paid" && cur.status === "received")
         return err("Accept the order first — a bill can only be paid once the order is accepted.", 409);
+      // A settled bill (paid / freed / cancelled) can only be undone within a 30-min
+      // grace window — after that it's aged into "Today's bills" for good (owner,
+      // 2026-07-02). NULL timestamp (never settled, or settled before this shipped)
+      // fails closed: treated as expired, not as "always restorable".
+      const RESTORE_WINDOW_MS = 30 * 60 * 1000;
+      const tooOld = (iso: string | null | undefined) =>
+        !iso || (Date.now() - new Date(iso).getTime()) > RESTORE_WINDOW_MS;
       // Reverting a PAID bill to unpaid is a refund/correction, not a routine edit:
       // require a reason and ALWAYS log it, so collected cash can't be quietly
       // un-booked without a trace (theft control).
       if (patch.payment_status === "pending" && cur.payment_status === "paid") {
+        if (tooOld(cur.paid_at)) return err("This bill was marked paid more than 30 minutes ago and can no longer be reverted.", 409);
         const reason = String((body && body.revert_reason) || "").trim();
         if (!reason) return err("Reverting a PAID bill needs a reason (refund/correction).", 409);
         await logAction("editor", "payment_revert", { order_id: id, detail: reason, device_id: deviceIdFrom(req) });
       }
+      if (patch.archived === false && cur.archived === true) {
+        if (tooOld(cur.archived_at)) return err("This bill was freed more than 30 minutes ago and can no longer be restored.", 409);
+      }
+      if (patch.status === "received" && cur.status === "cancelled") {
+        if (tooOld(cur.cancelled_at)) return err("This order was cancelled more than 30 minutes ago and can no longer be restored.", 409);
+      }
+      // Stamp/clear the settle timestamps as their gating flags flip.
+      if (patch.payment_status === "paid") patch.paid_at = new Date().toISOString();
+      if (patch.payment_status === "pending") patch.paid_at = null;
+      if (patch.archived === true) patch.archived_at = new Date().toISOString();
+      if (patch.archived === false) patch.archived_at = null;
+      if (patch.status === "cancelled") patch.cancelled_at = new Date().toISOString();
+      if (patch.status === "received" && cur.status === "cancelled") patch.cancelled_at = null;
       // Only session_id is needed (for auto-settle on pay); the client discards the body → no full row.
       const data = must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid).select("session_id"));
       if (patch.payment_status === "paid") await maybeAutoSettle(data[0]?.session_id, { panel: "editor", deviceId: deviceIdFrom(req) }); // paying may complete the table

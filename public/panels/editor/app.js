@@ -1257,14 +1257,30 @@ function businessDayStartMs() {
   if (d.getHours() < 5) s.setDate(s.getDate() - 1);
   return s.getTime();
 }
+// A bill's whole session is DONE the moment every non-cancelled order on it is
+// paid — that's the same "fully settled" check mergedOrderCardHtml already uses
+// to show the Free-table button. Owner (2026-07-02): a bill shouldn't need the
+// EXTRA manual "Free table" tap to count as finished — once it's fully paid it's
+// done and belongs in Today, whether or not the table's been physically freed yet.
+function fullyPaidSessionKeys(orders) {
+  const keys = new Set();
+  for (const g of groupOrdersBySession(orders.filter((o) => !o.archived))) {
+    const live = g.filter((o) => o.status !== "cancelled");
+    if (live.length && live.every((o) => o.payment_status === "paid")) keys.add(live[0].session_id || ("solo:" + live[0].id));
+  }
+  return keys;
+}
 function ordersBuckets() {
   const all = state.data.orders || [];
-  // LIVE = the active working set: not archived and not cancelled (a still-open bill
-  // never hides in a records view wearing live buttons; "Restore to floor" returns
-  // it here). RECORDS = archived (freed/settled) OR cancelled — split by day into
-  // TODAY (this business day) and PREVIOUS (older).
-  const live = all.filter((o) => !o.archived && o.status !== "cancelled");
-  const records = all.filter((o) => o.archived || o.status === "cancelled");
+  const sessKey = (o) => o.session_id || ("solo:" + o.id);
+  const paidKeys = fullyPaidSessionKeys(all);
+  // LIVE = the active working set: not archived, not cancelled, and NOT a bill whose
+  // whole table is already fully paid (that now counts as done — see above).
+  // RECORDS = archived (freed) OR cancelled OR fully-paid — split by day into
+  // TODAY (this business day) and PREVIOUS (older). "Restore to floor" (within its
+  // 30-min window — migration 112) returns a bill from here back to Live.
+  const live = all.filter((o) => !o.archived && o.status !== "cancelled" && !paidKeys.has(sessKey(o)));
+  const records = all.filter((o) => o.archived || o.status === "cancelled" || paidKeys.has(sessKey(o)));
   const dayStart = businessDayStartMs();
   const today = records.filter((o) => new Date(o.created_at || 0).getTime() >= dayStart);
   const previous = records.filter((o) => new Date(o.created_at || 0).getTime() < dayStart);
@@ -1394,6 +1410,12 @@ function openBillModal(key) {
     const det = itemDetailLine(i);
     return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span></div>`;
   }).join("")).join("");
+  // Restore is only offered while AT LEAST ONE order in this bill is still inside
+  // its 30-min grace window (migration 112) — once every order's window has
+  // passed, the bill has aged into Today's records for good.
+  const restoreLeftMs = Math.max(0, ...g.map((o) => restoreDeadline(o) - Date.now()));
+  const canRestore = restoreLeftMs > 0;
+  const restoreMins = Math.max(1, Math.ceil(restoreLeftMs / 60000));
   const wrap = document.createElement("div");
   wrap.className = "bill-overlay";
   wrap.innerHTML = `<div class="bill-modal">
@@ -1408,7 +1430,9 @@ function openBillModal(key) {
       </div>
       <div class="bm-actions">
         <button class="btn primary" data-bm-print>🖨 Print</button>
-        <button class="btn" data-bm-restore>↩ Restore to floor</button>
+        ${canRestore
+          ? `<button class="btn" data-bm-restore title="Undo within the next ${restoreMins} min">↩ Restore to floor (${restoreMins}m left)</button>`
+          : `<button class="btn" disabled title="More than 30 minutes have passed since this bill was settled">↩ Restore window expired</button>`}
         <button class="btn confirm-cancel" data-bm-close>Close</button>
       </div>
     </div>`;
@@ -1420,7 +1444,8 @@ function openBillModal(key) {
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   wrap.querySelector("[data-bm-close]").onclick = close;
   wrap.querySelector("[data-bm-print]").onclick = () => printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, g);
-  wrap.querySelector("[data-bm-restore]").onclick = async () => { close(); for (const o of g) await restoreTable(o.id); };
+  const restoreBtn = wrap.querySelector("[data-bm-restore]");
+  if (restoreBtn) restoreBtn.onclick = async () => { close(); for (const o of g) await restoreTable(o.id); };
 }
 
 // CALLS view: the live waiter-call list (water/cutlery/bill…), or an empty note.
@@ -1444,21 +1469,40 @@ async function freeTable(t) {
   } catch (e) { toast("Could not free: " + e.message, "err"); }
 }
 
-// Bring a previous-order record back onto the live floor. Un-archive it, and if
-// it was cancelled, revive it to "received" so it re-enters the live working set
-// (otherwise a restored cancelled order would stay filed under Previous). After
-// this it's a normal live order again and can be edited the usual way.
+// The 30-minute grace window for undoing a settled bill (migration 112) — must
+// match the server's RESTORE_WINDOW_MS in app/api/editor/[...path]/route.ts.
+const RESTORE_WINDOW_MS = 30 * 60 * 1000;
+function restoreDeadline(o) {
+  // Whichever transition put this order into "records" is what the clock runs from.
+  const ts = o.archived ? o.archived_at : o.status === "cancelled" ? o.cancelled_at : o.paid_at;
+  return ts ? new Date(ts).getTime() + RESTORE_WINDOW_MS : 0; // no timestamp → already expired
+}
+function canStillRestore(o) { return Date.now() < restoreDeadline(o); }
+
+// Bring a previous-order record back onto the live floor — un-archive it, revive
+// a cancelled order to "received", or (owner, 2026-07-02) un-pay a bill that's in
+// Today purely because it was fully paid (not yet freed) — whichever got it here.
+// Only allowed within the 30-min window; the server enforces this too (belt +
+// suspenders — panels have no auth today, so the real gate lives server-side).
 async function restoreTable(id) {
   const o = (state.data.orders || []).find((x) => x.id === id);
-  const patch = { archived: false };
-  if (o && o.status === "cancelled") patch.status = "received";
-  try {
-    await api("PATCH", "/orders/" + id, patch);
-    if (o) { o.archived = false; if (patch.status) o.status = patch.status; }
-    renderEditor();
-    toast("Restored to the live floor", "ok");
-  } catch (e) {
-    toast("Restore failed: " + e.message, "err");
+  if (!o) return;
+  if (!canStillRestore(o)) { toast("This bill was settled more than 30 minutes ago — it can no longer be restored.", "err"); return; }
+  if (o.archived || o.status === "cancelled") {
+    const patch = { archived: false };
+    if (o.status === "cancelled") patch.status = "received";
+    try {
+      await api("PATCH", "/orders/" + id, patch);
+      o.archived = false; if (patch.status) o.status = patch.status;
+      renderEditor();
+      toast("Restored to the live floor", "ok");
+    } catch (e) {
+      toast("Restore failed: " + e.message, "err");
+    }
+  } else if (o.payment_status === "paid") {
+    // Fully-paid-only bill (never freed) — undo via the existing revert-paid flow,
+    // which asks for a reason and logs it (theft control), same as "Mark unpaid".
+    await setOrderPayment(id, false);
   }
 }
 
