@@ -41,7 +41,7 @@ export async function maybeAutoSettle(
     } else {
       // restart: clear the round but KEEP the session open (mirror /tables/:t/restart) —
       // every live order becomes a served + archived bill record; the table stays open.
-      await sb.from("orders").update({ status: "served", archived: true })
+      await sb.from("orders").update({ status: "served", archived: true, archived_at: new Date().toISOString() })
         .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled");
       // …and RELEASE the party, exactly like the manual restart does (fresh round →
       // fresh party; the next guest re-joins). Without this, auto-restart left the old
