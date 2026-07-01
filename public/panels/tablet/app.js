@@ -272,7 +272,11 @@ function tileState(t) {
     if (a.nw > 0) return { cls: "new", label: "New order" };
     if (a.rd > 0) return { cls: "ready", label: "Ready to serve" };
     if (a.ck > 0) return { cls: "prep", label: "Preparing" };
-    if (a.hasOrders && a.sv > 0) return { cls: a.unpaid ? "bill" : "done", label: "Served" };
+    // Served but money still due → "Served"; served AND paid → "Cleared" — matching
+    // the server summary (lfh_table_view_summary) + the manager tile. Previously this
+    // always said "Served", so a paid table's tile FLIPPED "Cleared"→"Served" the moment
+    // you selected it (the summary said "Cleared", this recompute said "Served").
+    if (a.hasOrders && a.sv > 0) return { cls: a.unpaid ? "bill" : "done", label: a.unpaid ? "Served" : "Cleared" };
     if (s) return a.guests ? { cls: "seated", label: "Seated" } : { cls: "waiting", label: "Open" };
     if (reqsOf(t).length) return { cls: "req", label: "Wants in" };
     return { cls: "free", label: "Free" };
