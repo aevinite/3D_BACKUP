@@ -1410,12 +1410,18 @@ function openBillModal(key) {
     const det = itemDetailLine(i);
     return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span></div>`;
   }).join("")).join("");
-  // Restore is only offered while AT LEAST ONE order in this bill is still inside
-  // its 30-min grace window (migration 112) — once every order's window has
-  // passed, the bill has aged into Today's records for good.
-  const restoreLeftMs = Math.max(0, ...g.map((o) => restoreDeadline(o) - Date.now()));
+  // Restore is only offered while EVERY order in this bill is still inside its
+  // 30-min grace window (migration 112) — so this takes the MIN remaining time
+  // across the group, not the max (code review before merge: showing the most
+  // optimistic order's countdown could tell staff "5m left" on a bill restoreBill()
+  // would immediately refuse because a different order in it had already expired).
+  const restoreLeftMs = Math.min(...g.map((o) => restoreDeadline(o) - Date.now()));
   const canRestore = restoreLeftMs > 0;
   const restoreMins = Math.max(1, Math.ceil(restoreLeftMs / 60000));
+  // A bill that landed here purely because it's fully paid (never actually freed)
+  // still has an occupied table sitting on the floor — offer "Free table" right
+  // here so staff don't have to hunt for it elsewhere (code review before merge).
+  const stillOnFloor = g.some((o) => !o.archived) && !!(o0.table_number || "").trim();
   const wrap = document.createElement("div");
   wrap.className = "bill-overlay";
   wrap.innerHTML = `<div class="bill-modal">
@@ -1430,6 +1436,7 @@ function openBillModal(key) {
       </div>
       <div class="bm-actions">
         <button class="btn primary" data-bm-print>🖨 Print</button>
+        ${stillOnFloor ? `<button class="btn free-table" data-bm-free="${esc(o0.table_number)}">🪑 Free table ${esc(o0.table_number)}</button>` : ""}
         ${canRestore
           ? `<button class="btn" data-bm-restore title="Undo within the next ${restoreMins} min">↩ Restore to floor (${restoreMins}m left)</button>`
           : `<button class="btn" disabled title="More than 30 minutes have passed since this bill was settled">↩ Restore window expired</button>`}
@@ -1444,8 +1451,10 @@ function openBillModal(key) {
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   wrap.querySelector("[data-bm-close]").onclick = close;
   wrap.querySelector("[data-bm-print]").onclick = () => printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, g);
+  const freeBtn = wrap.querySelector("[data-bm-free]");
+  if (freeBtn) freeBtn.onclick = async () => { close(); await freeTable(freeBtn.dataset.bmFree); };
   const restoreBtn = wrap.querySelector("[data-bm-restore]");
-  if (restoreBtn) restoreBtn.onclick = async () => { close(); for (const o of g) await restoreTable(o.id); };
+  if (restoreBtn) restoreBtn.onclick = async () => { close(); await restoreBill(g); };
 }
 
 // CALLS view: the live waiter-call list (water/cutlery/bill…), or an empty note.
@@ -1473,9 +1482,18 @@ async function freeTable(t) {
 // match the server's RESTORE_WINDOW_MS in app/api/editor/[...path]/route.ts.
 const RESTORE_WINDOW_MS = 30 * 60 * 1000;
 function restoreDeadline(o) {
-  // Whichever transition put this order into "records" is what the clock runs from.
-  const ts = o.archived ? o.archived_at : o.status === "cancelled" ? o.cancelled_at : o.paid_at;
-  return ts ? new Date(ts).getTime() + RESTORE_WINDOW_MS : 0; // no timestamp → already expired
+  // The server checks archived_at and cancelled_at as INDEPENDENT gates (an order
+  // can be cancelled at one moment and freed at a later one), so the client must
+  // take the EARLIEST of every gate that actually applies — not just one — or the
+  // UI can show "N min left" for a leg the server will still 409 on (code review
+  // before merge: this used to pick only ONE of archived_at/cancelled_at/paid_at).
+  const deadlines = [];
+  if (o.archived) deadlines.push(o.archived_at ? new Date(o.archived_at).getTime() + RESTORE_WINDOW_MS : 0);
+  if (o.status === "cancelled") deadlines.push(o.cancelled_at ? new Date(o.cancelled_at).getTime() + RESTORE_WINDOW_MS : 0);
+  if (!o.archived && o.status !== "cancelled" && o.payment_status === "paid") {
+    deadlines.push(o.paid_at ? new Date(o.paid_at).getTime() + RESTORE_WINDOW_MS : 0);
+  }
+  return deadlines.length ? Math.min(...deadlines) : 0; // nothing settled → nothing to restore
 }
 function canStillRestore(o) { return Date.now() < restoreDeadline(o); }
 
@@ -1504,6 +1522,52 @@ async function restoreTable(id) {
     // which asks for a reason and logs it (theft control), same as "Mark unpaid".
     await setOrderPayment(id, false);
   }
+}
+
+// restoreBill: restore a WHOLE bill (every order in a session) as ONE atomic
+// step, instead of looping restoreTable per order. That loop used to be able to
+// pop one blocking window.prompt() PER paid order and leave the bill half
+// reverted if one order's window had already expired while a sibling's hadn't,
+// or if staff dismissed one of several prompts (code review before merge —
+// a multi-round table could end up with money silently still marked "collected"
+// on the un-reverted orders, with no further UI path back to it). Now: check
+// EVERY order can still be restored before touching anything, ask for a revert
+// reason ONCE for the whole bill, then apply every PATCH with that same reason.
+async function restoreBill(orders) {
+  if (!orders.length) return;
+  if (!orders.every(canStillRestore)) {
+    toast("Part of this bill was settled more than 30 minutes ago — it can no longer be restored.", "err");
+    return;
+  }
+  const needsPaymentRevert = orders.some((o) => !o.archived && o.status !== "cancelled" && o.payment_status === "paid");
+  let revertReason = null;
+  if (needsPaymentRevert) {
+    revertReason = (window.prompt("This bill is PAID. Reason for reverting it to unpaid (refund / wrong entry)?") || "").trim();
+    if (!revertReason) { toast("Restore cancelled — a reason is required.", "err"); return; }
+  }
+  let okCount = 0, failCount = 0;
+  for (const o of orders) {
+    const patch = {};
+    if (o.archived) patch.archived = false;
+    if (o.status === "cancelled") patch.status = "received";
+    if (!o.archived && o.status !== "cancelled" && o.payment_status === "paid") {
+      patch.payment_status = "pending";
+      patch.revert_reason = revertReason;
+    }
+    if (!Object.keys(patch).length) continue;
+    try {
+      await api("PATCH", "/orders/" + o.id, patch);
+      if (patch.archived === false) o.archived = false;
+      if (patch.status) o.status = patch.status;
+      if (patch.payment_status) o.payment_status = patch.payment_status;
+      okCount++;
+    } catch (e) {
+      failCount++;
+    }
+  }
+  renderEditor();
+  if (failCount) toast(`Restored ${okCount} of ${okCount + failCount} orders — ${failCount} failed, please retry`, "err");
+  else toast("Bill restored to the live floor", "ok");
 }
 
 // setOrderStatus: move one order to a new status (e.g. Accept → preparing).
