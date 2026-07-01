@@ -60,6 +60,12 @@ const state = {
   billSearch: "", billSearchType: "inv", billSort: "new", // Bills → Today/Previous search + sort
   logView: lsGet("lfh_editor_logview", "customers"),  // Log left-bar: customers | operations — remembered across refresh
   users: { members: [], customers: [], blocklist: [] }, // Log tab data
+  // "User setting" card (Settings tab): the manager's own team (tablet/kitchen/manager
+  // logins), reusing the SAME /api/owner/staff the owner's "Staff & powers" page uses —
+  // gated server-side by manager_permissions.manage_staff, so a manager without it just
+  // gets a 403 we show as a friendly message (staffDenied). Loaded lazily, once, on first
+  // visit to Settings (see loadStaffTeam), not on every keystroke/render.
+  staffLoaded: false, staffTeam: [], staffDenied: null, staffReveal: null, staffBusy: false, staffRestaurantId: null,
 };
 
 // ---------- tiny helpers ----------
@@ -760,6 +766,88 @@ function filterMembersHtml(f) {
       <span class="sub">· <b id="membCount">${selected}</b> selected · tick to add an existing dish, untick to remove</span></h3>
     <input class="memb-search" id="membSearch" placeholder="Search dishes…" />
     <div class="memb-list">${rows}</div>
+  </div>`;
+}
+
+// loadStaffTeam: fetch this manager's own team ONCE (cookies carry the session —
+// same-origin fetch, no auth wiring needed). A 403 (owner hasn't granted manage_staff)
+// is a NORMAL outcome here, not an error — shown as a quiet inline message instead of
+// a toast. Re-renders Settings when the real data lands (mirrors the floor's
+// skeleton-then-real pattern, just without a shimmer since this is a short list).
+async function loadStaffTeam() {
+  try {
+    const r = await fetch("/api/owner/staff", { cache: "no-store" });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { state.staffDenied = d.error || "Couldn't load your team."; state.staffTeam = []; state.staffRestaurantId = null; }
+    else { state.staffDenied = null; state.staffTeam = d.staff || []; state.staffRestaurantId = (d.restaurants || [])[0]?.id || null; }
+  } catch (e) { state.staffDenied = "Couldn't reach the server."; }
+  state.staffLoaded = true;
+  if (state.tab === "general") renderEditor();
+}
+
+// staffCall: POST/PATCH/DELETE to /api/owner/staff, then always reload the team so the
+// list reflects the server's truth (never trust the optimistic local edit alone — a
+// staff list is small, so a full reload after each action is cheap and simplest).
+async function staffCall(init) {
+  state.staffBusy = true;
+  try {
+    const r = await fetch("/api/owner/staff", { ...init, headers: { "Content-Type": "application/json", ...(init.headers || {}) } });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
+    return d;
+  } finally { state.staffBusy = false; }
+}
+
+// userSettingCardHtml: the "User setting" card — lets a manager (only if their owner
+// has granted manage_staff) add/manage their tablet · kitchen · manager logins right
+// from Settings, instead of needing the separate Owner panel. Reuses /api/owner/staff
+// exactly like the owner's own "Staff & powers" page — the server enforces
+// manage_staff, this card just renders whatever it says.
+function userSettingCardHtml() {
+  if (!state.staffLoaded) {
+    return `<div class="card"><h3>User setting</h3><p class="muted" style="font-size:13px;margin:0">Loading…</p></div>`;
+  }
+  if (state.staffDenied) {
+    return `<div class="card"><h3>User setting</h3><p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">${esc(state.staffDenied)}</p></div>`;
+  }
+  const ROLES = ["manager", "kitchen", "tablet"];
+  const reveal = state.staffReveal
+    ? `<div class="fc-card" style="border-color:var(--green);display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <div><b>New password for ${esc(state.staffReveal.name)}</b><div class="muted small">Copy it now — it can't be shown again.</div></div>
+        <code style="font-family:ui-monospace,monospace;font-weight:700;padding:5px 10px;border-radius:8px;background:color-mix(in srgb, var(--gold) 14%, transparent);letter-spacing:.03em">${esc(state.staffReveal.password)}</code>
+        <button class="btn small" id="usrRevealDone" style="margin-left:auto">Done</button>
+      </div>` : "";
+  const rows = state.staffTeam.length
+    ? state.staffTeam.map((u) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 10px;border-radius:9px;background:var(--panel-2)${u.active ? "" : ";opacity:.6"}">
+        <div style="display:flex;align-items:center;gap:9px;min-width:0">
+          <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:3px 8px;border-radius:999px;background:color-mix(in srgb, var(--gold) 18%, transparent);color:var(--gold-strong)">${esc(u.role)}</span>
+          <span style="font-weight:700;font-size:13.5px">${esc(u.name || u.username)}</span>
+          ${u.active ? "" : `<span style="font-size:10.5px;color:var(--red);font-weight:700">disabled</span>`}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <select data-staff-role="${esc(u.id)}" style="font-size:11.5px;font-weight:700;padding:5px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text)">
+            ${ROLES.map((r) => `<option value="${r}" ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}
+          </select>
+          <button class="btn small" data-staff-resetpw="${esc(u.id)}">Reset password</button>
+          <button class="btn small" data-staff-toggle="${esc(u.id)}" data-active="${u.active ? "1" : "0"}">${u.active ? "Disable" : "Enable"}</button>
+          <button class="btn small danger" data-staff-del="${esc(u.id)}">Remove</button>
+        </div>
+      </div>`).join("")
+    : `<div class="sx-empty">No staff yet — add the first below.</div>`;
+  return `<div class="card"><h3>User setting</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      Add and manage tablet, kitchen, and manager logins for this restaurant — the same
+      team the owner sees in Staff &amp; powers.
+    </p>
+    ${reveal}
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">${rows}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid var(--line)">
+      <input class="sx-input" id="usrNewName" placeholder="Name (their login)" style="flex:1 1 150px"/>
+      <select id="usrNewRole" style="flex:0 0 auto;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--text)">${ROLES.map((r) => `<option value="${r}">${r}</option>`).join("")}</select>
+      <input class="sx-input" id="usrNewPassword" placeholder="Password (blank = auto)" style="flex:1 1 150px"/>
+      <button class="btn primary" id="usrAddStaff">+ Add</button>
+    </div>
   </div>`;
 }
 

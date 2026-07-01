@@ -65,3 +65,7 @@ reference/code-snapshot/
 
 # Playwright MCP scratch output
 .playwright-mcp/
+
+# Competitor POS research (25 MB of competitor screenshots — local reference
+# only, for design inspiration; don't ship it to the public deploy repo).
+/All_compitior_POs_INFO/

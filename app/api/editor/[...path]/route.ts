@@ -19,6 +19,7 @@ import { panelRestaurantId } from "@/lib/panelScope";
 import { closeSession } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
+import { PAYMENT_METHODS } from "@/lib/payments";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -301,13 +302,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       else { since = new Date(Date.now() - 29 * 864e5); since.setHours(0, 0, 0, 0); }
 
       const [ordersQ, dishesQ] = await Promise.all([
-        sb.from("orders").select("id,total,discount,status,payment_status,created_at,items").eq("restaurant_id", rid).gte("created_at", since.toISOString()),
+        sb.from("orders").select("id,total,discount,status,payment_status,payment_method,created_at,items").eq("restaurant_id", rid).gte("created_at", since.toISOString()),
         sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
       ]);
       const orders = must(ordersQ), dishes = must(dishesQ);
       const catOf: Record<string, string> = Object.fromEntries(dishes.map((d: { id: string; category?: string }) => [d.id, d.category || "other"]));
       const hours = Array(24).fill(0);
       const topD: Record<string, number> = {}, cats: Record<string, number> = {}, seriesMap: Record<string, number> = {};
+      // Payment-method breakdown (owner, 2026-07-01): revenue per method for whatever's
+      // ALREADY marked paid in this range — no extra query, same orders array.
+      const paymentMethods: Record<string, number> = {};
       const bucket = range === "today" ? "hour" : range === "year" ? "month" : "day";
       const keyFor = (d: Date) => bucket === "hour" ? String(d.getHours())
         : bucket === "month" ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
@@ -320,7 +324,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         revenue += amt;
         const k = keyFor(dt); seriesMap[k] = (seriesMap[k] || 0) + amt;
         hours[dt.getHours()] += 1;
-        if (o.payment_status === "paid") paid++; else unpaid++;
+        if (o.payment_status === "paid") {
+          paid++;
+          const m = o.payment_method || "Not recorded";
+          paymentMethods[m] = (paymentMethods[m] || 0) + amt;
+        } else unpaid++;
         for (const it of (Array.isArray(o.items) ? o.items : [])) {
           const q = Number(it.qty) || 1;
           if (it.title) topD[it.title] = (topD[it.title] || 0) + q;
@@ -921,6 +929,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       if (body.payment_status !== undefined) {
         if (!["pending", "paid"].includes(body.payment_status)) return err("invalid payment_status");
         patch.payment_status = body.payment_status;
+        // How the money came in — asked by the "Mark paid" flow (owner, 2026-07-01). Optional:
+        // the per-order correction toggle doesn't pass it, and that's fine — it buckets under
+        // "Not recorded" in the payment-method breakdown (see lfh_owner_payment_breakdown).
+        if (body.payment_status === "paid" && body.payment_method !== undefined) {
+          if (!PAYMENT_METHODS.includes(body.payment_method)) return err("invalid payment_method");
+          patch.payment_method = body.payment_method;
+          patch.payment_note = String(body.payment_note || "").slice(0, 200) || null;
+        }
       }
       if (body.archived !== undefined) patch.archived = body.archived === true;
       if (!Object.keys(patch).length) return err("nothing to update");
