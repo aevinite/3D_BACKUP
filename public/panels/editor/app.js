@@ -1699,6 +1699,7 @@ async function loadDashboard() {
       <div class="dash-chart"><h4>Top dishes</h4><canvas id="chTop"></canvas></div>
       <div class="dash-chart"><h4>Orders by hour</h4><canvas id="chHours"></canvas></div>
       <div class="dash-chart"><h4>Category share</h4><canvas id="chCats"></canvas></div>
+      <div class="dash-chart"><h4>Payment methods · ${rangeLabel}</h4><canvas id="chPay"></canvas></div>
     </div>`;
   dashCharts.forEach((c) => { try { c.destroy(); } catch {} });
   dashCharts = [];
@@ -1727,6 +1728,20 @@ async function loadDashboard() {
     data: { labels: catEntries.map(([c]) => c), datasets: [{ data: catEntries.map(([, n]) => n), backgroundColor: ["#d4a574", "#7ec88a", "#4f9dff", "#e8a13c", "#b58ae6", "#ef7d7d", "#5bc8c8", "#c8b35b", "#8a93a6"] }] },
     options: { plugins: { legend: { position: "right" } } },
   }));
+  // Payment methods (owner, 2026-07-01): revenue split by how bills got paid —
+  // UPI/Cash/Card/Other, plus "Not recorded" for anything paid before this shipped
+  // or via the per-order correction toggle (which skips the picker on purpose).
+  const payEntries = (s.paymentMethods || []);
+  const payChart = document.getElementById("chPay");
+  if (payEntries.length) {
+    dashCharts.push(new Chart(payChart, {
+      type: "doughnut",
+      data: { labels: payEntries.map(([m]) => m), datasets: [{ data: payEntries.map(([, rev]) => rev), backgroundColor: ["#d4a574", "#7ec88a", "#4f9dff", "#e8a13c", "#9aa3b0"] }] },
+      options: { plugins: { legend: { position: "right" }, tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${inr(ctx.parsed)}` } } } },
+    }));
+  } else if (payChart) {
+    payChart.closest(".dash-chart").innerHTML = `<h4>Payment methods · ${rangeLabel}</h4><div class="empty">No paid bills in this range yet.</div>`;
+  }
 }
 
 
