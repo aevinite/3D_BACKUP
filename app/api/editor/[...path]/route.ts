@@ -878,6 +878,22 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             ? Object.fromEntries(Object.entries(f).filter(([, v]) => typeof v === "boolean"))
             : {};
         }
+        // "Table setting" — per-table seat counts, keyed by table number ("1", "2", …).
+        // Rebuild from scratch rather than trust the client shape: drops non-numeric
+        // keys/values and clamps seats to 1..30, so a malformed request can't write an
+        // array (setPath's array-vs-object ambiguity) or garbage into this JSONB column.
+        if ("table_seats" in body) {
+          const raw = body.table_seats;
+          const clean: Record<string, number> = {};
+          if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+            for (const [k, v] of Object.entries(raw)) {
+              const tn = parseInt(k, 10);
+              const n = Math.round(Number(v));
+              if (Number.isFinite(tn) && tn >= 1 && Number.isFinite(n)) clean[String(tn)] = Math.min(Math.max(n, 1), 30);
+            }
+          }
+          body.table_seats = clean;
+        }
       }
       if (a === "items" && body && typeof body === "object") {
         const slugify = (s: string) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");

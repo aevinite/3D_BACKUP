@@ -358,7 +358,12 @@ function tileHtml(i) {
   // get guests + the meta line, and (once there are dishes) a progress bar + count pills.
   let body = "";
   if (st.cls === "free" || st.cls === "req") {
-    body = `<span class="tsub">${st.cls === "req" ? "asked to open" : "tap to open"}</span><span class="topen" data-quick="open" data-qt="${i}">Open</span>`;
+    // Seat count (owner request, 2026-07-01 — the tablet had NO capacity info at all
+    // before) from the table_seats setting (migration 111); no entry → 4, same default
+    // the manager floor uses. Only shown on free/req tiles — occupied tiles show the
+    // guest count instead (already more useful once a party is actually seated).
+    const seats = ((state.data.settings || {}).table_seats || {})[String(i)] || 4;
+    body = `<span class="tsub">${st.cls === "req" ? "asked to open" : "tap to open"}</span><span class="tseats">🪑 ${seats} seats</span><span class="topen" data-quick="open" data-qt="${i}">Open</span>`;
   } else {
     // KOT # rides on the full slice only (the summary RPC carries no KOT — it's the shared
     // manager RPC). For the selected table we show "KOT #…"; for every other tile we show the

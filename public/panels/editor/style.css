@@ -837,8 +837,12 @@ body {
 .density-btn { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12px; font-weight: 700; cursor: pointer; }
 .density-btn:hover { border-color: var(--gold); color: var(--text); }
 .density-btn.active { background: var(--gold); border-color: var(--gold); color: #2a1d0c; }
-/* The faint chair watermark on a free/off table — top-right, subtle, premium. */
-.ft-officon { position: absolute; top: 13px; right: 14px; font-size: 20px; color: var(--c); opacity: 0.3; pointer-events: none; }
+/* The faint chair watermark on a free/off table — top-right, subtle, premium. Carries
+   the table's seat count (migration 111) alongside the icon, so "free" also answers
+   "how many can sit here" without opening the tile. */
+.ft-officon { position: absolute; top: 13px; right: 14px; display: flex; align-items: center; gap: 3px; color: var(--c); opacity: 0.45; pointer-events: none; }
+.ft-officon i { font-size: 18px; }
+.ft-officon span { font-size: 12px; font-weight: 800; }
 .ftile { --c: #6b6253; position: relative; text-align: left; cursor: pointer; min-height: 104px;
   display: flex; flex-direction: column; padding: 13px 14px; border-radius: 15px;
   border: 1.5px solid color-mix(in srgb, var(--c) 55%, var(--line));
