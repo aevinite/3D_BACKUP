@@ -27,6 +27,7 @@ const FEATURES = [
   { key: "favorites", label: "Favorites" }, { key: "waiter_calls", label: "Call waiter" },
   { key: "search", label: "Dish search" }, { key: "languages", label: "Languages" },
   { key: "currency", label: "Currency picker" }, { key: "scrollspy", label: "Category scroll-spy" },
+  { key: "diet_filter", label: "Veg / Non-Veg filter" },
 ];
 
 // The four operational PANELS a restaurant can have (mig 106). Turning one OFF blocks that

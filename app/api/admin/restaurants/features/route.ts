@@ -34,6 +34,7 @@ export const dynamic = "force-dynamic";
 const GUEST_FEATURE_KEYS = [
   "ratings", "reviews", "model3d", "allergies", "favorites",
   "waiter_calls", "search", "languages", "currency", "scrollspy",
+  "diet_filter", // Veg / Non-Veg filter group (off for pure-veg restaurants)
 ];
 const FEATURE_DEFAULTS: Record<string, boolean> = Object.fromEntries(GUEST_FEATURE_KEYS.map((k) => [k, true]));
 

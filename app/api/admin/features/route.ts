@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
 const GUEST_FEATURE_KEYS = [
   "ratings", "reviews", "model3d", "allergies", "favorites",
   "waiter_calls", "search", "languages", "currency", "scrollspy",
+  "diet_filter", // Veg / Non-Veg filter group (off for pure-veg restaurants)
 ];
 
 export async function POST(req: NextRequest) {
