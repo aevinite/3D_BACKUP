@@ -749,12 +749,23 @@ body {
 .floor-main { flex: 1; min-width: 0; }
 /* margin-top gives the panel breathing room so its first card isn't jammed
    against the top / the floor legend line. */
-.floor-side { width: 290px; flex: 0 0 290px; display: flex; flex-direction: column; gap: 14px; margin-top: 10px; }
+/* Sticky + its own scroll: the tile grid (.floor-main) and this panel used to share
+   ONE scrollbar (the .editor ancestor), so scrolling down through a big floor (300
+   tables) dragged the detail panel out of view too — you had to scroll all the way
+   back up to see it (owner, 2026-06-30). Sticky pins it in the viewport regardless of
+   how far the grid is scrolled; its own overflow-y lets ITS content scroll separately
+   without moving the grid at all. */
+.floor-side {
+  width: 290px; flex: 0 0 290px; display: flex; flex-direction: column; gap: 14px; margin-top: 10px;
+  position: sticky; top: 10px; max-height: calc(100vh - 90px); overflow-y: auto; overscroll-behavior: contain;
+}
 /* Stack the floor + side panel below 1040px. The !important is required because
    the side panel carries an inline width:${sideW}px from the drag-to-resize
    handle, and an inline style would otherwise beat this rule and keep the panel
-   its dragged pixel width instead of going full-width on a narrow screen. */
-@media (max-width: 1040px) { .floor-wrap { flex-direction: column; margin-right: 0; } .floor-side { width: 100% !important; flex: none !important; margin-top: 0; } }
+   its dragged pixel width instead of going full-width on a narrow screen. Sticky
+   stops making sense once the panel is stacked BELOW the grid instead of beside
+   it, so it reverts to a normal flowed block here. */
+@media (max-width: 1040px) { .floor-wrap { flex-direction: column; margin-right: 0; } .floor-side { width: 100% !important; flex: none !important; margin-top: 0; position: static; max-height: none; overflow-y: visible; } }
 /* F1: collapse / expand the right floor panel. Chevron sits top-right of the panel
    when open; floats on the floor's right edge when collapsed. Hover-grows (owner:
    "everything dynamic"). When collapsed, tapping a tile opens the full-screen popup. */
@@ -813,6 +824,19 @@ body {
    instead of stretching a lone tile across the whole row. The whole thing
    re-flows live as the side panel is dragged or the window resizes. */
 .ftile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
+/* Tile density (S/M/L) — the min tile width auto-fill measures against, so this is
+   really "how many tiles fit per row" (owner request, 2026-06-30). data-density
+   defaults to "m" (the original 140px) when unset. */
+.ftile-grid[data-density="s"] { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 10px; }
+.ftile-grid[data-density="l"] { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
+/* The S/M/L buttons themselves. They land at the far right of .ed-head because its
+   h2 carries flex:1 (a shared rule other tabs rely on) — the actual fix for the
+   overlap with the collapsed floor's Open all/Close all bar is in app.js (density
+   buttons are simply omitted while collapsed; see collapsedNow in floorHtml). */
+.density-btns { display: inline-flex; gap: 4px; }
+.density-btn { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12px; font-weight: 700; cursor: pointer; }
+.density-btn:hover { border-color: var(--gold); color: var(--text); }
+.density-btn.active { background: var(--gold); border-color: var(--gold); color: #2a1d0c; }
 /* The faint chair watermark on a free/off table — top-right, subtle, premium. */
 .ft-officon { position: absolute; top: 13px; right: 14px; font-size: 20px; color: var(--c); opacity: 0.3; pointer-events: none; }
 .ftile { --c: #6b6253; position: relative; text-align: left; cursor: pointer; min-height: 104px;
@@ -1226,6 +1250,18 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .ftile:hover { transform: translateY(-3px); box-shadow: 0 12px 26px -12px rgba(0,0,0,.7); }
 .ftile.ft-sel { outline: none; border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold), 0 12px 26px -12px rgba(0,0,0,.8); }
 
+/* Popped-out detail: a movable floating card instead of pinned to the side (owner
+   request, 2026-06-30 — "it should be movable"). Positioning wrapper only — the
+   .tp-detail inside keeps its normal look; this just fixes it in the viewport,
+   bounds its height, and gives its body an independent scroll so the head (with
+   the Dock button) and foot (action buttons) stay put while you scroll the middle. */
+.tp-detail-floating { position: fixed; top: 76px; right: 24px; z-index: 40; width: 420px; max-width: calc(100vw - 24px); height: min(78vh, calc(100vh - 96px)); }
+.tp-detail-floating .tp-detail { height: 100%; box-shadow: var(--shadow-md); }
+.tp-detail-floating .tp-detail-body { flex: 1; min-height: 0; overflow-y: auto; }
+.tp-detail-floating .tp-detail-head { cursor: grab; }
+.tp-detail-floating .tp-detail-head:active { cursor: grabbing; }
+@media (max-width: 1040px) { .tp-detail-floating { position: static; width: 100%; max-width: none; height: auto; margin-top: 14px; } .tp-detail-floating .tp-detail-body { overflow-y: visible; } }
+
 /* ---- detail header: title + status pill + summary + progress bar ---- */
 .tp-detail { border-radius: 16px; }
 .tp-detail-head { display: block; position: sticky; top: 0; z-index: 5; padding: 15px 16px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
@@ -1234,6 +1270,11 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .tp-detail-close { margin-left: auto; width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 16px; cursor: pointer; line-height: 1; }
 .tp-detail-close:hover { border-color: var(--gold); }
 .tbl-modal-head .tp-detail-top { width: 100%; }
+/* Pop-out / dock toggle — sits just left of the ✕. Only rendered inside the
+   side-panel master-detail, never on the full-screen modal (which is already its
+   own floating-ish popup, so it has nothing to pop out OF). */
+.tp-detail-float { flex: none; height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.tp-detail-float:hover { border-color: var(--gold); color: var(--text); }
 
 .tp-pill { font-size: 11px; font-weight: 800; padding: 4px 11px; border-radius: 999px; white-space: nowrap; }
 .tp-pill-new  { background: rgba(245,158,11,.16); color: #f59e0b; }

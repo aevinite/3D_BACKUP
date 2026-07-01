@@ -54,6 +54,8 @@ const state = {
   openSess: null, // table number whose session modal is open
   selectedTable: null, // table number whose DETAIL is shown IN the right side panel (Tables tab master-detail). null = show the floor controls instead.
   floorSideCollapsed: lsGet("lfh_floor_side_collapsed", "0") === "1", // F1: right floor panel collapsed → clicking a table opens a FULL-SCREEN popup instead of the in-side detail.
+  floorDetailFloating: lsGet("lfh_floor_detail_floating", "0") === "1", // detail panel popped out as a draggable floating card instead of pinned to the side
+  floorTileDensity: lsGet("lfh_floor_tile_density", "m"), // s | m | l — how many tiles fit per row in the floor grid
   ordersView: lsGet("lfh_editor_ordersview", "live"), // Orders left-bar: live | previous | bills | calls — remembered across refresh
   billSearch: "", billSearchType: "inv", billSort: "new", // Bills → Today/Previous search + sort
   logView: lsGet("lfh_editor_logview", "customers"),  // Log left-bar: customers | operations — remembered across refresh
@@ -2385,18 +2387,35 @@ function serveFlushPending() { return serveFlushTimer != null; }
 // stale-ticket guard; the next poll reconciles. (Factored out so the four call sites can't drift.)
 function mergeTableSlice(t, selBoard, selOrders, selCalls) {
   t = String(t);
-  let orders = (state.data.orders || []).filter((o) => String(o.table_number) !== t).concat(selOrders || []);
+  const dedupeById = (arr) => { const m = new Map(); for (const x of arr) if (x && x.id != null) m.set(x.id, x); return [...m.values()]; };
+  const b = state.board || {};
+  const freshSessions = (selBoard && selBoard.sessions) || [];
+  const freshOrders = selOrders || [];
+  // Purge set = anything CURRENTLY cached under table t UNION anything in the FRESH payload —
+  // not table t alone. A SHIFT moves a session/its orders to a new table_number server-side; if
+  // an earlier cleanup call for the party's OLD table got dropped (e.g. superseded by a
+  // realtime-triggered pollTables bumping the dataSeq stale-ticket while it was still in
+  // flight — a real race, not hypothetical), the party's rows stay cached under the OLD
+  // table_number forever. Purging by table-tag ALONE then never catches them, so the next merge
+  // for the NEW table adds a second copy on top → doubled guest names / doubled dishes (each
+  // still keyed by the same session/order id). Matching by id too — not just by the current
+  // table_number tag — plus a final dedupeById() safety net, is what tablet's mergeSelectedSlice
+  // already does; this brings the editor's merge in line with it.
+  const oldSids = new Set((b.sessions || []).filter((s) => String(s.table_number) === t).map((s) => s.id));
+  for (const s of freshSessions) oldSids.add(s.id);
+  const oldOids = new Set((state.data.orders || []).filter((o) => String(o.table_number) === t).map((o) => o.id));
+  for (const o of freshOrders) oldOids.add(o.id);
+
+  let orders = dedupeById((state.data.orders || []).filter((o) => !oldOids.has(o.id)).concat(freshOrders));
   orders = orders
     .filter((o) => !pendingDeletes.has(o.id))
     .map((o) => (pendingOrderOps.has(o.id) ? ((state.data.orders || []).find((x) => x.id === o.id) || o) : o));
   state.data.orders = orders;
-  state.data.calls = (state.data.calls || []).filter((c) => String(c.table_number) !== t).concat(selCalls || []);
-  const b = state.board || {};
-  const oldSids = new Set((b.sessions || []).filter((s) => String(s.table_number) === t).map((s) => s.id));
+  state.data.calls = dedupeById((state.data.calls || []).filter((c) => String(c.table_number) !== t).concat(selCalls || []));
   state.board = {
-    sessions: (b.sessions || []).filter((s) => String(s.table_number) !== t).concat((selBoard && selBoard.sessions) || []),
-    members: (b.members || []).filter((m) => !oldSids.has(m.session_id)).concat((selBoard && selBoard.members) || []),
-    items: (b.items || []).filter((i) => !oldSids.has(i.session_id)).concat((selBoard && selBoard.items) || []),
+    sessions: dedupeById((b.sessions || []).filter((s) => !oldSids.has(s.id)).concat(freshSessions)),
+    members: dedupeById((b.members || []).filter((m) => !oldSids.has(m.session_id)).concat((selBoard && selBoard.members) || [])),
+    items: dedupeById((b.items || []).filter((i) => !oldSids.has(i.session_id)).concat((selBoard && selBoard.items) || [])),
     requests: (selBoard && selBoard.requests) || b.requests || [],
     blocklist: (selBoard && selBoard.blocklist) || b.blocklist || [],
   };
@@ -3013,6 +3032,17 @@ function floorStatsHtml() {
 // floorHtml: build the whole unified floor — the grid of table tiles on the left
 // (with a legend and on-tile quick buttons) and a side panel on the right holding
 // the session toggles, café location, requests queue and blocklist.
+
+// densityBtnsHtml: the S/M/L tile-size control shown beside "Table view". Changes
+// how many tiles fit per row (bigger tiles = fewer per row) via a data-density
+// attribute the CSS keys off of (see .ftile-grid rules). Choice is remembered
+// across reloads (lsSet), same convention as floorSideCollapsed.
+function densityBtnsHtml() {
+  const cur = state.floorTileDensity || "m";
+  const opt = (k, label, title) => `<button class="density-btn${cur === k ? " active" : ""}" data-density-btn="${k}" title="${title}">${label}</button>`;
+  return `<div class="density-btns" role="group" aria-label="Tile size">${opt("s", "S", "Smaller tiles, more per row")}${opt("m", "M", "Normal tile size")}${opt("l", "L", "Larger tiles, fewer per row")}</div>`;
+}
+
 function floorHtml() {
   const s = state.data.settings || {};
   const sessionsOn = !!s.sessions_enabled;
@@ -3047,7 +3077,7 @@ function floorHtml() {
     for (let i = 1; i <= n; i++) {
       skel += `<div class="ftile ftile-skel" aria-hidden="true"><div class="sk-num"></div><div class="sk-lbl"></div><div class="sk-meta"></div></div>`;
     }
-    const skelMain = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2></div>${legend}<div class="ftile-grid">${skel}</div></div>`;
+    const skelMain = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${densityBtnsHtml()}</div>${legend}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${skel}</div></div>`;
     // right: skeleton versions of the side-panel cards so the whole layout is
     // present from the first frame (no empty gutter that fills in late). A card
     // = a title bar + a few placeholder rows of shimmer.
@@ -3069,7 +3099,14 @@ function floorHtml() {
   // Stats strip — the whole floor's health at a glance (Occupied / To pay / Needs you).
   // Built by the shared floorStatsHtml() so the patch path can refresh it identically.
   const statsStrip = floorStatsHtml();
-  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2></div>${statsStrip}${legend}<div class="ftile-grid">${tiles}</div></div>`;
+  // Density buttons live at the far right of .ed-head (its h2 has flex:1, which pushes
+  // anything after it there — a shared rule, not something to special-case here). That's
+  // the SAME corner the collapsed-floor's Open all/Close all bar + the ‹ chevron use
+  // (both position:absolute), so the two overlapped when collapsed (owner screenshot,
+  // 2026-06-30). Simplest correct fix: don't show density controls while collapsed —
+  // that corner is already spoken for there, and re-expanding is one click away.
+  const collapsedNow = state.floorSideCollapsed && state.selectedTable == null;
+  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${collapsedNow ? "" : densityBtnsHtml()}</div>${statsStrip}${legend}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${tiles}</div></div>`;
 
   // side panel — everyday things FIRST (whole-floor open/close, requests, needs),
   // rarely-touched feature switches + café location LAST (owner, 2026-06-12:
@@ -3122,17 +3159,29 @@ function floorHtml() {
   if (state.selectedTable != null) {
     const t = state.selectedTable;
     const parts = tablePanelParts(t);
-    const { headPill, headMeta, sessionSec, buildingSec, ordersSec, callsSec, billSec, foot } = parts;
+    const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
+    // Pop-out toggle: lets the detail become a draggable floating window instead of
+    // pinned to the side (owner request — "movable"). Docked back the same way.
+    const floatBtn = `<button class="tp-detail-float" id="tpDetailFloat" title="${state.floorDetailFloating ? "Dock back to the side panel" : "Pop out as a movable floating window"}">${state.floorDetailFloating ? "⇱ Dock" : "⤢ Float"}</button>`;
     sideInner = `<div class="tp-detail" data-table-detail="${esc(t)}">
         <div class="tp-detail-head">
-          <div class="tp-detail-top"><h3>Table ${esc(t)}</h3>${headPill}<button class="tp-detail-close" id="tpDetailClose" aria-label="Back to floor controls" title="Back to floor controls">✕</button></div>
+          <div class="tp-detail-top"><h3>Table ${esc(t)}</h3>${headPill}${floatBtn}<button class="tp-detail-close" id="tpDetailClose" aria-label="Back to floor controls" title="Back to floor controls">✕</button></div>
           ${headMeta}
         </div>
-        <div class="tp-detail-body">${sessionSec}${buildingSec}${ordersSec}${callsSec}${billSec}</div>
+        <div class="tp-detail-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div>
         <div class="tp-detail-foot">${foot}</div>
       </div>`;
   } else {
     sideInner = `${bulkCard}${reqCard}${needsCard}${blkCard}${controls}`;
+  }
+  // Floating mode: the detail pops out as a draggable card and the grid reclaims the
+  // full width (no side panel/resizer in the flow at all). Position persists in-memory
+  // (floorFloatX/Y) across re-renders, same convention as floorSideW/floorDetailW — reset
+  // on reload, where it re-centers via the CSS default (top-right).
+  if (state.selectedTable != null && state.floorDetailFloating) {
+    const hasPos = state.floorFloatX != null && state.floorFloatY != null;
+    const posStyle = hasPos ? `left:${state.floorFloatX}px;top:${state.floorFloatY}px;right:auto;` : "";
+    return `<div class="floor-wrap">${main}</div><div class="tp-detail-floating" id="tpDetailFloating" style="${posStyle}">${sideInner}</div>`;
   }
   // F1: collapsed (controls mode only) → hide the side panel so the floor goes
   // full-width; a slim chevron re-opens it. While collapsed, tapping a tile opens
@@ -3334,6 +3383,49 @@ function bindFloor() {
     rz.addEventListener("pointermove", move);
     rz.addEventListener("pointerup", up);
   };
+  // Tile density (S/M/L) — how many tiles fit per row. Persists across reloads.
+  ed.querySelectorAll("[data-density-btn]").forEach((b) => {
+    b.onclick = () => {
+      const d = b.dataset.densityBtn;
+      if (d === state.floorTileDensity) return;
+      state.floorTileDensity = d;
+      lsSet("lfh_floor_tile_density", d);
+      renderEditor();
+    };
+  });
+  // Pop the table detail out into a draggable floating window, or dock it back.
+  const floatBtn = document.getElementById("tpDetailFloat");
+  if (floatBtn) floatBtn.onclick = () => {
+    state.floorDetailFloating = !state.floorDetailFloating;
+    lsSet("lfh_floor_detail_floating", state.floorDetailFloating ? "1" : "0");
+    renderEditor();
+  };
+  // While floating, drag by the detail's header to move it anywhere on screen —
+  // clamped so it can't be dragged fully off-screen. Position is kept in-memory
+  // (floorFloatX/Y), same as the resizer's remembered widths above.
+  const floatCard = document.getElementById("tpDetailFloating");
+  if (floatCard) {
+    const head = floatCard.querySelector(".tp-detail-head");
+    if (head) head.onpointerdown = (e) => {
+      if (e.target.closest("button")) return; // don't start a drag from the Dock/✕ buttons
+      e.preventDefault();
+      const startX = e.clientX, startY = e.clientY;
+      const rect = floatCard.getBoundingClientRect();
+      const startLeft = rect.left, startTop = rect.top;
+      try { head.setPointerCapture(e.pointerId); } catch {}
+      const move = (ev) => {
+        const maxLeft = window.innerWidth - floatCard.offsetWidth - 8;
+        const maxTop = window.innerHeight - 60; // leave enough of the header on-screen to grab again
+        const x = Math.min(Math.max(8, startLeft + (ev.clientX - startX)), Math.max(8, maxLeft));
+        const y = Math.min(Math.max(8, startTop + (ev.clientY - startY)), Math.max(8, maxTop));
+        state.floorFloatX = x; state.floorFloatY = y;
+        floatCard.style.left = x + "px"; floatCard.style.top = y + "px"; floatCard.style.right = "auto";
+      };
+      const up = () => { head.removeEventListener("pointermove", move); head.removeEventListener("pointerup", up); };
+      head.addEventListener("pointermove", move);
+      head.addEventListener("pointerup", up);
+    };
+  }
 }
 
 // Flip a session toggle (system on / require location / require code) right from the floor.
@@ -3566,16 +3658,6 @@ function tablePanelParts(t) {
     }
   }
 
-  // Live shared cart: what the table is building right now but hasn't sent yet.
-  // Clears itself the moment they place the order (cart → []).
-  let buildingSec = "";
-  const cart = sess && Array.isArray(sess.cart) ? sess.cart : [];
-  if (cart.length) {
-    const cartTotal = cart.reduce((a, it) => a + (parseFloat(it.price) || 0) * (parseInt(it.qty, 10) || 1), 0);
-    const rows = cart.map((it) => `<div class="sx-item"><span class="sx-item-qty">×${esc(String(it.qty || 1))}</span><div class="sx-item-info"><span class="sx-item-name">${esc(it.title || "Item")}</span></div><span class="sx-item-price"></span><div class="sx-item-acts"><span class="ord-pill building">building</span></div></div>`).join("");
-    buildingSec = `<div class="sx-sec"><div class="sx-sec-h">🛒 Building <span class="sub">· not sent yet</span></div>${rows}<div class="sx-total">Cart <b>${inr(cartTotal)}</b></div></div>`;
-  }
-
   let ordersSec;
   if (!os.length) {
     ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders</div><div class="sx-empty">No orders yet.</div></div>`;
@@ -3668,7 +3750,7 @@ function tablePanelParts(t) {
   // discount on the LEFT, then table-management (shift/print/restart/close) on the RIGHT.
   const foot = `${primaryBtn}${payAllBtn}${discBtn}<span class="tp-foot-spacer"></span>${sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : ""}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
 
-  return { sess, os, canFree, headPill, headMeta, sessionSec, buildingSec, ordersSec, callsSec, billSec, foot };
+  return { sess, os, canFree, headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot };
 }
 
 // Compact dish-picker modal for ADDING a dish to an already-placed order (staff
@@ -3833,8 +3915,8 @@ function renderTablePanel() {
   document.querySelector(".sx-modal-overlay")?.remove();
   const t = state.openSess;
   const parts = tablePanelParts(t);
-  const { headPill, headMeta, sessionSec, buildingSec, ordersSec, callsSec, billSec, foot } = parts;
-  const wrap = el(`<div class="sx-modal-overlay tbl-modal-overlay"><div class="tbl-modal sx-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Table ${esc(t)}</h3>${headPill}<button class="tbl-modal-close" aria-label="Close">✕</button></div>${headMeta}</div><div class="tbl-modal-body">${sessionSec}${buildingSec}${ordersSec}${callsSec}${billSec}</div><div class="tbl-modal-foot">${foot}</div></div></div>`);
+  const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
+  const wrap = el(`<div class="sx-modal-overlay tbl-modal-overlay"><div class="tbl-modal sx-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Table ${esc(t)}</h3>${headPill}<button class="tbl-modal-close" aria-label="Close">✕</button></div>${headMeta}</div><div class="tbl-modal-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div><div class="tbl-modal-foot">${foot}</div></div></div>`);
   document.body.appendChild(wrap);
   const newModal = wrap.querySelector(".tbl-modal"); if (newModal) newModal.scrollTop = savedScroll;
   wrap.querySelector(".tbl-modal-close").onclick = closeTablePanel;
