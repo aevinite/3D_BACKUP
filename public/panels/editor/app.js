@@ -60,6 +60,12 @@ const state = {
   billSearch: "", billSearchType: "inv", billSort: "new", // Bills → Today/Previous search + sort
   logView: lsGet("lfh_editor_logview", "customers"),  // Log left-bar: customers | operations — remembered across refresh
   users: { members: [], customers: [], blocklist: [] }, // Log tab data
+  // "User setting" card (Settings tab): the manager's own team (tablet/kitchen/manager
+  // logins), reusing the SAME /api/owner/staff the owner's "Staff & powers" page uses —
+  // gated server-side by manager_permissions.manage_staff, so a manager without it just
+  // gets a 403 we show as a friendly message (staffDenied). Loaded lazily, once, on first
+  // visit to Settings (see loadStaffTeam), not on every keystroke/render.
+  staffLoaded: false, staffTeam: [], staffDenied: null, staffReveal: null, staffBusy: false, staffRestaurantId: null,
 };
 
 // ---------- tiny helpers ----------
@@ -763,6 +769,88 @@ function filterMembersHtml(f) {
   </div>`;
 }
 
+// loadStaffTeam: fetch this manager's own team ONCE (cookies carry the session —
+// same-origin fetch, no auth wiring needed). A 403 (owner hasn't granted manage_staff)
+// is a NORMAL outcome here, not an error — shown as a quiet inline message instead of
+// a toast. Re-renders Settings when the real data lands (mirrors the floor's
+// skeleton-then-real pattern, just without a shimmer since this is a short list).
+async function loadStaffTeam() {
+  try {
+    const r = await fetch("/api/owner/staff", { cache: "no-store" });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { state.staffDenied = d.error || "Couldn't load your team."; state.staffTeam = []; state.staffRestaurantId = null; }
+    else { state.staffDenied = null; state.staffTeam = d.staff || []; state.staffRestaurantId = (d.restaurants || [])[0]?.id || null; }
+  } catch (e) { state.staffDenied = "Couldn't reach the server."; }
+  state.staffLoaded = true;
+  if (state.tab === "general") renderEditor();
+}
+
+// staffCall: POST/PATCH/DELETE to /api/owner/staff, then always reload the team so the
+// list reflects the server's truth (never trust the optimistic local edit alone — a
+// staff list is small, so a full reload after each action is cheap and simplest).
+async function staffCall(init) {
+  state.staffBusy = true;
+  try {
+    const r = await fetch("/api/owner/staff", { ...init, headers: { "Content-Type": "application/json", ...(init.headers || {}) } });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
+    return d;
+  } finally { state.staffBusy = false; }
+}
+
+// userSettingCardHtml: the "User setting" card — lets a manager (only if their owner
+// has granted manage_staff) add/manage their tablet · kitchen · manager logins right
+// from Settings, instead of needing the separate Owner panel. Reuses /api/owner/staff
+// exactly like the owner's own "Staff & powers" page — the server enforces
+// manage_staff, this card just renders whatever it says.
+function userSettingCardHtml() {
+  if (!state.staffLoaded) {
+    return `<div class="card"><h3>User setting</h3><p class="muted" style="font-size:13px;margin:0">Loading…</p></div>`;
+  }
+  if (state.staffDenied) {
+    return `<div class="card"><h3>User setting</h3><p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">${esc(state.staffDenied)}</p></div>`;
+  }
+  const ROLES = ["manager", "kitchen", "tablet"];
+  const reveal = state.staffReveal
+    ? `<div class="fc-card" style="border-color:var(--green);display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <div><b>New password for ${esc(state.staffReveal.name)}</b><div class="muted small">Copy it now — it can't be shown again.</div></div>
+        <code style="font-family:ui-monospace,monospace;font-weight:700;padding:5px 10px;border-radius:8px;background:color-mix(in srgb, var(--gold) 14%, transparent);letter-spacing:.03em">${esc(state.staffReveal.password)}</code>
+        <button class="btn small" id="usrRevealDone" style="margin-left:auto">Done</button>
+      </div>` : "";
+  const rows = state.staffTeam.length
+    ? state.staffTeam.map((u) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 10px;border-radius:9px;background:var(--panel-2)${u.active ? "" : ";opacity:.6"}">
+        <div style="display:flex;align-items:center;gap:9px;min-width:0">
+          <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:3px 8px;border-radius:999px;background:color-mix(in srgb, var(--gold) 18%, transparent);color:var(--gold-strong)">${esc(u.role)}</span>
+          <span style="font-weight:700;font-size:13.5px">${esc(u.name || u.username)}</span>
+          ${u.active ? "" : `<span style="font-size:10.5px;color:var(--red);font-weight:700">disabled</span>`}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <select data-staff-role="${esc(u.id)}" style="font-size:11.5px;font-weight:700;padding:5px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text)">
+            ${ROLES.map((r) => `<option value="${r}" ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}
+          </select>
+          <button class="btn small" data-staff-resetpw="${esc(u.id)}">Reset password</button>
+          <button class="btn small" data-staff-toggle="${esc(u.id)}" data-active="${u.active ? "1" : "0"}">${u.active ? "Disable" : "Enable"}</button>
+          <button class="btn small danger" data-staff-del="${esc(u.id)}">Remove</button>
+        </div>
+      </div>`).join("")
+    : `<div class="sx-empty">No staff yet — add the first below.</div>`;
+  return `<div class="card"><h3>User setting</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      Add and manage tablet, kitchen, and manager logins for this restaurant — the same
+      team the owner sees in Staff &amp; powers.
+    </p>
+    ${reveal}
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">${rows}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid var(--line)">
+      <input class="sx-input" id="usrNewName" placeholder="Name (their login)" style="flex:1 1 150px"/>
+      <select id="usrNewRole" style="flex:0 0 auto;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--text)">${ROLES.map((r) => `<option value="${r}">${r}</option>`).join("")}</select>
+      <input class="sx-input" id="usrNewPassword" placeholder="Password (blank = auto)" style="flex:1 1 150px"/>
+      <button class="btn primary" id="usrAddStaff">+ Add</button>
+    </div>
+  </div>`;
+}
+
 // formGeneral: the site-wide Settings form — maintenance mode, the bubble
 // effect, table count, and the dining-session/location options.
 function formGeneral(s) {
@@ -804,6 +892,7 @@ function formGeneral(s) {
       </select>
     </div></div>
   </div>
+  ${userSettingCardHtml()}
   <div class="card"><h3>Tablet panel access</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       What the waiter can do with a bill on the tablet. Each is independent and starts
@@ -1444,7 +1533,11 @@ async function setOrderPayment(id, paid, opts = {}) {
   renderEditor();
   renderTablePanel();
   try {
-    await api("PATCH", "/orders/" + id, { payment_status: paid ? "paid" : "pending", ...(revertReason ? { revert_reason: revertReason } : {}) });
+    await api("PATCH", "/orders/" + id, {
+      payment_status: paid ? "paid" : "pending",
+      ...(revertReason ? { revert_reason: revertReason } : {}),
+      ...(paid && opts.method ? { payment_method: opts.method, payment_note: opts.note || "" } : {}),
+    });
     // The bulk "settle whole table" path passes quiet:true so we toast once at the
     // end instead of once per order.
     if (!opts.quiet) toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
@@ -1458,19 +1551,82 @@ async function setOrderPayment(id, paid, opts = {}) {
   }
 }
 
-// markTablePaid: settle the WHOLE table in one tap — mark every unpaid (non-
-// cancelled) order paid after a single "are you sure?" confirm. Used by the
-// on-tile quick button AND the "Mark all paid" button in the table popup, so
-// staff don't have to settle three orders separately.
+// openPaymentMethodModal(due, label): "how did they pay?" — UPI/Cash/Card, or Other
+// with a short typed note. Picking a method IS the confirmation (no separate "are you
+// sure?" step — the old confirmDialog is folded into this one tap). Resolves
+// { method, note } once staff pick one, or null if they cancel; talks to nothing
+// itself — payOrdersWithMethod below does the actual save. (owner, 2026-07-01)
+function openPaymentMethodModal(due, label) {
+  return new Promise((resolve) => {
+    document.querySelector(".pay-overlay")?.remove();
+    const wrap = el(`<div class="sx-modal-overlay pay-overlay"><div class="sx-modal pay-modal">
+      <div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(label)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+      <div class="dish-edit-body">
+        <div class="disc-bill-row"><span>Amount collected</span><b>${inr(due)}</b></div>
+        <div class="dish-edit-lbl">How did they pay? <span class="muted small">— only pick one if the money's actually in hand</span></div>
+        <div class="pay-method-grid">
+          <button type="button" class="pay-method-btn" data-method="UPI"><span class="pmi">📱</span>UPI</button>
+          <button type="button" class="pay-method-btn" data-method="Cash"><span class="pmi">💵</span>Cash</button>
+          <button type="button" class="pay-method-btn" data-method="Card"><span class="pmi">💳</span>Card</button>
+          <button type="button" class="pay-method-btn" data-method="Other"><span class="pmi">⋯</span>Other</button>
+        </div>
+        <div class="pay-other-field" style="display:none">
+          <label class="dish-edit-lbl">What kind?</label>
+          <input type="text" class="dish-edit-custominput" id="payOtherInput" maxlength="60" placeholder="e.g. wallet, bank transfer">
+          <button type="button" class="btn primary pay-other-confirm">Confirm</button>
+        </div>
+      </div>
+      <div class="dish-edit-foot"><button type="button" class="btn dish-edit-cancel">Cancel</button></div>
+    </div></div>`);
+    document.body.appendChild(wrap);
+    let resolved = false;
+    const close = () => wrap.remove();
+    const finish = (method, note) => { resolved = true; close(); resolve({ method, note }); };
+    const cancel = () => { close(); if (!resolved) resolve(null); };
+    wrap.querySelector(".tbl-modal-close").onclick = cancel;
+    wrap.querySelector(".dish-edit-cancel").onclick = cancel;
+    wrap.onclick = (e) => { if (e.target === wrap) cancel(); };
+    wrap.querySelectorAll(".pay-method-btn").forEach((b) => (b.onclick = () => {
+      const m = b.dataset.method;
+      if (m === "Other") {
+        wrap.querySelector(".pay-method-grid").style.display = "none";
+        wrap.querySelector(".pay-other-field").style.display = "";
+        wrap.querySelector("#payOtherInput").focus();
+        return;
+      }
+      finish(m, null);
+    }));
+    const otherInput = wrap.querySelector("#payOtherInput");
+    const confirmOther = () => finish("Other", otherInput.value.trim());
+    wrap.querySelector(".pay-other-confirm").onclick = confirmOther;
+    otherInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); confirmOther(); } };
+  });
+}
+
+// payOrdersWithMethod: the ONE shared "close this bill" flow — opens the payment-
+// method modal, then marks every given order paid with the picked method. Used by
+// all three real "mark a whole bill paid" entry points (table detail, Bills tab,
+// session card), so a bill is never settled without a method recorded. The smaller
+// PER-ORDER correction toggle (data-pay) stays a plain flip via setOrderPayment's
+// own confirm — that's a fix-a-mistake action, not a new payment being collected.
+async function payOrdersWithMethod(orders, label) {
+  if (!orders.length) { toast("Nothing to settle — already paid", "ok"); return false; }
+  const due = orders.reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
+  const picked = await openPaymentMethodModal(due, label);
+  if (!picked) return false; // cancelled
+  for (const o of orders) await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true, method: picked.method, note: picked.note });
+  toast(`Marked paid via ${picked.method} 💳`, "ok");
+  return true;
+}
+
+// markTablePaid: settle the WHOLE table in one go — mark every unpaid (non-
+// cancelled) order paid via payOrdersWithMethod. Used by the on-tile quick button
+// AND the "Mark all paid" button in the table popup, so staff don't have to settle
+// three orders separately.
 async function markTablePaid(t) {
   await ensureTableSlice(t); // a non-selected table's orders aren't cached otherwise
   const os = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
-  if (!os.length) { toast("Nothing to settle — already paid", "ok"); return; }
-  const due = os.reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
-  if (!(await confirmDialog(`Mark table ${t} PAID — settle all ${os.length} order${os.length > 1 ? "s" : ""} (${inr(due)})? Only confirm if the payment has actually been collected.`, "Yes, payment done"))) return;
-  // One confirm above; each order flips quietly, then one summary toast.
-  for (const o of os) await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true });
-  toast(`Table ${t} settled 💳`, "ok");
+  if (!(await payOrdersWithMethod(os, `Mark table ${t} paid`))) return;
   await pollTables([String(t)]); // refresh this tile's summary → green pay ring / "Cleared"
 }
 
@@ -1932,10 +2088,7 @@ function renderEditor() {
     ed.querySelectorAll("[data-sess-pay]").forEach((btn) => {
       btn.onclick = async () => {
         const grp = ordersInGroup(btn.dataset.sessPay).filter((x) => x.status !== "cancelled" && x.payment_status !== "paid");
-        if (!grp.length) return;
-        if (!(await confirmDialog("Mark this whole bill PAID? Only confirm if the payment has actually been collected.", "Yes, payment done"))) return;
-        for (const o of grp) await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true });
-        toast("Bill marked paid 💳", "ok");
+        await payOrdersWithMethod(grp, "Mark this bill paid");
       };
     });
     // Today/Previous: bill cards open a modal; search + sort drive the grid.
@@ -1987,9 +2140,8 @@ function renderEditor() {
     ed.querySelectorAll("[data-pay-table]").forEach((btn) => {
       btn.onclick = async () => {
         const ids = btn.dataset.payTable.split(",").filter(Boolean);
-        if (!ids.length) return;
-        if (!(await confirmDialog(`Mark this whole bill PAID (${ids.length} order${ids.length > 1 ? "s" : ""})? Only confirm if the payment has actually been collected.`, "Yes, payment done"))) return;
-        ids.forEach((id) => setOrderPayment(id, true, { skipConfirm: true }));
+        const orders = ids.map((id) => (state.data.orders || []).find((o) => o.id === id)).filter(Boolean);
+        await payOrdersWithMethod(orders, "Mark this bill paid");
       };
     });
     const updateSel = () => {
@@ -2099,6 +2251,55 @@ function bindEditor() {
       row.style.display = !q || row.dataset.memb.includes(q) ? "" : "none";
     });
   };
+
+  // ---- "User setting" card (Settings tab): the manager's own team ----
+  if (state.tab === "general" && !state.staffLoaded) loadStaffTeam();
+  const usrAdd = $("#usrAddStaff");
+  if (usrAdd) usrAdd.onclick = async () => {
+    const name = ($("#usrNewName")?.value || "").trim();
+    const role = $("#usrNewRole")?.value || "manager";
+    const password = ($("#usrNewPassword")?.value || "").trim();
+    if (name.length < 2) { toast("Name must be at least 2 characters.", "err"); return; }
+    if (!state.staffRestaurantId) { toast("Couldn't tell which restaurant to add to — reload and try again.", "err"); return; }
+    try {
+      const d = await staffCall({ method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: state.staffRestaurantId }) });
+      state.staffReveal = { name: d.name, password: d.password };
+      await loadStaffTeam();
+    } catch (e) { toast("Failed: " + e.message, "err"); }
+  };
+  ed.querySelectorAll("[data-staff-resetpw]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.staffResetpw;
+    const u = state.staffTeam.find((x) => x.id === id);
+    if (!(await confirmDialog(`Reset ${u ? (u.name || u.username) : "this person"}'s password? Their current login stops working.`, "Reset"))) return;
+    try {
+      const d = await staffCall({ method: "PATCH", body: JSON.stringify({ id, action: "reset_password" }) });
+      state.staffReveal = { name: u ? (u.name || u.username) : "", password: d.password };
+      await loadStaffTeam();
+    } catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+  ed.querySelectorAll("[data-staff-toggle]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.staffToggle, active = b.dataset.active !== "1";
+    try { await staffCall({ method: "PATCH", body: JSON.stringify({ id, action: "set_active", active }) }); await loadStaffTeam(); }
+    catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+  ed.querySelectorAll("[data-staff-role]").forEach((sel) => (sel.onchange = async () => {
+    const id = sel.dataset.staffRole;
+    try { await staffCall({ method: "PATCH", body: JSON.stringify({ id, action: "set_role", role: sel.value }) }); await loadStaffTeam(); }
+    catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+  ed.querySelectorAll("[data-staff-del]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.staffDel;
+    const u = state.staffTeam.find((x) => x.id === id);
+    if (!(await confirmDialog(`Remove ${u ? (u.name || u.username) : "this person"} for good? This can't be undone.`, "Remove"))) return;
+    try {
+      const r = await fetch(`/api/owner/staff?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Request failed");
+      await loadStaffTeam();
+    } catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+  const usrRevealDone = $("#usrRevealDone");
+  if (usrRevealDone) usrRevealDone.onclick = () => { state.staffReveal = null; renderEditor(); };
 }
 
 // handleAction: the one place that handles all the small "edit the form" buttons.
