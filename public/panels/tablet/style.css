@@ -79,6 +79,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .t-ready .tlabel { color: #f472b6; }
 .t-done .tlabel { color: #22c55e; }
 .tsub { font-size: 11px; color: var(--muted); }
+.tseats { font-size: 11px; color: var(--gold); font-weight: 700; margin-top: 2px; }
 /* kitchen progress strip + dish-count pills on a tile */
 .tstrip { height: 6px; border-radius: 6px; margin-top: 6px; background: #2a2218; overflow: hidden; display: flex; }
 .tstrip i { display: block; height: 100%; }

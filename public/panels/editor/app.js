@@ -851,6 +851,32 @@ function userSettingCardHtml() {
   </div>`;
 }
 
+// tableSeatingCardHtml: the "Table setting" card — how many people can sit at EACH
+// table (owner request, 2026-07-01). One small number input per table, backed by the
+// table_seats JSONB column (migration 111) keyed by table number. Falls back to 4 when
+// a table has no entry yet — matches the app-wide default read in floorTileHtml/tileHtml.
+// Deliberately reuses the generic data-path input wiring (bindEditor already listens for
+// [data-path] changes and writes into state.sel) — no custom JS needed for this card.
+function tableSeatingCardHtml(s) {
+  const n = Math.max(1, parseInt(s.table_count, 10) || 12);
+  const seats = s.table_seats && typeof s.table_seats === "object" ? s.table_seats : {};
+  let cells = "";
+  for (let i = 1; i <= n; i++) {
+    cells += `<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:8px;background:var(--panel-2)">
+      <span style="font-weight:700;font-size:13px;min-width:26px">T${i}</span>
+      <input type="number" min="1" max="30" data-path="table_seats.${i}" value="${esc(seats[String(i)] ?? 4)}"
+        style="width:56px;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text)"/>
+    </div>`;
+  }
+  return `<div class="card"><h3>Table setting</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      How many people can sit at each table. Shows next to the chair icon on the floor
+      map and the tablet — a table with nothing set here defaults to 4.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;max-height:340px;overflow-y:auto;padding-right:4px">${cells}</div>
+  </div>`;
+}
+
 // formGeneral: the site-wide Settings form — maintenance mode, the bubble
 // effect, table count, and the dining-session/location options.
 function formGeneral(s) {
@@ -877,6 +903,7 @@ function formGeneral(s) {
     </p>
     <div style="max-width:200px">${tf("Number of tables", "table_count", s.table_count ?? 12, { type: "number", min: 1, max: 500, step: 1 })}</div>
   </div>
+  ${tableSeatingCardHtml(s)}
   <div class="card"><h3>Auto close / restart tables</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       When a table's bill is fully <b>paid</b> and every dish is <b>served</b>, free it
@@ -3165,7 +3192,10 @@ function floorTileHtml(i) {
   else if (hasCall) quick = `<button class="btn small ftq" data-quick-attend="${i}">Attend</button>`;
   // A faint chair watermark marks an OFF/free table (an empty seat) — a quiet,
   // premium cue that the table is available.
-  const offIcon = st === "free" ? `<i class="fas fa-chair ft-officon" aria-hidden="true"></i>` : "";
+  // Seat count rides along the SAME watermark (owner request, 2026-07-01 — "how much
+  // person can sit"), from the table_seats setting (migration 111); no entry → 4.
+  const seats = (s.table_seats || {})[String(i)] || 4;
+  const offIcon = st === "free" ? `<div class="ft-officon" aria-hidden="true"><i class="fas fa-chair"></i><span>${seats}</span></div>` : "";
   return `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0">
         ${offIcon}
         <div class="ft-top"><span class="ft-num">${i}</span>${badges ? `<span class="ft-badges">${badges}</span>` : ""}</div>
