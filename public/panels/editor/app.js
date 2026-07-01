@@ -60,6 +60,12 @@ const state = {
   billSearch: "", billSearchType: "inv", billSort: "new", // Bills → Today/Previous search + sort
   logView: lsGet("lfh_editor_logview", "customers"),  // Log left-bar: customers | operations — remembered across refresh
   users: { members: [], customers: [], blocklist: [] }, // Log tab data
+  // "User setting" card (Settings tab): the manager's own team (tablet/kitchen/manager
+  // logins), reusing the SAME /api/owner/staff the owner's "Staff & powers" page uses —
+  // gated server-side by manager_permissions.manage_staff, so a manager without it just
+  // gets a 403 we show as a friendly message (staffDenied). Loaded lazily, once, on first
+  // visit to Settings (see loadStaffTeam), not on every keystroke/render.
+  staffLoaded: false, staffTeam: [], staffDenied: null, staffReveal: null, staffBusy: false, staffRestaurantId: null,
 };
 
 // ---------- tiny helpers ----------
@@ -763,6 +769,98 @@ function filterMembersHtml(f) {
   </div>`;
 }
 
+// loadStaffTeam: fetch this manager's own team ONCE (cookies carry the session —
+// same-origin fetch, no auth wiring needed). A 403 (owner hasn't granted manage_staff)
+// is a NORMAL outcome here, not an error — shown as a quiet inline message instead of
+// a toast. Re-renders Settings when the real data lands (mirrors the floor's
+// skeleton-then-real pattern, just without a shimmer since this is a short list).
+async function loadStaffTeam() {
+  try {
+    const r = await fetch("/api/owner/staff", { cache: "no-store" });
+    const d = await r.json().catch(() => ({}));
+    // /api/owner/staff returns EVERY restaurant the caller may see — just their own
+    // for a manager, but ALL of them for the admin super-user (who can "view as" any
+    // tenant here). Always filter to the ONE restaurant this editor session is
+    // actually scoped to (state.data.restaurant.id, loaded at startup) so an admin
+    // viewing restaurant #1 never sees restaurants #2–10's staff mixed in.
+    const myRid = (state.data.restaurant || {}).id || null;
+    if (!r.ok) { state.staffDenied = d.error || "Couldn't load your team."; state.staffTeam = []; state.staffRestaurantId = null; }
+    else {
+      state.staffDenied = null;
+      state.staffRestaurantId = myRid;
+      state.staffTeam = myRid ? (d.staff || []).filter((u) => u.restaurant_id === myRid) : (d.staff || []);
+    }
+  } catch (e) { state.staffDenied = "Couldn't reach the server."; }
+  state.staffLoaded = true;
+  if (state.tab === "general") renderEditor();
+}
+
+// staffCall: POST/PATCH/DELETE to /api/owner/staff, then always reload the team so the
+// list reflects the server's truth (never trust the optimistic local edit alone — a
+// staff list is small, so a full reload after each action is cheap and simplest).
+async function staffCall(init) {
+  state.staffBusy = true;
+  try {
+    const r = await fetch("/api/owner/staff", { ...init, headers: { "Content-Type": "application/json", ...(init.headers || {}) } });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
+    return d;
+  } finally { state.staffBusy = false; }
+}
+
+// userSettingCardHtml: the "User setting" card — lets a manager (only if their owner
+// has granted manage_staff) add/manage their tablet · kitchen · manager logins right
+// from Settings, instead of needing the separate Owner panel. Reuses /api/owner/staff
+// exactly like the owner's own "Staff & powers" page — the server enforces
+// manage_staff, this card just renders whatever it says.
+function userSettingCardHtml() {
+  if (!state.staffLoaded) {
+    return `<div class="card"><h3>User setting</h3><p class="muted" style="font-size:13px;margin:0">Loading…</p></div>`;
+  }
+  if (state.staffDenied) {
+    return `<div class="card"><h3>User setting</h3><p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">${esc(state.staffDenied)}</p></div>`;
+  }
+  const ROLES = ["manager", "kitchen", "tablet"];
+  const reveal = state.staffReveal
+    ? `<div class="fc-card" style="border-color:var(--green);display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <div><b>New password for ${esc(state.staffReveal.name)}</b><div class="muted small">Copy it now — it can't be shown again.</div></div>
+        <code style="font-family:ui-monospace,monospace;font-weight:700;padding:5px 10px;border-radius:8px;background:color-mix(in srgb, var(--gold) 14%, transparent);letter-spacing:.03em">${esc(state.staffReveal.password)}</code>
+        <button class="btn small" id="usrRevealDone" style="margin-left:auto">Done</button>
+      </div>` : "";
+  const rows = state.staffTeam.length
+    ? state.staffTeam.map((u) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 10px;border-radius:9px;background:var(--panel-2)${u.active ? "" : ";opacity:.6"}">
+        <div style="display:flex;align-items:center;gap:9px;min-width:0">
+          <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:3px 8px;border-radius:999px;background:color-mix(in srgb, var(--gold) 18%, transparent);color:var(--gold-strong)">${esc(u.role)}</span>
+          <span style="font-weight:700;font-size:13.5px">${esc(u.name || u.username)}</span>
+          ${u.active ? "" : `<span style="font-size:10.5px;color:var(--red);font-weight:700">disabled</span>`}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${ROLES.includes(u.role) ? `<select data-staff-role="${esc(u.id)}" style="font-size:11.5px;font-weight:700;padding:5px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text)">
+            ${ROLES.map((r) => `<option value="${r}" ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}
+          </select>` : ""}
+          <button class="btn small" data-staff-resetpw="${esc(u.id)}">Reset password</button>
+          <button class="btn small" data-staff-toggle="${esc(u.id)}" data-active="${u.active ? "1" : "0"}">${u.active ? "Disable" : "Enable"}</button>
+          <button class="btn small danger" data-staff-del="${esc(u.id)}">Remove</button>
+        </div>
+      </div>`).join("")
+    : `<div class="sx-empty">No staff yet — add the first below.</div>`;
+  return `<div class="card"><h3>User setting</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      Add and manage tablet, kitchen, and manager logins for this restaurant — the same
+      team the owner sees in Staff &amp; powers.
+    </p>
+    ${reveal}
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">${rows}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid var(--line)">
+      <input class="sx-input" id="usrNewName" placeholder="Name (their login)" style="flex:1 1 150px"/>
+      <select id="usrNewRole" style="flex:0 0 auto;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--text)">${ROLES.map((r) => `<option value="${r}">${r}</option>`).join("")}</select>
+      <input class="sx-input" id="usrNewPassword" placeholder="Password (blank = auto)" style="flex:1 1 150px"/>
+      <button class="btn primary" id="usrAddStaff">+ Add</button>
+    </div>
+  </div>`;
+}
+
 // formGeneral: the site-wide Settings form — maintenance mode, the bubble
 // effect, table count, and the dining-session/location options.
 function formGeneral(s) {
@@ -804,6 +902,7 @@ function formGeneral(s) {
       </select>
     </div></div>
   </div>
+  ${userSettingCardHtml()}
   <div class="card"><h3>Tablet panel access</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       What the waiter can do with a bill on the tablet. Each is independent and starts
@@ -2099,6 +2198,55 @@ function bindEditor() {
       row.style.display = !q || row.dataset.memb.includes(q) ? "" : "none";
     });
   };
+
+  // ---- "User setting" card (Settings tab): the manager's own team ----
+  if (state.tab === "general" && !state.staffLoaded) loadStaffTeam();
+  const usrAdd = $("#usrAddStaff");
+  if (usrAdd) usrAdd.onclick = async () => {
+    const name = ($("#usrNewName")?.value || "").trim();
+    const role = $("#usrNewRole")?.value || "manager";
+    const password = ($("#usrNewPassword")?.value || "").trim();
+    if (name.length < 2) { toast("Name must be at least 2 characters.", "err"); return; }
+    if (!state.staffRestaurantId) { toast("Couldn't tell which restaurant to add to — reload and try again.", "err"); return; }
+    try {
+      const d = await staffCall({ method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: state.staffRestaurantId }) });
+      state.staffReveal = { name: d.name, password: d.password };
+      await loadStaffTeam();
+    } catch (e) { toast("Failed: " + e.message, "err"); }
+  };
+  ed.querySelectorAll("[data-staff-resetpw]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.staffResetpw;
+    const u = state.staffTeam.find((x) => x.id === id);
+    if (!(await confirmDialog(`Reset ${u ? (u.name || u.username) : "this person"}'s password? Their current login stops working.`, "Reset"))) return;
+    try {
+      const d = await staffCall({ method: "PATCH", body: JSON.stringify({ id, action: "reset_password" }) });
+      state.staffReveal = { name: u ? (u.name || u.username) : "", password: d.password };
+      await loadStaffTeam();
+    } catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+  ed.querySelectorAll("[data-staff-toggle]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.staffToggle, active = b.dataset.active !== "1";
+    try { await staffCall({ method: "PATCH", body: JSON.stringify({ id, action: "set_active", active }) }); await loadStaffTeam(); }
+    catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+  ed.querySelectorAll("[data-staff-role]").forEach((sel) => (sel.onchange = async () => {
+    const id = sel.dataset.staffRole;
+    try { await staffCall({ method: "PATCH", body: JSON.stringify({ id, action: "set_role", role: sel.value }) }); await loadStaffTeam(); }
+    catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+  ed.querySelectorAll("[data-staff-del]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.staffDel;
+    const u = state.staffTeam.find((x) => x.id === id);
+    if (!(await confirmDialog(`Remove ${u ? (u.name || u.username) : "this person"} for good? This can't be undone.`, "Remove"))) return;
+    try {
+      const r = await fetch(`/api/owner/staff?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Request failed");
+      await loadStaffTeam();
+    } catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+  const usrRevealDone = $("#usrRevealDone");
+  if (usrRevealDone) usrRevealDone.onclick = () => { state.staffReveal = null; renderEditor(); };
 }
 
 // handleAction: the one place that handles all the small "edit the form" buttons.
