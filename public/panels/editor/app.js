@@ -3757,47 +3757,47 @@ function bindFloorDelegation() {
   });
 }
 
-// layoutFloatingRow(): auto-arranges every NON-pinned floating popup into a single
-// horizontal row, shrinking them together to keep fitting as more open — never wraps to a
-// second row (owner request, 2026-07-02, confirmed via interactive mockup: "grid tiled
-// view" but locked to one row). The newest non-pinned popup takes the CENTER slot; older
-// ones alternate further out, left/right ("newest in center is right" — confirmed). Pinned
-// (dragged) popups are left exactly where they were dropped and excluded from this
-// computation entirely — the free ones re-share whatever space is left. Applies positions
-// directly to the DOM (cheap — no re-render needed), so it's safe to call after every
-// render AND after any drag/pin/open/close.
+// FLOATING POPUP SLOT MODEL (owner, 2026-07-02 — "everything should stay as it is").
+// The row is a FIXED grid of up to MAX_FLOATING slots. Each non-pinned popup owns a stable
+// slot INDEX and never moves when another popup is dragged out or a new one opens — the
+// whole point of the change (dragging one no longer re-spreads the others). A popup that's
+// dragged/resized becomes PINNED, releases its slot (leaving a GAP), and floats freely.
+// Opening a new table fills the highest-priority EMPTY slot — center-out, so a fresh set
+// "starts from the middle" and drag-vacated gaps get reused before growing outward.
+const MAX_FLOATING = 5;
+const SLOT_ORDER = [2, 1, 3, 0, 4]; // fill/priority order over the 5 fixed slots: middle first, then out
+// firstEmptySlot(): the highest-priority slot index not currently held by a slotted (non-pinned) popup.
+function firstEmptySlot() {
+  const used = new Set(state.floatingTables.filter((f) => !f.pinned && f.slot != null).map((f) => f.slot));
+  for (const s of SLOT_ORDER) if (!used.has(s)) return s;
+  return null;
+}
+// addFloating(t): open table t as a floating popup in the next empty slot (center-out), unless
+// it's already open or we're at the MAX_FLOATING cap. Returns true if it's now open.
+function addFloating(t) {
+  t = String(t);
+  if (state.floatingTables.some((f) => f.table === t)) return true;         // already open
+  if (state.floatingTables.length >= MAX_FLOATING) { toast(`Up to ${MAX_FLOATING} popups at once.`, "err"); return false; }
+  const slot = firstEmptySlot();
+  if (slot == null) { toast(`Up to ${MAX_FLOATING} popups at once.`, "err"); return false; }
+  state.floatingTables.push({ table: t, pinned: false, slot, x: null, y: null, w: null, h: null });
+  return true;
+}
+
+// layoutFloatingRow(): position every NON-pinned popup at its OWN fixed slot. Because slots are
+// fixed, dragging one card out (→ pinned, skipped here) or opening/closing another never moves
+// the rest — they stay exactly where they are. Pinned cards keep their dropped/resized geometry.
+// Slot positions are computed for a full row of MAX_FLOATING slots so they never shift with count.
 function layoutFloatingRow() {
-  const free = state.floatingTables.filter((f) => !f.pinned);
-  const n = free.length;
-  if (!n) return;
-  // A proper CENTERED single row that never runs off-screen (owner, 2026-07-02: the 4th popup
-  // went off the left edge). The old center-out formula was asymmetric — it placed cards at
-  // relative slots 0,-1,+1,-2,… so an even count pushed the outermost off-screen. Instead we
-  // now build the visual left→right ORDER (newest in the middle slot, older ones alternating
-  // outward) and lay the slots out evenly, clamped inside the viewport. Cards shrink together
-  // to keep fitting; startX is clamped so nothing ever crosses the left margin.
-  const NAT_W = 400, GAP = 14, MARGIN = 20, TOP = 70;
+  const GAP = 14, MARGIN = 20, TOP = 70;
   const avail = window.innerWidth - MARGIN * 2;
-  // Width that exactly fills the row for n cards; cap at the natural width. NO hard minimum —
-  // a fixed floor (was 300) forced the row wider than the screen once 5+ were open, so the
-  // outermost overflowed again. Letting cards shrink to fit GUARANTEES they never overflow
-  // (they just get smaller with many open — and each can be resized/dragged out anyway).
-  const w = Math.min(NAT_W, (avail - (n - 1) * GAP) / n);
-  const totalW = n * w + (n - 1) * GAP;
-  const startX = Math.max(MARGIN, (window.innerWidth - totalW) / 2);
-  // free is oldest→newest. Put the newest in the middle slot; fill outward alternately.
-  const order = new Array(n);
-  const mid = Math.floor((n - 1) / 2);
-  order[mid] = free[n - 1];
-  let l = mid - 1, r = mid + 1, idx = n - 2;
-  while (idx >= 0) {
-    if (r < n) order[r++] = free[idx--];
-    if (idx >= 0 && l >= 0) order[l--] = free[idx--];
-  }
-  order.forEach((f, slot) => {
-    if (!f) return;
+  const slotW = (avail - (MAX_FLOATING - 1) * GAP) / MAX_FLOATING;
+  const rowW = MAX_FLOATING * slotW + (MAX_FLOATING - 1) * GAP;
+  const startX = (window.innerWidth - rowW) / 2;
+  state.floatingTables.forEach((f) => {
+    if (f.pinned || f.slot == null) return; // pinned = free-floating; keep its own position
     const el = document.querySelector(`[data-floating-table="${CSS.escape(String(f.table))}"]`);
-    if (el) { el.style.left = (startX + slot * (w + GAP)) + "px"; el.style.top = TOP + "px"; el.style.width = w + "px"; el.style.height = ""; el.style.right = "auto"; }
+    if (el) { el.style.left = (startX + f.slot * (slotW + GAP)) + "px"; el.style.top = TOP + "px"; el.style.width = slotW + "px"; el.style.height = ""; el.style.right = "auto"; }
   });
 }
 
@@ -3887,7 +3887,7 @@ function bindFloor() {
   const openBtn = ed.querySelector("[data-float-open]");
   if (openBtn) openBtn.onclick = () => {
     const t = String(openBtn.dataset.floatOpen);
-    if (!state.floatingTables.some((f) => f.table === t)) state.floatingTables.push({ table: t, pinned: false, x: null, y: null, w: null });
+    if (!addFloating(t)) return; // at the cap → keep it docked
     state.selectedTable = null;
     renderEditor();
   };
@@ -3953,10 +3953,12 @@ function bindFloor() {
         const f = state.floatingTables.find((x) => x.table === t);
         if (f) {
           const rect2 = card.getBoundingClientRect();
-          f.pinned = true; f.x = rect2.left; f.y = rect2.top; f.w = rect2.width;
+          // Pin it AND release its slot → leaves a gap the next new popup will fill; the other
+          // slotted cards keep their fixed positions (they never move because one was dragged).
+          f.pinned = true; f.slot = null; f.x = rect2.left; f.y = rect2.top; f.w = rect2.width;
         }
         card.classList.add("tp-pinned"); // instant visual feedback — the class also lands from the data on the next render anyway
-        layoutFloatingRow(); // re-share the freed-up space among the still-free cards
+        layoutFloatingRow(); // no-op for the others (fixed slots); just keeps things consistent
       };
       head.addEventListener("pointermove", move);
       head.addEventListener("pointerup", up);
@@ -3982,7 +3984,7 @@ function bindFloor() {
         rez.removeEventListener("pointermove", move); rez.removeEventListener("pointerup", up);
         card.classList.remove("dragging");
         const f = state.floatingTables.find((x) => x.table === t);
-        if (f) { const r = card.getBoundingClientRect(); f.pinned = true; f.x = r.left; f.y = r.top; f.w = r.width; f.h = r.height; }
+        if (f) { const r = card.getBoundingClientRect(); f.pinned = true; f.slot = null; f.x = r.left; f.y = r.top; f.w = r.width; f.h = r.height; }
         card.classList.add("tp-pinned");
         layoutFloatingRow();
       };
@@ -4057,10 +4059,7 @@ function deselectTable() { state.selectedTable = null; renderEditor(); }
 // same stale-while-revalidate flow as selectTable, just into a floating card instead of the
 // dock. Guards against duplicating a table that's already floating (a second tap is a no-op).
 function openFloatingTable(table) {
-  const t = String(table);
-  if (!state.floatingTables.some((f) => f.table === t)) {
-    state.floatingTables.push({ table: t, pinned: false, x: null, y: null, w: null });
-  }
+  if (!addFloating(table)) return; // at the cap
   renderEditor();  // instant, summary-accurate
   loadSessions();  // fetch slice → re-render with full dish rows
 }
@@ -5484,6 +5483,8 @@ function startOrderWatch() {
 }
 
 // --- final wiring: connect the static page controls and start everything up ---
+// Keep the floating popups' fixed slots positioned when the window resizes.
+window.addEventListener("resize", () => { if (state.floatingTables.length) layoutFloatingRow(); });
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => setTab(t.dataset.tab))); // top tabs switch views
 document.querySelectorAll(".subtab").forEach((t) => (t.onclick = () => setTab(t.dataset.tab))); // Editor sub-nav: Dishes/Categories/Tags
 $("#newBtn").onclick = newRecord; // the "+ New" button
