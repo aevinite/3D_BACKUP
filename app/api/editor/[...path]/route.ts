@@ -584,25 +584,20 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
 
-    // sessions/open
+    // sessions/open — was 4 sequential DB round-trips (table_count check, existing-session
+    // check, insert-or-update, approve requests); now ONE, via lfh_staff_open_table
+    // (migration 114 — mirrors lfh_staff_open_all_tables' single-round-trip pattern for
+    // the single-table case). Cut the "tap Open → table shows as open" latency roughly
+    // in half (owner report, 2026-07-02 — felt like a 5+ second lag).
     if (a === "sessions" && b === "open") {
       const table = String((body && body.table) || "").trim();
       if (!table) return err("table required");
-      const num = Number(table);
-      if (!/^\d+$/.test(table) || num < 1) return err("invalid table number");
-      const setRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
-      const maxTables = setRow.data && setRow.data.table_count ? Number(setRow.data.table_count) : 0;
-      if (maxTables > 0 && num > maxTables) return err(`Table ${num} doesn't exist — tables are 1–${maxTables}.`);
-      const existing = must(await sb.from("sessions").select("*").eq("table_number", table).eq("restaurant_id", rid).neq("status", "closed").limit(1));
-      let row;
-      if (existing.length) {
-        row = must(await sb.from("sessions").update({ status: "open", opened_by: "waiter", opened_at: existing[0].opened_at || nowIso(), last_activity_at: nowIso() }).eq("id", existing[0].id).select())[0];
-      } else {
-        row = must(await sb.from("sessions").insert({ table_number: table, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select())[0];
-      }
-      await sb.from("requests").update({ status: "approved" }).eq("table_number", table).eq("restaurant_id", rid).eq("status", "pending");
+      if (!/^\d+$/.test(table) || Number(table) < 1) return err("invalid table number");
+      const { data, error } = await sb.rpc("lfh_staff_open_table", { p_restaurant_id: rid, p_table: table });
+      if (error) throw new Error(error.message);
+      if (data && data.error) return err(data.error);
       await logAction("editor", "table_open", { table_number: table, device_id: dev });
-      return ok(row || null);
+      return ok(data || null);
     }
 
     // sessions/open-all — open EVERY not-yet-open table in ONE round-trip (mig 102), instead
