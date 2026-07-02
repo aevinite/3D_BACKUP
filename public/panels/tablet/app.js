@@ -67,14 +67,6 @@ const state = {
   allergies: "",        // order-level allergies (comma list), applied to the whole order
   editOrders: new Set(),// order ids currently in staff EDIT mode (after the kitchen-confirm)
   addToOrderId: null,   // when set, the dish browser ADDS to this existing order (not a new one)
-  // Multi-popup (owner 2026-07-02: "make the tablet same as the manager"). Mirrors the
-  // manager's model exactly: the detail can DOCK in the right side panel (state.table), OR
-  // pop out as draggable FLOATING cards (floatingTables) — and when the side panel is
-  // COLLAPSED, a tile tap opens a floating card instead of docking. floatingTables is an
-  // ordered array (oldest→newest) of { table, pinned, x, y, w }; non-pinned ones auto-arrange
-  // in a single row (newest-centre), a dragged one pins in place. Not persisted across reload.
-  floorSideCollapsed: (() => { try { return localStorage.getItem("lfh_tablet_side_collapsed") === "1"; } catch { return false; } })(),
-  floatingTables: [],
 };
 
 const api = async (method, path, body) => {
@@ -531,10 +523,8 @@ function bindFloorDelegation() {
       return;
     }
     // TILE SELECT last — only reached when no quick button above matched.
-    // Side pane OPEN → dock the detail; pane COLLAPSED → open a FLOATING popup (multi),
-    // same as the manager (owner 2026-07-02).
     const tile = e.target.closest(".tile[data-t]");
-    if (tile) { state.floorSideCollapsed ? openFloatingTablet(tile.dataset.t) : selectTable(tile.dataset.t); }
+    if (tile) selectTable(tile.dataset.t);
   });
 }
 
@@ -611,144 +601,13 @@ function openDishEditModal(itemId) {
   setTimeout(() => input.focus(), 30);
 }
 
-// ── FLOATING multi-popup layer (owner 2026-07-02 — tablet same as manager) ───────────────
-// The floating cards live in a body-level layer (position:fixed, above the floor). Each card
-// re-uses renderPanel(cardInner, table) so its detail + wiring are IDENTICAL to the docked pane.
-// renderFloatingTablet() is called from renderPanel()'s docked path, so any act()→load()→
-// renderPanel() keeps every open card live. Auto-arrange = single row, newest-centre; a dragged
-// card pins in place and drops out of the auto-arrange (exactly the manager's model).
-function renderFloatingTablet() {
-  let layer = document.getElementById("tabletFloatLayer");
-  if (!layer) { layer = document.createElement("div"); layer.id = "tabletFloatLayer"; document.body.appendChild(layer); }
-  const want = new Set(state.floatingTables.map((f) => String(f.table)));
-  [...layer.children].forEach((el) => { if (!want.has(el.dataset.floatingTable)) el.remove(); });
-  state.floatingTables.forEach((f) => {
-    const t = String(f.table);
-    let card = layer.querySelector(`[data-floating-table="${CSS.escape(t)}"]`);
-    if (!card) {
-      card = document.createElement("div");
-      card.className = "tp-detail-floating";
-      card.dataset.floatingTable = t;
-      card.innerHTML = `<button class="tbl-float-dismiss" title="Close this popup">✕</button><div class="panel tablet-float-inner"></div>`;
-      card.querySelector(".tbl-float-dismiss").onclick = () => { state.floatingTables = state.floatingTables.filter((x) => x.table !== t); renderPanel(); };
-      layer.appendChild(card);
-    }
-    card.classList.toggle("tp-pinned", !!f.pinned);
-    renderPanel(card.querySelector(".tablet-float-inner"), t); // detail + wiring, scoped to the card
-    wireTabletFloatDrag(card, t);
-  });
-  layoutTabletFloatingRow();
-}
-
-// Single-row auto-arrange for the non-pinned floating cards (newest centre; older ones
-// alternate outward), shrinking together to keep fitting. Pinned (dragged) cards keep their
-// dropped x/y and are excluded. Mirrors the manager's layoutFloatingRow.
-function layoutTabletFloatingRow() {
-  const free = state.floatingTables.filter((f) => !f.pinned);
-  const n = free.length;
-  if (!n) return;
-  const NAT_W = 380, MIN_W = 280, GAP = 14;
-  const avail = window.innerWidth - 48;
-  const w = (n * NAT_W + (n - 1) * GAP) <= avail ? NAT_W : Math.max(MIN_W, (avail - (n - 1) * GAP) / n);
-  const totalW = n * w + (n - 1) * GAP;
-  const startX = (window.innerWidth - totalW) / 2;
-  const cy = Math.max(64, window.innerHeight / 2 - 260);
-  free.forEach((f, i) => {
-    const rank = n - 1 - i;                 // 0 = newest → centre
-    const side = rank % 2 === 0 ? 1 : -1;
-    const step = Math.ceil(rank / 2);
-    const cx = startX + totalW / 2 + side * step * (w + GAP);
-    const el = document.querySelector(`[data-floating-table="${CSS.escape(String(f.table))}"]`);
-    if (el) { el.style.left = (cx - w / 2) + "px"; el.style.top = cy + "px"; el.style.width = w + "px"; el.style.right = "auto"; }
-  });
-}
-
-// Drag a floating card by its header → pins it (excluded from auto-arrange; the rest re-share
-// the space). Idempotent per render (guarded by a flag so re-render doesn't stack listeners).
-function wireTabletFloatDrag(card, t) {
-  const head = card.querySelector(".phead");
-  if (!head || head.__dragWired) return;
-  head.__dragWired = true;
-  head.style.cursor = "grab";
-  head.addEventListener("pointerdown", (e) => {
-    if (e.target.closest("button")) return;   // don't drag from Dock/✕/Take order
-    e.preventDefault();
-    const startX = e.clientX, startY = e.clientY;
-    const rect = card.getBoundingClientRect();
-    const startLeft = rect.left, startTop = rect.top;
-    try { head.setPointerCapture(e.pointerId); } catch {}
-    card.classList.add("dragging");
-    let moved = false;
-    const move = (ev) => {
-      moved = true;
-      const maxLeft = window.innerWidth - card.offsetWidth - 8, maxTop = window.innerHeight - 60;
-      const x = Math.min(Math.max(8, startLeft + (ev.clientX - startX)), Math.max(8, maxLeft));
-      const y = Math.min(Math.max(8, startTop + (ev.clientY - startY)), Math.max(8, maxTop));
-      card.style.left = x + "px"; card.style.top = y + "px"; card.style.right = "auto";
-    };
-    const up = () => {
-      head.removeEventListener("pointermove", move); head.removeEventListener("pointerup", up);
-      card.classList.remove("dragging");
-      if (!moved) return;
-      const f = state.floatingTables.find((x) => x.table === String(t));
-      if (f) { const r = card.getBoundingClientRect(); f.pinned = true; f.x = r.left; f.y = r.top; f.w = r.width; }
-      card.classList.add("tp-pinned");
-      layoutTabletFloatingRow();
-    };
-    head.addEventListener("pointermove", move);
-    head.addEventListener("pointerup", up);
-  });
-}
-
-// Float / Dock / open actions (mirror the manager).
-function floatTablet(t) {   // pop the DOCKED detail out into a floating card
-  t = String(t);
-  if (!state.floatingTables.some((f) => f.table === t)) state.floatingTables.push({ table: t, pinned: false, x: null, y: null, w: null });
-  if (String(state.table) === t) state.table = null;
-  renderPanel();
-}
-function dockTablet(t) {     // pull a floating card back into the side pane (auto-expands it)
-  t = String(t);
-  state.floatingTables = state.floatingTables.filter((f) => f.table !== t);
-  state.table = t;
-  if (state.floorSideCollapsed) { state.floorSideCollapsed = false; try { localStorage.setItem("lfh_tablet_side_collapsed", "0"); } catch {} applyTabletCollapse(); }
-  renderPanel();
-}
-async function openFloatingTablet(t) {  // tile tap while collapsed → a new floating card
-  t = String(t);
-  if (!state.floatingTables.some((f) => f.table === t)) state.floatingTables.push({ table: t, pinned: false, x: null, y: null, w: null });
-  renderPanel();                 // instant (summary-streaming)
-  await ensureTableSlice(t);     // fetch the full slice
-  renderPanel();                 // fill in dishes
-}
-// Reflect the collapse state on the layout (hide the side pane, float the floor full-width).
-function applyTabletCollapse() {
-  const layout = document.querySelector(".layout");
-  if (layout) layout.classList.toggle("panel-collapsed", !!state.floorSideCollapsed);
-  const tg = document.getElementById("panelToggle");
-  if (tg) { tg.textContent = state.floorSideCollapsed ? "▤ Panel" : "▧ Panel"; tg.title = state.floorSideCollapsed ? "Show the side panel" : "Hide the side panel (tap tables → floating popups)"; }
-}
-
 // ── the table detail panel (view mode) ───────────────────────────────────────
-// renderPanel(target, tbl): draw a table's detail. Called two ways now (owner 2026-07-02
-// — tablet multi-popup, same as manager):
-//   • DOCKED (no args): renders the SELECTED table into the fixed #panel side pane, exactly
-//     as before — the critical order-taking flow is unchanged. Also refreshes any floating
-//     cards so one act()→load()→renderPanel() keeps every open detail live.
-//   • FLOATING (target=cardEl, tbl=N): renders table N's detail INTO a floating card. Every
-//     button was scoped to `p` (the card/pane) above, so multiple cards never cross-fire.
-// All the singleton-id buttons (#takeOrder/#payBill/…) are looked up via p.querySelector, so
-// duplicate cards each wire their OWN — no global collision.
-function renderPanel(target, tbl) {
-  const floating = !!target;
-  const p = target || $("#panel");
+function renderPanel() {
+  const p = $("#panel");
   p.classList.remove("has-detail");
-  if (!floating) {
-    renderFloatingTablet();  // keep floating cards in sync on every docked redraw
-    if (!state.table) { p.innerHTML = `<div class="empty">Tap a table to see it — or to take an order for it.</div>`; return; }
-    if (state.ordering) { renderOrderMode(); return; }
-  }
-  const t = String(floating ? tbl : state.table), s = sessionOf(t), a = tableAgg(t);
+  if (!state.table) { p.innerHTML = `<div class="empty">Tap a table to see it — or to take an order for it.</div>`; return; }
+  if (state.ordering) { renderOrderMode(); return; }
+  const t = state.table, s = sessionOf(t), a = tableAgg(t);
 
   // ── INSTANT RENDER (stale-while-revalidate): before this table's full slice lands, paint an
   // accurate summary-driven detail (open state, guests, dish count, due — all from tableAgg,
@@ -764,7 +623,6 @@ function renderPanel(target, tbl) {
     p.innerHTML = `
       <div class="phead">
         <div style="flex:1"><h2 style="margin:0;font-size:19px">Table ${esc(t)}</h2><div class="pmeta">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${dishN ? `${dishN} dish${dishN === 1 ? "" : "es"}` : "opening…"}</div></div>
-        ${floating ? `<button class="btn small" data-tbl-dock="${esc(t)}" title="Dock back into the side panel">⇱ Dock</button>` : `<button class="btn small" data-tbl-float="${esc(t)}" title="Pop out as a movable floating card">⤢ Float</button>`}
         <button class="btn small backtop" id="backTop">↑ Tables</button>
         <span class="live">● open</span>
       </div>
@@ -775,8 +633,8 @@ function renderPanel(target, tbl) {
         <button class="btn primary big" id="takeOrder">＋ Take order</button>
       </div>
       ${billBox}`;
-    const bt = p.querySelector("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    p.querySelector("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel(); };
+    const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel(); };
     return;
   }
 
@@ -887,7 +745,6 @@ function renderPanel(target, tbl) {
   p.innerHTML = `
     <div class="phead">
       <div style="flex:1"><h2 style="margin:0;font-size:19px">Table ${esc(t)}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"}` : "closed"}</div></div>
-      ${floating ? `<button class="btn small" data-tbl-dock="${esc(t)}" title="Dock back into the side panel">⇱ Dock</button>` : `<button class="btn small" data-tbl-float="${esc(t)}" title="Pop out as a movable floating card">⤢ Float</button>`}
       <button class="btn small backtop" id="backTop">↑ Tables</button>
       ${s ? `<span class="live">● open</span>` : `<span class="off">closed</span>`}
     </div>
@@ -910,79 +767,74 @@ function renderPanel(target, tbl) {
     ${foot}`;
 
   // wire it up
-  p.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqApprove}/resolve`, { status: "approved" }))));
-  p.querySelectorAll("[data-req-deny]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqDeny}/resolve`, { status: "denied" }))));
-  p.querySelectorAll("[data-attend]").forEach((b) => (b.onclick = () => act(() => api("POST", `/calls/${b.dataset.attend}/attend`))));
-  p.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.approve}/approve`))));
-  p.querySelectorAll("[data-makehead]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.makehead}/make-head`))));
+  document.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqApprove}/resolve`, { status: "approved" }))));
+  document.querySelectorAll("[data-req-deny]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqDeny}/resolve`, { status: "denied" }))));
+  document.querySelectorAll("[data-attend]").forEach((b) => (b.onclick = () => act(() => api("POST", `/calls/${b.dataset.attend}/attend`))));
+  document.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.approve}/approve`))));
+  document.querySelectorAll("[data-makehead]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.makehead}/make-head`))));
   // Kick a guest off the table (table stays open). Confirm first — it ends access.
-  p.querySelectorAll("[data-kick]").forEach((b) => (b.onclick = async () => {
+  document.querySelectorAll("[data-kick]").forEach((b) => (b.onclick = async () => {
     if (await confirmDialog("Kick this guest from the table? Their access ends now — the table stays open.", "Kick"))
       act(() => api("POST", `/members/${b.dataset.kick}/remove`));
   }));
   // Ban a guest: kicked now AND blocklisted so they can't rejoin. Destructive — confirm.
-  p.querySelectorAll("[data-ban]").forEach((b) => (b.onclick = async () => {
+  document.querySelectorAll("[data-ban]").forEach((b) => (b.onclick = async () => {
     if (await confirmDialog("Ban this guest? They're kicked now and blocked from rejoining this table.", "Ban"))
       actGated("POST", `/members/${b.dataset.ban}/ban`, null, { message: "Enter a manager PIN to ban this guest." });
   }));
   // Auto-approve toggle: future joiners are approved automatically (no staff review).
   // Attend every waiter call on the table in one tap.
-  p.querySelectorAll("[data-attend-all-calls]").forEach((b) => (b.onclick = () => act(async () => {
+  document.querySelectorAll("[data-attend-all-calls]").forEach((b) => (b.onclick = () => act(async () => {
     for (const c of callsOf(b.dataset.attendAllCalls)) await api("POST", `/calls/${c.id}/attend`);
   })));
   // Discount: shown only when the manager enables it for the tablet (General settings
   // → tablet_discount = on/pin; default off = no button). tabletDiscount() applies
   // the on/pin rule; the server enforces it too.
-  p.querySelectorAll("[data-discount]").forEach((b) => (b.onclick = () => tabletDiscount(b.dataset.discount)));
+  document.querySelectorAll("[data-discount]").forEach((b) => (b.onclick = () => tabletDiscount(b.dataset.discount)));
   // Accept ONE order — optimistic (flips received→preparing instantly, persists in bg).
-  p.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => optimisticAccept([b.dataset.accept])));
+  document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => optimisticAccept([b.dataset.accept])));
   // Accept ALL un-accepted orders on the table in one tap — optimistic + bulk.
-  p.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () =>
+  document.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () =>
     optimisticAccept(ordersOf(b.dataset.acceptAll).filter((o) => o.status === "received").map((o) => o.id))));
   // Serve ALL accepted-but-unserved dishes on the table in one tap — optimistic + bulk.
   // Flips every dish to served on screen INSTANTLY, then fires one /serve-all per order
   // in the background (mirrors the manager + advanceDish). No more waiting on the network.
-  p.querySelectorAll("[data-serve-all]").forEach((b) => (b.onclick = () =>
+  document.querySelectorAll("[data-serve-all]").forEach((b) => (b.onclick = () =>
     optimisticServeAll(ordersOf(b.dataset.serveAll).filter((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served")).map((o) => o.id))));
   // Per-dish advance: optimistically flip the pill, then persist + reconcile.
-  p.querySelectorAll(".ist.tap[data-item]").forEach((el) => (el.onclick = () => advanceDish(el.dataset.item, el.dataset.cur)));
+  document.querySelectorAll(".ist.tap[data-item]").forEach((el) => (el.onclick = () => advanceDish(el.dataset.item, el.dataset.cur)));
   // Explicit "✓ Serve" button on each cooking/ready dish → serves it directly
   // (advanceDish takes preparing/ready straight to served).
-  p.querySelectorAll("[data-serve]").forEach((b) => (b.onclick = () => advanceDish(b.dataset.serve, b.dataset.cur)));
+  document.querySelectorAll("[data-serve]").forEach((b) => (b.onclick = () => advanceDish(b.dataset.serve, b.dataset.cur)));
   // Per-dish delete (confirm first; the server re-prices / cancels an emptied order).
-  p.querySelectorAll("[data-del-item]").forEach((b) => (b.onclick = async () => {
+  document.querySelectorAll("[data-del-item]").forEach((b) => (b.onclick = async () => {
     if (await confirmDialog("Remove this dish from the order? The bill updates automatically.", "Remove dish"))
       act(() => api("POST", `/items/${b.dataset.delItem}/delete`));
   }));
   // Delete a WHOLE order (confirm; refused server-side if the order is already paid).
-  p.querySelectorAll("[data-del-order]").forEach((b) => (b.onclick = async () => {
+  document.querySelectorAll("[data-del-order]").forEach((b) => (b.onclick = async () => {
     if (await confirmDialog("Delete this whole order? It will be permanently removed.", "Delete order"))
       act(() => api("POST", `/orders/${b.dataset.delOrder}/delete`));
   }));
   // ── STAFF EDIT-AFTER-CONFIRM (owner, 2026-06-17) ──────────────────────────
   // Enter edit mode ONLY after the waiter confirms with the kitchen it's still
   // editable (the order may already be cooking). The 2-step confirm IS the guard.
-  p.querySelectorAll("[data-edit-order]").forEach((b) => (b.onclick = async () => {
+  document.querySelectorAll("[data-edit-order]").forEach((b) => (b.onclick = async () => {
     if (await confirmDialog("Have you checked with the kitchen that this order is still editable? Only edit if they haven't started making it.", "Yes — it's editable")) {
       state.editOrders.add(b.dataset.editOrder); renderPanel();
     }
   }));
-  p.querySelectorAll("[data-done-order]").forEach((b) => (b.onclick = () => { state.editOrders.delete(b.dataset.doneOrder); renderPanel(); }));
+  document.querySelectorAll("[data-done-order]").forEach((b) => (b.onclick = () => { state.editOrders.delete(b.dataset.doneOrder); renderPanel(); }));
   // Quantity −/＋ on one dish (re-prices the bill server-side, clamped 1..99).
-  p.querySelectorAll("[data-qty-inc]").forEach((b) => (b.onclick = () => act(() => api("POST", `/items/${b.dataset.qtyInc}/qty`, { qty: Math.min(99, (parseInt(b.dataset.qty, 10) || 1) + 1) }))));
-  p.querySelectorAll("[data-qty-dec]").forEach((b) => (b.onclick = () => { const q = (parseInt(b.dataset.qty, 10) || 1) - 1; if (q < 1) { toast("Use 🗑 to remove the dish", false); return; } act(() => api("POST", `/items/${b.dataset.qtyDec}/qty`, { qty: q })); }));
+  document.querySelectorAll("[data-qty-inc]").forEach((b) => (b.onclick = () => act(() => api("POST", `/items/${b.dataset.qtyInc}/qty`, { qty: Math.min(99, (parseInt(b.dataset.qty, 10) || 1) + 1) }))));
+  document.querySelectorAll("[data-qty-dec]").forEach((b) => (b.onclick = () => { const q = (parseInt(b.dataset.qty, 10) || 1) - 1; if (q < 1) { toast("Use 🗑 to remove the dish", false); return; } act(() => api("POST", `/items/${b.dataset.qtyDec}/qty`, { qty: q })); }));
   // "✎ Edit" one dish → the unified modal (allergens incl. custom + kitchen note),
   // IDENTICAL to the manager panel's openDishEditModal.
-  p.querySelectorAll("[data-edit-dish]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.editDish)));
+  document.querySelectorAll("[data-edit-dish]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.editDish)));
   // Add a dish to THIS already-placed order: reuse the dish browser in add mode.
-  p.querySelectorAll("[data-add-dish]").forEach((b) => (b.onclick = () => {
-    // Adding a dish enters ordering mode (a #panel takeover) — dock this table first if we're
-    // acting from a floating card, so the dish browser has the pane to itself.
-    if (floating) { state.floatingTables = state.floatingTables.filter((f) => f.table !== String(t)); state.table = String(t); if (state.floorSideCollapsed) { state.floorSideCollapsed = false; try { localStorage.setItem("lfh_tablet_side_collapsed", "0"); } catch {} } }
-    state.ordering = true; state.addToOrderId = b.dataset.addDish; state.cat = ""; state.dishSearch = ""; renderPanel();
-  }));
+  document.querySelectorAll("[data-add-dish]").forEach((b) => (b.onclick = () => { state.ordering = true; state.addToOrderId = b.dataset.addDish; state.cat = ""; state.dishSearch = ""; renderPanel(); }));
   // Per-order allergen chips: toggle an allergen on/off for the whole order.
-  p.querySelectorAll(".talg[data-alg]").forEach((chip) => (chip.onclick = () => {
+  document.querySelectorAll(".talg[data-alg]").forEach((chip) => (chip.onclick = () => {
     const id = chip.dataset.alg, slug = chip.dataset.slug;
     const o = (state.data.orders || []).find((x) => x.id === id);
     if (!o) return;
@@ -992,11 +844,11 @@ function renderPanel(target, tbl) {
     chip.classList.toggle("on");   // INSTANT visual feedback — before this it only hit the server, so the tap felt dead ("allergy not clicking")
     act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }));
   }));
-  const ob = p.querySelector("#openTable"); if (ob) ob.onclick = () => optimisticOpen(t);
-  const shb = p.querySelector("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
+  const ob = $("#openTable"); if (ob) ob.onclick = () => optimisticOpen(t);
+  const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
   // Restart: clear this round's orders off the floor (they stay served+archived in
   // records) but keep the table OPEN for a fresh round. Mirrors the manager.
-  const rsb = p.querySelector("#restartTable"); if (rsb && s) rsb.onclick = async () => {
+  const rsb = $("#restartTable"); if (rsb && s) rsb.onclick = async () => {
     if (!(await confirmDialog(`Restart table ${t}? Its current orders clear off the floor and the table stays OPEN for a fresh round.`, "Restart"))) return;
     // Restart means NO ONE is sitting and the round is cleared — show that INSTANTLY.
     // Clear this table's orders + free its seats locally so the tile never flashes the
@@ -1009,16 +861,14 @@ function renderPanel(target, tbl) {
     await actGated("POST", `/tables/${t}/restart`, null, { message: "This table has a round going — enter a manager PIN to restart it." });
     await load(); // reconcile (also reverts the optimistic clear if the PIN was cancelled)
   };
-  const pb = p.querySelector("#payBill"); if (pb) pb.onclick = () => payBillWithMethod(t, a);
-  const gib = p.querySelector("#genInvoiceBtn"); if (gib && s) gib.onclick = () => genInvoice(s.id);
-  const clb = p.querySelector("#closeTable"); if (clb && s) clb.onclick = async () => {
+  const pb = $("#payBill"); if (pb) pb.onclick = () => payBillWithMethod(t, a);
+  const gib = $("#genInvoiceBtn"); if (gib && s) gib.onclick = () => genInvoice(s.id);
+  const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
     const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
     if (!(await confirmDialog(`Close table ${t} and free it?${warn}`, "Close table"))) return;
     // OPTIMISTIC: drop the session locally so the tile frees INSTANTLY, then persist.
     state.data.sessions = (state.data.sessions || []).filter((x) => x.id !== s.id);
-    // Closing from a FLOATING card removes just that card; from the docked pane clears it.
-    if (floating) state.floatingTables = state.floatingTables.filter((f) => f.table !== String(t));
-    else { state.table = null; state.ordering = false; }
+    state.table = null; state.ordering = false;
     renderFloor(); renderPanel();
     try {
       await api("POST", `/sessions/${s.id}/close`);
@@ -1034,17 +884,8 @@ function renderPanel(target, tbl) {
       toast("Failed: " + e.message, false);
     }
   };
-  const bt = p.querySelector("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  // Float this docked detail out into a draggable card; Dock a floating one back into the pane.
-  const flb = p.querySelector("[data-tbl-float]"); if (flb) flb.onclick = () => floatTablet(t);
-  const dkb = p.querySelector("[data-tbl-dock]"); if (dkb) dkb.onclick = () => dockTablet(t);
-  // Take order — ordering mode is a full #panel takeover (one order at a time). From a
-  // FLOATING card, dock this table into the pane FIRST, then enter ordering.
-  const tob = p.querySelector("#takeOrder");
-  if (tob) tob.onclick = () => {
-    if (floating) { state.floatingTables = state.floatingTables.filter((f) => f.table !== String(t)); state.table = String(t); if (state.floorSideCollapsed) { state.floorSideCollapsed = false; try { localStorage.setItem("lfh_tablet_side_collapsed", "0"); } catch {} } }
-    state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel();
-  };
+  const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel(); };
 }
 
 // Advance one dish new→cooking→served (wrapping). Optimistic so it feels instant.
@@ -1931,16 +1772,6 @@ if (window.LFH_RT) {
   drawer.querySelector(".dw-close").onclick = closeDrawer;
   drawer.querySelector("#dwTheme").onclick = () => document.getElementById("themeToggle")?.click();
   const ham = document.getElementById("hamburger"); if (ham) ham.onclick = openDrawer;
-  // Collapse / expand the side pane. Collapsed → tile taps open floating popups (multi).
-  const pt = document.getElementById("panelToggle");
-  if (pt) pt.onclick = () => {
-    state.floorSideCollapsed = !state.floorSideCollapsed;
-    try { localStorage.setItem("lfh_tablet_side_collapsed", state.floorSideCollapsed ? "1" : "0"); } catch {}
-    applyTabletCollapse();
-    renderPanel();
-  };
-  applyTabletCollapse(); // reflect the persisted state on load
-  window.addEventListener("resize", () => layoutTabletFloatingRow());
 
   let profileLoaded = false;
   async function loadProfile() {
