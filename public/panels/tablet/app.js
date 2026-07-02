@@ -166,6 +166,17 @@ async function actGated(method, path, body, opts = {}) {
 // ── floor helpers ────────────────────────────────────────────────────────────
 const sessionOf = (t) => state.data.sessions.find((s) => String(s.table_number) === String(t) && s.status === "open");
 const ordersOf = (t) => state.data.orders.filter((o) => String(o.table_number) === String(t) && o.status !== "cancelled");
+// sliceLoaded(t): has table t's FULL slice (session row or a live order) landed yet? The grid
+// runs on the slim summary; a table's full detail slice is only fetched when you tap it. Before
+// that first fetch, sessionOf/ordersOf are empty even for an occupied table — so the detail
+// briefly showed "closed / no orders" for 3-4s until /state?table=N landed. This lets renderPanel
+// paint an instant, summary-accurate "opening…" detail meanwhile (stale-while-revalidate), with
+// only the dish rows streaming in. (owner report, 2026-07-02 — tablet was the worst offender.)
+const sliceLoaded = (t) => {
+  const s = String(t);
+  return state.data.sessions.some((x) => String(x.table_number) === s)
+      || state.data.orders.some((o) => String(o.table_number) === s && o.status !== "cancelled");
+};
 const callsOf = (t) => state.data.calls.filter((c) => String(c.table_number) === String(t));
 // Waiter-call note → icon (matches the manager's REASON_EMOJI). Case-insensitive so it
 // works whatever casing the guest app sent — shows WHAT was called, not just a bell.
@@ -597,6 +608,36 @@ function renderPanel() {
   if (!state.table) { p.innerHTML = `<div class="empty">Tap a table to see it — or to take an order for it.</div>`; return; }
   if (state.ordering) { renderOrderMode(); return; }
   const t = state.table, s = sessionOf(t), a = tableAgg(t);
+
+  // ── INSTANT RENDER (stale-while-revalidate): before this table's full slice lands, paint an
+  // accurate summary-driven detail (open state, guests, dish count, due — all from tableAgg,
+  // which already reads the summary for a non-loaded tile) instead of the old "closed / no
+  // orders" that showed for 3-4s. The dish rows + party + full actions stream in the instant the
+  // slice arrives (selectTable re-renders). Only for an OCCUPIED table whose slice isn't in yet.
+  if (!sliceLoaded(t) && tileIsOpen(t)) {
+    const dishN = a.nw + a.ck + a.rd + a.sv;
+    const load = `<div class="muted" style="display:flex;align-items:center;gap:8px;padding:6px 0"><span class="tsl-dot"></span> Loading order details…</div>`;
+    const payCls = a.unpaid ? "unpaid" : a.paid ? "paid" : "";
+    const billBox = (a.due > 0 || dishN) ? `<div class="foot"><div class="billbox ${payCls}"><span class="bn">bill</span>${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : a.paid ? "paid ✓" : "● new"}</span></div></div>` : "";
+    p.classList.add("has-detail");
+    p.innerHTML = `
+      <div class="phead">
+        <div style="flex:1"><h2 style="margin:0;font-size:19px">Table ${esc(t)}</h2><div class="pmeta">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${dishN ? `${dishN} dish${dishN === 1 ? "" : "es"}` : "opening…"}</div></div>
+        <button class="btn small backtop" id="backTop">↑ Tables</button>
+        <span class="live">● open</span>
+      </div>
+      <div class="detail-body">
+        <div class="sec"><h3>Orders</h3>${load}</div>
+      </div>
+      <div class="dacts">
+        <button class="btn primary big" id="takeOrder">＋ Take order</button>
+      </div>
+      ${billBox}`;
+    const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel(); };
+    return;
+  }
+
   // renderPanel only ever draws the SELECTED table, whose full slice is loaded — so read its
   // orders straight from the slice (tableAgg no longer carries `os`, which would be empty for an
   // unselected table anyway). calls/joiners/members/reqs likewise come from the loaded slice.

@@ -692,6 +692,13 @@ body {
 .sx-panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; }
 .sx-panel h3 { margin: 0 0 10px; font-size: 15px; }
 .sx-empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+/* "Loading details…" line shown in a detail section while the table's full slice streams
+   in behind an instant summary-driven head (stale-while-revalidate). A soft pulsing dot
+   signals "working", not "empty" — it's only on screen for a sub-second in practice. */
+.sx-loading { color: var(--muted); font-size: 13px; padding: 8px 0; display: flex; align-items: center; gap: 8px; }
+.sx-load-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); animation: sxLoadPulse 1s ease-in-out infinite; }
+@keyframes sxLoadPulse { 0%, 100% { opacity: .35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.1); } }
+@media (prefers-reduced-motion: reduce) { .sx-load-dot { animation: none; } }
 .sx-req { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 9px 0; border-top: 1px solid var(--line); }
 .sx-req:first-of-type { border-top: none; }
 .sx-req-info { font-size: 14px; }

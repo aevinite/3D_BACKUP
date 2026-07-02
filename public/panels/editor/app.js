@@ -3177,6 +3177,18 @@ const ordersForTable = (t) => {
   return list;
 };
 const openSessionForTable = (t) => (state.board.sessions || []).find((s) => String(s.table_number) === String(t) && s.status === "open"); // t's open session
+// sliceLoaded(t): has table t's FULL slice (its session row OR any live order) landed in
+// memory yet? The two-tier design (mig 101) only fetches a table's full slice when its
+// detail opens — so before that first fetch, ordersForTable/openSessionForTable are empty
+// even for an occupied table. This tells the detail builder whether to render the real
+// dish rows (loaded) or an instant "loading details…" placeholder driven by the always-
+// fresh summary tile (streaming) — the stale-while-revalidate pattern that removes the
+// 1-2s blank-panel wait without any extra fetch. (owner report, 2026-07-02)
+function sliceLoaded(t) {
+  const s = String(t);
+  return (state.board.sessions || []).some((x) => String(x.table_number) === s)
+      || (state.data.orders || []).some((o) => !o.archived && String(o.table_number) === s);
+}
 // Open (unresolved) waiter calls at table t. Safety net: when dining sessions are
 // ON, a call only counts while the table is actually OPEN — so a free/closed table
 // can never show a lingering "call" badge even if a stale row slipped through.
@@ -3961,28 +3973,27 @@ async function saveGeo() {
 // landed, was a guaranteed double-render/flicker on every open, not just an occasional
 // race). A modal appearing a beat after the tap (one real network round-trip) reads as
 // normal; two back-to-back redraws reads as broken.
-function openTablePanel(table) { state.openSess = String(table); loadSessions(); }
+// Render the modal INSTANTLY (from the summary-driven streaming view — see tablePanelParts),
+// THEN loadSessions() fetches the slice and re-renders with real dish rows. Instant because
+// the first paint is summary-accurate (not stale/empty), so there's no wrong-then-corrected
+// flicker — just the dish list filling in. (owner report, 2026-07-02: the modal took 1-2s
+// to appear at all; this is the stale-while-revalidate fix.)
+function openTablePanel(table) { state.openSess = String(table); renderTablePanel(); loadSessions(); }
 function closeTablePanel() { state.openSess = null; document.querySelector(".sx-modal-overlay")?.remove(); }
 
 // selectTable / deselectTable — the NEW master-detail (Tables tab). Selecting a
 // table shows its full detail IN the right side panel (not a pop-up); deselecting
 // returns the panel to the whole-floor controls.
-// Selecting does NOT render synchronously — same reasoning as openTablePanel above: an
-// instant render would show this table's OLD cached (or empty) data, then loadSessions'
-// own render corrects it a moment later once the real fetch lands, reading as a double-
-// load/flicker. Only the tile highlight updates instantly (direct DOM, not a full
-// re-render) so the tap still feels acknowledged; the detail panel itself waits for the
-// one real render.
+// Renders INSTANTLY (renderEditor) using the summary-driven streaming view, THEN
+// loadSessions() re-renders with the full dish list once the slice lands. This is the
+// stale-while-revalidate fix: the first paint is ACCURATE (summary guests/dishes/due),
+// not stale/empty, so bringing back the instant render (removed in an earlier over-
+// correction) no longer flickers — the detail appears immediately and the dishes stream in.
 function selectTable(table) {
   const t = String(table);
-  const prev = state.selectedTable;
   state.selectedTable = t;
-  const ed = $("#editor");
-  if (ed) {
-    if (prev != null) { const p = ed.querySelector(`[data-floor-table="${CSS.escape(prev)}"]`); if (p) p.classList.remove("ft-sel"); }
-    const n = ed.querySelector(`[data-floor-table="${CSS.escape(t)}"]`); if (n) n.classList.add("ft-sel");
-  }
-  loadSessions();
+  renderEditor();  // instant, summary-accurate
+  loadSessions();  // fetch slice → re-render with full dish rows
 }
 function deselectTable() { state.selectedTable = null; renderEditor(); }
 
@@ -4134,9 +4145,21 @@ function tablePanelParts(t) {
   const os = ordersForTable(t);
   const sess = openSessionForTable(t);
   const calls = callsForTable(t);
-  // Both totals are net of any discounts staff have given.
-  const due = os.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid").reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
-  const billTotal = os.filter((o) => o.status !== "cancelled").reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
+
+  // ── INSTANT RENDER (stale-while-revalidate): before this table's full slice has loaded,
+  // render the head + a light "loading details…" body from the ALWAYS-fresh summary tile
+  // (guests/dishes/due/status — everything but the individual dish rows), so the popup
+  // opens instantly with accurate numbers instead of a 1-2s blank "isn't open yet". The
+  // dish rows + guest rows + action buttons stream in the moment the slice lands (~sub-
+  // second) and the detail re-renders. Only kicks in for an OCCUPIED table whose slice
+  // isn't in yet — a genuinely free table renders its real "Open this table" state.
+  const sumTile = (state.summary.tiles || {})[String(t)] || {};
+  const streaming = !sliceLoaded(t) && summaryTableOpen(t);
+
+  // Both totals are net of any discounts staff have given. While streaming, the summary
+  // tile's precomputed `due` stands in (it's server-computed net of discounts too).
+  const due = streaming ? (Number(sumTile.due) || 0) : os.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid").reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
+  const billTotal = streaming ? (Number(sumTile.due) || 0) : os.filter((o) => o.status !== "cancelled").reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
   const canFree = os.length > 0 && os.every((o) => o.payment_status === "paid" || o.status === "cancelled");
 
   // ── HEAD: a status pill, a one-line summary (bill #, guests, dishes, due) and a
@@ -4145,14 +4168,31 @@ function tablePanelParts(t) {
   const tile = tableTileState(t);
   const headPill = `<span class="tp-pill tp-pill-${esc(tile.st)}">● ${esc(tile.label)}</span>`;
   const liveRowsAll = os.filter((o) => o.status !== "cancelled").flatMap((o) => orderItemRows(o));
-  const cServed = liveRowsAll.filter((r) => r.status === "served").length;
-  const cCook = liveRowsAll.filter((r) => r.status === "preparing" || r.status === "ready").length;
-  const cRecv = liveRowsAll.filter((r) => r.status === "received").length;
-  const nItems = liveRowsAll.length || 1;
-  const guestsN = sess ? membersOf(sess.id).length : 0;
-  const subLine = `<div class="tp-det-sub">${sess && sess.bill_no != null ? `<span>Bill <b>#${esc(sess.bill_no)}</b></span>` : ""}<span><b>${guestsN}</b> guest${guestsN === 1 ? "" : "s"}</span><span><b>${liveRowsAll.length}</b> dish${liveRowsAll.length === 1 ? "" : "es"}</span>${due > 0 ? `<span>Due <b>${inr(due)}</b></span>` : billTotal > 0 ? `<span>Total <b>${inr(billTotal)}</b></span>` : ""}</div>`;
-  const progress = liveRowsAll.length ? `<div class="tp-prog"><div class="tp-prog-bar"><span class="pp-served" style="width:${(cServed / nItems) * 100}%"></span><span class="pp-cook" style="width:${(cCook / nItems) * 100}%"></span><span class="pp-recv" style="width:${(cRecv / nItems) * 100}%"></span></div><div class="tp-prog-leg"><span><i class="pl-served"></i>${cServed} served</span><span><i class="pl-cook"></i>${cCook} cooking</span><span><i class="pl-recv"></i>${cRecv} new</span></div></div>` : "";
+  // Count dishes by QUANTITY (a "2× Cappuccino" row is 2 dishes), matching both the summary
+  // tile and the floor tile's "0/3 served" — so the head's numbers stay identical whether
+  // they come from the summary (streaming) or the loaded rows, with no 3→2 blip when the
+  // slice lands.
+  const sc = sumTile.counts || { nw: 0, ck: 0, rd: 0, sv: 0 }; // summary per-status dish counts (already by qty)
+  const qsum = (pred) => liveRowsAll.filter(pred).reduce((s, r) => s + Math.max(1, parseInt(r.qty, 10) || 1), 0);
+  const cServed = streaming ? (sc.sv || 0) : qsum((r) => r.status === "served");
+  const cCook = streaming ? ((sc.ck || 0) + (sc.rd || 0)) : qsum((r) => r.status === "preparing" || r.status === "ready");
+  const cRecv = streaming ? (sc.nw || 0) : qsum((r) => r.status === "received");
+  const dishN = streaming ? (cServed + cCook + cRecv) : qsum(() => true);
+  const nItems = dishN || 1;
+  const guestsN = streaming ? (Number(sumTile.members) || 0) : (sess ? membersOf(sess.id).length : 0);
+  const subLine = `<div class="tp-det-sub">${sess && sess.bill_no != null ? `<span>Bill <b>#${esc(sess.bill_no)}</b></span>` : ""}<span><b>${guestsN}</b> guest${guestsN === 1 ? "" : "s"}</span><span><b>${dishN}</b> dish${dishN === 1 ? "" : "es"}</span>${due > 0 ? `<span>Due <b>${inr(due)}</b></span>` : billTotal > 0 ? `<span>Total <b>${inr(billTotal)}</b></span>` : ""}</div>`;
+  const progress = dishN ? `<div class="tp-prog"><div class="tp-prog-bar"><span class="pp-served" style="width:${(cServed / nItems) * 100}%"></span><span class="pp-cook" style="width:${(cCook / nItems) * 100}%"></span><span class="pp-recv" style="width:${(cRecv / nItems) * 100}%"></span></div><div class="tp-prog-leg"><span><i class="pl-served"></i>${cServed} served</span><span><i class="pl-cook"></i>${cCook} cooking</span><span><i class="pl-recv"></i>${cRecv} new</span></div></div>` : "";
   const headMeta = subLine + progress;
+
+  // STREAMING: head is accurate from summary; the actionable body (guest rows, dish rows,
+  // bill breakdown, action buttons) needs the slice, so show a light shimmer line for each
+  // until it lands. Return here so the heavy per-order builders below never run on empty data.
+  if (streaming) {
+    const loadRow = `<div class="sx-loading"><span class="sx-load-dot"></span> Loading details…</div>`;
+    const sessionSec = sessionsOn ? `<div class="sx-sec"><div class="sx-sec-h">Guests <span class="sub">· ${guestsN}</span></div>${loadRow}</div>` : "";
+    const ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${dishN}</span></div>${loadRow}</div>`;
+    return { sess: null, os: [], canFree: false, headPill, headMeta, sessionSec, ordersSec, callsSec: "", billSec: "", foot: "" };
+  }
 
   let sessionSec = "";
   if (sessionsOn) {
