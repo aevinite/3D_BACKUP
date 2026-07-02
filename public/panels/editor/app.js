@@ -3742,8 +3742,13 @@ function bindFloorDelegation() {
     // TILE SELECT last — only reached when no button above matched.
     const tile = e.target.closest("[data-floor-table]");
     if (tile) {
-      // F1: collapsed right panel → open a FULL-SCREEN popup; open panel → in-side detail.
-      if (state.floorSideCollapsed) openTablePanel(tile.dataset.floorTable);
+      // Side panel OPEN → dock the detail in the side panel (single, master-detail).
+      // Side panel COLLAPSED → open a FLOATING popup instead (owner, 2026-07-02:
+      // "when the side panel is closed the popup mode starts"). This retires the old
+      // full-screen BLUR modal (openTablePanel) that blocked the floor + closed on an
+      // outside click — collapsed mode now gives the same draggable, multi-open,
+      // non-blocking popups as the Float button, so you can open several tables at once.
+      if (state.floorSideCollapsed) openFloatingTable(tile.dataset.floorTable);
       else selectTable(tile.dataset.floorTable);
     }
   });
@@ -3890,6 +3895,10 @@ function bindFloor() {
     if (dockBtn) dockBtn.onclick = () => {
       state.floatingTables = state.floatingTables.filter((f) => f.table !== t);
       state.selectedTable = t;
+      // "Dock" = show this table in the side panel — which is hidden while collapsed, so
+      // docking must expand it (else the detail would vanish into a hidden panel). Only one
+      // table can be docked; any others stay floating.
+      if (state.floorSideCollapsed) { state.floorSideCollapsed = false; lsSet("lfh_floor_side_collapsed", "0"); }
       renderEditor();
     };
     const closeBtn = card.querySelector("[data-float-close]");
@@ -3996,6 +4005,20 @@ function selectTable(table) {
   loadSessions();  // fetch slice → re-render with full dish rows
 }
 function deselectTable() { state.selectedTable = null; renderEditor(); }
+
+// openFloatingTable(t): open (or re-focus) table t as a FLOATING popup — the tile-tap
+// entry point when the side panel is collapsed (owner, 2026-07-02: collapsed → popup mode).
+// Renders instantly (summary-accurate streaming), then loadSessions fills in the dishes —
+// same stale-while-revalidate flow as selectTable, just into a floating card instead of the
+// dock. Guards against duplicating a table that's already floating (a second tap is a no-op).
+function openFloatingTable(table) {
+  const t = String(table);
+  if (!state.floatingTables.some((f) => f.table === t)) {
+    state.floatingTables.push({ table: t, pinned: false, x: null, y: null, w: null });
+  }
+  renderEditor();  // instant, summary-accurate
+  loadSessions();  // fetch slice → re-render with full dish rows
+}
 
 // refreshTableDetail: redraw whichever table-detail view is currently open after a
 // local (optimistic) change, so the instant feedback works in BOTH places. There
