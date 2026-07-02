@@ -54,7 +54,15 @@ const state = {
   openSess: null, // table number whose session modal is open
   selectedTable: null, // table number whose DETAIL is shown IN the right side panel (Tables tab master-detail). null = show the floor controls instead.
   floorSideCollapsed: lsGet("lfh_floor_side_collapsed", "0") === "1", // F1: right floor panel collapsed → clicking a table opens a FULL-SCREEN popup instead of the in-side detail.
-  floorDetailFloating: lsGet("lfh_floor_detail_floating", "0") === "1", // detail panel popped out as a draggable floating card instead of pinned to the side
+  // Floating popups (owner request, 2026-07-02 — "I want many popups at the same time"):
+  // an ORDERED array (oldest→newest) of { table, pinned, x, y, w } — one entry per table
+  // whose detail is floating right now. Non-pinned ones auto-arrange in a single row
+  // (newest-center, shrinking together to keep fitting — see layoutFloatingRow); dragging
+  // one sets pinned + its own x/y/w and excludes it from that auto-arrange. Independent of
+  // the DOCKED side-panel detail (selectedTable) — floating is purely additive, the docked
+  // single-table flow is untouched. Not persisted across reload (matches floorSideW/
+  // floorFloatX's existing convention — positions are session-only, not saved state).
+  floatingTables: [],
   floorTileDensity: lsGet("lfh_floor_tile_density", "m"), // s | m | l — how many tiles fit per row in the floor grid
   ordersView: lsGet("lfh_editor_ordersview", "live"), // Orders left-bar: live | previous | bills | calls — remembered across refresh
   billSearch: "", billSearchType: "inv", billSort: "new", // Bills → Today/Previous search + sort
@@ -2790,7 +2798,7 @@ async function loadTableSlice(t) {
 // handler has table t's real order/call rows to act on, even when t isn't selected. Best-effort:
 // a fetch failure leaves the caches as-is (the handler then no-ops rather than throwing).
 async function ensureTableSlice(t) {
-  if (detailTable() === String(t)) return; // the open-detail table's slice is already kept fresh
+  if (detailTables().includes(String(t))) return; // the open-detail table's slice is already kept fresh
   try { await loadTableSlice(t); } catch {}
 }
 
@@ -2802,6 +2810,17 @@ function detailTable() {
   return state.selectedTable != null ? String(state.selectedTable)
        : state.openSess != null ? String(state.openSess)
        : null;
+}
+// detailTables(): EVERY table whose full detail needs to stay loaded right now — everything
+// detailTable() covers, PLUS every floating popup (owner request, 2026-07-02 — multiple
+// tables' details open at once, each a separate draggable card). Used wherever fetching/
+// merging/redraw-gating must account for ALL open details, not just the docked one.
+function detailTables() {
+  const set = new Set();
+  const dt = detailTable();
+  if (dt != null) set.add(dt);
+  for (const f of state.floatingTables) set.add(String(f.table));
+  return [...set];
 }
 
 // loadSessions: fetch (or reuse) the live tables board and redraw the floor. The
@@ -2815,23 +2834,24 @@ async function loadSessions(fromPoll) {
     const seq = ++dataSeq;
     try {
       // TIER 1: the slim per-tile SUMMARY drives the GRID + side-panel queues + chimes (mig 101).
-      // TIER 2: if a table's DETAIL is open (in-panel OR collapsed-mode modal), ALSO fetch its
-      // FULL slice (sessions/orders/calls ?table=N) so the detail renders complete order rows +
-      // members. The grid never needs them.
-      const sel = detailTable();
-      const reqs = [api("GET", "/summary")];
-      if (sel != null) {
-        const q = "?table=" + encodeURIComponent(sel);
-        reqs.push(api("GET", "/sessions" + q), api("GET", "/orders" + q), api("GET", "/calls" + q));
-      }
-      const [summary, selBoard, selOrders, selCalls] = await Promise.all(reqs);
+      // TIER 2: every table with a DETAIL open (docked, collapsed-mode modal, OR floating —
+      // detailTables(), owner 2026-07-02: multiple floating popups at once) ALSO gets its FULL
+      // slice fetched (sessions/orders/calls ?table=N) in parallel, one 3-request group per
+      // table, so each detail renders complete order rows + members. The grid never needs them.
+      const sels = detailTables();
+      const summaryReq = api("GET", "/summary");
+      const sliceReqs = sels.map((t) => {
+        const q = "?table=" + encodeURIComponent(t);
+        return Promise.all([api("GET", "/sessions" + q), api("GET", "/orders" + q), api("GET", "/calls" + q)]);
+      });
+      const [summary, ...slices] = await Promise.all([summaryReq, ...sliceReqs]);
       if (seq !== dataSeq) return; // a newer refresh started — drop this stale snapshot
       // Take the summary unless a floor action's save is still travelling (same shield the
       // board used) — or a refresh landing mid-action would flicker an optimistic tile back.
       if (!floorOpsInFlight) state.summary = summary;
-      // Merge ONLY the open-detail table's full slice into the board/data caches (the rest of the
+      // Merge EVERY open-detail table's full slice into the board/data caches (the rest of the
       // board is no longer fetched whole). The detail's ordersForTable/itemsForOrder read these.
-      if (sel != null && !floorOpsInFlight) mergeTableSlice(sel, selBoard, selOrders, selCalls);
+      if (!floorOpsInFlight) sels.forEach((t, i) => mergeTableSlice(t, slices[i][0], slices[i][1], slices[i][2]));
       state.boardLoaded = true; // the live floor has arrived at least once → real tiles, not the skeleton
     } catch (e) {
       toast("Could not load tables: " + e.message, "err");
@@ -2853,14 +2873,17 @@ async function loadSessions(fromPoll) {
   // left stuck showing "this table isn't open yet" until some UNRELATED event happens to
   // change the sig (owner report, 2026-07-02: stuck 5+ seconds after tapping the tile's
   // quick Open button while that table's detail was already showing).
-  const _dt = detailTable();
-  const selOrdersSig = _dt != null
-    ? (state.data.orders || []).filter((o) => String(o.table_number) === _dt)
+  // Folds in EVERY open detail (docked + every floating popup), not just one — a change to
+  // ANY of them (including a floating popup you're not currently looking at the side panel
+  // for) must still invalidate the dedup guard and redraw.
+  const _dts = detailTables();
+  const selOrdersSig = _dts.length
+    ? (state.data.orders || []).filter((o) => _dts.includes(String(o.table_number)))
     : [];
-  const selSessSig = _dt != null
-    ? (state.board.sessions || []).filter((s) => String(s.table_number) === _dt)
+  const selSessSig = _dts.length
+    ? (state.board.sessions || []).filter((s) => _dts.includes(String(s.table_number)))
     : [];
-  const sig = JSON.stringify(state.summary) + "|" + JSON.stringify(selOrdersSig) + "|" + JSON.stringify(selSessSig);
+  const sig = JSON.stringify(state.summary) + "|" + JSON.stringify(selOrdersSig) + "|" + JSON.stringify(selSessSig) + "|" + JSON.stringify(state.floatingTables.map((f) => [f.table, f.pinned]));
   if (fromPoll && sig === lastBoardSig) return;
   lastBoardSig = sig;
   const ed = $("#editor");
@@ -3545,9 +3568,11 @@ function floorHtml() {
     const t = state.selectedTable;
     const parts = tablePanelParts(t);
     const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
-    // Pop-out toggle: lets the detail become a draggable floating window instead of
-    // pinned to the side (owner request — "movable"). Docked back the same way.
-    const floatBtn = `<button class="tp-detail-float" id="tpDetailFloat" title="${state.floorDetailFloating ? "Dock back to the side panel" : "Pop out as a movable floating window"}">${state.floorDetailFloating ? "⇱ Dock" : "⤢ Float"}</button>`;
+    // Pop this table out into the FLOATING layer (owner request, 2026-07-02 — "movable",
+    // "many popups at the same time"). Docking back happens from the floating card's own
+    // "⇱ Dock" button (bindFloor), not here — this button only ever pops OUT.
+    const alreadyFloating = state.floatingTables.some((f) => String(f.table) === String(t));
+    const floatBtn = alreadyFloating ? "" : `<button class="tp-detail-float" data-float-open="${esc(t)}" title="Pop out as a movable floating window">⤢ Float</button>`;
     sideInner = `<div class="tp-detail" data-table-detail="${esc(t)}">
         <div class="tp-detail-head">
           <div class="tp-detail-top"><h3>Table ${esc(t)}</h3>${headPill}${floatBtn}<button class="tp-detail-close" id="tpDetailClose" aria-label="Back to floor controls" title="Back to floor controls">✕</button></div>
@@ -3559,15 +3584,29 @@ function floorHtml() {
   } else {
     sideInner = `${bulkCard}${reqCard}${needsCard}${blkCard}${controls}`;
   }
-  // Floating mode: the detail pops out as a draggable card and the grid reclaims the
-  // full width (no side panel/resizer in the flow at all). Position persists in-memory
-  // (floorFloatX/Y) across re-renders, same convention as floorSideW/floorDetailW — reset
-  // on reload, where it re-centers via the CSS default (top-right).
-  if (state.selectedTable != null && state.floorDetailFloating) {
-    const hasPos = state.floorFloatX != null && state.floorFloatY != null;
-    const posStyle = hasPos ? `left:${state.floorFloatX}px;top:${state.floorFloatY}px;right:auto;` : "";
-    return `<div class="floor-wrap">${main}</div><div class="tp-detail-floating" id="tpDetailFloating" style="${posStyle}">${sideInner}</div>`;
-  }
+  // FLOATING LAYER: every table in state.floatingTables gets its own draggable card,
+  // rendered ALONGSIDE whatever the side panel is doing above — fully independent (owner,
+  // 2026-07-02: "this only happens in popup mode, not the side thing — when the side thing
+  // is closed [docked] that still happens [normally]"). Non-pinned cards get their
+  // left/top/width from layoutFloatingRow() right after this markup lands (bindFloor);
+  // pinned ones (dragged) keep the exact x/y/w they were dropped at.
+  const floatingLayerHtml = state.floatingTables.map((f) => {
+    const parts = tablePanelParts(f.table);
+    const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
+    const dockBtn = `<button class="tp-detail-float" data-float-dock="${esc(f.table)}" title="Dock back to the side panel">⇱ Dock</button>`;
+    const styleParts = [`width:${f.w || 420}px`];
+    if (f.pinned && f.x != null) styleParts.push(`left:${f.x}px`, `top:${f.y}px`, "right:auto");
+    return `<div class="tp-detail-floating${f.pinned ? " tp-pinned" : ""}" data-floating-table="${esc(f.table)}" style="${styleParts.join(";")}">
+      <div class="tp-detail" data-table-detail="${esc(f.table)}">
+        <div class="tp-detail-head">
+          <div class="tp-detail-top"><h3>Table ${esc(f.table)}</h3>${headPill}${dockBtn}<button class="tp-detail-close" data-float-close="${esc(f.table)}" aria-label="Close" title="Close">✕</button></div>
+          ${headMeta}
+        </div>
+        <div class="tp-detail-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div>
+        <div class="tp-detail-foot">${foot}</div>
+      </div>
+    </div>`;
+  }).join("");
   // F1: collapsed (controls mode only) → hide the side panel so the floor goes
   // full-width; a slim chevron re-opens it. While collapsed, tapping a tile opens
   // the FULL-SCREEN table popup (see bindFloor). A SELECTED table's detail is never
@@ -3579,11 +3618,11 @@ function floorHtml() {
     // the collapsed floor so they're always reachable. Same ids → bindFloor wires them;
     // the side panel's copies never co-exist (the panel isn't rendered when collapsed).
     const cb = sessionsOn ? `<div class="floor-collapsed-bar"><button class="btn small" id="floorOpenAll" title="Open all tables">⬆ Open all</button><button class="btn small danger" id="floorCloseAll" title="Close all tables">⬇ Close all</button></div>` : "";
-    return `<div class="floor-wrap floor-collapsed">${main}${cb}<button class="floor-side-toggle is-collapsed" id="floorSideToggle" title="Show floor controls" aria-label="Show floor controls">‹</button></div>`;
+    return `<div class="floor-wrap floor-collapsed">${main}${cb}<button class="floor-side-toggle is-collapsed" id="floorSideToggle" title="Show floor controls" aria-label="Show floor controls">‹</button></div>${floatingLayerHtml}`;
   }
   const collapseBtn = state.selectedTable == null
     ? `<button class="floor-side-toggle" id="floorSideToggle" title="Hide this panel" aria-label="Hide this panel">›</button>` : "";
-  return `<div class="floor-wrap">${main}<div class="floor-resizer" id="floorResizer" title="Drag to resize"></div><aside class="floor-side" style="width:${sideW}px;flex:0 0 ${sideW}px">${collapseBtn}${sideInner}</aside></div>`;
+  return `<div class="floor-wrap">${main}<div class="floor-resizer" id="floorResizer" title="Drag to resize"></div><aside class="floor-side" style="width:${sideW}px;flex:0 0 ${sideW}px">${collapseBtn}${sideInner}</aside></div>${floatingLayerHtml}`;
 }
 
 // patchFloorTiles(tables): the INCREMENTAL update path. Instead of rebuilding all ~300 tiles
@@ -3606,10 +3645,10 @@ function patchFloorTiles(tables) {
   const ed = $("#editor");
   const grid = ed && ed.querySelector(".ftile-grid");
   if (state.tab !== "tables" || !state.boardLoaded || !grid) { loadSessions(true); return false; }
-  // While a table's DETAIL is open (in-panel OR collapsed-mode modal), the detail node + its
-  // slice rows (and the modal) need the full render path to refresh — so patch isn't safe; fall
-  // back. (Churn while a single table is open is bounded — not the steady-state freeze case.)
-  if (detailTable() != null) { loadSessions(true); return false; }
+  // While ANY table's DETAIL is open (docked, collapsed-mode modal, or a floating popup), the
+  // detail node(s) + their slice rows need the full render path to refresh — so patch isn't
+  // safe; fall back. (Churn while a few tables are open is bounded — not the steady-state freeze case.)
+  if (detailTables().length) { loadSessions(true); return false; }
   const _t0 = performance.now();
   let patched = 0;
   for (const t of tables) {
@@ -3698,6 +3737,36 @@ function bindFloorDelegation() {
   });
 }
 
+// layoutFloatingRow(): auto-arranges every NON-pinned floating popup into a single
+// horizontal row, shrinking them together to keep fitting as more open — never wraps to a
+// second row (owner request, 2026-07-02, confirmed via interactive mockup: "grid tiled
+// view" but locked to one row). The newest non-pinned popup takes the CENTER slot; older
+// ones alternate further out, left/right ("newest in center is right" — confirmed). Pinned
+// (dragged) popups are left exactly where they were dropped and excluded from this
+// computation entirely — the free ones re-share whatever space is left. Applies positions
+// directly to the DOM (cheap — no re-render needed), so it's safe to call after every
+// render AND after any drag/pin/open/close.
+function layoutFloatingRow() {
+  const free = state.floatingTables.filter((f) => !f.pinned);
+  const n = free.length;
+  if (!n) return;
+  const NAT_W = 420, MIN_W = 300, GAP = 16;
+  const avail = window.innerWidth - 64;
+  const naturalTotal = n * NAT_W + (n - 1) * GAP;
+  const w = naturalTotal <= avail ? NAT_W : Math.max(MIN_W, (avail - (n - 1) * GAP) / n);
+  const totalW = n * w + (n - 1) * GAP;
+  const startX = (window.innerWidth - totalW) / 2;
+  const cy = Math.max(70, window.innerHeight / 2 - 220);
+  free.forEach((f, i) => {
+    const rank = n - 1 - i; // 0 = newest (center)
+    const side = rank % 2 === 0 ? 1 : -1;
+    const step = Math.ceil(rank / 2);
+    const cx = startX + totalW / 2 + side * step * (w + GAP);
+    const el = document.querySelector(`[data-floating-table="${CSS.escape(f.table)}"]`);
+    if (el) { el.style.left = (cx - w / 2) + "px"; el.style.top = cy + "px"; el.style.width = w + "px"; el.style.right = "auto"; }
+  });
+}
+
 // bindFloor: wire up the unified floor after a FULL render — the once-attached delegated
 // click handler covers tiles + quick buttons + the Requests/Needs queue cards (so the
 // patch path never has to re-bind them); here we wire only the controls the patch never
@@ -3778,39 +3847,84 @@ function bindFloor() {
       renderEditor();
     };
   });
-  // Pop the table detail out into a draggable floating window, or dock it back.
-  const floatBtn = document.getElementById("tpDetailFloat");
-  if (floatBtn) floatBtn.onclick = () => {
-    state.floorDetailFloating = !state.floorDetailFloating;
-    lsSet("lfh_floor_detail_floating", state.floorDetailFloating ? "1" : "0");
+  // Pop the DOCKED detail out into the floating layer (adds it to floatingTables, clears
+  // the docked selection — the side panel goes back to controls). Multiple tables can be
+  // floating at once; this just adds one more.
+  const openBtn = ed.querySelector("[data-float-open]");
+  if (openBtn) openBtn.onclick = () => {
+    const t = String(openBtn.dataset.floatOpen);
+    if (!state.floatingTables.some((f) => f.table === t)) state.floatingTables.push({ table: t, pinned: false, x: null, y: null, w: null });
+    state.selectedTable = null;
     renderEditor();
   };
-  // While floating, drag by the detail's header to move it anywhere on screen —
-  // clamped so it can't be dragged fully off-screen. Position is kept in-memory
-  // (floorFloatX/Y), same as the resizer's remembered widths above.
-  const floatCard = document.getElementById("tpDetailFloating");
-  if (floatCard) {
-    const head = floatCard.querySelector(".tp-detail-head");
+  // Every floating card: wire its own detail actions (via the SAME bindTablePanel the
+  // docked/collapsed views use), its Dock/Close buttons, and drag-to-pin on its header.
+  ed.querySelectorAll("[data-floating-table]").forEach((card) => {
+    const t = String(card.dataset.floatingTable);
+    const detail = card.querySelector("[data-table-detail]");
+    if (detail) {
+      const parts = tablePanelParts(t);
+      const rerender = () => {
+        const body = card.querySelector(".tp-detail-body");
+        const top = body ? body.scrollTop : 0;
+        renderEditor();
+        const c2 = $("#editor").querySelector(`[data-floating-table="${CSS.escape(t)}"] .tp-detail-body`);
+        if (c2) c2.scrollTop = top;
+      };
+      const closeThis = () => { state.floatingTables = state.floatingTables.filter((f) => f.table !== t); renderEditor(); };
+      bindTablePanel(detail, t, parts, { rerender, close: closeThis });
+    }
+    const dockBtn = card.querySelector("[data-float-dock]");
+    if (dockBtn) dockBtn.onclick = () => {
+      state.floatingTables = state.floatingTables.filter((f) => f.table !== t);
+      state.selectedTable = t;
+      renderEditor();
+    };
+    const closeBtn = card.querySelector("[data-float-close]");
+    if (closeBtn) closeBtn.onclick = () => { state.floatingTables = state.floatingTables.filter((f) => f.table !== t); renderEditor(); };
+    // Drag-to-pin: once dragged, this card is EXCLUDED from auto-arrange (owner, 2026-07-02
+    // — "if you once move it, it will not be a part of auto") and the rest re-share the
+    // space among themselves. Clamped so it can't be dragged fully off-screen.
+    const head = card.querySelector(".tp-detail-head");
     if (head) head.onpointerdown = (e) => {
-      if (e.target.closest("button")) return; // don't start a drag from the Dock/✕ buttons
+      if (e.target.closest("button")) return; // don't start a drag from Dock/✕
       e.preventDefault();
       const startX = e.clientX, startY = e.clientY;
-      const rect = floatCard.getBoundingClientRect();
+      const rect = card.getBoundingClientRect();
       const startLeft = rect.left, startTop = rect.top;
       try { head.setPointerCapture(e.pointerId); } catch {}
+      // Suspend the auto-arrange left/top/width transition WHILE dragging — otherwise each
+      // pointermove's style change animates instead of jumping instantly, and worse,
+      // getBoundingClientRect() on drop can read a still-mid-animation position instead of
+      // where the pointer actually let go.
+      card.classList.add("dragging");
+      let moved = false;
       const move = (ev) => {
-        const maxLeft = window.innerWidth - floatCard.offsetWidth - 8;
+        moved = true;
+        const maxLeft = window.innerWidth - card.offsetWidth - 8;
         const maxTop = window.innerHeight - 60; // leave enough of the header on-screen to grab again
         const x = Math.min(Math.max(8, startLeft + (ev.clientX - startX)), Math.max(8, maxLeft));
         const y = Math.min(Math.max(8, startTop + (ev.clientY - startY)), Math.max(8, maxTop));
-        state.floorFloatX = x; state.floorFloatY = y;
-        floatCard.style.left = x + "px"; floatCard.style.top = y + "px"; floatCard.style.right = "auto";
+        card.style.left = x + "px"; card.style.top = y + "px"; card.style.right = "auto";
       };
-      const up = () => { head.removeEventListener("pointermove", move); head.removeEventListener("pointerup", up); };
+      const up = () => {
+        head.removeEventListener("pointermove", move);
+        head.removeEventListener("pointerup", up);
+        card.classList.remove("dragging");
+        if (!moved) return; // a plain click on the header — not a drag, nothing to pin
+        const f = state.floatingTables.find((x) => x.table === t);
+        if (f) {
+          const rect2 = card.getBoundingClientRect();
+          f.pinned = true; f.x = rect2.left; f.y = rect2.top; f.w = rect2.width;
+        }
+        card.classList.add("tp-pinned"); // instant visual feedback — the class also lands from the data on the next render anyway
+        layoutFloatingRow(); // re-share the freed-up space among the still-free cards
+      };
       head.addEventListener("pointermove", move);
       head.addEventListener("pointerup", up);
     };
-  }
+  });
+  layoutFloatingRow();
 }
 
 // Flip a session toggle (system on / require location / require code) right from the floor.
@@ -5068,14 +5182,16 @@ async function pollOrders() {
       state.data.orders = orders;
     } catch {}
     try { const calls = await api("GET", "/calls"); if (seq !== dataSeq) return; state.data.calls = calls; } catch {}
-  } else if (state.tab === "tables" && detailTable() != null && !floorOpsInFlight) {
-    // Keep the open detail (in-panel OR collapsed-mode modal) order rows + members fresh.
+  } else if (state.tab === "tables" && detailTables().length && !floorOpsInFlight) {
+    // Keep EVERY open detail (docked, collapsed-mode modal, or floating) order rows + members fresh.
     try {
-      const t = detailTable();
-      const q = "?table=" + encodeURIComponent(t);
-      const [selBoard, selOrders, selCalls] = await Promise.all([api("GET", "/sessions" + q), api("GET", "/orders" + q), api("GET", "/calls" + q)]);
+      const tables = detailTables();
+      const results = await Promise.all(tables.map((t) => {
+        const q = "?table=" + encodeURIComponent(t);
+        return Promise.all([api("GET", "/sessions" + q), api("GET", "/orders" + q), api("GET", "/calls" + q)]);
+      }));
       if (seq !== dataSeq) return;
-      mergeTableSlice(t, selBoard, selOrders, selCalls);
+      tables.forEach((t, i) => mergeTableSlice(t, results[i][0], results[i][1], results[i][2]));
     } catch {}
   }
 
@@ -5212,13 +5328,13 @@ async function pollTables(tables) {
     } : {});
     state.boardLoaded = true;
 
-    // If the OPEN-DETAIL table (in-panel OR collapsed modal) is among the changed ones,
-    // refresh its full slice for the detail.
-    const _dt = detailTable();
-    if (_dt != null && tset.has(_dt)) {
+    // Any OPEN-DETAIL table (docked, collapsed modal, or floating) that's among the changed
+    // ones gets its full slice refreshed for the detail.
+    const toRefresh = detailTables().filter((t) => tset.has(t));
+    if (toRefresh.length) {
       try {
         if (seq !== dataSeq) return;
-        await loadTableSlice(_dt);
+        await Promise.all(toRefresh.map((t) => loadTableSlice(t)));
       } catch {}
     }
   }
