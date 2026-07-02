@@ -33,6 +33,35 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 /* two-pane layout: floor left, work panel right (stacks when narrow) */
 .layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr); gap: 14px; padding: 14px 18px; align-items: start; }
 @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+/* Side pane COLLAPSED (owner 2026-07-02 — tablet multi-popup like manager): hide the pane,
+   let the floor take the full width; tile taps then open FLOATING popups instead of docking. */
+.layout.panel-collapsed { grid-template-columns: 1fr; }
+.layout.panel-collapsed > .panel { display: none; }
+.panel-toggle { background: var(--panel-2, #211a12); color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.panel-toggle:hover { border-color: var(--gold); color: var(--text); }
+
+/* FLOATING detail cards — a body-level layer of draggable popups reusing the .panel detail.
+   width/left/top set inline by layoutTabletFloatingRow (auto-arranged) or by a drag (pinned). */
+#tabletFloatLayer { position: fixed; inset: 0; pointer-events: none; z-index: 45; }
+.tp-detail-floating { position: fixed; top: 70px; right: 20px; width: 430px; max-width: calc(100vw - 24px);
+  height: min(80vh, calc(100vh - 92px)); pointer-events: auto; z-index: 45;
+  transition: left .2s ease, top .2s ease, width .2s ease; }
+.tp-detail-floating.tp-pinned { z-index: 46; transition: none; }
+.tp-detail-floating.dragging { transition: none; z-index: 47; }
+.tp-detail-floating .panel { height: 100%; box-shadow: 0 18px 44px rgba(0,0,0,.5); }
+.tp-detail-floating.tp-pinned .panel { box-shadow: 0 0 0 2px var(--gold), 0 18px 44px rgba(0,0,0,.5); }
+.tp-detail-floating .phead { cursor: grab; padding-right: 44px; }   /* room for the ✕ */
+/* In a floating card the "↑ Tables" scroll button + the open/closed pill are redundant (and
+   crowd the ✕) — the card title already carries the state. Hide them; keep Dock. */
+.tp-detail-floating .phead .backtop, .tp-detail-floating .phead .live, .tp-detail-floating .phead .off { display: none; }
+.tp-detail-floating .inm { overflow: hidden; }                        /* clip, never overlap the price on a narrow card */
+.tbl-float-dismiss { position: absolute; top: 10px; right: 10px; z-index: 2; width: 30px; height: 30px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+  font-size: 15px; line-height: 1; cursor: pointer; }
+.tbl-float-dismiss:hover { border-color: var(--red); color: var(--red); }
+@media (max-width: 760px) { .tp-detail-floating { position: static; width: 100% !important; max-width: none;
+  height: auto; margin: 12px 0; left: auto !important; top: auto !important; } #tabletFloatLayer { position: static; }
+  .layout.panel-collapsed > .panel { display: block; } }
 
 /* floor tiles — fluid grid, no dead gap */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; align-items: start; }
