@@ -2839,14 +2839,28 @@ async function loadSessions(fromPoll) {
     }
   }
   if (state.tab !== "tables") return;
-  // "sig" is a fingerprint of everything the GRID draws (the slim summary + the open-detail
-  // table's order rows). If a poll arrives and the fingerprint hasn't changed, there's
-  // literally nothing new — so skip the redraw.
+  // "sig" is a fingerprint of everything the GRID + the open-detail panel draw (the slim
+  // summary, the open-detail table's order rows, AND its SESSION row). If a poll arrives
+  // and the fingerprint hasn't changed, there's literally nothing new — so skip the redraw.
+  //
+  // The session row matters: the detail panel's "is this table open" state comes from
+  // openSessionForTable() reading state.board.sessions, NOT from summary/orders. Opening a
+  // table optimistically pre-sets its summary tile to "Open/waiting" BEFORE the real POST
+  // lands (openTableSession) — so once the real session actually arrives, the tile's label
+  // is already the same and there's still no order, meaning summary+orders alone produce the
+  // IDENTICAL sig as the pre-open optimistic render. The dedup guard then thinks nothing
+  // changed and skips the redraw that would show the table as open — the detail panel is
+  // left stuck showing "this table isn't open yet" until some UNRELATED event happens to
+  // change the sig (owner report, 2026-07-02: stuck 5+ seconds after tapping the tile's
+  // quick Open button while that table's detail was already showing).
   const _dt = detailTable();
   const selOrdersSig = _dt != null
     ? (state.data.orders || []).filter((o) => String(o.table_number) === _dt)
     : [];
-  const sig = JSON.stringify(state.summary) + "|" + JSON.stringify(selOrdersSig);
+  const selSessSig = _dt != null
+    ? (state.board.sessions || []).filter((s) => String(s.table_number) === _dt)
+    : [];
+  const sig = JSON.stringify(state.summary) + "|" + JSON.stringify(selOrdersSig) + "|" + JSON.stringify(selSessSig);
   if (fromPoll && sig === lastBoardSig) return;
   lastBoardSig = sig;
   const ed = $("#editor");
@@ -2894,7 +2908,23 @@ async function openTableSession(table) {
   });
   floorOpsInFlight++;
   loadSessions(true); // render-only, no network
-  try { await api("POST", "/sessions/open", { table: t }); floorOpsInFlight--; await pollTables([t]); toast("Table opened", "ok"); }
+  try {
+    const opened = await api("POST", "/sessions/open", { table: t });
+    floorOpsInFlight--;
+    // The POST response IS the real session row — merge it in and redraw right away instead
+    // of waiting for pollTables' extra round-trip to fetch the exact same thing a moment
+    // later. This is what made the detail panel feel laggy when it was already open for this
+    // table (owner report, 2026-07-02): it sat on "not open yet" until that second fetch
+    // landed. pollTables still runs after, as the usual reconcile/safety net.
+    if (opened && opened.id) {
+      state.board = Object.assign({}, state.board, {
+        sessions: (state.board.sessions || []).filter((s) => s.id !== opened.id).concat(opened),
+      });
+      loadSessions(true);
+    }
+    await pollTables([t]);
+    toast("Table opened", "ok");
+  }
   catch (e) {
     floorOpsInFlight--;
     state.summary = Object.assign({}, state.summary, { tiles: beforeTiles, requests: beforeReqs }); // undo
