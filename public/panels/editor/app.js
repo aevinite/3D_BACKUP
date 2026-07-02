@@ -3525,7 +3525,7 @@ function floorHtml() {
   // (both position:absolute), so the two overlapped when collapsed (owner screenshot,
   // 2026-06-30). Simplest correct fix: don't show density controls while collapsed —
   // that corner is already spoken for there, and re-expanding is one click away.
-  const collapsedNow = state.floorSideCollapsed && state.selectedTable == null;
+  const collapsedNow = state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null);
   const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${collapsedNow ? "" : densityBtnsHtml()}</div>${statsStrip}${legend}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${tiles}</div></div>`;
 
   // side panel — everyday things FIRST (whole-floor open/close, requests, needs),
@@ -3622,11 +3622,12 @@ function floorHtml() {
       <div class="tp-resize-handle" data-float-resize="${esc(f.table)}" title="Drag to resize"></div>
     </div>`;
   }).join("");
-  // F1: collapsed (controls mode only) → hide the side panel so the floor goes
-  // full-width; a slim chevron re-opens it. While collapsed, tapping a tile opens
-  // the FULL-SCREEN table popup (see bindFloor). A SELECTED table's detail is never
-  // collapsed — it has its own ✕ that returns to the controls.
-  if (state.floorSideCollapsed && state.selectedTable == null) {
+  // POPUP MODE — hide the side panel entirely (owner, 2026-07-02: float and the side panel
+  // must NEVER be on screen together). We're in popup mode when EITHER the owner manually
+  // collapsed the panel, OR any floating popup is open (floating one auto-hides the panel).
+  // The floor goes full-width with a chevron that EXITS popup mode (closes popups + shows the
+  // panel — see the floorSideToggle handler). Tapping a tile here opens a floating popup.
+  if (state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null)) {
     // The bulk Open-all / Close-all live in the side panel — which is hidden while
     // collapsed. Without this, "Open all" vanished when the floor was collapsed (owner
     // 2026-06-27: "open all tables button not working"). Surface them in a small bar on
@@ -3745,13 +3746,12 @@ function bindFloorDelegation() {
     // TILE SELECT last — only reached when no button above matched.
     const tile = e.target.closest("[data-floor-table]");
     if (tile) {
-      // Side panel OPEN → dock the detail in the side panel (single, master-detail).
-      // Side panel COLLAPSED → open a FLOATING popup instead (owner, 2026-07-02:
-      // "when the side panel is closed the popup mode starts"). This retires the old
-      // full-screen BLUR modal (openTablePanel) that blocked the floor + closed on an
-      // outside click — collapsed mode now gives the same draggable, multi-open,
-      // non-blocking popups as the Float button, so you can open several tables at once.
-      if (state.floorSideCollapsed) openFloatingTable(tile.dataset.floorTable);
+      // POPUP MODE (side panel collapsed OR a popup already open) → open another FLOATING
+      // popup. DOCKED MODE (side panel visible, no popups) → dock the detail in the panel.
+      // The two modes are mutually exclusive (owner, 2026-07-02), so a tile tap can only ever
+      // ADD to whichever mode is active — never mix a docked detail with floating popups.
+      const popupMode = state.floatingTables.length > 0 || state.floorSideCollapsed;
+      if (popupMode) openFloatingTable(tile.dataset.floorTable);
       else selectTable(tile.dataset.floorTable);
     }
   });
@@ -3816,9 +3816,18 @@ function bindFloor() {
   if (oa) oa.onclick = () => openAllTables();
   const ca = document.getElementById("floorCloseAll");
   if (ca) ca.onclick = () => closeAllTables();
-  // F1: collapse / expand the right floor panel (state persisted across reloads).
+  // Collapse / expand the right floor panel. The '‹' chevron shows in POPUP MODE and EXITS it
+  // — closing every floating popup AND showing the side panel (float and panel are mutually
+  // exclusive, so leaving popup mode must clear the popups). The '›' chevron (docked mode)
+  // just collapses into the empty popup-ready floor. (state persisted across reloads.)
   const sideToggle = ed.querySelector("#floorSideToggle");
-  if (sideToggle) sideToggle.onclick = () => { state.floorSideCollapsed = !state.floorSideCollapsed; lsSet("lfh_floor_side_collapsed", state.floorSideCollapsed ? "1" : "0"); renderEditor(); };
+  if (sideToggle) sideToggle.onclick = () => {
+    const inPopupMode = state.floatingTables.length > 0 || state.floorSideCollapsed;
+    if (inPopupMode) { state.floatingTables = []; state.floorSideCollapsed = false; }
+    else { state.floorSideCollapsed = true; }
+    lsSet("lfh_floor_side_collapsed", state.floorSideCollapsed ? "1" : "0");
+    renderEditor();
+  };
   // The Blocked card's Unblock buttons — that card is NEVER touched by the patch path
   // (unblock() routes through a full loadSessions()), so id-based binding is safe here.
   ed.querySelectorAll("[data-unblock]").forEach((b) => (b.onclick = () => unblock(b.dataset.unblock)));
@@ -3910,11 +3919,12 @@ function bindFloor() {
     }
     const dockBtn = card.querySelector("[data-float-dock]");
     if (dockBtn) dockBtn.onclick = () => {
-      state.floatingTables = state.floatingTables.filter((f) => f.table !== t);
+      // "Dock" = leave popup mode and show THIS table in the side panel. Float and the side
+      // panel are mutually exclusive (owner, 2026-07-02: "if we shift to side panel then float
+      // should not be there"), so docking CLOSES every floating popup — not just this one —
+      // and re-shows the (expanded) side panel with this table docked.
+      state.floatingTables = [];
       state.selectedTable = t;
-      // "Dock" = show this table in the side panel — which is hidden while collapsed, so
-      // docking must expand it (else the detail would vanish into a hidden panel). Only one
-      // table can be docked; any others stay floating.
       if (state.floorSideCollapsed) { state.floorSideCollapsed = false; lsSet("lfh_floor_side_collapsed", "0"); }
       renderEditor();
     };
