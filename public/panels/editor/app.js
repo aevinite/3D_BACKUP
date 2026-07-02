@@ -3606,8 +3606,10 @@ function floorHtml() {
     const parts = tablePanelParts(f.table);
     const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
     const dockBtn = `<button class="tp-detail-float" data-float-dock="${esc(f.table)}" title="Dock back to the side panel">⇱ Dock</button>`;
-    const styleParts = [`width:${f.w || 420}px`];
-    if (f.pinned && f.x != null) styleParts.push(`left:${f.x}px`, `top:${f.y}px`, "right:auto");
+    // A PINNED card keeps its dragged/resized geometry (x/y/w/h); a free one gets only its
+    // auto-arrange width here and its left/top/width from layoutFloatingRow after render.
+    const styleParts = [`width:${f.w || 400}px`];
+    if (f.pinned && f.x != null) { styleParts.push(`left:${f.x}px`, `top:${f.y}px`, "right:auto"); if (f.h) styleParts.push(`height:${f.h}px`); }
     return `<div class="tp-detail-floating${f.pinned ? " tp-pinned" : ""}" data-floating-table="${esc(f.table)}" style="${styleParts.join(";")}">
       <div class="tp-detail" data-table-detail="${esc(f.table)}">
         <div class="tp-detail-head">
@@ -3617,6 +3619,7 @@ function floorHtml() {
         <div class="tp-detail-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div>
         <div class="tp-detail-foot">${foot}</div>
       </div>
+      <div class="tp-resize-handle" data-float-resize="${esc(f.table)}" title="Drag to resize"></div>
     </div>`;
   }).join("");
   // F1: collapsed (controls mode only) → hide the side panel so the floor goes
@@ -3767,20 +3770,30 @@ function layoutFloatingRow() {
   const free = state.floatingTables.filter((f) => !f.pinned);
   const n = free.length;
   if (!n) return;
-  const NAT_W = 420, MIN_W = 300, GAP = 16;
-  const avail = window.innerWidth - 64;
-  const naturalTotal = n * NAT_W + (n - 1) * GAP;
-  const w = naturalTotal <= avail ? NAT_W : Math.max(MIN_W, (avail - (n - 1) * GAP) / n);
+  // A proper CENTERED single row that never runs off-screen (owner, 2026-07-02: the 4th popup
+  // went off the left edge). The old center-out formula was asymmetric — it placed cards at
+  // relative slots 0,-1,+1,-2,… so an even count pushed the outermost off-screen. Instead we
+  // now build the visual left→right ORDER (newest in the middle slot, older ones alternating
+  // outward) and lay the slots out evenly, clamped inside the viewport. Cards shrink together
+  // to keep fitting; startX is clamped so nothing ever crosses the left margin.
+  const NAT_W = 400, MIN_W = 300, GAP = 14, MARGIN = 20, TOP = 70;
+  const avail = window.innerWidth - MARGIN * 2;
+  const w = (n * NAT_W + (n - 1) * GAP) <= avail ? NAT_W : Math.max(MIN_W, (avail - (n - 1) * GAP) / n);
   const totalW = n * w + (n - 1) * GAP;
-  const startX = (window.innerWidth - totalW) / 2;
-  const cy = Math.max(70, window.innerHeight / 2 - 220);
-  free.forEach((f, i) => {
-    const rank = n - 1 - i; // 0 = newest (center)
-    const side = rank % 2 === 0 ? 1 : -1;
-    const step = Math.ceil(rank / 2);
-    const cx = startX + totalW / 2 + side * step * (w + GAP);
-    const el = document.querySelector(`[data-floating-table="${CSS.escape(f.table)}"]`);
-    if (el) { el.style.left = (cx - w / 2) + "px"; el.style.top = cy + "px"; el.style.width = w + "px"; el.style.right = "auto"; }
+  const startX = Math.max(MARGIN, (window.innerWidth - totalW) / 2);
+  // free is oldest→newest. Put the newest in the middle slot; fill outward alternately.
+  const order = new Array(n);
+  const mid = Math.floor((n - 1) / 2);
+  order[mid] = free[n - 1];
+  let l = mid - 1, r = mid + 1, idx = n - 2;
+  while (idx >= 0) {
+    if (r < n) order[r++] = free[idx--];
+    if (idx >= 0 && l >= 0) order[l--] = free[idx--];
+  }
+  order.forEach((f, slot) => {
+    if (!f) return;
+    const el = document.querySelector(`[data-floating-table="${CSS.escape(String(f.table))}"]`);
+    if (el) { el.style.left = (startX + slot * (w + GAP)) + "px"; el.style.top = TOP + "px"; el.style.width = w + "px"; el.style.height = ""; el.style.right = "auto"; }
   });
 }
 
@@ -3943,6 +3956,34 @@ function bindFloor() {
       };
       head.addEventListener("pointermove", move);
       head.addEventListener("pointerup", up);
+    };
+    // Resize by dragging the bottom-right corner (owner, 2026-07-02: "you should be able to
+    // make it small"). Like a drag, resizing PINS the card — it keeps its size+position and
+    // drops out of the auto-arrange; the others re-share the row. Stores h so a re-render
+    // (e.g. a live poll) keeps the size the owner set.
+    const rez = card.querySelector("[data-float-resize]");
+    if (rez) rez.onpointerdown = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const startX = e.clientX, startY = e.clientY;
+      const rect = card.getBoundingClientRect();
+      const startW = rect.width, startH = rect.height, left = rect.left, top = rect.top;
+      try { rez.setPointerCapture(e.pointerId); } catch {}
+      card.classList.add("dragging");
+      const move = (ev) => {
+        const w = Math.min(Math.max(280, startW + (ev.clientX - startX)), window.innerWidth - left - 12);
+        const h = Math.min(Math.max(180, startH + (ev.clientY - startY)), window.innerHeight - top - 12);
+        card.style.width = w + "px"; card.style.height = h + "px";
+      };
+      const up = () => {
+        rez.removeEventListener("pointermove", move); rez.removeEventListener("pointerup", up);
+        card.classList.remove("dragging");
+        const f = state.floatingTables.find((x) => x.table === t);
+        if (f) { const r = card.getBoundingClientRect(); f.pinned = true; f.x = r.left; f.y = r.top; f.w = r.width; f.h = r.height; }
+        card.classList.add("tp-pinned");
+        layoutFloatingRow();
+      };
+      rez.addEventListener("pointermove", move);
+      rez.addEventListener("pointerup", up);
     };
   });
   layoutFloatingRow();

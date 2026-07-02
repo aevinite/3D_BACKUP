@@ -1271,16 +1271,28 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
    the pinned x/y/w a drag left it at — this rule only supplies defaults + the parts JS
    doesn't touch. A dragged (pinned) card gets a gold ring so it reads as "you moved this
    one on purpose" among the auto-arranged ones. */
-.tp-detail-floating { position: fixed; top: 76px; right: 24px; z-index: 40; width: 420px; max-width: calc(100vw - 24px); height: min(78vh, calc(100vh - 96px)); transition: left .22s ease, top .22s ease, width .22s ease; }
-.tp-detail-floating.tp-pinned { z-index: 41; box-shadow: 0 0 0 2px var(--gold), var(--shadow-md); transition: none; }
-/* While actively being dragged, no transition — the pointer must control position 1:1,
-   not chase an animated interpolation (which also broke the drop-position capture). */
+/* Height FITS the content up to a cap (owner, 2026-07-02: three full-height cards side by
+   side looked bad — mostly empty). A table with one order is now a short card; a busy one
+   grows to the cap and scrolls inside. Width/left/top come from layoutFloatingRow (auto) or
+   a drag/resize (pinned). */
+.tp-detail-floating { position: fixed; top: 70px; right: 24px; z-index: 40; width: 400px; max-width: calc(100vw - 24px); height: auto; max-height: calc(100vh - 92px); min-height: 200px; transition: left .22s ease, top .22s ease, width .22s ease; }
+.tp-detail-floating.tp-pinned { z-index: 41; transition: none; }
+/* While actively being dragged/resized, no transition — the pointer must control it 1:1. */
 .tp-detail-floating.dragging { transition: none; z-index: 42; }
-.tp-detail-floating .tp-detail { height: 100%; box-shadow: var(--shadow-md); }
+.tp-detail-floating .tp-detail { height: 100%; max-height: 100%; box-shadow: var(--shadow-md); }
+.tp-detail-floating.tp-pinned .tp-detail { box-shadow: 0 0 0 2px var(--gold), var(--shadow-md); }
 .tp-detail-floating .tp-detail-body { flex: 1; min-height: 0; overflow-y: auto; }
 .tp-detail-floating .tp-detail-head { cursor: grab; }
 .tp-detail-floating .tp-detail-head:active { cursor: grabbing; }
-@media (max-width: 1040px) { .tp-detail-floating { position: static; width: 100% !important; max-width: none; height: auto; margin-top: 14px; left: auto !important; top: auto !important; } .tp-detail-floating .tp-detail-body { overflow-y: visible; } }
+.tp-detail-floating .tp-detail-top { flex-wrap: wrap; row-gap: 6px; }
+.tp-detail-floating .tp-detail-top h3 { white-space: nowrap; }
+/* Resize handle — drag the bottom-right corner to make a card smaller/larger. Resizing
+   pins the card (keeps its size + position, out of the auto-arrange), same as a drag. */
+.tp-resize-handle { position: absolute; right: 2px; bottom: 2px; width: 18px; height: 18px; cursor: nwse-resize; z-index: 6;
+  background: linear-gradient(135deg, transparent 0 45%, color-mix(in srgb, var(--gold) 60%, var(--line)) 45% 55%, transparent 55% 70%, color-mix(in srgb, var(--gold) 60%, var(--line)) 70% 80%, transparent 80%);
+  border-bottom-right-radius: 14px; opacity: .7; }
+.tp-resize-handle:hover { opacity: 1; }
+@media (max-width: 1040px) { .tp-detail-floating { position: static; width: 100% !important; max-width: none; height: auto !important; max-height: none; margin-top: 14px; left: auto !important; top: auto !important; } .tp-detail-floating .tp-detail-body { overflow-y: visible; } .tp-resize-handle { display: none; } }
 
 /* ---- detail header: title + status pill + summary + progress bar ---- */
 .tp-detail { border-radius: 16px; }
