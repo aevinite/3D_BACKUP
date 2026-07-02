@@ -80,6 +80,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .t-done .tlabel { color: #22c55e; }
 .tsub { font-size: 11px; color: var(--muted); }
 .tseats { font-size: 11px; color: var(--gold); font-weight: 700; margin-top: 2px; }
+/* Pulsing dot on the "Loading order details…" line shown while a tapped table's full
+   slice streams in behind an instant summary-driven detail (stale-while-revalidate). */
+.tsl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); animation: tslPulse 1s ease-in-out infinite; flex: none; }
+@keyframes tslPulse { 0%, 100% { opacity: .35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.1); } }
+@media (prefers-reduced-motion: reduce) { .tsl-dot { animation: none; } }
 /* kitchen progress strip + dish-count pills on a tile */
 .tstrip { height: 6px; border-radius: 6px; margin-top: 6px; background: #2a2218; overflow: hidden; display: flex; }
 .tstrip i { display: block; height: 100%; }
