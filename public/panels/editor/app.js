@@ -63,6 +63,11 @@ const state = {
   // single-table flow is untouched. Not persisted across reload (matches floorSideW/
   // floorFloatX's existing convention — positions are session-only, not saved state).
   floatingTables: [],
+  // How many columns the floating-popup row currently has (0 = no grid yet). GROWS as popups
+  // are added (1 popup = one BIG centered card, 2 = halves, 3 = thirds … capped at 5) and
+  // resets when no slotted popup remains — so a fresh popup always starts big in the middle
+  // (owner, 2026-07-02: "if only 1, size should be big; as I add, it should become small").
+  floatCols: 0,
   floorTileDensity: lsGet("lfh_floor_tile_density", "m"), // s | m | l — how many tiles fit per row in the floor grid
   ordersView: lsGet("lfh_editor_ordersview", "live"), // Orders left-bar: live | previous | bills | calls — remembered across refresh
   billSearch: "", billSearchType: "inv", billSort: "new", // Bills → Today/Previous search + sort
@@ -3525,7 +3530,7 @@ function floorHtml() {
   // (both position:absolute), so the two overlapped when collapsed (owner screenshot,
   // 2026-06-30). Simplest correct fix: don't show density controls while collapsed —
   // that corner is already spoken for there, and re-expanding is one click away.
-  const collapsedNow = state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null);
+  const collapsedNow = isPhoneLayout() || state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null);
   const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${collapsedNow ? "" : densityBtnsHtml()}</div>${statsStrip}${legend}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${tiles}</div></div>`;
 
   // side panel — everyday things FIRST (whole-floor open/close, requests, needs),
@@ -3605,7 +3610,7 @@ function floorHtml() {
   const floatingLayerHtml = state.floatingTables.map((f) => {
     const parts = tablePanelParts(f.table);
     const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
-    const dockBtn = `<button class="tp-detail-float" data-float-dock="${esc(f.table)}" title="Dock back to the side panel">⇱ Dock</button>`;
+    const dockBtn = isPhoneLayout() ? "" : `<button class="tp-detail-float" data-float-dock="${esc(f.table)}" title="Dock back to the side panel">⇱ Dock</button>`; // no side panel on a phone → nothing to dock into
     // A PINNED card keeps its dragged/resized geometry (x/y/w/h); a free one gets only its
     // auto-arrange width here and its left/top/width from layoutFloatingRow after render.
     const styleParts = [`width:${f.w || 400}px`];
@@ -3627,7 +3632,9 @@ function floorHtml() {
   // collapsed the panel, OR any floating popup is open (floating one auto-hides the panel).
   // The floor goes full-width with a chevron that EXITS popup mode (closes popups + shows the
   // panel — see the floorSideToggle handler). Tapping a tile here opens a floating popup.
-  if (state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null)) {
+  // On a PHONE the floor is ALWAYS popup-mode (there's no room for the side panel — owner,
+  // 2026-07-03: "on phone, click table = only popup"); the desktop rule is unchanged.
+  if (isPhoneLayout() || state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null)) {
     // The bulk Open-all / Close-all live in the side panel — which is hidden while
     // collapsed. Without this, "Open all" vanished when the floor was collapsed (owner
     // 2026-06-27: "open all tables button not working"). Surface them in a small bar on
@@ -3750,54 +3757,69 @@ function bindFloorDelegation() {
       // popup. DOCKED MODE (side panel visible, no popups) → dock the detail in the panel.
       // The two modes are mutually exclusive (owner, 2026-07-02), so a tile tap can only ever
       // ADD to whichever mode is active — never mix a docked detail with floating popups.
-      const popupMode = state.floatingTables.length > 0 || state.floorSideCollapsed;
+      const popupMode = isPhoneLayout() || state.floatingTables.length > 0 || state.floorSideCollapsed;
       if (popupMode) openFloatingTable(tile.dataset.floorTable);
       else selectTable(tile.dataset.floorTable);
     }
   });
 }
 
-// FLOATING POPUP SLOT MODEL (owner, 2026-07-02 — "everything should stay as it is").
-// The row is a FIXED grid of up to MAX_FLOATING slots. Each non-pinned popup owns a stable
-// slot INDEX and never moves when another popup is dragged out or a new one opens — the
-// whole point of the change (dragging one no longer re-spreads the others). A popup that's
-// dragged/resized becomes PINNED, releases its slot (leaving a GAP), and floats freely.
-// Opening a new table fills the highest-priority EMPTY slot — center-out, so a fresh set
-// "starts from the middle" and drag-vacated gaps get reused before growing outward.
+// FLOATING POPUP SLOT MODEL (owner, 2026-07-02/03). The row is a grid of state.floatCols
+// columns that GROWS as popups are added: 1 popup = one BIG centered card, 2 = halves,
+// 3 = thirds … capped at MAX_FLOATING (owner: "if only 1, size should be big; as I add,
+// it should become small"). Each non-pinned popup owns a stable slot INDEX inside that
+// grid — dragging one out (→ PINNED, releases its slot) or closing one leaves a GAP and
+// NEVER moves the rest ("everything should stay as it is"); the gap is re-used by the next
+// table opened. Only ADDING a popup when no gap is free grows the grid (everyone reflows
+// slightly smaller — the one movement the owner explicitly asked for). When no slotted
+// popup remains (all dragged away / closed), the grid resets so the next popup starts
+// big from the middle again. On a PHONE (isPhoneLayout) it's ONE full-width popup at a
+// time — no drag, no resize, no side-by-side (owner, 2026-07-03).
 const MAX_FLOATING = 5;
-const SLOT_ORDER = [2, 1, 3, 0, 4]; // fill/priority order over the 5 fixed slots: middle first, then out
-// firstEmptySlot(): the highest-priority slot index not currently held by a slotted (non-pinned) popup.
-function firstEmptySlot() {
-  const used = new Set(state.floatingTables.filter((f) => !f.pinned && f.slot != null).map((f) => f.slot));
-  for (const s of SLOT_ORDER) if (!used.has(s)) return s;
-  return null;
-}
-// addFloating(t): open table t as a floating popup in the next empty slot (center-out), unless
-// it's already open or we're at the MAX_FLOATING cap. Returns true if it's now open.
+const FLOAT_MAX_W = 640; // don't let 1–2 popups stretch absurdly wide on a big monitor
+const isPhoneLayout = () => window.matchMedia("(max-width: 760px)").matches;
+// addFloating(t): open table t as a floating popup. Fills the left-most empty gap in the
+// current grid first; grows the grid by one column when there's no gap. Returns true if open.
 function addFloating(t) {
   t = String(t);
+  if (isPhoneLayout()) {
+    // Phone = single-popup mode: the new table REPLACES whatever was floating.
+    if (state.floatingTables.length === 1 && state.floatingTables[0].table === t) return true;
+    state.floatingTables = [{ table: t, pinned: false, slot: 0, x: null, y: null, w: null, h: null }];
+    state.floatCols = 1;
+    return true;
+  }
   if (state.floatingTables.some((f) => f.table === t)) return true;         // already open
   if (state.floatingTables.length >= MAX_FLOATING) { toast(`Up to ${MAX_FLOATING} popups at once.`, "err"); return false; }
-  const slot = firstEmptySlot();
-  if (slot == null) { toast(`Up to ${MAX_FLOATING} popups at once.`, "err"); return false; }
+  const slotted = state.floatingTables.filter((f) => !f.pinned && f.slot != null);
+  if (!slotted.length) state.floatCols = 0; // fresh grid → this popup starts big in the middle
+  const used = new Set(slotted.map((f) => f.slot));
+  let slot = null;
+  for (let s = 0; s < state.floatCols; s++) if (!used.has(s)) { slot = s; break; } // re-use a vacated gap first
+  if (slot == null) {
+    if (state.floatCols >= MAX_FLOATING) { toast(`Up to ${MAX_FLOATING} popups at once.`, "err"); return false; }
+    slot = state.floatCols; state.floatCols += 1; // no gap → grow the grid (existing cards shrink to fit)
+  }
   state.floatingTables.push({ table: t, pinned: false, slot, x: null, y: null, w: null, h: null });
   return true;
 }
 
-// layoutFloatingRow(): position every NON-pinned popup at its OWN fixed slot. Because slots are
-// fixed, dragging one card out (→ pinned, skipped here) or opening/closing another never moves
-// the rest — they stay exactly where they are. Pinned cards keep their dropped/resized geometry.
-// Slot positions are computed for a full row of MAX_FLOATING slots so they never shift with count.
+// layoutFloatingRow(): position every NON-pinned popup at its slot inside the CURRENT grid
+// (state.floatCols columns, centered as a row, each column capped at FLOAT_MAX_W). Slot
+// indexes are stable, so drag-outs/closes never move the rest; only a grid GROWTH (add with
+// no free gap) re-computes everyone's width. Pinned cards keep their dropped/resized geometry.
 function layoutFloatingRow() {
   const GAP = 14, MARGIN = 20, TOP = 70;
-  const avail = window.innerWidth - MARGIN * 2;
-  const slotW = (avail - (MAX_FLOATING - 1) * GAP) / MAX_FLOATING;
-  const rowW = MAX_FLOATING * slotW + (MAX_FLOATING - 1) * GAP;
-  const startX = (window.innerWidth - rowW) / 2;
+  const phone = isPhoneLayout();
+  const cols = Math.max(1, Math.min(MAX_FLOATING, state.floatCols || 1));
+  const avail = window.innerWidth - (phone ? 16 : MARGIN * 2);
+  const slotW = phone ? avail : Math.min((avail - (cols - 1) * GAP) / cols, FLOAT_MAX_W);
+  const rowW = cols * slotW + (cols - 1) * GAP;
+  const startX = Math.max(phone ? 8 : MARGIN, (window.innerWidth - rowW) / 2);
   state.floatingTables.forEach((f) => {
     if (f.pinned || f.slot == null) return; // pinned = free-floating; keep its own position
     const el = document.querySelector(`[data-floating-table="${CSS.escape(String(f.table))}"]`);
-    if (el) { el.style.left = (startX + f.slot * (slotW + GAP)) + "px"; el.style.top = TOP + "px"; el.style.width = slotW + "px"; el.style.height = ""; el.style.right = "auto"; }
+    if (el) { el.style.left = (startX + f.slot * (slotW + GAP)) + "px"; el.style.top = (phone ? 62 : TOP) + "px"; el.style.width = slotW + "px"; el.style.height = ""; el.style.right = "auto"; }
   });
 }
 
@@ -3935,6 +3957,7 @@ function bindFloor() {
     // space among themselves. Clamped so it can't be dragged fully off-screen.
     const head = card.querySelector(".tp-detail-head");
     if (head) head.onpointerdown = (e) => {
+      if (isPhoneLayout()) return; // phone = one fixed full-width popup — no drag/pin
       if (e.target.closest("button")) return; // don't start a drag from Dock/✕
       e.preventDefault();
       const startX = e.clientX, startY = e.clientY;
@@ -3979,6 +4002,7 @@ function bindFloor() {
     // (e.g. a live poll) keeps the size the owner set.
     const rez = card.querySelector("[data-float-resize]");
     if (rez) rez.onpointerdown = (e) => {
+      if (isPhoneLayout()) return; // phone: no resize (the handle is also display:none in CSS)
       e.preventDefault(); e.stopPropagation();
       const startX = e.clientX, startY = e.clientY;
       const rect = card.getBoundingClientRect();
@@ -5494,7 +5518,23 @@ function startOrderWatch() {
 
 // --- final wiring: connect the static page controls and start everything up ---
 // Keep the floating popups' fixed slots positioned when the window resizes.
-window.addEventListener("resize", () => { if (state.floatingTables.length) layoutFloatingRow(); });
+// Keep the floating row laid out on resize; crossing the phone/desktop breakpoint (rotate,
+// window resize) needs a FULL re-render (the markup itself differs: side panel vs popup-only,
+// Dock button, drag handles) — and entering phone mode keeps only the newest popup, unpinned.
+let lfhWasPhone = isPhoneLayout();
+window.addEventListener("resize", () => {
+  const nowPhone = isPhoneLayout();
+  if (nowPhone !== lfhWasPhone) {
+    lfhWasPhone = nowPhone;
+    if (nowPhone && state.floatingTables.length) {
+      state.floatingTables = [Object.assign(state.floatingTables[state.floatingTables.length - 1], { pinned: false, slot: 0, x: null, y: null, w: null, h: null })];
+      state.floatCols = 1;
+    }
+    renderEditor();
+    return;
+  }
+  if (state.floatingTables.length) layoutFloatingRow();
+});
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => setTab(t.dataset.tab))); // top tabs switch views
 document.querySelectorAll(".subtab").forEach((t) => (t.onclick = () => setTab(t.dataset.tab))); // Editor sub-nav: Dishes/Categories/Tags
 $("#newBtn").onclick = newRecord; // the "+ New" button
