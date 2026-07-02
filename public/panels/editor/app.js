@@ -3776,9 +3776,13 @@ function layoutFloatingRow() {
   // now build the visual left→right ORDER (newest in the middle slot, older ones alternating
   // outward) and lay the slots out evenly, clamped inside the viewport. Cards shrink together
   // to keep fitting; startX is clamped so nothing ever crosses the left margin.
-  const NAT_W = 400, MIN_W = 300, GAP = 14, MARGIN = 20, TOP = 70;
+  const NAT_W = 400, GAP = 14, MARGIN = 20, TOP = 70;
   const avail = window.innerWidth - MARGIN * 2;
-  const w = (n * NAT_W + (n - 1) * GAP) <= avail ? NAT_W : Math.max(MIN_W, (avail - (n - 1) * GAP) / n);
+  // Width that exactly fills the row for n cards; cap at the natural width. NO hard minimum —
+  // a fixed floor (was 300) forced the row wider than the screen once 5+ were open, so the
+  // outermost overflowed again. Letting cards shrink to fit GUARANTEES they never overflow
+  // (they just get smaller with many open — and each can be resized/dragged out anyway).
+  const w = Math.min(NAT_W, (avail - (n - 1) * GAP) / n);
   const totalW = n * w + (n - 1) * GAP;
   const startX = Math.max(MARGIN, (window.innerWidth - totalW) / 2);
   // free is oldest→newest. Put the newest in the middle slot; fill outward alternately.
