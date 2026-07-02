@@ -3893,6 +3893,11 @@ function bindFloor() {
       const rect = card.getBoundingClientRect();
       const startLeft = rect.left, startTop = rect.top;
       try { head.setPointerCapture(e.pointerId); } catch {}
+      // Suspend the auto-arrange left/top/width transition WHILE dragging — otherwise each
+      // pointermove's style change animates instead of jumping instantly, and worse,
+      // getBoundingClientRect() on drop can read a still-mid-animation position instead of
+      // where the pointer actually let go.
+      card.classList.add("dragging");
       let moved = false;
       const move = (ev) => {
         moved = true;
@@ -3905,12 +3910,14 @@ function bindFloor() {
       const up = () => {
         head.removeEventListener("pointermove", move);
         head.removeEventListener("pointerup", up);
+        card.classList.remove("dragging");
         if (!moved) return; // a plain click on the header — not a drag, nothing to pin
         const f = state.floatingTables.find((x) => x.table === t);
         if (f) {
           const rect2 = card.getBoundingClientRect();
           f.pinned = true; f.x = rect2.left; f.y = rect2.top; f.w = rect2.width;
         }
+        card.classList.add("tp-pinned"); // instant visual feedback — the class also lands from the data on the next render anyway
         layoutFloatingRow(); // re-share the freed-up space among the still-free cards
       };
       head.addEventListener("pointermove", move);

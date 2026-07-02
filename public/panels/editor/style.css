@@ -1266,6 +1266,9 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
    one on purpose" among the auto-arranged ones. */
 .tp-detail-floating { position: fixed; top: 76px; right: 24px; z-index: 40; width: 420px; max-width: calc(100vw - 24px); height: min(78vh, calc(100vh - 96px)); transition: left .22s ease, top .22s ease, width .22s ease; }
 .tp-detail-floating.tp-pinned { z-index: 41; box-shadow: 0 0 0 2px var(--gold), var(--shadow-md); transition: none; }
+/* While actively being dragged, no transition — the pointer must control position 1:1,
+   not chase an animated interpolation (which also broke the drop-position capture). */
+.tp-detail-floating.dragging { transition: none; z-index: 42; }
 .tp-detail-floating .tp-detail { height: 100%; box-shadow: var(--shadow-md); }
 .tp-detail-floating .tp-detail-body { flex: 1; min-height: 0; overflow-y: auto; }
 .tp-detail-floating .tp-detail-head { cursor: grab; }
