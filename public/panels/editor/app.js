@@ -3946,16 +3946,37 @@ async function saveGeo() {
 }
 
 // ---- the ONE panel that handles a table end to end ----
-// open/closeTablePanel: remember which table's big control panel is open. Opening
-// also kicks off a fresh load so the panel is never showing stale data.
-function openTablePanel(table) { state.openSess = String(table); renderTablePanel(); loadSessions(); /* refresh immediately so a reopened table is never stale */ }
+// open/closeTablePanel: remember which table's big control panel is open. Opening kicks
+// off a fresh load so the panel is never showing stale data — that SAME load's own
+// renderTablePanel() call (see loadSessions) is what actually draws the modal; we don't
+// also render synchronously here (owner report, 2026-07-02: "why 2 time load" — rendering
+// instantly with whatever was cached, THEN again a moment later once the real fetch
+// landed, was a guaranteed double-render/flicker on every open, not just an occasional
+// race). A modal appearing a beat after the tap (one real network round-trip) reads as
+// normal; two back-to-back redraws reads as broken.
+function openTablePanel(table) { state.openSess = String(table); loadSessions(); }
 function closeTablePanel() { state.openSess = null; document.querySelector(".sx-modal-overlay")?.remove(); }
 
 // selectTable / deselectTable — the NEW master-detail (Tables tab). Selecting a
 // table shows its full detail IN the right side panel (not a pop-up); deselecting
-// returns the panel to the whole-floor controls. Both just set state + redraw the
-// floor, and kick a fresh load so the detail is never stale.
-function selectTable(table) { state.selectedTable = String(table); renderEditor(); loadSessions(); }
+// returns the panel to the whole-floor controls.
+// Selecting does NOT render synchronously — same reasoning as openTablePanel above: an
+// instant render would show this table's OLD cached (or empty) data, then loadSessions'
+// own render corrects it a moment later once the real fetch lands, reading as a double-
+// load/flicker. Only the tile highlight updates instantly (direct DOM, not a full
+// re-render) so the tap still feels acknowledged; the detail panel itself waits for the
+// one real render.
+function selectTable(table) {
+  const t = String(table);
+  const prev = state.selectedTable;
+  state.selectedTable = t;
+  const ed = $("#editor");
+  if (ed) {
+    if (prev != null) { const p = ed.querySelector(`[data-floor-table="${CSS.escape(prev)}"]`); if (p) p.classList.remove("ft-sel"); }
+    const n = ed.querySelector(`[data-floor-table="${CSS.escape(t)}"]`); if (n) n.classList.add("ft-sel");
+  }
+  loadSessions();
+}
 function deselectTable() { state.selectedTable = null; renderEditor(); }
 
 // refreshTableDetail: redraw whichever table-detail view is currently open after a
