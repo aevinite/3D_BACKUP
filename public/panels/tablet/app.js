@@ -233,8 +233,10 @@ function summaryCallsOf(t) {
 //   { nw, ck, rd, sv, due, kots, guests, unpaid, paid, billNo, hasOrders }
 function tableAgg(t) {
   // SELECTED table with its slice loaded → live-from-board (mirrors the editor's tableTileState).
+  // (sessionOf(t) is OR'd OUTSIDE the .some() — it used to sit inside the callback, so a
+  //  session-only table with zero cached orders anywhere never took this live branch.)
   if (String(state.table) === String(t)
-      && (state.data.orders || []).some((o) => String(o.table_number) === String(t) || sessionOf(t))) {
+      && ((state.data.orders || []).some((o) => String(o.table_number) === String(t)) || sessionOf(t))) {
     const os = ordersOf(t), s = sessionOf(t);
     let nw = 0, ck = 0, rd = 0, sv = 0, due = 0;
     const kots = [];
@@ -278,7 +280,7 @@ function tableAgg(t) {
 // served/bill → seated/waiting → req → free).
 function tileState(t) {
   if (String(state.table) === String(t)
-      && (state.data.orders || []).some((o) => String(o.table_number) === String(t) || sessionOf(t))) {
+      && ((state.data.orders || []).some((o) => String(o.table_number) === String(t)) || sessionOf(t))) {
     const a = tableAgg(t), s = sessionOf(t);
     if (a.nw > 0) return { cls: "new", label: "New order" };
     if (a.rd > 0) return { cls: "ready", label: "Ready to serve" };
@@ -1058,6 +1060,17 @@ function optimisticOpen(table) {
     () => {
       state.data.sessions = [...(state.data.sessions || []), { id: "pending-" + t, table_number: t, status: "open", auto_approve: false }];
       if (Array.isArray(state.data.requests)) state.data.requests = state.data.requests.filter((r) => !(r.type === "open" && String(r.table_number) === t));
+      // The GRID tile reads the slim SUMMARY (tier 1), not the slice patched above — without
+      // this the tile sat on "Free" for the whole server round-trip (~2s) while the detail
+      // already said open (owner report, 2026-07-02). Mirror the manager's openTableSession:
+      // flip this tile to "Open / waiting" locally NOW; load() reconciles to server truth after.
+      const tiles = Object.assign({}, state.summary.tiles || {});
+      tiles[t] = Object.assign({}, tiles[t] || {}, {
+        state: "waiting", label: "Open", meta: "waiting for guests",
+        counts: { nw: 0, ck: 0, rd: 0, sv: 0 }, due: 0, pay: "",
+        members: 0, pending: 0, hasNew: false, hasCall: false, hasReq: false, hasJoin: false, reqs: 0, calls: 0,
+      });
+      state.summary = Object.assign({}, state.summary, { tiles });
     },
     () => api("POST", "/sessions/open", { table: t }),
   );

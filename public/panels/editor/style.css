@@ -1652,3 +1652,25 @@ html[data-theme="light"] .op-tablet{ color:#1d4ed8; }
   .ed-head { flex-wrap: wrap; gap: 10px; }
   .ed-head h2 { font-size: 20px; flex: 1 1 100%; }
 }
+
+/* ── PHONE (≤760px) — Tables tab (owner, 2026-07-03) ──────────────────────────
+   On a phone the floor is popup-only: tapping a tile opens ONE full-width FIXED
+   overlay popup (the ≤1040px rule above turns floating cards into static blocks
+   BELOW the grid — on a phone that put the popup off-screen). No drag, no resize,
+   no side panel, no dock. Desktop (>760px) is untouched. */
+@media (max-width: 760px) {
+  .tp-detail-floating {
+    position: fixed !important; left: 8px !important; right: 8px !important;
+    top: 62px !important; width: auto !important; margin-top: 0;
+    height: auto !important; max-height: calc(100vh - 76px); max-height: calc(100dvh - 76px);
+    z-index: 40;
+  }
+  .tp-detail-floating .tp-detail-body { overflow-y: auto; }
+  .tp-detail-floating .tp-detail-head { cursor: default; }
+  .tp-resize-handle { display: none; }
+  /* The ‹/› side-panel chevron is meaningless on a phone (popup mode is forced). */
+  .floor-side-toggle { display: none; }
+  /* Tiles: two comfortable thumb-sized columns whatever the density setting. */
+  .ftile-grid, .ftile-grid[data-density="s"], .ftile-grid[data-density="l"] { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .floor-stats { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+}
