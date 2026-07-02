@@ -374,6 +374,20 @@ the browser handles their back for free; only state-driven overlays need wiring.
   + `--project-ref` — NOT `--supabase-url`/`--supabase-key`. Any MCP config change
   needs a full Claude Code restart to take effect.
 
+## Deferred optimizations (owner-approved to revisit later — NOT yet built)
+
+- **Realtime-UPDATE latency on an already-open table detail (owner, 2026-07-02).** Opening a
+  table detail now paints instantly from the slim summary (stale-while-revalidate — see
+  `tablePanelParts` streaming branch / tablet `renderPanel`), so FIRST-open feels instant. But
+  a LIVE update to a detail that's already open (a new order/dish landing) still waits on a
+  full per-table slice refetch (`?table=N` → sessions+orders+calls+items, one Sydney round-trip
+  each ≈ 1–1.5s on the tablet). Idea for later, if it still feels laggy: instead of refetching
+  the whole slice on every breadcrumb, apply the realtime DELTA in place (the rt_emit breadcrumb
+  already names the table + change; patch just the changed row into `state.data.orders`/`items`
+  and re-render). That's the Linear/Figma "apply the delta, don't refetch" model — near-zero
+  egress, near-zero latency. Only build if the owner still notices the lag after the instant-open
+  win. Keep the 60s full-slice poll underneath as the safety net either way.
+
 ## Definition of done for code changes
 
 - Type-check passes (`npm run lint` or Next's built-in checker).
