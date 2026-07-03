@@ -32,7 +32,7 @@ section's cards. New state: `state.settingsSection` (default `"general"`).
 ## B. Per-user access (new feature)
 
 ### Data
-Migration 116: `ALTER TABLE staff_users ADD COLUMN IF NOT EXISTS permissions jsonb NOT NULL
+Migration 115: `ALTER TABLE staff_users ADD COLUMN IF NOT EXISTS permissions jsonb NOT NULL
 DEFAULT '{}'::jsonb;` Keys (v1): `tablet_discount`, `tablet_mark_paid`, `tablet_invoice` (same keys
 as the restaurant tri-states, so resolution is a simple fallback). Values: `"on" | "pin" | "off"`.
 Absent key = inherit restaurant default. JSONB so future capabilities need no migration (mirrors

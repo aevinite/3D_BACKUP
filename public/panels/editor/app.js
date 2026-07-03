@@ -872,8 +872,9 @@ function userSettingCardHtml() {
     : `<div class="sx-empty">No staff yet — add the first below.</div>`;
   return `<div class="card"><h3>User setting</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      Add and manage tablet, kitchen, and manager logins for this restaurant — the same
-      team the owner sees in Staff &amp; powers.
+      ${state.staffActor === "manager"
+        ? "Add and manage <b>tablet</b> and <b>kitchen</b> logins for this restaurant. Manager accounts are managed by the owner."
+        : "Add and manage tablet, kitchen, and manager logins for this restaurant — the same team the owner sees in Staff &amp; powers."}
     </p>
     ${reveal}
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">${rows}</div>
