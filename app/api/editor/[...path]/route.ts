@@ -162,9 +162,43 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // names ONE table, the panel asks for just that table's orders (?table=N) instead
       // of re-reading the whole floor. No param = full board (unchanged). Scopes the
       // 159 KB-and-growing whole-orders read down to a few rows.
-      const tbl = new URL(req.url).searchParams.get("table");
+      const sp = new URL(req.url).searchParams;
+      const tbl = sp.get("table");
+      // BILLS-HISTORY SEARCH (owner, 2026-07-03): the Bills tab only fetched the newest 200
+      // orders, so searching for an OLDER bill found nothing (the row was never fetched). When
+      // ?history=1&q=…&type=… is set, query the DB directly for the match (scoped by rid),
+      // returning up to 200 matching bill records — so any bill is findable, however old.
       let oq = sb.from("orders").select("*").eq("restaurant_id", rid);
-      if (tbl) oq = oq.eq("table_number", tbl);
+      const histQ = sp.get("history") ? (sp.get("q") || "").trim() : "";
+      if (histQ) {
+        const type = sp.get("type") || "inv";
+        if (type === "inv" || type === "bill") {
+          // invoice_no / bill_no live on the SESSION → find matching sessions, then their orders.
+          const col = type === "inv" ? "invoice_no" : "bill_no";
+          const n = parseInt(histQ.replace(/\D/g, ""), 10);
+          if (!Number.isFinite(n)) return ok([]);
+          const sess = must(await sb.from("sessions").select("id").eq("restaurant_id", rid).eq(col, n).limit(200));
+          const ids = (sess as any[]).map((s) => s.id);
+          if (!ids.length) return ok([]);
+          oq = oq.in("session_id", ids);
+        } else if (type === "table") {
+          oq = oq.eq("table_number", histQ);
+        } else if (type === "cust") {
+          // Customer name is on the session's owner member (dine-in) or orders.customer_name
+          // (aggregator). Match either: gather session_ids by member name, then OR the orders.
+          const mem = must(await sb.from("session_members").select("session_id").eq("restaurant_id", rid).ilike("name", `%${histQ}%`).limit(200));
+          const sIds = [...new Set((mem as any[]).map((m) => m.session_id).filter(Boolean))];
+          oq = sIds.length ? oq.or(`customer_name.ilike.%${histQ}%,session_id.in.(${sIds.join(",")})`) : oq.ilike("customer_name", `%${histQ}%`);
+        } else if (type === "date") {
+          const d = new Date(histQ);
+          if (isNaN(d.getTime())) return ok([]);
+          const start = new Date(d); start.setHours(0, 0, 0, 0);
+          const end = new Date(start); end.setDate(end.getDate() + 1);
+          oq = oq.gte("created_at", start.toISOString()).lt("created_at", end.toISOString());
+        }
+      } else if (tbl) {
+        oq = oq.eq("table_number", tbl);
+      }
       const orders = must(await oq.order("created_at", { ascending: false }).limit(200));
       // Attach each order's SESSION invoice/bill state so the merged bill card knows
       // whether it's invoiced/locked (invoice lives on the session, not the order).

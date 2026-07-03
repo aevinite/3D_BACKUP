@@ -71,6 +71,7 @@ const state = {
   floorTileDensity: lsGet("lfh_floor_tile_density", "m"), // s | m | l — how many tiles fit per row in the floor grid
   ordersView: lsGet("lfh_editor_ordersview", "live"), // Orders left-bar: live | previous | bills | calls — remembered across refresh
   billSearch: "", billSearchType: "inv", billSort: "new", // Bills → Today/Previous search + sort
+  billHistRows: [], // server-side bills-history search results (bills older than the local 200-row window)
   logView: lsGet("lfh_editor_logview", "customers"),  // Log left-bar: customers | operations — remembered across refresh
   users: { members: [], customers: [], blocklist: [] }, // Log tab data
   // "User setting" card (Settings tab): the manager's own team (tablet/kitchen/manager
@@ -1522,9 +1523,37 @@ function ordersLiveHtml(live) {
 // TODAY / PREVIOUS: settled bill RECORDS as small cards (one per visit/session) —
 // click a card to expand the full bill in a modal (Print / Restore). A search bar
 // (by invoice/bill/table/customer/date, starts-with ranked first) + sort dropdown.
+// loadBillHistory(q, type): server-side bills search for the Previous view — finds bills
+// OLDER than the locally-cached 200 orders (owner, 2026-07-03). Debounced (300ms) so typing
+// doesn't spray requests; each fetch takes a ticket so a slow older response can't overwrite
+// a newer one. Results land in state.billHistRows and merge into the list (ordersPreviousHtml).
+let _billHistSeq = 0, _billHistTimer = null;
+function loadBillHistory(q, type) {
+  clearTimeout(_billHistTimer);
+  if (!q) { state.billHistRows = []; return; } // cleared search → drop server results, fall back to local
+  _billHistTimer = setTimeout(async () => {
+    const seq = ++_billHistSeq;
+    try {
+      const rows = await api("GET", `/orders?history=1&q=${encodeURIComponent(q)}&type=${encodeURIComponent(type || "inv")}`);
+      if (seq !== _billHistSeq) return; // a newer search superseded this one
+      state.billHistRows = Array.isArray(rows) ? rows : [];
+      if (state.tab === "orders") renderEditor();
+    } catch { /* leave prior results; the local-200 filter still works */ }
+  }, 300);
+}
 function ordersPreviousHtml(previous, kind = "previous") {
   const isToday = kind === "today";
-  const groups = groupOrdersBySession(previous);
+  // When searching the PREVIOUS view, union the locally-cached 200 orders with the
+  // server-side history search results (state.billHistRows) so bills OLDER than the
+  // 200-row window are findable too (owner, 2026-07-03 — old bills were unsearchable).
+  // Dedup by order id; the existing filter/rank/sort below then applies to the union.
+  let src = previous;
+  if (kind === "previous" && (state.billSearch || "").trim() && Array.isArray(state.billHistRows) && state.billHistRows.length) {
+    const byId = new Map((previous || []).map((o) => [o.id, o]));
+    for (const o of state.billHistRows) if (!byId.has(o.id)) byId.set(o.id, o);
+    src = [...byId.values()];
+  }
+  const groups = groupOrdersBySession(src);
   const bills = groups.map((g) => {
     const o0 = g[0];
     const total = billMath(g).total;
@@ -2455,12 +2484,15 @@ function renderEditor() {
     // Today/Previous: bill cards open a modal; search + sort drive the grid.
     ed.querySelectorAll("[data-bill-open]").forEach((c) => { c.onclick = () => openBillModal(c.dataset.billOpen); });
     const _bst = ed.querySelector("[data-bill-stype]");
-    if (_bst) _bst.onchange = () => { state.billSearchType = _bst.value; state.billSearch = ""; renderEditor(); };
+    if (_bst) _bst.onchange = () => { state.billSearchType = _bst.value; state.billSearch = ""; state.billHistRows = []; renderEditor(); };
     const _bso = ed.querySelector("[data-bill-sort]");
     if (_bso) _bso.onchange = () => { state.billSort = _bso.value; renderEditor(); };
     const _bq = ed.querySelector("[data-bill-q]");
     if (_bq) _bq.oninput = () => {
       state.billSearch = _bq.value;
+      // In the PREVIOUS view, also search the server so bills older than the local 200-row
+      // window are found (debounced; results merge into the list — see ordersPreviousHtml).
+      if (ordersViewKey() === "previous") loadBillHistory(_bq.value.trim(), state.billSearchType);
       renderEditor();
       const ne = $("#editor [data-bill-q]"); if (ne) { ne.focus(); const v = ne.value; try { ne.setSelectionRange(v.length, v.length); } catch {} }
     };
