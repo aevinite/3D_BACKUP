@@ -189,3 +189,16 @@ owner looks, with cache busting, before claiming anything.
   invoice number removed (bill # kept, voided tag kept). VERIFIED: Table 2 bill renders
   correctly, no invoice number. (The printed Tax Invoice keeps its number for GST — flag
   to owner if he wants it gone there too.)
+- [x] **Tablet take-order redesign — menu-style browse (owner 2026-07-03).** All categories
+  laid out as sections in ONE scrollable browser; category rail (desktop) / chips (phone)
+  JUMP on tap + follow the scroll (spy). Order mode takes over the full screen; the
+  "This order" cart kept EXACTLY as before in its OWN separate scroll (owner: no floating
+  cart bar/sheet). Options/allergy/note/send flow untouched; browse scroll survives adds,
+  option edits and search-clear; hardware back peels order mode first (backstack.js now
+  loaded in tablet). VERIFIED live at 390px + 1280px, dark+light, real order sent (bill #2).
+- [x] **Make every panel responsive (owner 2026-07-03).** Audited /aevinite /owner /manager
+  /editor /kitchen /login /staff-login at 390px. Fixed: admin Branding card (2-col grid never
+  collapsed — was UNUSABLE on phone), compacted admin/owner phone nav (3-across), editor
+  Operations-log now stacks like the Customer log (was 700px sideways scroll), login inputs
+  16px (kills iOS focus-zoom). Kitchen/owner/manager/login verified fine already (manager
+  phone pass shipped in #102). VERIFIED live at 390px.

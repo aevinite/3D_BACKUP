@@ -1155,6 +1155,12 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   .logrow { grid-template-columns: 1fr 1fr; min-width: 0; }
   .logtable { overflow-x: visible; }
   .logacts { justify-content: flex-start; }
+  /* Operation log: same phone reflow as the customer log above (it kept the
+     desktop 700px min-width, so it scrolled sideways while its neighbour stacked). */
+  .oprow.ophead { display: none; }
+  .oprow { grid-template-columns: 1fr 1fr; min-width: 0; }
+  .oplist { overflow-x: visible; }
+  .opacts { justify-content: flex-start; }
 }
 
 /* ============================ POLISH & OVERFLOW SAFETY ============================
