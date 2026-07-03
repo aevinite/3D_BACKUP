@@ -44,7 +44,7 @@ export default function LoginForm({ next }: { next: string }) {
   // — styling: a warm, calm card on a dark backdrop; matches the app's tone —
   const field: React.CSSProperties = {
     width: "100%", boxSizing: "border-box", padding: "12px 14px", borderRadius: 12,
-    border: "1px solid #2a3a5f", background: "#0b1220", color: "#eaf1ff", fontSize: 15, outline: "none",
+    border: "1px solid #2a3a5f", background: "#0b1220", color: "#eaf1ff", fontSize: 16, outline: "none",
   };
 
   return (

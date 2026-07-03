@@ -24,7 +24,7 @@ export default async function StaffLogin({
           placeholder="Password"
           autoFocus
           autoComplete="current-password"
-          style={{ width: "100%", boxSizing: "border-box", padding: 12, borderRadius: 10, border: "1px solid #2a3a5f", background: "#0b1220", color: "#dbe7ff", fontSize: 15 }}
+          style={{ width: "100%", boxSizing: "border-box", padding: 12, borderRadius: 10, border: "1px solid #2a3a5f", background: "#0b1220", color: "#dbe7ff", fontSize: 16 }}
         />
         {bad ? <div style={{ color: "#f87171", fontSize: 13, marginTop: 8 }}>Wrong password — try again.</div> : null}
         <button

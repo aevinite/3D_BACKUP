@@ -613,6 +613,13 @@ function openDishEditModal(itemId) {
 function renderPanel() {
   const p = $("#panel");
   p.classList.remove("has-detail");
+  // Not ordering → make sure the order-mode takeover + its back-stack layer are gone,
+  // whatever path ended the ordering (send, ← back, ✓ Done, hardware back, drawer close).
+  if (!state.ordering) {
+    document.body.classList.remove("om-mode");
+    p.classList.remove("om-open");
+    const off = omBackOff; omBackOff = null; if (off) off();
+  }
   if (!state.table) { p.innerHTML = `<div class="empty">Tap a table to see it — or to take an order for it.</div>`; return; }
   if (state.ordering) { renderOrderMode(); return; }
   const t = state.table, s = sessionOf(t), a = tableAgg(t);
@@ -651,7 +658,7 @@ function renderPanel() {
       </div>
       ${billBox}`;
     const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel(); };
+    $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
     return;
   }
 
@@ -849,7 +856,7 @@ function renderPanel() {
   // IDENTICAL to the manager panel's openDishEditModal.
   document.querySelectorAll("[data-edit-dish]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.editDish)));
   // Add a dish to THIS already-placed order: reuse the dish browser in add mode.
-  document.querySelectorAll("[data-add-dish]").forEach((b) => (b.onclick = () => { state.ordering = true; state.addToOrderId = b.dataset.addDish; state.cat = ""; state.dishSearch = ""; renderPanel(); }));
+  document.querySelectorAll("[data-add-dish]").forEach((b) => (b.onclick = () => { state.ordering = true; state.addToOrderId = b.dataset.addDish; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); }));
   // Per-order allergen chips: toggle an allergen on/off for the whole order.
   document.querySelectorAll(".talg[data-alg]").forEach((chip) => (chip.onclick = () => {
     const id = chip.dataset.alg, slug = chip.dataset.slug;
@@ -902,7 +909,7 @@ function renderPanel() {
     }
   };
   const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; renderPanel(); };
+  $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
 }
 
 // Advance one dish new→cooking→served (wrapping). Optimistic so it feels instant.
@@ -1320,27 +1327,96 @@ async function addDishToOrder(orderId, payload) {
   } catch (e) { toast("Failed: " + e.message, false); }
 }
 
-function orderDishes() {
+// Menu-style browse (owner, 2026-07-03): ALL categories are laid out as sections in ONE
+// scrollable browser — the category rail/chips JUMP to a section on tap and FOLLOW the
+// scroll (scroll-spy, same trick as the guest menu's computeSpy). Searching collapses the
+// sections into a single flat result list, exactly like before.
+function orderSections() {
   const q = state.dishSearch.trim().toLowerCase();
-  return state.data.dishes.filter((d) =>
-    q ? (d.title || "").toLowerCase().includes(q) : (!state.cat || d.category === state.cat));
+  if (q) {
+    const dishes = state.data.dishes.filter((d) => (d.title || "").toLowerCase().includes(q));
+    return dishes.length ? [{ slug: "__search", label: "Search results", dishes }] : [];
+  }
+  const cats = (state.data.categories || []).filter((c) => c.active !== false);
+  const bySlug = new Map(cats.map((c) => [c.slug, { slug: c.slug, label: (c.name && c.name.en) || c.slug, dishes: [] }]));
+  const other = { slug: "__other", label: "Other", dishes: [] };
+  for (const d of state.data.dishes) (bySlug.get(d.category) || other).dishes.push(d);
+  const secs = [...bySlug.values()].filter((s) => s.dishes.length);
+  if (other.dishes.length) secs.push(other);
+  return secs;
 }
-function orderGridHtml() {
-  const dishes = orderDishes();
-  if (!dishes.length) return `<div class="muted" style="padding:14px">No dishes match.</div>`;
-  return dishes.map((d) => {
-    const out = (d.tags || []).includes("sold-out");
-    // Total this dish across ALL its cart lines (a dish can now appear on several
-    // lines — e.g. plain + "no nuts"), so the badge shows the true count.
-    const inCartQty = state.cart.filter((l) => l.id === d.id).reduce((s, l) => s + l.qty, 0);
-    return `<button class="dish ${out ? "out" : ""} ${inCartQty ? "in" : ""}" data-dish="${esc(d.id)}" ${out ? "disabled" : ""}>
-      <span class="dname">${esc(d.title)}</span>
-      <span class="drow">
-        <span class="dprice">${out ? "SOLD OUT" : inr(dishPrice(d))}</span>
-        ${out ? "" : inCartQty ? `<span class="dqty">×${inCartQty}</span>` : `<span class="dadd" aria-hidden="true">＋</span>`}
-      </span>
-    </button>`;
-  }).join("");
+function dishBtnHtml(d) {
+  const out = (d.tags || []).includes("sold-out");
+  // Total this dish across ALL its cart lines (a dish can now appear on several
+  // lines — e.g. plain + "no nuts"), so the badge shows the true count.
+  const inCartQty = state.cart.filter((l) => l.id === d.id).reduce((s, l) => s + l.qty, 0);
+  return `<button class="dish ${out ? "out" : ""} ${inCartQty ? "in" : ""}" data-dish="${esc(d.id)}" ${out ? "disabled" : ""}>
+    <span class="dname">${esc(d.title)}</span>
+    <span class="drow">
+      <span class="dprice">${out ? "SOLD OUT" : inr(dishPrice(d))}</span>
+      <span class="dbadge">${out ? "" : inCartQty ? `<span class="dqty">×${inCartQty}</span>` : `<span class="dadd" aria-hidden="true">＋</span>`}</span>
+    </span>
+  </button>`;
+}
+function orderSectionsHtml() {
+  const secs = orderSections();
+  if (!secs.length) return `<div class="muted" style="padding:14px">No dishes match.</div>`;
+  return secs.map((s) => `<section class="om-sec" data-cat="${esc(s.slug)}">
+    <h3 class="om-sec-h">${esc(s.label)} <span class="om-sec-n">· ${s.dishes.length}</span></h3>
+    <div class="dishgrid">${s.dishes.map(dishBtnHtml).join("")}</div>
+  </section>`).join("");
+}
+function orderNavHtml() {
+  if (state.dishSearch.trim()) return "";
+  return orderSections().map((s, i) =>
+    `<button class="om-cat ${i === 0 ? "on" : ""}" data-cat="${esc(s.slug)}">${esc(s.label)}</button>`).join("");
+}
+// Tap a category → smooth-jump to its section; scrolling highlights the section under
+// the header line (spy). A tap mutes the spy briefly so the highlight doesn't flicker
+// through the categories the smooth scroll passes over.
+function wireOrderNav() {
+  const sc = $("#omScroll");
+  if (!sc) return;
+  const btns = [...document.querySelectorAll(".om-nav .om-cat")];
+  const setOn = (slug) => btns.forEach((b) => {
+    const on = b.dataset.cat === slug;
+    b.classList.toggle("on", on);
+    if (on) b.scrollIntoView({ block: "nearest", inline: "nearest" });
+  });
+  btns.forEach((b) => (b.onclick = () => {
+    const s = sc.querySelector(`.om-sec[data-cat="${(window.CSS && CSS.escape) ? CSS.escape(b.dataset.cat) : b.dataset.cat}"]`);
+    if (!s) return;
+    state._omMute = Date.now() + 700;
+    setOn(b.dataset.cat);
+    sc.scrollTo({ top: Math.max(0, s.offsetTop - 6), behavior: "smooth" });
+  }));
+  let raf = 0;
+  sc.onscroll = () => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      // Remember the BROWSE spot only (not search-result scrolling), so clearing a
+      // search / returning from the options screen lands back where the waiter was.
+      if (!state.dishSearch.trim()) state._omTop = sc.scrollTop;
+      if (Date.now() < (state._omMute || 0)) return;
+      const secs = [...sc.querySelectorAll(".om-sec")];
+      if (!secs.length || !btns.length) return;
+      const line = sc.scrollTop + 56;              // just under the sticky section header
+      let active = secs[0];
+      for (const s of secs) if (s.offsetTop <= line) active = s;
+      if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 24) active = secs[secs.length - 1];
+      setOn(active.dataset.cat);
+    });
+  };
+}
+// Refresh every dish button's ×N badge + highlight IN PLACE (no grid rebuild → the
+// browse scroll position survives adding dishes).
+function updateDishBadges() {
+  document.querySelectorAll("#omScroll .dish[data-dish]").forEach((btn) => {
+    const qty = state.cart.filter((l) => l.id === btn.dataset.dish).reduce((s, l) => s + l.qty, 0);
+    btn.classList.toggle("in", qty > 0);
+    const slot = btn.querySelector(".dbadge");
+    if (slot && !btn.disabled) slot.innerHTML = qty ? `<span class="dqty">×${qty}</span>` : `<span class="dadd" aria-hidden="true">＋</span>`;
+  });
 }
 function bindDishButtons() {
   document.querySelectorAll("[data-dish]").forEach((b) => (b.onclick = () => {
@@ -1357,11 +1433,15 @@ function bindDishButtons() {
     const line = state.cart.find((l) => l.id === d.id && !l.options && !l.allergy && !l.note);
     if (line) line.qty = Math.min(99, line.qty + 1);
     else state.cart.push({ id: d.id, title: d.title, price: dishPrice(d), qty: 1 });
-    renderOrderMode();
+    // Patch the badge + cart pane in place — a full re-render would reset the browse scroll.
+    updateDishBadges(); updateOrderCart();
   }));
 }
 
 function renderDishOptions(d, editIndex) {
+  // Leaving the browser for the options screen — remember the browse spot so the
+  // rebuild on return lands exactly where the waiter was.
+  const sc = $("#omScroll"); if (sc) state._omTop = sc.scrollTop;
   const sel = {};
   const line = editIndex != null ? state.cart[editIndex] : null;
   if (line && line.options) for (const o of line.options) (sel[o.group] = sel[o.group] || []).push(o.label);
@@ -1387,7 +1467,10 @@ function drawDishOptions() {
   $("#panel").classList.remove("has-detail");
   // Size/extras (if the dish has any) PLUS a per-item allergy + note — so the
   // waiter can flag "no nuts" or "less ice" on this one dish, not the whole order.
+  // .om-optwrap gives the screen its own padding + scroll while the panel is the
+  // full-screen order takeover (which strips the panel's usual padding).
   $("#panel").innerHTML = `
+    <div class="om-optwrap">
     <div class="phead"><h2>${esc(d.title)}</h2><button class="btn small" id="optBack">← back</button></div>
     <div class="muted small">Base ${inr(base)}</div>
     ${groups || `<div class="muted small">No size / extras for this dish.</div>`}
@@ -1396,7 +1479,8 @@ function drawDishOptions() {
     <div class="optgroup"><h4>Note <span class="muted small">· optional</span></h4>
       <input type="text" id="optNote" class="note" placeholder="e.g. less ice, extra hot" value="${esc(state._opt.note || "")}"></div>
     <div class="ctotal"><span>Per item</span><b>${inr(unit)}</b></div>
-    <button class="btn primary big" id="optAdd">${editIndex != null ? "Update item" : "Add to order"}</button>`;
+    <button class="btn primary big" id="optAdd">${editIndex != null ? "Update item" : "Add to order"}</button>
+    </div>`;
   document.querySelectorAll("[data-optg]").forEach((b) => (b.onclick = () => {
     const g = b.dataset.optg, l = b.dataset.optl, multi = b.dataset.multi === "true";
     const cur = sel[g] || [];
@@ -1434,72 +1518,94 @@ function drawDishOptions() {
   };
 }
 
-function renderOrderMode() {
-  const p = $("#panel");
-  p.classList.remove("has-detail");
-  const cats = state.data.categories.filter((c) => c.active !== false);
-  const chips = state.dishSearch.trim() ? "" : [`<button class="chip ${!state.cat ? "on" : ""}" data-cat="">All</button>`]
-    .concat(cats.map((c) => `<button class="chip ${state.cat === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc((c.name && c.name.en) || c.slug)}</button>`)).join("");
-  // ADD-TO-EXISTING-ORDER mode: a slim dish browser. Tapping a dish adds it straight
-  // to the order (the bill re-prices itself); "✓ Done" returns to the table.
-  if (state.addToOrderId) {
-    p.innerHTML = `
-      <div class="phead"><h2 style="margin:0;font-size:19px">Add a dish · Table ${esc(state.table)}</h2><button class="btn small primary" id="addDoneBtn">✓ Done</button></div>
-      <input type="search" id="dishSearch" class="order-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">
-      <div class="chips">${chips}</div>
-      <div class="muted small" style="padding:4px 2px">Tap a dish to add it to this order — the bill updates automatically.</div>
-      <div class="dishgrid">${orderGridHtml()}</div>`;
-    document.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => { state.cat = b.dataset.cat; renderOrderMode(); }));
-    bindDishButtons();
-    const search = $("#dishSearch");
-    if (search) search.oninput = (e) => { state.dishSearch = e.target.value; const g = document.querySelector(".dishgrid"); if (g) { g.innerHTML = orderGridHtml(); bindDishButtons(); } };
-    $("#addDoneBtn").onclick = () => { state.ordering = false; state.addToOrderId = null; renderPanel(); };
-    return;
-  }
+// The "This order" pane — kept EXACTLY as before (owner 2026-07-03: "this order thing is
+// perfect right now"), it just lives in its own scroll region now instead of under the grid.
+function orderCartHtml() {
   const lines = state.cart.map((l, i) => `<div class="cline">
       <span class="cname">${esc(l.title)}${l.options && l.options.length ? `<small class="copts">${esc(l.options.map((o) => o.label).join(", "))}</small>` : ""}${l.allergy ? `<small class="callergy">⚠ ${esc(l.allergy)}</small>` : ""}${l.note ? `<small class="copts">✎ ${esc(l.note)}</small>` : ""}</span>
       <span class="cqty"><button class="qbtn" data-minus="${i}">−</button><b>${l.qty}</b><button class="qbtn" data-plus="${i}">+</button><button class="qbtn edit" data-edit="${i}" title="Size / extras / allergy">✎</button></span>
       <span class="cprice">${inr(l.price * l.qty)}</span>
     </div>`).join("");
   const total = state.cart.reduce((s, l) => s + l.price * l.qty, 0);
-  p.innerHTML = `
-    <div class="phead"><h2>Order · Table ${esc(state.table)}</h2><button class="btn small" id="backBtn">← back</button></div>
-    <input type="search" id="dishSearch" class="order-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">
-    <div class="chips">${chips}</div>
-    <div class="dishgrid">${orderGridHtml()}</div>
-    <div class="cart">
+  return `<div class="cart">
       <h3>This order</h3>
-      ${lines || `<div class="muted">Tap dishes above to add them.</div>`}
+      ${lines || `<div class="muted">Tap dishes to add them.</div>`}
       <input type="text" id="orderNote" class="note" placeholder="Note for the kitchen (optional)" value="${esc(state.note)}">
       <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Allergies (e.g. nuts, dairy) — applies to the whole order" value="${esc(state.allergies || "")}">
       <div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
       <div class="muted small">Final bill (incl. tax) is computed by the system when you send it.</div>
       <button class="btn primary big" id="sendOrder" ${state.cart.length ? "" : "disabled"}>SEND TO KITCHEN</button>
     </div>`;
-  document.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => { state.cat = b.dataset.cat; renderOrderMode(); }));
-  bindDishButtons();
-  const search = $("#dishSearch");
-  if (search) search.oninput = (e) => {
-    state.dishSearch = e.target.value;
-    const g = document.querySelector(".dishgrid");
-    if (g) { g.innerHTML = orderGridHtml(); bindDishButtons(); }
-  };
-  document.querySelectorAll("[data-plus]").forEach((b) => (b.onclick = () => { state.cart[+b.dataset.plus].qty = Math.min(99, state.cart[+b.dataset.plus].qty + 1); renderOrderMode(); }));
-  document.querySelectorAll("[data-minus]").forEach((b) => (b.onclick = () => {
+}
+// Re-render ONLY the cart pane (its own scroll region) — the dish browser is untouched,
+// so its scroll position and the search focus survive every qty change.
+function updateOrderCart() {
+  const c = $("#omCart");
+  if (!c) return;
+  c.innerHTML = orderCartHtml();
+  c.querySelectorAll("[data-plus]").forEach((b) => (b.onclick = () => { state.cart[+b.dataset.plus].qty = Math.min(99, state.cart[+b.dataset.plus].qty + 1); updateOrderCart(); updateDishBadges(); }));
+  c.querySelectorAll("[data-minus]").forEach((b) => (b.onclick = () => {
     const i = +b.dataset.minus;
     state.cart[i].qty -= 1;
     if (state.cart[i].qty <= 0) state.cart.splice(i, 1);
-    renderOrderMode();
+    updateOrderCart(); updateDishBadges();
   }));
-  $("#orderNote").oninput = (e) => (state.note = e.target.value);
-  const al = $("#orderAllergy"); if (al) al.oninput = (e) => (state.allergies = e.target.value);
-  document.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => {
+  c.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => {
     const l = state.cart[+b.dataset.edit];
     const d = l && state.data.dishes.find((x) => x.id === l.id);
     if (d) renderDishOptions(d, +b.dataset.edit);
   }));
-  $("#backBtn").onclick = () => { state.ordering = false; renderPanel(); };
-  $("#sendOrder").onclick = sendOrder;
+  const nt = c.querySelector("#orderNote"); if (nt) nt.oninput = (e) => (state.note = e.target.value);
+  const al = c.querySelector("#orderAllergy"); if (al) al.oninput = (e) => (state.allergies = e.target.value);
+  const send = c.querySelector("#sendOrder"); if (send) send.onclick = sendOrder;
+}
+// Leave order mode by ANY exit (← back, ✓ Done, hardware back) — one place drops the
+// takeover class + the back-stack layer so none of them can leak.
+let omBackOff = null;
+function exitOrderMode() {
+  state.ordering = false; state.addToOrderId = null; state._omTop = 0;
+  renderPanel();
+}
+function renderOrderMode() {
+  const p = $("#panel");
+  p.classList.remove("has-detail");
+  p.classList.add("om-open");
+  document.body.classList.add("om-mode");   // full-screen takeover (floor hidden while ordering)
+  if (window.LFH_BACK && !omBackOff) omBackOff = LFH_BACK.layer("tablet-order", exitOrderMode);
+  const addMode = !!state.addToOrderId;
+  p.innerHTML = `
+    <div class="om">
+      <div class="om-head">
+        <h2>${addMode ? "Add a dish" : "Order"} · Table ${esc(state.table)}</h2>
+        <input type="search" id="dishSearch" class="order-search om-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">
+        <button class="btn small ${addMode ? "primary" : ""}" id="omExit">${addMode ? "✓ Done" : "← back"}</button>
+      </div>
+      <div class="om-body ${addMode ? "no-cart" : ""}">
+        <nav class="om-nav" id="omNav">${orderNavHtml()}</nav>
+        <div class="om-scroll" id="omScroll">${addMode ? `<div class="muted small om-hint">Tap a dish to add it to this order — the bill updates automatically.</div>` : ""}${orderSectionsHtml()}</div>
+        ${addMode ? "" : `<aside class="om-cart" id="omCart"></aside>`}
+      </div>
+    </div>`;
+  bindDishButtons();
+  wireOrderNav();
+  updateOrderCart();
+  const search = $("#dishSearch");
+  if (search) search.oninput = (e) => {
+    state.dishSearch = e.target.value;
+    $("#omNav").innerHTML = orderNavHtml();
+    const scroller = $("#omScroll");
+    scroller.innerHTML = orderSectionsHtml();
+    bindDishButtons(); wireOrderNav();
+    // Search cleared → put the waiter back at the section they were browsing.
+    if (!state.dishSearch.trim() && state._omTop) {
+      scroller.style.scrollBehavior = "auto"; scroller.scrollTop = state._omTop; scroller.style.scrollBehavior = "";
+    }
+  };
+  $("#omExit").onclick = exitOrderMode;
+  // Restore the browse spot after a rebuild (options round-trip / add-to-order reload) —
+  // instantly, so the smooth scroll-behavior doesn't animate the restore.
+  const sc = $("#omScroll");
+  if (sc && state._omTop) { sc.style.scrollBehavior = "auto"; sc.scrollTop = state._omTop; sc.style.scrollBehavior = ""; }
 }
 
 let sendingOrder = false;
@@ -1535,7 +1641,7 @@ async function sendOrder() {
     });
     if (!r || r.ok !== true) { toast("Rejected: " + ((r && r.reason) || "unknown") + (r && r.item ? ` (${r.item})` : ""), false); return; }
     toast(`Sent! Kitchen ticket #${r.kot_no}`);
-    state.ordering = false; state.cart = []; state.note = ""; state.allergies = "";
+    state.ordering = false; state.cart = []; state.note = ""; state.allergies = ""; state._omTop = 0;
     await load(); renderPanel();
   } catch (e) { toast("Failed: " + e.message, false); }
   finally {
