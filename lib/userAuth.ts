@@ -32,6 +32,10 @@ export type StaffUser = {
   id: string; username: string; role: Role; restaurant_id: string;
   name: string | null; phone: string | null; active: boolean; pin_hash: string | null;
   token_version: number; can_self_reset: boolean; can_self_set_pin: boolean; profile_confirmed: boolean;
+  // Per-user capability overrides (migration 115): capability-key → 'on'|'pin'|'off'.
+  // Absent key = inherit the restaurant-wide default. Rides free on the select("*")
+  // row reads below — no extra query anywhere.
+  permissions: Record<string, string> | null;
 };
 
 // Normalize a typed "Name" into the canonical login key stored in `username`:

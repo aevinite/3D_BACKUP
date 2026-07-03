@@ -40,16 +40,42 @@ async function managerPinGate(req: NextRequest, body: any, rid: string): Promise
 }
 const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName !== "admin" ? ` (by ${g.managerName})` : "");
 
-// Setting-aware gate for a tablet BILLING action. The manager's General settings
+// Setting-aware gate for a tablet BILLING action. The manager's Access settings
 // hold a tri-state per action (tablet_discount / tablet_mark_paid / tablet_invoice):
 //   'off' → blocked (default; waiter has no access)   'pin' → manager PIN required
 //   'on'  → allowed directly.  Server-enforced so hiding the button isn't the only guard.
-async function tabletPerm(key: string, req: NextRequest, body: any, rid: string): Promise<PinGate> {
-  const s = await sb.from("settings").select(key).eq("restaurant_id", rid).maybeSingle();
-  const mode = ((s.data as Record<string, string> | null)?.[key]) || "off";
-  if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for the tablet — ask a manager.", disabled: true }, { status: 403 }) };
+//
+// PER-USER OVERRIDE (owner, 2026-07-03 · migration 115): the logged-in waiter's own
+// staff_users.permissions[key] wins when set ('on'|'pin'|'off'); an absent key falls
+// back to the restaurant-wide tri-state. `user` comes from the request gate — its row
+// is re-read from the DB on every request by userFromCookie, so revoking someone's
+// access takes effect on their very next tap (no re-login needed). Admin bypasses via
+// managerPinGate as before.
+const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice"] as const;
+const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
+async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
+  const override = (user?.permissions ?? {})[key];
+  let mode: string;
+  if (isPermMode(override)) mode = override;
+  else {
+    const s = await sb.from("settings").select(key).eq("restaurant_id", rid).maybeSingle();
+    mode = ((s.data as Record<string, string> | null)?.[key]) || "off";
+  }
+  if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for you — ask a manager.", disabled: true }, { status: 403 }) };
   if (mode === "pin") return managerPinGate(req, body, rid);
   return { allow: true }; // 'on'
+}
+
+// Overlay the logged-in waiter's per-user overrides ONTO the settings object the
+// board GETs send to the tablet client. The client's tperm() reads settings[key] to
+// show/hide the Mark-paid / Discount / Invoice buttons — resolving here means the
+// buttons follow the PER-USER truth with zero client changes (the server gate above
+// stays the real guard either way).
+function overlayUserPerms<T extends Record<string, any> | null>(settings: T, user: StaffUser | null): T {
+  if (!settings || !user?.permissions) return settings;
+  const out: Record<string, any> = { ...settings };
+  for (const k of TABLET_PERM_KEYS) if (isPermMode(user.permissions[k])) out[k] = user.permissions[k];
+  return out as T;
 }
 
 const nowIso = () => new Date().toISOString();
@@ -110,7 +136,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       ]);
       return ok({
         ...summary,
-        settings: must(settings), dishes: must(dishes), categories: must(categories),
+        // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
+        settings: overlayUserPerms(must(settings), g.user), dishes: must(dishes), categories: must(categories),
         restaurant: must(restaurant) || null,
       });
     }
@@ -155,7 +182,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
       ]);
       return ok({
-        settings: must(settings), sessions: must(sessions), members: must(members),
+        // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
+        settings: overlayUserPerms(must(settings), g.user), sessions: must(sessions), members: must(members),
         orders: live.orders, items: live.items, calls: must(calls), dishes: must(dishes),
         categories: must(categories), requests: must(requests),
         restaurant: must(restaurant) || null,
@@ -171,6 +199,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 export async function POST(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  // The logged-in waiter, for per-user permission checks. Bound here because the
+  // tabletPerm call sites below shadow `g` with their own gate result.
+  const actor = g.user;
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
@@ -299,7 +330,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/:id/discount — reduce ONE order's bill (comp/loyalty/fix). Clamped to
     // 0..order total, money-safe. Mirrors the editor endpoint. (owner, 2026-06-17)
     if (a === "orders" && c === "discount") {
-      const g = await tabletPerm("tablet_discount", req, body, rid); if (!g.allow) return g.resp; // off/pin/on per settings
+      const g = await tabletPerm("tablet_discount", req, body, rid, actor); if (!g.allow) return g.resp; // off/pin/on per settings
       const cur = must(await sb.from("orders").select("total").eq("id", b).single());
       const raw = Number(body && body.amount);
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number(cur.total) || 0) : 0;
@@ -314,7 +345,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // RPC the manager panel uses; it's idempotent (a repeat call just returns the
     // existing invoice), so there's no double-invoice risk.
     if (a === "sessions" && c === "invoice") {
-      const g = await tabletPerm("tablet_invoice", req, body, rid); if (!g.allow) return g.resp;
+      const g = await tabletPerm("tablet_invoice", req, body, rid, actor); if (!g.allow) return g.resp;
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
       if (error) throw new Error(error.message);
       await logAction("tablet", "invoice_generate", { detail: `session ${b}` + byNote(g), device_id: dev });
@@ -548,7 +579,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "pay") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      const g = await tabletPerm("tablet_mark_paid", req, body, rid); if (!g.allow) return g.resp; // off/pin/on per settings
+      const g = await tabletPerm("tablet_mark_paid", req, body, rid, actor); if (!g.allow) return g.resp; // off/pin/on per settings
       // Settle only the CURRENT party's bill: scope to the table's open session
       // so we never mark a previous party's leftover order paid. Sessions-off
       // mode (no open session) falls back to the table's active orders.

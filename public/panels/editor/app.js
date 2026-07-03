@@ -79,6 +79,11 @@ const state = {
   // gets a 403 we show as a friendly message (staffDenied). Loaded lazily, once, on first
   // visit to Settings (see loadStaffTeam), not on every keystroke/render.
   staffLoaded: false, staffTeam: [], staffDenied: null, staffReveal: null, staffBusy: false, staffRestaurantId: null,
+  staffActor: null, // "admin" | "owner" | "manager" — who the staff API says WE are (drives which roles the dropdowns offer)
+  // Settings tab: which SECTION the left sidebar has selected (owner, 2026-07-03 —
+  // "settings should be organized": General / Tables / Users / Access / Billing /
+  // Dining sessions instead of one long scroll). See SETTINGS_SECTIONS.
+  settingsSection: "general",
 };
 
 // ---------- tiny helpers ----------
@@ -348,7 +353,21 @@ function renderList() {
   const ul = $("#list");
   ul.innerHTML = ""; // wipe the old list before drawing the new one
   if (state.tab === "general") {
-    ul.appendChild(el(`<li class="list-item active"><div class="thumb"><i class="fas fa-gear"></i></div><div class="meta"><b>Site settings</b><small>general</small></div></li>`));
+    // Settings SECTIONS (owner, 2026-07-03): the sidebar lists the setting groups —
+    // clicking one shows only that group's cards on the right (see formGeneral's
+    // dispatcher). Same master-detail .list-item pattern as every other tab.
+    for (const sec of SETTINGS_SECTIONS) {
+      const li = el(`<li class="list-item${state.settingsSection === sec.id ? " active" : ""}" data-settings-section="${sec.id}">
+        <div class="thumb"><i class="fas ${sec.icon}"></i></div>
+        <div class="meta"><b>${sec.label}</b><small>${sec.sub}</small></div></li>`);
+      li.onclick = () => {
+        if (state.settingsSection === sec.id) return;
+        state.settingsSection = sec.id;
+        renderList();   // restyle the active row
+        renderEditor(); // swap the cards on the right
+      };
+      ul.appendChild(li);
+    }
     return;
   }
   if (state.tab === "orders") {
@@ -792,7 +811,7 @@ async function loadStaffTeam() {
     const r = await fetch("/api/owner/staff", { cache: "no-store" });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { state.staffDenied = d.error || "Couldn't load your team."; state.staffTeam = []; state.staffRestaurantId = null; }
-    else { state.staffDenied = null; state.staffTeam = d.staff || []; state.staffRestaurantId = (d.restaurants || [])[0]?.id || null; }
+    else { state.staffDenied = null; state.staffTeam = d.staff || []; state.staffRestaurantId = (d.restaurants || [])[0]?.id || null; state.staffActor = d.actor || "manager"; }
   } catch (e) { state.staffDenied = "Couldn't reach the server."; }
   state.staffLoaded = true;
   if (state.tab === "general") renderEditor();
@@ -823,7 +842,10 @@ function userSettingCardHtml() {
   if (state.staffDenied) {
     return `<div class="card"><h3>User setting</h3><p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">${esc(state.staffDenied)}</p></div>`;
   }
-  const ROLES = ["manager", "kitchen", "tablet"];
+  // Hierarchy (owner, 2026-07-03): a MANAGER manages only kitchen + tablet — the
+  // server already filters the list and refuses anything else; this just keeps the
+  // dropdowns honest. Owner/admin actors still get the full set.
+  const ROLES = state.staffActor === "manager" ? ["kitchen", "tablet"] : ["manager", "kitchen", "tablet"];
   const reveal = state.staffReveal
     ? `<div class="fc-card" style="border-color:var(--green);display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
         <div><b>New password for ${esc(state.staffReveal.name)}</b><div class="muted small">Copy it now — it can't be shown again.</div></div>
@@ -850,8 +872,9 @@ function userSettingCardHtml() {
     : `<div class="sx-empty">No staff yet — add the first below.</div>`;
   return `<div class="card"><h3>User setting</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      Add and manage tablet, kitchen, and manager logins for this restaurant — the same
-      team the owner sees in Staff &amp; powers.
+      ${state.staffActor === "manager"
+        ? "Add and manage <b>tablet</b> and <b>kitchen</b> logins for this restaurant. Manager accounts are managed by the owner."
+        : "Add and manage tablet, kitchen, and manager logins for this restaurant — the same team the owner sees in Staff &amp; powers."}
     </p>
     ${reveal}
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">${rows}</div>
@@ -890,25 +913,99 @@ function tableSeatingCardHtml(s) {
   </div>`;
 }
 
-// formGeneral: the site-wide Settings form — maintenance mode, the bubble
-// effect, table count, and the dining-session/location options.
+// ---------- Settings SECTIONS (owner, 2026-07-03) ----------
+// The Settings tab is organized into sidebar sections instead of one long scroll.
+// Each section groups related cards; renderList() draws the sidebar from this same
+// array, and formGeneral() below dispatches on state.settingsSection.
+const SETTINGS_SECTIONS = [
+  { id: "general", label: "General", sub: "site basics", icon: "fa-gear", title: "General settings" },
+  { id: "tables", label: "Tables", sub: "floor & seats", icon: "fa-chair", title: "Table settings" },
+  { id: "users", label: "Users", sub: "staff logins", icon: "fa-users", title: "User settings" },
+  { id: "access", label: "Access", sub: "user permissions", icon: "fa-key", title: "Access settings" },
+  { id: "billing", label: "Billing", sub: "invoice & print", icon: "fa-file-invoice", title: "Billing settings" },
+  { id: "sessions", label: "Dining sessions", sub: "QR & location", icon: "fa-qrcode", title: "Dining sessions" },
+];
+
+// The three tablet capabilities that can be granted per person (Access section).
+// Key = the settings column AND the staff_users.permissions key (same name, so the
+// server's fallback rule is a plain lookup). Label = the human words.
+const ACCESS_CAPS = [
+  { key: "tablet_discount", label: "Apply discount" },
+  { key: "tablet_mark_paid", label: "Mark bill paid" },
+  { key: "tablet_invoice", label: "Generate invoice" },
+];
+const ACCESS_MODE_LABEL = { on: "On", pin: "On — needs PIN", off: "Off" };
+
+// accessDefaultsCardHtml: the restaurant-wide defaults — the same three tri-states
+// that used to live in "Tablet panel access", now framed as what EVERYONE inherits
+// unless a per-user override (card below) says otherwise.
+function accessDefaultsCardHtml(s) {
+  return `<div class="card"><h3>Defaults for everyone</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      What a waiter can do with a bill on the tablet, unless a person below has their own
+      setting. Each starts <b>Off</b> (hidden). <b>On</b> = allowed directly;
+      <b>On · needs manager PIN</b> = allowed but a manager PIN is asked each time.
+    </p>
+    <div class="grid cols-3">
+      ${ACCESS_CAPS.map((c) => triSel(c.label, c.key, s[c.key])).join("")}
+    </div>
+  </div>`;
+}
+
+// accessUsersCardHtml: PER-USER overrides (owner, 2026-07-03 — "what access is granted
+// to a particular user, like he can mark as paid"). One row per TABLET login; each
+// capability is Default (inherit the card above) / On / On·PIN / Off. Saved instantly
+// per change via /api/owner/staff set_permissions; the server's tabletPerm enforces it.
+function accessUsersCardHtml(s) {
+  if (!state.staffLoaded) {
+    return `<div class="card"><h3>Per-user access</h3><p class="muted" style="font-size:13px;margin:0">Loading…</p></div>`;
+  }
+  if (state.staffDenied) {
+    return `<div class="card"><h3>Per-user access</h3><p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">${esc(state.staffDenied)}</p></div>`;
+  }
+  const waiters = state.staffTeam.filter((u) => u.role === "tablet");
+  const selFor = (u, cap) => {
+    const cur = (u.permissions || {})[cap.key] || "";
+    const defNow = ACCESS_MODE_LABEL[s[cap.key]] || "Off"; // what Default resolves to right now
+    return `<div class="field" style="margin:0">
+      <label style="font-size:11px">${cap.label}</label>
+      <select data-perm-user="${esc(u.id)}" data-perm-key="${cap.key}" style="font-size:12px;font-weight:600;padding:6px 8px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text)">
+        <option value="" ${cur === "" ? "selected" : ""}>Default (${defNow})</option>
+        <option value="on" ${cur === "on" ? "selected" : ""}>On</option>
+        <option value="pin" ${cur === "pin" ? "selected" : ""}>On — needs PIN</option>
+        <option value="off" ${cur === "off" ? "selected" : ""}>Off</option>
+      </select>
+    </div>`;
+  };
+  const rows = waiters.length
+    ? waiters.map((u) => `
+      <div style="padding:10px 12px;border-radius:9px;background:var(--panel-2)${u.active ? "" : ";opacity:.6"}">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+          <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:3px 8px;border-radius:999px;background:color-mix(in srgb, var(--gold) 18%, transparent);color:var(--gold-strong)">${esc(u.role)}</span>
+          <span style="font-weight:700;font-size:13.5px">${esc(u.name || u.username)}</span>
+          ${u.active ? "" : `<span style="font-size:10.5px;color:var(--red);font-weight:700">disabled</span>`}
+          ${Object.keys(u.permissions || {}).length ? `<span style="font-size:10.5px;color:var(--gold-strong);font-weight:700" title="This person has their own settings">· custom</span>` : ""}
+        </div>
+        <div class="grid cols-3" style="gap:8px">${ACCESS_CAPS.map((c) => selFor(u, c)).join("")}</div>
+      </div>`).join("")
+    : `<div class="sx-empty">No tablet logins yet — add one in <b>Users</b>.</div>`;
+  return `<div class="card"><h3>Per-user access</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
+      Give a specific waiter more (or less) than the defaults above. <b>Default</b> follows
+      the defaults card; a person's own <b>On / On·PIN / Off</b> wins over it. Changes save
+      instantly and apply on their very next tap — no re-login needed.
+    </p>
+    <div style="display:flex;flex-direction:column;gap:8px">${rows}</div>
+  </div>`;
+}
+
+// formGeneral: the site-wide Settings form, now split into SECTIONS (see
+// SETTINGS_SECTIONS). Every card is unchanged in behaviour — the split is purely
+// organizational; data-path bindings and Save work exactly as before.
 function formGeneral(s) {
-  return `
-  <div class="card"><h3>Service mode</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      When ON, the public menu is replaced by a full-screen <b>"We'll be right back"</b>
-      maintenance screen — customers can't view or order anything until you switch it
-      back off. Use it while updating the menu or during a break.
-    </p>
-    ${toggle("Put the menu under maintenance", "service_mode", s.service_mode === true)}
-  </div>
-  <div class="card"><h3>Bubble effect</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      The rising bubble particles in the menu background (the "furnace" look).
-      Turn this off for a flat, calm background.
-    </p>
-    ${toggle("Show rising bubbles on the menu", "bubbles_enabled", s.bubbles_enabled !== false)}
-  </div>
+  const sec = state.settingsSection;
+  if (sec === "tables") {
+    return `
   <div class="card"><h3>Tables / seating</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       How many tables the restaurant has. Drives the live floor map in the
@@ -931,21 +1028,16 @@ function formGeneral(s) {
         <option value="restart" ${s.auto_table_action === "restart" ? "selected" : ""}>Auto-restart the table</option>
       </select>
     </div></div>
-  </div>
-  ${userSettingCardHtml()}
-  <div class="card"><h3>Tablet panel access</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      What the waiter can do with a bill on the tablet. Each is independent and starts
-      <b>Off</b> (hidden). <b>On</b> = the waiter can do it directly; <b>On · needs manager PIN</b>
-      = allowed but a manager PIN is required each time. Applying a discount, marking a bill
-      paid, and generating an invoice are separate controls.
-    </p>
-    <div class="grid cols-3">
-      ${triSel("Apply discount", "tablet_discount", s.tablet_discount)}
-      ${triSel("Mark bill paid", "tablet_mark_paid", s.tablet_mark_paid)}
-      ${triSel("Generate invoice", "tablet_invoice", s.tablet_invoice)}
-    </div>
-  </div>
+  </div>`;
+  }
+  if (sec === "users") {
+    return userSettingCardHtml();
+  }
+  if (sec === "access") {
+    return accessDefaultsCardHtml(s) + accessUsersCardHtml(s);
+  }
+  if (sec === "billing") {
+    return `
   ${s.auto_print_kot_allowed ? `<div class="card"><h3>Auto-print KOT</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       When ON, the <b>kitchen screen</b> prints a kitchen ticket automatically the moment a new
@@ -968,7 +1060,10 @@ function formGeneral(s) {
       ${tf("Invoice prefix", "invoice_prefix", s.invoice_prefix ?? "")}
     </div>
     <div style="max-width:200px">${tf("Tax rate (0.05 = 5%)", "tax_rate", s.tax_rate ?? "", { type: "number", step: "any", min: 0 })}</div>
-  </div>
+  </div>`;
+  }
+  if (sec === "sessions") {
+    return `
   <div class="card"><h3>Dining sessions — NEW</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       The QR/session system. <b>When OFF, the menu works exactly like today.</b> Turn it
@@ -988,6 +1083,24 @@ function formGeneral(s) {
       ${tf("Longitude", "geo_lng", s.geo_lng ?? "", { type: "number", step: "any" })}
       ${tf("Radius (metres)", "geo_radius_m", s.geo_radius_m ?? 250, { type: "number", min: 20, max: 5000, step: 10 })}
     </div>
+  </div>`;
+  }
+  // default: the "general" section — site basics.
+  return `
+  <div class="card"><h3>Service mode</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      When ON, the public menu is replaced by a full-screen <b>"We'll be right back"</b>
+      maintenance screen — customers can't view or order anything until you switch it
+      back off. Use it while updating the menu or during a break.
+    </p>
+    ${toggle("Put the menu under maintenance", "service_mode", s.service_mode === true)}
+  </div>
+  <div class="card"><h3>Bubble effect</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      The rising bubble particles in the menu background (the "furnace" look).
+      Turn this off for a flat, calm background.
+    </p>
+    ${toggle("Show rising bubbles on the menu", "bubbles_enabled", s.bubbles_enabled !== false)}
   </div>`;
 }
 
@@ -2350,7 +2463,10 @@ function renderEditor() {
     : state.tab === "categories" ? formCategories(state.sel)
     : state.tab === "filters" ? formFilters(state.sel)
     : formGeneral(state.sel);
-  const title = isGeneral ? "General settings" : (state.isNew ? `New ${TAB_LABEL[state.tab]}` : recLabel(state.sel));
+  // Settings tab: the heading follows the selected SECTION ("Table settings",
+  // "Access settings", …) so you always know which group you're editing.
+  const secTitle = (SETTINGS_SECTIONS.find((x) => x.id === state.settingsSection) || SETTINGS_SECTIONS[0]).title;
+  const title = isGeneral ? secTitle : (state.isNew ? `New ${TAB_LABEL[state.tab]}` : recLabel(state.sel));
   ed.innerHTML = `
     <div class="ed-head">
       <h2>${esc(title)} ${(!isGeneral && !state.isNew) ? `<span class="sub">· ${esc(recKey(state.sel) || "")}</span>` : ""}</h2>
@@ -2417,6 +2533,23 @@ function bindEditor() {
 
   // ---- "User setting" card (Settings tab): the manager's own team ----
   if (state.tab === "general" && !state.staffLoaded) loadStaffTeam();
+
+  // ---- Access section: per-user permission selects (owner, 2026-07-03) ----
+  // Each change saves IMMEDIATELY via /api/owner/staff set_permissions ("" = back to
+  // Default → the server deletes the key). staffCall reloads nothing itself, so we
+  // patch the local row and re-render for instant feedback.
+  ed.querySelectorAll("[data-perm-user]").forEach((sel) => (sel.onchange = async () => {
+    const id = sel.dataset.permUser, key = sel.dataset.permKey;
+    const value = sel.value === "" ? null : sel.value;
+    try {
+      const d = await staffCall({ method: "PATCH", body: JSON.stringify({ id, action: "set_permissions", permissions: { [key]: value } }) });
+      const u = state.staffTeam.find((x) => x.id === id);
+      if (u) u.permissions = d.permissions || {};
+      const cap = ACCESS_CAPS.find((c) => c.key === key);
+      toast(`${u ? (u.name || u.username) : "User"} — ${cap ? cap.label : key}: ${value ? ACCESS_MODE_LABEL[value] : "Default"}`, "ok");
+      renderEditor(); // refresh the "· custom" marker + Default(...) labels
+    } catch (e) { toast("Failed: " + e.message, "err"); renderEditor(); }
+  }));
   const usrAdd = $("#usrAddStaff");
   if (usrAdd) usrAdd.onclick = async () => {
     const name = ($("#usrNewName")?.value || "").trim();
