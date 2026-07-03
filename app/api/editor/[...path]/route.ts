@@ -50,9 +50,9 @@ const nowIso = () => new Date().toISOString();
 // Mark an order as EDITED after it was placed → drives the persistent "✎ Edited"
 // badge on the kitchen/tablet/manager ticket so staff re-check what changed.
 // Best-effort: a stamp failure must never fail the edit itself.
-const stampEdited = async (orderId?: string | null) => {
+const stampEdited = async (orderId?: string | null, rid?: string) => {
   if (!orderId) return;
-  try { await sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); } catch {}
+  try { let q = sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); if (rid) q = q.eq("restaurant_id", rid); await q; } catch {}
 };
 // Unwrap a Supabase { data, error } reply — throw on error so the catch turns it
 // into a clean 500 (mirrors the editor server's `must`).
@@ -472,6 +472,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const status = body && body.status;
       const ALLOWED = ["new", "accepted", "preparing", "ready", "handed_over", "cancelled"];
       if (!ALLOWED.includes(status)) return err("invalid status");
+      // lfh_platform_set_status updates by id with NO tenant scope (mig 071); confirm this
+      // platform order is THIS restaurant's before advancing it (service-role bypasses RLS).
+      const owns = must(await sb.from("aggregator_orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!owns) return err("That platform order isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "manager" });
       if (error) throw new Error(error.message);
       const row = Array.isArray(data) ? data[0] : data;
@@ -509,12 +513,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "discount") {
       if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
       if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
-      const cur = must(await sb.from("orders").select("total").eq("id", b).single());
+      // .eq(restaurant_id, rid) on every by-id write: sb is service-role (RLS bypassed), so
+      // this is the only tenant boundary — a foreign order id can't be discounted/edited.
+      const cur = must(await sb.from("orders").select("total").eq("id", b).eq("restaurant_id", rid).single());
       const raw = Number(body && body.amount);
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number(cur.total) || 0) : 0;
       const note = String((body && body.note) || "").slice(0, 200) || null;
       // return=minimal: client re-fetches the board; no need to pull the full order row back.
-      must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b));
+      must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid));
       return ok({ ok: true });
     }
     // orders/:id/allergies — staff edit of the order-wide "avoid" list (add a
@@ -527,19 +533,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // Diff the OLD order-wide list so the per-dish markers stay right: an order-wide
       // allergen distributes onto every dish, so an add/remove here marks ＋ / ✎− on
       // ALL the order's items (same rules as the per-dish endpoint).
-      const prev = must(await sb.from("orders").select("allergies").eq("id", b).maybeSingle());
+      const prev = must(await sb.from("orders").select("allergies").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       const oldOW = new Set((Array.isArray(prev?.allergies) ? prev.allergies : []).map((x: any) => String(x).toLowerCase()));
       const addedOW = allergies.filter((s) => !oldOW.has(s));
       const removedOW = [...oldOW].filter((s) => !allergies.includes(s));
-      must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b));
+      must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).eq("restaurant_id", rid));
       if (addedOW.length || removedOW.length) {
-        const items = must(await sb.from("order_items").select("id, added_allergens, removed_flag").eq("order_id", b));
+        const items = must(await sb.from("order_items").select("id, added_allergens, removed_flag").eq("order_id", b).eq("restaurant_id", rid));
         for (const it of items) {
           const mark = new Set((Array.isArray(it.added_allergens) ? it.added_allergens : []).map((x: any) => String(x).toLowerCase()));
           let rf = !!it.removed_flag;
           for (const s of addedOW) mark.add(s);
           for (const s of removedOW) { if (mark.has(s)) mark.delete(s); else rf = true; }
-          await sb.from("order_items").update({ added_allergens: [...mark], removed_flag: rf }).eq("id", it.id);
+          await sb.from("order_items").update({ added_allergens: [...mark], removed_flag: rf }).eq("id", it.id).eq("restaurant_id", rid);
         }
       }
       const detail = [addedOW.length ? `added ${addedOW.join(", ")}` : "", removedOW.length ? `removed ${removedOW.join(", ")}` : ""].filter(Boolean).join("; ") || (allergies.join(", ") || "(none)");
@@ -547,24 +553,24 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
     if (a === "orders" && c === "accept") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).single());
-       
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
+
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: client re-fetches the board → skip both the .select() and the full-row re-read.
-      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b));
-      await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
+      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
+      await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
       await logAction("editor", "order_accept", { order_id: b, device_id: dev });
       return ok({ ok: true });
     }
     if (a === "orders" && c === "serve-all") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).single());
-       
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
+
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
-      must(await sb.from("orders").update({ items, status: "served" }).eq("id", b));
-      await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).neq("status", "served");
+      must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).eq("restaurant_id", rid));
+      await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
       await logAction("editor", "order_serve", { order_id: b, device_id: dev });
       // Only session_id is needed (for auto-settle); the client discards the body → not the full row.
-      const servedRow = must(await sb.from("orders").select("session_id").eq("id", b).single());
+      const servedRow = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).single());
       await maybeAutoSettle((servedRow as any)?.session_id, { panel: "editor", deviceId: dev }); // serving may complete the table
       return ok({ ok: true });
     }
@@ -572,17 +578,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const idx = Number(body && body.index);
       const status = body && body.status;
       if (!["received", "preparing", "served"].includes(status)) return err("invalid status");
-      const cur = must(await sb.from("orders").select("items").eq("id", b).single());
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
       const items = Array.isArray(cur.items) ? cur.items : [];
       if (!items[idx]) return err("bad item index");
       items[idx] = { ...items[idx], status };
-       
+
       const servedCount = items.filter((i: any) => i.status === "served").length;
-       
+
       const orderStatus = servedCount === items.length ? "served"
         : items.some((i: any) => i.status === "preparing" || i.status === "served") ? "preparing" : "received";
       // Only session_id is needed (for auto-settle); the client discards the body.
-      const row = must(await sb.from("orders").update({ items, status: orderStatus }).eq("id", b).select("session_id"));
+      const row = must(await sb.from("orders").update({ items, status: orderStatus }).eq("id", b).eq("restaurant_id", rid).select("session_id"));
       if (status === "served") await maybeAutoSettle(row[0]?.session_id, { panel: "editor", deviceId: dev }); // serving may complete the table
       return ok({ ok: true });
     }
@@ -704,7 +710,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         return err(msg, reason === "order_paid" ? 409 : 400);
       }
       await logAction("editor", "order_item_delete", { order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
-      await stampEdited(data?.order_id);
+      await stampEdited(data?.order_id, rid);
       return ok(data);
     }
 
@@ -720,7 +726,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("editor", "order_item_qty", { order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
-      await stampEdited(data?.order_id);
+      await stampEdited(data?.order_id, rid);
       return ok(data);
     }
 
@@ -730,7 +736,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("editor", "order_item_note", { order_id: data?.order_id, device_id: dev });
-      await stampEdited(data?.order_id);
+      await stampEdited(data?.order_id, rid);
       return ok(data);
     }
 
@@ -746,11 +752,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // markers: which allergens were ADDED after placement (added_allergens, → a "＋"
       // beside each) and whether one was REMOVED (removed_flag, → a "✎−" on the name).
       // maybeSingle: a stale id returns null so the friendly "dish not found" 400 fires.
-      const item = must(await sb.from("order_items").select("id, order_id, removed, added_allergens, removed_flag, status").eq("id", b).maybeSingle());
+      const item = must(await sb.from("order_items").select("id, order_id, removed, added_allergens, removed_flag, status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!item) return err(editErrMsg("item_not_found"), 400);
       // Once a dish is READY or SERVED it's cooked/out — too late to change it.
       if (item.status === "ready" || item.status === "served") return err("That dish is already " + item.status + " — too late to edit.", 409);
-      const order = must(await sb.from("orders").select("payment_status, status").eq("id", item.order_id).maybeSingle());
+      const order = must(await sb.from("orders").select("payment_status, status").eq("id", item.order_id).eq("restaurant_id", rid).maybeSingle());
       if (order?.payment_status === "paid") return err(editErrMsg("order_paid"), 409);
       if (order?.status === "cancelled") return err(editErrMsg("order_cancelled"), 400);
       const oldSet = new Set((Array.isArray(item.removed) ? item.removed : []).map((x: any) => String(x).toLowerCase()));
@@ -761,10 +767,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       for (const s of justAdded) addedMark.add(s);   // staff-added allergen → mark it "added"
       for (const s of justRemoved) { if (addedMark.has(s)) addedMark.delete(s); else removedFlag = true; } // un-mark a re-removed add; else flag a real removal
       const added_allergens = [...addedMark].filter((s) => removed.includes(s)); // keep only ones still present
-      const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).select());
+      const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).eq("restaurant_id", rid).select());
       const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : ""].filter(Boolean).join("; ") || "no change";
       await logAction("editor", "order_item_removed", { order_id: item.order_id, detail, device_id: dev });
-      await stampEdited(item.order_id);
+      await stampEdited(item.order_id, rid);
       return ok(rowU[0] || { ok: true });
     }
 
@@ -786,7 +792,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("editor", "order_add_item", { order_id: b, detail: dishId, device_id: dev });
-      await stampEdited(b);
+      await stampEdited(b, rid);
       return ok(data);
     }
 
@@ -797,17 +803,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
        
       const patch: any = { status };
       if (status === "served") patch.served_at = nowIso();
-      const updated = must(await sb.from("order_items").update(patch).eq("id", b).select());
+      const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select());
       const item = updated[0];
       if (item && item.order_id) {
-        const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id));
+        const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id).eq("restaurant_id", rid));
         const total = rows.length;
-         
+
         const served = rows.filter((r: any) => r.status === "served").length;
-         
+
         const anyActive = rows.some((r: any) => ["preparing", "ready", "served"].includes(r.status));
         const orderStatus = total > 0 && served === total ? "served" : anyActive ? "preparing" : "received";
-        await sb.from("orders").update({ status: orderStatus }).eq("id", item.order_id);
+        await sb.from("orders").update({ status: orderStatus }).eq("id", item.order_id).eq("restaurant_id", rid);
       }
       return ok(item || null);
     }
