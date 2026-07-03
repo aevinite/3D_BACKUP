@@ -485,3 +485,24 @@ body.om-mode .panel.om-open { position: fixed; inset: 0; z-index: 40; border: 0;
 /* While ordering, the floating panel-✕ is hidden — the order screen has its own
    ← back, and a mistap on ✕ would drop the whole cart. */
 body.om-mode #tabletClose { display: none; }
+
+/* ── om LITE (owner 2026-07-03 v2) ──────────────────────────────────────────────
+   The order screen stays INSIDE the work panel like the original (no takeover,
+   floor stays visible). Only the browsing is new: an auto-shift category chip row
+   on top + ALL categories as sections in one scrolling browser, with the cart in
+   its own separate scroll below — on desktop AND phone. */
+.om.lite { height: auto; }
+.om.lite .om-head { padding: 0 0 10px; border-bottom: 0; background: transparent; flex-wrap: wrap; }
+.om.lite .om-head h2 { flex: 1; }
+.om.lite .om-head .om-search { order: 3; flex-basis: 100%; margin-top: 8px; }
+.om.lite .om-body, .om.lite .om-body.no-cart { display: block; }
+/* the category bar: always a horizontal chip row (jump + follow-scroll) */
+.om.lite .om-nav { flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 2px 2px 10px; gap: 8px; background: transparent; scrollbar-width: none; }
+.om.lite .om-nav::-webkit-scrollbar { display: none; }
+.om.lite .om-cat { flex: 0 0 auto; border: 1px solid var(--line); border-left-width: 1px; border-radius: 999px; padding: 8px 14px; font-size: 13.5px; background: var(--bg); color: var(--muted); }
+.om.lite .om-cat.on { background: var(--gold); border-color: var(--gold); color: #14110d; font-weight: 800; }
+/* dish browser: its OWN scroll (like the old 60vh grid, now with sections) */
+.om.lite .om-scroll { max-height: 48vh; max-height: 48dvh; padding: 10px 2px 24px; }
+.om.lite .om-sec-h { top: -10px; background: linear-gradient(var(--panel) 78%, transparent); }
+/* the cart: unchanged markup, its OWN scroll right below — never hidden */
+.om.lite .om-cart { border-left: 0; border-top: 1px solid var(--line); background: transparent; padding: 10px 2px 0; max-height: 42vh; max-height: 42dvh; overflow-y: auto; }
