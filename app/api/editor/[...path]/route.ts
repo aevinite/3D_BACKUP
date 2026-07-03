@@ -259,7 +259,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         platform: { count: platActive.length, revenue: platRevenue },
         invoicesGenerated: (must(invQ) || []).length,
         invoicesVoided: (must(voidQ) || []).length,
-        grandTotal: r2(net + platRevenue), rate,
+        // GRAND TOTAL = money actually COLLECTED today, so use paidNet (paid-only dine-in),
+        // NOT net (which includes still-open/unpaid bills). Matches mig 113's paid-only rule +
+        // the /stats endpoint; the old `net + platRevenue` overstated the day-close cash by the
+        // value of any unpaid bills open at print time (owner-facing till mismatch). (2026-07-03)
+        grandTotal: r2(paidNet + platRevenue), rate,
         restaurant: { name: set.restaurant_name || "Little French House", gstin: set.gstin || "" },
       });
     }
