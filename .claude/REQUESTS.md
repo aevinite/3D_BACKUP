@@ -189,3 +189,18 @@ owner looks, with cache busting, before claiming anything.
   invoice number removed (bill # kept, voided tag kept). VERIFIED: Table 2 bill renders
   correctly, no invoice number. (The printed Tax Invoice keeps its number for GST — flag
   to owner if he wants it gone there too.)
+
+## 2026-07-03 — Settings organization + per-user access + hierarchy (PR #106, merged)
+- [x] Manager Settings organized into sidebar sections (General/Tables/Users/Access/Billing/Dining sessions)
+- [x] Access section: per-user tablet permissions (Default/On/On·PIN/Off for discount, mark-paid, invoice) — server-enforced (mig 115)
+- [x] Hierarchy: manager can only manage kitchen+tablet (never managers/owners), server-enforced
+- [x] Manager Log hides owner + admin actions
+- [ ] Awaiting owner check on :4000 once the allergy session's work lands (feature verified on :4010 + PASS from work-checker)
+
+## 2026-07-03 — DEFERRED (owner: "for now we will NOT do it — first make it live")
+- [ ] **Per-restaurant tax, TWO tax types, ADMIN-managed, full redesign.** Each restaurant sets its own tax (owner saw 2.5% in the bill). There are TWO distinct taxes to manage separately:
+      (1) the tax shown in the manager panel's **Bills view**, and (2) the tax on the **actually-printed bill**.
+      The ADMIN (not the owner/manager) controls BOTH, per restaurant. Redesign this area completely + clean admin UI.
+      (Related known issue: settings.tax_rate=0 is currently overridden by a hardcoded 5% fallback in lfh_price_order + billMath.)
+- [ ] **Admin "god-mode" control surface.** An admin-only area from /aevinite where the admin can change things the OWNER/MANAGER cannot even see — e.g. the two tax rates above, and (owner's words) "change the code and do everything." Good, clean admin interface. Build the individual sub-panels LATER (after the current live push); this is the umbrella requirement.
+- [ ] **Robustness/protection pass (lower urgency).** Owner: "if there is any error, add features that make my website protected." Harden against errors; owner grants latitude to add sensible safeguards.

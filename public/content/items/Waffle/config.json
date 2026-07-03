@@ -1,8 +1,8 @@
 {
-  "modelUrl": "https://klnohzowlmbumvvzddya.supabase.co/storage/v1/object/public/Models/waffle/waffle%20dessert%203d%20model_small.glb",
-  "smallUrl": "https://klnohzowlmbumvvzddya.supabase.co/storage/v1/object/public/Models/waffle/waffle%20dessert%203d%20model_small.glb",
-  "optimizedUrl": "https://klnohzowlmbumvvzddya.supabase.co/storage/v1/object/public/Models/waffle/waffle%20dessert%203d%20model_optimized.glb",
-  "title": "Croissant Sandwich",
+  "modelUrl": "/models/waffle_small.glb",
+  "smallUrl": "/models/waffle_small.glb",
+  "optimizedUrl": "/models/waffle-optimized.glb",
+  "title": "Lemon Icecream Waffle",
   "subtitle": "Freshly Made · Signature Item",
   "stats": {
     "calories": "480",

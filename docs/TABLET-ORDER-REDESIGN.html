@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tablet "Take Order" Redesign — Design Options Report</title>
+<style>
+  /* ── Report chrome (matches the tablet panel's dark/gold theme) ─────────── */
+  :root {
+    --bg:#14110d; --panel:#1d1812; --panel-2:#251f17; --line:#38301f;
+    --text:#f2e9da; --muted:#a8997f; --gold:#d4a574; --gold-strong:#e8b884;
+    --green:#22c55e; --amber:#fbbf24; --red:#ef4444;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font-family:system-ui,-apple-system,"Segoe UI",sans-serif; line-height:1.55; }
+  .wrap { max-width:1100px; margin:0 auto; padding:32px 20px 80px; }
+  h1 { font-size:30px; margin:0 0 6px; }
+  h1 .tag { font-size:13px; vertical-align:middle; background:var(--gold); color:#14110d;
+            border-radius:999px; padding:3px 12px; margin-left:10px; font-weight:800; }
+  h2 { font-size:22px; margin:48px 0 10px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+  h3 { font-size:16px; margin:22px 0 8px; }
+  p, li { color:#d8cdb9; font-size:15px; }
+  .muted { color:var(--muted); }
+  .lead { font-size:16px; }
+  code { background:var(--panel-2); border:1px solid var(--line); border-radius:6px;
+         padding:1px 6px; font-size:13px; color:var(--gold-strong); }
+  .pill { display:inline-block; font-size:12px; font-weight:800; letter-spacing:.4px;
+          border-radius:999px; padding:3px 10px; margin-right:6px; }
+  .pill.good { background:rgba(34,197,94,.15); color:var(--green); border:1px solid rgba(34,197,94,.4); }
+  .pill.warn { background:rgba(251,191,36,.12); color:var(--amber); border:1px solid rgba(251,191,36,.4); }
+  .pill.bad  { background:rgba(239,68,68,.12); color:var(--red); border:1px solid rgba(239,68,68,.4); }
+  .pill.rec  { background:var(--gold); color:#14110d; border:1px solid var(--gold); }
+
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:860px){ .grid2 { grid-template-columns:1fr; } }
+
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:18px 20px; }
+  .card h3 { margin-top:0; }
+
+  table { border-collapse:collapse; width:100%; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:9px 12px; text-align:left; vertical-align:top; }
+  th { background:var(--panel-2); color:var(--gold-strong); }
+  td { color:#d8cdb9; }
+
+  /* ── Device frames the live demos sit inside ────────────────────────────── */
+  .demo-row { display:flex; gap:26px; flex-wrap:wrap; align-items:flex-start; margin:18px 0 6px; }
+  .frame { border:2px solid var(--line); border-radius:26px; background:var(--bg);
+           box-shadow:0 20px 50px rgba(0,0,0,.5); overflow:hidden; flex:0 0 auto; }
+  .frame .screen { position:relative; overflow:hidden; display:flex; flex-direction:column; }
+  .frame.phone  { width:300px; }  .frame.phone  .screen { height:560px; }
+  .frame.tablet { width:640px; }  .frame.tablet .screen { height:460px; }
+  @media (max-width:700px){ .frame.tablet { width:100%; } }
+  .frame-label { text-align:center; font-size:12px; color:var(--muted); padding:7px 0 9px;
+                 border-top:1px solid var(--line); background:var(--panel); }
+  .try { font-size:13px; color:var(--gold-strong); margin:6px 0 0; }
+
+  /* ── Shared demo widgets (mini versions of the real panel widgets) ──────── */
+  .d-top { padding:10px 12px 0; background:var(--panel); }
+  .d-title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .d-title b { font-size:15px; }
+  .d-back { font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:8px;
+            padding:4px 9px; background:var(--panel-2); cursor:pointer; }
+  .d-search { margin:8px 0; padding:8px 11px; border-radius:10px; border:1px solid var(--line);
+              background:var(--bg); color:var(--muted); font-size:13px; }
+  .d-chips { display:flex; gap:6px; overflow-x:auto; padding:2px 12px 10px; background:var(--panel);
+             border-bottom:1px solid var(--line); scrollbar-width:none; }
+  .d-chips::-webkit-scrollbar { display:none; }
+  .d-chip { flex:0 0 auto; border:1px solid var(--line); background:var(--bg); color:var(--muted);
+            border-radius:999px; padding:7px 13px; font-size:12.5px; cursor:pointer; font-family:inherit;
+            transition:background .15s,color .15s,border-color .15s; }
+  .d-chip.on { background:var(--gold); border-color:var(--gold); color:#14110d; font-weight:800; }
+  .d-scroll { flex:1; overflow-y:auto; padding:10px 12px 90px; scroll-behavior:smooth; }
+  .d-sec { margin:0 0 14px; }
+  .d-sec-h { position:sticky; top:-10px; z-index:2; background:linear-gradient(var(--bg) 78%,transparent);
+             padding:8px 2px 6px; font-weight:800; font-size:13px; color:var(--gold-strong);
+             letter-spacing:.5px; text-transform:uppercase; }
+  .d-sec-h small { color:var(--muted); font-weight:600; margin-left:6px; }
+  .d-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(118px,1fr)); gap:7px; }
+  .d-dish { border:1px solid var(--line); background:var(--panel); border-radius:11px; padding:8px 10px;
+            min-height:56px; display:flex; flex-direction:column; justify-content:space-between; gap:5px;
+            cursor:pointer; transition:border-color .12s, transform .08s; }
+  .d-dish:active { transform:scale(.96); }
+  .d-dish .n { font-size:12.5px; font-weight:600; color:var(--text); }
+  .d-dish .r { display:flex; justify-content:space-between; align-items:center; font-size:12px; }
+  .d-dish .p { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .d-dish .plus { color:var(--gold); font-weight:800; }
+  .d-dish.in { border-color:var(--gold); background:rgba(212,165,116,.10); }
+  .d-dish.in .qty { background:var(--gold); color:#14110d; font-weight:800; border-radius:999px;
+                    font-size:11px; padding:1px 7px; }
+  /* bottom cart bar (Option A / phone) */
+  .d-cartbar { position:absolute; left:10px; right:10px; bottom:10px; z-index:5;
+               background:var(--gold); color:#14110d; border-radius:14px; padding:11px 14px;
+               display:flex; justify-content:space-between; align-items:center; font-weight:800;
+               font-size:13.5px; box-shadow:0 10px 26px rgba(0,0,0,.55); cursor:pointer; }
+  .d-cartbar small { font-weight:700; opacity:.75; display:block; font-size:11px; }
+  /* Option B: three-pane takeover */
+  .d-pos { display:grid; grid-template-columns:108px 1fr 190px; height:100%; }
+  .d-rail { border-right:1px solid var(--line); background:var(--panel); overflow-y:auto; padding:8px 6px; }
+  .d-rail button { display:block; width:100%; text-align:left; border:0; background:transparent;
+                   color:var(--muted); font-size:12.5px; padding:10px 9px; border-radius:9px;
+                   cursor:pointer; font-family:inherit; border-left:3px solid transparent;
+                   transition:background .15s,color .15s; }
+  .d-rail button.on { background:rgba(212,165,116,.14); color:var(--gold-strong); font-weight:800;
+                      border-left-color:var(--gold); }
+  .d-rail button small { display:block; font-size:10.5px; color:var(--muted); font-weight:500; }
+  .d-cart { border-left:1px solid var(--line); background:var(--panel); display:flex;
+            flex-direction:column; padding:10px; }
+  .d-cart h4 { margin:0 0 8px; font-size:11px; letter-spacing:.6px; text-transform:uppercase; color:var(--muted); }
+  .d-cline { display:flex; justify-content:space-between; gap:6px; font-size:12px; padding:5px 0;
+             border-bottom:1px dashed var(--line); }
+  .d-cline .q { color:var(--gold-strong); font-weight:800; }
+  .d-ctotal { margin-top:auto; display:flex; justify-content:space-between; font-size:13px;
+              font-weight:800; padding:8px 0; }
+  .d-send { background:var(--gold); color:#14110d; border:0; border-radius:10px; padding:10px;
+            font-weight:800; font-size:12.5px; cursor:pointer; width:100%; }
+  .rec-banner { background:linear-gradient(90deg, rgba(212,165,116,.16), transparent);
+                border:1px solid var(--gold); border-radius:14px; padding:14px 18px; margin:14px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Take-Order Redesign <span class="tag">DESIGN REPORT</span></h1>
+  <p class="lead muted">Waiter tablet · order-taking screen · 2026-07-03 · 3 options with <b>live, scrollable mockups</b> — scroll inside each phone/tablet frame and tap the categories.</p>
+
+  <h2>What's wrong today</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Current behaviour</h3>
+      <ul>
+        <li>Category chips <b>filter</b> — you see ONE category at a time (or a giant unlabelled "All" wall).</li>
+        <li>Every chip tap <b>re-renders the whole screen</b> — feels like a page swap, not a jump.</li>
+        <li>The dish grid is a small <code>60vh</code> box with the cart squeezed under it — lots of scrolling inside a scroll.</li>
+        <li>No sense of place: no section headers, no highlight following you as you browse.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>What the owner asked for</h3>
+      <ul>
+        <li>Browse like the <b>guest menu</b>: every category is always there, laid out in one list.</li>
+        <li>Tap a category → <b>instantly shift</b> to that section (scroll jump, not filter).</li>
+        <li>The bar should <b>follow you</b> as you scroll (scroll-spy, Petpooja-style — already built in the guest menu).</li>
+        <li>Keep everything that already works: tap-to-add, options/allergy popup, cart lines, SEND flow.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ OPTION A ═══════════════════ -->
+  <h2>Option A — "Guest-menu style" <span class="pill good">phone-perfect</span><span class="pill good">smallest change</span></h2>
+  <p>One continuous scroll of <b>all categories as sections</b> with sticky section headers. The chip bar pins on top: tapping a chip <b>scrolls</b> to that section; scrolling moves the highlight (scroll-spy). The cart leaves the bottom of the page and becomes a <b>floating gold bar</b> — always visible, tap it to open the order as a bottom sheet with the note/allergy fields and SEND button.</p>
+  <div class="demo-row">
+    <div class="frame phone">
+      <div class="screen" id="demoA">
+        <div class="d-top">
+          <div class="d-title"><b>Order · Table 4</b><span class="d-back">← back</span></div>
+          <div class="d-search">🔎 Search dishes…</div>
+        </div>
+        <div class="d-chips"></div>
+        <div class="d-scroll"></div>
+        <div class="d-cartbar"><span>3 items <small>Paneer ×2, Naan ×1</small></span><span>₹560 · VIEW ➜</span></div>
+      </div>
+      <div class="frame-label">phone · ~390px — <b>scroll the list, tap the chips</b></div>
+    </div>
+    <div style="flex:1;min-width:260px">
+      <h3>Why it works</h3>
+      <ul>
+        <li>Exactly the guest-menu mental model the waiter already knows.</li>
+        <li>Zero re-render on category tap — it's just a scroll, so it feels instant.</li>
+        <li>Sticky section headers = you always know where you are.</li>
+        <li>Cart bar keeps count + total in sight without stealing space.</li>
+      </ul>
+      <h3>Trade-offs</h3>
+      <ul>
+        <li>Cart detail is one tap away (bottom sheet) instead of always on screen.</li>
+        <li>On a big tablet, a single column wastes the panel's width.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ OPTION B ═══════════════════ -->
+  <h2>Option B — "Full POS takeover" <span class="pill good">fastest for heavy use</span><span class="pill warn">bigger change</span></h2>
+  <p>Taking an order <b>takes over the whole screen</b> (today it's crammed into the right half while the floor sits idle on the left). Three panes, like a pro POS (Petpooja/Toast): a <b>category rail</b> on the left (always visible, spy-highlighted), the all-sections dish grid in the middle, and the <b>live cart always on screen</b> on the right with the SEND button. On phones it gracefully collapses into Option A's layout.</p>
+  <div class="demo-row">
+    <div class="frame tablet">
+      <div class="screen">
+        <div class="d-pos" id="demoB">
+          <nav class="d-rail"></nav>
+          <div class="d-scroll" style="padding-bottom:20px"></div>
+          <aside class="d-cart">
+            <h4>This order · T4</h4>
+            <div class="d-cline"><span><span class="q">2×</span> Paneer Tikka</span><span>₹440</span></div>
+            <div class="d-cline"><span><span class="q">1×</span> Butter Naan <small style="color:var(--red)">⚠ no nuts</small></span><span>₹60</span></div>
+            <div class="d-cline"><span><span class="q">1×</span> Masala Chai</span><span>₹60</span></div>
+            <div class="d-ctotal"><span>Total</span><span>₹560</span></div>
+            <button class="d-send">SEND TO KITCHEN</button>
+          </aside>
+        </div>
+      </div>
+      <div class="frame-label">tablet · landscape — <b>scroll the middle, tap the rail</b></div>
+    </div>
+    <div style="flex:1;min-width:260px">
+      <h3>Why it works</h3>
+      <ul>
+        <li>Cart is <b>never hidden</b> — the waiter sees every added line and the total the whole time (fewer mistakes).</li>
+        <li>Vertical rail fits 15+ categories with no horizontal squinting; shows dish counts.</li>
+        <li>Full width = 3–4 dish columns instead of 2 — less scrolling overall.</li>
+        <li>This is what every serious restaurant POS does — waiters who used one feel at home.</li>
+      </ul>
+      <h3>Trade-offs</h3>
+      <ul>
+        <li>More CSS + a new "takeover" mode for the panel (moderate build, ~a day).</li>
+        <li>The live floor is hidden while ordering (fine — "← back" is one tap, and the floor was unusable mid-order anyway).</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ OPTION C ═══════════════════ -->
+  <h2>Option C — "Minimal touch-up" <span class="pill good">hours, not days</span><span class="pill bad">doesn't really deliver the ask</span></h2>
+  <p>Keep today's layout exactly, but make the chips <b>jump</b> (scroll to a section in an all-sections list) instead of filtering, and add scroll-spy. No cart bar, no takeover — the cart stays where it is, below the grid.</p>
+  <div class="grid2">
+    <div class="card">
+      <h3>Why you might pick it</h3>
+      <ul><li>Cheapest and safest — a few hours of work, tiny diff.</li>
+      <li>Still kills the worst annoyance (filter + full re-render).</li></ul>
+    </div>
+    <div class="card">
+      <h3>Why I wouldn't</h3>
+      <ul><li>The cramped <code>60vh</code> inner scroll and buried cart remain.</li>
+      <li>On tablet the screen still wastes half its width.</li>
+      <li>We'd likely redo it properly later anyway — double work.</li></ul>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ RECOMMENDATION ═══════════════════ -->
+  <h2>My recommendation <span class="pill rec">A + B MERGED</span></h2>
+  <div class="rec-banner">
+    <b>Build ONE responsive order mode:</b> the screen takes over fully when "＋ Take order" is tapped.
+    <b>Wide screens (tablet)</b> get Option B — rail + all-sections grid + always-visible cart.
+    <b>Narrow screens (phone)</b> get Option A — sticky chips + sections + floating cart bar + bottom-sheet cart.
+    Same HTML, same data, one CSS breakpoint decides which shape you get — exactly how the rest of the panel already adapts at <code>760px</code>.
+  </div>
+  <ul>
+    <li><b>Everything that works stays:</b> tap-to-add, the options/size/allergy popup, per-line edit, quantities, order note + whole-order allergy, the confirm dialog, SEND — untouched. Only the <i>browsing layout</i> changes.</li>
+    <li><b>Zero backend / zero egress change:</b> the dishes are already all in memory (<code>state.data.dishes</code>) — we're only changing how they're painted. No new queries, no new realtime.</li>
+    <li><b>Search stays king:</b> typing collapses the sections into one flat result list (same as today), clearing restores the sections at your old scroll spot.</li>
+    <li><b>Add-dish-to-existing-order mode</b> gets the same new browser for consistency (it shares the code path today).</li>
+    <li><b>Back button:</b> the takeover + the cart sheet register with <code>LFH_BACK.layer(…)</code> — hardware back peels the sheet, then the order mode, per the house rule.</li>
+  </ul>
+
+  <h2>Comparison at a glance</h2>
+  <table>
+    <tr><th></th><th>A · Menu-style</th><th>B · POS takeover</th><th>C · Minimal</th><th>A+B merged ★</th></tr>
+    <tr><td>Category jump + scroll-spy</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+    <tr><td>All categories always visible</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+    <tr><td>Cart always in sight</td><td>bar only</td><td>✓ full</td><td>✗</td><td>✓ (full on tablet, bar on phone)</td></tr>
+    <tr><td>Uses tablet's full width</td><td>✗</td><td>✓</td><td>✗</td><td>✓</td></tr>
+    <tr><td>Great at 390px</td><td>✓</td><td>✗ alone</td><td>~</td><td>✓</td></tr>
+    <tr><td>Build size</td><td>~½ day</td><td>~1 day</td><td>hours</td><td>~1–1.5 days</td></tr>
+  </table>
+
+  <h2>What building it involves (no code yet — for sizing only)</h2>
+  <ul>
+    <li>All inside <code>public/panels/tablet/</code> — rewrite <code>renderOrderMode()</code> + <code>orderGridHtml()</code> to group by category, add a small scroll-spy (same trick as the guest menu's <code>computeSpy</code>), new CSS for rail / chips / cart bar / takeover. No API, no DB, no migration.</li>
+    <li>Cache-bust <code>app.js</code>/<code>style.css</code> when shipping (house rule) and verify live on <code>localhost:4000</code> at tablet AND ~390px widths.</li>
+    <li>Aangan (waiter-tablet-only restaurant) is the biggest beneficiary — verify there too.</li>
+  </ul>
+
+  <p class="muted" style="margin-top:40px">Next step: pick A, B, C, or the merged recommendation ★ — then I'll write the formal spec + implementation plan and build it on its own branch.</p>
+</div>
+
+<script>
+/* ── tiny demo engine: builds sample sections, wires chip/rail jump + scroll-spy ── */
+const MENU = [
+  ["Starters", ["Paneer Tikka·220","Veg Manchurian·180","Hara Bhara Kebab·190","Crispy Corn·170","Spring Rolls·160","Chilli Paneer·210"]],
+  ["Mains", ["Paneer Butter Masala·260","Dal Makhani·220","Kadai Veg·230","Palak Paneer·240","Veg Kolhapuri·250","Malai Kofta·260"]],
+  ["Breads", ["Butter Naan·60","Garlic Naan·75","Tandoori Roti·35","Lachha Paratha·70"]],
+  ["Rice & Biryani", ["Veg Biryani·240","Jeera Rice·160","Curd Rice·140","Kashmiri Pulao·220"]],
+  ["Desserts", ["Gulab Jamun·120","Rasmalai·140","Brownie Sizzler·220"]],
+  ["Drinks", ["Masala Chai·60","Cold Coffee·140","Fresh Lime Soda·90","Lassi·110"]],
+];
+const IN_CART = { "Paneer Tikka":2, "Butter Naan":1, "Masala Chai":1 };
+
+function sectionsHtml(){
+  return MENU.map(([cat,dishes],i)=>`
+    <div class="d-sec" data-sec="${i}">
+      <div class="d-sec-h">${cat}<small>· ${dishes.length}</small></div>
+      <div class="d-grid">${dishes.map(d=>{
+        const [n,p]=d.split("·"); const q=IN_CART[n];
+        return `<div class="d-dish ${q?"in":""}"><span class="n">${n}</span>
+          <span class="r"><span class="p">₹${p}</span>${q?`<span class="qty">×${q}</span>`:`<span class="plus">＋</span>`}</span></div>`;
+      }).join("")}</div>
+    </div>`).join("");
+}
+function wire(scrollEl, navButtons){
+  const secs = scrollEl.querySelectorAll("[data-sec]");
+  const setOn = (i)=>navButtons.forEach((b,j)=>{
+    b.classList.toggle("on", i===j);
+    if(i===j && b.scrollIntoView) b.scrollIntoView({block:"nearest", inline:"nearest"});
+  });
+  navButtons.forEach((b,i)=>b.addEventListener("click",()=>{
+    secs[i].scrollIntoView({behavior:"smooth", block:"start"});
+  }));
+  scrollEl.addEventListener("scroll",()=>{
+    const line = scrollEl.getBoundingClientRect().top + 46;
+    let active = 0;
+    secs.forEach((s,i)=>{ if(s.getBoundingClientRect().top <= line) active = i; });
+    if(scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 20) active = secs.length-1;
+    setOn(active);
+  },{passive:true});
+  setOn(0);
+}
+/* Option A: chips */
+(()=>{ const root=document.getElementById("demoA");
+  const chips=root.querySelector(".d-chips"), sc=root.querySelector(".d-scroll");
+  chips.innerHTML = MENU.map(([c])=>`<button class="d-chip">${c}</button>`).join("");
+  sc.innerHTML = sectionsHtml();
+  wire(sc,[...chips.children]);
+})();
+/* Option B: rail */
+(()=>{ const root=document.getElementById("demoB");
+  const rail=root.querySelector(".d-rail"), sc=root.querySelector(".d-scroll");
+  rail.innerHTML = MENU.map(([c,d])=>`<button>${c}<small>${d.length} dishes</small></button>`).join("");
+  sc.innerHTML = sectionsHtml();
+  wire(sc,[...rail.children]);
+})();
+</script>
+</body>
+</html>
