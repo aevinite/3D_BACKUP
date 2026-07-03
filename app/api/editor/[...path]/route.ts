@@ -184,11 +184,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         } else if (type === "table") {
           oq = oq.eq("table_number", histQ);
         } else if (type === "cust") {
-          // Customer name is on the session's owner member (dine-in) or orders.customer_name
-          // (aggregator). Match either: gather session_ids by member name, then OR the orders.
+          // Customer name lives on the session's member rows (session_members.name), NOT on
+          // orders — orders.customer_name is a SYNTHETIC field attached during enrichment
+          // below, so it can't be queried. Resolve matching sessions by member name (rid-
+          // scoped), then return those sessions' orders. No match → no bills.
           const mem = must(await sb.from("session_members").select("session_id").eq("restaurant_id", rid).ilike("name", `%${histQ}%`).limit(200));
           const sIds = [...new Set((mem as any[]).map((m) => m.session_id).filter(Boolean))];
-          oq = sIds.length ? oq.or(`customer_name.ilike.%${histQ}%,session_id.in.(${sIds.join(",")})`) : oq.ilike("customer_name", `%${histQ}%`);
+          if (!sIds.length) return ok([]);
+          oq = oq.in("session_id", sIds);
         } else if (type === "date") {
           const d = new Date(histQ);
           if (isNaN(d.getTime())) return ok([]);
