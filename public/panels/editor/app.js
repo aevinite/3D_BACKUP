@@ -4273,6 +4273,22 @@ function openFloatingTable(table) {
 // fling the list back to the top.
 function refreshTableDetail() {
   if (state.openSess != null) { renderTablePanel(); return; }
+  // FLOATING POPUPS (popup mode — the default detail view now): the detail lives in the
+  // floating layer, which ONLY renderEditor() rebuilds. Optimistic actions (serve a dish,
+  // approve/deny a member) call refreshTableDetail expecting an INSTANT repaint — without
+  // this branch the local change didn't paint until the next poll, so serving a dish in a
+  // popup looked like it took ~2s (owner report, 2026-07-03). The per-order accept/serve-all
+  // already repaint via loadSessions(true)→renderEditor; this covers the per-DISH path too.
+  // Preserve every open popup's scroll so serving a dish doesn't fling the list to the top.
+  if (state.floatingTables.length) {
+    const ed = $("#editor");
+    const scrolls = {};
+    ed.querySelectorAll("[data-floating-table]").forEach((c) => { const b = c.querySelector(".tp-detail-body"); if (b) scrolls[c.dataset.floatingTable] = b.scrollTop; });
+    renderEditor();
+    const ed2 = $("#editor");
+    Object.keys(scrolls).forEach((t) => { const b = ed2.querySelector(`[data-floating-table="${CSS.escape(t)}"] .tp-detail-body`); if (b) b.scrollTop = scrolls[t]; });
+    return;
+  }
   if (state.selectedTable != null) {
     const ed = $("#editor");
     const body = ed.querySelector(".tp-detail-body");
