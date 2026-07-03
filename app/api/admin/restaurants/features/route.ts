@@ -22,6 +22,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { cleanClonedSettings } from "@/lib/settingsClone";
 
 export const dynamic = "force-dynamic";
 
@@ -110,8 +111,7 @@ export async function POST(req: NextRequest) {
   // is satisfied (same shape the demo seeder uses), then override id/restaurant_id
   // /features. Falls back to a minimal row if #1 is somehow missing.
   const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
-  const base: Record<string, unknown> = template.data ? { ...template.data } : { bubbles_enabled: true };
-  delete base.updated_at;
+  const base = cleanClonedSettings(template.data); // strip #1's identity/geo/tax so they don't leak into the new restaurant
   const newRow = { ...base, id: rest.data.slug, restaurant_id, features };
   const ins = await sb.from("settings").upsert(newRow, { onConflict: "restaurant_id" }).select("features").maybeSingle();
   if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 500 });

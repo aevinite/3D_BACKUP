@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { cleanClonedSettings } from "@/lib/settingsClone";
 
 export const dynamic = "force-dynamic";
 
@@ -80,10 +81,10 @@ export async function POST(req: NextRequest) {
   }
 
   // No settings row yet → clone #1's row as a template (every NOT NULL column satisfied),
-  // then override id/restaurant_id/enabled_panels. Mirrors the features route exactly.
+  // then override id/restaurant_id/enabled_panels. cleanClonedSettings strips #1's tenant-
+  // specific identity/geo/tax so they don't leak into the new restaurant. Mirrors the others.
   const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
-  const base: Record<string, unknown> = template.data ? { ...template.data } : { bubbles_enabled: true };
-  delete base.updated_at;
+  const base = cleanClonedSettings(template.data);
   const newRow = { ...base, id: rest.data.slug, restaurant_id, enabled_panels: panels };
   const ins = await sb.from("settings").upsert(newRow, { onConflict: "restaurant_id" }).select("enabled_panels").maybeSingle();
   if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 500 });
