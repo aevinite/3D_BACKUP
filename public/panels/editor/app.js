@@ -2463,7 +2463,7 @@ function bindEditor() {
     const u = state.staffTeam.find((x) => x.id === id);
     if (!(await confirmDialog(`Remove ${u ? (u.name || u.username) : "this person"} for good? This can't be undone.`, "Remove"))) return;
     try {
-      const r = await fetch(`/api/owner/staff?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const r = await fetch(ridQ(`/api/owner/staff?id=${encodeURIComponent(id)}`), { method: "DELETE" }); // ridQ: keep the admin's per-tab restaurant pin (appends &rid=)
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || "Request failed");
       await loadStaffTeam();
