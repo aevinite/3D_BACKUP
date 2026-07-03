@@ -642,12 +642,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
     if (a === "sessions" && c === "auto-approve") {
       const value = !!(body && body.value === true);
-      const row = must(await sb.from("sessions").update({ auto_approve: value }).eq("id", b).select());
+      // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS) — the
+      // same rule applied to order/dish writes; a foreign session id can't be flipped.
+      const row = must(await sb.from("sessions").update({ auto_approve: value }).eq("id", b).eq("restaurant_id", rid).select());
       return ok(row[0] || null);
     }
     // sessions/:id/invoice — GENERATE the tax invoice (assign a permanent number,
     // lock the bill). Server-authoritative (totals computed from DB order rows).
     if (a === "sessions" && c === "invoice") {
+      // lfh_generate_invoice takes only p_session (no tenant param) — confirm the session
+      // is THIS restaurant's first (service-role bypasses RLS; a foreign session id must not
+      // get an invoice generated against it).
+      const ownsGen = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!ownsGen) return err("That table isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
       if (error) throw new Error(error.message);
       await logAction("editor", "invoice_generate", { detail: `session ${b}`, device_id: dev });
@@ -656,6 +663,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // sessions/:id/void-invoice — VOID it (reopen the bill for edits; number kept in record).
     if (a === "sessions" && c === "void-invoice") {
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("void bills");
+      // Confirm the session belongs to THIS restaurant before voiding (RPC has no tenant param).
+      const ownsVoid = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!ownsVoid) return err("That table isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_void_invoice", { p_session: b, p_reason: (body && body.reason) || null });
       if (error) throw new Error(error.message);
       await logAction("editor", "invoice_void", { detail: `session ${b}` + ((body && body.reason) ? ` · ${body.reason}` : ""), device_id: dev });
@@ -671,22 +681,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // members/:id/approve | remove | make-head
     if (a === "members" && c === "approve") {
-      const row = must(await sb.from("session_members").update({ approved: true }).eq("id", b).select());
+      // rid-scoped like every by-id write (service-role bypasses RLS → this is the boundary).
+      const row = must(await sb.from("session_members").update({ approved: true }).eq("id", b).eq("restaurant_id", rid).select());
       return ok(row[0] || null);
     }
     if (a === "members" && c === "remove") {
-      const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).select());
+      const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).eq("restaurant_id", rid).select());
       return ok(row[0] || null);
     }
     if (a === "members" && c === "make-head") {
-      const found = must(await sb.from("session_members").select("id,session_id,role,removed").eq("id", b).limit(1));
+      const found = must(await sb.from("session_members").select("id,session_id,role,removed").eq("id", b).eq("restaurant_id", rid).limit(1));
       const m = found[0];
       if (!m) return err("member not found", 404);
-      const sessRows = must(await sb.from("sessions").select("status").eq("id", m.session_id).limit(1));
+      const sessRows = must(await sb.from("sessions").select("status").eq("id", m.session_id).eq("restaurant_id", rid).limit(1));
       if (!sessRows[0] || sessRows[0].status !== "open") return err("table is not open");
       if (m.role === "owner" && !m.removed) return ok(m);
-      must(await sb.from("session_members").update({ removed: true }).eq("session_id", m.session_id).eq("role", "owner").eq("removed", false).select());
-      const row = must(await sb.from("session_members").update({ role: "owner", approved: true, removed: false }).eq("id", m.id).select());
+      must(await sb.from("session_members").update({ removed: true }).eq("session_id", m.session_id).eq("restaurant_id", rid).eq("role", "owner").eq("removed", false).select());
+      const row = must(await sb.from("session_members").update({ role: "owner", approved: true, removed: false }).eq("id", m.id).eq("restaurant_id", rid).select());
       return ok(row[0] || null);
     }
 
@@ -824,7 +835,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "requests" && c === "resolve") {
       const status = body && body.status;
       if (!["approved", "denied"].includes(status)) return err("invalid status");
-      const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).select())[0];
+      const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).eq("restaurant_id", rid).select())[0];
       if (status === "approved" && reqRow && reqRow.type === "open") {
         const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).eq("restaurant_id", rid).neq("status", "closed").limit(1));
         if (!existing.length) must(await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }));

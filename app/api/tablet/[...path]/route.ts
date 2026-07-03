@@ -258,7 +258,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "requests" && c === "resolve") {
       const status = body && body.status;
       if (!["approved", "denied"].includes(status)) return err("invalid status");
-      const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).select())[0];
+      // rid-scoped: service-role bypasses RLS so .eq(restaurant_id) is the tenant boundary.
+      const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).eq("restaurant_id", rid).select())[0];
       if (status === "approved" && reqRow && reqRow.type === "open") {
         const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).eq("restaurant_id", rid).neq("status", "closed").limit(1));
         if (!existing.length) must(await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }));
@@ -268,35 +269,35 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // calls/:id/attend
     if (a === "calls" && c === "attend") {
-      const row = must(await sb.from("waiter_calls").update({ resolved: true }).eq("id", b).select());
+      const row = must(await sb.from("waiter_calls").update({ resolved: true }).eq("id", b).eq("restaurant_id", rid).select());
       await logAction("tablet", "call_attend", { table_number: row[0]?.table_number ?? null, device_id: dev });
       return ok(row[0] || null);
     }
 
-    // members/:id/approve
+    // members/:id/approve  (rid-scoped — service-role bypasses RLS, so this is the boundary)
     if (a === "members" && c === "approve") {
-      const row = must(await sb.from("session_members").update({ approved: true }).eq("id", b).select());
+      const row = must(await sb.from("session_members").update({ approved: true }).eq("id", b).eq("restaurant_id", rid).select());
       return ok(row[0] || null);
     }
 
     // members/:id/make-head — transfer the table head to another member (kick the
     // current head, promote this one). Mirrors the editor's make-head.
     if (a === "members" && c === "make-head") {
-      const found = must(await sb.from("session_members").select("id,session_id,role,removed").eq("id", b).limit(1));
+      const found = must(await sb.from("session_members").select("id,session_id,role,removed").eq("id", b).eq("restaurant_id", rid).limit(1));
       const m = found[0];
       if (!m) return err("member not found", 404);
-      const sessRows = must(await sb.from("sessions").select("status").eq("id", m.session_id).limit(1));
+      const sessRows = must(await sb.from("sessions").select("status").eq("id", m.session_id).eq("restaurant_id", rid).limit(1));
       if (!sessRows[0] || sessRows[0].status !== "open") return err("table is not open");
       if (m.role === "owner" && !m.removed) return ok(m);
-      must(await sb.from("session_members").update({ removed: true }).eq("session_id", m.session_id).eq("role", "owner").eq("removed", false).select());
-      const row = must(await sb.from("session_members").update({ role: "owner", approved: true, removed: false }).eq("id", b).select());
+      must(await sb.from("session_members").update({ removed: true }).eq("session_id", m.session_id).eq("restaurant_id", rid).eq("role", "owner").eq("removed", false).select());
+      const row = must(await sb.from("session_members").update({ role: "owner", approved: true, removed: false }).eq("id", b).eq("restaurant_id", rid).select());
       return ok(row[0] || null);
     }
 
     // members/:id/remove — KICK a guest off the table (works for the head too; the
     // table stays open). Mirrors the editor's remove. (owner, 2026-06-17 — parity)
     if (a === "members" && c === "remove") {
-      const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).select());
+      const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).eq("restaurant_id", rid).select());
       await logAction("tablet", "member_remove", { detail: "kicked", device_id: dev });
       return ok(row[0] || null);
     }
@@ -306,7 +307,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // member's phone here (the editor passes it from its row). (owner, 2026-06-17)
     if (a === "members" && c === "ban") {
       const g = await managerPinGate(req, body, rid); if (!g.allow) return g.resp; // manager PIN required
-      const found = must(await sb.from("session_members").select("id,phone,device_id").eq("id", b).limit(1));
+      const found = must(await sb.from("session_members").select("id,phone,device_id").eq("id", b).eq("restaurant_id", rid).limit(1));
       const m = found[0];
       if (!m) return err("member not found", 404);
       const phone = m.phone ? String(m.phone).trim() : null;
@@ -315,7 +316,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const device = m.device_id ? String(m.device_id).trim() : null;
       must(await sb.from("blocklist").insert({ member_id: b, phone, device_id: device, reason: "banned from tablet" }).select());
       if (phone) await sb.from("customers").upsert({ phone, blocked: true, restaurant_id: rid }, { onConflict: "restaurant_id,phone" });
-      const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).select());
+      const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).eq("restaurant_id", rid).select());
       await logAction("tablet", "member_ban", { detail: (phone ? `banned ${phone}` : "banned") + byNote(g), device_id: dev });
       return ok(row[0] || null);
     }
@@ -324,7 +325,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // editor endpoint exactly. (owner, 2026-06-17 — parity)
     if (a === "sessions" && c === "auto-approve") {
       const value = !!(body && body.value === true);
-      const row = must(await sb.from("sessions").update({ auto_approve: value }).eq("id", b).select());
+      const row = must(await sb.from("sessions").update({ auto_approve: value }).eq("id", b).eq("restaurant_id", rid).select());
       await logAction("tablet", "auto_approve", { detail: value ? "on" : "off", device_id: dev });
       return ok(row[0] || null);
     }
@@ -583,7 +584,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // trigger only fires on INSERT, not on this move — assign it if missing).
       const tb = (must(await sb.from("sessions").select("bill_no").eq("id", target.id).limit(1)))[0];
       if (tb && tb.bill_no == null) {
-        try { const { data: bn } = await sb.rpc("lfh_next_counter", { p_rid: rid, p_key: "bill" }); if (bn != null) await sb.from("sessions").update({ bill_no: bn }).eq("id", target.id).is("bill_no", null); } catch { /* bill stays lazy if the counter isn't callable */ }
+        try { const { data: bn } = await sb.rpc("lfh_next_counter", { p_rid: rid, p_key: "bill" }); if (bn != null) await sb.from("sessions").update({ bill_no: bn }).eq("id", target.id).eq("restaurant_id", rid).is("bill_no", null); } catch { /* bill stays lazy if the counter isn't callable */ }
       }
       await logAction("tablet", "order_move", { order_id: b, table_number: to, device_id: dev });
       return ok(moved[0] || null);
