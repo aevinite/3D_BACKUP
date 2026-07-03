@@ -98,7 +98,14 @@ export default function SessionOwner() {
       window.removeEventListener("lfh:rt-tick", onTick);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [poll]);
+    // restaurantId is in the deps: the global widgets resolve their restaurant
+    // ASYNCHRONOUSLY (RestaurantProvider starts at #1, then fixes itself once the
+    // /r/<slug> lookup lands — React runs child effects before the parent's). Without
+    // restaurantId here, this effect read restaurant #1's sessions_enabled and cached
+    // it forever, so on a NON-#1 restaurant the host's approval poll never started and
+    // a guest asking to join waited forever (owner: "guest stuck at the menu"). Now it
+    // re-runs the instant the real id arrives. (poll has no deps, so it's stable.)
+  }, [poll, restaurantId]);
 
   // Only show the prompt when someone's waiting AND we're not in a "Later" snooze.
   const visible = pending.length > 0 && Date.now() >= snoozeUntil.current;

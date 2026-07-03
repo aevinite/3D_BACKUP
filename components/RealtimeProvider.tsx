@@ -11,10 +11,12 @@
 import { useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { intendedTable } from "@/lib/tableConnection";
+import { useRestaurantId } from "@/lib/restaurant-context";
 
 type GuestMetrics = { events: number; ticks: number; reconnects: number; lastEventAt: number; topic: string | null };
 
 export default function RealtimeProvider() {
+  const rid = useRestaurantId();
   useEffect(() => {
     const metrics: GuestMetrics = { events: 0, ticks: 0, reconnects: 0, lastEventAt: 0, topic: null };
     (window as unknown as { __lfh_rt_guest?: GuestMetrics }).__lfh_rt_guest = metrics;
@@ -48,7 +50,17 @@ export default function RealtimeProvider() {
       channel = supabase
         .channel(`rt:${topic}`)
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "realtime_events", filter: `topic=eq.${topic}` },
-          () => { metrics.events++; metrics.lastEventAt = Date.now(); tick(); })
+          (payload) => {
+            // The topic is `table:N`, which is NOT unique across restaurants — restaurant
+            // A's "table 5" and restaurant B's "table 5" share the channel. Drop any event
+            // whose breadcrumb belongs to a DIFFERENT restaurant so a guest never refetches
+            // on another restaurant's activity (mig 086 added realtime_events.restaurant_id
+            // for exactly this; mirrors lib/useRealtime.ts). If either id is missing we keep
+            // the event (safe: at worst one extra refetch, never a missed update).
+            const evRid = (payload as { new?: { restaurant_id?: string } })?.new?.restaurant_id;
+            if (rid && evRid && evRid !== rid) return;
+            metrics.events++; metrics.lastEventAt = Date.now(); tick();
+          })
         .subscribe((status) => {
           if (status === "SUBSCRIBED") { if (everSubscribed) { metrics.reconnects++; tick(); } everSubscribed = true; }
         });
@@ -111,7 +123,11 @@ export default function RealtimeProvider() {
       window.removeEventListener("pageshow", onWake);
       window.removeEventListener("online", onOnline);
     };
-  }, []);
+    // rid in deps: it resolves ASYNC (RestaurantProvider starts at #1 then fixes itself),
+    // so the filter above must rebuild with the real id once it lands — otherwise a non-#1
+    // guest would keep filtering against #1 and drop its OWN events. Re-running tears down
+    // and rebuilds the socket cleanly (same as a wake/resubscribe).
+  }, [rid]);
 
   return null;
 }

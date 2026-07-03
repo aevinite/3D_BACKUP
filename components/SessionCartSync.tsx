@@ -62,6 +62,11 @@ export default function SessionCartSync() {
   // (every 2s) and the listeners that push local changes up to the server.
   useEffect(() => {
     let alive = true; // guards against acting after the component is gone
+    // The restaurant resolves async (RestaurantProvider starts at #1, then fixes itself).
+    // enabled.current is cached once per mount; reset it here so a change of restaurantId
+    // re-reads THIS restaurant's sessions_enabled instead of keeping #1's (else a non-#1
+    // table's shared cart never synced). restaurantId is in this effect's deps below.
+    enabled.current = null;
     let iv: ReturnType<typeof setInterval> | null = null; // the pull timer
 
     // Overwrite the local cart and notify the UI, without triggering our own push.
@@ -160,7 +165,7 @@ export default function SessionCartSync() {
       window.removeEventListener("lfh:session-changed", onSessionChanged);
       window.removeEventListener("lfh:rt-tick", onTick);
     };
-  }, []);
+  }, [restaurantId]);
 
   // This component is invisible — it only does background syncing, draws nothing.
   return null;
