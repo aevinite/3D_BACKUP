@@ -400,17 +400,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const patch: any = { status };
       if (status === "served") patch.served_at = nowIso();
       // Only order_id + session_id are needed below; the client discards the body → no full row.
-      const updated = must(await sb.from("order_items").update(patch).eq("id", b).select("order_id, session_id"));
+      // .eq(restaurant_id, rid) on every by-id write: sb is service-role (RLS bypassed), so
+      // this is the only tenant boundary — stops a foreign dish/order id being advanced.
+      const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id, session_id"));
       const item = updated[0];
       if (item && item.order_id) {
         // Order-level status stays coarse (received/preparing/served) so the guest
         // tracker + floor never see the internal "ready": a cooked-but-unserved
         // dish keeps the order "preparing".
-        const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id));
+        const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id).eq("restaurant_id", rid));
         const served = rows.filter((r: any) => r.status === "served").length;
         const anyActive = rows.some((r: any) => ["preparing", "ready", "served"].includes(r.status));
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
-        await sb.from("orders").update({ status: overall }).eq("id", item.order_id);
+        await sb.from("orders").update({ status: overall }).eq("id", item.order_id).eq("restaurant_id", rid);
       }
       await logAction("tablet", "item_status", { detail: status, device_id: dev });
       if (status === "served") await maybeAutoSettle(item?.session_id, { panel: "tablet", deviceId: dev }); // last dish served may complete the table
@@ -420,11 +422,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/:id/accept — accept a (often phone/online) order: everything not yet
     // served → preparing, so it shows up on the kitchen pass. Mirrors the kitchen.
     if (a === "orders" && c === "accept") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).single());
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
       const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: client re-fetches → skip both the .select() and the full-row re-read.
-      must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b));
-      await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
+      must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
+      await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
       await logAction("tablet", "order_accept", { order_id: b, device_id: dev });
       return ok({ ok: true });
     }
@@ -432,13 +434,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/:id/serve-all — mark EVERY dish on one order served in a single call
     // (the table-wide "Serve all" fans these out, one per order). Mirrors the editor.
     if (a === "orders" && c === "serve-all") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).single());
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
-      must(await sb.from("orders").update({ items, status: "served" }).eq("id", b));
-      await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).neq("status", "served");
+      must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).eq("restaurant_id", rid));
+      await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
       await logAction("tablet", "order_serve", { order_id: b, device_id: dev });
       // Only session_id needed (for auto-settle); client discards the body → not the full row.
-      const served = must(await sb.from("orders").select("session_id").eq("id", b).single());
+      const served = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).single());
       await maybeAutoSettle((served as any)?.session_id, { panel: "tablet", deviceId: dev }); // serving the order may complete the table
       return ok({ ok: true });
     }
@@ -449,7 +451,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "allergies") {
       const raw = Array.isArray(body?.allergies) ? body.allergies : [];
       const allergies = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
-      must(await sb.from("orders").update({ allergies }).eq("id", b));
+      must(await sb.from("orders").update({ allergies }).eq("id", b).eq("restaurant_id", rid));
       await logAction("tablet", "order_allergies", { order_id: b, detail: allergies.join(", ") || "(none)", device_id: dev });
       return ok({ ok: true });
     }
