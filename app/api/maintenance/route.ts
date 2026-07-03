@@ -12,7 +12,11 @@ export const dynamic = "force-dynamic";
 
 async function gate(req: NextRequest): Promise<NextResponse | null> {
   const g = await requireRole(req, "manager");
-  return g.ok ? null : NextResponse.json({ error: "Not authorised." }, { status: 401 });
+  if (g.ok) return null;
+  // transient = auth lookup failed (DB blip) → 503 so the client retries instead of logging out.
+  return g.transient
+    ? NextResponse.json({ error: "Server can't reach the database — retrying." }, { status: 503 })
+    : NextResponse.json({ error: "Not authorised." }, { status: 401 });
 }
 
 export async function GET(req: NextRequest) {

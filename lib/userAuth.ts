@@ -102,14 +102,18 @@ async function sign(u: { id: string; role: string; token_version: number }): Pro
 // success resets the fail counter and returns the user + a ready-to-set cookie.
 export async function loginUser(
   username: string, password: string,
-): Promise<{ ok: true; user: StaffUser; cookie: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; user: StaffUser; cookie: string } | { ok: false; error: string; transient?: boolean }> {
   const uname = normalizeLoginName(username);
   if (!uname || !password) return { ok: false, error: "Enter your name and password." };
   // Username is unique only PER restaurant (mig 091), so the SAME name can exist at
   // several restaurants. Fetch every active match and pick the one whose PASSWORD
   // verifies — so the login form needs no restaurant field. (The only ambiguity is
   // two restaurants sharing BOTH the same name AND password; then the first wins.)
-  const candidates = ((await sb.from("staff_users").select("*").eq("username", uname).eq("active", true)).data || []) as any[];
+  const candRes = await sb.from("staff_users").select("*").eq("username", uname).eq("active", true);
+  // A FAILED lookup is a server problem, not wrong credentials — don't gaslight the
+  // waiter into resetting a password during a network blip (stress test 2026-07-03).
+  if (candRes.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true };
+  const candidates = (candRes.data || []) as any[];
   // Same generic message whether the name is missing or the password is wrong —
   // never reveal which names exist.
   if (!candidates.length) return { ok: false, error: "Wrong name or password." };
@@ -139,9 +143,17 @@ export async function loginUser(
   return { ok: true, user: matched as StaffUser, cookie: await sign(matched) };
 }
 
+// Thrown when the cookie could not be VERIFIED because the staff_users lookup itself
+// failed (DB/network blip) — deliberately distinct from "cookie is invalid". The
+// 2026-07-03 stress test showed a few seconds of DNS flap 401-logging-out EVERY open
+// panel because a failed lookup fell through the same `!u` branch as a bad cookie.
+// A transient outage must surface as 503 ("try again"), never as "please log in".
+export class AuthDbError extends Error {}
+
 // Resolve a USER_COOKIE value to its (active) user: verify the HMAC signature
 // against the user's CURRENT role + token_version, and reject if older than the
 // max age. Any mismatch (tampered, role changed, token bumped, expired) → null.
+// Throws AuthDbError when the lookup FAILS (vs. finding nothing).
 export async function userFromCookie(value: string | undefined | null): Promise<StaffUser | null> {
   if (!value) return null;
   const parts = value.split(".");
@@ -150,7 +162,9 @@ export async function userFromCookie(value: string | undefined | null): Promise<
   const iat = Number(iatStr);
   if (!id || !Number.isFinite(iat)) return null;
   if (Date.now() - iat > TOKEN_TTL_MS) return null; // expired
-  const u = (await sb.from("staff_users").select("*").eq("id", id).eq("active", true).limit(1)).data?.[0];
+  const res = await sb.from("staff_users").select("*").eq("id", id).eq("active", true).limit(1);
+  if (res.error) throw new AuthDbError(res.error.message);
+  const u = res.data?.[0];
   if (!u) return null;
   const expected = await hmac(`${id}:${u.role}:${u.token_version}:${iat}`);
   if (!safeEqual(sig, expected)) return null;
@@ -184,8 +198,15 @@ export function roleSatisfies(have: Role, need: Role): boolean {
 export async function requireRole(
   req: { cookies: { get(name: string): { value: string } | undefined } },
   role: Role,
-): Promise<{ ok: true; user: StaffUser | null } | { ok: false }> {
-  const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+): Promise<{ ok: true; user: StaffUser | null } | { ok: false; transient?: boolean }> {
+  let u: StaffUser | null;
+  try {
+    u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  } catch (e) {
+    // DB blip ≠ logged out: gates answer 503, panels keep their session and retry.
+    if (e instanceof AuthDbError) return { ok: false, transient: true };
+    throw e;
+  }
   if (u && roleSatisfies(u.role, role)) {
     // Presence heartbeat (throttled ~45s): mark this user active now so admin/owner
     // see who's working / which panel is open. Fire-and-forget; never blocks the call.

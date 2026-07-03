@@ -12,7 +12,9 @@ export async function POST(req: NextRequest) {
   let body: any = {};
   try { body = await req.json(); } catch {}
   const r = await loginUser(String(body?.username || ""), String(body?.password || ""));
-  if (!r.ok) return NextResponse.json({ ok: false, error: r.error }, { status: 401 });
+  // transient = the credential lookup itself failed (DB blip) → 503 "try again",
+  // NOT 401 "wrong password" (stress test 2026-07-03).
+  if (!r.ok) return NextResponse.json({ ok: false, error: r.error }, { status: r.transient ? 503 : 401 });
   const u = r.user;
   // Per-restaurant PANEL entitlement (mig 106): if the admin turned this role's panel OFF
   // for the user's restaurant, they can't sign in here. (The admin reaches panels via the
