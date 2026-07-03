@@ -44,6 +44,30 @@ const ITEM_COLS =
 // with no regression. The TABLET must NOT use this — it needs served/paid orders for bills.
 const KITCHEN_ACTIVE_STATUSES = ["received", "preparing"];
 
+// PostgREST silently caps any response at 1000 rows. With ascending ordering that
+// means a board past 1000 live rows keeps the OLDEST and DROPS the NEWEST — the
+// 2026-07-03 stress test showed the kitchen going blind to every new KOT once a
+// backlog passed the cap, with no error anywhere. pageAll() walks .range() windows
+// until a short page so the board is COMPLETE again. PAGE must not exceed the
+// server's max-rows (1000). MAX_PAGES is runaway protection only (20k rows is far
+// beyond any real floor); if it ever trips we log — never silently truncate again.
+const PAGE = 1000;
+const MAX_PAGES = 20;
+async function pageAll<T>(
+  makePage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let p = 0; p < MAX_PAGES; p++) {
+    const { data, error } = await makePage(p * PAGE, p * PAGE + PAGE - 1);
+    if (error) throw new Error(error.message);
+    const rows = data ?? [];
+    all.push(...rows);
+    if (rows.length < PAGE) return all;
+  }
+  console.error(`liveBoard: pageAll hit MAX_PAGES (${MAX_PAGES * PAGE} rows) — board truncated`);
+  return all;
+}
+
 export async function liveOrdersAndItems(
   restaurantId: string = DEFAULT_RESTAURANT_ID,
   tableNumbers?: string[],
@@ -58,22 +82,29 @@ export async function liveOrdersAndItems(
 
   // Which sessions are open right now — their orders stay visible at any age.
   // Scoped to this restaurant so a kitchen/tablet only ever sees its own floor.
-  const openRes = await sb.from("sessions").select("id").eq("status", "open").eq("restaurant_id", restaurantId);
+  // ONLY pre-rollover sessions matter here: a session OPENED today (created_at >= since)
+  // can only contain orders created after it, so those orders already pass the
+  // `created_at >= since` arm of the OR below. Narrowing to the overnight stragglers
+  // keeps this id-list tiny — the stress test showed 300+ open sessions inlining ~11KB
+  // of UUIDs into the PostgREST URL, flirting with URL-length failures.
+  const openRes = await sb.from("sessions").select("id")
+    .eq("status", "open").eq("restaurant_id", restaurantId).lt("created_at", since);
   if (openRes.error) throw new Error(openRes.error.message);
   const openIds = (openRes.data ?? []).map((s) => s.id as string);
 
   // Orders: today's, PLUS any belonging to a still-open session (matches the brain).
   // The optional table filter is AND-ed in BEFORE the today/open-session OR group, so
   // PostgREST builds  ... AND table_number IN (…) AND (created_at>=since OR session_id IN (…)).
-  let ordQ = sb.from("orders").select(ORDER_COLS).eq("archived", false).eq("restaurant_id", restaurantId);
-  if (activeOnly) ordQ = ordQ.in("status", KITCHEN_ACTIVE_STATUSES); // kitchen board → drop served/cancelled server-side
-  if (tableFilter) ordQ = ordQ.in("table_number", tableFilter);
-  ordQ = openIds.length
-    ? ordQ.or(`created_at.gte.${since},session_id.in.(${openIds.join(",")})`)
-    : ordQ.gte("created_at", since);
-  const ordRes = await ordQ.order("created_at", { ascending: true });
-  if (ordRes.error) throw new Error(ordRes.error.message);
-  const orders = (ordRes.data ?? []) as Row[];
+  // Paged (pageAll) + a stable created_at,id tiebreak so pages never overlap/skip.
+  const orders = await pageAll<Row>((from, to) => {
+    let q = sb.from("orders").select(ORDER_COLS).eq("archived", false).eq("restaurant_id", restaurantId);
+    if (activeOnly) q = q.in("status", KITCHEN_ACTIVE_STATUSES); // kitchen board → drop served/cancelled server-side
+    if (tableFilter) q = q.in("table_number", tableFilter);
+    q = openIds.length
+      ? q.or(`created_at.gte.${since},session_id.in.(${openIds.join(",")})`)
+      : q.gte("created_at", since);
+    return q.order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to);
+  });
 
   // TARGETED path: items are simply the items of the orders we fetched — scope by
   // order_id (no today/open OR logic needed; the orders query already settled which
@@ -81,11 +112,11 @@ export async function liveOrdersAndItems(
   if (tableFilter) {
     const orderIds = orders.map((o) => o.id);
     if (!orderIds.length) return { orders, items: [] };
-    const itRes = await sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
-      .in("order_id", orderIds)
-      .order("created_at", { ascending: true }).order("id", { ascending: true });
-    if (itRes.error) throw new Error(itRes.error.message);
-    return { orders, items: (itRes.data ?? []) as Row[] };
+    const items = await pageAll<Row>((from, to) =>
+      sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
+        .in("order_id", orderIds)
+        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to));
+    return { orders, items };
   }
 
   // FULL path: per-dish rows are today's, PLUS the items of the OLD (pre-rollover)
@@ -93,12 +124,13 @@ export async function liveOrdersAndItems(
   // Keeping the id-list to just those old orders keeps the query small.
   const sinceMs = new Date(since).getTime();
   const oldOrderIds = orders.filter((o) => new Date(o.created_at).getTime() < sinceMs).map((o) => o.id);
-  let itQ = sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId);
-  itQ = oldOrderIds.length
-    ? itQ.or(`created_at.gte.${since},order_id.in.(${oldOrderIds.join(",")})`)
-    : itQ.gte("created_at", since);
-  const itRes = await itQ.order("created_at", { ascending: true }).order("id", { ascending: true });
-  if (itRes.error) throw new Error(itRes.error.message);
+  const items = await pageAll<Row>((from, to) => {
+    let q = sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId);
+    q = oldOrderIds.length
+      ? q.or(`created_at.gte.${since},order_id.in.(${oldOrderIds.join(",")})`)
+      : q.gte("created_at", since);
+    return q.order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to);
+  });
 
-  return { orders, items: (itRes.data ?? []) as Row[] };
+  return { orders, items };
 }

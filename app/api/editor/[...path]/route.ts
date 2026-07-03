@@ -27,7 +27,13 @@ export const dynamic = "force-dynamic"; // always live, never cached
 // Returns a 401 response to short-circuit, or null to let the handler proceed.
 async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | NextResponse> {
   const g = await requireRole(req, "manager");
-  if (!g.ok) return NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
+  // transient = the auth lookup itself failed (DB blip) — 503 keeps the panel logged
+  // in and retrying; only a genuinely bad/expired cookie gets the 401 → /login bounce.
+  if (!g.ok) {
+    return g.transient
+      ? NextResponse.json({ error: "Server can't reach the database — retrying." }, { status: 503 })
+      : NextResponse.json({ error: "Not authorised — please log in." }, { status: 401 });
+  }
   return { user: g.user };
 }
 // (panel restaurant scope now comes from lib/panelScope → panelRestaurantId, which

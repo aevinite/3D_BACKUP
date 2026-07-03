@@ -209,12 +209,11 @@ export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID)
   // Fetch the dishes AND the real-review aggregates at the same time (parallel
   // requests — no extra waiting). Ratings failing must never hide the menu, so
   // its error is swallowed and dishes just show as unrated.
-  // NOTE: item_ratings is a view that doesn't yet expose restaurant_id; with one
-  // restaurant its slugs are unique so this is correct. When a 2nd restaurant
-  // shares a slug, the view must gain restaurant_id (follow-on) and be filtered.
+  // item_ratings exposes restaurant_id since migration 116 — read ONLY this
+  // restaurant's aggregates, with an explicit column list (egress rule).
   const [items, ratings] = await Promise.all([
     supabase.from("menu_items").select("*").eq("restaurant_id", restaurantId).order("sort_order"),
-    supabase.from("item_ratings").select("*"),
+    supabase.from("item_ratings").select("item_slug, avg_rating, review_count").eq("restaurant_id", restaurantId),
   ]);
   if (items.error) throw new Error(`Failed to load menu: ${items.error.message}`);
   // Index the aggregates by slug for a quick lookup while mapping each dish.
@@ -227,12 +226,11 @@ export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID)
 export async function getMenuItem(slug: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<MenuItem | null> {
   // Three parallel reads: the dish, its rating aggregate, and its newest
   // real reviews (capped at 20 so a popular dish can't flood the page).
-  // (item_ratings / reviews are still keyed by slug only — correct for one
-  // restaurant; scope by restaurant_id once those gain the column.)
   const [item, agg, revs] = await Promise.all([
     supabase.from("menu_items").select("*").eq("restaurant_id", restaurantId).eq("slug", slug).maybeSingle(),
-    supabase.from("item_ratings").select("*").eq("item_slug", slug).maybeSingle(),
-    getItemReviews(slug),
+    supabase.from("item_ratings").select("item_slug, avg_rating, review_count")
+      .eq("restaurant_id", restaurantId).eq("item_slug", slug).maybeSingle(), // scoped since mig 116
+    getItemReviews(slug, restaurantId), // was defaulting to restaurant #1 (stress-test fix queue)
   ]);
   if (item.error) throw new Error(`Failed to load item "${slug}": ${item.error.message}`);
   if (!item.data) return null;
@@ -310,9 +308,12 @@ export interface Settings {
 // Reads the single site-wide settings row and returns it with safe defaults,
 // so the app still works even if settings haven't been configured yet.
 export async function getSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Settings> {
+  // Explicit column list = exactly what this function maps below (egress rule) —
+  // and the guest no longer receives staff-only fields (gstin, tax, invoice
+  // prefix, phone…) that `*` was silently shipping to every menu visitor.
   const { data, error } = await supabase
     .from("settings")
-    .select("*")
+    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features")
     .eq("restaurant_id", restaurantId)   // one settings row per restaurant (079)
     .maybeSingle();
   if (error) throw new Error(`Failed to load settings: ${error.message}`);

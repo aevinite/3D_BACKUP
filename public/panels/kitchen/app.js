@@ -563,9 +563,20 @@ if (window.LFH_RT) {
   // Split by topic: ops churn → TARGETED loadTables() when the breadcrumb names specific
   // tables, else full load() (platform change, wake, reconnect, initial). menu edits
   // (sold-out / dish edits) always do a full load() so the dish lists + 86 board refresh.
+  // FULL-reload rate guard (stress test 2026-07-03): breadcrumbs that can't name a table
+  // (pay/close/platform…) force a WHOLE-board reload, and a rush hour fires them constantly —
+  // one kitchen screen pulled 278MB in 50min re-reading a big board every few seconds. Collapse
+  // full reloads to at most one per 4s, TRAILING (a suppressed burst still lands one reload at
+  // the window edge — nothing is ever dropped). Targeted per-table refetches stay instant.
+  let lastFullAt = 0, fullTimer = null;
+  const fullSoon = () => {
+    if (fullTimer) return;
+    const wait = Math.max(0, lastFullAt + 4000 - Date.now());
+    fullTimer = setTimeout(() => { fullTimer = null; lastFullAt = Date.now(); load().catch(() => {}); }, wait);
+  };
   LFH_RT.start({ handlers: {
-    ops: (detail) => (detail && !detail.full && detail.tables && detail.tables.length) ? loadTables(detail.tables) : load(),
-    menu: () => load(),
+    ops: (detail) => (detail && !detail.full && detail.tables && detail.tables.length) ? loadTables(detail.tables) : fullSoon(),
+    menu: () => fullSoon(),
   }});
   setInterval(() => load().catch(() => {}), 60000); // backup sync
 } else {
