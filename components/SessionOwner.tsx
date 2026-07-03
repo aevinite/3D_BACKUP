@@ -16,6 +16,9 @@ import { useRestaurantId } from "@/lib/restaurant-context";
 // React building blocks: useState remembers values, useEffect runs setup code,
 // useRef keeps a value that survives re-draws, useCallback reuses a function.
 import { useCallback, useEffect, useRef, useState } from "react";
+// Hardware back-button manager: registers this popup as a "layer" so the phone
+// back button closes IT instead of quitting the site (CLAUDE.md rule).
+import { useBackClose } from "@/lib/backStack";
 // Reads the restaurant's on/off settings (e.g. is the session system turned on).
 import { getSettings } from "@/lib/menu";
 // Helpers that talk to the server about the table's dining session: read the
@@ -107,8 +110,19 @@ export default function SessionOwner() {
     // re-runs the instant the real id arrives. (poll has no deps, so it's stable.)
   }, [poll, restaurantId]);
 
+  // "Later"/close: hide the prompt for SNOOZE_MS so the host isn't trapped by it.
+  // (Re-setting pending forces a re-draw so the hidden state takes effect now.)
+  // Defined BEFORE the back-button hook + early return so the hook can reference it
+  // and is always called unconditionally (Rules of Hooks).
+  const snooze = () => { snoozeUntil.current = Date.now() + SNOOZE_MS; setPending((p) => [...p]); };
+
   // Only show the prompt when someone's waiting AND we're not in a "Later" snooze.
   const visible = pending.length > 0 && Date.now() >= snoozeUntil.current;
+  // Register with the hardware back-button manager (CLAUDE.md rule: EVERY overlay must
+  // register, or the phone back button skips it and quits the site). Called every render,
+  // self-noops while not visible; a back press "closes" this popup by snoozing it — the
+  // same as tapping the ✕ / backdrop — instead of falling through to the exit guard.
+  useBackClose("session-owner", visible, snooze);
   if (!visible) return null;
 
   // The first person in the queue — that's who this prompt is about.
@@ -140,9 +154,6 @@ export default function SessionOwner() {
     setBusy(false);
     poll();
   };
-  // "Later"/close: hide the prompt for SNOOZE_MS so the host isn't trapped by it.
-  // (Re-setting pending forces a re-draw so the hidden state takes effect now.)
-  const snooze = () => { snoozeUntil.current = Date.now() + SNOOZE_MS; setPending((p) => [...p]); };
 
   // What the host sees: a small approve/deny card over a dimmed background.
   return (
