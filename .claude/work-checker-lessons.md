@@ -1,5 +1,13 @@
 # Work-checker lessons
 
+## What works
+- **Per-user permission overrides as JSONB + "override ?? restaurant-default ?? off" fallback** `#backend`
+  (PR #106): one additive column, keys named identically to the settings tri-states, resolution in ONE
+  server gate, resolved values overlaid onto the board GET so the client needs zero changes. Owner's
+  follow-up message described exactly this model. Reuse for future per-user capabilities.
+- **Test-user + curl end-to-end proof on a worktree server (port ≠4000)** — override→403→revert with
+  cleanup on the shared DB; work-checker PASSed first try. Prefer this over UI-only verification.
+
 - **Verify panel UIs at mobile width, not just desktop.** I built/redesigned the
   admin/owner (+ manager) panels and called them "verified" after only checking at
   ~1440px. The owner then found them not responsive on mobile. This is a restaurant
@@ -57,3 +65,31 @@
   server runs from (`lsof`), and verify on a server you KNOW is main; (2) after merging a branch
   that touched package.json, run `npm install` in the consolidated checkout; (3) don't blanket-
   blame "stale cache" — verify each reported bug independently (some are real, some aren't).
+
+- **When the owner asks for a "full / everything / in detail" learning doc, go EXHAUSTIVE — length is
+  not a virtue to trim.** `#general #tone` He asked for a "full project report literally full everything
+  in very detail," said "idk if it takes 200-300 pages," and is a true beginner who wants to understand
+  EVERY technology and folder by name. I shipped a tight, elegant 12-section guide optimised for concise
+  altitude — and he was angry it was "too small." For a teach-me-everything request from this owner:
+  name and explain EVERY dependency (even ones he's never heard of), show the REAL folder tree and REAL
+  app screenshots (start the dev server, capture actual pages), explain what each tool does in his project
+  specifically, dual layer (10-year-old plain + technical). Do NOT compress for elegance when he explicitly
+  asked for volume. My default "good design = concise" is the wrong instinct for his learning docs.
+
+- **When the owner defines two modes as MUTUALLY EXCLUSIVE, enforce it structurally — don't leave a
+  path that lets them coexist.** `#ui #manager` He said "if float then remove side panel; if we shift
+  to side panel then float should not be there." I built floating popups AND kept the "Float" button on
+  the docked detail — but Float popped a card out while the side panel stayed visible (showing floor
+  controls), so both were on screen at once. He (all-caps) called it out and said it "can cause error
+  later." Fix was to DERIVE the side panel's visibility from mode: side panel hidden whenever any float
+  popup exists; Float → enter popup mode (hide panel); Dock / '‹' expand → exit popup mode (close ALL
+  popups, show panel). Lesson: when a rule is "A xor B, never both," gate the shared render on a single
+  derived mode flag and make every entry/exit transition flip cleanly — verify the actual forbidden
+  state (both visible) can't be reached from ANY path (Float, Dock, collapse chevron, tile-tap), not
+  just the one you were thinking about.
+- **2026-07-03 · "Still broken" ≠ code bug — check WHICH working tree the owner's server serves.** Owner reported the float/side-panel fix (#100) as unfixed; main was correct, but localhost:4000 serves the SHARED folder, which another session held on pre-fix code with uncommitted edits. When a fix merges but the owner's dev checkout can't show it yet, SAY SO explicitly in the wrap-up ("your :4000 won't show this until X lands") — otherwise the owner re-reports the bug and trust erodes.
+- **2026-07-03 · Cross-cutting invariant fix → enumerate ALL sites by grep FIRST, don't fix the flagged subset.** Adding `.eq("restaurant_id", rid)` to tenant-scope by-id writes, I fixed the obvious accept/serve/ready handlers but missed tablet discount, per-dish allergen edit, HARD DELETE, move, and the stampEdited helper. work-checker caught 2; a follow-up `grep -E 'from\("orders"\)\.(update|delete)\(.*\.eq\("id"' | grep -v restaurant_id` across all routes caught 3 more. For any "apply rule X everywhere" change, write the exhaustive detector grep up front, fix until it returns zero, THEN hand to review.
+- #design (2026-07-03) When the owner says "keep the same as the previous one, I just want X",
+  implement ONLY X on the existing layout — do not bundle the larger redesign option (shipped a
+  full-screen order takeover when he wanted the old in-panel layout + just the scroll-spy menu;
+  had to redo as a lite demo).

@@ -1540,9 +1540,12 @@ function openBillModal(key) {
   // Receipt-style item rows: dish name · ×qty · add-ons/notes underneath · price right.
   // (owner 2026-06-26: the bill should read like a clean printable receipt — no invoice
   // number on screen; subtotal → discount in the middle → total at the bottom.)
+  // Every dish gets a ✎ Edit (allergies/note) — regardless of status, a settled bill
+  // included: allergen info is metadata, not money, so there's no reason to lock it
+  // once a dish is served/paid (owner, 2026-07-03 — "allergy can be added to all items").
   const lines = g.map((o) => (o.items || []).map((i) => {
     const det = itemDetailLine(i);
-    return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span></div>`;
+    return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-line-right"><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span>${i.id ? `<button type="button" class="bm-edit-item" data-bm-edit-item="${esc(i.id)}" title="Edit allergies &amp; note">✎</button>` : ""}</span></div>`;
   }).join("")).join("");
   // Restore is only offered while EVERY order in this bill is still inside its
   // 30-min grace window (migration 112) — so this takes the MIN remaining time
@@ -1589,6 +1592,11 @@ function openBillModal(key) {
   if (freeBtn) freeBtn.onclick = async () => { close(); await freeTable(freeBtn.dataset.bmFree); };
   const restoreBtn = wrap.querySelector("[data-bm-restore]");
   if (restoreBtn) restoreBtn.onclick = async () => { close(); await restoreBill(g); };
+  // Re-open this SAME bill fresh after a dish edit, so the updated note/allergy chip
+  // shows immediately. openDishEditModal's own save already calls loadSessions(), but
+  // that's LIVE-floor-scoped — an ARCHIVED bill's order needs the full loadOrders()
+  // too, or state.data.orders would still show the pre-edit removed/note here.
+  wrap.querySelectorAll("[data-bm-edit-item]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.bmEditItem, async () => { await loadOrders(); close(); openBillModal(key); })));
 }
 
 // CALLS view: the live waiter-call list (water/cutlery/bill…), or an empty note.
@@ -4312,14 +4320,17 @@ function itemRowHtml(row, editing = false) {
   const delBtn = (row.kind === "session" && row.status !== "served") ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
   // status label: friendlier words for the chip (class stays the raw status for colour).
   const STLABEL = { received: "new", preparing: "cooking", ready: "ready", served: "served", cancelled: "cancelled" };
-  // STAFF EDIT (a real, not-yet-served dish): qty −/＋ steppers + a single "✎ Edit"
-  // button that opens ONE modal to set allergens (standard + custom) and the kitchen
-  // note. The controls sit on a FULL-WIDTH row below the dish so the name keeps its
-  // room; the dish's current allergens + note show read-only on the line above.
-  // No editing once a dish is READY or SERVED — it's cooked/out, too late to change.
-  const canEdit = editing && row.kind === "session" && row.status !== "served" && row.status !== "ready";
-  const editRow = canEdit
-    ? `<div class="sx-dish-edit-row"><span class="sx-item-edit"><button class="sx-qty" data-qty-dec="${esc(row.id)}" data-qty="${esc(row.qty)}" title="Fewer">−</button><button class="sx-qty" data-qty-inc="${esc(row.id)}" data-qty="${esc(row.qty)}" title="More">＋</button></span><button class="sx-dish-edit-btn" data-edit-dish="${esc(row.id)}" title="Edit allergens & note for this dish">✎ Edit</button></div>`
+  // STAFF EDIT (a real dish): qty −/＋ steppers + a "✎ Edit" button (allergens +
+  // kitchen note) on a FULL-WIDTH row below the dish. Split into two separate gates:
+  //   qty steppers  — blocked once READY/SERVED (re-prices the bill; you can't
+  //                   un-serve part of a dish once it's out).
+  //   ✎ Edit        — allowed at ANY status (owner, 2026-07-03 — "allergy can be
+  //                   added to all items"). Allergens/notes are metadata, never
+  //                   money, so there's no integrity reason to lock them once served.
+  const canEditQty = editing && row.kind === "session" && row.status !== "served" && row.status !== "ready";
+  const canEditDish = editing && row.kind === "session";
+  const editRow = canEditDish
+    ? `<div class="sx-dish-edit-row">${canEditQty ? `<span class="sx-item-edit"><button class="sx-qty" data-qty-dec="${esc(row.id)}" data-qty="${esc(row.qty)}" title="Fewer">−</button><button class="sx-qty" data-qty-inc="${esc(row.id)}" data-qty="${esc(row.qty)}" title="More">＋</button></span>` : ""}<button class="sx-dish-edit-btn" data-edit-dish="${esc(row.id)}" title="Edit allergens & note for this dish">✎ Edit</button></div>`
     : "";
   // ✎− on the dish NAME when an allergen was REMOVED after the order was placed
   // (we flag that something was removed without naming the gone item).
@@ -4336,9 +4347,21 @@ function itemRowHtml(row, editing = false) {
 //   • the note → order_items.note
 function openDishEditModal(itemId, rerender) {
   document.querySelector(".dish-edit-overlay")?.remove();
-  const item = (state.board.items || []).find((i) => i.id === itemId);
-  if (!item) { toast("That dish is no longer on the order.", "err"); return; }
-  const order = (state.data.orders || []).find((o) => o.id === item.order_id) || {};
+  // The live floor's cache (state.board.items) only holds OPEN tables' dishes. A
+  // settled/archived bill (opened from the Bills view) isn't there — fall back to
+  // each order's own embedded items JSONB, which carries the same id/removed/note
+  // fields (kept in sync by lfh_sync_order_items_json), so the SAME modal works for
+  // both a live table's dish and a past bill's dish. (owner, 2026-07-03 — "allergy
+  // can be added to all items")
+  let item = (state.board.items || []).find((i) => i.id === itemId);
+  let order = item ? ((state.data.orders || []).find((o) => o.id === item.order_id) || {}) : null;
+  if (!item) {
+    for (const o of (state.data.orders || [])) {
+      const found = (Array.isArray(o.items) ? o.items : []).find((i) => i.id === itemId);
+      if (found) { item = { ...found, order_id: o.id }; order = o; break; }
+    }
+  }
+  order = order || {};
   // Normalise an allergen: lowercase, trim, strip a leading "no " so typing "no water"
   // or "water" both store "water" (the UI prepends "NO" when it shows it).
   const norm = (s) => String(s || "").trim().toLowerCase().replace(/^no[\s-]+/, "");

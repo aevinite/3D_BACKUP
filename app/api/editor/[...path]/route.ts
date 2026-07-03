@@ -743,8 +743,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // items/:id/removed — STAFF EDIT: change ONE dish's removed/allergen list ("NO X")
     // on a PLACED order — add a missed allergen on just this dish, or UNDO one added by
     // mistake (the order-wide list has its own endpoint above). Removals don't change
-    // the price, so a direct table write (service-role, already gated) is enough; we
-    // still refuse a PAID/cancelled order to match the other edit endpoints.
+    // the price, so a direct table write (service-role, already gated) is enough.
+    // Allowed at ANY dish/order status (owner, 2026-07-03 — "allergy can be added to
+    // all items"): unlike qty, this never touches money, so served/ready/paid is fine.
+    // Still refused for a cancelled order — nothing was ever served, nothing to annotate.
     if (a === "items" && c === "removed") {
       const raw = Array.isArray(body?.removed) ? body.removed : [];
       const removed = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
@@ -754,10 +756,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // maybeSingle: a stale id returns null so the friendly "dish not found" 400 fires.
       const item = must(await sb.from("order_items").select("id, order_id, removed, added_allergens, removed_flag, status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!item) return err(editErrMsg("item_not_found"), 400);
-      // Once a dish is READY or SERVED it's cooked/out — too late to change it.
-      if (item.status === "ready" || item.status === "served") return err("That dish is already " + item.status + " — too late to edit.", 409);
+      // MERGE NOTE: the allergen branch removed the ready/served/paid rejections
+      // (edits allowed at ANY status — see header comment); main independently added
+      // restaurant_id scoping to this order lookup (tenancy hardening). Both kept.
       const order = must(await sb.from("orders").select("payment_status, status").eq("id", item.order_id).eq("restaurant_id", rid).maybeSingle());
-      if (order?.payment_status === "paid") return err(editErrMsg("order_paid"), 409);
       if (order?.status === "cancelled") return err(editErrMsg("order_cancelled"), 400);
       const oldSet = new Set((Array.isArray(item.removed) ? item.removed : []).map((x: any) => String(x).toLowerCase()));
       const justAdded = removed.filter((s) => !oldSet.has(s));
