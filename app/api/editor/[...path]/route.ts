@@ -914,6 +914,18 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         // Rebuild from scratch rather than trust the client shape: drops non-numeric
         // keys/values and clamps seats to 1..30, so a malformed request can't write an
         // array (setPath's array-vs-object ambiguity) or garbage into this JSONB column.
+        // tax_components — the named tax breakdown [{label,rate%},…] (mig 117). Rebuild from
+        // scratch (don't trust client shape): keep only entries with a non-empty label + a
+        // finite rate in 0..100, cap the label length and the count (max 6 taxes), so a
+        // malformed request can't write garbage into this JSONB column. Empty array = "not
+        // configured" (the app falls back to tax_rate/5%).
+        if ("tax_components" in body) {
+          const raw = Array.isArray(body.tax_components) ? body.tax_components : [];
+          body.tax_components = raw
+            .map((c: any) => ({ label: String(c && c.label || "").trim().slice(0, 24), rate: Math.round((Number(c && c.rate) || 0) * 100) / 100 }))
+            .filter((c: { label: string; rate: number }) => c.label && c.rate > 0 && c.rate <= 100)
+            .slice(0, 6);
+        }
         if ("table_seats" in body) {
           const raw = body.table_seats;
           const clean: Record<string, number> = {};

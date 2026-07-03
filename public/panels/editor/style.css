@@ -1690,3 +1690,12 @@ html[data-theme="light"] .op-tablet{ color:#1d4ed8; }
   .ftile-grid, .ftile-grid[data-density="s"], .ftile-grid[data-density="l"] { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .floor-stats { grid-template-columns: repeat(3, 1fr); gap: 8px; }
 }
+
+/* Configurable tax editor (Billing settings — owner 2026-07-03) */
+.tax-rows { display: flex; flex-direction: column; gap: 8px; }
+.tax-row { display: flex; align-items: center; gap: 8px; }
+.tax-row input[type="text"] { flex: 1; }
+.tax-row .tax-rate-in { width: 80px; }
+.tax-row .tax-pct { color: var(--muted); font-weight: 700; margin-left: -4px; }
+.tax-total { margin-top: 10px; font-size: 13.5px; color: var(--muted); }
+.tax-total b { color: var(--text); }
