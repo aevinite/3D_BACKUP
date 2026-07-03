@@ -930,7 +930,8 @@ const SETTINGS_SECTIONS = [
   { id: "tables", label: "Tables", sub: "floor & seats", icon: "fa-chair", title: "Table settings" },
   { id: "users", label: "Users", sub: "staff logins", icon: "fa-users", title: "User settings" },
   { id: "access", label: "Access", sub: "user permissions", icon: "fa-key", title: "Access settings" },
-  { id: "billing", label: "Billing", sub: "invoice & print", icon: "fa-file-invoice", title: "Billing settings" },
+  { id: "billing", label: "Billing", sub: "invoice & tax", icon: "fa-file-invoice", title: "Billing settings" },
+  { id: "kitchen", label: "Kitchen", sub: "KOT printing", icon: "fa-fire-burner", title: "Kitchen settings" },
   { id: "sessions", label: "Dining sessions", sub: "QR & location", icon: "fa-qrcode", title: "Dining sessions" },
 ];
 
@@ -1045,20 +1046,26 @@ function formGeneral(s) {
     return accessDefaultsCardHtml(s) + accessUsersCardHtml(s);
   }
   if (sec === "billing") {
+    // Configurable tax breakdown (owner, 2026-07-03): the owner sets a set of NAMED taxes
+    // (CGST/SGST/… any number) with their own %. Their sum IS the total tax — shown in the
+    // manager + everywhere the bill is paid — while the PRINTED customer bill itemises each
+    // named tax. Empty list → falls back to the single "Tax rate" below (blank = 5%), printed
+    // as a 50/50 CGST+SGST split. So the split and the total can never disagree.
+    const comps = Array.isArray(s.tax_components) ? s.tax_components : [];
+    const compTotal = Math.round(comps.reduce((a, c) => a + (Number(c && c.rate) || 0), 0) * 100) / 100;
+    const taxRows = comps.map((c, i) => `
+      <div class="tax-row">
+        <input type="text" data-path="tax_components.${i}.label" value="${esc(c.label ?? "")}" placeholder="e.g. CGST" maxlength="24" />
+        <input type="number" step="any" min="0" max="100" data-path="tax_components.${i}.rate" value="${esc(c.rate ?? "")}" placeholder="%" class="tax-rate-in" />
+        <span class="tax-pct">%</span>
+        <button type="button" class="icon-btn" data-action="rmTax" data-arg="${i}" title="Remove this tax"><i class="fas fa-trash"></i></button>
+      </div>`).join("");
     return `
-  ${s.auto_print_kot_allowed ? `<div class="card"><h3>Auto-print KOT</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      When ON, the <b>kitchen screen</b> prints a kitchen ticket automatically the moment a new
-      order arrives — no clicking. Set up the kitchen device's printer first (and launch its
-      Chrome in "kiosk printing" mode for silent prints). Leave OFF until the printer is ready.
-    </p>
-    ${toggle("Auto-print the KOT when a new order arrives", "auto_print_kot", s.auto_print_kot === true)}
-  </div>` : ""}
   <div class="card"><h3>Billing &amp; invoice</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       These appear on the printed tax invoice exactly as typed. Set your real name,
       address, phone and GSTIN. <b>Invoice prefix</b> + financial year build the number
-      (e.g. <code>LFH/2025-26/000042</code>). <b>Tax rate</b> 0.05 = 5% (blank = 5%).
+      (e.g. <code>LFH/2025-26/000042</code>).
     </p>
     ${tf("Restaurant name", "restaurant_name", s.restaurant_name ?? "")}
     ${tf("Address", "restaurant_address", s.restaurant_address ?? "")}
@@ -1067,7 +1074,32 @@ function formGeneral(s) {
       ${tf("GSTIN", "gstin", s.gstin ?? "")}
       ${tf("Invoice prefix", "invoice_prefix", s.invoice_prefix ?? "")}
     </div>
-    <div style="max-width:200px">${tf("Tax rate (0.05 = 5%)", "tax_rate", s.tax_rate ?? "", { type: "number", step: "any", min: 0 })}</div>
+  </div>
+  <div class="card"><h3>Tax</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
+      Add the taxes that make up your total (e.g. <b>CGST 2.5%</b> + <b>SGST 2.5%</b>). Each one
+      prints as its own line on the customer's bill; their total (<b>${compTotal}%</b>) is the tax
+      shown in the manager and everywhere the bill is paid. Leave empty to use the single fallback
+      rate below.
+    </p>
+    <div class="tax-rows">${taxRows || `<div class="hint" style="margin-bottom:10px">No named taxes yet — using the fallback rate below.</div>`}</div>
+    <div class="tax-total">Total tax: <b>${compTotal}%</b></div>
+    <button type="button" class="btn small" data-action="addTax" style="margin-top:10px">+ Add tax</button>
+    <div style="max-width:220px;margin-top:16px">${tf("Fallback tax rate (0.05 = 5%)", "tax_rate", s.tax_rate ?? "", { type: "number", step: "any", min: 0, hint: "Used only when no named taxes are set above." })}</div>
+  </div>`;
+  }
+  if (sec === "kitchen") {
+    return `
+  <div class="card"><h3>Kitchen printing</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      This is for the <b>kitchen</b>, not the bill. When ON, the kitchen screen auto-prints a
+      <b>KOT (kitchen order ticket)</b> — the dishes to make, no prices — the moment a new order
+      arrives, so cooks never have to click. Set up the kitchen device's printer first and launch
+      its Chrome in "kiosk printing" mode for silent prints. Leave OFF until the printer is ready.
+    </p>
+    ${s.auto_print_kot_allowed
+      ? toggle("Auto-print the KOT when a new order arrives", "auto_print_kot", s.auto_print_kot === true)
+      : `<div class="hint">Auto-print isn't enabled for this restaurant yet — ask your admin to turn it on.</div>`}
   </div>`;
   }
   if (sec === "sessions") {
@@ -1248,15 +1280,34 @@ function invFmt(no) {
 // Single source of truth for a bill's money — discount comes off BEFORE tax (GST is
 // charged on the taxable amount). All inputs are DB values (server-priced items,
 // server-clamped discount, configured rate); the frontend never sets a price.
+// taxModel(settings): the ONE source of truth for the tax rate + its named breakdown.
+// If the restaurant configured tax_components (owner, 2026-07-03), the TOTAL rate is the
+// SUM of the components' percents (so the manager total and the printed per-tax split can
+// never disagree). Empty/absent → fall back to tax_rate, then 5% — i.e. existing behaviour.
+// Returns { rate (decimal, e.g. 0.05), pct (5), components:[{label,rate%}] }.
+function taxModel(settings) {
+  const s = settings || {};
+  const comps = Array.isArray(s.tax_components) ? s.tax_components
+    .map((c) => ({ label: String(c && c.label || "").trim(), rate: Number(c && c.rate) || 0 }))
+    .filter((c) => c.label && c.rate > 0) : [];
+  if (comps.length) {
+    const pct = comps.reduce((a, c) => a + c.rate, 0);
+    return { rate: pct / 100, pct: Math.round(pct * 100) / 100, components: comps };
+  }
+  const rate = Number(s.tax_rate) || 0.05;
+  return { rate, pct: Math.round(rate * 10000) / 100, components: [] };
+}
 function billMath(orders) {
   const live = (orders || []).filter((o) => o.status !== "cancelled");
   const subtotal = live.reduce((a, o) => a + (parseFloat(o.subtotal) || 0), 0);
   const disc = live.reduce((a, o) => a + (parseFloat(o.discount) || 0), 0);
   const taxable = Math.max(0, subtotal - disc);
-  const rate = Number((state.data.settings || {}).tax_rate) || 0.05;
+  const tm = taxModel(state.data.settings);
+  const rate = tm.rate;
   const tax = Math.round(taxable * rate * 100) / 100;
   const total = Math.round((taxable + tax) * 100) / 100;
-  return { subtotal, disc, taxable, rate, tax, total };
+  // components carried through so the printed bill can itemise each named tax.
+  return { subtotal, disc, taxable, rate, tax, total, taxComponents: tm.components };
 }
 function mergedOrderCardHtml(g) {
   const o0 = g[0];
@@ -2087,6 +2138,13 @@ function printBill(t, sess, os) {
   const now = new Date();
   const pct = Math.round(m.rate * 10000) / 100; // e.g. 5
   const half = Math.round((m.tax / 2) * 100) / 100;
+  // Tax rows on the printed bill: if the restaurant configured named components
+  // (tax_components → m.taxComponents), itemise EACH (label · its % · its amount, amounts
+  // computed from the taxable value so they sum to m.tax). Otherwise keep the historical
+  // 50/50 CGST+SGST split. (owner, 2026-07-03 — customisable multi-tax on the customer bill.)
+  const taxRows = (m.taxComponents && m.taxComponents.length)
+    ? m.taxComponents.map((c) => `<div class="t"><span>${esc(c.label)} ${c.rate}%</span><span>${inr(Math.round(m.taxable * (c.rate / 100) * 100) / 100)}</span></div>`).join("")
+    : `<div class="t"><span>CGST ${pct / 2}%</span><span>${inr(half)}</span></div><div class="t"><span>SGST ${pct / 2}%</span><span>${inr(half)}</span></div>`;
   const w = window.open("", "_blank", "width=380,height=680");
   if (!w) { toast("Allow popups for this site to print the bill", "err"); return; }
   w.document.write(`<!doctype html><title>Tax Invoice — ${name}</title>
@@ -2120,8 +2178,7 @@ ${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}
 <div style="margin-top:8px">
   <div class="t"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
   ${m.disc > 0 ? `<div class="t"><span>Discount</span><span>− ${inr(m.disc)}</span></div><div class="t tx"><span>Taxable value</span><span>${inr(m.taxable)}</span></div>` : ""}
-  <div class="t"><span>CGST ${pct / 2}%</span><span>${inr(half)}</span></div>
-  <div class="t"><span>SGST ${pct / 2}%</span><span>${inr(half)}</span></div>
+  ${taxRows}
   <div class="g"><span>TOTAL</span><span>${inr(m.total)}</span></div>
 </div>
 <div class="foot">${footer}</div>
@@ -2660,6 +2717,12 @@ function handleAction(action, arg, node) {
   } else if (action === "rmOptChoice") {
     const [gi, ci] = arg.split(".").map(Number);
     it.options[gi].choices.splice(ci, 1);
+  } else if (action === "addTax") {
+    // Named tax component for the printed bill (Billing settings). state.sel is the
+    // settings row here; the data-path inputs write label/rate into this array.
+    (it.tax_components = Array.isArray(it.tax_components) ? it.tax_components : []).push({ label: "", rate: 0 });
+  } else if (action === "rmTax") {
+    if (Array.isArray(it.tax_components)) it.tax_components.splice(Number(arg), 1);
   }
   // Re-draw the form to show the change, but remember and restore the scroll
   // position so the page doesn't jump to the top after every little edit.
