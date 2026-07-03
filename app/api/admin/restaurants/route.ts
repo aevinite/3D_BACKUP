@@ -12,6 +12,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { hashSecret, normalizeLoginName } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
 import { loadStarterMenu, toCategoryRows, toFilterRows, toItemRows } from "@/lib/starterMenu";
+import { cleanClonedSettings } from "@/lib/settingsClone";
 
 export const dynamic = "force-dynamic";
 const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
@@ -117,9 +118,10 @@ export async function POST(req: NextRequest) {
     // 2) its settings row — clone #1 as a template, then override id/restaurant_id/enabled_panels
     //    and start with a modest table_count (a new restaurant shouldn't inherit #1's big floor).
     const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RID).maybeSingle();
-    const baseRow: Record<string, unknown> = template.data ? { ...template.data } : { bubbles_enabled: true };
-    delete baseRow.updated_at;
-    const settingsRow = { ...baseRow, id: slug, restaurant_id: rid, enabled_panels: panels, table_count: 10 };
+    // cleanClonedSettings strips #1's tenant-specific identity/geo/tax (and sets table_count:10)
+    // so a new restaurant never inherits #1's invoice name/GSTIN or café geofence coordinates.
+    const baseRow = cleanClonedSettings(template.data);
+    const settingsRow = { ...baseRow, id: slug, restaurant_id: rid, enabled_panels: panels };
     const setRes = await sb.from("settings").upsert(settingsRow, { onConflict: "restaurant_id" });
     if (setRes.error) return bad(setRes.error.message, 500);
     // 2b) Seed the starter menu (categories → filters → items), scoped to this restaurant.
