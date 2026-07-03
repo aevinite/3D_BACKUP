@@ -618,7 +618,16 @@ function renderPanel() {
   // slice arrives (selectTable re-renders). Only for an OCCUPIED table whose slice isn't in yet.
   if (!sliceLoaded(t) && tileIsOpen(t)) {
     const dishN = a.nw + a.ck + a.rd + a.sv;
-    const load = `<div class="muted" style="display:flex;align-items:center;gap:8px;padding:6px 0"><span class="tsl-dot"></span> Loading order details…</div>`;
+    // The loading state should look like the REAL detail, not a bare spinner line (owner,
+    // 2026-07-03 — "add a loading thing… it should look very great"). So: the summary's
+    // status pills (same classes/wording as the grid tile — real counts on the first paint)
+    // + an order-card skeleton whose shimmer rows match the dish-row layout, so the real
+    // rows land in place with no jump. Falls back to the plain line when there are no dishes.
+    const pills = dishN ? `<div class="tpills" style="margin:0 0 10px">${a.nw ? `<span class="tpill nw">${a.nw} new</span>` : ""}${a.ck ? `<span class="tpill ck">${a.ck} cooking</span>` : ""}${a.rd ? `<span class="tpill rd">${a.rd} ready</span>` : ""}${a.sv ? `<span class="tpill sv">${a.sv} served</span>` : ""}</div>` : "";
+    const skelRow = (w) => `<div class="iline skelrow"><span class="skel skel-qty"></span><span class="skel skel-name" style="width:${w}%"></span><span class="skel skel-pill"></span></div>`;
+    const load = dishN
+      ? `<div class="ord"><div class="ordh"><span class="left"><span class="skel skel-kot"></span><span class="when" style="display:flex;align-items:center;gap:7px"><span class="tsl-dot"></span> syncing…</span></span></div>${[52, 38, 61, 45].slice(0, Math.min(4, dishN)).map(skelRow).join("")}</div>`
+      : `<div class="muted" style="display:flex;align-items:center;gap:8px;padding:6px 0"><span class="tsl-dot"></span> Loading order details…</div>`;
     const payCls = a.unpaid ? "unpaid" : a.paid ? "paid" : "";
     const billBox = (a.due > 0 || dishN) ? `<div class="foot"><div class="billbox ${payCls}"><span class="bn">bill</span>${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : a.paid ? "paid ✓" : "● new"}</span></div></div>` : "";
     p.classList.add("has-detail");
@@ -629,7 +638,7 @@ function renderPanel() {
         <span class="live">● open</span>
       </div>
       <div class="detail-body">
-        <div class="sec"><h3>Orders</h3>${load}</div>
+        <div class="sec"><h3>Orders</h3>${pills}${load}</div>
       </div>
       <div class="dacts">
         <button class="btn primary big" id="takeOrder">＋ Take order</button>
