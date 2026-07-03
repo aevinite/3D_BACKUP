@@ -167,15 +167,24 @@ export function roleSatisfies(have: Role, need: Role): boolean {
   return false;
 }
 
-// Authoritative gate for a panel's API route handlers: allow if a valid ADMIN
-// cookie is present (super-access) OR a valid user cookie whose role SATISFIES the
-// requirement (per the hierarchy above). Returns the acting user (null for admin
-// super-access), or false if denied.
+// Authoritative gate for a panel's API route handlers: allow a valid user cookie
+// whose role SATISFIES the requirement (per the hierarchy above), OR a valid ADMIN
+// cookie (super-access). Returns the acting user (null for admin super-access), or
+// false if denied.
+//
+// ORDER MATTERS (QA sweep, 2026-07-03): the STAFF login is checked FIRST. On a
+// device holding BOTH cookies — the owner's own machine constantly does: he signs
+// into /aevinite AND tests staff panels — the old admin-first order returned
+// user:null, so panelRestaurantId fell through to the admin act-as/default path and
+// silently scoped a logged-in waiter's panel to restaurant #1 (or whatever the admin
+// last viewed). Observed live: burger-barn's waiter tablet answering with
+// french-house's 300-tile floor + 59-dish menu — a cross-restaurant leak. A person
+// who explicitly signed in must always act as THAT person; the admin fallback is
+// only for admin-only sessions (its ?rid / act-as flow is unchanged).
 export async function requireRole(
   req: { cookies: { get(name: string): { value: string } | undefined } },
   role: Role,
 ): Promise<{ ok: true; user: StaffUser | null } | { ok: false }> {
-  if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { ok: true, user: null }; // admin super
   const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   if (u && roleSatisfies(u.role, role)) {
     // Presence heartbeat (throttled ~45s): mark this user active now so admin/owner
@@ -186,5 +195,8 @@ export async function requireRole(
     }
     return { ok: true, user: u };
   }
+  // No satisfying staff session → the ADMIN super-user may still pass (their panel
+  // scope then comes from ?rid / the act-as cookie via panelRestaurantId).
+  if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { ok: true, user: null }; // admin super
   return { ok: false };
 }
