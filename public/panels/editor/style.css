@@ -1585,6 +1585,7 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .bm-items { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 6px 0; }
 .bm-line { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; font-size: 14px; }
 .bm-line .bm-q { color: var(--gold); font-weight: 700; }
+.bm-line.bm-cancelled .bm-nm { color: var(--muted); font-style: italic; }
 .bm-line .bm-pr { font-variant-numeric: tabular-nums; }
 .bm-line-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .bm-edit-item {
