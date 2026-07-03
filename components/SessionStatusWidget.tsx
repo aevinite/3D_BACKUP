@@ -215,7 +215,13 @@ export default function SessionStatusWidget() {
     })();
     // Cleanup when the component disappears: stop the poll, listener and intro timer.
     return () => { alive = false; if (iv) clearInterval(iv); if (onTick) window.removeEventListener("lfh:rt-tick", onTick); if (introTimer.current) clearTimeout(introTimer.current); };
-  }, []);
+    // restaurantId in deps: the global widgets resolve their restaurant async (starts at
+    // #1, then fixes itself). Reading `sessionsEnabled` once at mount cached restaurant
+    // #1's value — on a NON-#1 restaurant that published `sessionsEnabled:false` to
+    // tableConnection, so gateAddToCart added straight to the cart and the guest was
+    // NEVER prompted to open/join a table (owner: "open table isn't working"). Re-running
+    // on the real id fixes it.
+  }, [restaurantId]);
 
   // ── PRESENCE HEARTBEAT (migration 099) ──────────────────────────────────────
   // While this guest's menu tab is VISIBLE and we're connected to an OPEN table,
