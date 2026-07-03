@@ -50,9 +50,9 @@ const nowIso = () => new Date().toISOString();
 // Mark an order as EDITED after it was placed → drives the persistent "✎ Edited"
 // badge on the kitchen/tablet/manager ticket so staff re-check what changed.
 // Best-effort: a stamp failure must never fail the edit itself.
-const stampEdited = async (orderId?: string | null) => {
+const stampEdited = async (orderId?: string | null, rid?: string) => {
   if (!orderId) return;
-  try { await sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); } catch {}
+  try { let q = sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); if (rid) q = q.eq("restaurant_id", rid); await q; } catch {}
 };
 // Unwrap a Supabase { data, error } reply — throw on error so the catch turns it
 // into a clean 500 (mirrors the editor server's `must`).
@@ -710,7 +710,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         return err(msg, reason === "order_paid" ? 409 : 400);
       }
       await logAction("editor", "order_item_delete", { order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
-      await stampEdited(data?.order_id);
+      await stampEdited(data?.order_id, rid);
       return ok(data);
     }
 
@@ -726,7 +726,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("editor", "order_item_qty", { order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
-      await stampEdited(data?.order_id);
+      await stampEdited(data?.order_id, rid);
       return ok(data);
     }
 
@@ -736,7 +736,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("editor", "order_item_note", { order_id: data?.order_id, device_id: dev });
-      await stampEdited(data?.order_id);
+      await stampEdited(data?.order_id, rid);
       return ok(data);
     }
 
@@ -770,7 +770,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).eq("restaurant_id", rid).select());
       const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : ""].filter(Boolean).join("; ") || "no change";
       await logAction("editor", "order_item_removed", { order_id: item.order_id, detail, device_id: dev });
-      await stampEdited(item.order_id);
+      await stampEdited(item.order_id, rid);
       return ok(rowU[0] || { ok: true });
     }
 
@@ -792,7 +792,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("editor", "order_add_item", { order_id: b, detail: dishId, device_id: dev });
-      await stampEdited(b);
+      await stampEdited(b, rid);
       return ok(data);
     }
 
