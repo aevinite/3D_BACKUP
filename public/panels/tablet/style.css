@@ -506,3 +506,19 @@ body.om-mode #tabletClose { display: none; }
 .om.lite .om-sec-h { top: -10px; background: linear-gradient(var(--panel) 78%, transparent); }
 /* the cart: unchanged markup, its OWN scroll right below — never hidden */
 .om.lite .om-cart { border-left: 0; border-top: 1px solid var(--line); background: transparent; padding: 10px 2px 0; max-height: 42vh; max-height: 42dvh; overflow-y: auto; }
+
+/* ── Tablet order screen — PHONE (owner 2026-07-03): full-height split with TWO
+   independent scrolls (menu top, order bottom) so the whole screen never scrolls as
+   one; compact header. Desktop keeps the in-panel lite layout above. */
+@media (max-width: 760px) {
+  .om.lite { position: fixed; inset: 0; z-index: 45; background: var(--bg);
+    display: flex; flex-direction: column; height: 100vh; height: 100dvh; padding: 8px 12px; box-sizing: border-box; }
+  .om.lite .om-head { padding: 2px 0 8px; margin: 0; align-items: center; }
+  .om.lite .om-head h2 { font-size: 16px; flex: 0 1 auto; }
+  .om.lite .om-head .om-search { order: 3; flex-basis: 100%; margin-top: 8px; }
+  .om.lite .om-body, .om.lite .om-body.no-cart { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  .om.lite .om-nav { flex: 0 0 auto; }
+  .om.lite .om-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; }   /* MENU — own scroll, fills the top */
+  .om.lite .om-cart { flex: 0 0 auto; max-height: 42vh; max-height: 42dvh; overflow-y: auto;    /* ORDER — own scroll, capped bottom half */
+    border-top: 2px solid var(--line); margin-top: 6px; padding-top: 8px; }
+}

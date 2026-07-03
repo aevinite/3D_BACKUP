@@ -1543,8 +1543,7 @@ function orderCartHtml() {
   return `<div class="cart">
       <h3>This order</h3>
       ${lines || `<div class="muted">Tap dishes to add them.</div>`}
-      <input type="text" id="orderNote" class="note" placeholder="Note for the kitchen (optional)" value="${esc(state.note)}">
-      <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Allergies (e.g. nuts, dairy) — applies to the whole order" value="${esc(state.allergies || "")}">
+      <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Allergies / notes for the kitchen (e.g. nuts, less ice) — whole order" value="${esc(state.allergies || "")}">
       <div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
       <div class="muted small">Final bill (incl. tax) is computed by the system when you send it.</div>
       <button class="btn primary big" id="sendOrder" ${state.cart.length ? "" : "disabled"}>SEND TO KITCHEN</button>
@@ -1568,7 +1567,8 @@ function updateOrderCart() {
     const d = l && state.data.dishes.find((x) => x.id === l.id);
     if (d) renderDishOptions(d, +b.dataset.edit);
   }));
-  const nt = c.querySelector("#orderNote"); if (nt) nt.oninput = (e) => (state.note = e.target.value);
+  // The separate kitchen-note field was removed (owner, 2026-07-03 — allergy covers it);
+  // the allergy box now doubles as the whole-order note-to-kitchen.
   const al = c.querySelector("#orderAllergy"); if (al) al.oninput = (e) => (state.allergies = e.target.value);
   const send = c.querySelector("#sendOrder"); if (send) send.onclick = sendOrder;
 }
@@ -1592,7 +1592,7 @@ function renderOrderMode() {
   p.innerHTML = `
     <div class="om lite">
       <div class="om-head">
-        <h2>${addMode ? "Add a dish" : "Order"} · Table ${esc(state.table)}</h2>
+        <h2>${addMode ? "Add · " : ""}Table ${esc(state.table)}</h2>
         <input type="search" id="dishSearch" class="order-search om-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">
         <button class="btn small ${addMode ? "primary" : ""}" id="omExit">${addMode ? "✓ Done" : "← back"}</button>
       </div>
