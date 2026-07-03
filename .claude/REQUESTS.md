@@ -189,13 +189,15 @@ owner looks, with cache busting, before claiming anything.
   invoice number removed (bill # kept, voided tag kept). VERIFIED: Table 2 bill renders
   correctly, no invoice number. (The printed Tax Invoice keeps its number for GST — flag
   to owner if he wants it gone there too.)
-- [x] **Tablet take-order redesign — menu-style browse (owner 2026-07-03).** All categories
-  laid out as sections in ONE scrollable browser; category rail (desktop) / chips (phone)
-  JUMP on tap + follow the scroll (spy). Order mode takes over the full screen; the
-  "This order" cart kept EXACTLY as before in its OWN separate scroll (owner: no floating
-  cart bar/sheet). Options/allergy/note/send flow untouched; browse scroll survives adds,
-  option edits and search-clear; hardware back peels order mode first (backstack.js now
-  loaded in tablet). VERIFIED live at 390px + 1280px, dark+light, real order sent (bill #2).
+- [x] **Tablet take-order redesign — menu-style browse (owner 2026-07-03; FINAL = LITE, #113).**
+  All categories laid out as sections in ONE scrollable browser; auto-shift category chips
+  JUMP on tap + follow the scroll (spy). Layout stays the ORIGINAL in-panel one — owner
+  tested the #107 full-screen takeover and rejected it ("keep the same as the previous one");
+  #113 keeps the takeover CSS dormant (body.om-mode never set). The "This order" cart kept
+  EXACTLY as before in its OWN separate scroll (owner: no floating cart bar/sheet).
+  Options/allergy/note/send flow untouched; browse scroll survives adds, option edits and
+  search-clear; hardware back peels order mode first (backstack.js now loaded in tablet).
+  VERIFIED live at 390px + 1280px; prod serves v=20260703b.
 - [x] **Make every panel responsive (owner 2026-07-03).** Audited /aevinite /owner /manager
   /editor /kitchen /login /staff-login at 390px. Fixed: admin Branding card (2-col grid never
   collapsed — was UNUSABLE on phone), compacted admin/owner phone nav (3-across), editor
