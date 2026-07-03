@@ -1371,12 +1371,22 @@ function orderNavHtml() {
   return orderSections().map((s, i) =>
     `<button class="om-cat ${i === 0 ? "on" : ""}" data-cat="${esc(s.slug)}">${esc(s.label)}</button>`).join("");
 }
-// Tap a category → smooth-jump to its section; scrolling highlights the section under
-// the header line (spy). A tap mutes the spy briefly so the highlight doesn't flicker
-// through the categories the smooth scroll passes over.
+// Tap a category → INSTANT jump to its section (owner: "fastly shift"; instant also can't
+// be cancelled mid-flight by a finger touching the list, which left the scroll stranded
+// halfway). Scrolling highlights the section under the header line (spy). An end spacer
+// guarantees even the LAST category can reach the top — without it the scroll hits its
+// limit and "stops in the middle" for the bottom categories.
 function wireOrderNav() {
   const sc = $("#omScroll");
   if (!sc) return;
+  // End spacer: tall enough that the last section's top can align with the scroller's top.
+  const secs = sc.querySelectorAll(".om-sec");
+  if (secs.length) {
+    let pad = sc.querySelector(".om-endpad");
+    if (!pad) { pad = document.createElement("div"); pad.className = "om-endpad"; pad.setAttribute("aria-hidden", "true"); sc.appendChild(pad); }
+    const last = secs[secs.length - 1];
+    pad.style.height = Math.max(0, sc.clientHeight - last.offsetHeight - 24) + "px";
+  }
   const btns = [...document.querySelectorAll(".om-nav .om-cat")];
   const setOn = (slug) => btns.forEach((b) => {
     const on = b.dataset.cat === slug;
@@ -1386,9 +1396,12 @@ function wireOrderNav() {
   btns.forEach((b) => (b.onclick = () => {
     const s = sc.querySelector(`.om-sec[data-cat="${(window.CSS && CSS.escape) ? CSS.escape(b.dataset.cat) : b.dataset.cat}"]`);
     if (!s) return;
-    state._omMute = Date.now() + 700;
+    state._omMute = Date.now() + 200;
     setOn(b.dataset.cat);
-    sc.scrollTo({ top: Math.max(0, s.offsetTop - 6), behavior: "smooth" });
+    // Instant, not smooth: overrides the CSS scroll-behavior so the jump lands in one frame.
+    sc.style.scrollBehavior = "auto";
+    sc.scrollTop = Math.max(0, s.offsetTop - 6);
+    sc.style.scrollBehavior = "";
   }));
   let raf = 0;
   sc.onscroll = () => {
