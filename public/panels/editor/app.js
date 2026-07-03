@@ -2927,15 +2927,23 @@ function mergeTableSlice(t, selBoard, selOrders, selCalls) {
   };
 }
 
+// Per-TABLE latest-wins guard: two overlapping loadTableSlice(t) calls (e.g. a slow one and
+// a fast one during a table shift) could resolve out of order, letting the OLDER response
+// clobber the newer cache for that table (the "real race, not hypothetical" the old comment
+// flagged). Each fetch takes a ticket; a stale response whose ticket was superseded is dropped.
+const tableSliceSeq = {};
 // loadTableSlice(t): fetch ONE table's FULL slice (sessions/orders/calls ?table=N) and merge it
 // into the board/data caches, so the helpers that read those caches (ordersForTable /
 // callsForTable / openSessionForTable / itemsForOrder) return real rows for table t. The GRID
 // renders from the slim summary and never needs this; it's for (1) the selected table's detail
 // and (2) ENSURING a tile quick-action on a NON-selected table has the table's order ids to act
-// on — without it those handlers would see an empty cache and do nothing. Last-wins (no ticket).
+// on — without it those handlers would see an empty cache and do nothing.
 async function loadTableSlice(t) {
+  const key = String(t);
+  const seq = (tableSliceSeq[key] = (tableSliceSeq[key] || 0) + 1);
   const q = "?table=" + encodeURIComponent(t);
   const [selBoard, selOrders, selCalls] = await Promise.all([api("GET", "/sessions" + q), api("GET", "/orders" + q), api("GET", "/calls" + q)]);
+  if (seq !== tableSliceSeq[key]) return; // a newer slice for THIS table started — drop this stale one
   mergeTableSlice(t, selBoard, selOrders, selCalls);
 }
 
@@ -3031,6 +3039,12 @@ async function loadSessions(fromPoll) {
     : [];
   const sig = JSON.stringify(state.summary) + "|" + JSON.stringify(selOrdersSig) + "|" + JSON.stringify(selSessSig) + "|" + JSON.stringify(state.floatingTables.map((f) => [f.table, f.pinned]));
   if (fromPoll && sig === lastBoardSig) return;
+  // DON'T rebuild the floor mid-drag/resize of a floating popup: renderEditor() replaces
+  // #editor.innerHTML, tearing the dragged card out from under the pointer so the drop is
+  // lost (owner-facing glitch — a live poll landing mid-drag snapped the popup back). Defer
+  // the redraw and flush it on pointerup. We intentionally DON'T update lastBoardSig here, so
+  // the flushed loadSessions(true) still sees sig !== lastBoardSig and actually redraws.
+  if (fromPoll && floatInteracting) { floatRenderPending = true; return; }
   lastBoardSig = sig;
   const ed = $("#editor");
   // Don't yank the floor out from under the owner mid-edit: if they're typing in a
@@ -3918,6 +3932,13 @@ function bindFloorDelegation() {
 // time — no drag, no resize, no side-by-side (owner, 2026-07-03).
 const MAX_FLOATING = 5;
 const FLOAT_MAX_W = 640; // don't let 1–2 popups stretch absurdly wide on a big monitor
+// True WHILE a floating popup is being dragged or resized: a background poll's
+// renderEditor() would rebuild #editor and drop the drag, so loadSessions() defers
+// its redraw until pointerup (see the guard in loadSessions + the flush in the up handlers).
+let floatInteracting = false;
+let floatRenderPending = false;
+// flushFloatRender(): call on drag/resize end — replays the redraw we deferred, if any.
+function flushFloatRender() { floatInteracting = false; if (floatRenderPending) { floatRenderPending = false; loadSessions(true); } }
 const isPhoneLayout = () => window.matchMedia("(max-width: 760px)").matches;
 // addFloating(t): open table t as a floating popup. Fills the left-most empty gap in the
 // current grid first; grows the grid by one column when there's no gap. Returns true if open.
@@ -4110,6 +4131,7 @@ function bindFloor() {
       // getBoundingClientRect() on drop can read a still-mid-animation position instead of
       // where the pointer actually let go.
       card.classList.add("dragging");
+      floatInteracting = true; // pause poll-driven redraws so the drag can't be torn out
       let moved = false;
       const move = (ev) => {
         moved = true;
@@ -4123,7 +4145,7 @@ function bindFloor() {
         head.removeEventListener("pointermove", move);
         head.removeEventListener("pointerup", up);
         card.classList.remove("dragging");
-        if (!moved) return; // a plain click on the header — not a drag, nothing to pin
+        if (!moved) { flushFloatRender(); return; } // a plain click on the header — not a drag, nothing to pin
         const f = state.floatingTables.find((x) => x.table === t);
         if (f) {
           const rect2 = card.getBoundingClientRect();
@@ -4133,6 +4155,7 @@ function bindFloor() {
         }
         card.classList.add("tp-pinned"); // instant visual feedback — the class also lands from the data on the next render anyway
         layoutFloatingRow(); // no-op for the others (fixed slots); just keeps things consistent
+        flushFloatRender(); // resume redraws + replay any poll we deferred mid-drag (now that f.x/y/w are set)
       };
       head.addEventListener("pointermove", move);
       head.addEventListener("pointerup", up);
@@ -4150,6 +4173,7 @@ function bindFloor() {
       const startW = rect.width, startH = rect.height, left = rect.left, top = rect.top;
       try { rez.setPointerCapture(e.pointerId); } catch {}
       card.classList.add("dragging");
+      floatInteracting = true; // pause poll-driven redraws so the resize can't be torn out
       const move = (ev) => {
         const w = Math.min(Math.max(280, startW + (ev.clientX - startX)), window.innerWidth - left - 12);
         const h = Math.min(Math.max(180, startH + (ev.clientY - startY)), window.innerHeight - top - 12);
@@ -4162,6 +4186,7 @@ function bindFloor() {
         if (f) { const r = card.getBoundingClientRect(); f.pinned = true; f.slot = null; f.x = r.left; f.y = r.top; f.w = r.width; f.h = r.height; }
         card.classList.add("tp-pinned");
         layoutFloatingRow();
+        flushFloatRender(); // resume redraws + replay any poll we deferred mid-resize
       };
       rez.addEventListener("pointermove", move);
       rez.addEventListener("pointerup", up);
