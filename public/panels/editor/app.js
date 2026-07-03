@@ -1383,13 +1383,18 @@ function ordersViewKey() {
 // PREVIOUS (anything archived, cancelled, or older than today — the bill records),
 // plus the count of unresolved waiter calls. ONE source of truth for both the
 // sidebar nav counts and the main view, so they can never disagree.
-// Start of TODAY's business day (05:00 IST) in ms — same rule the server uses, so
-// "Today" vs "Previous" bills line up. (The owner's browser is in the café's TZ.)
+// Start of TODAY's business day (05:00 IST) in ms — a faithful port of the server's
+// lib/businessDay.ts so "Today" vs "Previous" lines up with the Z-report REGARDLESS of
+// the device's timezone. The old version used setHours() (the browser's LOCAL 05:00), so
+// a manager on a laptop/phone not set to IST mis-bucketed bills vs the server (owner-
+// facing Today-total mismatch). Fixed to 05:00 Asia/Kolkata (UTC+05:30, no DST). (2026-07-03)
 function businessDayStartMs() {
-  const d = new Date(); const s = new Date(d);
-  s.setHours(5, 0, 0, 0);
-  if (d.getHours() < 5) s.setDate(s.getDate() - 1);
-  return s.getTime();
+  const IST_OFFSET_MIN = 5 * 60 + 30;
+  const ist = new Date(Date.now() + IST_OFFSET_MIN * 60000); // UTC fields now hold IST wall-clock
+  const boundary = new Date(ist);
+  boundary.setUTCHours(5, 0, 0, 0);                          // today's 05:00 in IST wall-clock
+  if (ist.getTime() < boundary.getTime()) boundary.setUTCDate(boundary.getUTCDate() - 1); // before 05:00 → yesterday
+  return boundary.getTime() - IST_OFFSET_MIN * 60000;        // back to real UTC ms
 }
 // A bill's whole session is DONE the moment every non-cancelled order on it is
 // paid — that's the same "fully settled" check mergedOrderCardHtml already uses
