@@ -69,8 +69,14 @@ const state = {
   addToOrderId: null,   // when set, the dish browser ADDS to this existing order (not a new one)
 };
 
+// PER-TAB restaurant pin (ADMIN "view as" only): ?rid= comes in via the iframe URL and
+// is echoed on every API call so this tab never shifts restaurants when the admin opens
+// another restaurant's panel (the act-as cookie is browser-wide — owner bug, 2026-07-03).
+// Empty for real staff logins; the server ignores it for them.
+const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
+const ridQ = (path) => PANEL_RID ? path + (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID) : path;
 const api = async (method, path, body) => {
-  const r = await fetch("/api/tablet" + path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  const r = await fetch("/api/tablet" + ridQ(path), { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
   const j = await r.json().catch(() => null);
   if (!r.ok) throw new Error((j && j.error) || r.statusText);

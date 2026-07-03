@@ -608,7 +608,11 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
       const r = await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't enter restaurant.");
       setViewing(true);
-      window.open(path, "_blank", "noopener");
+      // ?rid= pins THAT TAB to this restaurant. The act-as cookie above is browser-wide,
+      // so without the URL pin, opening a second restaurant's panel silently shifted every
+      // already-open panel tab to it (owner, 2026-07-03 — "Aangan's manager panel shifts to
+      // the other restaurant"). The cookie stays as the fallback for the owner dashboard.
+      window.open(`${path}?rid=${encodeURIComponent(restaurant.id)}`, "_blank", "noopener");
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const stop = async () => {

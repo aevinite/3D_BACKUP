@@ -253,12 +253,20 @@ function openIssueModal() {
   };
 }
 
+// PER-TAB restaurant pin (ADMIN "view as" only): the wrapper page forwards ?rid=
+// into this iframe; echoing it on EVERY API call pins this tab to that restaurant
+// even if the admin opens another restaurant's panel later (the act-as cookie is
+// browser-wide and used to shift this tab's data — owner bug, 2026-07-03). Empty
+// for real staff logins; the server ignores it for them anyway.
+const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
+const ridQ = (path) => PANEL_RID ? path + (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID) : path;
+
 // api: the one helper every server call goes through. Give it the HTTP method
 // ("GET"/"POST"/"PATCH"/"DELETE"), the path (e.g. "/orders"), and optionally a
 // body object. It sends the request to our local server, reads back the JSON,
 // and throws a clear error if the server reported a problem.
 async function api(method, path, body) {
-  const res = await fetch("/api/editor" + path, {
+  const res = await fetch("/api/editor" + ridQ(path), {
     method,
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined, // turn the body object into JSON text to send
@@ -789,7 +797,7 @@ function filterMembersHtml(f) {
 // skeleton-then-real pattern, just without a shimmer since this is a short list).
 async function loadStaffTeam() {
   try {
-    const r = await fetch("/api/owner/staff", { cache: "no-store" });
+    const r = await fetch(ridQ("/api/owner/staff"), { cache: "no-store" }); // ridQ: keep the admin's per-tab restaurant pin
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { state.staffDenied = d.error || "Couldn't load your team."; state.staffTeam = []; state.staffRestaurantId = null; }
     else { state.staffDenied = null; state.staffTeam = d.staff || []; state.staffRestaurantId = (d.restaurants || [])[0]?.id || null; }
@@ -804,7 +812,7 @@ async function loadStaffTeam() {
 async function staffCall(init) {
   state.staffBusy = true;
   try {
-    const r = await fetch("/api/owner/staff", { ...init, headers: { "Content-Type": "application/json", ...(init.headers || {}) } });
+    const r = await fetch(ridQ("/api/owner/staff"), { ...init, headers: { "Content-Type": "application/json", ...(init.headers || {}) } });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
     return d;

@@ -19,11 +19,14 @@ export type OwnerScope = { all: true } | { all: false; ids: string[]; ownerId: s
 
 export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) {
-    // Admin who has DELIBERATELY entered one restaurant (act-as cookie) is scoped to
-    // JUST that restaurant — so the owner cockpit shows exactly what THAT owner sees.
-    // This reuses the same {all:false} path a real owner takes (one id), so no owner
+    // Admin who has DELIBERATELY entered one restaurant is scoped to JUST that
+    // restaurant — so the owner cockpit shows exactly what THAT owner sees. This
+    // reuses the same {all:false} path a real owner takes (one id), so no owner
     // route changes. Admin with NO act-as keeps the full all-restaurants view.
-    const acting = req.cookies.get(ADMIN_ACT_COOKIE)?.value;
+    // A per-TAB ?rid= wins over the browser-wide act-as cookie (same rule as
+    // panelRestaurantId — the cookie is shared across tabs, so a second "view as"
+    // used to repoint the first tab's data; owner bug, 2026-07-03).
+    const acting = req.nextUrl?.searchParams?.get("rid") || req.cookies.get(ADMIN_ACT_COOKIE)?.value;
     if (acting) {
       // Show what the OWNER of the entered restaurant sees: ALL restaurants that owner
       // owns (an owner may run several), not just the one we entered — so the admin's
