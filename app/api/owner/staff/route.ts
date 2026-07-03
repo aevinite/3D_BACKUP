@@ -25,6 +25,12 @@ export const dynamic = "force-dynamic";
 
 // Roles an owner/manager may CREATE (never 'owner' — only the admin assigns owners).
 const ASSIGNABLE: Role[] = ["manager", "kitchen", "tablet"];
+// HIERARCHY RULE (owner, 2026-07-03 — "a lower role must NEVER control its own level
+// or above"): what each actor may see/create/edit/delete here. A MANAGER manages only
+// kitchen + tablet — never other managers (peer level) and never owners. This is the
+// server truth; the panels' UIs merely reflect it.
+const assignableFor = (actor: "admin" | "owner" | "manager"): Role[] =>
+  actor === "manager" ? ["kitchen", "tablet"] : ASSIGNABLE;
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 
@@ -77,9 +83,11 @@ export async function GET(req: NextRequest) {
   const ids = s.restaurants.map((r) => r.id);
   let staff: any[] = [];
   if (ids.length) {
+    // Hierarchy: a manager's list contains ONLY the roles they may manage (kitchen +
+    // tablet) — they never even SEE other managers' or owners' accounts.
     const { data, error } = await sb.from("staff_users")
-      .select("id, username, role, name, phone, active, restaurant_id, last_seen_at, created_at, pin_hash")
-      .in("restaurant_id", ids).order("created_at", { ascending: true });
+      .select("id, username, role, name, phone, active, restaurant_id, last_seen_at, created_at, pin_hash, permissions")
+      .in("restaurant_id", ids).in("role", assignableFor(s.actor)).order("created_at", { ascending: true });
     if (error) return bad(error.message, 500);
     // Never ship hashes; expose only whether a PIN exists.
     staff = (data || []).map(({ pin_hash, ...u }) => ({ ...u, hasPin: !!pin_hash }));
@@ -95,7 +103,8 @@ export async function POST(req: NextRequest) {
   const role = String(body?.role || "") as Role;
   const rid = String(body?.restaurant_id || "");
   if (key.length < 2) return bad("Name must be at least 2 characters.");
-  if (!ASSIGNABLE.includes(role)) return bad("Pick a valid role (manager, kitchen, or tablet).");
+  // Hierarchy: a manager may only create BELOW their level (kitchen/tablet).
+  if (!assignableFor(s.actor).includes(role)) return bad(s.actor === "manager" ? "Managers can only add kitchen or tablet logins." : "Pick a valid role (manager, kitchen, or tablet).");
   if (!s.restaurants.some((r) => r.id === rid)) return bad("That restaurant isn't yours to staff.", 403);
   // Names are unique PER restaurant (mig 091) — only clash-check within this one.
   const dup = (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", rid).limit(1)).data?.[0];
@@ -117,6 +126,9 @@ export async function PATCH(req: NextRequest) {
   const ids = s.restaurants.map((r) => r.id);
   const u = (await sb.from("staff_users").select("*").eq("id", id).in("restaurant_id", ids).limit(1)).data?.[0];
   if (!u) return bad("That person isn't on your staff.", 404);
+  // Hierarchy: the TARGET must be below the actor's level — a manager can never
+  // touch another manager's (or an owner's) account, in any way.
+  if (!assignableFor(s.actor).includes(u.role)) return bad("You can't manage accounts at or above your own level.", 403);
 
   if (action === "reset_password") {
     const password = String(body?.password || "").trim() || genPassword();
@@ -133,10 +145,35 @@ export async function PATCH(req: NextRequest) {
   }
   if (action === "set_role") {
     const role = String(body?.role || "") as Role;
-    if (!ASSIGNABLE.includes(role)) return bad("Pick a valid role.");
+    // Hierarchy: the NEW role must also stay below the actor (a manager can't
+    // promote someone up to manager).
+    if (!assignableFor(s.actor).includes(role)) return bad("Pick a valid role.");
     await sb.from("staff_users").update({ role, token_version: (u.token_version || 0) + 1 }).eq("id", id);
     await logAction("owner", "staff_set_role", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `set "${u.username}" → ${role}` });
     return ok({ ok: true });
+  }
+  // set_permissions — per-user capability overrides (migration 115). Body:
+  //   { id, action:"set_permissions", permissions: { tablet_mark_paid: "on"|"pin"|"off"|null, … } }
+  // null (or absent-after-merge) deletes the key → the user goes back to "Default"
+  // (inherits the restaurant-wide tri-state). Keys/values are strictly validated so a
+  // buggy client can never write junk into the JSONB.
+  if (action === "set_permissions") {
+    const PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice"];
+    const PERM_MODES = ["on", "pin", "off"];
+    const patch = body?.permissions;
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing permissions object.");
+    const merged: Record<string, string> = { ...(u.permissions && typeof u.permissions === "object" ? u.permissions : {}) };
+    const noted: string[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (!PERM_KEYS.includes(k)) return bad(`Unknown permission "${k}".`);
+      if (v === null || v === "" || v === "default") { delete merged[k]; noted.push(`${k}→default`); continue; }
+      if (!PERM_MODES.includes(String(v))) return bad(`Bad value for "${k}" — use on, pin, off, or null.`);
+      merged[k] = String(v); noted.push(`${k}→${v}`);
+    }
+    if (!noted.length) return bad("Nothing to change.");
+    await sb.from("staff_users").update({ permissions: merged }).eq("id", id);
+    await logAction("owner", "staff_set_permissions", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `"${u.username}": ${noted.join(", ")}` });
+    return ok({ ok: true, permissions: merged });
   }
   if (action === "edit") {
     const patch: Record<string, unknown> = {};
@@ -161,8 +198,10 @@ export async function DELETE(req: NextRequest) {
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!id) return bad("Missing staff id.");
   const ids = s.restaurants.map((r) => r.id);
-  const u = (await sb.from("staff_users").select("username, restaurant_id").eq("id", id).in("restaurant_id", ids).limit(1)).data?.[0];
+  const u = (await sb.from("staff_users").select("username, role, restaurant_id").eq("id", id).in("restaurant_id", ids).limit(1)).data?.[0];
   if (!u) return bad("That person isn't on your staff.", 404);
+  // Hierarchy: can only delete accounts BELOW your level (see assignableFor).
+  if (!assignableFor(s.actor).includes(u.role as Role)) return bad("You can't manage accounts at or above your own level.", 403);
   await sb.from("staff_users").delete().eq("id", id);
   await logAction("owner", "staff_delete", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `deleted "${u.username}"` });
   return ok({ ok: true });

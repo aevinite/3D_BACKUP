@@ -3648,6 +3648,10 @@ a:focus:not(:focus-visible) { outline: none; }
   .adm-logwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .adm-logrow { min-width: 540px; }
   .adm-togglegrid { grid-template-columns: 1fr 1fr; }
+  /* Compact the wrapped nav on phones: 3 per row instead of 2, smaller — every item
+     stays visible (deliberate 2026-06-26 choice) but the block is half as tall. */
+  .adm-nav a { flex: 1 1 30%; font-size: 12px; padding: 8px 9px; gap: 7px; }
+  .adm-nav a .navsoon { display: none; }
 }
 
 /* ── Ban wall (components/BanGate.tsx) — covers the whole menu for a blocked

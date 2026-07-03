@@ -242,7 +242,12 @@ export default function CartPanel() {
       window.removeEventListener("lfh:orders-updated", handleOrdersChanged);
       window.removeEventListener("storage", handleOrdersChanged);
     };
-  }, []);
+    // restaurantId in deps: the global widgets resolve their restaurant async (starts at
+    // #1, then fixes itself). Re-run so tableCount/sessionsEnabled (and the menu) reflect
+    // the REAL restaurant once its id lands — else a non-#1 guest saw #1's table count,
+    // wrongly rejecting a valid table number as "doesn't exist". Cleanup drops old
+    // listeners, so re-running never double-subscribes.
+  }, [restaurantId]);
 
   // Persist the order-wide allergy avoidances. Skip the very first run: on mount
   // `declared` is still the empty default while the restore (above) is being

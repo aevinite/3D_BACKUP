@@ -296,10 +296,12 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       await loadPanels();
     } finally { setBusy(false); }
   };
-  const PanelToggle = ({ k, label }: { k: string; label: string }) => {
+  // Plain render helper, NOT a component — defining a component inside render remounts
+  // it on every parent render (and the lint rule rightly errors on it).
+  const panelToggle = (k: string, label: string) => {
     const isOn = onP(k);
     return (
-      <button className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!panels || busy} onClick={() => togglePanel(k, isOn)}
+      <button key={k} className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!panels || busy} onClick={() => togglePanel(k, isOn)}
         title={isOn ? "On — tap to turn off (blocks that login)" : "Off — tap to turn on"}>
         <span>{label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
       </button>
@@ -320,10 +322,10 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       await loadStaffFeat();
     } finally { setBusy(false); }
   };
-  const StaffToggle = ({ k, label }: { k: string; label: string }) => {
+  const staffToggle = (k: string, label: string) => {
     const isOn = onS(k);
     return (
-      <button className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!staffFeat || busy} onClick={() => toggleStaffFeat(k, isOn)}
+      <button key={k} className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!staffFeat || busy} onClick={() => toggleStaffFeat(k, isOn)}
         title={isOn ? "Allowed — tap to disallow" : "Not allowed — tap to allow"}>
         <span>{label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
       </button>
@@ -356,7 +358,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         <p className="hint">Which panels <b>{restaurant.name}</b> has. Turning one OFF blocks that login and removes its Enter button above — e.g. a restaurant with no Owner panel.</p>
         {panels === null
           ? <div className="adm-empty">Loading panels…</div>
-          : <div className="adm-togglegrid">{PANEL_OPTS.map((p) => <PanelToggle key={p.key} k={p.key} label={p.label} />)}</div>}
+          : <div className="adm-togglegrid">{PANEL_OPTS.map((p) => panelToggle(p.key, p.label))}</div>}
       </div>
 
       <div className="adm-card" style={{ marginBottom: 14 }}>
@@ -364,7 +366,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         <p className="hint">Operational features you allow <b>{restaurant.name}</b> to use. Allowing one just makes the owner&apos;s own on/off toggle appear — it doesn&apos;t turn it on.</p>
         {staffFeat === null
           ? <div className="adm-empty">Loading…</div>
-          : <div className="adm-togglegrid"><StaffToggle k="auto_print_kot_allowed" label="Auto-print KOT (allow)" /></div>}
+          : <div className="adm-togglegrid">{staffToggle("auto_print_kot_allowed", "Auto-print KOT (allow)")}</div>}
       </div>
 
       <div className="adm-card">
@@ -470,14 +472,16 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
         <button className={`adm-toggle ${mode === "light" ? "on" : "off"}`} onClick={() => setMode("light")}><span>Light mode</span><span className="pill">{mode === "light" ? "EDITING" : ""}</span></button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+      {/* adm-grid2 collapses to ONE column on phones — the old inline 1fr 1fr never did,
+          which crammed ~260px of fixed-width colour controls into a ~155px column at 390px. */}
+      <div className="adm-grid2" style={{ gap: 16, alignItems: "start" }}>
         <div style={{ display: "grid", gap: 10 }}>
           {PALETTE_FIELDS.map((f) => (
             <div key={f.key} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <label style={{ width: 110, fontSize: 13 }}>{f.label}</label>
+              <label style={{ width: 110, flex: "0 0 auto", fontSize: 13 }}>{f.label}</label>
               <input type="color" value={(cur[f.key] && HEX_RE.test(cur[f.key])) ? cur[f.key] : pv[f.key]} disabled={busy}
-                onChange={(e) => setColor(f.key, e.target.value)} style={{ width: 38, height: 30, border: "none", background: "none", cursor: "pointer" }} />
-              <input value={cur[f.key] || ""} placeholder={pv[f.key]} disabled={busy} onChange={(e) => setColor(f.key, e.target.value.trim())} style={{ ...inputStyle, width: 110, fontFamily: "ui-monospace, monospace" }} />
+                onChange={(e) => setColor(f.key, e.target.value)} style={{ width: 38, flex: "0 0 auto", height: 30, border: "none", background: "none", cursor: "pointer" }} />
+              <input value={cur[f.key] || ""} placeholder={pv[f.key]} disabled={busy} onChange={(e) => setColor(f.key, e.target.value.trim())} style={{ ...inputStyle, width: 110, minWidth: 0, flex: "0 1 110px", fontFamily: "ui-monospace, monospace" }} />
               {cur[f.key] && <button className="adm-btn" disabled={busy} onClick={() => clearColor(f.key)} title="Reset to default" style={{ padding: "4px 8px" }}>↺</button>}
             </div>
           ))}
@@ -608,7 +612,11 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
       const r = await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't enter restaurant.");
       setViewing(true);
-      window.open(path, "_blank", "noopener");
+      // ?rid= pins THAT TAB to this restaurant. The act-as cookie above is browser-wide,
+      // so without the URL pin, opening a second restaurant's panel silently shifted every
+      // already-open panel tab to it (owner, 2026-07-03 — "Aangan's manager panel shifts to
+      // the other restaurant"). The cookie stays as the fallback for the owner dashboard.
+      window.open(`${path}?rid=${encodeURIComponent(restaurant.id)}`, "_blank", "noopener");
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const stop = async () => {

@@ -40,24 +40,50 @@ async function managerPinGate(req: NextRequest, body: any, rid: string): Promise
 }
 const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName !== "admin" ? ` (by ${g.managerName})` : "");
 
-// Setting-aware gate for a tablet BILLING action. The manager's General settings
+// Setting-aware gate for a tablet BILLING action. The manager's Access settings
 // hold a tri-state per action (tablet_discount / tablet_mark_paid / tablet_invoice):
 //   'off' → blocked (default; waiter has no access)   'pin' → manager PIN required
 //   'on'  → allowed directly.  Server-enforced so hiding the button isn't the only guard.
-async function tabletPerm(key: string, req: NextRequest, body: any, rid: string): Promise<PinGate> {
-  const s = await sb.from("settings").select(key).eq("restaurant_id", rid).maybeSingle();
-  const mode = ((s.data as Record<string, string> | null)?.[key]) || "off";
-  if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for the tablet — ask a manager.", disabled: true }, { status: 403 }) };
+//
+// PER-USER OVERRIDE (owner, 2026-07-03 · migration 115): the logged-in waiter's own
+// staff_users.permissions[key] wins when set ('on'|'pin'|'off'); an absent key falls
+// back to the restaurant-wide tri-state. `user` comes from the request gate — its row
+// is re-read from the DB on every request by userFromCookie, so revoking someone's
+// access takes effect on their very next tap (no re-login needed). Admin bypasses via
+// managerPinGate as before.
+const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice"] as const;
+const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
+async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
+  const override = (user?.permissions ?? {})[key];
+  let mode: string;
+  if (isPermMode(override)) mode = override;
+  else {
+    const s = await sb.from("settings").select(key).eq("restaurant_id", rid).maybeSingle();
+    mode = ((s.data as Record<string, string> | null)?.[key]) || "off";
+  }
+  if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for you — ask a manager.", disabled: true }, { status: 403 }) };
   if (mode === "pin") return managerPinGate(req, body, rid);
   return { allow: true }; // 'on'
+}
+
+// Overlay the logged-in waiter's per-user overrides ONTO the settings object the
+// board GETs send to the tablet client. The client's tperm() reads settings[key] to
+// show/hide the Mark-paid / Discount / Invoice buttons — resolving here means the
+// buttons follow the PER-USER truth with zero client changes (the server gate above
+// stays the real guard either way).
+function overlayUserPerms<T extends Record<string, any> | null>(settings: T, user: StaffUser | null): T {
+  if (!settings || !user?.permissions) return settings;
+  const out: Record<string, any> = { ...settings };
+  for (const k of TABLET_PERM_KEYS) if (isPermMode(user.permissions[k])) out[k] = user.permissions[k];
+  return out as T;
 }
 
 const nowIso = () => new Date().toISOString();
 // Mark an order EDITED after placement → bumps orders.edited_at so the "✎ Edited"
 // badge shows on every panel (mirrors the manager). Best-effort; never fails the edit.
-const stampEdited = async (orderId?: string | null) => {
+const stampEdited = async (orderId?: string | null, rid?: string) => {
   if (!orderId) return;
-  try { await sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); } catch {}
+  try { let q = sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); if (rid) q = q.eq("restaurant_id", rid); await q; } catch {}
 };
 
 const must = (r: any) => { if (r.error) throw new Error(r.error.message); return r.data; };
@@ -110,7 +136,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       ]);
       return ok({
         ...summary,
-        settings: must(settings), dishes: must(dishes), categories: must(categories),
+        // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
+        settings: overlayUserPerms(must(settings), g.user), dishes: must(dishes), categories: must(categories),
         restaurant: must(restaurant) || null,
       });
     }
@@ -155,7 +182,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
       ]);
       return ok({
-        settings: must(settings), sessions: must(sessions), members: must(members),
+        // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
+        settings: overlayUserPerms(must(settings), g.user), sessions: must(sessions), members: must(members),
         orders: live.orders, items: live.items, calls: must(calls), dishes: must(dishes),
         categories: must(categories), requests: must(requests),
         restaurant: must(restaurant) || null,
@@ -171,6 +199,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 export async function POST(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  // The logged-in waiter, for per-user permission checks. Bound here because the
+  // tabletPerm call sites below shadow `g` with their own gate result.
+  const actor = g.user;
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
@@ -211,10 +242,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // "received" and need accepting. (owner, 2026-06-16 — tablet-only)
       const placedId = (data as any)?.order_id;
       if (placedId) {
-        const cur = must(await sb.from("orders").select("items").eq("id", placedId).single());
+        // placedId is server-generated by the scoped placement RPC, but scope by rid anyway
+        // for consistency with every other by-id write (defense in depth).
+        const cur = must(await sb.from("orders").select("items").eq("id", placedId).eq("restaurant_id", rid).single());
         const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-        await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", placedId);
-        await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("status", "received");
+        await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", placedId).eq("restaurant_id", rid);
+        await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("restaurant_id", rid).eq("status", "received");
       }
       await logAction("tablet", "order_place", { table_number: t, device_id: dev });
       return ok(data);
@@ -299,12 +332,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/:id/discount — reduce ONE order's bill (comp/loyalty/fix). Clamped to
     // 0..order total, money-safe. Mirrors the editor endpoint. (owner, 2026-06-17)
     if (a === "orders" && c === "discount") {
-      const g = await tabletPerm("tablet_discount", req, body, rid); if (!g.allow) return g.resp; // off/pin/on per settings
-      const cur = must(await sb.from("orders").select("total").eq("id", b).single());
+      const g = await tabletPerm("tablet_discount", req, body, rid, actor); if (!g.allow) return g.resp; // off/pin/on per settings
+      // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS); the perm
+      // gate above is a FEATURE gate, not a tenant one, so a foreign ?rid= must still be blocked.
+      const cur = must(await sb.from("orders").select("total").eq("id", b).eq("restaurant_id", rid).single());
       const raw = Number(body && body.amount);
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number(cur.total) || 0) : 0;
       const note = String((body && body.note) || "").slice(0, 200) || null;
-      const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).select());
+      const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid).select());
       await logAction("tablet", "order_discount", { order_id: b, detail: `₹${amount}` + byNote(g), device_id: dev });
       return ok(row[0] || null);
     }
@@ -314,7 +349,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // RPC the manager panel uses; it's idempotent (a repeat call just returns the
     // existing invoice), so there's no double-invoice risk.
     if (a === "sessions" && c === "invoice") {
-      const g = await tabletPerm("tablet_invoice", req, body, rid); if (!g.allow) return g.resp;
+      const g = await tabletPerm("tablet_invoice", req, body, rid, actor); if (!g.allow) return g.resp;
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
       if (error) throw new Error(error.message);
       await logAction("tablet", "invoice_generate", { detail: `session ${b}` + byNote(g), device_id: dev });
@@ -369,17 +404,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const patch: any = { status };
       if (status === "served") patch.served_at = nowIso();
       // Only order_id + session_id are needed below; the client discards the body → no full row.
-      const updated = must(await sb.from("order_items").update(patch).eq("id", b).select("order_id, session_id"));
+      // .eq(restaurant_id, rid) on every by-id write: sb is service-role (RLS bypassed), so
+      // this is the only tenant boundary — stops a foreign dish/order id being advanced.
+      const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id, session_id"));
       const item = updated[0];
       if (item && item.order_id) {
         // Order-level status stays coarse (received/preparing/served) so the guest
         // tracker + floor never see the internal "ready": a cooked-but-unserved
         // dish keeps the order "preparing".
-        const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id));
+        const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id).eq("restaurant_id", rid));
         const served = rows.filter((r: any) => r.status === "served").length;
         const anyActive = rows.some((r: any) => ["preparing", "ready", "served"].includes(r.status));
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
-        await sb.from("orders").update({ status: overall }).eq("id", item.order_id);
+        await sb.from("orders").update({ status: overall }).eq("id", item.order_id).eq("restaurant_id", rid);
       }
       await logAction("tablet", "item_status", { detail: status, device_id: dev });
       if (status === "served") await maybeAutoSettle(item?.session_id, { panel: "tablet", deviceId: dev }); // last dish served may complete the table
@@ -389,11 +426,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/:id/accept — accept a (often phone/online) order: everything not yet
     // served → preparing, so it shows up on the kitchen pass. Mirrors the kitchen.
     if (a === "orders" && c === "accept") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).single());
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
       const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: client re-fetches → skip both the .select() and the full-row re-read.
-      must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b));
-      await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
+      must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
+      await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
       await logAction("tablet", "order_accept", { order_id: b, device_id: dev });
       return ok({ ok: true });
     }
@@ -401,13 +438,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // orders/:id/serve-all — mark EVERY dish on one order served in a single call
     // (the table-wide "Serve all" fans these out, one per order). Mirrors the editor.
     if (a === "orders" && c === "serve-all") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).single());
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
-      must(await sb.from("orders").update({ items, status: "served" }).eq("id", b));
-      await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).neq("status", "served");
+      must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).eq("restaurant_id", rid));
+      await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
       await logAction("tablet", "order_serve", { order_id: b, device_id: dev });
       // Only session_id needed (for auto-settle); client discards the body → not the full row.
-      const served = must(await sb.from("orders").select("session_id").eq("id", b).single());
+      const served = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).single());
       await maybeAutoSettle((served as any)?.session_id, { panel: "tablet", deviceId: dev }); // serving the order may complete the table
       return ok({ ok: true });
     }
@@ -418,7 +455,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "allergies") {
       const raw = Array.isArray(body?.allergies) ? body.allergies : [];
       const allergies = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
-      must(await sb.from("orders").update({ allergies }).eq("id", b));
+      must(await sb.from("orders").update({ allergies }).eq("id", b).eq("restaurant_id", rid));
       await logAction("tablet", "order_allergies", { order_id: b, detail: allergies.join(", ") || "(none)", device_id: dev });
       return ok({ ok: true });
     }
@@ -448,7 +485,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("tablet", "order_item_qty", { order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
-      await stampEdited(data?.order_id);
+      await stampEdited(data?.order_id, rid);
       return ok(data);
     }
 
@@ -458,7 +495,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("tablet", "order_item_note", { order_id: data?.order_id, device_id: dev });
-      await stampEdited(data?.order_id);
+      await stampEdited(data?.order_id, rid);
       return ok(data);
     }
 
@@ -469,11 +506,14 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "items" && c === "removed") {
       const raw = Array.isArray(body?.removed) ? body.removed : [];
       const removed = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
-      const item = must(await sb.from("order_items").select("id, order_id, removed, added_allergens, removed_flag, status").eq("id", b).maybeSingle());
+      // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS) — no perm
+      // gate fronts this endpoint, so a foreign ?rid= would otherwise read+write another
+      // restaurant's dish. Scoped to match the identical editor endpoint.
+      const item = must(await sb.from("order_items").select("id, order_id, removed, added_allergens, removed_flag, status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!item) return err(editErrMsg("item_not_found"), 400);
       // Once a dish is READY or SERVED it's cooked/out — too late to change it.
       if (item.status === "ready" || item.status === "served") return err("That dish is already " + item.status + " — too late to edit.", 409);
-      const order = must(await sb.from("orders").select("payment_status, status").eq("id", item.order_id).maybeSingle());
+      const order = must(await sb.from("orders").select("payment_status, status").eq("id", item.order_id).eq("restaurant_id", rid).maybeSingle());
       if (order?.payment_status === "paid") return err(editErrMsg("order_paid"), 409);
       if (order?.status === "cancelled") return err(editErrMsg("order_cancelled"), 400);
       const oldSet = new Set((Array.isArray(item.removed) ? item.removed : []).map((x: any) => String(x).toLowerCase()));
@@ -484,10 +524,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       for (const s of justAdded) addedMark.add(s);
       for (const s of justRemoved) { if (addedMark.has(s)) addedMark.delete(s); else removedFlag = true; }
       const added_allergens = [...addedMark].filter((s) => removed.includes(s));
-      const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).select());
+      const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).eq("restaurant_id", rid).select());
       const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : ""].filter(Boolean).join("; ") || "no change";
       await logAction("tablet", "order_item_removed", { order_id: item.order_id, detail, device_id: dev });
-      await stampEdited(item.order_id);
+      await stampEdited(item.order_id, rid);
       return ok(rowU[0] || { ok: true });
     }
 
@@ -507,17 +547,20 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await logAction("tablet", "order_add_item", { order_id: b, detail: dishId, device_id: dev });
-      await stampEdited(b);
+      await stampEdited(b, rid);
       return ok(data);
     }
 
     // orders/:id/delete — remove a WHOLE order (and its dishes). Refuses a PAID
     // order (it's a financial record); otherwise hard-deletes order + items.
     if (a === "orders" && c === "delete") {
-      const cur = must(await sb.from("orders").select("payment_status").eq("id", b).single());
+      // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS) — without
+      // it a foreign order id could be HARD-DELETED from another restaurant. Scope the
+      // gate read AND both deletes.
+      const cur = must(await sb.from("orders").select("payment_status").eq("id", b).eq("restaurant_id", rid).single());
       if (cur && cur.payment_status === "paid") return err("Won't delete a PAID order — mark it unpaid first.", 409);
-      await sb.from("order_items").delete().eq("order_id", b);
-      must(await sb.from("orders").delete().eq("id", b).select());
+      await sb.from("order_items").delete().eq("order_id", b).eq("restaurant_id", rid);
+      must(await sb.from("orders").delete().eq("id", b).eq("restaurant_id", rid).select());
       await logAction("tablet", "order_delete", { order_id: b, device_id: dev });
       return ok({ ok: true });
     }
@@ -530,8 +573,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // Find (or open) the target table's session, then re-home the order onto it.
       let target = (must(await sb.from("sessions").select("id").eq("table_number", to).eq("restaurant_id", rid).neq("status", "closed").limit(1)))[0];
       if (!target) target = (must(await sb.from("sessions").insert({ table_number: to, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select()))[0];
-      const moved = must(await sb.from("orders").update({ table_number: to, session_id: target.id }).eq("id", b).select());
-      await sb.from("order_items").update({ session_id: target.id }).eq("order_id", b);
+      // Scope the SOURCE order by rid (target session is already rid-scoped above): without
+      // it a foreign order id could be re-homed onto this restaurant's table (service-role
+      // bypasses RLS). 0 rows moved on a foreign id → guarded below.
+      const moved = must(await sb.from("orders").update({ table_number: to, session_id: target.id }).eq("id", b).eq("restaurant_id", rid).select());
+      if (!moved.length) return err("That order isn't for this restaurant.", 404);
+      await sb.from("order_items").update({ session_id: target.id }).eq("order_id", b).eq("restaurant_id", rid);
       // The target now has an order, so make sure it has a bill number (the bill
       // trigger only fires on INSERT, not on this move — assign it if missing).
       const tb = (must(await sb.from("sessions").select("bill_no").eq("id", target.id).limit(1)))[0];
@@ -548,7 +595,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "pay") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      const g = await tabletPerm("tablet_mark_paid", req, body, rid); if (!g.allow) return g.resp; // off/pin/on per settings
+      const g = await tabletPerm("tablet_mark_paid", req, body, rid, actor); if (!g.allow) return g.resp; // off/pin/on per settings
       // Settle only the CURRENT party's bill: scope to the table's open session
       // so we never mark a previous party's leftover order paid. Sessions-off
       // mode (no open session) falls back to the table's active orders.

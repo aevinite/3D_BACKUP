@@ -99,13 +99,16 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // orders/:id/accept — everything not served → preparing
     if (a === "orders" && c === "accept") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).single());
-       
+      // .eq(restaurant_id, rid) on EVERY by-id write: sb is the service-role client (RLS
+      // bypassed), so this filter is the ONLY tenant boundary — without it a stale/foreign
+      // order id would be actioned across restaurants (owner's isolation concern, 2026-07-03).
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
+
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: the client discards the body and re-fetches the board, so we skip
       // BOTH the .select() on the update and the full-row re-read (server↔DB egress saver).
-      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b));
-      await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("status", "received");
+      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
+      await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
       await logAction("kitchen", "order_accept", { order_id: b, device_id: dev });
       return ok({ ok: true });
     }
@@ -114,11 +117,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // (cooked, waiting for the waiter to carry it out). NOT served — serving is
     // the waiter's action on the tablet. Order stays "preparing" until served.
     if (a === "orders" && c === "ready") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).single());
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "ready" })) : [];
       // return=minimal: client discards the body and re-fetches the board → skip the full-row re-read.
-      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b));
-      await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).neq("status", "served");
+      must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
+      await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
       await logAction("kitchen", "order_ready", { order_id: b, device_id: dev });
       return ok({ ok: true });
     }
@@ -132,16 +135,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const patch: any = { status };
       if (status === "served") patch.served_at = nowIso();
       // Only need order_id to roll the parent up; the client discards the body → no full row.
-      const updated = must(await sb.from("order_items").update(patch).eq("id", b).select("order_id"));
+      // Scoped by rid so a foreign dish id can't be advanced (service-role bypasses RLS).
+      const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id"));
       const item = updated[0];
       if (item && item.order_id) {
-        const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id));
+        const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id).eq("restaurant_id", rid));
 
         const served = rows.filter((r: any) => r.status === "served").length;
 
         const anyActive = rows.some((r: any) => ["preparing", "ready", "served"].includes(r.status));
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
-        await sb.from("orders").update({ status: overall }).eq("id", item.order_id);
+        await sb.from("orders").update({ status: overall }).eq("id", item.order_id).eq("restaurant_id", rid);
       }
       return ok({ ok: true });
     }
@@ -158,6 +162,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           return err("The kitchen isn't allowed to accept platform orders — the manager accepts them.", 403);
         }
       }
+      // lfh_platform_set_status updates by id with NO tenant scope (mig 071), so confirm
+      // this platform order belongs to THIS restaurant first (service-role bypasses RLS).
+      const owns = must(await sb.from("aggregator_orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!owns) return err("That platform order isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "kitchen" });
       if (error) throw new Error(error.message);
       const row = Array.isArray(data) ? data[0] : data;
@@ -169,11 +177,11 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // dishes/:id/sold-out — toggle the 'sold-out' tag (the 86 board)
     if (a === "dishes" && c === "sold-out") {
       const value = !!(body && body.value === true);
-      const cur = must(await sb.from("menu_items").select("tags").eq("id", b).single());
-       
+      const cur = must(await sb.from("menu_items").select("tags").eq("id", b).eq("restaurant_id", rid).single());
+
       const tags = Array.isArray(cur.tags) ? cur.tags.filter((t: string) => t !== "sold-out") : [];
       if (value) tags.push("sold-out");
-      const row = must(await sb.from("menu_items").update({ tags }).eq("id", b).select());
+      const row = must(await sb.from("menu_items").update({ tags }).eq("id", b).eq("restaurant_id", rid).select());
       await logAction("kitchen", value ? "sold_out_on" : "sold_out_off", { detail: b, device_id: dev });
       return ok(row[0] || null);
     }

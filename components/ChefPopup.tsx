@@ -77,7 +77,10 @@ export default function ChefPopup() {
       window.removeEventListener("lfh:table-scanned", prefillScanned);
       window.removeEventListener("lfh:session-changed", syncSession);
     };
-  }, []);
+    // restaurantId in deps: the global widgets resolve their restaurant async (starts at
+    // #1, then fixes itself). Re-run so tableCount reflects the REAL restaurant once its
+    // id lands — else the "call a waiter" popup validated table numbers against #1's count.
+  }, [restaurantId]);
 
   // The list of things a guest can ask for — each is an icon plus a label.
   const REASONS = [

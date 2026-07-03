@@ -11,6 +11,16 @@
 // so a Preparing→Ready→Served burst = ONE refetch), and on wake/reconnect.
 (function () {
   let sbPromise = null;
+  // This panel's restaurant id, learned from /api/rt-config. Used to DROP realtime
+  // breadcrumbs belonging to OTHER restaurants: the rt:ops / rt:menu topic names are
+  // shared across every tenant, so without this each restaurant's panel refetched on
+  // every other restaurant's activity (owner's #1 scaling fear — egress). Mirrors the
+  // guest RealtimeProvider / lib/useRealtime.ts filter. Empty until config loads (then
+  // we keep everything — safe: at worst an extra refetch, never a missed update).
+  let RT_RID = "";
+  // The admin's per-tab pin (?rid=) rides on the iframe URL; forward it so rt-config
+  // resolves THIS tab's restaurant (not the browser-wide act-as cookie).
+  const RT_RID_Q = new URLSearchParams(location.search).get("rid") || "";
   // Live metrics — inspect any time in the panel console:  __lfh_rt
   const metrics = {
     subscribed: 0, reconnects: 0, events: 0, errors: 0,
@@ -23,7 +33,8 @@
   async function getClient() {
     if (sbPromise) return sbPromise;
     sbPromise = (async () => {
-      const cfg = await (await fetch("/api/rt-config", { cache: "no-store" })).json();
+      const cfg = await (await fetch("/api/rt-config" + (RT_RID_Q ? "?rid=" + encodeURIComponent(RT_RID_Q) : ""), { cache: "no-store" })).json();
+      RT_RID = cfg.restaurantId || ""; // this panel's restaurant → cross-tenant event filter (noteEvent)
       // SELF-HOSTED: import the Supabase client from OUR origin (built by
       // scripts/build-vendor.mjs), not the jsdelivr CDN. A restaurant's wifi can be
       // slow or block public CDNs, which made the panel hang or silently fall back
@@ -82,6 +93,9 @@
     // Record one breadcrumb's scope, then schedule the (debounced) refetch.
     const noteEvent = (topic, row) => {
       const a = acc[topic]; if (!a) return;
+      // Drop breadcrumbs from OTHER restaurants (shared rt:ops/rt:menu topic names).
+      // If either id is missing, keep the event (safe fallback — never miss an update).
+      if (RT_RID && row && row.restaurant_id && row.restaurant_id !== RT_RID) return;
       const tn = row && row.table_number;
       const spans = !tn || (row && row.kind === "platform"); // unscopable → full reload
       if (spans) a.full = true; else a.tables.add(String(tn));

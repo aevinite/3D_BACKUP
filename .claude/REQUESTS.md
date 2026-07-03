@@ -189,6 +189,19 @@ owner looks, with cache busting, before claiming anything.
   invoice number removed (bill # kept, voided tag kept). VERIFIED: Table 2 bill renders
   correctly, no invoice number. (The printed Tax Invoice keeps its number for GST — flag
   to owner if he wants it gone there too.)
+- [x] **Tablet take-order redesign — menu-style browse (owner 2026-07-03).** All categories
+  laid out as sections in ONE scrollable browser; category rail (desktop) / chips (phone)
+  JUMP on tap + follow the scroll (spy). Order mode takes over the full screen; the
+  "This order" cart kept EXACTLY as before in its OWN separate scroll (owner: no floating
+  cart bar/sheet). Options/allergy/note/send flow untouched; browse scroll survives adds,
+  option edits and search-clear; hardware back peels order mode first (backstack.js now
+  loaded in tablet). VERIFIED live at 390px + 1280px, dark+light, real order sent (bill #2).
+- [x] **Make every panel responsive (owner 2026-07-03).** Audited /aevinite /owner /manager
+  /editor /kitchen /login /staff-login at 390px. Fixed: admin Branding card (2-col grid never
+  collapsed — was UNUSABLE on phone), compacted admin/owner phone nav (3-across), editor
+  Operations-log now stacks like the Customer log (was 700px sideways scroll), login inputs
+  16px (kills iOS focus-zoom). Kitchen/owner/manager/login verified fine already (manager
+  phone pass shipped in #102). VERIFIED live at 390px.
 
 ## 2026-07-03 — Settings organization + per-user access + hierarchy (PR #106, merged)
 - [x] Manager Settings organized into sidebar sections (General/Tables/Users/Access/Billing/Dining sessions)
@@ -204,3 +217,7 @@ owner looks, with cache busting, before claiming anything.
       (Related known issue: settings.tax_rate=0 is currently overridden by a hardcoded 5% fallback in lfh_price_order + billMath.)
 - [ ] **Admin "god-mode" control surface.** An admin-only area from /aevinite where the admin can change things the OWNER/MANAGER cannot even see — e.g. the two tax rates above, and (owner's words) "change the code and do everything." Good, clean admin interface. Build the individual sub-panels LATER (after the current live push); this is the umbrella requirement.
 - [ ] **Robustness/protection pass (lower urgency).** Owner: "if there is any error, add features that make my website protected." Harden against errors; owner grants latitude to add sensible safeguards.
+
+## 2026-07-03 — Allergen edit anytime + waffle model (PR #112)
+- [x] Allergen/note edit at ANY status (served/ready/paid) incl. ✎ Edit on Bills view; qty stays locked
+- [x] Waffle 3D model (local GLBs) + title fix "Lemon Icecream Waffle"
