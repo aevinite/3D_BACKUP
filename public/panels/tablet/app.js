@@ -1570,11 +1570,14 @@ function renderOrderMode() {
   const p = $("#panel");
   p.classList.remove("has-detail");
   p.classList.add("om-open");
-  document.body.classList.add("om-mode");   // full-screen takeover (floor hidden while ordering)
+  // LITE layout (owner 2026-07-03 v2): NO full-screen takeover — the order screen stays
+  // inside the right-hand panel exactly like the old one (floor stays visible beside it).
+  // Only the browsing changed: all categories as sections + the auto-shift category bar.
+  // body.om-mode is never set, so all the takeover CSS stays dormant.
   if (window.LFH_BACK && !omBackOff) omBackOff = LFH_BACK.layer("tablet-order", exitOrderMode);
   const addMode = !!state.addToOrderId;
   p.innerHTML = `
-    <div class="om">
+    <div class="om lite">
       <div class="om-head">
         <h2>${addMode ? "Add a dish" : "Order"} · Table ${esc(state.table)}</h2>
         <input type="search" id="dishSearch" class="order-search om-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">
