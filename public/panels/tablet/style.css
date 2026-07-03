@@ -417,3 +417,19 @@ html[data-theme="light"] .t-done .tlabel{ color:#15803d; }
   /* comfortable touch targets */
   .panel .btn, .floor-nav button, .counts button { min-height: 42px; }
 }
+
+/* ── skeleton shimmer for the streaming table detail (stale-while-revalidate) ──
+   Shown between the instant summary paint and the full slice landing: an order-
+   card placeholder whose rows share .iline geometry with the real dish rows, so
+   the content swap does not jump. (owner, 2026-07-03 — "loading should look great") */
+.skel { position: relative; overflow: hidden; border-radius: 7px; display: inline-block; height: 14px;
+  background: color-mix(in srgb, var(--muted) 24%, var(--panel-2)); } /* theme-aware: soft bar in BOTH light and dark */
+.skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--gold) 22%, transparent), transparent);
+  animation: skelSweep 1.1s ease-in-out infinite; }
+.skelrow .skel-qty { width: 26px; flex: none; }
+.skelrow .skel-name { flex: none; }
+.skelrow .skel-pill { width: 64px; height: 20px; border-radius: 8px; margin-left: auto; flex: none; }
+.skel-kot { width: 52px; height: 20px; border-radius: 8px; }
+@keyframes skelSweep { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .skel::after { animation: none; } }
