@@ -1423,8 +1423,10 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .disc-modal { max-width: 420px; width: 92%; display: flex; flex-direction: column; }
 .disc-bill-row { display: flex; justify-content: space-between; align-items: center; font-size: 13.5px; color: var(--muted); margin-bottom: 12px; }
 .disc-bill-row b { color: var(--text); font-size: 15px; }
-.disc-mode-row { display: flex; gap: 8px; margin-bottom: 14px; }
-.disc-mode-chip { flex: 1; text-align: center; padding: 9px 10px; font-size: 13.5px; }
+/* Merged discount interface (owner 2026-07-03): % and ₹ side by side, linked live. */
+.disc-linked-row { display: flex; align-items: flex-end; gap: 10px; }
+.disc-linked-row .disc-field { flex: 1; margin-bottom: 0; }
+.disc-linked-eq { padding-bottom: 12px; color: var(--muted); font-weight: 800; font-size: 16px; }
 .disc-field { margin-bottom: 4px; }
 .disc-input { width: 100%; box-sizing: border-box; font-size: 17px; font-weight: 700; }
 .disc-pct-quick { margin-top: 10px; }

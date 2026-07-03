@@ -4694,33 +4694,34 @@ function openDiscountModal(order, rerender) {
   document.querySelector(".disc-overlay")?.remove();
   const total = Number(order.total) || 0;
   const current = Number(order.discount) || 0;
-  let mode = "pay"; // "pay" | "percent"
-  // Seed each mode from whatever discount is already on the bill, so re-opening to
-  // tweak an existing discount doesn't make staff redo the maths from scratch.
-  let payVal = total > 0 ? Math.max(0, total - current) : total;
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
+  // ONE interface, no mode toggle (owner, 2026-07-03 — "merge the two modes… both things
+  // in one interface"): a Percent field and an Amount(₹) field that are TWO-WAY LINKED —
+  // edit one and the other recalculates from the same discAmount, so they can never disagree.
+  // Default 0%. discAmount (₹ off) is the single source of truth the server has always taken.
+  let discAmount = current;
   let pctVal = total > 0 ? Math.round((current / total) * 1000) / 10 : 0;
 
   const wrap = el(`<div class="sx-modal-overlay disc-overlay"><div class="sx-modal disc-modal">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Apply discount</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body disc-body">
       <div class="disc-bill-row"><span>Bill total</span><b>${inr(total)}</b></div>
-      <div class="disc-mode-row">
-        <span class="chip disc-mode-chip on" data-mode="pay">They pay</span>
-        <span class="chip disc-mode-chip" data-mode="percent">Percent off</span>
+      <div class="disc-linked-row">
+        <div class="disc-field">
+          <label class="dish-edit-lbl">Discount %</label>
+          <input type="number" inputmode="decimal" min="0" max="100" step="1" class="dish-edit-custominput disc-input" id="discPctInput" placeholder="0">
+        </div>
+        <div class="disc-linked-eq">=</div>
+        <div class="disc-field">
+          <label class="dish-edit-lbl">Discount amount (₹)</label>
+          <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput disc-input" id="discAmtInput" placeholder="0">
+        </div>
       </div>
-      <div class="disc-field" data-panel="pay">
-        <label class="dish-edit-lbl">Amount they'll pay</label>
-        <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput disc-input" id="discPayInput" placeholder="e.g. 3000">
-      </div>
-      <div class="disc-field" data-panel="percent" style="display:none">
-        <label class="dish-edit-lbl">Percent off</label>
-        <input type="number" inputmode="decimal" min="0" max="100" step="1" class="dish-edit-custominput disc-input" id="discPctInput" placeholder="e.g. 20">
-        <div class="chips disc-pct-quick">${[5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p}%</span>`).join("")}</div>
-      </div>
+      <div class="chips disc-pct-quick">${[0, 5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p ? p + "%" : "None"}</span>`).join("")}</div>
       <div class="disc-preview">
         <div class="disc-prev-row"><span>Discount</span><b id="discPrevAmt">− ${inr(current)}</b></div>
-        <div class="disc-prev-row"><span>That's</span><b id="discPrevPct">${pctVal}% off</b></div>
-        <div class="disc-prev-row grand"><span>They pay</span><b id="discPrevPay">${inr(payVal)}</b></div>
+        <div class="disc-prev-row grand"><span>They pay</span><b id="discPrevPay">${inr(round2(total - current))}</b></div>
       </div>
       <label class="dish-edit-lbl" style="margin-top:14px">Reason <span class="muted small">(optional, shows on the bill)</span></label>
       <input type="text" class="dish-edit-custominput" id="discNoteInput" maxlength="200" placeholder="e.g. loyalty, comp, manager approval">
@@ -4734,44 +4735,26 @@ function openDiscountModal(order, rerender) {
   </div></div>`);
   document.body.appendChild(wrap);
   wrap.querySelector("#discNoteInput").value = order.discount_note || "";
-  const payInput = wrap.querySelector("#discPayInput");
   const pctInput = wrap.querySelector("#discPctInput");
-  payInput.value = payVal ? String(payVal) : "";
+  const amtInput = wrap.querySelector("#discAmtInput");
   pctInput.value = pctVal ? String(pctVal) : "";
+  amtInput.value = current ? String(round2(current)) : "";
 
-  // discAmount is the ONE number both modes converge on — everything else (the live
-  // preview, the final API call) is derived from it, so the two modes can never disagree.
-  let discAmount = current;
-  const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
-  const round2 = (n) => Math.round(n * 100) / 100;
-  const updatePreview = () => {
-    if (mode === "pay") {
-      payVal = clamp(parseFloat(payInput.value), 0, total);
-      discAmount = round2(total - payVal);
-    } else {
-      pctVal = clamp(parseFloat(pctInput.value), 0, 100);
-      discAmount = round2((total * pctVal) / 100);
-      payVal = round2(total - discAmount);
-    }
+  // Refresh ONLY the preview + the OTHER field from discAmount — never the field the
+  // user is typing in (so their caret/partial number isn't clobbered mid-keystroke).
+  const paint = (typing) => {
     pctVal = total > 0 ? Math.round((discAmount / total) * 1000) / 10 : 0;
+    if (typing !== "pct") pctInput.value = discAmount ? String(pctVal) : "";
+    if (typing !== "amt") amtInput.value = discAmount ? String(round2(discAmount)) : "";
     wrap.querySelector("#discPrevAmt").textContent = "− " + inr(discAmount);
-    wrap.querySelector("#discPrevPct").textContent = pctVal + "% off";
-    wrap.querySelector("#discPrevPay").textContent = inr(payVal);
+    wrap.querySelector("#discPrevPay").textContent = inr(round2(total - discAmount));
   };
-  updatePreview();
+  paint();
 
-  const setMode = (m) => {
-    mode = m;
-    wrap.querySelectorAll(".disc-mode-chip").forEach((c) => c.classList.toggle("on", c.dataset.mode === m));
-    wrap.querySelector('[data-panel="pay"]').style.display = m === "pay" ? "" : "none";
-    wrap.querySelector('[data-panel="percent"]').style.display = m === "percent" ? "" : "none";
-    (m === "pay" ? payInput : pctInput).focus();
-    updatePreview();
-  };
-  wrap.querySelectorAll(".disc-mode-chip").forEach((c) => (c.onclick = () => setMode(c.dataset.mode)));
-  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { pctInput.value = c.dataset.pct; updatePreview(); }));
-  payInput.oninput = updatePreview;
-  pctInput.oninput = updatePreview;
+  // Edit % → derive amount. Edit amount → derive %. Both clamp to the bill.
+  pctInput.oninput = () => { const p = clamp(parseFloat(pctInput.value), 0, 100); discAmount = round2((total * p) / 100); paint("pct"); };
+  amtInput.oninput = () => { discAmount = clamp(parseFloat(amtInput.value), 0, total); paint("amt"); };
+  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { discAmount = round2((total * Number(c.dataset.pct)) / 100); paint(); }));
 
   const close = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = close;
@@ -4789,7 +4772,7 @@ function openDiscountModal(order, rerender) {
   };
   wrap.querySelector(".disc-apply").onclick = () => save(discAmount);
   const removeBtn = wrap.querySelector(".disc-remove"); if (removeBtn) removeBtn.onclick = () => save(0);
-  setTimeout(() => payInput.focus(), 30);
+  setTimeout(() => pctInput.focus(), 30);
 }
 
 // bindTablePanel: wire up every button inside an already-rendered table detail.
