@@ -1548,10 +1548,17 @@ function openBillModal(key) {
   // Every dish gets a ✎ Edit (allergies/note) — regardless of status, a settled bill
   // included: allergen info is metadata, not money, so there's no reason to lock it
   // once a dish is served/paid (owner, 2026-07-03 — "allergy can be added to all items").
-  const lines = g.map((o) => (o.items || []).map((i) => {
-    const det = itemDetailLine(i);
-    return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-line-right"><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span>${i.id ? `<button type="button" class="bm-edit-item" data-bm-edit-item="${esc(i.id)}" title="Edit allergies &amp; note">✎</button>` : ""}</span></div>`;
-  }).join("")).join("");
+  // Render item lines from the SAME non-cancelled orders billMath uses for the total —
+  // otherwise a cancelled order showed its priced items while the total (correctly)
+  // excluded them, so the bill read "Litchi Cooler ₹229 … Total ₹0" (owner screenshot,
+  // 2026-07-03). A fully-cancelled bill now shows a clear "cancelled" note instead.
+  const liveOrders = g.filter((o) => o.status !== "cancelled");
+  const lines = liveOrders.length
+    ? liveOrders.map((o) => (o.items || []).map((i) => {
+        const det = itemDetailLine(i);
+        return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-line-right"><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span>${i.id ? `<button type="button" class="bm-edit-item" data-bm-edit-item="${esc(i.id)}" title="Edit allergies &amp; note">✎</button>` : ""}</span></div>`;
+      }).join("")).join("")
+    : `<div class="bm-line bm-cancelled"><span class="bm-nm">This bill was cancelled — no charge.</span></div>`;
   // Restore is only offered while EVERY order in this bill is still inside its
   // 30-min grace window (migration 112) — so this takes the MIN remaining time
   // across the group, not the max (code review before merge: showing the most
