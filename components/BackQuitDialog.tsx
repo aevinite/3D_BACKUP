@@ -20,9 +20,14 @@ import { setRootBackHandler } from "@/lib/backStack";
 
 // The guest "home" — where the exit guard applies. Sub-pages (/item, /view) have a
 // real previous page, so their back goes to the menu on its own.
+// EVERY real menu now lives at /r/<slug>/menu (the bare /menu just 307-redirects
+// there), so the guard MUST match the tenant route or it never arms and the back
+// button quits the site in one press — the exact owner hard-rule violation fixed
+// 2026-07-05 (bug G1). Match /r/<slug>/menu exactly, NOT its /item|/view children.
 const HOME_PATHS = ["/", "/menu"];
+const TENANT_MENU = /^\/r\/[^/]+\/menu\/?$/;
 function isHomePath(p: string) {
-  return HOME_PATHS.includes(p);
+  return HOME_PATHS.includes(p) || TENANT_MENU.test(p);
 }
 
 type GuardState = (History["state"] & { __lfhExitGuard?: boolean }) | null;
