@@ -13,6 +13,7 @@ import ReorderableNav, { type NavItem } from "@/components/admin/ReorderableNav"
 const NAV: NavItem[] = [
   { href: "/aevinite", label: "Overview", icon: "fa-gauge-high", exact: true },
   { href: "/aevinite/restaurants", label: "Restaurants", icon: "fa-store" },
+  { href: "/aevinite/access", label: "Access control", icon: "fa-key" },
   { href: "/aevinite/owners", label: "Owners", icon: "fa-crown", soon: true },
   { href: "/aevinite/users", label: "Users & access", icon: "fa-users" },
   { href: "/aevinite/floor", label: "Live floor", icon: "fa-chair" },
