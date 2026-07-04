@@ -335,7 +335,7 @@ async function selectTable(t) {
   if (window.matchMedia("(max-width: 760px)").matches) {
     document.getElementById("panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
-  await ensureTableSlice(t);            // load this table's full detail rows
+  await ensureTableSlice(t, true);      // FORCE a fresh pull — never trust up-to-60s-stale cached detail (M10)
   if (String(state.table) !== String(t)) return; // the waiter already moved on — don't clobber
   lastSig = boardSig(state);            // adopt as baseline so the next poll doesn't re-flicker the detail
   renderFloor();
@@ -1044,10 +1044,14 @@ const act = async (fn) => { try { await fn(); await load(); } catch (e) { toast(
 // slim summary, so an unselected table has NO order rows cached — and Accept/Mark-paid need them
 // (the ids to act on, the due/billNo to confirm). Mirrors the editor's ensureTableSlice. The
 // SELECTED table's slice is already kept fresh by load(); best-effort (a fetch blip just no-ops).
-async function ensureTableSlice(t) {
-  // Already have this table's rows cached (orders OR an open session)? Nothing to fetch.
-  if ((state.data.orders || []).some((o) => String(o.table_number) === String(t))
-      || (state.data.sessions || []).some((s) => String(s.table_number) === String(t))) return;
+async function ensureTableSlice(t, force) {
+  // Already have this table's rows cached (orders OR an open session)? Nothing to fetch —
+  // UNLESS `force` (bug M10, 2026-07-05): when OPENING a table's detail we must always
+  // re-pull its slice, because a live update to a DIFFERENT table only refreshes the
+  // selected table's slice, so a previously-viewed table's cached rows can be up to 60s
+  // stale. selectTable passes force=true so re-opening a table never shows stale detail.
+  if (!force && ((state.data.orders || []).some((o) => String(o.table_number) === String(t))
+      || (state.data.sessions || []).some((s) => String(s.table_number) === String(t)))) return;
   try {
     const slice = await api("GET", "/state?table=" + encodeURIComponent(t));
     const tset = String(t);

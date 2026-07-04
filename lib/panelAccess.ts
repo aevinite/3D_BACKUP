@@ -38,3 +38,21 @@ export async function isPanelEnabled(role: Role, restaurantId: string): Promise<
   const p = await getEnabledPanels(restaurantId);
   return p[role as PanelKey] !== false;
 }
+
+// Cached variant for the HOT path (requireRole runs on every polled request). A per-request
+// settings read would reintroduce the egress the owner fights, so cache the enabled-panels
+// map per restaurant for a short TTL — an admin flipping a panel OFF then takes effect within
+// TTL seconds instead of instantly, which is fine (bug M3, 2026-07-05). The login route keeps
+// using the uncached isPanelEnabled (login is rare + must be immediate).
+const _panelCache = new Map<string, { at: number; on: boolean }>();
+const PANEL_TTL_MS = 30_000;
+export async function isPanelEnabledCached(role: Role, restaurantId: string): Promise<boolean> {
+  if (!(PANEL_KEYS as readonly string[]).includes(role)) return true;
+  if (!restaurantId) return true;
+  const key = `${restaurantId}:${role}`;
+  const hit = _panelCache.get(key);
+  if (hit && Date.now() - hit.at < PANEL_TTL_MS) return hit.on;
+  const on = await isPanelEnabled(role, restaurantId);
+  _panelCache.set(key, { at: Date.now(), on });
+  return on;
+}
