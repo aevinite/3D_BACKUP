@@ -109,11 +109,19 @@ export async function GET(req: NextRequest) {
           { label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 },
         ];
         const rateSum = effective.reduce((a, c) => a + c.rate, 0) || 1;
-        tax = {
-          effectivePct: pct,
-          components: effective.map((c) => ({ ...c, amount: num(totals.tax * (c.rate / rateSum)) })),
-          configured: comps.length > 0,
-        };
+        // The per-line amounts MUST sum back to the merged tax exactly — a GST filing
+        // where CGST+SGST ≠ total tax is wrong. Rounding each line independently drifts
+        // by a paisa (58.75 → 29.38+29.38 = 58.76), so round every line except the LAST
+        // and give the last the remainder. (found + fixed 2026-07-04)
+        let running = 0;
+        const components = effective.map((c, i) => {
+          const amount = i === effective.length - 1
+            ? num(totals.tax - running)
+            : num(totals.tax * (c.rate / rateSum));
+          running = num(running + amount);
+          return { ...c, amount };
+        });
+        tax = { effectivePct: pct, components, configured: comps.length > 0 };
       }
       return NextResponse.json({ type, range, bucket, rows, totals, tax });
     }

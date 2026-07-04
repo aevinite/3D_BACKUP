@@ -51,10 +51,41 @@ type View = { level: "home" } | { level: "restaurant"; rid: string } | { level: 
 const FALLBACK = "#34d399";
 const PAY_LABEL: Record<string, string> = { upi: "UPI", cash: "Cash", card: "Card", other: "Other" };
 
+const IST = "Asia/Kolkata";
 function tsLabel(iso: string, range: Range): string {
   const d = new Date(iso);
-  if (range === "today" || range === "yesterday") return d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true });
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  if (range === "today" || range === "yesterday") return d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST });
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
+}
+// A stable IST key for a bucket instant, at the range's granularity — used to line
+// timeseries rows up against a COMPLETE bucket sequence so days/hours with no sales
+// show as a zero, not a hidden gap that makes the trend lie (found 2026-07-05).
+function istKey(d: Date, range: Range): string {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: IST, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23",
+  }).formatToParts(d).map((x) => [x.type, x.value]));
+  if (range === "today" || range === "yesterday") return `${p.year}-${p.month}-${p.day} ${p.hour}`;
+  return `${p.year}-${p.month}-${p.day}`;
+}
+// The full ordered list of buckets we EXPECT for a range (so gaps become zeros). "all"
+// is unbounded, so it's left to whatever the data spans (no fill).
+function expectedBuckets(range: Range): { key: string; label: string }[] {
+  const now = new Date();
+  const out: { key: string; label: string }[] = [];
+  if (range === "today" || range === "yesterday") {
+    const base = new Date(now); if (range === "yesterday") base.setDate(base.getDate() - 1);
+    for (let h = 0; h < 24; h++) {
+      const d = new Date(base); d.setHours(h, 0, 0, 0);
+      out.push({ key: istKey(d, range), label: d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST }) });
+    }
+  } else if (range === "7d" || range === "30d") {
+    const n = range === "7d" ? 7 : 30;
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(now); d.setDate(d.getDate() - i);
+      out.push({ key: istKey(d, range), label: d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST }) });
+    }
+  }
+  return out;
 }
 
 // Count-up: eases a number to its target so tiles feel alive without lying —
@@ -163,19 +194,35 @@ export default function OwnerDashboard() {
   // ── shape group timeseries → multi-line rows {label,[name]:rev} ──
   const trendData = useMemo(() => {
     if (!group) return { rows: [] as Record<string, unknown>[], lines: [] as { key: string; name: string; color: string }[] };
-    const names = new Map(group.restaurantRevenue.map((r) => [r.id, { name: r.name, color: r.accentColor || FALLBACK }]));
-    const byBucket = new Map<string, Record<string, unknown>>();
+    // Key each series by restaurant ID, never by display name — two restaurants can share
+    // a name, and keying by name silently merges their two lines into one (found 2026-07-05).
+    const lines = group.restaurantRevenue.slice(0, 8).map((r) => ({ key: r.id, name: r.name, color: r.accentColor || FALLBACK }));
+    const byKey = new Map<string, Record<string, unknown>>();
     for (const t of group.timeseries) {
-      if (!byBucket.has(t.bucket)) byBucket.set(t.bucket, { label: tsLabel(t.bucket, range) });
-      const meta = names.get(t.restaurantId || "");
-      if (meta) (byBucket.get(t.bucket)!)[meta.name] = t.revenue;
+      const k = istKey(new Date(t.bucket), range);
+      if (!byKey.has(k)) byKey.set(k, { label: tsLabel(t.bucket, range) });
+      if (t.restaurantId) (byKey.get(k)!)[t.restaurantId] = t.revenue;
     }
-    const lines = group.restaurantRevenue.slice(0, 8).map((r) => ({ key: r.name, name: r.name, color: r.accentColor || FALLBACK }));
-    return { rows: Array.from(byBucket.values()), lines };
+    // Zero-fill: plot the COMPLETE bucket sequence so a no-sales day/hour shows as a
+    // gap-to-zero, not an invisible skip that makes the trend denser than reality.
+    const expected = expectedBuckets(range);
+    if (!expected.length) return { rows: Array.from(byKey.values()), lines };
+    const rows = expected.map((e) => {
+      const found = byKey.get(e.key) || {};
+      const row: Record<string, unknown> = { label: e.label };
+      for (const l of lines) row[l.key] = Number(found[l.key]) || 0;
+      return row;
+    });
+    return { rows, lines };
   }, [group, range]);
 
-  const restTrend = useMemo(() =>
-    (rest?.timeseries ?? []).map((t) => ({ label: tsLabel(t.bucket, range), Revenue: t.revenue })), [rest, range]);
+  const restTrend = useMemo(() => {
+    const byKey = new Map<string, number>();
+    for (const t of (rest?.timeseries ?? [])) byKey.set(istKey(new Date(t.bucket), range), t.revenue);
+    const expected = expectedBuckets(range);
+    if (!expected.length) return (rest?.timeseries ?? []).map((t) => ({ label: tsLabel(t.bucket, range), Revenue: t.revenue }));
+    return expected.map((e) => ({ label: e.label, Revenue: byKey.get(e.key) ?? 0 }));
+  }, [rest, range]);
   const restSpark = useMemo(() => (rest?.timeseries ?? []).map((t) => t.revenue), [rest]);
   const groupSpark = useMemo(() => {
     if (!group) return [];
@@ -196,7 +243,7 @@ export default function OwnerDashboard() {
         else if (Math.abs(pct) >= 3) out.push({ icon: pct > 0 ? "fa-arrow-trend-up" : "fa-arrow-trend-down", text: `Revenue is ${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% ${PREV_LABEL[range]}` });
       }
       const busiest = [...rest.hourly].sort((a, b) => b.orders - a.orders)[0];
-      if (busiest?.orders) out.push({ icon: "fa-clock", text: `Busiest at ${busiest.hour}:00 — ${busiest.orders} orders` });
+      if (busiest?.orders) out.push({ icon: "fa-clock", text: `Busiest at ${busiest.hour}:00 — ${busiest.orders} order${busiest.orders === 1 ? "" : "s"}` });
       const total = rest.dishes.reduce((a, d) => a + d.revenue, 0);
       if (rest.dishes[0] && total > 0) out.push({ icon: "fa-utensils", text: `${rest.dishes[0].title} makes ${Math.round((rest.dishes[0].revenue / total) * 100)}% of dish revenue` });
       if (money && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to ${money.cancelledOrders} cancelled order${money.cancelledOrders === 1 ? "" : "s"} ${rl}` });
@@ -380,7 +427,7 @@ export default function OwnerDashboard() {
               <div className="adm-stat"><div className="k">Revenue</div><div className="v">{inr(dishView.d.revenue)}</div></div>
               <div className="adm-stat"><div className="k">Sold</div><div className="v">{dishView.d.qty}</div></div>
               <div className="adm-stat"><div className="k">Share of revenue</div><div className="v">{dishView.share}%</div></div>
-              <div className="adm-stat"><div className="k">Rank</div><div className="v">#{dishView.rank}<span style={{ fontSize: 13, color: "var(--muted)" }}> / {dishView.of}</span></div></div>
+              <div className="adm-stat"><div className="k">Rank by revenue</div><div className="v">#{dishView.rank}<span style={{ fontSize: 13, color: "var(--muted)" }}> / {dishView.of}</span></div></div>
             </div>
             <div className="own-ctitle" style={{ marginTop: 18 }}>How it compares <span>· revenue vs other dishes</span></div>
             <LeaderBar data={(rest?.dishes ?? []).slice(0, 12).map((d) => ({ id: d.title, name: d.title, revenue: d.revenue, orders: d.qty, accentColor: d.title === dishView.d.title ? (rest?.restaurant.accentColor || FALLBACK) : "rgba(128,128,128,.35)" }))}

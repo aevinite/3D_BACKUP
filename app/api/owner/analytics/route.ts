@@ -77,23 +77,15 @@ export async function GET(req: NextRequest) {
   try {
     if (!rid) {
       // Group scope — the "who earns more" bar + multi-line trend.
-      // NOTE: lfh_owner_payment_breakdown(p_restaurant_id=NULL) sums PLATFORM-WIDE —
-      // there's no per-restaurant-ownership filter available on that shape (unlike the
-      // other two RPCs, which return one row per restaurant so we can filter by scope.ids
-      // below). An owner scoped to a subset of restaurants would see the platform total,
-      // not just theirs. Acceptable for now: only the admin (scope.all) sees this card
-      // today (owner, 2026-07-01 — "on for everyone", no owner-panel UI wired to it yet).
-      const [rev, ts, pm] = await Promise.all([
+      const allow = scope.all ? null : new Set(scope.ids);
+      const [rev, ts] = await Promise.all([
         sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to }),
         sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket }),
-        sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: null, p_from: from, p_to: to }),
       ]);
       if (rev.error) throw rev.error;
       if (ts.error) throw ts.error;
-      if (pm.error) throw pm.error;
-      // An owner only ever sees their OWN restaurants; admin sees all. The RPCs sum
-      // across every restaurant, so we filter the tiny pre-summed rows here.
-      const allow = scope.all ? null : new Set(scope.ids);
+      // An owner only ever sees their OWN restaurants; admin sees all. These RPCs
+      // return one row per restaurant, so we filter the tiny pre-summed rows here.
       const restaurantRevenue = (rev.data ?? [])
         .filter((r: Record<string, unknown>) => !allow || allow.has(r.restaurant_id as string))
         .map((r: Record<string, unknown>) => ({
@@ -105,9 +97,25 @@ export async function GET(req: NextRequest) {
         .map((r: Record<string, unknown>) => ({
           bucket: r.bucket, restaurantId: r.restaurant_id, revenue: num(r.revenue), orders: Number(r.orders) || 0,
         }));
-      const paymentMethods = (pm.data ?? []).map((r: Record<string, unknown>) => ({
-        method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0,
-      }));
+      // Payment breakdown: lfh_owner_payment_breakdown(NULL) sums PLATFORM-WIDE and its
+      // rows carry no restaurant_id, so it CANNOT be post-filtered — passing NULL for a
+      // scoped owner leaks every other tenant's payment totals (cross-tenant leak, found
+      // + fixed 2026-07-04). Admin (scope.all) may sum all; a scoped owner sums ONLY
+      // their own restaurants (one tiny call each) and we merge by method.
+      const pmByMethod = new Map<string, { method: string; revenue: number; orders: number }>();
+      const pmIds: (string | null)[] = scope.all ? [null] : scope.ids;
+      const pmRes = await Promise.all(pmIds.map((id) => sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      for (const r of pmRes) {
+        if (r.error) throw r.error;
+        for (const row of (r.data ?? []) as Record<string, unknown>[]) {
+          const m = String(row.method ?? "");
+          const cur = pmByMethod.get(m) || { method: m, revenue: 0, orders: 0 };
+          cur.revenue = num(cur.revenue + (Number(row.revenue) || 0));
+          cur.orders += Number(row.orders) || 0;
+          pmByMethod.set(m, cur);
+        }
+      }
+      const paymentMethods = Array.from(pmByMethod.values()).sort((a, b) => b.revenue - a.revenue);
       const prev = prevWin ? await windowTotals(null, allow, prevWin.from, prevWin.to) : null;
       return NextResponse.json({ scope: "group", range, restaurantRevenue, timeseries, paymentMethods, prev });
     }
