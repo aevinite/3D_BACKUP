@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { splitBrandSegments, stripBrandMarkers } from "@/lib/brandText";
 import { openRestaurantPanel } from "@/components/admin/shared";
+import RestaurantReport from "@/components/admin/RestaurantReport";
 
 // Render brand text in the live preview: *marked* parts use the accent colour,
 // the rest the mode's text colour — exactly how the guest menu renders it.
@@ -294,6 +295,10 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
   const [staffFeat, setStaffFeat] = useState<Record<string, boolean> | null>(null);
   const [busy, setBusy] = useState(false);
+  // "Full report" (owner's words: "every single bit" of ONE restaurant) swaps the
+  // whole detail view for its own report — its own component, own data load —
+  // instead of cramming another card into an already-long page.
+  const [showReport, setShowReport] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -395,6 +400,10 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     );
   };
 
+  if (showReport) {
+    return <RestaurantReport restaurantId={restaurant.id} restaurantName={restaurant.name} onBack={() => setShowReport(false)} />;
+  }
+
   return (
     <>
       {/* Breadcrumb: Restaurants › <name> — matches the owner-view breadcrumb (.adm-crumbs)
@@ -404,11 +413,18 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         <i className="fas fa-chevron-right sep" aria-hidden="true" />
         <span className="cur">{restaurant.name}</span>
       </nav>
-      <h1 className="adm-page-h">{restaurant.name}</h1>
-      <p className="adm-page-sub">
-        <span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{restaurant.slug}/menu</span>
-        {" · "}Turn this restaurant&apos;s guest features on or off. Changes affect only its menu.
-      </p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 className="adm-page-h">{restaurant.name}</h1>
+          <p className="adm-page-sub">
+            <span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{restaurant.slug}/menu</span>
+            {" · "}Turn this restaurant&apos;s guest features on or off. Changes affect only its menu.
+          </p>
+        </div>
+        <button className="adm-btn" onClick={() => setShowReport(true)} title={`Every usage figure for ${restaurant.name}`}>
+          <i className="fas fa-file-lines" style={{ marginRight: 7 }} aria-hidden="true" />Full report
+        </button>
+      </div>
 
       <StatusCard restaurant={restaurant} onChanged={onChanged} />
 

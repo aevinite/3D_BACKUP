@@ -40,6 +40,7 @@ export const ACT_LABEL: Record<string, string> = {
   order_allergies: "Set allergies", order_item_removed: "Removed allergen", item_status: "Updated dish status",
   bill_paid: "Marked paid", close_unpaid: "Closed unpaid", payment_revert: "Reverted payment",
   member_remove: "Removed guest", member_ban: "Banned guest", auto_approve: "Auto-approve", table_restart: "Restarted table",
+  billing_set_plan: "Set billing plan", billing_add_payment: "Recorded a payment", billing_delete_payment: "Deleted a payment",
 };
 
 export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
