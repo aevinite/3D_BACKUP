@@ -25,6 +25,10 @@ const DAY = 86_400_000;
 function windowFor(range: string): { from: string; to: string; bucket: string } {
   const now = Date.now();
   const to = new Date(now).toISOString();
+  // "all" = unbounded, matching /api/owner/analytics (from 2020) so the dashboard's money
+  // tiles (cancellations/discounts) cover the SAME span as its revenue/order KPIs — before,
+  // the dashboard mapped range=all → 12m here and undercounted everything >1yr old (bug M11).
+  if (range === "all") return { from: "2020-01-01T00:00:00Z", to, bucket: "month" };
   if (range === "12m") return { from: new Date(now - 365 * DAY).toISOString(), to, bucket: "month" };
   if (range === "30d") return { from: new Date(now - 30 * DAY).toISOString(), to, bucket: "day" };
   if (range === "7d") return { from: new Date(now - 7 * DAY).toISOString(), to, bucket: "day" };

@@ -637,6 +637,13 @@ if (window.LFH_RT) {
     menu: () => fullSoon(),
   }});
   setInterval(() => load().catch(() => {}), 60000); // backup sync
+  // If realtime NEVER actually connects (blocked/flaky WebSocket), LFH_RT.start() swallows
+  // the subscribe error and only the 60s backstop runs — a new KOT could sit unseen up to
+  // 60s (bug M9, 2026-07-05). Engage a 5s catch-up poll UNTIL a subscription lands. Gated on
+  // subscribed===0, so the instant realtime works this is a no-op and egress stays low.
+  setInterval(() => {
+    if (!document.hidden && (!window.LFH_RT.metrics || window.LFH_RT.metrics.subscribed === 0)) load().catch(() => {});
+  }, 5000);
 } else {
   setInterval(() => load().catch(() => {}), 2000); // fallback poll
 }

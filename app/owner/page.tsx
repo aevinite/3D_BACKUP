@@ -168,8 +168,10 @@ export default function OwnerDashboard() {
       // The tab's scope pin (admin-in-one-restaurant) rides on EVERY call so the
       // shared act-as cookie can't hijack this tab (C1). Null for a real owner.
       const scp = scopePin ? `&scope=${scopePin}` : "";
+      // range=all now maps to an unbounded reports window (mig M11) — pass it through so the
+      // money tiles cover the same span as the all-time revenue KPIs (was collapsed to 12m).
       const moneyUrl = (rid: string | null) =>
-        `/api/owner/reports?type=sales&range=${rg === "all" ? "12m" : rg}${rid ? `&rid=${rid}` : ""}${scp}`;
+        `/api/owner/reports?type=sales&range=${rg}${rid ? `&rid=${rid}` : ""}${scp}`;
       if (view.level === "home") {
         const o: Overview = await fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then(j);
         if ((o as unknown as { error?: string }).error) throw new Error((o as unknown as { error: string }).error);
