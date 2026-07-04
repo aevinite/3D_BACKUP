@@ -38,9 +38,13 @@ const PAY_LABEL: Record<string, string> = { upi: "UPI", cash: "Cash", card: "Car
 
 function bucketLabel(iso: string, range: Range): string {
   const d = new Date(iso);
-  if (range === "today" || range === "yesterday") return d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true });
-  if (range === "12m") return d.toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  // Buckets are IST instants (the RPC truncates in Asia/Kolkata). Format IN THAT zone
+  // explicitly, or a viewer/SSR outside IST sees every day & month off by one — wrong
+  // on a GST document (found 2026-07-05). tz pinned to Asia/Kolkata always.
+  const tz = "Asia/Kolkata";
+  if (range === "today" || range === "yesterday") return d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: tz });
+  if (range === "12m") return d.toLocaleDateString("en-IN", { month: "short", year: "2-digit", timeZone: tz });
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: tz });
 }
 
 // CSV download — plain client-side blob, no server round-trip.
@@ -59,10 +63,15 @@ function downloadCsv(filename: string, header: string[], rows: (string | number)
 
 export default function OwnerReports() {
   const [rests, setRests] = useState<Rest[]>([]);
-  const [rid, setRid] = useState<string>("");         // "" = all restaurants
+  const [ready, setReady] = useState(false);           // restaurant list has loaded
+  const [rid, setRid] = useState<string>("");          // "" = all restaurants
   const [type, setType] = useState<RType>("sales");
   const [range, setRange] = useState<Range>("30d");
   const [rep, setRep] = useState<Report | null>(null);
+  // What actually produced `rep` — the title/scope MUST read from this, never from the
+  // live pickers, or switching a tab shows old numbers under the new heading (found
+  // 2026-07-05). null rid = all restaurants.
+  const [gen, setGen] = useState<{ type: RType; rid: string; range: Range } | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -72,26 +81,35 @@ export default function OwnerReports() {
       const list: Rest[] = (o.restaurants ?? []).map((r: Row) => ({ id: r.id as string, name: r.name as string }));
       setRests(list);
       if (list.length === 1) setRid(list[0].id);
-    }).catch(() => {});
+      setReady(true);
+    }).catch(() => setReady(true));
   }, []);
 
   const generate = useCallback(async () => {
     setBusy(true); setErr(null);
+    const asked = { type, rid, range };
     try {
       const q = new URLSearchParams({ type, range });
       if (rid) q.set("rid", rid);
       const r = await fetch(`/api/owner/reports?${q}`, { cache: "no-store" }).then((x) => x.json());
       if (r.error) throw new Error(r.error);
-      setRep(r);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setRep(null); }
+      setRep(r); setGen({ type: asked.type, rid: asked.rid, range: asked.range });
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setRep(null); setGen(null); }
     setBusy(false);
   }, [type, range, rid]);
 
-  // First visit: generate the default report so the page never opens empty.
-  useEffect(() => { generate(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // Auto-generate once the restaurant list is in (so single-restaurant owners have
+  // their rid before the first Tax report runs — else the CGST/SGST split dead-ends
+  // with no picker to obey, found 2026-07-05) and whenever the report TYPE or the
+  // RESTAURANT changes (clicking a chip / dropdown is itself an on-demand ask). A
+  // RANGE change stays behind the Generate button (the heavier date choice).
+  useEffect(() => { if (ready) generate(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [ready, type, rid]);
 
-  const meta = REPORTS.find((r) => r.k === type)!;
-  const restName = rid ? (rests.find((r) => r.id === rid)?.name ?? "") : "All restaurants";
+  // Title + scope come from the GENERATED report, so heading and body can't disagree.
+  const shownType = gen?.type ?? type;
+  const shownRange = gen?.range ?? range;
+  const meta = REPORTS.find((r) => r.k === shownType)!;
+  const restName = gen ? (gen.rid ? (rests.find((r) => r.id === gen.rid)?.name ?? "This restaurant") : "All restaurants") : "";
   const money = rep && ["sales", "tax", "discounts", "cancellations"].includes(rep.type);
   const mrows = (money ? (rep!.rows as unknown as MoneyRow[]) : []);
   const t = rep?.totals;
@@ -110,7 +128,7 @@ export default function OwnerReports() {
   const exportCsv = () => {
     if (!rep) return;
     const stamp = new Date().toISOString().slice(0, 10);
-    const name = `${meta.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${range}-${stamp}.csv`;
+    const name = `${meta.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${rep.range}-${stamp}.csv`;
     if (money) {
       downloadCsv(name,
         ["Period", "Orders", "Paid orders", "Subtotal", "Tax", "Discount", "Revenue", "Cancelled orders", "Cancelled value"],
@@ -328,6 +346,15 @@ export default function OwnerReports() {
         .rp-ct { font-size: 13px; font-weight: 800; }
         @media print {
           .rp-controls, .owx-chips { display: none !important; }
+          .rp-head :global(.rp-sub) { display: none; }
+          /* Strip the console chrome + card borders/shadows so the PDF is a clean
+             document, not a screenshot of the panel. The report page's own class names
+             (.rp-*) drifted from the old global print block (.rep-*) so those never
+             applied — target the real markup here. (found 2026-07-05) */
+          :global(.owx-side), :global(.owx-top), :global(.adm-adminbar) { display: none !important; }
+          :global(.adm-main), :global(.adm-body), :global(.owx-wrap) { padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+          :global(.adm-card) { border: 1px solid #ddd !important; box-shadow: none !important; break-inside: avoid; }
+          :global(.owx-tablewrap) { max-height: none !important; overflow: visible !important; }
         }
       `}</style>
     </>
