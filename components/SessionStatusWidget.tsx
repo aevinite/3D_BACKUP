@@ -28,6 +28,7 @@ import { getStoredSession, storeSession, clearStoredSession, getSessionState, le
 // Publish the live "can this guest order?" answer so the Add-to-cart gate can read
 // it synchronously (this widget already polls the session, so we reuse that poll).
 import { setTableConnection } from "@/lib/tableConnection";
+import { tremove } from "@/lib/tenantStorage";
 import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
 // Phone back button: while a confirm/blocked popup shows, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
@@ -88,8 +89,8 @@ export default function SessionStatusWidget() {
   // OrderTracker re-read straight away and draw nothing.
   const clearLocal = () => {
     clearStoredSession();
-    try { localStorage.removeItem("lfh_cart"); } catch {}
-    try { localStorage.removeItem("lfh_active_orders"); } catch {}
+    tremove("lfh_cart");
+    tremove("lfh_active_orders");
     setScannedTable("");                                    // stop pre-filling the table you just left
     window.dispatchEvent(new Event("lfh:cart-updated"));
     window.dispatchEvent(new Event("lfh:table-scanned"));

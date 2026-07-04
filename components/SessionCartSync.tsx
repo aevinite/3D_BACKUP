@@ -30,7 +30,8 @@ import { getSettings } from "@/lib/menu";
 import { getStoredSession, getSessionCart, setSessionCart } from "@/lib/session";
 import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
 
-// The localStorage key where the cart is saved on this device.
+// The localStorage key where the cart is saved on this device (tenant-scoped).
+import { tget, tset } from "@/lib/tenantStorage";
 const CART_KEY = "lfh_cart";
 
 // One line in the cart: a dish id, an options signature, a quantity, and extras.
@@ -41,7 +42,7 @@ const lineKey = (i: Line) => `${i.id}__${i.sig ?? "[]"}`;
 
 // Reads the cart from this device's storage, safely returning [] if anything's off.
 const readLocal = (): Line[] => {
-  try { const raw = localStorage.getItem(CART_KEY); const a = raw ? JSON.parse(raw) : []; return Array.isArray(a) ? a : []; }
+  try { const raw = tget(CART_KEY); const a = raw ? JSON.parse(raw) : []; return Array.isArray(a) ? a : []; }
   catch { return []; }
 };
 
@@ -72,7 +73,7 @@ export default function SessionCartSync() {
     // Overwrite the local cart and notify the UI, without triggering our own push.
     const writeLocalGuarded = (cart: Line[]) => {
       applyingRemote.current = true;
-      try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch {}
+      tset(CART_KEY, JSON.stringify(cart));
       window.dispatchEvent(new Event("lfh:cart-updated")); // listeners run synchronously here
       applyingRemote.current = false;
     };

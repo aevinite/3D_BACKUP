@@ -10,6 +10,7 @@ import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 import { useFeatures } from "@/lib/features";
 import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
 import { getStoredSession } from "@/lib/session";
+import { tget, tset, isTKey } from "@/lib/tenantStorage";
 import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
 import { useBackClose } from "@/lib/backStack"; // phone back button closes the panel
 import SessionTableBill from "@/components/SessionTableBill";
@@ -101,7 +102,7 @@ export default function CartPanel() {
   // loadCart(): read the saved cart from localStorage and clean it up.
   const loadCart = () => {
     try {
-      const saved = localStorage.getItem("lfh_cart");
+      const saved = tget("lfh_cart");
       setCart(saved ? normalize(JSON.parse(saved)) : []);
     } catch {
       setCart([]);
@@ -109,9 +110,7 @@ export default function CartPanel() {
   };
   // saveCart(): write the cart back to the browser's notepad (localStorage).
   const saveCart = (newCart: CartItem[]) => {
-    try {
-      localStorage.setItem("lfh_cart", JSON.stringify(newCart));
-    } catch {}
+    tset("lfh_cart", JSON.stringify(newCart));
   };
   // commit(): the one place that changes the cart — it updates the screen, saves
   // to storage, and broadcasts "lfh:cart-updated" so the badge/mini-cart refresh.
@@ -146,8 +145,10 @@ export default function CartPanel() {
   useEffect(() => {
     loadCart();
     setCurrencyState(getCurrency());
-    // allergen lookup by dish id (so the bill can warn)
-    getMenuItems()
+    // allergen lookup by dish id (so the bill can warn) — THIS restaurant's menu,
+    // not the default one's (was leaking #1's dishes into every tenant's cart
+    // pairings + a needless whole-menu read of the wrong restaurant).
+    getMenuItems(restaurantId)
       .then((items) => {
         const m: Record<string, string[]> = {};
         items.forEach((i) => (m[i.id] = i.allergens || []));
@@ -165,7 +166,7 @@ export default function CartPanel() {
     loadLive();
     // restore order-wide allergy avoidances (set via "apply to all" or the bill section)
     try {
-      const d = JSON.parse(localStorage.getItem("lfh_declared") || "[]");
+      const d = JSON.parse(tget("lfh_declared") || "[]");
       if (Array.isArray(d) && d.length) setDeclared(d);
     } catch {}
     // Pre-fill the table from a scanned QR (?table=N stored in lib/table). Only
@@ -206,7 +207,7 @@ export default function CartPanel() {
     // cross tabs, so translate a cross-tab lfh_cart change into the local
     // announcement every cart listener already understands.
     const handleStorageCart = (e: StorageEvent) => {
-      if (e.key === "lfh_cart") window.dispatchEvent(new Event("lfh:cart-updated"));
+      if (isTKey(e.key, "lfh_cart")) window.dispatchEvent(new Event("lfh:cart-updated"));
     };
     // handleAvoidAll: someone ticked "avoid X in all my dishes" in the popup —
     // merge those allergens into our order-wide avoid list.
@@ -254,7 +255,7 @@ export default function CartPanel() {
   // applied, so writing here would overwrite the saved list with [].
   useEffect(() => {
     if (!declaredHydrated.current) { declaredHydrated.current = true; return; }
-    try { localStorage.setItem("lfh_declared", JSON.stringify(declared)); } catch {}
+    tset("lfh_declared", JSON.stringify(declared));
   }, [declared]);
 
   // While the cart is open, re-evaluate live orders every few seconds so a
@@ -438,10 +439,10 @@ export default function CartPanel() {
         if (!d?.ok || !d.orderId) return; // order cancelled / failed — the gate showed its own message
         try {
           // Save into the "active orders" list so the OrderTracker shows it.
-          const raw = localStorage.getItem("lfh_active_orders");
+          const raw = tget("lfh_active_orders");
           const arr = (() => { const p = raw ? JSON.parse(raw) : []; return Array.isArray(p) ? p : []; })();
           arr.push({ id: d.orderId, tableNumber: tableTrim, total: totalS, itemCount: countS, items: trackS, status: "received", placedAt: Date.now() });
-          localStorage.setItem("lfh_active_orders", JSON.stringify(arr));
+          tset("lfh_active_orders", JSON.stringify(arr));
           window.dispatchEvent(new Event("lfh:order-placed")); // wake the tracker
         } catch {}
         // Empty the cart and reset the allergy fields, then refresh + close.
@@ -468,7 +469,7 @@ export default function CartPanel() {
       }, restaurantId);
       // Remember this order on THIS device so the guest can follow its status.
       try {
-        const raw = localStorage.getItem("lfh_active_orders");
+        const raw = tget("lfh_active_orders");
         const list = raw ? JSON.parse(raw) : [];
         const active = Array.isArray(list) ? list : [];
         active.push({ // add this order to the live-tracking list
@@ -480,7 +481,7 @@ export default function CartPanel() {
           status: "received",
           placedAt: Date.now(),
         });
-        localStorage.setItem("lfh_active_orders", JSON.stringify(active));
+        tset("lfh_active_orders", JSON.stringify(active));
         window.dispatchEvent(new Event("lfh:order-placed")); // wake the tracker
       } catch {}
       // Pop a success toast confirming the order went to the kitchen.

@@ -7,6 +7,7 @@ import type { OptionGroup } from "@/lib/menu";
 import { allergenIcon, allergenLabel } from "@/lib/allergens";
 // Phone back button: while this popup is open, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
+import { tget, tset } from "@/lib/tenantStorage";
 
 // The minimal info we keep about the dish being customized.
 interface OrderItem {
@@ -167,7 +168,7 @@ export default function OrderConfirmModal() {
       // kitchen sees "no dairy" once on the whole order, NOT repeated on the
       // cappuccino line too (owner, 2026-06-14: the duplicate was confusing).
       let orderWide: string[] = [];
-      try { const d = JSON.parse(localStorage.getItem("lfh_declared") || "[]"); if (Array.isArray(d)) orderWide = d; } catch {}
+      try { const d = JSON.parse(tget("lfh_declared") || "[]"); if (Array.isArray(d)) orderWide = d; } catch {}
       const lineRemoved = (applyAll ? [] : finalRemoved).filter((r) => !orderWide.includes(r));
 
       // Fingerprint of this line's spec. An EMPTY spec (no options, no removed
@@ -181,7 +182,7 @@ export default function OrderConfirmModal() {
       ]);
       let cart: { id: string; title: string; price: string; image: string; qty: number; options?: typeof chosen; removed?: string[]; note?: string; sig?: string }[] = [];
       // Read the existing cart out of the browser's notepad (localStorage).
-      const saved = localStorage.getItem("lfh_cart");
+      const saved = tget("lfh_cart");
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) cart = parsed;
@@ -204,7 +205,7 @@ export default function OrderConfirmModal() {
 
       // Save the updated cart back to storage, then announce the change so the
       // mini-cart, header badge, and bill all refresh.
-      localStorage.setItem("lfh_cart", JSON.stringify(cart));
+      tset("lfh_cart", JSON.stringify(cart));
       window.dispatchEvent(new Event("lfh:cart-updated"));
       // "Apply to all" — push the avoided allergens into the order-wide avoid list.
       if (applyAll && finalRemoved.length) {

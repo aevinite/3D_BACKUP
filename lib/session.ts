@@ -11,11 +11,13 @@ import { getGuestDeviceId } from "./guestDevice";
 // (default #1 keeps single-restaurant behaviour identical).
 import { DEFAULT_RESTAURANT_ID } from "./tenant";
 
-// ── per-device session token, keyed by table ──────────────────────────────
+// ── per-device session token, keyed by table AND restaurant ────────────────
 // Re-scanning a DIFFERENT table must not reuse the old token, so we store the
 // table alongside it and treat a table mismatch as "no session here".
-// "localStorage" is the browser's little notepad that survives page refreshes;
-// KEY is the label we file this note under.
+// The key is tenant-scoped (lfh_session:<slug>) so a session opened at one
+// restaurant can never show up — or be resolved — while browsing another
+// restaurant on the same phone (the 2026-07-04 cross-tenant leak).
+import { tget, tset, tremove } from "./tenantStorage";
 const KEY = "lfh_session";
 
 // The shape of the session note we keep on the device: which table it's for,
@@ -35,7 +37,7 @@ export function getStoredSession(table?: string): StoredSession | null {
   // Wrapped in try/catch because localStorage can throw (e.g. private mode) and
   // the saved text might be corrupt — we'd rather quietly return null than crash.
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = tget(KEY);
     if (!raw) return null;
     // It's stored as text, so JSON.parse turns it back into an object.
     const s = JSON.parse(raw) as StoredSession;
@@ -47,11 +49,11 @@ export function getStoredSession(table?: string): StoredSession | null {
 }
 // Save the session note. JSON.stringify turns the object into text to store.
 export function storeSession(s: StoredSession) {
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {}
+  tset(KEY, JSON.stringify(s));
 }
 // Forget the session entirely (used on "leave table" / sign-out).
 export function clearStoredSession() {
-  try { localStorage.removeItem(KEY); } catch {}
+  tremove(KEY);
 }
 
 // ── location (the main gate) ───────────────────────────────────────────────

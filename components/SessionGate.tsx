@@ -35,6 +35,7 @@ import {
 import { useBackClose } from "@/lib/backStack";
 // Which restaurant this guest is ordering at (from the /r/<slug> URL).
 import { useRestaurantId } from "@/lib/restaurant-context";
+import { tget, tset } from "@/lib/tenantStorage";
 
 // Once you're in a session, that table becomes your default everywhere (cart +
 // call-waiter prefill from the scanned-table key, and re-read on lfh:table-scanned).
@@ -62,7 +63,7 @@ const LOC_CONSENT_KEY = "lfh_loc_consent";
 const NICKNAME_KEY = "lfh_nickname";
 const getNickname = (token?: string): string => {
   try {
-    const raw = localStorage.getItem(NICKNAME_KEY);
+    const raw = tget(NICKNAME_KEY);
     if (!raw) return "";
     const v = JSON.parse(raw) as { token?: string; name?: string };
     // Only valid for the CURRENT session's token; a different/stale token = ask again.
@@ -70,7 +71,7 @@ const getNickname = (token?: string): string => {
   } catch { return ""; } // legacy plain-string (pre-session-scoping) → treat as none
 };
 const setNicknameFor = (token: string | undefined, name: string) => {
-  try { localStorage.setItem(NICKNAME_KEY, JSON.stringify({ token, name })); } catch {}
+  tset(NICKNAME_KEY, JSON.stringify({ token, name }));
 };
 
 // The name also persists per (table + SESSION): once a device gives a name for a
@@ -81,12 +82,12 @@ const setNicknameFor = (token: string | undefined, name: string) => {
 const TABLE_NAME_KEY = "lfh_table_name";
 const getTableName = (table: string, sessionId?: string): string => {
   try {
-    const v = JSON.parse(localStorage.getItem(TABLE_NAME_KEY) || "null") as { table?: string; sessionId?: string; name?: string } | null;
+    const v = JSON.parse(tget(TABLE_NAME_KEY) || "null") as { table?: string; sessionId?: string; name?: string } | null;
     return v && sessionId && v.table === table && v.sessionId === sessionId ? String(v.name || "").trim() : "";
   } catch { return ""; }
 };
 const setTableName = (table: string, sessionId: string | undefined, name: string) => {
-  try { localStorage.setItem(TABLE_NAME_KEY, JSON.stringify({ table, sessionId, name })); } catch {}
+  tset(TABLE_NAME_KEY, JSON.stringify({ table, sessionId, name }));
 };
 
 // The job we were asked to do, for which table, with whatever data it needs:
@@ -330,7 +331,7 @@ export default function SessionGate() {
     const st = settingsRef.current!;
     if (!st.requireLocation) { coords.current = { lat: null, lng: null }; return afterLocation(); } // location not required -> skip
     let consented = false;
-    try { consented = localStorage.getItem(LOC_CONSENT_KEY) === "1"; } catch {}
+    consented = tget(LOC_CONSENT_KEY) === "1";
     if (!consented) { setStep("location_intro"); return; } // first time -> explain before prompting
     await runLocation(); // returning guest -> straight to the check
   }, [afterLocation, runLocation]);
@@ -338,7 +339,7 @@ export default function SessionGate() {
   // The intro's "I'm here — continue" button: remember the consent so we don't ask
   // again on this device, then run the real location check (which prompts the OS).
   const continueFromIntro = useCallback(async () => {
-    try { localStorage.setItem(LOC_CONSENT_KEY, "1"); } catch {}
+    tset(LOC_CONSENT_KEY, "1");
     await runLocation();
   }, [runLocation]);
 

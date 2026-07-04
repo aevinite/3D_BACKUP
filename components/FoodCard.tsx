@@ -30,7 +30,9 @@ interface FoodItem {
   allergens?: string[];
 }
 
-// The localStorage key where the shopping cart is saved on this device.
+// The localStorage key where the shopping cart is saved on this device —
+// tenant-scoped via tget/tset so each restaurant has its own cart.
+import { tget, tset } from "@/lib/tenantStorage";
 const CART_KEY = "lfh_cart";
 
 // The shape of one line saved in the cart. `sig` is a "signature" that captures
@@ -47,7 +49,7 @@ const isPlainLine = (i: CartItem) => !i.sig || i.sig === "[]";
 // is missing or corrupt, it safely returns an empty list instead of crashing.
 const readCart = (): CartItem[] => {
   try {
-    const raw = localStorage.getItem(CART_KEY);
+    const raw = tget(CART_KEY);
     // JSON.parse turns the saved text back into a real list.
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed : [];
@@ -58,7 +60,7 @@ const readCart = (): CartItem[] => {
 // of the app (the cart badge, other cards) can update themselves.
 const writeCart = (cart: CartItem[]) => {
   try {
-    localStorage.setItem(CART_KEY, JSON.stringify(cart));
+    tset(CART_KEY, JSON.stringify(cart));
     window.dispatchEvent(new Event("lfh:cart-updated")); // "the cart changed!"
   } catch {}
 };
