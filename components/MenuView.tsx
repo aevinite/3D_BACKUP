@@ -74,6 +74,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // Each useState below is a piece of memory this page keeps. The first value
   // is the current value; the "set..." function changes it (and redraws).
   const [menuData, setMenuData] = useState<FoodItem[]>([]);        // all dishes
+  const [loaded, setLoaded] = useState(false); // true once a menu fetch has RESOLVED — lets us tell "still loading" from "loaded but empty" (bug G2, 2026-07-05)
   const [dbCategories, setDbCategories] = useState<Category[]>([]); // all categories
   const [currentCategory, setCurrentCategory] = useState("all");    // ALWAYS "all" now — categories only scroll, never narrow the view
   const [currentSort, setCurrentSort] = useState(""); // "" = recommended (menu order)
@@ -184,8 +185,8 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     const seq = ++menuReqRef.current; // tag this refresh; only the latest may apply
     const applyDirect = () => {
       getMenuItems(restaurantId)
-        .then((items) => { if (seq === menuReqRef.current) setMenuData(items); }) // drop stale replies
-        .catch((err) => console.error("Error loading menu data:", err));
+        .then((items) => { if (seq === menuReqRef.current) { setMenuData(items); setLoaded(true); } }) // drop stale replies
+        .catch((err) => { console.error("Error loading menu data:", err); if (seq === menuReqRef.current) setLoaded(true); });
       // The menu is ALWAYS the full "all" view now — tapping a category just scrolls
       // to its section, it never narrows. So there's no per-category state to restore.
       getCategories(restaurantId)
@@ -201,6 +202,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         if (seq !== menuReqRef.current) return; // drop stale replies
         if (Array.isArray(bundle.items)) setMenuData(bundle.items);
         if (Array.isArray(bundle.categories)) setDbCategories(bundle.categories);
+        setLoaded(true); // fetch resolved — even 0 items now shows an empty state, not endless skeletons
       })
       .catch((err) => { console.error("Error loading menu data (cached endpoint):", err); applyDirect(); });
   };
@@ -761,8 +763,16 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
             B) the "All" view           -> one collapsible dropdown PER category
             C) a single category/search -> the normal flat grid (with the
                                            Favorites-empty tip when relevant) */}
-        {menuData.length === 0 ? (
-          // A) loading skeleton
+        {menuData.length === 0 && loaded ? (
+          // A0) loaded but genuinely EMPTY (a freshly-created restaurant with no dishes
+          // yet): show a friendly empty state, NOT endless skeletons (bug G2, 2026-07-05).
+          <div className="menu-empty-state" style={{ textAlign: "center", padding: "56px 24px", color: "var(--muted)" }}>
+            <i className="fas fa-utensils" style={{ fontSize: 40, opacity: 0.5, color: "var(--accent)" }} aria-hidden="true" />
+            <p style={{ marginTop: 16, fontSize: 16, fontWeight: 600, color: "var(--text)" }}>No dishes on the menu yet</p>
+            <p style={{ marginTop: 6, fontSize: 13.5 }}>This restaurant hasn&apos;t added any dishes. Please check back soon.</p>
+          </div>
+        ) : menuData.length === 0 ? (
+          // A) still loading → grey placeholder cards
           <div className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}>
             {showSkeleton
               ? Array.from({ length: 6 }).map((_, i) => (

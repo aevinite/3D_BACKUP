@@ -16,7 +16,7 @@ const WORDMARK = "little French house";
 // The opening "splash" screen shown once when the app first loads: the logo
 // fades in, the wordmark assembles, then the whole curtain slides up to reveal
 // the menu. After it finishes it removes itself from the page.
-export default function IntroSplash({ wordmark, accentColor, logoUrl }: { wordmark?: string; accentColor?: string; logoUrl?: string }) {
+export default function IntroSplash({ wordmark, accentColor, logoUrl, scopeKey }: { wordmark?: string; accentColor?: string; logoUrl?: string; scopeKey?: string }) {
   // Has the intro finished? When true, this component renders nothing.
   const [done, setDone] = useState(false);
   // A handle to the outer splash <div> so GSAP can animate it.
@@ -36,10 +36,14 @@ export default function IntroSplash({ wordmark, accentColor, logoUrl }: { wordma
     };
     // Play the intro only ONCE per visit — not every time the menu re-mounts
     // (e.g. coming back from a dish page). A full refresh / new tab plays it again.
-    // sessionStorage remembers things only for THIS browser tab/visit. We use
-    // the key "lfh_intro_seen" to note we've already shown the splash.
+    // sessionStorage remembers things only for THIS browser tab/visit. The key is
+    // scoped PER RESTAURANT (bug G3/L1, 2026-07-05): a single global "lfh_intro_seen"
+    // meant that after seeing restaurant A's splash, opening restaurant B in the same
+    // tab skipped B's own branded intro entirely — a white-label violation. Keying by
+    // the restaurant id (falls back to the wordmark) shows each tenant its own splash once.
+    const seenKey = "lfh_intro_seen:" + (scopeKey || wordmark || "default");
     let seen = false;
-    try { seen = sessionStorage.getItem("lfh_intro_seen") === "1"; } catch {}
+    try { seen = sessionStorage.getItem(seenKey) === "1"; } catch {}
     // If we've shown it already this visit (or the visitor prefers reduced
     // motion), skip straight to the finished state.
     if (seen || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
@@ -47,7 +51,7 @@ export default function IntroSplash({ wordmark, accentColor, logoUrl }: { wordma
       return;
     }
     // Otherwise, remember that we're showing it now so it won't replay.
-    try { sessionStorage.setItem("lfh_intro_seen", "1"); } catch {}
+    try { sessionStorage.setItem(seenKey, "1"); } catch {}
     // gsap.context groups all these animations so we can cleanly undo them later.
     const ctx = gsap.context(() => {
       // A timeline plays the steps below back-to-back in order.
@@ -86,7 +90,8 @@ export default function IntroSplash({ wordmark, accentColor, logoUrl }: { wordma
       window.removeEventListener("pageshow", onVisible);
       ctx.revert();
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once per mount; scopeKey/wordmark are stable for a page load
 
   // Once the intro is over, render nothing at all.
   if (done) return null;

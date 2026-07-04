@@ -156,7 +156,12 @@ export async function PATCH(req: NextRequest) {
       const display = String(body.name || "").trim().slice(0, 80);
       const key = normalizeLoginName(display);
       if (key.length < 2) return bad("Name must be at least 2 characters.");
-      const clash = (await sb.from("staff_users").select("id").eq("username", key).neq("id", id).limit(1)).data?.[0];
+      // Names are unique PER restaurant (mig 091), so the clash-check MUST be scoped to
+      // this user's restaurant — a global check wrongly rejected a name that's free at the
+      // user's own restaurant just because another tenant uses it (bug M6, 2026-07-05).
+      // Matches the create path, which already scopes by restaurant_id.
+      const target = (await sb.from("staff_users").select("restaurant_id").eq("id", id).maybeSingle()).data;
+      const clash = target ? (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", target.restaurant_id).neq("id", id).limit(1)).data?.[0] : null;
       if (clash) return bad("That name is taken — pick another.", 409);
       patch.name = display;
       patch.username = key;
