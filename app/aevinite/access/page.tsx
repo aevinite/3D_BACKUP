@@ -22,6 +22,35 @@ const MANAGER_POWERS: [string, string][] = [
 const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"]];
 const TRI: [string, string][] = [["off", "Off"], ["on", "On"], ["pin", "On · PIN"]];
 
+// Small pure UI atoms — hoisted to module scope (defining them inside the page
+// body recreated them every render; the react-hooks/static-components lint
+// rightly errors on that).
+const Toggle = ({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) => (
+  <button type="button" role="switch" aria-checked={on} onClick={() => onChange(!on)}
+    style={{ width: 44, height: 26, borderRadius: 999, border: "1px solid var(--ac-line, #d8cdb8)", background: on ? "var(--ac-accent, #c98f3f)" : "var(--ac-off, #e6dcc9)", position: "relative", cursor: "pointer", transition: "background .15s", flex: "none" }}>
+    <span style={{ position: "absolute", top: 2, left: on ? 20 : 2, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,.3)" }} />
+  </button>
+);
+const Tri = ({ val, onChange, withDefault }: { val: string; onChange: (v: string) => void; withDefault?: boolean }) => (
+  <select value={val} onChange={(e) => onChange(e.target.value)}
+    style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--ac-line,#d8cdb8)", background: "var(--ac-card,#fff)", color: "inherit", fontSize: 13.5, cursor: "pointer" }}>
+    {withDefault && <option value="default">Default</option>}
+    {TRI.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+  </select>
+);
+const Card = ({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) => (
+  <section style={{ background: "var(--ac-card,#fff)", border: "1px solid var(--ac-line,#e6dcc9)", borderRadius: 10, padding: "16px 18px", marginBottom: 12 }}>
+    <h3 style={{ margin: "0 0 4px", fontSize: 14.5 }}>{title}</h3>
+    {hint && <p style={{ margin: "0 0 12px", color: "var(--ac-muted,#857655)", fontSize: 12.5, lineHeight: 1.5 }}>{hint}</p>}
+    {children}
+  </section>
+);
+const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--ac-line,#f0e9dc)" }}>
+    <span style={{ fontSize: 13.5 }}>{label}</span>{children}
+  </div>
+);
+
 export default function AccessPage() {
   const [rests, setRests] = useState<Rest[]>([]);
   const [rid, setRid] = useState<string>("");
@@ -68,56 +97,30 @@ export default function AccessPage() {
   const savePanel = async (panel: string, enabled: boolean) => {
     setPanels((x) => ({ ...x, [panel]: enabled }));
     const r = await fetch("/api/admin/restaurants/panels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, panel, enabled }) });
-    r.ok ? toast("Saved") : (toast("Failed"), loadRestaurant(rid));
+    if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
   };
   const saveFeature = async (key: string, value: boolean) => {
     setFeatures((x) => ({ ...x, [key]: value }));
     const r = await fetch("/api/admin/restaurants/features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, key, value }) });
-    r.ok ? toast("Saved") : (toast("Failed"), loadRestaurant(rid));
+    if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
   };
   const saveManager = async (key: string, value: boolean) => {
     setManager((x) => ({ ...x, [key]: value }));
     const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, manager: { [key]: value } }) });
-    r.ok ? toast("Saved") : (toast("Failed"), loadRestaurant(rid));
+    if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
   };
   const saveTablet = async (key: string, value: string) => {
     setTablet((x) => ({ ...x, [key]: value }));
     const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, tablet: { [key]: value } }) });
-    r.ok ? toast("Saved") : (toast("Failed"), loadRestaurant(rid));
+    if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
   };
   const saveStaffPerm = async (userId: string, key: string, value: string) => {
     setStaff((list) => list.map((u) => u.id === userId ? { ...u, permissions: { ...(u.permissions || {}), [key]: value } } : u));
     // "default" clears the override (null) so the user inherits the restaurant-wide setting.
     const perm = value === "default" ? null : value;
     const r = await fetch("/api/owner/staff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: userId, action: "set_permissions", permissions: { [key]: perm } }) });
-    r.ok ? toast("Saved") : (toast("Failed"), loadRestaurant(rid));
+    if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
   };
-
-  const Toggle = ({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) => (
-    <button type="button" role="switch" aria-checked={on} onClick={() => onChange(!on)}
-      style={{ width: 44, height: 26, borderRadius: 999, border: "1px solid var(--ac-line, #d8cdb8)", background: on ? "var(--ac-accent, #c98f3f)" : "var(--ac-off, #e6dcc9)", position: "relative", cursor: "pointer", transition: "background .15s", flex: "none" }}>
-      <span style={{ position: "absolute", top: 2, left: on ? 20 : 2, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,.3)" }} />
-    </button>
-  );
-  const Tri = ({ val, onChange, withDefault }: { val: string; onChange: (v: string) => void; withDefault?: boolean }) => (
-    <select value={val} onChange={(e) => onChange(e.target.value)}
-      style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--ac-line,#d8cdb8)", background: "var(--ac-card,#fff)", color: "inherit", fontSize: 13.5, cursor: "pointer" }}>
-      {withDefault && <option value="default">Default</option>}
-      {TRI.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-    </select>
-  );
-  const Card = ({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) => (
-    <section style={{ background: "var(--ac-card,#fff)", border: "1px solid var(--ac-line,#e6dcc9)", borderRadius: 16, padding: "18px 20px", marginBottom: 16 }}>
-      <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>{title}</h3>
-      {hint && <p style={{ margin: "0 0 14px", color: "var(--ac-muted,#857655)", fontSize: 13, lineHeight: 1.5 }}>{hint}</p>}
-      {children}
-    </section>
-  );
-  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "9px 0", borderBottom: "1px solid var(--ac-line,#f0e9dc)" }}>
-      <span style={{ fontSize: 14.5 }}>{label}</span>{children}
-    </div>
-  );
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto", padding: "8px 4px 60px" }}>

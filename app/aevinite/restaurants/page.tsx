@@ -7,6 +7,7 @@
 // .adm-* styling, parameterised by restaurant.
 import { useCallback, useEffect, useState } from "react";
 import { splitBrandSegments, stripBrandMarkers } from "@/lib/brandText";
+import { openRestaurantPanel } from "@/components/admin/shared";
 
 // Render brand text in the live preview: *marked* parts use the accent colour,
 // the rest the mode's text colour — exactly how the guest menu renders it.
@@ -42,6 +43,18 @@ export default function AdminRestaurants() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Restaurant | null>(null);
+  // ?focus=<slug> (set by the Command page + the topbar quick-switcher): scroll to
+  // and highlight that row. Read from window.location (not useSearchParams) so this
+  // client page needs no Suspense boundary.
+  const [focusSlug, setFocusSlug] = useState<string | null>(null);
+  useEffect(() => {
+    try { setFocusSlug(new URLSearchParams(window.location.search).get("focus")); } catch {}
+  }, []);
+  useEffect(() => {
+    if (!focusSlug || !list) return;
+    const el = document.getElementById(`rest-row-${focusSlug}`);
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focusSlug, list]);
 
   // Load the restaurant list once (and again when we come back from a detail view
   // so a freshly-created settings row + owner assignment show their latest state).
@@ -94,9 +107,15 @@ export default function AdminRestaurants() {
             {rows.map((r) => (
               <button
                 key={r.id}
+                id={`rest-row-${r.slug}`}
                 className="adm-logrow"
                 onClick={() => setSelected(r)}
-                style={{ gridTemplateColumns: "1.2fr 1fr 1fr 80px 80px", width: "100%", border: 0, background: "transparent", color: "var(--text)", cursor: "pointer", textAlign: "left", font: "inherit" }}
+                style={{
+                  gridTemplateColumns: "1.2fr 1fr 1fr 80px 80px", width: "100%", border: 0, color: "var(--text)", cursor: "pointer", textAlign: "left", font: "inherit",
+                  // The ?focus= row gets a quiet accent highlight so the eye lands on it.
+                  background: focusSlug === r.slug ? "color-mix(in srgb, var(--accent) 10%, transparent)" : "transparent",
+                  boxShadow: focusSlug === r.slug ? "inset 2px 0 0 var(--accent)" : undefined,
+                }}
                 title={`Open ${r.name}`}
               >
                 <span style={{ fontWeight: 700 }}>{r.name}</span>
@@ -609,14 +628,11 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
   const openPanel = async (path: string) => {
     setBusy(true); setMsg(null);
     try {
-      const r = await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id }) });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't enter restaurant.");
+      // Shared act-as helper (components/admin/shared.tsx) — also used by the
+      // Command page's quick-open buttons. Sets the act-as cookie, then opens the
+      // panel in a new tab pinned to this restaurant via ?rid=.
+      await openRestaurantPanel(restaurant.id, path);
       setViewing(true);
-      // ?rid= pins THAT TAB to this restaurant. The act-as cookie above is browser-wide,
-      // so without the URL pin, opening a second restaurant's panel silently shifted every
-      // already-open panel tab to it (owner, 2026-07-03 — "Aangan's manager panel shifts to
-      // the other restaurant"). The cookie stays as the fallback for the owner dashboard.
-      window.open(`${path}?rid=${encodeURIComponent(restaurant.id)}`, "_blank", "noopener");
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const stop = async () => {

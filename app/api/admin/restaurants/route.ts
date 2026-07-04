@@ -31,11 +31,14 @@ export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const [restQ, setQ, ownersQ] = await Promise.all([
     sb.from("restaurants").select("id, slug, name, active, owner_user_id").order("name"),
-    sb.from("settings").select("restaurant_id"),
+    // enabled_panels rides along (tiny JSONB) so the admin home can show each
+    // restaurant's M/K/T/O panel chips WITHOUT a per-row fetch. Read-only add.
+    sb.from("settings").select("restaurant_id, enabled_panels"),
     sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true).order("name"),
   ]);
   if (restQ.error) return bad(restQ.error.message, 500);
   const withSettings = new Set((setQ.data || []).map((r) => r.restaurant_id).filter(Boolean));
+  const panelsByRid = new Map((setQ.data || []).map((r) => [r.restaurant_id, (r as { enabled_panels?: Record<string, boolean> | null }).enabled_panels || null]));
   const owners = (ownersQ.data || []).map((o) => ({ id: o.id, name: o.name || o.username }));
   const ownerName = new Map(owners.map((o) => [o.id, o.name]));
   const restaurants = (restQ.data || []).map((r) => ({
@@ -43,6 +46,8 @@ export async function GET(req: NextRequest) {
     hasSettings: withSettings.has(r.id),
     ownerUserId: r.owner_user_id || null,
     ownerName: r.owner_user_id ? (ownerName.get(r.owner_user_id) || "—") : null,
+    // Panel flags: a panel is ON unless explicitly false (matches /panels route semantics).
+    panels: panelsByRid.get(r.id) || null,
   }));
   return ok({ restaurants, owners });
 }

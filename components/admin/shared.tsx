@@ -14,7 +14,7 @@ export type Overview = {
   maintenance: boolean; sessionsEnabled: boolean; tableCount: number;
   features: Record<string, boolean>;
   openTables: number; activeOrders: number; unpaidOrders: number;
-  revenueToday: number; ordersToday: number;
+  ordersToday: number;
 };
 export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string; restaurant_name?: string | null; restaurant_slug?: string | null };
 
@@ -43,6 +43,23 @@ export const ACT_LABEL: Record<string, string> = {
 };
 
 export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
+
+// openRestaurantPanel — the admin "act-as" pattern, shared by the home command
+// table and the Restaurants detail page. Sets the short-lived act-as cookie via
+// POST /api/admin/act-as, then opens the panel in a NEW tab with ?rid= pinning
+// THAT tab to the restaurant (the cookie is browser-wide; without the URL pin,
+// opening a second restaurant's panel silently shifted every open panel tab —
+// owner 2026-07-03). Throws on failure so callers can surface the message.
+export async function openRestaurantPanel(restaurantId: string, path: string) {
+  const r = await fetch("/api/admin/act-as", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ restaurant_id: restaurantId }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Couldn't enter restaurant.");
+  window.open(`${path}?rid=${encodeURIComponent(restaurantId)}`, "_blank", "noopener");
+}
 export const timeAgo = (iso: string) => {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return "just now";
@@ -99,12 +116,13 @@ export function useActiveAutoRefresh(fn: () => void, intervalMs = 60000, idleMs 
   }, [intervalMs, idleMs]);
 }
 
+// NO revenue here (owner 2026-07-03: the admin panel shows no earnings anywhere;
+// the only ₹ allowed is a live table's unpaid "due" on the floor grid below).
 export function StatCards({ ov }: { ov: Overview | null }) {
   const cells: [string, string | number][] = [
     ["Open tables", ov ? ov.openTables : "…"],
     ["Active orders", ov ? ov.activeOrders : "…"],
     ["Unpaid bills", ov ? ov.unpaidOrders : "…"],
-    ["Revenue today", ov ? inr(ov.revenueToday) : "…"],
     ["Orders today", ov ? ov.ordersToday : "…"],
   ];
   return (
