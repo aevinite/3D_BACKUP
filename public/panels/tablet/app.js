@@ -1542,7 +1542,7 @@ function orderCartHtml() {
   const total = state.cart.reduce((s, l) => s + l.price * l.qty, 0);
   return `<div class="cart">
       <h3>This order</h3>
-      ${lines || `<div class="muted">Tap dishes to add them.</div>`}
+      <div class="cart-lines">${lines || `<div class="muted">Tap dishes to add them.</div>`}</div>
       <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Allergies / notes for the kitchen (e.g. nuts, less ice) — whole order" value="${esc(state.allergies || "")}">
       <div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
       <div class="muted small">Final bill (incl. tax) is computed by the system when you send it.</div>

@@ -33,6 +33,15 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 /* two-pane layout: floor left, work panel right (stacks when narrow) */
 .layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr); gap: 14px; padding: 14px 18px; align-items: start; }
 @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+/* On tablet/desktop widths the floor and the work panel scroll INDEPENDENTLY:
+   the layout fills the viewport below the sticky topbar and each pane owns its
+   scrollbar (owner, 2026-07-04 — scrolling one side must never move the other).
+   overscroll-behavior stops a pane that hit its end from dragging the page. */
+@media (min-width: 761px) {
+  body { height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
+  .layout { flex: 1; min-height: 0; align-items: stretch; padding-bottom: 0; }
+  .layout .floor, .layout .panel { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 14px; }
+}
 
 /* floor tiles — fluid grid, no dead gap */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; align-items: start; }
@@ -61,10 +70,16 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
   font-family: inherit; padding: 12px 12px 13px; text-align: left; overflow: hidden; }
 /* the action / progress cluster sticks to the bottom, so all tiles read evenly */
 .tile .topen, .tile .tstrip { margin-top: auto; }
-.tile.sel { outline: 3px solid var(--blue); outline-offset: 1px; }
+/* Selection ring: gold normally, but on a tile that carries the red/green payment
+   outline the ring takes THAT colour — brighter + glowing — so selecting an unpaid
+   table makes the red POP instead of hiding it (owner, 2026-07-04). */
+.tile.sel { --selc: var(--blue); outline: 3px solid var(--selc); outline-offset: 1px;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--selc) 45%, transparent); }
 /* OUTLINE = payment (only on tables that have orders) */
 .tile.pay-unpaid { border-color: var(--red); }
 .tile.pay-paid { border-color: var(--green); }
+.tile.sel.pay-unpaid { --selc: #ff6b64; border-color: #ff6b64; }
+.tile.sel.pay-paid { --selc: #3ee586; border-color: #3ee586; }
 /* A waiter call / a join-or-open request is shown by the corner BADGES + the tile's
    state colour (e.g. amber "Wants in") — NOT a ring. Red is reserved for an UNPAID
    bill (.pay-unpaid), so ringing a free/requested table red was confusing. (2026-06-18) */
@@ -314,7 +329,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .accept { margin: 10px 12px; display: block; width: calc(100% - 24px); background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; font-weight: 800; text-align: center; padding: 11px; border-radius: 10px; font-size: 13.5px; border: 0; cursor: pointer; }
 
 /* actions row: Take order (primary) + Move table / Move an order (secondary) */
-.dacts { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 16px 12px; }
+/* The action cluster is PINNED below the scrollable detail body. It needs its own
+   opaque background + a divider: without them the orders list scrolling underneath
+   showed through and half-covered buttons looked broken (owner, 2026-07-04 phone pass). */
+.dacts { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 16px 12px;
+  background: var(--panel); border-top: 1px solid var(--line); }
 .dacts .btn { flex: 1; min-width: 120px; }
 .dacts .btn.primary { flex: 2; }
 
@@ -513,12 +532,24 @@ body.om-mode #tabletClose { display: none; }
 @media (max-width: 760px) {
   .om.lite { position: fixed; inset: 0; z-index: 45; background: var(--bg);
     display: flex; flex-direction: column; height: 100vh; height: 100dvh; padding: 8px 12px; box-sizing: border-box; }
-  .om.lite .om-head { padding: 2px 0 8px; margin: 0; align-items: center; }
-  .om.lite .om-head h2 { font-size: 16px; flex: 0 1 auto; }
-  .om.lite .om-head .om-search { order: 3; flex-basis: 100%; margin-top: 8px; }
+  /* Compact ONE-ROW header (owner 2026-07-04: the top was eating ~25% of the phone):
+     the table number shrinks to a small pill, the search sits beside it instead of
+     wrapping onto its own row. */
+  .om.lite .om-head { padding: 2px 0 8px; margin: 0; align-items: center; flex-wrap: nowrap; gap: 8px; }
+  .om.lite .om-head h2 { flex: 0 0 auto; font-size: 12.5px; font-weight: 800; margin: 0;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 7px 11px; }
+  .om.lite .om-head .om-search { order: 0; flex: 1 1 auto; flex-basis: auto; margin-top: 0; min-width: 0; }
   .om.lite .om-body, .om.lite .om-body.no-cart { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
   .om.lite .om-nav { flex: 0 0 auto; }
   .om.lite .om-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; }   /* MENU — own scroll, fills the top */
-  .om.lite .om-cart { flex: 0 0 auto; max-height: 42vh; max-height: 42dvh; overflow-y: auto;    /* ORDER — own scroll, capped bottom half */
-    border-top: 2px solid var(--line); margin-top: 6px; padding-top: 8px; }
+  /* ORDER — a FIRM half of the screen (owner 2026-07-04: 50-50, always room to review
+     what's been taken), not "grow up to 42dvh". Inside it only the item LINES scroll;
+     the allergy field, total and SEND button stay pinned and always visible. */
+  .om.lite .om-cart { flex: 0 0 auto; height: 47vh; height: 47dvh; max-height: none; overflow: hidden;
+    display: flex; flex-direction: column; border-top: 2px solid var(--line); margin-top: 6px; padding-top: 8px; }
+  .om.lite .om-cart .cart { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .om.lite .om-cart .cart-lines { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  /* While the phone order screen is open, hide the floating panel-✕ — it sat EXACTLY
+     on top of "← back" (both at the top-right) and a mistap dropped the whole cart. */
+  body:has(.om.lite) #tabletClose { display: none; }
 }

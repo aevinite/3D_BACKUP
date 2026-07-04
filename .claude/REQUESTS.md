@@ -249,3 +249,9 @@ owner looks, with cache busting, before claiming anything.
 
 ## 2026-07-03 — Database migrated to Mumbai (owner request)
 - [x] Full Supabase migration Sydney→Mumbai (new project, new account): schema+data exact copy (26 tables verified row-for-row), realtime rewired, branding storage copied, Vercel env swapped + redeployed, local dev repointed. Guest freeze ~3-4 min during cutover. Old project kept as rollback. Latency: ping 723ms→~80ms, order write 589ms→152ms, big kitchen board 3-14s→1.4s.
+
+## 2026-07-04 — Tile selection pop + split scrolls + phone order 50/50 + admin redesign (owner request)
+- [x] Selecting a table must NOT bury its red/green payment outline under the yellow ring — the red/green itself pops (brighter + glow), tablet AND manager (verified live in both, red/green/plain)
+- [x] Tablet floor + right panel: fully SEPARATE scrolls on tablet/desktop widths (verified: body no longer scrolls; each pane owns its scrollbar) — manager already had it (re-verified: grid scrolled 400px, side panel moved 0)
+- [x] Tablet phone (~390px) cleanup: pinned detail action-row got an opaque backdrop (buttons no longer look half-buried); take-order screen 50/50 split — menu top, "This order" review = firm bottom half, item lines scroll inside, SEND always visible; header = one row with a small table pill; floating ✕ hidden while ordering (sat exactly on ← back, mistap dropped the cart)
+- [ ] Whole NEW admin panel UI per the 2026-07-03 spec (dense real-data SaaS console; NO earnings anywhere; restaurants/panels/access/taxes; god-mode) — building on `feat/admin-redesign`, NOT merged to main until owner reviews
