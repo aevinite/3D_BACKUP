@@ -4571,8 +4571,16 @@ function tablePanelParts(t) {
 
   // Both totals are net of any discounts staff have given. While streaming, the summary
   // tile's precomputed `due` stands in (it's server-computed net of discounts too).
-  const due = streaming ? (Number(sumTile.due) || 0) : os.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid").reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
-  const billTotal = streaming ? (Number(sumTile.due) || 0) : os.filter((o) => o.status !== "cancelled").reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
+  // Money is computed via billMath (per-bill, discount BEFORE tax, this restaurant's tax
+  // rate) — the SAME helper the printed bill uses — so the pay screen, the receipt and
+  // the Z-report always agree. (Was summing the STORED per-order total, which carried a
+  // flat 5% on the pre-discount subtotal → the staff collected a different amount than
+  // the bill said.) A table settles all-or-nothing, so `due` is the unpaid slice's total.
+  const unpaidOs = os.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  const mBill = billMath(os);
+  const mDue = billMath(unpaidOs);
+  const due = streaming ? (Number(sumTile.due) || 0) : mDue.total;
+  const billTotal = streaming ? (Number(sumTile.due) || 0) : mBill.total;
   const canFree = os.length > 0 && os.every((o) => o.payment_status === "paid" || o.status === "cancelled");
 
   // ── HEAD: a status pill, a one-line summary (bill #, guests, dishes, due) and a
@@ -4693,10 +4701,11 @@ function tablePanelParts(t) {
   const printBtn = os.length ? `<button class="btn" id="sxPrint">🖨 Print</button>` : "";
   // The bill now shows a full BREAKDOWN (subtotal · discount · GST · total) summed
   // across the table's non-cancelled orders, not just a one-line "Due/Total".
-  const nonCanc = os.filter((o) => o.status !== "cancelled");
-  const sumSub = nonCanc.reduce((s, o) => s + (parseFloat(o.subtotal) || 0), 0);
-  const sumTax = nonCanc.reduce((s, o) => s + (parseFloat(o.tax) || 0), 0);
-  const sumDisc = nonCanc.reduce((s, o) => s + (parseFloat(o.discount) || 0), 0);
+  // Breakdown from billMath (same rate + discount-before-tax rule as the printed bill),
+  // NOT the stored per-order subtotal/tax columns (tax there is a flat 5%, pre-discount).
+  const sumSub = mBill.subtotal;
+  const sumTax = mBill.tax;
+  const sumDisc = mBill.disc;
   const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>Subtotal</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 ? `<div class="tp-bl"><span>GST</span><b>${inr(sumTax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
 
   // The PRIMARY table-wide action: accept everything that's new, else serve everything
