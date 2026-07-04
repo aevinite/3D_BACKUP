@@ -806,8 +806,8 @@ body {
 .tp-detail-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
 .tp-detail-foot { padding: 14px 16px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tp-detail-foot .tp-free { margin-left: auto; }
-/* the selected tile gets a gold ring so it's obvious which detail is showing */
-.ftile.ft-sel { outline: 3px solid var(--gold); outline-offset: 1px; }
+/* (selected-tile ring lives with the tile styles below — see .ftile.ft-sel,
+   which keeps the red/green payment colour visible instead of covering it) */
 /* dish row actions (Serve + 🗑 delete) sit together at the row's right edge */
 .sx-item-acts { display: inline-flex; align-items: center; gap: 6px; }
 .sx-item-del { padding: 4px 8px; }
@@ -1262,10 +1262,16 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .fstat.warn .fstat-n { color: var(--gold-strong); }
 .fstat.alert .fstat-n { color: #f59e0b; }
 
-/* ---- tiles: rounder, lift on hover, a clear gold ring when selected ---- */
+/* ---- tiles: rounder, lift on hover, a clear ring when selected ---- */
 .ftile { border-radius: 16px; padding: 12px 13px; min-height: 118px; transition: transform .12s ease, box-shadow .12s ease, border-color .12s; }
 .ftile:hover { transform: translateY(-3px); box-shadow: 0 12px 26px -12px rgba(0,0,0,.7); }
-.ftile.ft-sel { outline: none; border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold), 0 12px 26px -12px rgba(0,0,0,.8); }
+/* Selection ring colour: gold normally, but a tile that carries a payment outline
+   keeps THAT meaning — the red/green goes BRIGHTER + glows instead of being
+   swallowed by gold (owner, 2026-07-04: "the red should pop, not disappear"). */
+.ftile.ft-sel { --selc: var(--gold); outline: none; border-color: var(--selc);
+  box-shadow: 0 0 0 2px var(--selc), 0 0 18px color-mix(in srgb, var(--selc) 45%, transparent), 0 12px 26px -12px rgba(0,0,0,.8); }
+.ftile.ft-sel.pay-red { --selc: #ff6b64; }
+.ftile.ft-sel.pay-green { --selc: #3ee586; }
 
 /* Popped-out detail: a movable floating card instead of pinned to the side (owner
    request, 2026-06-30 — "it should be movable"). Positioning wrapper only — the
