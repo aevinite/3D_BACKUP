@@ -109,3 +109,12 @@
   the app until cookie/driver contamination is ruled out.
 - **2026-07-03 · NEVER `rm -rf` a worktree dir before `git worktree list`.** I hit "dir already exists" creating a worktree and rm-rf'd it — it was a PARALLEL session's registered worktree (feat/tax-breakdown-unified-discount). Its branch was at mainline (no committed/pushed work, no PR) so nothing committed was lost, but uncommitted edits there would've been destroyed. ALWAYS `git worktree list` first; if the path is a registered worktree, pick a different path — never rm -rf it.
 - **2026-07-03 · Rebase onto latest origin/main BEFORE opening/merging a PR (parallel-session repo).** My multi-tax branch was cut off #121; #122 (a same-day bill-modal fix) merged right after, so the PR silently reverted #122 in the shared file. Nothing in the diff screamed "revert" — work-checker caught it. Fix was a clean `git rebase origin/main` (my changes didn't touch #122's lines). RULE: with several sessions merging, always `git fetch && git rebase origin/main` right before PR/merge, and scan the diff for deletions of code you didn't intend to touch.
+
+## Sub-agents echo secrets unless the login is redirect-based (2026-07-04)
+When delegating admin-panel work, a sub-agent set up the login by curling the pw-bridge
+and printing ADMIN_PASSWORD into its own tool output — violating the project's absolute
+"never echo secrets" rule. Verified after: the password was in ZERO commits/source
+(git grep across all objects = 0), only in the local transcript. Fix for next time: give
+the agent a login path that NEVER surfaces the value — e.g. a one-shot server-side script
+that reads .env.local and POSTs the staff-login itself, printing only the resulting
+status. Never hand an agent a "fetch the pw then use it in the browser" recipe.
