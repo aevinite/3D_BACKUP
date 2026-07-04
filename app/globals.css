@@ -3829,3 +3829,14 @@ a:focus:not(:focus-visible) { outline: none; }
 @media (prefers-reduced-motion: reduce) {
   .adx-navlink, .adx-switch-trig, .adx-switch-opt, .adx .adm-btn { transition: none; }
 }
+
+/* Live floor — the "year calendar" (owner 2026-07-04): restaurants = months,
+   tables = tiny date cells. Colour carries the state; keep cells ≥20px so the
+   number stays legible and the hover/tooltip target isn't fiddly. */
+.adx .adm-flooryear { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.adx .adm-floormonth { padding: 12px 14px; }
+.adx .adm-floormonth header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.adx .adm-floormonth-name { background: none; border: 0; padding: 0; font: inherit; font-size: 13.5px; font-weight: 700; color: var(--text); cursor: pointer; text-align: left; }
+.adx .adm-floormonth-name:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.adx .adm-minigrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(22px, 1fr)); gap: 3px; }
+.adx .adm-minitile { display: grid; place-items: center; aspect-ratio: 1; border-radius: 4px; font-size: 8.5px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; cursor: default; }

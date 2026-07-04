@@ -43,15 +43,19 @@ export default function AdminRestaurants() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Restaurant | null>(null);
-  // ?focus=<slug> (set by the Command page + the topbar quick-switcher): scroll to
-  // and highlight that row. Read from window.location (not useSearchParams) so this
-  // client page needs no Suspense boundary.
+  // ?focus=<slug> (set by the Command page's Manage→ + the topbar quick-switcher):
+  // open that restaurant's DETAIL directly — landing on the list and making the
+  // admin find the row again was the bug (owner 2026-07-04: "Manage should take me
+  // to the details of the particular restaurant"). Read from window.location (not
+  // useSearchParams) so this client page needs no Suspense boundary.
   const [focusSlug, setFocusSlug] = useState<string | null>(null);
   useEffect(() => {
     try { setFocusSlug(new URLSearchParams(window.location.search).get("focus")); } catch {}
   }, []);
   useEffect(() => {
     if (!focusSlug || !list) return;
+    const hit = list.find((r) => r.slug === focusSlug);
+    if (hit) { setSelected(hit); setFocusSlug(null); return; } // consume it — Back shows the plain list
     const el = document.getElementById(`rest-row-${focusSlug}`);
     if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [focusSlug, list]);
@@ -125,7 +129,7 @@ export default function AdminRestaurants() {
                   <span className="adm-chip" style={r.active
                     ? { background: "color-mix(in srgb, var(--adm-ok) 22%, transparent)", color: "var(--adm-ok)" }
                     : { background: "var(--muted2, rgba(120,120,120,0.18))", color: "var(--muted)" }}>
-                    {r.active ? "Active" : "Off"}
+                    {r.active ? "Active" : "Suspended"}
                   </span>
                 </span>
                 <span style={{ textAlign: "right", color: "var(--accent)", fontWeight: 700, fontSize: 13 }}>
@@ -245,6 +249,46 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
 }
 
 // The per-restaurant detail: assign its OWNER + flip its guest feature switches.
+// StatusCard — Live vs SUSPENDED, with the kill switch (owner 2026-07-04: "what does
+// suspended mean? where is the button?"). Suspended = active:false → the tenant
+// resolver stops serving the guest menu; the admin still reaches every panel via
+// act-as. Suspending is confirmed first — flipping the LIVE client off by accident
+// would be an outage.
+function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const setActive = async (active: boolean) => {
+    if (!active && !window.confirm(`Suspend ${restaurant.name}?\n\nIts guest menu goes OFFLINE immediately (staff panels stay reachable to you via act-as). You can reactivate any time.`)) return;
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch("/api/admin/restaurants", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_restaurant_active", restaurant_id: restaurant.id, active }),
+      });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't change the status.");
+      onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="adm-card" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", ...(restaurant.active ? {} : { borderColor: "var(--adm-danger)" }) }}>
+      <span className="adm-chip" style={restaurant.active
+        ? { background: "color-mix(in srgb, var(--adm-ok) 22%, transparent)", color: "var(--adm-ok)" }
+        : { background: "color-mix(in srgb, var(--adm-danger) 22%, transparent)", color: "var(--adm-danger)" }}>
+        {restaurant.active ? "Live" : "Suspended"}
+      </span>
+      <span style={{ flex: 1, fontSize: 13 }} className="adm-muted">
+        {restaurant.active
+          ? "Guests can open this restaurant's menu."
+          : "Suspended — the guest menu is offline. Staff panels stay reachable to you via the buttons below."}
+      </span>
+      {err && <span style={{ color: "var(--adm-danger)", fontSize: 12.5 }}>{err}</span>}
+      {restaurant.active
+        ? <button className="adm-btn danger" disabled={busy} onClick={() => setActive(false)}><i className="fas fa-power-off" style={{ marginRight: 7 }} aria-hidden="true" />Suspend…</button>
+        : <button className="adm-btn primary" disabled={busy} onClick={() => setActive(true)}><i className="fas fa-play" style={{ marginRight: 7 }} aria-hidden="true" />Reactivate</button>}
+    </div>
+  );
+}
+
 function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
   const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
   const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
@@ -365,6 +409,8 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         <span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{restaurant.slug}/menu</span>
         {" · "}Turn this restaurant&apos;s guest features on or off. Changes affect only its menu.
       </p>
+
+      <StatusCard restaurant={restaurant} onChanged={onChanged} />
 
       <OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} />
 

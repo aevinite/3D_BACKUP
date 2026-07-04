@@ -45,20 +45,14 @@ export const ACT_LABEL: Record<string, string> = {
 export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
 
 // openRestaurantPanel — the admin "act-as" pattern, shared by the home command
-// table and the Restaurants detail page. Sets the short-lived act-as cookie via
-// POST /api/admin/act-as, then opens the panel in a NEW tab with ?rid= pinning
-// THAT tab to the restaurant (the cookie is browser-wide; without the URL pin,
-// opening a second restaurant's panel silently shifted every open panel tab —
-// owner 2026-07-03). Throws on failure so callers can surface the message.
+// table and the Restaurants detail page. Opens the tab SYNCHRONOUSLY on the
+// /api/admin/act-as/go redirect, which sets the act-as cookie and 302s to the
+// panel in one round trip: the tab appears the instant the admin clicks (owner
+// 2026-07-04 — the old await-POST-then-open flow felt slow and risked popup
+// blockers). The ?rid= pin keeps THAT tab on the restaurant even if the
+// browser-wide cookie later changes (owner 2026-07-03).
 export async function openRestaurantPanel(restaurantId: string, path: string) {
-  const r = await fetch("/api/admin/act-as", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ restaurant_id: restaurantId }),
-  });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(d.error || "Couldn't enter restaurant.");
-  window.open(`${path}?rid=${encodeURIComponent(restaurantId)}`, "_blank", "noopener");
+  window.open(`/api/admin/act-as/go?rid=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(path)}`, "_blank", "noopener");
 }
 export const timeAgo = (iso: string) => {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);

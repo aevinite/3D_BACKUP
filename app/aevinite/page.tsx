@@ -89,7 +89,7 @@ export default function AdminCommand() {
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Command</h1>
+        <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Dashboard</h1>
         <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now (auto-updates are throttled to save load)">
           <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
         </button>

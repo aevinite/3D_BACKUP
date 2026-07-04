@@ -97,6 +97,21 @@ export async function POST(req: NextRequest) {
   let body: any = {}; try { body = await req.json(); } catch {}
   const action = String(body?.action || "");
 
+  // ── set_restaurant_active — the platform kill switch (owner 2026-07-04: "where is
+  // the button to suspend?"). active=false stops the tenant resolver serving the
+  // guest menu; the admin can still reach every panel via act-as to inspect/fix. ──
+  if (action === "set_restaurant_active") {
+    const rid = String(body?.restaurant_id || "");
+    const active = !!body?.active;
+    if (!rid) return bad("Missing restaurant_id.");
+    const r = (await sb.from("restaurants").select("id, name").eq("id", rid).limit(1)).data?.[0];
+    if (!r) return bad("Restaurant not found.", 404);
+    const { error } = await sb.from("restaurants").update({ active }).eq("id", rid);
+    if (error) return bad(error.message, 500);
+    await logAction("admin", active ? "restaurant_reactivate" : "restaurant_suspend", { restaurant_id: rid, actor: "admin", detail: `${r.name} ${active ? "reactivated" : "suspended"}` });
+    return ok({ ok: true, active });
+  }
+
   // ── create_restaurant — the admin onboards a NEW restaurant in one go (owner 2026-06-29):
   // make the restaurant row, its settings (cloned from #1 so every NOT NULL column is satisfied,
   // with the chosen enabled_panels), and ONE starter login per ENABLED panel (passwords shown

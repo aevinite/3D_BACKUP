@@ -14,11 +14,15 @@ type NavGroup = { label: string; items: NavItem[]; quiet?: boolean };
 
 // Grouped nav: Operate (daily work) / Manage (tenants & access) / Platform /
 // Coming soon (quiet — placeholders, no dead ends).
+// (Owner 2026-07-04: "Command" reads wrong → Dashboard. The old global "Features"
+// page confused him — per-restaurant features already live in each restaurant's
+// detail + the Access-control hub, so the nav entry is gone; the page itself stays
+// reachable by URL until we delete it.)
 const GROUPS: NavGroup[] = [
   {
     label: "Operate",
     items: [
-      { href: "/aevinite", label: "Command", icon: "fa-table-columns", exact: true },
+      { href: "/aevinite", label: "Dashboard", icon: "fa-table-columns", exact: true },
       { href: "/aevinite/floor", label: "Live floor", icon: "fa-chair" },
       { href: "/aevinite/logs", label: "Activity log", icon: "fa-scroll" },
     ],
@@ -29,7 +33,6 @@ const GROUPS: NavGroup[] = [
       { href: "/aevinite/restaurants", label: "Restaurants", icon: "fa-store" },
       { href: "/aevinite/access", label: "Access control", icon: "fa-key" },
       { href: "/aevinite/users", label: "Users", icon: "fa-users" },
-      { href: "/aevinite/features", label: "Features", icon: "fa-toggle-on" },
     ],
   },
   {
