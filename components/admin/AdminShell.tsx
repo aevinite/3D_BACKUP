@@ -24,6 +24,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { href: "/aevinite", label: "Dashboard", icon: "fa-table-columns", exact: true },
       { href: "/aevinite/floor", label: "Live floor", icon: "fa-chair" },
+      { href: "/aevinite/analytics", label: "Analytics", icon: "fa-chart-pie" },
       { href: "/aevinite/logs", label: "Activity log", icon: "fa-scroll" },
     ],
   },
@@ -37,16 +38,17 @@ const GROUPS: NavGroup[] = [
   },
   {
     label: "Platform",
-    items: [{ href: "/aevinite/settings", label: "Settings", icon: "fa-gear" }],
+    items: [
+      { href: "/aevinite/billing", label: "Billing & plans", icon: "fa-file-invoice" },
+      { href: "/aevinite/health", label: "System health", icon: "fa-heart-pulse" },
+      { href: "/aevinite/settings", label: "Settings", icon: "fa-gear" },
+    ],
   },
   {
     label: "Coming soon",
     quiet: true,
     items: [
       { href: "/aevinite/owners", label: "Owners", icon: "fa-crown", soon: true },
-      { href: "/aevinite/analytics", label: "Analytics", icon: "fa-chart-pie", soon: true },
-      { href: "/aevinite/billing", label: "Billing & plans", icon: "fa-file-invoice", soon: true },
-      { href: "/aevinite/health", label: "System health", icon: "fa-heart-pulse", soon: true },
     ],
   },
 ];
