@@ -18,6 +18,19 @@ import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 export type OwnerScope = { all: true } | { all: false; ids: string[]; ownerId: string };
 
 export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
+  // A logged-in OWNER wins over a stray admin cookie in the same browser. This
+  // matches app/owner/layout.tsx (which renders the OWNER shell when the owner
+  // cookie is valid) — before, layout picked owner chrome while this scoped to
+  // the admin's act-as restaurant: owner header, someone else's numbers
+  // (surfaced 2026-07-04 verifying the redesign on a shared browser profile).
+  const owner = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  if (owner && owner.role === "owner") {
+    // Multi-owner: resolve EVERY restaurant this owner is a member of via the
+    // restaurant_owners join table (migration 097) — widens to all restaurants
+    // they co-own AND never leaks one they aren't a member of.
+    const { data } = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", owner.id);
+    return { all: false, ids: (data || []).map((r) => r.restaurant_id as string), ownerId: owner.id };
+  }
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) {
     // Admin who has DELIBERATELY entered one restaurant is scoped to JUST that
     // restaurant — so the owner cockpit shows exactly what THAT owner sees. This
@@ -41,15 +54,6 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
       return { all: false, ids: [acting], ownerId: "admin" };
     }
     return { all: true };
-  }
-  const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
-  if (u && u.role === "owner") {
-    // Multi-owner: resolve EVERY restaurant this owner is a member of via the
-    // restaurant_owners join table (migration 097), not the single primary-owner
-    // column. This is the ONLY scoping change for a real owner — it widens to all
-    // restaurants they co-own AND never leaks one they aren't a member of.
-    const { data } = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", u.id);
-    return { all: false, ids: (data || []).map((r) => r.restaurant_id as string), ownerId: u.id };
   }
   return null;
 }

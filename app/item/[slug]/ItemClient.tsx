@@ -14,6 +14,7 @@ import { getMenuItems, getItemReviews, submitReview as submitReviewRpc } from "@
 import { getDeviceId } from "@/lib/device";          // stable per-browser id (one rating per dish per device)
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
 import { useFeatures } from "@/lib/features"; // per-restaurant feature switches
+import { tget, tset } from "@/lib/tenantStorage"; // tenant-scoped storage (favorites)
 import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // money formatting
 import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
 import { useTranslation } from "@/lib/i18n";         // translated text strings
@@ -271,7 +272,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
 
         // Load favorite state
         try {
-          const savedFavorites = localStorage.getItem('lfh-favorites');
+          const savedFavorites = tget('lfh-favorites');
           if (savedFavorites) {
             const favorites = JSON.parse(savedFavorites);  // text back into a list
             setFavorited(favorites.includes(found?.id));    // is this dish in it?
@@ -370,7 +371,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     try { localStorage.setItem("lfh-fav-hint-seen", "1"); } catch {}
     try {
       let favorites: string[] = [];
-      const savedFavorites = localStorage.getItem('lfh-favorites');
+      const savedFavorites = tget('lfh-favorites');
       if (savedFavorites) {
         favorites = JSON.parse(savedFavorites);  // read the current list
       }
@@ -381,7 +382,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         // It wasn't — add it.
         favorites.push(item.id);
       }
-      localStorage.setItem('lfh-favorites', JSON.stringify(favorites));  // save back
+      tset('lfh-favorites', JSON.stringify(favorites));  // save back
       setFavorited(!favorited);  // flip the heart on screen
       // Tell the menu's Favorites tab to refresh (same-tab; storage event covers others).
       window.dispatchEvent(new Event("lfh:favorites-updated"));

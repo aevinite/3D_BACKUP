@@ -10,6 +10,7 @@ import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 import { useFeatures } from "@/lib/features";
 import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
 import { getStoredSession } from "@/lib/session";
+import { tget, tset, isTKey } from "@/lib/tenantStorage";
 import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
 import { useBackClose } from "@/lib/backStack"; // phone back button closes the panel
 import SessionTableBill from "@/components/SessionTableBill";
@@ -41,7 +42,9 @@ interface CartItem {
 // feedback row) was removed (owner, 2026-06-17). The cart's second tab is now a
 // LIVE-STATUS tab only — see the live bill (SessionTableBill) + live-orders strip.
 
-const TAX_RATE = 0.05; // 5% — shown as a line on the bill
+// Tax rate is per-restaurant (see lib/tax.ts) — loaded into `taxRate` state from
+// getSettings so the guest is quoted the SAME GST the bill actually charges (this
+// was hardcoded 5%, which under-quoted any restaurant on a different rate).
 
 // normalize(): take whatever messy data was saved in localStorage and turn it
 // into a clean, predictable list of CartItems (filling in safe defaults). This
@@ -79,6 +82,7 @@ export default function CartPanel() {
   const [lockedTable, setLockedTable] = useState<string | null>(null); // when in a session you can ONLY order for that table
   const [tableCount, setTableCount] = useState(0); // how many tables exist; 0 = no limit known
   const [sessionsEnabled, setSessionsEnabled] = useState(false); // v2 dining-session system
+  const [taxRate, setTaxRate] = useState(0.05); // this restaurant's effective tax rate (decimal); 5% until settings load
   const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null); // currency for all prices
   const [allergenMap, setAllergenMap] = useState<Record<string, string[]>>({}); // dish id -> its allergens, for warnings
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]); // the full menu (for pairings/editing)
@@ -101,7 +105,7 @@ export default function CartPanel() {
   // loadCart(): read the saved cart from localStorage and clean it up.
   const loadCart = () => {
     try {
-      const saved = localStorage.getItem("lfh_cart");
+      const saved = tget("lfh_cart");
       setCart(saved ? normalize(JSON.parse(saved)) : []);
     } catch {
       setCart([]);
@@ -109,9 +113,7 @@ export default function CartPanel() {
   };
   // saveCart(): write the cart back to the browser's notepad (localStorage).
   const saveCart = (newCart: CartItem[]) => {
-    try {
-      localStorage.setItem("lfh_cart", JSON.stringify(newCart));
-    } catch {}
+    tset("lfh_cart", JSON.stringify(newCart));
   };
   // commit(): the one place that changes the cart — it updates the screen, saves
   // to storage, and broadcasts "lfh:cart-updated" so the badge/mini-cart refresh.
@@ -146,8 +148,10 @@ export default function CartPanel() {
   useEffect(() => {
     loadCart();
     setCurrencyState(getCurrency());
-    // allergen lookup by dish id (so the bill can warn)
-    getMenuItems()
+    // allergen lookup by dish id (so the bill can warn) — THIS restaurant's menu,
+    // not the default one's (was leaking #1's dishes into every tenant's cart
+    // pairings + a needless whole-menu read of the wrong restaurant).
+    getMenuItems(restaurantId)
       .then((items) => {
         const m: Record<string, string[]> = {};
         items.forEach((i) => (m[i.id] = i.allergens || []));
@@ -157,7 +161,7 @@ export default function CartPanel() {
       .catch(() => {});
     // How many tables exist, so we can reject an out-of-range table number.
     getSettings(restaurantId)
-      .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); })
+      .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); })
       .catch(() => {});
 
     // Live orders are written/polled by OrderTracker; we just read them here.
@@ -165,7 +169,7 @@ export default function CartPanel() {
     loadLive();
     // restore order-wide allergy avoidances (set via "apply to all" or the bill section)
     try {
-      const d = JSON.parse(localStorage.getItem("lfh_declared") || "[]");
+      const d = JSON.parse(tget("lfh_declared") || "[]");
       if (Array.isArray(d) && d.length) setDeclared(d);
     } catch {}
     // Pre-fill the table from a scanned QR (?table=N stored in lib/table). Only
@@ -189,7 +193,7 @@ export default function CartPanel() {
     const handleOpen = () => {
       setOpen(true); loadCart(); loadLive(); setShowHistory(false); prefillScanned(); syncSession();
       // re-read settings on open so a freshly-toggled sessions mode is always respected
-      getSettings(restaurantId).then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); }).catch(() => {});
+      getSettings(restaurantId).then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); }).catch(() => {});
     };
     // handleShowPrev: open straight to the LIVE-STATUS tab (the live table view
     // with the served-progress bar). Fired when the multi-order tracker is tapped.
@@ -206,7 +210,7 @@ export default function CartPanel() {
     // cross tabs, so translate a cross-tab lfh_cart change into the local
     // announcement every cart listener already understands.
     const handleStorageCart = (e: StorageEvent) => {
-      if (e.key === "lfh_cart") window.dispatchEvent(new Event("lfh:cart-updated"));
+      if (isTKey(e.key, "lfh_cart")) window.dispatchEvent(new Event("lfh:cart-updated"));
     };
     // handleAvoidAll: someone ticked "avoid X in all my dishes" in the popup —
     // merge those allergens into our order-wide avoid list.
@@ -254,7 +258,7 @@ export default function CartPanel() {
   // applied, so writing here would overwrite the saved list with [].
   useEffect(() => {
     if (!declaredHydrated.current) { declaredHydrated.current = true; return; }
-    try { localStorage.setItem("lfh_declared", JSON.stringify(declared)); } catch {}
+    tset("lfh_declared", JSON.stringify(declared));
   }, [declared]);
 
   // While the cart is open, re-evaluate live orders every few seconds so a
@@ -320,16 +324,16 @@ export default function CartPanel() {
   // lines visibly add up: subtotal = sum of the printed line values.
   const subtotal = cart.reduce((sum, it) => sum + lineDisp(it), 0);
   const itemCount = cart.reduce((sum, it) => sum + it.qty, 0); // total number of items
-  // 5% tax, rounded to the currency's minor unit (whole ₹ / cents) so it
-  // doesn't jump in ₹10 hops like the menu prices do.
-  const tax = toMinor(subtotal * TAX_RATE, currency || undefined);
+  // Tax at this restaurant's rate, rounded to the currency's minor unit (whole ₹ /
+  // cents) so it doesn't jump in ₹10 hops like the menu prices do.
+  const tax = toMinor(subtotal * taxRate, currency || undefined);
   const total = subtotal + tax; // what the guest pays (display currency, for the BILL UI only)
   // ORDER RECORDS are stored in USD — the tracker, history list and the
   // session pull (which saves the server's USD totals) all share one storage,
   // and they convert at render time. Storing the display number here once put
   // ₹578 through a ×84 conversion and showed ₹48,550. One domain only.
   const subtotalUsd = cart.reduce((sum, it) => sum + parseFloat(it.price) * it.qty, 0);
-  const totalUsd = Math.round(subtotalUsd * (1 + TAX_RATE) * 100) / 100;
+  const totalUsd = Math.round(subtotalUsd * (1 + taxRate) * 100) / 100;
 
   // itemAllergens(): the allergens a given dish contains.
   const itemAllergens = (id: string) => allergenMap[id] || [];
@@ -438,10 +442,10 @@ export default function CartPanel() {
         if (!d?.ok || !d.orderId) return; // order cancelled / failed — the gate showed its own message
         try {
           // Save into the "active orders" list so the OrderTracker shows it.
-          const raw = localStorage.getItem("lfh_active_orders");
+          const raw = tget("lfh_active_orders");
           const arr = (() => { const p = raw ? JSON.parse(raw) : []; return Array.isArray(p) ? p : []; })();
           arr.push({ id: d.orderId, tableNumber: tableTrim, total: totalS, itemCount: countS, items: trackS, status: "received", placedAt: Date.now() });
-          localStorage.setItem("lfh_active_orders", JSON.stringify(arr));
+          tset("lfh_active_orders", JSON.stringify(arr));
           window.dispatchEvent(new Event("lfh:order-placed")); // wake the tracker
         } catch {}
         // Empty the cart and reset the allergy fields, then refresh + close.
@@ -468,7 +472,7 @@ export default function CartPanel() {
       }, restaurantId);
       // Remember this order on THIS device so the guest can follow its status.
       try {
-        const raw = localStorage.getItem("lfh_active_orders");
+        const raw = tget("lfh_active_orders");
         const list = raw ? JSON.parse(raw) : [];
         const active = Array.isArray(list) ? list : [];
         active.push({ // add this order to the live-tracking list
@@ -480,7 +484,7 @@ export default function CartPanel() {
           status: "received",
           placedAt: Date.now(),
         });
-        localStorage.setItem("lfh_active_orders", JSON.stringify(active));
+        tset("lfh_active_orders", JSON.stringify(active));
         window.dispatchEvent(new Event("lfh:order-placed")); // wake the tracker
       } catch {}
       // Pop a success toast confirming the order went to the kitchen.
@@ -804,7 +808,7 @@ export default function CartPanel() {
             {/* The bill summary: subtotal, tax, and grand total. */}
             <div className="bill-rows">
               <div className="bill-line"><span>Subtotal</span><span>{fmtDisp(subtotal)}</span></div>
-              <div className="bill-line"><span>GST (5%)</span><span>{fmtDisp(tax)}</span></div>
+              <div className="bill-line"><span>GST ({Math.round(taxRate * 10000) / 100}%)</span><span>{fmtDisp(tax)}</span></div>
               <div className="bill-line grand"><span>Total</span><span>{fmtDisp(total)}</span></div>
             </div>
 

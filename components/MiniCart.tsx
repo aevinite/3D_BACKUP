@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { tget } from "@/lib/tenantStorage";
 
 // A sticky bottom pill on phones: "🛍 N items · ₹X · View bill". Tapping opens
 // the cart. Hidden when the cart is empty, when the cart panel is open, and on
@@ -27,7 +28,7 @@ export default function MiniCart() {
     try {
       // localStorage is the browser's little notepad that survives page reloads.
       // "lfh_cart" is where the whole cart is saved as text.
-      const raw = localStorage.getItem("lfh_cart");
+      const raw = tget("lfh_cart");
       const arr = raw ? JSON.parse(raw) : []; // turn the saved text back into a list
       const list = Array.isArray(arr) ? arr : [];
       // Add up the quantities of every line to get the total item count.

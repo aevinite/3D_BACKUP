@@ -16,6 +16,7 @@ import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { panelRestaurantId } from "@/lib/panelScope";
+import { effectiveTaxRate } from "@/lib/tax";
 import { closeSession } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
@@ -262,11 +263,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since),     // invoices GENERATED today
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since),        // invoices VOIDED today
         sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since),
-        sb.from("settings").select("tax_rate,restaurant_name,gstin,invoice_prefix").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select("tax_rate,tax_components,restaurant_name,gstin,invoice_prefix").eq("restaurant_id", rid).maybeSingle(),
       ]);
       const orders = (must(ordQ) || []) as any[];
       const set = (must(setQ) || {}) as any;
-      const rate = Number(set.tax_rate) || 0.05;
+      // Effective rate = sum of named tax components (CGST/SGST/…), else the fallback
+      // rate, else 5% — the SAME rule as billMath/the printed bill (lib/tax.ts), so the
+      // Z-report tax matches what the day's bills actually charged. Was flat tax_rate/5%.
+      const rate = effectiveTaxRate(set);
       const r2 = (n: number) => Math.round(n * 100) / 100;
       // Group orders into BILLS by session_id (a solo order is its own bill) so the
       // tax is computed per-bill — IDENTICAL to billMath()/the printed receipt — and the
@@ -348,11 +352,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       else if (range === "year") { since = new Date(now.getFullYear(), now.getMonth() - 11, 1); }
       else { since = new Date(Date.now() - 29 * 864e5); since.setHours(0, 0, 0, 0); }
 
-      const [ordersQ, dishesQ] = await Promise.all([
-        sb.from("orders").select("id,total,discount,status,payment_status,payment_method,created_at,items").eq("restaurant_id", rid).gte("created_at", since.toISOString()),
+      const [ordersQ, dishesQ, setQ] = await Promise.all([
+        sb.from("orders").select("id,subtotal,total,discount,status,payment_status,payment_method,created_at,items").eq("restaurant_id", rid).gte("created_at", since.toISOString()),
         sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
+        sb.from("settings").select("tax_rate,tax_components").eq("restaurant_id", rid).maybeSingle(),
       ]);
       const orders = must(ordersQ), dishes = must(dishesQ);
+      // Same effective rate + discount-before-tax rule as billMath/Z-report (lib/tax.ts),
+      // so the dashboard revenue agrees with the Bills tab and the printed bills. Was
+      // summing the STORED order total (taxed at a flat 5% on the pre-discount subtotal).
+      const rate = effectiveTaxRate(must(setQ) || {});
       const catOf: Record<string, string> = Object.fromEntries(dishes.map((d: { id: string; category?: string }) => [d.id, d.category || "other"]));
       const hours = Array(24).fill(0);
       const topD: Record<string, number> = {}, cats: Record<string, number> = {}, seriesMap: Record<string, number> = {};
@@ -367,7 +376,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       for (const o of orders) {
         if (o.status === "cancelled") { cancelled++; continue; }
         const dt = new Date(o.created_at);
-        const amt = (Number(o.total) || 0) - (Number(o.discount) || 0);
+        const amt = Math.max(0, (Number(o.subtotal) || 0) - (Number(o.discount) || 0)) * (1 + rate);
         // Revenue = money actually COLLECTED, not "orders placed" — same rule as the
         // Bills tab (a bill only counts once settled) and the Z-report's paidNet.
         // Un-paid orders still count toward hours/top-dishes (kitchen load), just
@@ -915,7 +924,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const t = TABLES[a];
       if (!t) return err("unknown kind", 404);
       if ((a === "items" || a === "categories" || a === "filters") && !(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the menu");
+      // Settings save is owner-only unless the owner has granted a manager the power
+      // (owner role always passes managerCan). Previously this endpoint had NO gate — any
+      // authenticated staff could PATCH the settings row. (2026-07-04 audit #4)
+      if (a === "settings" && !(await managerCan(g, rid, "edit_settings"))) return permDenied("change settings");
       if (a === "settings" && body && typeof body === "object") {
+        // Admin-only ENTITLEMENTS (mig 107, e.g. auto_print_kot_allowed) are granted ONLY
+        // from the admin panel (/aevinite). Strip them here so a manager/owner can't
+        // self-grant an entitlement the admin controls. Any `*_allowed` flag is admin-only.
+        for (const k of Object.keys(body)) if (/_allowed$/.test(k)) delete (body as Record<string, unknown>)[k];
         // settings is one row per restaurant (UNIQUE restaurant_id); matched by
         // restaurant_id at the upsert below — don't force the legacy id='site'
         // (that only ever matches restaurant #1's row).

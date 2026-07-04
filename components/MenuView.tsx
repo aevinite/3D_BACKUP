@@ -30,6 +30,7 @@ import {
 import { useTranslation, useLanguage } from "@/lib/i18n";
 // Remembers the table number scanned from a QR code, for the cart/waiter.
 import { setScannedTable } from "@/lib/table";
+import { tget } from "@/lib/tenantStorage";
 // Per-restaurant feature switches (search/favorites/3D/scroll-spy on-off).
 import { useFeatures, refreshFeatures } from "@/lib/features";
 // Live updates: refetch the menu the instant the owner edits a dish / toggles a
@@ -162,7 +163,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // localStorage is the browser's little notebook that survives page reloads.
   const loadFavorites = () => {
     try {
-      const raw = localStorage.getItem("lfh-favorites");
+      const raw = tget("lfh-favorites");
       const parsed = raw ? JSON.parse(raw) : [];
       setFavorites(Array.isArray(parsed) ? parsed : []);
     } catch { setFavorites([]); }

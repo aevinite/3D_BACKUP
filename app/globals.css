@@ -3666,3 +3666,166 @@ a:focus:not(:focus-visible) { outline: none; }
 .ban-btn { width: 100%; padding: 13px 16px; font-size: 15px; font-weight: 700; border: none; border-radius: 12px; cursor: pointer; background: var(--accent, #c9a35b); color: #1a140e; }
 .ban-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .ban-done { font-size: 14px; line-height: 1.5; color: #16a34a; font-weight: 600; margin: 4px 0 0; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   OWNER CONSOLE SKIN (redesign 2026-07-04) — scoped to `.adm.owx`, the modifier
+   class ONLY OwnerShell adds. Same dense console language as the admin `.adx`
+   skin the owner approved (dark default, hairline borders, tabular numerals,
+   one amber CTA) but with an EMERALD data accent so owner (green = money) and
+   admin (blue = control) are never confused. Self-contained on purpose: no
+   dependency on the admin branch's CSS.
+   ════════════════════════════════════════════════════════════════════════════ */
+.adm.owx {                              /* DARK (default) */
+  --bg: #0a0c10; --card: #10141b; --border: 1px solid #1d2430; --border-c: #1d2430;
+  --side: #0c0f15;
+  --text: #e6ebf3; --muted: #8b94a7; --muted2: rgba(230,235,243,0.10);
+  --accent: #10b981; --accent-dim: rgba(16,185,129,0.6);
+  --accent-grad: #10b981; --accent-glow: rgba(16,185,129,0.25);
+  --own-cta: #d97706;
+  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24;
+  --elev: 0 1px 0 rgba(255,255,255,.03);
+  background: var(--bg);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+.adm.owx[data-skin="light"] {           /* LIGHT (kept for the toggle) */
+  --bg: #f6f7f9; --card: #ffffff; --border: 1px solid #e5e8ee; --border-c: #e5e8ee;
+  --side: #ffffff;
+  --text: #111827; --muted: #6b7280; --muted2: rgba(17,24,39,0.08);
+  --accent: #059669; --accent-dim: rgba(5,150,105,0.6);
+  --accent-grad: #059669; --accent-glow: rgba(5,150,105,0.18);
+  --own-cta: #d97706;
+  --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-warn: #d97706;
+  --elev: 0 1px 2px rgba(16,24,40,.04);
+  background: var(--bg);
+}
+.owx :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+.owx a, .owx button, .owx [role="button"] { cursor: pointer; }
+.owx .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+/* ── sidebar (fixed 224px, grouped) ──────────────────────────────────────── */
+.owx-side {
+  width: 224px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--side); border-right: var(--border); padding: 12px 10px;
+  overflow-y: auto;
+}
+.owx-brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 12px; margin-bottom: 6px; border-bottom: var(--border); }
+.owx-brand .mark { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); display: grid; place-items: center; color: #fff; font-size: 12px; flex-shrink: 0; }
+.owx-brand .who { min-width: 0; }
+.owx-brand .who b { display: block; font-size: 13.5px; font-weight: 700; line-height: 1.15; color: var(--text); }
+.owx-brand .who span { font-size: 11px; color: var(--muted); }
+.owx-nav { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.owx-group { display: flex; flex-direction: column; gap: 1px; }
+.owx-group-lbl {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); padding: 0 10px; margin: 14px 0 5px;
+}
+.owx-group:first-child .owx-group-lbl { margin-top: 4px; }
+.owx-group.quiet .owx-navlink { opacity: .62; }
+.owx-group.quiet .owx-navlink:hover, .owx-group.quiet .owx-navlink.active { opacity: 1; }
+.owx-navlink {
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px;
+  color: var(--text) !important; text-decoration: none; font-size: 13px; font-weight: 500;
+  transition: background .15s ease, color .15s ease;
+}
+.owx-navlink i { width: 16px; text-align: center; font-size: 13px; color: var(--muted); }
+.owx-navlink:hover { background: var(--muted2); }
+.owx-navlink.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent) !important; font-weight: 600; }
+.owx-navlink.active i { color: var(--accent); }
+.owx-navlink .navsoon {
+  margin-left: auto; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); border: var(--border); padding: 1px 5px; border-radius: 999px;
+}
+.owx-side-foot { margin-top: auto; font-size: 11px; color: var(--muted); padding: 10px 10px 2px; border-top: var(--border); }
+/* ── topbar ──────────────────────────────────────────────────────────────── */
+.owx-top {
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  border-bottom: var(--border); background: var(--card); flex-shrink: 0; min-height: 48px;
+}
+.owx .adm-icnbtn { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; }
+.owx-scope {
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px;
+  border-radius: 8px; border: var(--border); background: var(--bg); color: var(--text);
+  font-size: 12.5px; font-weight: 600;
+}
+.owx-scope .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--adm-ok); }
+/* ── page container / density overrides for shared .adm-* pieces ─────────── */
+.owx .adm-main { padding: 20px; }
+.owx-wrap { max-width: 1280px; margin: 0 auto; }
+.owx .adm-card { border-radius: 10px; padding: 14px 16px; box-shadow: var(--elev); }
+.owx .adm-btn { padding: 6px 12px; border-radius: 8px; font-size: 12.5px; height: 30px; display: inline-flex; align-items: center; }
+.owx .adm-btn.primary { background: var(--own-cta); border-color: transparent; color: #fff; box-shadow: none; }
+.owx .adm-btn.primary:hover { filter: brightness(1.08); }
+.owx .adm-stats { gap: 8px; margin-bottom: 14px; }
+.owx .adm-stat { border-radius: 10px; padding: 10px 14px; }
+.owx .adm-stat .k { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+.owx .adm-stat .v { font-size: 20px; letter-spacing: 0; }
+.owx .adm-stat:hover { transform: none; box-shadow: var(--elev); }
+.owx .adm-empty { padding: 28px 14px; font-size: 13px; }
+/* KPI tile internals (value + delta chip + sparkline) */
+.owx-kpi { position: relative; overflow: hidden; text-align: left; }
+.owx-kpi .row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.owx-delta {
+  display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700;
+  padding: 1px 7px; border-radius: 999px; font-variant-numeric: tabular-nums;
+}
+.owx-delta.up   { color: var(--adm-ok);     background: color-mix(in srgb, var(--adm-ok) 14%, transparent); }
+.owx-delta.down { color: var(--adm-danger); background: color-mix(in srgb, var(--adm-danger) 14%, transparent); }
+.owx-delta.flat { color: var(--muted);      background: var(--muted2); }
+.owx-spark { position: absolute; right: 8px; bottom: 6px; opacity: .8; pointer-events: none; }
+/* Insight strip — plain-language callouts */
+.owx-insights { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
+.owx-insight {
+  display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 500;
+  border: var(--border); background: var(--card); border-radius: 999px; padding: 6px 13px;
+  box-shadow: var(--elev);
+}
+.owx-insight i { color: var(--accent); font-size: 11.5px; }
+/* Range toggle (segmented) */
+.owx-range { display: inline-flex; background: var(--card); border: var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
+.owx-range button { background: none; border: none; padding: 5px 11px; border-radius: 7px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; }
+.owx-range button.on { background: var(--accent); color: #fff; }
+/* Report picker chips */
+.owx-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.owx-chip {
+  display: inline-flex; align-items: center; gap: 7px; border: var(--border); background: var(--card);
+  color: var(--text); border-radius: 9px; padding: 7px 12px; font-size: 12.5px; font-weight: 600;
+  transition: background .15s ease;
+}
+.owx-chip i { color: var(--muted); font-size: 12px; }
+.owx-chip:hover { background: var(--muted2); }
+.owx-chip.on { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
+.owx-chip.on i { color: var(--accent); }
+/* Report table */
+.owx-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.owx-table th {
+  text-align: right; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); font-weight: 700; padding: 7px 10px; border-bottom: var(--border);
+  background: var(--muted2); position: sticky; top: 0;
+}
+.owx-table th:first-child, .owx-table td:first-child { text-align: left; }
+.owx-table td { padding: 7px 10px; border-bottom: var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.owx-table tr:hover td { background: var(--muted2); }
+.owx-table tfoot td { font-weight: 700; border-top: 2px solid var(--border-c); background: var(--muted2); }
+.owx-tablewrap { overflow: auto; max-height: 60vh; border: var(--border); border-radius: 10px; }
+/* Tax split sub-rows */
+.owx-taxsplit { border-left: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.owx-taxsplit td:first-child { padding-left: 20px; color: var(--muted); }
+/* ── responsive: sidebar → horizontally scrollable nav pills row (≤900px) ── */
+@media (max-width: 900px) {
+  .owx-side { width: 100%; flex-direction: row; align-items: center; gap: 8px; padding: 8px 10px; border-right: 0; border-bottom: var(--border); overflow: visible; }
+  .owx-brand { padding: 0 6px 0 0; margin: 0; border-bottom: 0; border-right: var(--border); flex-shrink: 0; }
+  .owx-brand .who { display: none; }
+  .owx-nav { flex-direction: row; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 4px; scrollbar-width: none; }
+  .owx-nav::-webkit-scrollbar { display: none; }
+  .owx-group { display: contents; }
+  .owx-group-lbl { display: none; }
+  .owx-navlink { flex: none; white-space: nowrap; padding: 6px 10px; font-size: 12.5px; border: var(--border); border-radius: 999px; }
+  .owx-navlink.active { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .owx-navlink .navsoon { display: none; }
+  .owx-side-foot { display: none; }
+  .owx-top { padding: 8px 12px; }
+  .owx .adm-main { padding: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .owx-navlink, .owx-chip, .owx .adm-btn { transition: none; }
+}

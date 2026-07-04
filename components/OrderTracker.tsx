@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import { getOrderStatus, updateOrderTableNumber, getSettings, type OrderStatus } from "@/lib/menu";
 import { useRestaurantId } from "@/lib/restaurant-context";
 import { getStoredSession, getSessionState } from "@/lib/session";
+import { tremove } from "@/lib/tenantStorage";
 import { toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import {
   STEPS,
@@ -181,7 +182,7 @@ export default function OrderTracker() {
           // (otherwise a momentary drop would wrongly wipe a live order).
           const reason = st.reason as string | undefined;
           if (reason === "session_closed" || reason === "removed" || reason === "invalid_token") {
-            try { localStorage.removeItem("lfh_active_orders"); } catch {}
+            tremove("lfh_active_orders");
             window.dispatchEvent(new Event("lfh:order-placed")); // make the strip re-read + vanish
           }
           setDishProg({ served: 0, segs: [] });
