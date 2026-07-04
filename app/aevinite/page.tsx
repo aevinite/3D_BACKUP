@@ -54,12 +54,15 @@ export default function AdminOverview() {
   // range refetches ONLY the charts — not the other 6 endpoints (egress-safe; the
   // owner's #1 fear is whole-page refetches on every little interaction).
   const loadAnalytics = useCallback(() => {
-    fetch(`/api/owner/analytics?range=${range}`, { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) { setRev(j.restaurantRevenue || []); setTs(j.timeseries || []); setPay(j.paymentMethods || []); } }).catch(() => {});
+    // scope=all pins this command center to the WHOLE platform. Without it, if the
+    // admin has drilled into a restaurant (which sets the 6h act-as cookie), these
+    // calls would silently collapse to just that restaurant (bug H2, 2026-07-05).
+    fetch(`/api/owner/analytics?range=${range}&scope=all`, { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) { setRev(j.restaurantRevenue || []); setTs(j.timeseries || []); setPay(j.paymentMethods || []); } }).catch(() => {});
   }, [range]);
   // Everything else — refreshed on mount, on the 60s active poll, and on manual ↻.
   const loadRest = useCallback(() => {
     fetch("/api/admin/restaurants", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) { setRests(j.restaurants || []); setOwners(j.owners || []); } }).catch(() => {});
-    fetch("/api/owner/overview", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setOv(j); }).catch(() => {});
+    fetch("/api/owner/overview?scope=all", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setOv(j); }).catch(() => {});
     fetch("/api/admin/overview", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setMaintenance(!!j.maintenance); }).catch(() => {});
     fetch("/api/admin/oplog?limit=18", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setActivity(j.actions || []); }).catch(() => {});
     fetch("/api/admin/users", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setStaff(j.users || []); }).catch(() => {});

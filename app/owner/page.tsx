@@ -139,6 +139,13 @@ export default function OwnerDashboard() {
   const [money, setMoney] = useState<MoneyTotals | null>(null); // discounts + lost business tiles
   const [err, setErr] = useState<string | null>(null);
   const [dishSort, setDishSort] = useState<"revenue" | "qty">("revenue");
+  // If an ADMIN opened this cockpit for a specific restaurant, the URL carries
+  // ?rid=<id>. Pin EVERY API call to that scope (as ?scope=) so a second tab — which
+  // overwrites the browser-wide act-as cookie — can never repaint or WRITE to this
+  // tab under a different restaurant (bug C1, 2026-07-05). A real logged-in owner has
+  // no ?rid= and is scoped by their own cookie, so this is null and nothing changes.
+  const [scopePin] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
 
   const single = ov?.restaurants.length === 1;
   // With ONE restaurant the home page IS that restaurant — resolve its id once known.
@@ -149,23 +156,26 @@ export default function OwnerDashboard() {
     try {
       const rg = range;
       const j = (r: Response) => r.json();
+      // The tab's scope pin (admin-in-one-restaurant) rides on EVERY call so the
+      // shared act-as cookie can't hijack this tab (C1). Null for a real owner.
+      const scp = scopePin ? `&scope=${scopePin}` : "";
       const moneyUrl = (rid: string | null) =>
-        `/api/owner/reports?type=sales&range=${rg === "all" ? "12m" : rg}${rid ? `&rid=${rid}` : ""}`;
+        `/api/owner/reports?type=sales&range=${rg === "all" ? "12m" : rg}${rid ? `&rid=${rid}` : ""}${scp}`;
       if (view.level === "home") {
-        const o: Overview = await fetch("/api/owner/overview", { cache: "no-store" }).then(j);
+        const o: Overview = await fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then(j);
         if ((o as unknown as { error?: string }).error) throw new Error((o as unknown as { error: string }).error);
         setOv(o);
         if (o.restaurants.length === 1) {
           const rid = o.restaurants[0].id;
           const [a, m] = await Promise.all([
-            fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1`, { cache: "no-store" }).then(j),
+            fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${scp}`, { cache: "no-store" }).then(j),
             fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
           ]);
           if (a.error) throw new Error(a.error);
           setRest(a); setMoney(m.error ? null : m.totals); setGroup(null);
         } else {
           const [g, m] = await Promise.all([
-            fetch(`/api/owner/analytics?range=${rg}&compare=1`, { cache: "no-store" }).then(j),
+            fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}`, { cache: "no-store" }).then(j),
             fetch(moneyUrl(null), { cache: "no-store" }).then(j),
           ]);
           if (g.error) throw new Error(g.error);
@@ -174,7 +184,7 @@ export default function OwnerDashboard() {
       } else {
         const rid = (view as { rid: string }).rid;
         const [a, m] = await Promise.all([
-          fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1`, { cache: "no-store" }).then(j),
+          fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${scp}`, { cache: "no-store" }).then(j),
           fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
         ]);
         if (a.error) throw new Error(a.error);
