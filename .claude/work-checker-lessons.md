@@ -93,3 +93,19 @@
   implement ONLY X on the existing layout — do not bundle the larger redesign option (shipped a
   full-screen order takeover when he wanted the old in-panel layout + just the scroll-spy menu;
   had to redo as a lite demo).
+- #verify (2026-07-03) Jump-to-section UIs: explicitly test that the LAST section can land at
+  the scroller's top (needs an end spacer past the scroll limit) and that the jump can't be
+  cancelled mid-flight by touch (prefer instant over smooth). "Scroll moved" isn't "landed" —
+  owner caught the shipped jump "stopping in the middle" on bottom categories.
+- 2026-07-03 (stress test): `pkill -f` from the harness shell can kill the zsh wrapper but MISS the node child — twice left a zombie observer running (duplicate load, overwritten stats). Kill by exact PID from `ps` and re-verify with `ps` after.
+
+- **2026-07-03 · TWO sessions share ONE Playwright-MCP browser — cookies & clicks cross-contaminate.** `#general`
+  During the QA sweep, another session's admin login (lfh_staff_auth) appeared mid-run in MY browser and
+  silently re-scoped a logged-in waiter's tablet to restaurant #1 — which surfaced the real requireRole
+  admin-beats-staff bug (fixed, PR #120), but also made every timing/nav observation suspect (earlier
+  "phantom section advancing" was the other session driving the same tabs). Rule: before browser-based
+  verification, probe for foreign cookies (`/api/admin/users` → expect 401) and re-probe when scoping looks
+  wrong; prefer a dedicated context/profile when another session is active; never attribute UI weirdness to
+  the app until cookie/driver contamination is ruled out.
+- **2026-07-03 · NEVER `rm -rf` a worktree dir before `git worktree list`.** I hit "dir already exists" creating a worktree and rm-rf'd it — it was a PARALLEL session's registered worktree (feat/tax-breakdown-unified-discount). Its branch was at mainline (no committed/pushed work, no PR) so nothing committed was lost, but uncommitted edits there would've been destroyed. ALWAYS `git worktree list` first; if the path is a registered worktree, pick a different path — never rm -rf it.
+- **2026-07-03 · Rebase onto latest origin/main BEFORE opening/merging a PR (parallel-session repo).** My multi-tax branch was cut off #121; #122 (a same-day bill-modal fix) merged right after, so the PR silently reverted #122 in the shared file. Nothing in the diff screamed "revert" — work-checker caught it. Fix was a clean `git rebase origin/main` (my changes didn't touch #122's lines). RULE: with several sessions merging, always `git fetch && git rebase origin/main` right before PR/merge, and scan the diff for deletions of code you didn't intend to touch.

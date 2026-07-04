@@ -223,3 +223,29 @@ owner looks, with cache busting, before claiming anything.
 ## 2026-07-03 — Allergen edit anytime + waffle model (PR #112)
 - [x] Allergen/note edit at ANY status (served/ready/paid) incl. ✎ Edit on Bills view; qty stays locked
 - [x] Waffle 3D model (local GLBs) + title fix "Lemon Icecream Waffle"
+
+## 2026-07-03 — Stress test 7×300 (owner request)
+
+- [x] Stress test: 7 restaurants × 300 tables simultaneously, ≥30 min, realtime + egress measured — DONE (≈65 min, 22,941 actions; live restaurants untouched; prod READY throughout).
+- [ ] FIX QUEUE from the test (owner said LIST ONLY, fix on his word — details in session findings):
+  1. Kitchen board drops NEW tickets past 1000 rows (lib/liveBoard.ts no .limit(); PostgREST cap) + 713KB/poll full-board egress (278MB per kitchen screen per 50 min at backlog).
+  2. DB compute saturates at 7×300 rush (free tier): ping 0.7s→4.7s, place 2.1s median; recovers fully after load. Capacity decision needed before real scale.
+  3. Auth: userFromCookie treats a FAILED staff_users lookup as bad cookie → any network blip 401-logs-out ALL panels, no auto-recovery (lib/userAuth.ts).
+  4. Bursty 500s from kitchen/board + editor/tablet summary at saturation spikes (no panel retry/backoff).
+  5. Manager floor: updates can exceed 90s under load; first paint 23–39s at 300 tables; heaviest page (tab crashes — needs real-device memory profile).
+  6. lfh_join_session lacks p_restaurant_id (guest join on non-#1 depends on scoped wrapper).
+  7. Guest menu: /api/r/<slug>/menu-data 404 spam + select=* fallbacks; item_ratings read UNSCOPED (no restaurant_id).
+- [ ] Clean stress data off the 6 demo restaurants + demo-bistro (~9k orders, 1,647 open sessions) before any demo.
+
+### Fix-queue status update (same day, PR #123 — `fix/stress-test-bugs`)
+- [x] 1. Kitchen 1000-row cap → FIXED (liveBoard pageAll pagination; verified: 3,121 items returned, new KOT visible on a 1,050-order backlog) + full-reload 4s rate guard (was 278MB/50min).
+- [x] 3. Auth blip-logout → FIXED (AuthDbError → 503 on all panel gates + login; verified live against an unreachable DB; bad cookie still 401).
+- [x] 6. lfh_join_session → NOT A BUG (mig 083 already added p_restaurant_id; the stress probe used the old signature).
+- [x] 7. Guest reads → FIXED (menu-data 404 was already fixed on origin/main; item_ratings view + restaurant_id via mig 116 (applied); scoped + explicit columns; guest settings no longer ships gstin/tax/phone).
+- [ ] 2. DB compute saturation → NOT code-fixable: free-tier capacity ceiling; needs a paid-tier/instance decision before real scale.
+- [ ] 5. Manager >90s updates + slow first paint under saturation → symptom of 2; re-test after capacity bump (deep "apply the delta" rework stays deferred per owner).
+- [ ] (7b) Manager tab crashes during test → needs a real-device memory profile (test machine was memory-starved; likely not an app bug).
+- [ ] 4. Bursty 500s at saturation spikes → largely addressed by 1+3 (smaller queries, 503s on auth path); re-verify in the next load test.
+
+## 2026-07-03 — Database migrated to Mumbai (owner request)
+- [x] Full Supabase migration Sydney→Mumbai (new project, new account): schema+data exact copy (26 tables verified row-for-row), realtime rewired, branding storage copied, Vercel env swapped + redeployed, local dev repointed. Guest freeze ~3-4 min during cutover. Old project kept as rollback. Latency: ping 723ms→~80ms, order write 589ms→152ms, big kitchen board 3-14s→1.4s.
