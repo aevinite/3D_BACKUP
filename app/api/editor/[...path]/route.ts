@@ -571,9 +571,19 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
       // .eq(restaurant_id, rid) on every by-id write: sb is service-role (RLS bypassed), so
       // this is the only tenant boundary — a foreign order id can't be discounted/edited.
-      const cur = must(await sb.from("orders").select("total").eq("id", b).eq("restaurant_id", rid).single());
+      const cur = must(await sb.from("orders").select("total, session_id").eq("id", b).eq("restaurant_id", rid).single());
+      // The discount is stored on ONE order but billMath sums every order's discount and
+      // applies it to the WHOLE table's bill — so the cap must be the TABLE's total, not
+      // this one order's (capping at the single order's total made a multi-order table's
+      // discount silently clamp to the first order's amount — bug H8, 2026-07-05).
+      let billCap = Number(cur.total) || 0;
+      if (cur.session_id) {
+        const sessOrders = must(await sb.from("orders").select("total, status").eq("restaurant_id", rid).eq("session_id", cur.session_id));
+        billCap = sessOrders.filter((o: { status: string }) => o.status !== "cancelled")
+          .reduce((a: number, o: { total: number | null }) => a + (Number(o.total) || 0), 0);
+      }
       const raw = Number(body && body.amount);
-      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number(cur.total) || 0) : 0;
+      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), billCap) : 0;
       const note = String((body && body.note) || "").slice(0, 200) || null;
       // return=minimal: client re-fetches the board; no need to pull the full order row back.
       must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid));
