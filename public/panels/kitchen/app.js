@@ -54,10 +54,23 @@ const toast = (msg, undoFn) => {
 
 // A short two-note chime for new orders (WebAudio — no sound file needed).
 let audioCtx = null;
+// A KDS is usually a wall display nobody ever taps. WebAudio's autoplay policy starts
+// a context created outside a user gesture in "suspended" state, so the FIRST order
+// chimed silently and the display never beeped until someone touched it (bug M8,
+// 2026-07-05). Fix: create the context eagerly and resume() it on the first ANY user
+// gesture (one-time), and also try to resume() on every chime in case it lapsed.
+function primeAudio() {
+  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume?.(); } catch {}
+}
+if (typeof window !== "undefined") {
+  const once = () => { primeAudio(); ["pointerdown", "keydown", "touchstart"].forEach((e) => window.removeEventListener(e, once)); };
+  ["pointerdown", "keydown", "touchstart"].forEach((e) => window.addEventListener(e, once, { once: true, passive: true }));
+}
 const chime = () => {
   if (state.muted) return;
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume?.();
     [[880, 0], [1175, 0.18]].forEach(([f, at]) => {
       const o = audioCtx.createOscillator(), g = audioCtx.createGain();
       o.frequency.value = f; o.type = "sine";
@@ -396,7 +409,13 @@ async function loadTables(tables) {
   try {
     slices = await Promise.all(tables.map((t) => api("GET", "/board?table=" + encodeURIComponent(t))));
   } catch (e) { return load(); }      // network/parse blip → safe full reload
-  if (seq !== loadSeq) return;        // a newer refresh started — drop this stale snapshot
+  // NOTE: the latest-wins `seq` guard used to sit HERE and `return` — which silently
+  // dropped a superseded targeted refetch BEFORE it printed/chimed/merged, so a rush
+  // (two new-order breadcrumbs on different tables >200ms apart, or a concurrent full
+  // load()) could lose a KOT entirely until the 60s backstop (bug H6, 2026-07-05). The
+  // side-effects (print/chime/knownIds) and the state MERGE are idempotent (dedup by
+  // id, knownIds prevents a double-print), so we now always apply them and gate only
+  // the final render() on staleness — the newer refresh paints the merged-in board.
 
   // Defensive dedup by row id (fresh row wins over a stale cached copy). The drop/add below
   // keys orders by id and items by order_id; this guarantees a row can never appear twice
@@ -412,8 +431,8 @@ async function loadTables(tables) {
   // existing orders as "new"). Platform tickets only arrive on the FULL path (load()).
   const newReceived = freshOrders.filter((o) => o.status === "received" && !state.knownIds.has(o.id));
   if (newReceived.length) chime();
-  // Auto-print a KOT for each brand-new dine-in order on the targeted path too (same guard).
-  if (state.autoPrintKot) for (const o of newReceived) printKot(o, freshItems.filter((i) => i.order_id === o.id), state.restaurant);
+  // Auto-print via the shared helper (printedIds-tracked, hidden-tab-safe, serialized).
+  autoPrintNew(state.autoPrintKot, freshOrders, freshItems, state.restaurant);
   for (const o of freshOrders) state.knownIds.add(o.id);
 
   // The set of orders the changed tables used to show (cached) PLUS the orders the slice
@@ -440,6 +459,9 @@ async function loadTables(tables) {
   // If the 86-board drawer is open, keep it fresh (dishes are unchanged on a targeted pass,
   // but a re-render is cheap and harmless).
   if (!$("#drawerOverlay").hidden) renderDishes();
+  // Latest-wins guard, moved to gate ONLY the render (state + prints already applied
+  // above so nothing is lost): if a newer refresh started, let IT paint the board.
+  if (seq !== loadSeq) return;
   const sig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes, platform: state.platform, platformAccept: state.platformAccept });
   if (sig === lastSig) return; // nothing visible changed — don't rebuild the tickets
   lastSig = sig;
@@ -490,6 +512,37 @@ function printKot(order, itemRows, restaurant) {
   } catch (e) { /* printing must NEVER break the board */ }
 }
 
+// Auto-print the KOT for brand-new received orders — the ONE place both load() and
+// loadTables() call so print-tracking is consistent (bug H7, 2026-07-05).
+//  • `printedIds` is SEPARATE from `knownIds` (which tracks chime/"seen"). A hidden
+//    tab's 60s backstop still advances knownIds, so gating print on knownIds meant a
+//    backgrounded tab consumed new orders as "seen" and NEVER printed them. Gating on
+//    printedIds instead means an unprinted order stays pending until it actually prints.
+//  • While the tab is HIDDEN the browser suppresses iframe printing, so we DON'T print
+//    (and DON'T mark printed) — the orders flush on the next visible pass instead of
+//    being silently lost, and don't flood all at once.
+//  • Prints are SERIALIZED (spaced) so a burst doesn't stack N blocking dialogs at once
+//    in a non-kiosk browser (partially mitigates M7; kiosk mode prints silently anyway).
+const printedIds = new Set();
+function autoPrintNew(autoOn, orders, allItems, restaurant) {
+  if (!autoOn || document.hidden) return;
+  const queue = (orders || []).filter((o) => o.status === "received" && !printedIds.has(o.id));
+  if (!queue.length) return;
+  let i = 0;
+  const step = () => {
+    if (document.hidden || i >= queue.length) return; // paused if tab hidden mid-burst
+    const o = queue[i++];
+    if (!printedIds.has(o.id)) { printedIds.add(o.id); printKot(o, (allItems || []).filter((it) => it.order_id === o.id), restaurant); }
+    if (i < queue.length) setTimeout(step, 400);
+  };
+  step();
+}
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) autoPrintNew(state.autoPrintKot, state.orders || [], state.items || [], state.restaurant);
+  });
+}
+
 async function load() {
   const seq = ++loadSeq;
   const data = await api("GET", "/board");
@@ -501,10 +554,15 @@ async function load() {
     const newReceived = data.orders.filter((o) => o.status === "received" && !state.knownIds.has(o.id));
     const freshPlat = (data.platform || []).some((p) => p.status === "new" && !state.knownIds.has(p.id));
     if (newReceived.length || freshPlat) chime();
-    // Auto-print a KOT for each BRAND-NEW dine-in order (only when enabled). Reuses the same
-    // knownIds guard as the chime, so it NEVER prints the existing board on first open and
-    // NEVER double-prints the same order.
-    if (data.autoPrintKot) for (const o of newReceived) printKot(o, (data.items || []).filter((i) => i.order_id === o.id), data.restaurant);
+    // Auto-print via the shared helper (printedIds-tracked, hidden-tab-safe, serialized)
+    // — never prints the existing board on first open (knownIds is set only after) and
+    // never double-prints (printedIds).
+    autoPrintNew(!!data.autoPrintKot, data.orders, data.items, data.restaurant);
+  } else {
+    // FIRST load (no baseline yet): treat every current received order as already
+    // handled so we never retro-print the existing board on the next pass (bug H7's
+    // sibling — printedIds is separate from knownIds, so it needs its own baseline).
+    for (const o of data.orders) if (o.status === "received") printedIds.add(o.id);
   }
   state.autoPrintKot = !!data.autoPrintKot;
   state.restaurant = data.restaurant || null;
