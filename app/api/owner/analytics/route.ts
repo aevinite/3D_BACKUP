@@ -32,7 +32,36 @@ function windowFor(range: string): { from: string; to: string; bucket: string } 
   return { from: new Date(todayStart).toISOString(), to, bucket: "hour" };
 }
 
+// The previous EQUAL-LENGTH window, for the KPI ▲/▼ delta chips ("today" compares
+// against the same span of yesterday's business day, 7d against the 7 days before,
+// …). "all" has no previous period — the chips just don't render.
+function prevWindowFor(range: string, from: string, to: string): { from: string; to: string } | null {
+  if (range === "all") return null;
+  const f = Date.parse(from), t = Date.parse(to);
+  const span = t - f;
+  if (range === "today") {
+    // same-time-yesterday, so a 11:00 check compares mornings, not a whole day.
+    return { from: new Date(f - DAY).toISOString(), to: new Date(f - DAY + span).toISOString() };
+  }
+  return { from: new Date(f - span).toISOString(), to: new Date(f).toISOString() };
+}
+
 const num = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
+
+// Paid revenue + orders summed over a window (tiny pre-summed rows), scoped to
+// the caller's restaurants — ONE extra RPC per dashboard load when compare=1.
+async function windowTotals(rid: string | null, allow: Set<string> | null, from: string, to: string) {
+  const rev = await sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to });
+  if (rev.error) throw rev.error;
+  let revenue = 0, orders = 0;
+  for (const r of (rev.data ?? []) as Record<string, unknown>[]) {
+    const id = r.restaurant_id as string;
+    if (rid ? id !== rid : allow && !allow.has(id)) continue;
+    revenue += Number(r.revenue) || 0;
+    orders += Number(r.orders) || 0;
+  }
+  return { revenue: num(revenue), orders };
+}
 
 export async function GET(req: NextRequest) {
   const scope = await ownerScope(req);
@@ -41,7 +70,9 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const range = sp.get("range") || "today";
   const rid = sp.get("rid");
+  const compare = sp.get("compare") === "1";
   const { from, to, bucket } = windowFor(range);
+  const prevWin = compare ? prevWindowFor(range, from, to) : null;
 
   try {
     if (!rid) {
@@ -77,7 +108,8 @@ export async function GET(req: NextRequest) {
       const paymentMethods = (pm.data ?? []).map((r: Record<string, unknown>) => ({
         method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0,
       }));
-      return NextResponse.json({ scope: "group", range, restaurantRevenue, timeseries, paymentMethods });
+      const prev = prevWin ? await windowTotals(null, allow, prevWin.from, prevWin.to) : null;
+      return NextResponse.json({ scope: "group", range, restaurantRevenue, timeseries, paymentMethods, prev });
     }
 
     // Restaurant scope — KPIs + per-dish/category/hourly + this restaurant's trend.
@@ -104,9 +136,10 @@ export async function GET(req: NextRequest) {
     }));
     const revenue = num(tsRows.reduce((a: number, r: { revenue: number }) => a + r.revenue, 0));
     const orders = tsRows.reduce((a: number, r: { orders: number }) => a + r.orders, 0);
+    const prev = prevWin ? await windowTotals(rid, null, prevWin.from, prevWin.to) : null;
 
     return NextResponse.json({
-      scope: "restaurant", range,
+      scope: "restaurant", range, prev,
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
       kpis: { revenue, orders, avgOrder: orders ? num(revenue / orders) : 0, openTables: openT.count || 0, topDish: dishRows[0]?.title || "—" },
       timeseries: tsRows,

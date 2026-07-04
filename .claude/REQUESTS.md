@@ -255,3 +255,22 @@ owner looks, with cache busting, before claiming anything.
 - [x] Tablet floor + right panel: fully SEPARATE scrolls on tablet/desktop widths (verified: body no longer scrolls; each pane owns its scrollbar) — manager already had it (re-verified: grid scrolled 400px, side panel moved 0)
 - [x] Tablet phone (~390px) cleanup: pinned detail action-row got an opaque backdrop (buttons no longer look half-buried); take-order screen 50/50 split — menu top, "This order" review = firm bottom half, item lines scroll inside, SEND always visible; header = one row with a small table pill; floating ✕ hidden while ordering (sat exactly on ← back, mistap dropped the cart)
 - [ ] Whole NEW admin panel UI per the 2026-07-03 spec (dense real-data SaaS console; NO earnings anywhere; restaurants/panels/access/taxes; god-mode) — building on `feat/admin-redesign`, NOT merged to main until owner reviews
+
+## 🆕 2026-07-04 late — OWNER PANEL full redesign (branch feat/owner-redesign, review at localhost:4007/owner)
+- [x] **Adaptive dashboard by restaurant count** — 1 restaurant = that restaurant IS the home (time/date
+  charts, no one-bar "who earns more"); 2 = head-to-head comparison; 3+ = leaderboard + multi-line trend.
+  Verified all three live (diag owner + temp ownerships, reverted).
+- [x] **Charts fill their range** — lines auto-scale [min,max] ("touch top and bottom"); bars zero-based
+  with the top fitted to the data max. KPI tiles: ▲/▼ delta vs previous equal period + sparkline +
+  count-up; huge deltas capped as "N×". Plain-language insight strip (lost ₹, busiest hour, top dish…).
+- [x] **Reports section** (replaces Earnings-report + Sales stubs): Sales / Tax-GST (merged rate headline
+  + CGST-SGST split underneath, same total — owner's tax spec) / Dishes / Categories / Payments /
+  Discounts / Cancellations (lost business ₹) / Busy hours. Today→12-months (monthly buckets), on-demand
+  Generate only, Download CSV + Print. Mig 120 `lfh_owner_sales_report` (paid-only mig-113 rule), applied.
+- [x] **New `.adm.owx` console skin** — dark dense default (light behind toggle), emerald owner accent
+  (vs admin blue), grouped sidebar → pill row ≤900px. Staff & powers + Feedback inherit it.
+- [x] **Security pass** — anon hits on all owner APIs → 401; /owner bounces to /login; owner DOM carries
+  zero admin traces (no /aevinite links, no "admin view" strings); admin act-as ribbon renders only for
+  admin. FIX: ownerScope now checks the OWNER cookie before the admin cookie (matches layout.tsx — was
+  owner chrome + admin-scoped data when both cookies existed in one browser).
+- [ ] **Owner reviews at localhost:4007/owner** (diag creds or admin act-as) — NOT merged to main until approved.
