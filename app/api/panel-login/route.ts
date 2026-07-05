@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   // NOT 401 "wrong password" (stress test 2026-07-03).
   if (!r.ok) return NextResponse.json({ ok: false, error: r.error }, { status: r.transient ? 503 : 401 });
   const u = r.user;
-  // Restaurant in the recycle bin (mig 127): its logins are dead until it's
+  // Restaurant in the recycle bin (mig 128): its logins are dead until it's
   // restored. Checked before the panel entitlement so a binned restaurant blocks
   // every role, not just disabled panels.
   if (await isRestaurantDeleted(u.restaurant_id)) {
