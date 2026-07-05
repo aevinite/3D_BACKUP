@@ -3538,6 +3538,7 @@ a:focus:not(:focus-visible) { outline: none; }
     width: 248px; box-shadow: 10px 0 44px -10px rgba(0,0,0,.55);
   }
   .adm-body { margin-left: 76px; }            /* reserve the rail; body never reflows on hover */
+  .adm.owx .adm-body { margin-left: 0; }      /* owner uses an in-flow 224px sidebar, not the admin icon-rail — the 76px reserve left a blank gap (2026-07-05) */
   .adm-side .lbl, .adm-side .who, .adm-side .navsoon {
     opacity: 0; transition: opacity .18s ease; white-space: nowrap;
   }
@@ -3623,7 +3624,11 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm-tile .tsub { margin-top: 4px; font-size: 12px; opacity: .9; }
 /* ── responsive: collapse the sidebar to a horizontal bar on small screens ─── */
 @media (max-width: 900px) {
-  .adm { flex-direction: column; height: auto; min-height: 100dvh; overflow: visible; }
+  /* PHONE SCROLLPORT (2026-07-05): the global body is overflow:hidden/height:100%, so if
+     .adm goes overflow:visible here it has NO scroll container — everything below the first
+     screen (dashboard charts, the whole reports table, the add-staff form) becomes unreachable
+     on a phone. Make .adm itself the scrollport (fills the viewport, scrolls its own content). */
+  .adm { flex-direction: column; height: 100dvh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .adm-side { width: 100%; flex-direction: column; border-right: 0; border-bottom: var(--border); padding: 10px 12px; }
   .adm-brand { padding: 2px 4px 10px; }
   /* Nav wraps to rows so EVERY item is visible (no hidden/cut-off scroll). */
