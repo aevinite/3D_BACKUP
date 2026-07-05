@@ -2207,6 +2207,8 @@ async function loadDashboard() {
     const w = (el2 && el2.parentElement && el2.parentElement.clientWidth) || 600;
     return Math.max(min, Math.min(max, Math.round(w / 80)));
   };
+  // A real-but-tiny share reads better as "<1%" than a lying "0%".
+  const pctOf = (n, total) => { const p = (n / total) * 100; return p > 0 && p < 1 ? "<1" : String(Math.round(p)); };
   const surface = (getComputedStyle(document.body).getPropertyValue("--panel") || "#1d1812").trim();
   const mutedInk = (getComputedStyle(document.body).getPropertyValue("--muted") || "#a8997f").trim();
   Chart.defaults.color = mutedInk;
@@ -2273,7 +2275,7 @@ async function loadDashboard() {
       <div class="pay-row">
         <span class="dot" style="background:${catColor(i)}"></span>
         <span class="m">${esc(c)}</span><span class="amt">${n.toLocaleString("en-IN")}</span>
-        <span class="meta">${Math.round((n / catTotal) * 100)}% of plates</span>
+        <span class="meta">${pctOf(n, catTotal)}% of plates</span>
       </div>`).join("");
     dashCharts.push(new Chart(document.getElementById("chCats"), {
       type: "doughnut",
@@ -2299,7 +2301,7 @@ async function loadDashboard() {
       <div class="pay-row">
         <span class="dot" style="background:${payColor(m)}"></span>
         <span class="m">${esc(m)}</span><span class="amt">${inr(rev)}</span>
-        <span class="meta">${Math.round((rev / payTotal) * 100)}%${bills ? ` · ${bills} bill${bills === 1 ? "" : "s"}` : ""}</span>
+        <span class="meta">${pctOf(rev, payTotal)}%${bills ? ` · ${bills} bill${bills === 1 ? "" : "s"}` : ""}</span>
       </div>`).join("");
     dashCharts.push(new Chart(payChart, {
       type: "doughnut",
