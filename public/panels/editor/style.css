@@ -1086,15 +1086,16 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   }
   .brand { font-size: 18px; }
   .conn { margin-left: auto; }              /* stays top-right, on the brand's row */
+  /* On a phone the tabs WRAP to as many rows as needed so EVERY section
+     (Dashboard, Log, Settings…) is visible — the old horizontal-swipe strip
+     hid the last 3 tabs off the right edge with no scroll hint, so a manager
+     on a phone could not reach them at all (2026-07-05 phone audit). */
   .tabs {
     order: 3; width: 100%;                  /* full-width row beneath the brand */
-    flex-wrap: nowrap; overflow-x: auto;    /* swipe sideways through the tabs */
-    -webkit-overflow-scrolling: touch;
+    flex-wrap: wrap;                        /* show every tab, wrapping as needed */
     gap: 6px; padding-bottom: 2px;
-    scrollbar-width: none;                  /* hide the scrollbar (Firefox) */
   }
-  .tabs::-webkit-scrollbar { display: none; } /* hide the scrollbar (Chrome/Safari) */
-  .tab { flex: 0 0 auto; padding: 7px 14px; font-size: 13px; white-space: nowrap; }
+  .tab { flex: 0 0 auto; padding: 9px 14px; font-size: 13px; white-space: nowrap; min-height: 40px; }
 
   /* --- main layout: single column, page scrolls instead of fixed panes --- */
   .layout { grid-template-columns: 1fr; height: auto; }
