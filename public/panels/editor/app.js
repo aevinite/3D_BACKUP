@@ -5910,6 +5910,99 @@ document.addEventListener("keydown", (e) => {
 // the whole network round-trip. Now the correct tab is shown right away (empty for
 // a moment), and the data fills into it when it arrives.
 setTab(state.tab);
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HIERARCHY X-RAY (2026-07-05) — the same panel renders differently by WHO opened it:
+//   • the real MANAGER (own login): a feature the owner turned OFF is HIDDEN entirely.
+//   • a HIGHER role viewing in (admin super-user / owner): that feature shows GREYED
+//     (locked) — so they can see what the manager is missing — with a jump to the
+//     setting that controls it and a "Reveal all" master toggle. The server still
+//     enforces every capability; this is purely how the nav is presented.
+// Extend XRAY_TABS as more tabs become permission-gated. Grant rule matches the
+// server's managerCan(): a manager is granted ONLY when the flag is explicitly true.
+// ══════════════════════════════════════════════════════════════════════════════
+const XRAY_TABS = [
+  { tab: "dash", flag: "view_dashboard", label: "Dashboard" },
+  // (Bills discount/void live inside the Bills tab as actions, not whole tabs — a
+  //  later vertical greys those controls the same way via this same WHO signal.)
+];
+// Manager powers all live on the OWNER panel's "Staff & powers" (Access) page.
+const XRAY_SETTING_URL = "/owner/staff";
+let XRAY_WHO = null;
+
+(function injectXrayStyles() {
+  const css = `
+  .tab.xray-locked { opacity: .45; position: relative; }
+  .tab.xray-locked::after { content: "\\f023"; font-family: "Font Awesome 6 Free"; font-weight: 900;
+    font-size: 9px; margin-left: 5px; opacity: .8; }
+  body.xray-reveal .tab.xray-locked { opacity: .8; }
+  #xrayBar { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 9999;
+    display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 999px;
+    background: #10141b; color: #e6ebf3; border: 1px solid #d97706; font-size: 12px; font-weight: 600;
+    box-shadow: 0 6px 24px rgba(0,0,0,.35); font-family: system-ui, sans-serif; }
+  #xrayBar .tag { color: #fbbf24; display: inline-flex; align-items: center; gap: 5px; }
+  #xrayBar .cnt { color: #8b94a7; font-weight: 500; cursor: pointer; text-decoration: underline dotted; }
+  #xrayBar button { background: #d97706; color: #fff; border: 0; border-radius: 999px; padding: 4px 11px;
+    font: inherit; font-weight: 700; cursor: pointer; }
+  #xrayBar button.off { background: transparent; color: #8b94a7; border: 1px solid #2a2a2a; }`;
+  const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
+})();
+
+function xrayGrantedForManager(flag) { return XRAY_WHO && XRAY_WHO.managerPermissions && XRAY_WHO.managerPermissions[flag] === true; }
+
+function applyHierarchyView() {
+  if (!XRAY_WHO) return;
+  const higher = !!XRAY_WHO.higherView;                 // admin/owner looking in
+  const revealed = higher && localStorage.getItem("lfh_xray_reveal") === "1";
+  document.body.classList.toggle("xray-reveal", revealed);
+  let lockedCount = 0;
+  for (const { tab } of XRAY_TABS) {
+    const btn = document.querySelector(`.tabs .tab[data-tab="${tab}"]`);
+    if (!btn) continue;
+    const granted = xrayGrantedForManager(XRAY_TABS.find((x) => x.tab === tab).flag);
+    btn.hidden = false; btn.classList.remove("xray-locked"); btn.style.pointerEvents = "";
+    if (granted) continue;                               // manager has it → normal for everyone
+    if (!higher) { btn.hidden = true; continue; }        // real manager → hide entirely
+    // higher role → show greyed (locked). Revealed = usable (admin is top power).
+    lockedCount++;
+    btn.classList.add("xray-locked");
+    if (!revealed) {
+      btn.title = "Turned off for managers — click to manage in the owner's Access settings";
+      btn.dataset.xrayLocked = "1";
+    } else {
+      btn.title = "Off for managers · you can use it (admin view)";
+      delete btn.dataset.xrayLocked;
+    }
+  }
+  renderXrayBar(higher, lockedCount, revealed);
+}
+
+function renderXrayBar(higher, lockedCount, revealed) {
+  let bar = document.getElementById("xrayBar");
+  if (!higher) { if (bar) bar.remove(); return; }
+  if (!bar) { bar = document.createElement("div"); bar.id = "xrayBar"; document.body.appendChild(bar); }
+  const who = XRAY_WHO.actor === "admin" ? "ADMIN" : "OWNER";
+  bar.innerHTML =
+    `<span class="tag"><i class="fas fa-user-shield"></i> Viewing as ${who}</span>` +
+    (lockedCount ? `<span class="cnt" id="xrayJump">${lockedCount} feature${lockedCount === 1 ? "" : "s"} off for staff</span>` : `<span class="cnt">nothing hidden here</span>`) +
+    `<button id="xrayReveal" class="${revealed ? "" : "off"}">${revealed ? "Hide greyed" : "Reveal all"}</button>`;
+  const rv = document.getElementById("xrayReveal");
+  if (rv) rv.onclick = () => { localStorage.setItem("lfh_xray_reveal", revealed ? "0" : "1"); applyHierarchyView(); };
+  const jump = document.getElementById("xrayJump");
+  if (jump) jump.onclick = () => { try { window.top.location.href = XRAY_SETTING_URL; } catch { window.location.href = XRAY_SETTING_URL; } };
+}
+
+// A locked tab, when NOT revealed, jumps to the setting instead of switching view.
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest && e.target.closest('.tab[data-xray-locked="1"]');
+  if (!btn) return;
+  e.preventDefault(); e.stopPropagation();
+  toast("This is off for managers — opening the owner's Access settings…", "ok");
+  setTimeout(() => { try { window.top.location.href = XRAY_SETTING_URL; } catch { window.location.href = XRAY_SETTING_URL; } }, 500);
+}, true); // capture: run before the normal setTab handler
+
+api("GET", "/whoami").then((w) => { XRAY_WHO = w; applyHierarchyView(); }).catch(() => {});
+
 // Then load all the data, refresh the current view in place, and start live polling.
 // If the very first load fails, show "connection failed" so it's obvious the local
 // server probably isn't running.
