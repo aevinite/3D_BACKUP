@@ -2061,7 +2061,10 @@ function openPaymentMethodModal(due, label) {
 // own confirm — that's a fix-a-mistake action, not a new payment being collected.
 async function payOrdersWithMethod(orders, label) {
   if (!orders.length) { toast("Nothing to settle — already paid", "ok"); return false; }
-  const due = orders.reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
+  // "Amount collected" MUST equal the printed bill: billMath applies the discount
+  // BEFORE tax. The old Σ(total − discount) taxed the pre-discount amount and told
+  // staff to collect discount×rate too much on any discounted bill (2026-07-05 fix).
+  const due = billMath(orders).total;
   const picked = await openPaymentMethodModal(due, label);
   if (!picked) return false; // cancelled
   for (const o of orders) await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true, method: picked.method, note: picked.note });
@@ -3768,7 +3771,8 @@ function tableTileStateFromBoard(t) {
   // yet, so it shouldn't flag the table red — that starts when you accept it.
   const isUnpaidBill = (o) => o.status !== "cancelled" && o.status !== "received" && o.payment_status !== "paid";
   const unpaid = os.some(isUnpaidBill);
-  const due = os.filter(isUnpaidBill).reduce((s, o) => s + (parseFloat(o.total) || 0) - (parseFloat(o.discount) || 0), 0);
+  // discount-before-tax (billMath) so the tile "due" matches the bill / server summary
+  const due = billMath(os.filter(isUnpaidBill)).total;
 
   let st = "free", label = "Free", meta = "tap to open";
   if (os.length) {
