@@ -17,6 +17,7 @@ import {
   type LanguageMeta,
 } from "@/lib/format";
 import { readActiveOrders, hasHiddenLiveOrder } from "@/lib/orderStatus";
+import { tget } from "@/lib/tenantStorage";
 import { splitBrandSegments, hasBrandMarkers } from "@/lib/brandText";
 
 // The site only has two looks: a dark theme and a light theme.
@@ -48,7 +49,7 @@ export default function Header({ logoText }: { logoText?: string }) {
   const loadCartCount = () => {
     try {
       // Read the cart from the browser's notepad (localStorage).
-      const saved = localStorage.getItem("lfh_cart");
+      const saved = tget("lfh_cart");
       if (!saved) return setCartCount(0);
       const cart = JSON.parse(saved); // text back into a list
       const total = Array.isArray(cart)

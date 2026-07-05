@@ -1,12 +1,3 @@
-import ComingSoon from "@/components/ComingSoon";
-
-export default function Page() {
-  return (
-    <ComingSoon
-      icon="fa-chart-line"
-      title="Sales & reports"
-      blurb="Deep day-wise, item-wise, category and tax reports across all your restaurants — exportable to PDF and Excel."
-      points={["Day-wise & item-wise sales", "GST / tax summaries", "Compare restaurants side by side", "Schedule reports to your inbox"]}
-    />
-  );
-}
+// "Sales & reports" is no longer a Coming-soon teaser — it shipped as /owner/reports.
+import { redirect } from "next/navigation";
+export default function Page() { redirect("/owner/reports"); }

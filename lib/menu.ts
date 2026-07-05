@@ -10,6 +10,8 @@
 
 // Grab the shared database connection we set up in supabase.ts.
 import { supabase } from "./supabase";
+// Single source of truth for the restaurant's effective tax rate.
+import { effectiveTaxRate } from "./tax";
 import { DEFAULT_RESTAURANT_ID } from "./tenant";
 
 // The shape of one dish in the app. Every field a menu card / detail page might
@@ -304,6 +306,11 @@ export interface Settings {
   // app merges these over code-side defaults in lib/features.ts, so an absent
   // key simply means "default behavior".
   features: Record<string, boolean>;
+  // The restaurant's effective tax rate as a DECIMAL (e.g. 0.05 = 5%), derived from
+  // its named tax components (or the fallback rate, or 5%) — see lib/tax.ts. The guest
+  // cart uses this so the quoted GST matches the actual bill (was hardcoded 5%). Only
+  // the single number is exposed to guests, never the component labels/GSTIN.
+  taxRate: number;
 }
 // Reads the single site-wide settings row and returns it with safe defaults,
 // so the app still works even if settings haven't been configured yet.
@@ -313,7 +320,7 @@ export async function getSettings(restaurantId: string = DEFAULT_RESTAURANT_ID):
   // prefix, phone…) that `*` was silently shipping to every menu visitor.
   const { data, error } = await supabase
     .from("settings")
-    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features")
+    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features, tax_rate, tax_components")
     .eq("restaurant_id", restaurantId)   // one settings row per restaurant (079)
     .maybeSingle();
   if (error) throw new Error(`Failed to load settings: ${error.message}`);
@@ -338,6 +345,7 @@ export async function getSettings(restaurantId: string = DEFAULT_RESTAURANT_ID):
     features: data && data.features && typeof data.features === "object"
       ? Object.fromEntries(Object.entries(data.features as Record<string, unknown>).filter(([, v]) => typeof v === "boolean")) as Record<string, boolean>
       : {},
+    taxRate: effectiveTaxRate(data),
   };
 }
 

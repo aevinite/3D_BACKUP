@@ -24,6 +24,9 @@ export const STATUS_COPY: Record<OrderStatus, { label: string; sub: string; icon
 // --- Live order tracking (localStorage) -----------------------------------
 
 // The localStorage key under which this device's in-progress orders are saved.
+// Tenant-scoped (lfh_active_orders:<slug>) so one restaurant's live order bar
+// never floats over another restaurant's menu on the same phone.
+import { tget, tset } from "./tenantStorage";
 export const ACTIVE_ORDERS_KEY = "lfh_active_orders";
 export const POLL_MS = 1500; // how often a guest re-checks their order's status (snappy near-real-time)
 // With Realtime ON, the guest refetches the instant a breadcrumb arrives (via the
@@ -59,7 +62,7 @@ export const isFinalStatus = (s: OrderStatus) => s === "served" || s === "cancel
 // the page — we just return an empty list instead.
 export const readActiveOrders = (): ActiveOrder[] => {
   try {
-    const raw = localStorage.getItem(ACTIVE_ORDERS_KEY);
+    const raw = tget(ACTIVE_ORDERS_KEY);
     // localStorage stores text, so JSON.parse turns that text back into a list.
     const list = raw ? JSON.parse(raw) : [];
     // Double-check it really is a list before trusting it.
@@ -72,9 +75,7 @@ export const readActiveOrders = (): ActiveOrder[] => {
 // Save the given list of orders back into localStorage (as text via JSON.stringify).
 // Quietly does nothing if saving fails (e.g. storage full or private mode).
 export const writeActiveOrders = (list: ActiveOrder[]) => {
-  try {
-    localStorage.setItem(ACTIVE_ORDERS_KEY, JSON.stringify(list));
-  } catch {}
+  tset(ACTIVE_ORDERS_KEY, JSON.stringify(list));
 };
 
 // The orders still worth showing live: not dismissed and not aged out. A SERVED

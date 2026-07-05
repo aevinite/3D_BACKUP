@@ -32,7 +32,36 @@ function windowFor(range: string): { from: string; to: string; bucket: string } 
   return { from: new Date(todayStart).toISOString(), to, bucket: "hour" };
 }
 
+// The previous EQUAL-LENGTH window, for the KPI ▲/▼ delta chips ("today" compares
+// against the same span of yesterday's business day, 7d against the 7 days before,
+// …). "all" has no previous period — the chips just don't render.
+function prevWindowFor(range: string, from: string, to: string): { from: string; to: string } | null {
+  if (range === "all") return null;
+  const f = Date.parse(from), t = Date.parse(to);
+  const span = t - f;
+  if (range === "today") {
+    // same-time-yesterday, so a 11:00 check compares mornings, not a whole day.
+    return { from: new Date(f - DAY).toISOString(), to: new Date(f - DAY + span).toISOString() };
+  }
+  return { from: new Date(f - span).toISOString(), to: new Date(f).toISOString() };
+}
+
 const num = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
+
+// Paid revenue + orders summed over a window (tiny pre-summed rows), scoped to
+// the caller's restaurants — ONE extra RPC per dashboard load when compare=1.
+async function windowTotals(rid: string | null, allow: Set<string> | null, from: string, to: string) {
+  const rev = await sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to });
+  if (rev.error) throw rev.error;
+  let revenue = 0, orders = 0;
+  for (const r of (rev.data ?? []) as Record<string, unknown>[]) {
+    const id = r.restaurant_id as string;
+    if (rid ? id !== rid : allow && !allow.has(id)) continue;
+    revenue += Number(r.revenue) || 0;
+    orders += Number(r.orders) || 0;
+  }
+  return { revenue: num(revenue), orders };
+}
 
 export async function GET(req: NextRequest) {
   const scope = await ownerScope(req);
@@ -41,28 +70,22 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const range = sp.get("range") || "today";
   const rid = sp.get("rid");
+  const compare = sp.get("compare") === "1";
   const { from, to, bucket } = windowFor(range);
+  const prevWin = compare ? prevWindowFor(range, from, to) : null;
 
   try {
     if (!rid) {
       // Group scope — the "who earns more" bar + multi-line trend.
-      // NOTE: lfh_owner_payment_breakdown(p_restaurant_id=NULL) sums PLATFORM-WIDE —
-      // there's no per-restaurant-ownership filter available on that shape (unlike the
-      // other two RPCs, which return one row per restaurant so we can filter by scope.ids
-      // below). An owner scoped to a subset of restaurants would see the platform total,
-      // not just theirs. Acceptable for now: only the admin (scope.all) sees this card
-      // today (owner, 2026-07-01 — "on for everyone", no owner-panel UI wired to it yet).
-      const [rev, ts, pm] = await Promise.all([
+      const allow = scope.all ? null : new Set(scope.ids);
+      const [rev, ts] = await Promise.all([
         sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to }),
         sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket }),
-        sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: null, p_from: from, p_to: to }),
       ]);
       if (rev.error) throw rev.error;
       if (ts.error) throw ts.error;
-      if (pm.error) throw pm.error;
-      // An owner only ever sees their OWN restaurants; admin sees all. The RPCs sum
-      // across every restaurant, so we filter the tiny pre-summed rows here.
-      const allow = scope.all ? null : new Set(scope.ids);
+      // An owner only ever sees their OWN restaurants; admin sees all. These RPCs
+      // return one row per restaurant, so we filter the tiny pre-summed rows here.
       const restaurantRevenue = (rev.data ?? [])
         .filter((r: Record<string, unknown>) => !allow || allow.has(r.restaurant_id as string))
         .map((r: Record<string, unknown>) => ({
@@ -74,10 +97,27 @@ export async function GET(req: NextRequest) {
         .map((r: Record<string, unknown>) => ({
           bucket: r.bucket, restaurantId: r.restaurant_id, revenue: num(r.revenue), orders: Number(r.orders) || 0,
         }));
-      const paymentMethods = (pm.data ?? []).map((r: Record<string, unknown>) => ({
-        method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0,
-      }));
-      return NextResponse.json({ scope: "group", range, restaurantRevenue, timeseries, paymentMethods });
+      // Payment breakdown: lfh_owner_payment_breakdown(NULL) sums PLATFORM-WIDE and its
+      // rows carry no restaurant_id, so it CANNOT be post-filtered — passing NULL for a
+      // scoped owner leaks every other tenant's payment totals (cross-tenant leak, found
+      // + fixed 2026-07-04). Admin (scope.all) may sum all; a scoped owner sums ONLY
+      // their own restaurants (one tiny call each) and we merge by method.
+      const pmByMethod = new Map<string, { method: string; revenue: number; orders: number }>();
+      const pmIds: (string | null)[] = scope.all ? [null] : scope.ids;
+      const pmRes = await Promise.all(pmIds.map((id) => sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      for (const r of pmRes) {
+        if (r.error) throw r.error;
+        for (const row of (r.data ?? []) as Record<string, unknown>[]) {
+          const m = String(row.method ?? "");
+          const cur = pmByMethod.get(m) || { method: m, revenue: 0, orders: 0 };
+          cur.revenue = num(cur.revenue + (Number(row.revenue) || 0));
+          cur.orders += Number(row.orders) || 0;
+          pmByMethod.set(m, cur);
+        }
+      }
+      const paymentMethods = Array.from(pmByMethod.values()).sort((a, b) => b.revenue - a.revenue);
+      const prev = prevWin ? await windowTotals(null, allow, prevWin.from, prevWin.to) : null;
+      return NextResponse.json({ scope: "group", range, restaurantRevenue, timeseries, paymentMethods, prev });
     }
 
     // Restaurant scope — KPIs + per-dish/category/hourly + this restaurant's trend.
@@ -104,9 +144,10 @@ export async function GET(req: NextRequest) {
     }));
     const revenue = num(tsRows.reduce((a: number, r: { revenue: number }) => a + r.revenue, 0));
     const orders = tsRows.reduce((a: number, r: { orders: number }) => a + r.orders, 0);
+    const prev = prevWin ? await windowTotals(rid, null, prevWin.from, prevWin.to) : null;
 
     return NextResponse.json({
-      scope: "restaurant", range,
+      scope: "restaurant", range, prev,
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
       kpis: { revenue, orders, avgOrder: orders ? num(revenue / orders) : 0, openTables: openT.count || 0, topDish: dishRows[0]?.title || "—" },
       timeseries: tsRows,

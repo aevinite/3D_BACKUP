@@ -71,19 +71,16 @@ export function flagTableInput(inputId: string, message: string) {
 // that link, the menu page stores N here, and the cart + chef pre-fill from it
 // so nobody has to type their table. It stays editable (a QR can be mis-scanned
 // or shared), and clears when the guest scans a different table.
+// Tenant-scoped: the table you scanned at one restaurant must not pre-fill at
+// another restaurant on the same phone.
+import { tget, tset, tremove } from "./tenantStorage";
 export const SCANNED_TABLE_KEY = "lfh_table";
 
 export function getScannedTable(): string {
-  try {
-    return localStorage.getItem(SCANNED_TABLE_KEY) || "";
-  } catch {
-    return "";
-  }
+  return tget(SCANNED_TABLE_KEY) || "";
 }
 
 export function setScannedTable(value: string) {
-  try {
-    if (value) localStorage.setItem(SCANNED_TABLE_KEY, value);
-    else localStorage.removeItem(SCANNED_TABLE_KEY);
-  } catch {}
+  if (value) tset(SCANNED_TABLE_KEY, value);
+  else tremove(SCANNED_TABLE_KEY);
 }
