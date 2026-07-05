@@ -644,10 +644,14 @@ function renderPanel() {
     const payCls = a.unpaid ? "unpaid" : a.paid ? "paid" : "";
     const billBox = (a.due > 0 || dishN) ? `<div class="foot"><div class="billbox ${payCls}"><span class="bn">bill</span>${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : a.paid ? "paid ✓" : "● new"}</span></div></div>` : "";
     p.classList.add("has-detail");
+    // Wrap the LOADING state in the SAME .detail-pop popup as the real detail, so tapping
+    // a table shows the centered popup from the first frame — no side-panel flash before it
+    // (owner 2026-07-05: "no trace it was ever a side-edge panel").
     p.innerHTML = `
+     <div class="detail-pop">
+      <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
       <div class="phead">
         <div style="flex:1"><h2 style="margin:0;font-size:19px">Table ${esc(t)}</h2><div class="pmeta">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${dishN ? `${dishN} dish${dishN === 1 ? "" : "es"}` : "opening…"}</div></div>
-        <button class="btn small backtop" id="backTop">↑ Tables</button>
         <span class="live">● open</span>
       </div>
       <div class="detail-body">
@@ -656,8 +660,9 @@ function renderPanel() {
       <div class="dacts">
         <button class="btn primary big" id="takeOrder">＋ Take order</button>
       </div>
-      ${billBox}`;
-    const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      ${billBox}
+     </div>`;
+    { const dc = $("#detailClose"); if (dc) dc.onclick = () => { state.table = null; renderPanel(); renderFloor(); }; }
     $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
     return;
   }

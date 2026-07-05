@@ -636,3 +636,9 @@ body:has(.detail-pop) .layout { grid-template-columns: 1fr; }   /* floor fills; 
   cursor: pointer; z-index: 2; }
 /* the popup carries its own ✕ — hide the global floating panel-✕ while it's open. */
 body:has(.detail-pop) #tabletClose { display: none; }
+
+/* No side-edge panel ANYWHERE (owner 2026-07-05: "no trace it was ever a side panel").
+   The floor is always full-width; the table detail only ever appears as the centered
+   popup (loading state included). The old resting "Tap a table" side hint is dropped. */
+.layout { grid-template-columns: 1fr; }
+#panel:has(.empty) { display: none; }
