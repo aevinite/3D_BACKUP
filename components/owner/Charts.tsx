@@ -157,7 +157,9 @@ export function HourlyBar({ data, color }: { data: { hour: number; orders: numbe
       <ResponsiveContainer>
         <BarChart data={full} margin={{ left: 0, right: 8, top: 6, bottom: 4 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} interval={2} />
+          {/* Adaptive ticks (owner's axis rule): let Recharts drop labels by available
+              width instead of a hard every-3rd-hour — narrow cards thin out, wide fill. */}
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" />
           <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={28} allowDecimals={false} />
           <Tooltip content={<CountTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="orders" name="Orders" fill={color} radius={[5, 5, 0, 0]} />
