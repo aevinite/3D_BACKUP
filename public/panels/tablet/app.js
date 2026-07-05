@@ -1886,7 +1886,14 @@ if (window.LFH_RT) {
   closeBtn.id = "tabletClose"; closeBtn.type = "button";
   closeBtn.setAttribute("aria-label", "Close"); closeBtn.textContent = "✕";
   document.body.appendChild(closeBtn);
-  closeBtn.onclick = () => { state.table = null; state.ordering = false; renderPanel(); renderFloor(); };
+  // Smart ONE-STEP back — never dump the waiter all the way out from deep inside
+  // (owner 2026-07-05: the ✕ used to exit the whole flow mid-order/mid-edit). It peels
+  // one layer: item options → order screen → table detail → floor.
+  closeBtn.onclick = () => {
+    if (state._opt) { state._opt = null; renderOrderMode(); return; }   // editing an item → back to the order
+    if (state.ordering) { exitOrderMode(); return; }                    // taking an order → back to the table
+    state.table = null; renderPanel(); renderFloor();                   // table detail → back to the floor
+  };
 
   // Toggle body.tbl-open whenever the panel shows a table (vs the "tap a table" empty state),
   // so the CSS can make it a full-screen overlay on phones. Decoupled from the render code.
