@@ -285,3 +285,10 @@ owner looks, with cache busting, before claiming anything.
   admin. FIX: ownerScope now checks the OWNER cookie before the admin cookie (matches layout.tsx — was
   owner chrome + admin-scoped data when both cookies existed in one browser).
 - [ ] **Owner reviews at localhost:4007/owner** (diag creds or admin act-as) — NOT merged to main until approved.
+
+## 🆕 2026-07-06 — Admin must enter panels FROM the admin console, restaurant named (branch fix/admin-panels-require-restaurant)
+- [ ] **Bare `/tablet` `/kitchen` `/manager` `/editor` no longer admit a scopeless admin** — like /owner,
+  the admin gets in ONLY via /aevinite's open-panel flow (act-as cookie + ?rid in the URL). A logged-in
+  admin typing /tablet with no restaurant picked bounces to /aevinite. Staff logins unchanged (their
+  session pins their restaurant; no rid in the URL — exactly the owner's ask). Also killed the silent
+  "default to restaurant #1" fallback in panelRestaurantId: a scopeless admin API call now answers 400.
