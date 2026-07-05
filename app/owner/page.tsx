@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import {
-  AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, Spark, DeltaChip,
+  AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod, Spark, DeltaChip,
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
 
@@ -51,7 +51,6 @@ type MoneyTotals = { revenue: number; discount: number; cancelledOrders: number;
 type View = { level: "home" } | { level: "restaurant"; rid: string } | { level: "dish"; rid: string; dish: string };
 
 const FALLBACK = "#34d399";
-const PAY_LABEL: Record<string, string> = { upi: "UPI", cash: "Cash", card: "Card", other: "Other" };
 
 const IST = "Asia/Kolkata";
 function tsLabel(iso: string, range: Range): string {
@@ -270,10 +269,11 @@ export default function OwnerDashboard() {
       if (money && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to ${money.cancelledOrders} cancelled order${money.cancelledOrders === 1 ? "" : "s"} ${rl}` });
       // Only call out a payment method the staff actually recorded — "Not recorded
       // is 100% of payments" is true but useless.
-      const pay = (rest.paymentMethods ?? []).find((p) => PAY_LABEL[p.method]);
-      const payTotal = (rest.paymentMethods ?? []).reduce((a, p) => a + p.revenue, 0);
+      const payRows = (rest.paymentMethods ?? []).map((p) => ({ ...p, method: canonPayMethod(p.method) }));
+      const pay = payRows.filter((p) => p.method !== "Not recorded").sort((a, b) => b.revenue - a.revenue)[0];
+      const payTotal = payRows.reduce((a, p) => a + p.revenue, 0);
       if (pay && payTotal > 0 && pay.revenue / payTotal >= 0.15)
-        out.push({ icon: "fa-wallet", text: `${PAY_LABEL[pay.method]} is ${Math.round((pay.revenue / payTotal) * 100)}% of payments` });
+        out.push({ icon: "fa-wallet", text: `${pay.method} is ${Math.round((pay.revenue / payTotal) * 100)}% of payments` });
     } else if (group) {
       const total = group.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
       if (group.prev && group.prev.revenue > 0 && total > 0) {
@@ -539,16 +539,7 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
       {payTotal > 0 && (
         <div className="adm-card" style={{ marginTop: 12 }}>
           <div className="rv-ct">Payment methods <span>· how customers paid</span></div>
-          <div className="rv-pay">
-            {(rest.paymentMethods ?? []).map((p) => (
-              <div key={p.method} className="rv-payrow">
-                <span className="pm">{PAY_LABEL[p.method] || p.method || "Unknown"}</span>
-                <span className="bar"><span style={{ width: `${(p.revenue / payTotal) * 100}%`, background: accent }} /></span>
-                <span className="pct">{Math.round((p.revenue / payTotal) * 100)}%</span>
-                <span className="amt">{inr(p.revenue)}</span>
-              </div>
-            ))}
-          </div>
+          <PaymentDonut data={rest.paymentMethods ?? []} />
         </div>
       )}
 
@@ -580,13 +571,6 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
         .rv-sort { display: inline-flex; gap: 2px; }
         .rv-sort button { background: none; border: var(--border); padding: 4px 10px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
         .rv-sort button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-        .rv-pay { display: flex; flex-direction: column; gap: 6px; }
-        .rv-payrow { display: grid; grid-template-columns: 70px 1fr auto auto; align-items: center; gap: 12px; font-size: 12.5px; }
-        .rv-payrow .pm { font-weight: 700; }
-        .rv-payrow .bar { height: 8px; border-radius: 4px; background: rgba(128,128,128,.14); overflow: hidden; }
-        .rv-payrow .bar span { display: block; height: 100%; border-radius: 4px; }
-        .rv-payrow .pct { color: var(--muted); font-variant-numeric: tabular-nums; }
-        .rv-payrow .amt { font-weight: 800; font-variant-numeric: tabular-nums; min-width: 70px; text-align: right; }
         .rv-dishes { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
         .rv-dish { display: grid; grid-template-columns: minmax(120px, 1.4fr) 2fr auto auto auto; align-items: center; gap: 12px; padding: 9px 8px; border: none; border-radius: 8px; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; }
         .rv-dish:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }

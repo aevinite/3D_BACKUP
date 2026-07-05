@@ -2149,7 +2149,12 @@ async function loadDashboard() {
       <div class="dash-chart"><h4>Top dishes</h4><canvas id="chTop"></canvas></div>
       <div class="dash-chart"><h4>Orders by hour</h4><canvas id="chHours"></canvas></div>
       <div class="dash-chart"><h4>Category share</h4><canvas id="chCats"></canvas></div>
-      <div class="dash-chart"><h4>Payment methods · ${rangeLabel}</h4><canvas id="chPay"></canvas></div>
+      <div class="dash-chart"><h4>Payment methods · ${rangeLabel}</h4>
+        <div class="pay-split">
+          <div class="pay-donut"><canvas id="chPay"></canvas><div class="pay-center" id="payCenter"></div></div>
+          <div class="pay-legend" id="payLegend"></div>
+        </div>
+      </div>
     </div>`;
   dashCharts.forEach((c) => { try { c.destroy(); } catch {} });
   dashCharts = [];
@@ -2187,16 +2192,34 @@ async function loadDashboard() {
   } else {
     document.getElementById("chCats").closest(".dash-chart").innerHTML = `<h4>Category share</h4><div class="empty">No sales in this range yet.</div>`;
   }
-  // Payment methods (owner, 2026-07-01): revenue split by how bills got paid —
-  // UPI/Cash/Card/Other, plus "Not recorded" for anything paid before this shipped
-  // or via the per-order correction toggle (which skips the picker on purpose).
-  const payEntries = (s.paymentMethods || []);
+  // Payment methods (redesigned 2026-07-05): revenue split by how bills got paid —
+  // UPI/Cash/Card/Other, plus "Not recorded" for older bills. One FIXED colour per
+  // method (same validated colorblind-safe set as the owner panel), the ₹ total in
+  // the donut hole, and an HTML legend with ₹ + % + bill count (the server sends
+  // [method, revenue, bills] triples; % lives in the legend, never angle-only).
+  const PAY_COLORS = { UPI: "#9085e9", Cash: "#199e70", Card: "#3987e5", Other: "#c98500", "Not recorded": "#6b7280" };
+  const payColor = (m) => PAY_COLORS[m] || PAY_COLORS["Not recorded"];
+  const payEntries = (s.paymentMethods || []).filter(([, rev]) => rev > 0);
   const payChart = document.getElementById("chPay");
   if (payEntries.length) {
+    const payTotal = payEntries.reduce((a, [, rev]) => a + rev, 0);
+    document.getElementById("payCenter").innerHTML = `<b>${inr(payTotal)}</b><small>collected</small>`;
+    document.getElementById("payLegend").innerHTML = payEntries.map(([m, rev, bills]) => `
+      <div class="pay-row">
+        <span class="dot" style="background:${payColor(m)}"></span>
+        <span class="m">${esc(m)}</span><span class="amt">${inr(rev)}</span>
+        <span class="meta">${Math.round((rev / payTotal) * 100)}%${bills ? ` · ${bills} bill${bills === 1 ? "" : "s"}` : ""}</span>
+      </div>`).join("");
     dashCharts.push(new Chart(payChart, {
       type: "doughnut",
-      data: { labels: payEntries.map(([m]) => m), datasets: [{ data: payEntries.map(([, rev]) => rev), backgroundColor: ["#d4a574", "#7ec88a", "#4f9dff", "#e8a13c", "#9aa3b0"] }] },
-      options: { plugins: { legend: { position: "right" }, tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${inr(ctx.parsed)}` } } } },
+      data: { labels: payEntries.map(([m]) => m), datasets: [{
+        data: payEntries.map(([, rev]) => rev),
+        backgroundColor: payEntries.map(([m]) => payColor(m)),
+        // Slice gap must match the CARD surface in the active theme (light + dark).
+        borderColor: (getComputedStyle(document.body).getPropertyValue("--panel") || "#1d1812").trim(),
+        borderWidth: 2, hoverOffset: 6,
+      }] },
+      options: { cutout: "68%", plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${inr(ctx.parsed)}` } } } },
     }));
   } else if (payChart) {
     payChart.closest(".dash-chart").innerHTML = `<h4>Payment methods · ${rangeLabel}</h4><div class="empty">No paid bills in this range yet.</div>`;

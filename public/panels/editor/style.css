@@ -403,6 +403,18 @@ input:disabled { opacity: .55; cursor: not-allowed; }
 .dash-chart { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
 .dash-chart h4 { margin: 0 0 10px; font-size: 13px; color: var(--muted); letter-spacing: 0.3px; }
 .dash-chart canvas { max-height: 260px; }
+/* Payment-methods donut (2026-07-05): ₹ total in the hole + rich HTML legend. */
+.pay-split { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.pay-donut { position: relative; width: 168px; height: 168px; flex: 0 0 auto; }
+.pay-center { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; pointer-events: none; }
+.pay-center b { display: block; font-size: 18px; color: var(--text); font-variant-numeric: tabular-nums; }
+.pay-center small { display: block; font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.pay-legend { flex: 1 1 180px; min-width: 180px; display: flex; flex-direction: column; gap: 10px; }
+.pay-row { display: grid; grid-template-columns: 10px 1fr auto; column-gap: 8px; align-items: baseline; }
+.pay-row .dot { width: 10px; height: 10px; border-radius: 3px; align-self: center; }
+.pay-row .m { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.pay-row .amt { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text); }
+.pay-row .meta { grid-column: 2 / 4; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 /* wrap the customers table so a narrow screen scrolls it sideways instead of
    clipping the right-hand columns under the page's overflow guard */
 .dash-body { overflow-x: auto; }
