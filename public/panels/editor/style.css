@@ -98,6 +98,10 @@ body {
 .cat-filter[hidden] { display: none; }
 .cat-filter::-webkit-scrollbar { height: 6px; }
 .cat-filter::-webkit-scrollbar-thumb { background: var(--line); border-radius: 999px; }
+/* On desktop there's vertical room, so WRAP the category chips instead of a
+   horizontal scroll that half-cuts the last visible chip at the panel edge
+   (2026-07-05). Phone keeps the single-row scroll (saves vertical space). */
+@media (min-width: 761px) { .cat-filter { flex-wrap: wrap; overflow-x: visible; } }
 .cat-chip {
   flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
   background: var(--panel-2); color: var(--muted);
