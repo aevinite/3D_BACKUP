@@ -161,3 +161,10 @@ hard-exited + a back). Lesson: when the ask is "make it responsive," actually lo
 panel at 390px AND walk to the DEEPEST screens — can you SEE and tap Send? reach Take
 order without scrolling? is there exactly one clear back? A 50/50 split rendering isn't
 proof of usability. Verify reachability of the primary action on every sub-screen.
+
+#ui #tenancy (2026-07-05) — Default UI wording must be brand/country-neutral in this
+multi-tenant app. I labelled the on-screen bill tax line "GST"; owner immediately asked
+for "Tax" as the default for ALL restaurants (the printed bill keeps the configured
+CGST/SGST names). Lesson: user-facing default labels should never bake in one locale's
+tax/branding terms — use the neutral word and let per-restaurant settings supply the
+specific names.

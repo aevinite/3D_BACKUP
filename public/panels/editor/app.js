@@ -1057,12 +1057,29 @@ function formGeneral(s) {
     return accessDefaultsCardHtml(s) + accessUsersCardHtml(s);
   }
   if (sec === "billing") {
-    // Configurable tax breakdown (owner, 2026-07-03): the owner sets a set of NAMED taxes
-    // (CGST/SGST/… any number) with their own %. Their sum IS the total tax — shown in the
-    // manager + everywhere the bill is paid — while the PRINTED customer bill itemises each
-    // named tax. Empty list → falls back to the single "Tax rate" below (blank = 5%), printed
-    // as a 50/50 CGST+SGST split. So the split and the total can never disagree.
-    const comps = Array.isArray(s.tax_components) ? s.tax_components : [];
+    // TWO stacked sections (owner, 2026-07-05 — "manager bill and printable bill, up/down,
+    // no separate menu"): ① the ON-SCREEN manager bill (one merged tax line, renameable
+    // word), ② the PRINTED customer bill (identity + footer + the named tax split).
+    //
+    // AUTOFILL (owner, 2026-07-05): the form opens PRE-FILLED with the exact values the
+    // bill uses RIGHT NOW (same resolver as printBill — billIdentity()), never blank boxes
+    // that hide what actually prints. We fill the WORKING COPY (s = state.sel), so what you
+    // see is what Save persists; edit anything before saving to change it.
+    const bi = billIdentity(s);
+    if (!s.restaurant_name) s.restaurant_name = bi.name;
+    if (!s.restaurant_address) s.restaurant_address = bi.address;
+    if (!s.restaurant_phone) s.restaurant_phone = bi.phone;
+    if (!s.gstin) s.gstin = bi.gstin;
+    if (!s.invoice_prefix) s.invoice_prefix = bi.prefix;
+    if (!s.bill_footer) s.bill_footer = bi.footer;
+    if (!s.tax_label) s.tax_label = bi.taxLabel;
+    // Tax rows prefill: no named taxes yet → materialise the 50/50 split the print has
+    // always used (e.g. 5% → CGST 2.5 + SGST 2.5) so the owner can rename/re-split it.
+    if (!Array.isArray(s.tax_components) || !s.tax_components.length) {
+      const half = Math.round((taxModel(s).pct / 2) * 100) / 100;
+      s.tax_components = [{ label: "CGST", rate: half }, { label: "SGST", rate: half }];
+    }
+    const comps = s.tax_components;
     const compTotal = Math.round(comps.reduce((a, c) => a + (Number(c && c.rate) || 0), 0) * 100) / 100;
     const taxRows = comps.map((c, i) => `
       <div class="tax-row">
@@ -1072,32 +1089,38 @@ function formGeneral(s) {
         <button type="button" class="icon-btn" data-action="rmTax" data-arg="${i}" title="Remove this tax"><i class="fas fa-trash"></i></button>
       </div>`).join("");
     return `
-  <div class="card"><h3>Billing &amp; invoice</h3>
+  <div class="card"><h3>① Manager bill — on screen</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      These appear on the printed tax invoice exactly as typed. Set your real name,
-      address, phone and GSTIN. <b>Invoice prefix</b> + financial year build the number
-      (e.g. <code>LFH/2025-26/000042</code>).
+      Bills you SEE in the manager (Live/Today/Previous cards, the bill popup, table
+      details) show ONE merged tax line. Rename its word here — the amount and % always
+      come from the tax rows in the printed-bill section below (their total: <b>${compTotal}%</b>).
+    </p>
+    <div style="max-width:260px">${tf("Tax word on screen", "tax_label", s.tax_label ?? "Tax", { hint: `Shows as “${(s.tax_label || "Tax").trim() || "Tax"} ${compTotal}%”. E.g. Tax, GST, VAT.` })}</div>
+  </div>
+  <div class="card"><h3>② Printed bill — what the customer gets</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      Everything below prints on the customer's bill exactly as typed, and the form is
+      pre-filled with what the bill prints <b>right now</b> — change anything and Save.
+      <b>Invoice prefix</b> + financial year build the number (e.g. <code>LFH/2025-26/000042</code>).
     </p>
     ${tf("Restaurant name", "restaurant_name", s.restaurant_name ?? "")}
     ${tf("Address", "restaurant_address", s.restaurant_address ?? "")}
     <div class="grid cols-3">
       ${tf("Phone", "restaurant_phone", s.restaurant_phone ?? "")}
-      ${tf("GSTIN", "gstin", s.gstin ?? "")}
+      ${tf("GSTIN", "gstin", s.gstin ?? "", { hint: s.gstin === "24AAAAA0000A1Z5" ? "⚠ Placeholder — replace with your REAL GSTIN before tax filing." : "" })}
       ${tf("Invoice prefix", "invoice_prefix", s.invoice_prefix ?? "")}
     </div>
-    ${tf("Bill footer message", "bill_footer", s.bill_footer ?? "", { hint: "Printed at the very bottom of the customer's bill, e.g. “Thank you — visit again!”. Leave blank to use the default sign-off." })}
-  </div>
-  <div class="card"><h3>Tax</h3>
+    ${tf("Bill footer message", "bill_footer", s.bill_footer ?? "", { hint: "Printed at the very bottom of the customer's bill, e.g. “Thank you — visit again!”." })}
+    <h4 style="margin:18px 0 6px">Tax lines on the print</h4>
     <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
-      Add the taxes that make up your total (e.g. <b>CGST 2.5%</b> + <b>SGST 2.5%</b>). Each one
-      prints as its own line on the customer's bill; their total (<b>${compTotal}%</b>) is the tax
-      shown in the manager and everywhere the bill is paid. Leave empty to use the single fallback
-      rate below.
+      The taxes that make up your total (e.g. <b>CGST 2.5%</b> + <b>SGST 2.5%</b>). Each prints
+      as its own line; on screen they show merged as one “${esc((s.tax_label || "Tax").trim() || "Tax")} <b>${compTotal}%</b>” line —
+      the split and the total can never disagree.
     </p>
-    <div class="tax-rows">${taxRows || `<div class="hint" style="margin-bottom:10px">No named taxes yet — using the fallback rate below.</div>`}</div>
+    <div class="tax-rows">${taxRows}</div>
     <div class="tax-total">Total tax: <b>${compTotal}%</b></div>
     <button type="button" class="btn small" data-action="addTax" style="margin-top:10px">+ Add tax</button>
-    <div style="max-width:220px;margin-top:16px">${tf("Fallback tax rate (0.05 = 5%)", "tax_rate", s.tax_rate ?? "", { type: "number", step: "any", min: 0, hint: "Used only when no named taxes are set above." })}</div>
+    <div style="max-width:220px;margin-top:16px">${tf("Fallback tax rate (0.05 = 5%)", "tax_rate", s.tax_rate ?? "", { type: "number", step: "any", min: 0, hint: "Used only if you remove every named tax above." })}</div>
   </div>`;
   }
   if (sec === "kitchen") {
@@ -1268,7 +1291,7 @@ function orderCardHtml(o, freed = false) {
     ${allergy}
     ${Number(o.subtotal) > 0 ? `<div class="ord-sub"><span>Subtotal</span><span>${inr(Number(o.subtotal))}</span></div>` : ""}
     ${Number(o.discount) > 0 ? `<div class="ord-disc">Discount${o.discount_note ? ` (${esc(o.discount_note)})` : ""}<span>− ${inr(o.discount)}</span></div>` : ""}
-    ${Number(o.tax) > 0 ? `<div class="ord-sub"><span>Tax ${taxModel(state.data.settings).pct}%</span><span>${inr(Number(o.tax))}</span></div>` : ""}
+    ${Number(o.tax) > 0 ? `<div class="ord-sub"><span>${esc(taxLabel())} ${taxModel(state.data.settings).pct}%</span><span>${inr(Number(o.tax))}</span></div>` : ""}
     <div class="ord-total"><span>Total</span><span>${inr((Number(o.total) || 0) - (Number(o.discount) || 0))}</span></div>
     <div class="ord-actions">${actionsRow}</div>
   </div>`;
@@ -1310,6 +1333,43 @@ function taxModel(settings) {
   }
   const rate = Number(s.tax_rate) || 0.05;
   return { rate, pct: Math.round(rate * 10000) / 100, components: [] };
+}
+// taxLabel(): the word the ON-SCREEN merged tax line uses ("Tax 5%"). Owner-editable per
+// restaurant (settings.tax_label, mig 125); the PRINTED bill instead itemises the named
+// components from tax_components — this label never appears on paper.
+function taxLabel(settings) {
+  return (((settings || state.data.settings || {}).tax_label || "Tax") + "").trim() || "Tax";
+}
+// billIdentity(settings?): the EFFECTIVE identity + wording the customer bill uses RIGHT
+// NOW — the restaurant's own Settings › Billing values, falling back to the same defaults
+// printBill has always used (flagship #1 keeps its LFH identity; everyone else gets the
+// TEMPORARY Aevidine placeholders / per-cuisine sign-offs until they fill their own).
+// ONE resolver shared by printBill AND the Billing settings form, which AUTOFILLS these
+// exact values — so "what you see in the form" can never drift from "what the bill
+// prints". Returns RAW (unescaped) strings; callers escape at render.
+function billIdentity(settings) {
+  const s = settings || state.data.settings || {};
+  const r = state.data.restaurant || {};
+  const isDefault = r.slug === "french-house" || r.id === "00000000-0000-0000-0000-000000000001";
+  const DEFAULT_BILL = { address: "Aevidine, Ahmedabad, Gujarat 380015, India", phone: "+91 90000 00000", gstin: "24AAAAA0000A1Z5" };
+  const FOOTERS = {
+    "pizza-palace": "Grazie — a presto! 🍕",
+    "sakura-sushi": "Arigato — mata kite ne 🍣",
+    "taco-fiesta": "¡Gracias — vuelve pronto! 🌮",
+    "burger-barn": "Y'all come back now! 🍔",
+    "spice-route": "Dhanyavaad — padharo! 🍛",
+    "green-bowl": "Stay fresh — see you soon! 🥗",
+  };
+  return {
+    isDefault,
+    name: s.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")),
+    address: s.restaurant_address || (isDefault ? "" : DEFAULT_BILL.address),
+    phone: s.restaurant_phone || (isDefault ? "+91 90999 14418" : DEFAULT_BILL.phone),
+    gstin: s.gstin || (isDefault ? "" : DEFAULT_BILL.gstin),
+    prefix: s.invoice_prefix || "INV",
+    footer: s.bill_footer || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again"),
+    taxLabel: taxLabel(s),
+  };
 }
 function billMath(orders) {
   const live = (orders || []).filter((o) => o.status !== "cancelled");
@@ -1393,7 +1453,7 @@ function mergedOrderCardHtml(g) {
     <div class="ord-items">${items}</div>
     <div class="ord-sub"><span>Subtotal</span><span>${inr(_m.subtotal)}</span></div>
     ${disc > 0 ? `<div class="ord-disc">Discount<span>− ${inr(disc)}</span></div>` : ""}
-    ${_m.tax > 0 ? `<div class="ord-sub"><span>Tax ${Math.round(_m.rate * 10000) / 100}%</span><span>${inr(_m.tax)}</span></div>` : ""}
+    ${_m.tax > 0 ? `<div class="ord-sub"><span>${esc(taxLabel())} ${Math.round(_m.rate * 10000) / 100}%</span><span>${inr(_m.tax)}</span></div>` : ""}
     <div class="ord-total"><span>Total</span><span>${inr(total)}</span></div>
     <div class="ord-actions">${billBtns}${stage}${freeBtn}</div>
   </div>`;
@@ -1681,7 +1741,7 @@ function openBillModal(key) {
       <div class="bm-totals">
         <div class="bm-trow"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
         ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount</span><span>− ${inr(m.disc)}</span></div>` : ""}
-        ${m.tax > 0 ? `<div class="bm-trow"><span>Tax ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
+        ${m.tax > 0 ? `<div class="bm-trow"><span>${esc(taxLabel())} ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
         <div class="bm-trow grand"><span>Total</span><span>${inr(m.total)}</span></div>
       </div>
       <div class="bm-actions">
@@ -2166,31 +2226,16 @@ function printBill(t, sess, os) {
     for (const x of opts) r += `<tr class="ex"><td colspan="2">+ ${esc(x.label)}</td><td class="r">${Math.round(Number(x.price))}</td><td class="r">${Math.round(Number(x.price) * q)}</td></tr>`;
     return r;
   }).join("")).join("");
-  // White-label identity: prefer THIS restaurant's own settings, then its menu
-  // wordmark. The French House logo / phone / "Merci" footer apply ONLY to the
-  // flagship (#1); every other restaurant prints its own name + sign-off.
-  const r = state.data.restaurant || {};
-  const isDefault = r.slug === "french-house" || r.id === "00000000-0000-0000-0000-000000000001";
-  // TEMPORARY brand defaults (owner 2026-07-05): until a restaurant fills its own
-  // Billing details, its bill shows these Aevidine placeholders instead of a blank
-  // header — so no bill ever prints empty. The flagship (#1) keeps its own identity.
-  // Each restaurant REPLACES these in Settings › Billing (and MUST set a real GSTIN
-  // before using the bill for actual tax filing — this GSTIN is a placeholder).
-  const DEFAULT_BILL = { address: "Aevidine, Ahmedabad, Gujarat 380015, India", phone: "+91 90000 00000", gstin: "24AAAAA0000A1Z5" };
-  const name = esc(s.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")));
-  const addr = esc(s.restaurant_address || (isDefault ? "" : DEFAULT_BILL.address));
-  const phone = esc(s.restaurant_phone || (isDefault ? "+91 90999 14418" : DEFAULT_BILL.phone));
-  const gstin = esc(s.gstin || (isDefault ? "" : DEFAULT_BILL.gstin));
-  // Per-cuisine sign-off so each bill feels native to its restaurant.
-  const FOOTERS = {
-    "pizza-palace": "Grazie — a presto! 🍕",
-    "sakura-sushi": "Arigato — mata kite ne 🍣",
-    "taco-fiesta": "¡Gracias — vuelve pronto! 🌮",
-    "burger-barn": "Y'all come back now! 🍔",
-    "spice-route": "Dhanyavaad — padharo! 🍛",
-    "green-bowl": "Stay fresh — see you soon! 🥗",
-  };
-  const footer = s.bill_footer || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again");
+  // White-label identity: ALL the fallback logic lives in billIdentity() (shared with
+  // the Billing settings form, which autofills the same values). The French House
+  // logo applies ONLY to the flagship (#1).
+  const bi = billIdentity(s);
+  const isDefault = bi.isDefault;
+  const name = esc(bi.name);
+  const addr = esc(bi.address);
+  const phone = esc(bi.phone);
+  const gstin = esc(bi.gstin);
+  const footer = esc(bi.footer);
   // Customer name: orders carry a customer_name (dine-in head / aggregator buyer);
   // use the first order that has one. Blank → the line is hidden, never empty.
   const cust = esc((os.find((o) => (o.customer_name || "").toString().trim()) || {}).customer_name || "");
@@ -4748,7 +4793,7 @@ function tablePanelParts(t) {
   const sumSub = mBill.subtotal;
   const sumTax = mBill.tax;
   const sumDisc = mBill.disc;
-  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>Subtotal</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 ? `<div class="tp-bl"><span>Tax</span><b>${inr(sumTax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
+  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>Subtotal</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 ? `<div class="tp-bl"><span>${esc(taxLabel())}</span><b>${inr(sumTax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
 
   // The PRIMARY table-wide action: accept everything that's new, else serve everything
   // that's cooked. (Per-order Accept stays on each new card; per-dish Serve on each row.)

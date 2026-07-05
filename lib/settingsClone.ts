@@ -19,6 +19,7 @@ const NULL_COLUMNS = [
   "restaurant_name", "restaurant_address", "restaurant_phone", // printed on the tax invoice
   "gstin", "invoice_prefix",                                   // invoice identity
   "bill_footer",                                               // printed sign-off (mig 124)
+  "tax_label",                                                 // on-screen tax word (mig 125)
   "tax_rate",                                                  // each restaurant sets its own
   "geo_lat", "geo_lng",                                        // location gate center → else #1's café coords leak in
 ] as const;
