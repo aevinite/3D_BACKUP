@@ -267,6 +267,16 @@ function openIssueModal() {
 const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
 const ridQ = (path) => PANEL_RID ? path + (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID) : path;
 
+// The restaurant THIS panel is currently showing: the admin "view as" URL pin if
+// present, else the restaurant the board loaded (state.data.restaurant.id) once
+// /all returns. Used to SCOPE per-restaurant device caches so one restaurant's
+// floor can never first-paint with another restaurant's data on a shared device
+// (cross-tenant leak fixed 2026-07-04 — the table-count skeleton hint below).
+const panelRid = () => PANEL_RID || (state && state.data && state.data.restaurant && state.data.restaurant.id) || "";
+// The device cache key for THIS restaurant's table count. Empty until we know the
+// restaurant — callers then fall back to the neutral default skeleton (no leak).
+const tableCountKey = () => { const r = panelRid(); return r ? "lfh_editor_table_count:" + r : ""; };
+
 // api: the one helper every server call goes through. Give it the HTTP method
 // ("GET"/"POST"/"PATCH"/"DELETE"), the path (e.g. "/orders"), and optionally a
 // body object. It sends the request to our local server, reads back the JSON,
@@ -3714,7 +3724,8 @@ function floorNeedsCardHtml() {
 function floorStatsHtml() {
   const s = state.data.settings || {};
   if (!s.sessions_enabled) return "";
-  let cachedN = parseInt(localStorage.getItem("lfh_editor_table_count"), 10);
+  const _tcKey = tableCountKey();
+  let cachedN = _tcKey ? parseInt(localStorage.getItem(_tcKey), 10) : NaN;
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
   const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
   let cOcc = 0, cPay = 0, cNew = 0, cCall = 0;
@@ -3753,10 +3764,11 @@ function floorHtml() {
   // skeleton. Fix: remember the real count in localStorage and use it as the
   // default, so the skeleton starts at the right size. (Falls back to 12 only
   // on a browser that has never loaded this editor.)
-  let cachedN = parseInt(localStorage.getItem("lfh_editor_table_count"), 10);
+  const _tcKey = tableCountKey();
+  let cachedN = _tcKey ? parseInt(localStorage.getItem(_tcKey), 10) : NaN;
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
   const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
-  if (s.table_count) { try { localStorage.setItem("lfh_editor_table_count", String(parseInt(s.table_count, 10))); } catch {} }
+  if (s.table_count && _tcKey) { try { localStorage.setItem(_tcKey, String(parseInt(s.table_count, 10))); } catch {} }
   // Side-panel queues now come from the slim SUMMARY aggregates (tiny — only pending rows),
   // not the full board (which is no longer fetched whole). Same shapes the cards expect.
   // (Requests/joiners/calls live in the shared floorReqCardHtml/floorNeedsCardHtml builders.)

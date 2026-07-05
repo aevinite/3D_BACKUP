@@ -14,7 +14,7 @@ export type Overview = {
   maintenance: boolean; sessionsEnabled: boolean; tableCount: number;
   features: Record<string, boolean>;
   openTables: number; activeOrders: number; unpaidOrders: number;
-  revenueToday: number; ordersToday: number;
+  ordersToday: number;
 };
 export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string; restaurant_name?: string | null; restaurant_slug?: string | null };
 
@@ -40,9 +40,21 @@ export const ACT_LABEL: Record<string, string> = {
   order_allergies: "Set allergies", order_item_removed: "Removed allergen", item_status: "Updated dish status",
   bill_paid: "Marked paid", close_unpaid: "Closed unpaid", payment_revert: "Reverted payment",
   member_remove: "Removed guest", member_ban: "Banned guest", auto_approve: "Auto-approve", table_restart: "Restarted table",
+  billing_set_plan: "Set billing plan", billing_add_payment: "Recorded a payment", billing_delete_payment: "Deleted a payment",
 };
 
 export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
+
+// openRestaurantPanel — the admin "act-as" pattern, shared by the home command
+// table and the Restaurants detail page. Opens the tab SYNCHRONOUSLY on the
+// /api/admin/act-as/go redirect, which sets the act-as cookie and 302s to the
+// panel in one round trip: the tab appears the instant the admin clicks (owner
+// 2026-07-04 — the old await-POST-then-open flow felt slow and risked popup
+// blockers). The ?rid= pin keeps THAT tab on the restaurant even if the
+// browser-wide cookie later changes (owner 2026-07-03).
+export async function openRestaurantPanel(restaurantId: string, path: string) {
+  window.open(`/api/admin/act-as/go?rid=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(path)}`, "_blank", "noopener");
+}
 export const timeAgo = (iso: string) => {
   const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return "just now";
@@ -99,12 +111,13 @@ export function useActiveAutoRefresh(fn: () => void, intervalMs = 60000, idleMs 
   }, [intervalMs, idleMs]);
 }
 
+// NO revenue here (owner 2026-07-03: the admin panel shows no earnings anywhere;
+// the only ₹ allowed is a live table's unpaid "due" on the floor grid below).
 export function StatCards({ ov }: { ov: Overview | null }) {
   const cells: [string, string | number][] = [
     ["Open tables", ov ? ov.openTables : "…"],
     ["Active orders", ov ? ov.activeOrders : "…"],
     ["Unpaid bills", ov ? ov.unpaidOrders : "…"],
-    ["Revenue today", ov ? inr(ov.revenueToday) : "…"],
     ["Orders today", ov ? ov.ordersToday : "…"],
   ];
   return (

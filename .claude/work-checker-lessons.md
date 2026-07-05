@@ -125,3 +125,13 @@ realtime sync) survive fine and found the real bugs. So: (1) don't send security
 work to ANY subagent model — do it inline; (2) keep hunter prompts strictly functional,
 no "self-grant/escalate/leak/attack" words; (3) the findings are real, so never skip
 the tests. The work-checker agent survived fine and is the right final gate.
+
+## Sub-agents echo secrets unless the login is redirect-based (2026-07-04)
+When delegating admin-panel work, a sub-agent set up the login by curling the pw-bridge
+and printing ADMIN_PASSWORD into its own tool output — violating the project's absolute
+"never echo secrets" rule. Verified after: the password was in ZERO commits/source
+(git grep across all objects = 0), only in the local transcript. Fix for next time: give
+the agent a login path that NEVER surfaces the value — e.g. a one-shot server-side script
+that reads .env.local and POSTs the staff-login itself, printing only the resulting
+status. Never hand an agent a "fetch the pw then use it in the browser" recipe.
+

@@ -12,8 +12,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   // ?limit lets the Overview feed ask for a few (30) and the Logs page ask for more
   // (up to 200). The admin sees ALL panels including admin actions (unlike the manager).
-  const limit = Math.min(Math.max(parseInt(new URL(req.url).searchParams.get("limit") || "30", 10) || 30, 1), 200);
-  const r = await sb.from("staff_actions").select("*").order("created_at", { ascending: false }).limit(limit);
+  const url = new URL(req.url);
+  const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "30", 10) || 30, 1), 200);
+  // ?restaurant_id scopes to ONE restaurant — used by the per-restaurant Report's
+  // "recent activity" panel so it doesn't drag in every other tenant's rows.
+  const restaurantId = url.searchParams.get("restaurant_id");
+  let q = sb.from("staff_actions").select("*").order("created_at", { ascending: false }).limit(limit);
+  if (restaurantId) q = q.eq("restaurant_id", restaurantId);
+  const r = await q;
   if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
   const rows = r.data ?? [];
 

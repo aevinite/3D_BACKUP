@@ -7,6 +7,8 @@
 // .adm-* styling, parameterised by restaurant.
 import { useCallback, useEffect, useState } from "react";
 import { splitBrandSegments, stripBrandMarkers } from "@/lib/brandText";
+import { openRestaurantPanel } from "@/components/admin/shared";
+import RestaurantReport from "@/components/admin/RestaurantReport";
 
 // Render brand text in the live preview: *marked* parts use the accent colour,
 // the rest the mode's text colour — exactly how the guest menu renders it.
@@ -42,6 +44,22 @@ export default function AdminRestaurants() {
   const [owners, setOwners] = useState<Owner[]>([]);
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Restaurant | null>(null);
+  // ?focus=<slug> (set by the Command page's Manage→ + the topbar quick-switcher):
+  // open that restaurant's DETAIL directly — landing on the list and making the
+  // admin find the row again was the bug (owner 2026-07-04: "Manage should take me
+  // to the details of the particular restaurant"). Read from window.location (not
+  // useSearchParams) so this client page needs no Suspense boundary.
+  const [focusSlug, setFocusSlug] = useState<string | null>(null);
+  useEffect(() => {
+    try { setFocusSlug(new URLSearchParams(window.location.search).get("focus")); } catch {}
+  }, []);
+  useEffect(() => {
+    if (!focusSlug || !list) return;
+    const hit = list.find((r) => r.slug === focusSlug);
+    if (hit) { setSelected(hit); setFocusSlug(null); return; } // consume it — Back shows the plain list
+    const el = document.getElementById(`rest-row-${focusSlug}`);
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focusSlug, list]);
 
   // Load the restaurant list once (and again when we come back from a detail view
   // so a freshly-created settings row + owner assignment show their latest state).
@@ -94,9 +112,15 @@ export default function AdminRestaurants() {
             {rows.map((r) => (
               <button
                 key={r.id}
+                id={`rest-row-${r.slug}`}
                 className="adm-logrow"
                 onClick={() => setSelected(r)}
-                style={{ gridTemplateColumns: "1.2fr 1fr 1fr 80px 80px", width: "100%", border: 0, background: "transparent", color: "var(--text)", cursor: "pointer", textAlign: "left", font: "inherit" }}
+                style={{
+                  gridTemplateColumns: "1.2fr 1fr 1fr 80px 80px", width: "100%", border: 0, color: "var(--text)", cursor: "pointer", textAlign: "left", font: "inherit",
+                  // The ?focus= row gets a quiet accent highlight so the eye lands on it.
+                  background: focusSlug === r.slug ? "color-mix(in srgb, var(--accent) 10%, transparent)" : "transparent",
+                  boxShadow: focusSlug === r.slug ? "inset 2px 0 0 var(--accent)" : undefined,
+                }}
                 title={`Open ${r.name}`}
               >
                 <span style={{ fontWeight: 700 }}>{r.name}</span>
@@ -106,7 +130,7 @@ export default function AdminRestaurants() {
                   <span className="adm-chip" style={r.active
                     ? { background: "color-mix(in srgb, var(--adm-ok) 22%, transparent)", color: "var(--adm-ok)" }
                     : { background: "var(--muted2, rgba(120,120,120,0.18))", color: "var(--muted)" }}>
-                    {r.active ? "Active" : "Off"}
+                    {r.active ? "Active" : "Suspended"}
                   </span>
                 </span>
                 <span style={{ textAlign: "right", color: "var(--accent)", fontWeight: 700, fontSize: 13 }}>
@@ -226,11 +250,55 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
 }
 
 // The per-restaurant detail: assign its OWNER + flip its guest feature switches.
+// StatusCard — Live vs SUSPENDED, with the kill switch (owner 2026-07-04: "what does
+// suspended mean? where is the button?"). Suspended = active:false → the tenant
+// resolver stops serving the guest menu; the admin still reaches every panel via
+// act-as. Suspending is confirmed first — flipping the LIVE client off by accident
+// would be an outage.
+function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const setActive = async (active: boolean) => {
+    if (!active && !window.confirm(`Suspend ${restaurant.name}?\n\nIts guest menu goes OFFLINE immediately (staff panels stay reachable to you via act-as). You can reactivate any time.`)) return;
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch("/api/admin/restaurants", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_restaurant_active", restaurant_id: restaurant.id, active }),
+      });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't change the status.");
+      onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="adm-card" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", ...(restaurant.active ? {} : { borderColor: "var(--adm-danger)" }) }}>
+      <span className="adm-chip" style={restaurant.active
+        ? { background: "color-mix(in srgb, var(--adm-ok) 22%, transparent)", color: "var(--adm-ok)" }
+        : { background: "color-mix(in srgb, var(--adm-danger) 22%, transparent)", color: "var(--adm-danger)" }}>
+        {restaurant.active ? "Live" : "Suspended"}
+      </span>
+      <span style={{ flex: 1, fontSize: 13 }} className="adm-muted">
+        {restaurant.active
+          ? "Guests can open this restaurant's menu."
+          : "Suspended — the guest menu is offline. Staff panels stay reachable to you via the buttons below."}
+      </span>
+      {err && <span style={{ color: "var(--adm-danger)", fontSize: 12.5 }}>{err}</span>}
+      {restaurant.active
+        ? <button className="adm-btn danger" disabled={busy} onClick={() => setActive(false)}><i className="fas fa-power-off" style={{ marginRight: 7 }} aria-hidden="true" />Suspend…</button>
+        : <button className="adm-btn primary" disabled={busy} onClick={() => setActive(true)}><i className="fas fa-play" style={{ marginRight: 7 }} aria-hidden="true" />Reactivate</button>}
+    </div>
+  );
+}
+
 function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
   const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
   const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
   const [staffFeat, setStaffFeat] = useState<Record<string, boolean> | null>(null);
   const [busy, setBusy] = useState(false);
+  // "Full report" (owner's words: "every single bit" of ONE restaurant) swaps the
+  // whole detail view for its own report — its own component, own data load —
+  // instead of cramming another card into an already-long page.
+  const [showReport, setShowReport] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -332,6 +400,10 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     );
   };
 
+  if (showReport) {
+    return <RestaurantReport restaurantId={restaurant.id} restaurantName={restaurant.name} onBack={() => setShowReport(false)} />;
+  }
+
   return (
     <>
       {/* Breadcrumb: Restaurants › <name> — matches the owner-view breadcrumb (.adm-crumbs)
@@ -341,11 +413,20 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         <i className="fas fa-chevron-right sep" aria-hidden="true" />
         <span className="cur">{restaurant.name}</span>
       </nav>
-      <h1 className="adm-page-h">{restaurant.name}</h1>
-      <p className="adm-page-sub">
-        <span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{restaurant.slug}/menu</span>
-        {" · "}Turn this restaurant&apos;s guest features on or off. Changes affect only its menu.
-      </p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 className="adm-page-h">{restaurant.name}</h1>
+          <p className="adm-page-sub">
+            <span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{restaurant.slug}/menu</span>
+            {" · "}Turn this restaurant&apos;s guest features on or off. Changes affect only its menu.
+          </p>
+        </div>
+        <button className="adm-btn" onClick={() => setShowReport(true)} title={`Every usage figure for ${restaurant.name}`}>
+          <i className="fas fa-file-lines" style={{ marginRight: 7 }} aria-hidden="true" />Full report
+        </button>
+      </div>
+
+      <StatusCard restaurant={restaurant} onChanged={onChanged} />
 
       <OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} />
 
@@ -609,14 +690,11 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
   const openPanel = async (path: string) => {
     setBusy(true); setMsg(null);
     try {
-      const r = await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id }) });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't enter restaurant.");
+      // Shared act-as helper (components/admin/shared.tsx) — also used by the
+      // Command page's quick-open buttons. Sets the act-as cookie, then opens the
+      // panel in a new tab pinned to this restaurant via ?rid=.
+      await openRestaurantPanel(restaurant.id, path);
       setViewing(true);
-      // ?rid= pins THAT TAB to this restaurant. The act-as cookie above is browser-wide,
-      // so without the URL pin, opening a second restaurant's panel silently shifted every
-      // already-open panel tab to it (owner, 2026-07-03 — "Aangan's manager panel shifts to
-      // the other restaurant"). The cookie stays as the fallback for the owner dashboard.
-      window.open(`${path}?rid=${encodeURIComponent(restaurant.id)}`, "_blank", "noopener");
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const stop = async () => {
