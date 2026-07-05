@@ -8,11 +8,16 @@
 //     slip in silently scoped to restaurant #1; now it bounces to the admin console.
 // Anyone else is bounced to /login (carrying ?next so they return after login).
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, type Role } from "@/lib/userAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { isPanelEnabled } from "@/lib/panelAccess";
+import { getRestaurantBySlug } from "@/lib/tenant";
+
+// Where each role lands after login. The canonical copy — LoginForm keeps a
+// client-side duplicate (it can't import this server module).
+export const ROLE_HOME: Record<Role, string> = { owner: "/owner", manager: "/manager", kitchen: "/kitchen", tablet: "/tablet" };
 
 export async function requirePanel(role: Role, next: string): Promise<void> {
   const store = await cookies();
@@ -31,4 +36,29 @@ export async function requirePanel(role: Role, next: string): Promise<void> {
     redirect("/aevinite");
   }
   redirect(`/login?next=${encodeURIComponent(next)}`);
+}
+
+// Gate for a TENANT-SCOPED panel route (/r/<slug>/tablet|kitchen|manager).
+//
+// The slug is a LABEL + a CHECK — never the data source. Staff data stays scoped
+// by the session cookie (lib/panelScope), so a typo'd or guessed slug can't leak
+// anything: a staff session whose restaurant does NOT match the slug is bounced
+// to THAT restaurant's login instead of silently showing their own restaurant
+// under the wrong address. The admin super-user may open any slug; the returned
+// restaurantId is then passed as ?rid= into the panel iframe (the existing
+// admin view-as mechanism — ignored server-side for real staff sessions).
+export async function requirePanelAt(
+  role: Role, slug: string,
+): Promise<{ restaurantId: string; admin: boolean }> {
+  const r = await getRestaurantBySlug(slug);
+  if (!r) notFound();
+  const store = await cookies();
+  const u = await userFromCookie(store.get(USER_COOKIE)?.value);
+  if (u && u.role === role && u.restaurant_id === r.id && r.active && (await isPanelEnabled(role, r.id))) {
+    return { restaurantId: r.id, admin: false };
+  }
+  // Admin super-access: any slug, even an inactive restaurant or a disabled panel
+  // (admin sets up / inspects everything) — same bypass as the bare-route gate.
+  if (await tokenIsValid(store.get(AUTH_COOKIE)?.value)) return { restaurantId: r.id, admin: true };
+  redirect(`/r/${slug}/login?next=${encodeURIComponent(`/r/${slug}${ROLE_HOME[role]}`)}`);
 }

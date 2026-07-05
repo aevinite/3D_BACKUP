@@ -7,10 +7,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
+import { ROLE_HOME } from "@/lib/panelGate";
 import LoginForm from "./LoginForm";
-
-// Where each role lands after login.
-export const ROLE_HOME: Record<string, string> = { owner: "/owner", manager: "/manager", kitchen: "/kitchen", tablet: "/tablet" };
 
 export default async function LoginPage({
   searchParams,

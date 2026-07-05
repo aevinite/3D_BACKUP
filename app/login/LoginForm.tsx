@@ -4,10 +4,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-// Must match the server's ROLE_HOME map.
+// Must match the server's ROLE_HOME map (lib/panelGate.ts).
 const ROLE_HOME: Record<string, string> = { owner: "/owner", manager: "/manager", kitchen: "/kitchen", tablet: "/tablet" };
 
-export default function LoginForm({ next }: { next: string }) {
+// restaurantSlug/restaurantName come from the tenant-scoped door (/r/<slug>/login):
+// the slug is posted so only THAT restaurant's staff can match, and the card shows
+// the restaurant's own name instead of the platform brand.
+export default function LoginForm({
+  next, restaurantSlug, restaurantName,
+}: { next: string; restaurantSlug?: string; restaurantName?: string }) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -23,7 +28,7 @@ export default function LoginForm({ next }: { next: string }) {
       const r = await fetch("/api/panel-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, ...(restaurantSlug ? { restaurant: restaurantSlug } : {}) }),
       });
       const data = await r.json();
       if (!r.ok || !data.ok) {
@@ -31,7 +36,10 @@ export default function LoginForm({ next }: { next: string }) {
         setBusy(false);
         return;
       }
-      const home = ROLE_HOME[data.role] || "/menu";
+      // From the scoped door, land on the scoped panel URL so the address bar
+      // keeps saying which restaurant this is.
+      const base = ROLE_HOME[data.role];
+      const home = base ? (restaurantSlug ? `/r/${restaurantSlug}${base}` : base) : "/menu";
       // Open-redirect guard: only honour ?next if it points to THIS user's panel.
       const dest = next && next === home ? next : home;
       router.push(dest);
@@ -52,8 +60,8 @@ export default function LoginForm({ next }: { next: string }) {
       <form onSubmit={submit} style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 18, padding: 28, width: "min(92vw, 380px)", boxShadow: "0 20px 60px rgba(0,0,0,.45)" }}>
         <div style={{ textAlign: "center", marginBottom: 18 }}>
           <div style={{ fontSize: 30, letterSpacing: "0.04em" }}>✦</div>
-          <h1 style={{ fontSize: 22, margin: "8px 0 2px", fontWeight: 800, letterSpacing: "0.02em" }}>Aevidine</h1>
-          <p style={{ margin: 0, fontSize: 13, color: "#8aa0c9" }}>Restaurant OS · staff sign in</p>
+          <h1 style={{ fontSize: 22, margin: "8px 0 2px", fontWeight: 800, letterSpacing: "0.02em" }}>{restaurantName || "Aevidine"}</h1>
+          <p style={{ margin: 0, fontSize: 13, color: "#8aa0c9" }}>{restaurantName ? "Staff sign in" : "Restaurant OS · staff sign in"}</p>
         </div>
 
         <label style={{ fontSize: 12, color: "#8aa0c9" }}>Name</label>

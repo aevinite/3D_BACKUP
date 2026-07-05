@@ -286,6 +286,16 @@ owner looks, with cache busting, before claiming anything.
   owner chrome + admin-scoped data when both cookies existed in one browser).
 - [ ] **Owner reviews at localhost:4007/owner** (diag creds or admin act-as) — NOT merged to main until approved.
 
+## 🆕 2026-07-05 night — Per-restaurant panel URLs (branch worktree-feat-tenant-scoped-panel-urls)
+- [x] **Every restaurant gets its OWN panel + login addresses** — `/r/<slug>/login|tablet|kitchen|manager|owner`
+  (owner: "make a whole separate path for other restaurants"). The slug is a label + CHECK, never the data
+  source: staff data stays scoped by the session cookie; a session from another restaurant is bounced to
+  the slug's own login. Scoped login is branded with the restaurant name and only matches THAT restaurant's
+  staff (kills the cross-restaurant same-name+same-password ambiguity). Admin opens any slug → auto view-as
+  (?rid pin / act-as cookie). Bare /login /tablet /kitchen /manager /owner unchanged (back-compat).
+  Verified live on :4010: branded card, wrong-door 401, mismatch bounce, 404 unknown slug, admin rid pin,
+  owner entry, bare routes still 200.
+
 ## 🆕 2026-07-06 — Admin must enter panels FROM the admin console, restaurant named (branch fix/admin-panels-require-restaurant)
 - [ ] **Bare `/tablet` `/kitchen` `/manager` `/editor` no longer admit a scopeless admin** — like /owner,
   the admin gets in ONLY via /aevinite's open-panel flow (act-as cookie + ?rid in the URL). A logged-in
