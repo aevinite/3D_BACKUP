@@ -658,7 +658,7 @@ function renderPanel() {
       </div>
       ${billBox}`;
     const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
+    $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
     return;
   }
 
@@ -856,7 +856,7 @@ function renderPanel() {
   // IDENTICAL to the manager panel's openDishEditModal.
   document.querySelectorAll("[data-edit-dish]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.editDish)));
   // Add a dish to THIS already-placed order: reuse the dish browser in add mode.
-  document.querySelectorAll("[data-add-dish]").forEach((b) => (b.onclick = () => { state.ordering = true; state.addToOrderId = b.dataset.addDish; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); }));
+  document.querySelectorAll("[data-add-dish]").forEach((b) => (b.onclick = () => { state.ordering = true; state.viewOrder = false; state.addToOrderId = b.dataset.addDish; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); }));
   // Per-order allergen chips: toggle an allergen on/off for the whole order.
   document.querySelectorAll(".talg[data-alg]").forEach((chip) => (chip.onclick = () => {
     const id = chip.dataset.alg, slug = chip.dataset.slug;
@@ -909,7 +909,7 @@ function renderPanel() {
     }
   };
   const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  $("#takeOrder").onclick = () => { state.ordering = true; state.cart = []; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
+  $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
 }
 
 // Advance one dish new→cooking→served (wrapping). Optimistic so it feels instant.
@@ -1355,6 +1355,7 @@ function dishBtnHtml(d) {
   // lines — e.g. plain + "no nuts"), so the badge shows the true count.
   const inCartQty = state.cart.filter((l) => l.id === d.id).reduce((s, l) => s + l.qty, 0);
   return `<button class="dish ${out ? "out" : ""} ${inCartQty ? "in" : ""}" data-dish="${esc(d.id)}" ${out ? "disabled" : ""}>
+    ${out ? "" : `<span class="dedit" data-dishedit="${esc(d.id)}" role="button" aria-label="Quantity / allergy" title="Set quantity or allergy">✎</span>`}
     <span class="dname">${esc(d.title)}</span>
     <span class="drow">
       <span class="dprice">${out ? "SOLD OUT" : inr(dishPrice(d))}</span>
@@ -1436,9 +1437,18 @@ function updateDishBadges() {
   });
 }
 function bindDishButtons() {
-  document.querySelectorAll("[data-dish]").forEach((b) => (b.onclick = () => {
+  // The small ✎ on each tile → the quantity/allergy popup (owner 2026-07-05). Its own
+  // handler, and it stops the tile's quick-add from also firing.
+  document.querySelectorAll("[data-dishedit]").forEach((el) => (el.onclick = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const d = state.data.dishes.find((x) => x.id === el.dataset.dishedit);
+    if (d) renderDishOptions(d, null);
+  }));
+  document.querySelectorAll("[data-dish]").forEach((b) => (b.onclick = (e) => {
+    if (e.target.closest && e.target.closest("[data-dishedit]")) return; // ✎ handled above
     const d = state.data.dishes.find((x) => x.id === b.dataset.dish);
     if (!d) { toast("That dish just changed — refreshing the menu", false); renderOrderMode(); return; }
+    // A sized/extra dish can't be quick-added blindly — open the popup to choose.
     if (Array.isArray(d.options) && d.options.length) { renderDishOptions(d, null); return; }
     // ADD-TO-EXISTING-ORDER mode: a plain dish is added straight away (no cart).
     if (state.addToOrderId) { addDishToOrder(state.addToOrderId, { dishId: d.id, qty: 1 }); return; }
@@ -1451,22 +1461,39 @@ function bindDishButtons() {
     if (line) line.qty = Math.min(99, line.qty + 1);
     else state.cart.push({ id: d.id, title: d.title, price: dishPrice(d), qty: 1 });
     // Patch the badge + cart pane in place — a full re-render would reset the browse scroll.
-    updateDishBadges(); updateOrderCart();
+    updateDishBadges(); updateOrderCart(); updateViewPill();
   }));
 }
+// The floating "View order" pill (phone browse screen) — keep its count + total live.
+function updateViewPill() {
+  const pill = document.getElementById("omViewBtn");
+  if (!pill) return;
+  const n = state.cart.reduce((s, l) => s + l.qty, 0);
+  const total = state.cart.reduce((s, l) => s + l.price * l.qty, 0);
+  pill.classList.toggle("empty", n === 0);
+  pill.innerHTML = `<span class="vp-n">${n}</span><span class="vp-lbl">View order</span><span class="vp-total">${inr(total)}</span><i class="vp-arrow">→</i>`;
+}
 
+// The per-dish POPUP (owner 2026-07-05): opened by the ✎ on a tile (or on a cart line).
+// A modal OVER the menu — quantity stepper + a per-item allergy/avoid field (+ any
+// size/extras) — so the menu behind is untouched (browse scroll survives). The plain
+// tap on a tile still quick-adds without opening this.
+let optBackOff = null;
 function renderDishOptions(d, editIndex) {
-  // Leaving the browser for the options screen — remember the browse spot so the
-  // rebuild on return lands exactly where the waiter was.
-  const sc = $("#omScroll"); if (sc) state._omTop = sc.scrollTop;
   const sel = {};
   const line = editIndex != null ? state.cart[editIndex] : null;
   if (line && line.options) for (const o of line.options) (sel[o.group] = sel[o.group] || []).push(o.label);
-  // carry the line's per-item allergy + note so editing keeps them
-  state._opt = { d, sel, editIndex, allergy: (line && line.allergy) || "", note: (line && line.note) || "" };
+  state._opt = { d, sel, editIndex, allergy: (line && line.allergy) || "", qty: (line && line.qty) || 1 };
+  if (window.LFH_BACK && !optBackOff) optBackOff = LFH_BACK.layer("tablet-optpopup", closeDishOptions);
   drawDishOptions();
 }
+function closeDishOptions() {
+  const ov = document.getElementById("optOverlay"); if (ov) ov.remove();
+  state._opt = null;
+  if (optBackOff) { optBackOff(); optBackOff = null; }
+}
 function drawDishOptions() {
+  if (!state._opt) return;
   const { d, sel, editIndex } = state._opt;
   const base = dishPrice(d);
   let addons = 0;
@@ -1481,57 +1508,58 @@ function drawDishOptions() {
     return `<div class="optgroup"><h4>${esc(g.name)}${multi ? ` <span class="muted small">· choose any</span>` : ""}</h4><div class="optchoices">${choices}</div></div>`;
   }).join("");
   const unit = base + addons;
-  $("#panel").classList.remove("has-detail");
-  // Size/extras (if the dish has any) PLUS a per-item allergy + note — so the
-  // waiter can flag "no nuts" or "less ice" on this one dish, not the whole order.
-  // .om-optwrap gives the screen its own padding + scroll while the panel is the
-  // full-screen order takeover (which strips the panel's usual padding).
-  $("#panel").innerHTML = `
-    <div class="om-optwrap">
-    <div class="phead"><h2>${esc(d.title)}</h2><button class="btn small" id="optBack">← back</button></div>
-    <div class="muted small">Base ${inr(base)}</div>
-    ${groups || `<div class="muted small">No size / extras for this dish.</div>`}
-    <div class="optgroup"><h4>⚠ Allergy / avoid <span class="muted small">· this item</span></h4>
-      <input type="text" id="optAllergy" class="note allergy" placeholder="e.g. nuts, dairy" value="${esc(state._opt.allergy || "")}"></div>
-    <div class="optgroup"><h4>Note <span class="muted small">· optional</span></h4>
-      <input type="text" id="optNote" class="note" placeholder="e.g. less ice, extra hot" value="${esc(state._opt.note || "")}"></div>
-    <div class="ctotal"><span>Per item</span><b>${inr(unit)}</b></div>
-    <button class="btn primary big" id="optAdd">${editIndex != null ? "Update item" : "Add to order"}</button>
+  const qty = Math.max(1, state._opt.qty || 1);
+  let ov = document.getElementById("optOverlay");
+  if (!ov) { ov = document.createElement("div"); ov.id = "optOverlay"; ov.className = "opt-overlay"; document.body.appendChild(ov); }
+  ov.innerHTML = `
+    <div class="opt-pop" role="dialog" aria-modal="true">
+      <div class="opt-head"><h3>${esc(d.title)}</h3><button class="opt-x" id="optClose" aria-label="Close">✕</button></div>
+      <div class="opt-scroll">
+        <div class="muted small">Base ${inr(base)}</div>
+        ${groups || ""}
+        <div class="optgroup"><h4>⚠ Allergy / avoid <span class="muted small">· this item</span></h4>
+          <input type="text" id="optAllergy" class="note allergy" placeholder="e.g. nuts, dairy" value="${esc(state._opt.allergy || "")}"></div>
+        <div class="optgroup"><h4>Quantity</h4>
+          <div class="opt-qty"><button class="qbtn" id="optMinus" aria-label="Less">−</button><b id="optQ">${qty}</b><button class="qbtn" id="optPlus" aria-label="More">+</button></div></div>
+      </div>
+      <div class="opt-foot">
+        <div class="ctotal"><span>${qty} × ${inr(unit)}</span><b>${inr(unit * qty)}</b></div>
+        <button class="btn primary big" id="optAdd">${editIndex != null ? "Update item" : "Add to order"}</button>
+      </div>
     </div>`;
-  document.querySelectorAll("[data-optg]").forEach((b) => (b.onclick = () => {
+  ov.onclick = (e) => { if (e.target === ov) closeDishOptions(); };   // tap the dim backdrop to close
+  ov.querySelectorAll("[data-optg]").forEach((b) => (b.onclick = () => {
     const g = b.dataset.optg, l = b.dataset.optl, multi = b.dataset.multi === "true";
     const cur = sel[g] || [];
     sel[g] = multi ? (cur.includes(l) ? cur.filter((x) => x !== l) : [...cur, l]) : (cur.includes(l) ? [] : [l]);
     drawDishOptions();
   }));
-  // Persist the typed allergy/note onto _opt so a re-render (toggling an option)
-  // doesn't wipe them.
-  const al = $("#optAllergy"); if (al) al.oninput = (e) => (state._opt.allergy = e.target.value);
-  const nt = $("#optNote"); if (nt) nt.oninput = (e) => (state._opt.note = e.target.value);
-  $("#optBack").onclick = renderOrderMode;
-  $("#optAdd").onclick = () => {
+  const al = ov.querySelector("#optAllergy"); if (al) al.oninput = (e) => (state._opt.allergy = e.target.value);
+  ov.querySelector("#optMinus").onclick = () => { state._opt.qty = Math.max(1, qty - 1); drawDishOptions(); };
+  ov.querySelector("#optPlus").onclick = () => { state._opt.qty = Math.min(99, qty + 1); drawDishOptions(); };
+  ov.querySelector("#optClose").onclick = closeDishOptions;
+  ov.querySelector("#optAdd").onclick = () => {
     const opts = [];
     for (const g of (d.options || [])) for (const c of (g.choices || [])) {
       if ((sel[g.name] || []).includes(c.label)) opts.push({ group: g.name, label: c.label, price: Number(c.price) || 0 });
     }
     const unitPrice = base + opts.reduce((s, o) => s + o.price, 0);
     const allergy = (state._opt.allergy || "").trim();
-    const noteRaw = (state._opt.note || "").trim();
+    const useQty = Math.max(1, state._opt.qty || 1);
     // ADD-TO-EXISTING-ORDER mode: send straight to the order's add-item endpoint.
-    // The allergy rides as this dish's own `removed` list (NOT the order-wide
-    // list), so it stays on this dish only — mirroring how new orders carry it.
     if (state.addToOrderId) {
       const removed = allergy ? allergy.split(",").map((s) => s.trim()).filter(Boolean) : [];
-      addDishToOrder(state.addToOrderId, { dishId: d.id, qty: 1, options: opts.length ? opts.map((o) => ({ group: o.group, label: o.label })) : undefined, removed: removed.length ? removed : undefined, note: noteRaw || undefined });
-      state._opt = null;
+      addDishToOrder(state.addToOrderId, { dishId: d.id, qty: useQty, options: opts.length ? opts.map((o) => ({ group: o.group, label: o.label })) : undefined, removed: removed.length ? removed : undefined });
+      closeDishOptions();
       return;
     }
-    const line = { id: d.id, title: d.title, price: unitPrice, qty: 1, options: opts.length ? opts : undefined,
-      allergy: allergy || undefined, note: noteRaw || undefined };
-    if (editIndex != null && state.cart[editIndex]) { line.qty = state.cart[editIndex].qty; state.cart[editIndex] = line; }
+    const line = { id: d.id, title: d.title, price: unitPrice, qty: useQty, options: opts.length ? opts : undefined,
+      allergy: allergy || undefined };
+    if (editIndex != null && state.cart[editIndex]) state.cart[editIndex] = line;
     else state.cart.push(line);
-    state._opt = null;
-    renderOrderMode();
+    closeDishOptions();
+    // Patch in place — no full re-render, so the browse scroll + the view-order stay put.
+    updateDishBadges(); updateOrderCart(); updateViewPill();
   };
 }
 
@@ -1580,10 +1608,37 @@ function updateOrderCart() {
 // takeover class + the back-stack layer so none of them can leak.
 let omBackOff = null;
 function exitOrderMode() {
-  state.ordering = false; state.addToOrderId = null; state._omTop = 0;
+  state.ordering = false; state.addToOrderId = null; state._omTop = 0; state.viewOrder = false;
   renderPanel();
 }
+
+// The phone VIEW-ORDER screen (owner 2026-07-05): a separate screen (like the guest
+// menu) with the added items, ONE allergy/note field for the kitchen and SEND — reached
+// from the browse screen's floating "View order" pill. Desktop never sets viewOrder.
+function renderViewOrder() {
+  const p = $("#panel");
+  p.classList.remove("has-detail");
+  p.classList.add("om-open");
+  if (window.LFH_BACK && !omBackOff) omBackOff = LFH_BACK.layer("tablet-order", exitOrderMode);
+  p.innerHTML = `
+    <div class="om lite vieworder">
+      <div class="om-head">
+        <button class="btn small" id="voBack">← Menu</button>
+        <h2>Your order · Table ${esc(state.table)}</h2>
+      </div>
+      <div class="om-voscroll">
+        <aside class="om-cart" id="omCart"></aside>
+      </div>
+    </div>`;
+  updateOrderCart();               // fills #omCart: items + one note + total + SEND, wires handlers
+  const back = $("#voBack");
+  if (back) back.onclick = () => { state.viewOrder = false; renderOrderMode(); };
+}
 function renderOrderMode() {
+  // Phone: the added-items review lives on its OWN screen (like the guest menu), reached
+  // by the floating "View order" pill. Desktop keeps the side pane, so it never sets
+  // viewOrder. (owner 2026-07-05)
+  if (state.viewOrder) { renderViewOrder(); return; }
   const p = $("#panel");
   p.classList.remove("has-detail");
   p.classList.add("om-open");
@@ -1605,10 +1660,14 @@ function renderOrderMode() {
         <div class="om-scroll" id="omScroll">${addMode ? `<div class="muted small om-hint">Tap a dish to add it to this order — the bill updates automatically.</div>` : ""}${orderSectionsHtml()}</div>
         ${addMode ? "" : `<aside class="om-cart" id="omCart"></aside>`}
       </div>
+      ${addMode ? "" : `<button class="om-viewpill empty" id="omViewBtn" type="button"></button>`}
     </div>`;
   bindDishButtons();
   wireOrderNav();
   updateOrderCart();
+  updateViewPill();
+  const vb = $("#omViewBtn");
+  if (vb) vb.onclick = () => { state.viewOrder = true; renderOrderMode(); };
   const search = $("#dishSearch");
   if (search) search.oninput = (e) => {
     state.dishSearch = e.target.value;
@@ -1890,7 +1949,8 @@ if (window.LFH_RT) {
   // (owner 2026-07-05: the ✕ used to exit the whole flow mid-order/mid-edit). It peels
   // one layer: item options → order screen → table detail → floor.
   closeBtn.onclick = () => {
-    if (state._opt) { state._opt = null; renderOrderMode(); return; }   // editing an item → back to the order
+    if (state._opt) { closeDishOptions(); return; }                     // item popup → close it
+    if (state.viewOrder) { state.viewOrder = false; renderOrderMode(); return; }  // view order → back to menu
     if (state.ordering) { exitOrderMode(); return; }                    // taking an order → back to the table
     state.table = null; renderPanel(); renderFloor();                   // table detail → back to the floor
   };

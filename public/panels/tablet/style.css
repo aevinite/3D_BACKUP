@@ -547,24 +547,25 @@ body.om-mode #tabletClose { display: none; }
   .om.lite .om-head .om-search { order: 0; flex: 1 1 auto; flex-basis: auto; margin-top: 0; min-width: 0; }
   .om.lite .om-body, .om.lite .om-body.no-cart { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
   .om.lite .om-nav { flex: 0 0 auto; }
-  /* 53 / 47 split (owner 2026-07-05): the MENU (add dishes) gets ~53% up top with the
-     search + category chips pinned above it; the ORDER review gets ~47% below. */
-  .om.lite .om-scroll { flex: 53 1 0; min-height: 0; max-height: none; overflow-y: auto; }   /* MENU — own scroll */
-  /* ORDER — ONE single scroll: the added items, the allergy/notes field, the item total
-     AND the SEND button all scroll TOGETHER, so SEND is always reachable. (owner
-     2026-07-05: the items scrolled on their own while the allergy/total/SEND stayed put
-     and got pushed off-screen — SEND was unreachable. Now it's one continuous scroll,
-     no separate item scroll, no pinned footer.) */
-  .om.lite .om-cart { flex: 47 1 0; min-height: 0; height: auto; max-height: none;
-    overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; display: block;
-    border-top: 2px solid var(--line); margin-top: 6px; padding: 8px 0 calc(84px + env(safe-area-inset-bottom)); }
-  .om.lite .om-cart .cart { display: block; }
-  .om.lite .om-cart .cart-lines { overflow: visible; max-height: none; }   /* merged into the ONE order scroll */
-  .om.lite .om-cart .cart #sendOrder { margin-top: 10px; }
-  /* While the phone order screen OR the item-edit screen is open, hide the floating
-     panel-✕ — the screen has its own single "← back". One button only. */
+  /* BROWSE screen (owner 2026-07-05, guest-menu model): the MENU fills the screen; the
+     order review is a SEPARATE screen reached by the floating "View order" pill. The
+     search + category chips stay pinned above the dish scroll. */
+  .om.lite:not(.vieworder) .om-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; padding-bottom: 84px; }
+  .om.lite:not(.vieworder) .om-cart { display: none; }        /* no side pane on the phone browse screen */
+  /* VIEW-ORDER screen: the added items, the ONE allergy/note field, the total AND SEND
+     all scroll TOGETHER, so SEND is always reachable. */
+  .om.lite.vieworder .om-voscroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 4px 0 calc(84px + env(safe-area-inset-bottom)); }
+  .om.lite.vieworder .om-cart { display: block; border: 0; margin: 0; padding: 0; }
+  .om.lite.vieworder .om-cart .cart { display: block; }
+  .om.lite.vieworder .om-cart .cart-lines { overflow: visible; max-height: none; }
+  .om.lite.vieworder .om-cart .cart #sendOrder { margin-top: 12px; }
+  /* The floating "View order" pill — only on the phone browse screen. */
+  .om.lite:not(.vieworder) .om-viewpill { display: flex; }
+  /* While ANY order screen (browse / view-order) or the item popup is open, hide the
+     floating panel-✕ — those screens have their own back. One button only. */
   body:has(.om.lite) #tabletClose,
-  body:has(.om-optwrap) #tabletClose { display: none; }
+  body:has(.opt-overlay) #tabletClose { display: none; }
 
   /* Table detail on a phone: ONE natural scroll. The actions (Take order / Open this)
      flow right BELOW the orders list as a plain row — not a highlighted box floating in
@@ -573,4 +574,46 @@ body.om-mode #tabletClose { display: none; }
   body.tbl-open #panel { overflow-y: auto; }
   body.tbl-open #panel .detail-body { flex: none; overflow: visible; }
   body.tbl-open #panel .dacts { background: transparent; border-top: 0; padding: 12px 0 0; }
+}
+
+/* ── Take-order redesign (mobile), 2026-07-05 ──────────────────────────────────
+   Per-dish ✎ (quantity/allergy popup), the floating "View order" pill, and the
+   item popup modal. The pill is hidden on desktop (which keeps the side pane). */
+.dish { position: relative; }
+.dish .dname { padding-right: 26px; }                    /* clear the ✎ corner */
+.dedit { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 8px;
+  display: grid; place-items: center; font-size: 12.5px; line-height: 1; cursor: pointer;
+  background: color-mix(in srgb, var(--gold, #b8923f) 16%, transparent); color: var(--gold-strong, #8a6d2f);
+  border: 1px solid transparent; }
+.dedit:hover { border-color: var(--gold, #b8923f); }
+
+/* Floating "View order" pill — guest-menu style; shown only on the phone browse screen
+   (the media rule above flips it to flex). */
+.om-viewpill { display: none; position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 60; align-items: center; gap: 10px; padding: 13px 16px; border: 0; border-radius: 14px;
+  background: var(--gold, #b8923f); color: #14110d; font-family: inherit; font-weight: 800; font-size: 15px;
+  box-shadow: 0 8px 26px rgba(0,0,0,.32); cursor: pointer; }
+.om-viewpill.empty { opacity: .5; }
+.om-viewpill .vp-n { background: rgba(0,0,0,.18); border-radius: 999px; padding: 2px 11px; font-size: 14px; }
+.om-viewpill .vp-total { margin-left: auto; }
+.om-viewpill .vp-arrow { font-style: normal; font-weight: 900; }
+
+/* Item popup modal (quantity + allergy [+ size/extras]) — over the menu. */
+.opt-overlay { position: fixed; inset: 0; z-index: 100000; background: rgba(4,8,18,.55);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center; padding: 16px; }
+.opt-pop { width: min(94vw, 460px); max-height: 88vh; max-height: 88dvh; background: var(--panel, #fff); color: var(--text);
+  border-radius: 16px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,.45); }
+.opt-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.opt-head h3 { margin: 0; font-size: 16px; font-weight: 800; flex: 1; }
+.opt-x { background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 8px; width: 32px; height: 32px; font-size: 15px; cursor: pointer; flex: 0 0 auto; }
+.opt-scroll { padding: 14px 16px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.opt-foot { padding: 12px 16px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+.opt-foot .ctotal { margin-bottom: 8px; }
+.opt-qty { display: inline-flex; align-items: center; gap: 16px; }
+.opt-qty .qbtn { width: 42px; height: 42px; font-size: 20px; }
+.opt-qty b { font-size: 18px; min-width: 26px; text-align: center; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .opt-overlay { align-items: flex-end; padding: 0; }
+  .opt-pop { width: 100%; max-width: none; border-radius: 18px 18px 0 0; max-height: 86dvh; }
 }
