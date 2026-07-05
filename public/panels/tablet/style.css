@@ -41,6 +41,12 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
   body { height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
   .layout { flex: 1; min-height: 0; align-items: stretch; padding-bottom: 0; }
   .layout .floor, .layout .panel { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 14px; }
+  /* The floor is an overflow-y:auto scroll pane, so overflow-x computes to auto and CLIPS
+     anything drawn outside an edge tile. A SELECTED tile's ring+glow (outline + box-shadow,
+     drawn OUTSIDE the tile) then gets sliced off flat on the far-left/far-right column — the
+     "green line cutting out" the owner reported on a served+paid corner tile. Give the floor
+     a little horizontal + top breathing room so the ring/glow paints inside the clip box. */
+  .layout .floor { padding-left: 8px; padding-right: 8px; padding-top: 8px; }
 }
 
 /* floor tiles — fluid grid, no dead gap */
