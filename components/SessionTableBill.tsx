@@ -32,8 +32,10 @@ interface SItem {
   removed?: string[] | null;
   note?: string | null;
 }
-// The money totals for the whole table.
-interface SBill { subtotal: number; tax: number; total: number; }
+// The money totals for the whole table. `discount` is the whole-bill reduction staff
+// applied (0 if none); tax/total are already computed discount-BEFORE-tax by the server
+// (lfh_session_state, mig 126) so they equal the printed/paid bill.
+interface SBill { subtotal: number; discount?: number; tax: number; total: number; }
 
 // Turns the short status codes into friendly words shown on the little pills.
 // "received" reads "Awaiting accept" so the guest knows the order is placed but the
@@ -207,6 +209,9 @@ export default function SessionTableBill() {
           {bill && (
             <div className="bill-rows stb-bill">
               <div className="bill-line"><span>Subtotal</span><span>{show(Number(bill.subtotal) || 0)}</span></div>
+              {Number(bill.discount) > 0 && (
+                <div className="bill-line"><span>Discount</span><span>− {show(Number(bill.discount) || 0)}</span></div>
+              )}
               <div className="bill-line"><span>GST</span><span>{show(Number(bill.tax) || 0)}</span></div>
               <div className="bill-line grand"><span>Table total</span><span>{show(Number(bill.total) || 0)}</span></div>
             </div>
