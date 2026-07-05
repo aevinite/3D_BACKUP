@@ -66,7 +66,11 @@ body {
 .conn.err { color: var(--red); }
 
 /* ---------- layout ---------- */
-.layout { display: grid; grid-template-columns: var(--sidebar-w, 320px) 1fr; height: calc(100vh - 60px); }
+/* --ribbon-h: height of the injected admin/owner "view" ribbon (#xrayRibbon), set by
+   renderXrayRibbon() in app.js; 0px for real staff. Every fixed-height calc must
+   subtract it or the bottom of the page hangs below the viewport in admin view
+   (owner 2026-07-05: detail-panel footer was clipped at the screen edge). */
+.layout { display: grid; grid-template-columns: var(--sidebar-w, 320px) 1fr; height: calc(100vh - 60px - var(--ribbon-h, 0px)); }
 /* Tables tab: no left sidebar — collapse the first column so the floor fills the width. */
 .layout.no-sidebar { grid-template-columns: 1fr; }
 .layout.no-sidebar > .sidebar { display: none; }
@@ -774,7 +778,9 @@ body {
    without moving the grid at all. */
 .floor-side {
   width: 290px; flex: 0 0 290px; display: flex; flex-direction: column; gap: 14px; margin-top: 10px;
-  position: sticky; top: 10px; max-height: calc(100vh - 90px); overflow-y: auto; overscroll-behavior: contain;
+  /* 94px = topbar 60 + sticky offset 10 + a 24px bottom gap so the panel's rounded
+     bottom floats clear of the screen edge (owner: "too close to edge"). */
+  position: sticky; top: 10px; max-height: calc(100vh - 94px - var(--ribbon-h, 0px)); overflow-y: auto; overscroll-behavior: contain;
 }
 /* This panel's own scrollbar sits right NEXT TO the page scrollbar (two bars side by
    side — owner saw them "overlapping" on a Windows PC, 2026-07-05). Keep its thumb
@@ -1336,7 +1342,9 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
    overflow-y:auto never got a bounded box — the popup clipped instead of scrolling
    (owner bug, 2026-07-05). As a flex column, the card shrinks to the cap (or fills an
    inline height set by the resize handle) and the body scrolls inside it. */
-.tp-detail-floating { position: fixed; top: 70px; right: 24px; z-index: 40; width: 400px; max-width: calc(100vw - 24px); height: auto; max-height: calc(100vh - 92px); min-height: 200px; display: flex; flex-direction: column; transition: left .22s ease, top .22s ease, width .22s ease; }
+/* top/max-height also subtract --ribbon-h (the injected admin/owner view ribbon) so the
+   popup clears the topbar and never hangs below the viewport in admin view. */
+.tp-detail-floating { position: fixed; top: calc(70px + var(--ribbon-h, 0px)); right: 24px; z-index: 40; width: 400px; max-width: calc(100vw - 24px); height: auto; max-height: calc(100vh - 92px - var(--ribbon-h, 0px)); min-height: 200px; display: flex; flex-direction: column; transition: left .22s ease, top .22s ease, width .22s ease; }
 .tp-detail-floating.tp-pinned { z-index: 41; transition: none; }
 /* While actively being dragged/resized, no transition — the pointer must control it 1:1. */
 .tp-detail-floating.dragging { transition: none; z-index: 42; }
@@ -1749,8 +1757,8 @@ html[data-theme="light"] .op-tablet{ color:#1d4ed8; }
 @media (max-width: 760px) {
   .tp-detail-floating {
     position: fixed !important; left: 8px !important; right: 8px !important;
-    top: 62px !important; width: auto !important; margin-top: 0;
-    height: auto !important; max-height: calc(100vh - 76px); max-height: calc(100dvh - 76px);
+    top: calc(62px + var(--ribbon-h, 0px)) !important; width: auto !important; margin-top: 0;
+    height: auto !important; max-height: calc(100vh - 76px - var(--ribbon-h, 0px)); max-height: calc(100dvh - 76px - var(--ribbon-h, 0px));
     z-index: 40;
   }
   .tp-detail-floating .tp-detail-body { overflow-y: auto; }
