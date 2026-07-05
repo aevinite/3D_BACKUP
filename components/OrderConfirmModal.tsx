@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { prettyUsd, unitDisplay, minorDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import type { OptionGroup } from "@/lib/menu";
-import { allergenIcon, allergenLabel } from "@/lib/allergens";
+import { allergenIcon, allergenLabel, ALLERGENS } from "@/lib/allergens";
 // Phone back button: while this popup is open, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
 import { tget, tset } from "@/lib/tenantStorage";
@@ -27,6 +27,11 @@ interface ConfirmDetail {
   editSig?: string;
   preselect?: { options?: { group: string; label: string; price: number }[]; removed?: string[]; note?: string; qty?: number };
 }
+
+// The common allergens every dish can be flagged against, even when the menu
+// declared none for it (so "Edit" on a plain dish still lets a guest say "no
+// nuts"). Same six chips as the order-wide "Any allergies?" box in the cart.
+const COMMON_ALLERGEN_SLUGS = ALLERGENS.map((a) => a.slug);
 
 // OrderConfirmModal: the "customize your dish" popup. The guest picks options
 // (size, extras), taps allergens to remove, adds a note and a quantity, then
@@ -74,11 +79,15 @@ export default function OrderConfirmModal() {
       setSelected(init);
       const listed = Array.isArray(detail.allergens) ? detail.allergens : [];
       setAllergens(listed);
-      // Split a saved line's "removed" back into listed allergens vs a free-text
-      // "other" allergy the guest typed (anything not in the dish's own list).
+      // Which allergen chips this dish offers: its own declared list, or the
+      // common six when it declares none — so a saved "no:nuts" on a plain dish
+      // re-opens as a selected chip, not as free text.
+      const pickable = listed.length > 0 ? listed : COMMON_ALLERGEN_SLUGS;
+      // Split a saved line's "removed" back into chip allergens vs a free-text
+      // "other" allergy the guest typed (anything not in the chip list).
       const preRemoved = pre?.removed || [];
-      const otherEntries = preRemoved.filter((r) => !listed.includes(r));
-      setRemoved(preRemoved.filter((r) => listed.includes(r)));
+      const otherEntries = preRemoved.filter((r) => !pickable.includes(r));
+      setRemoved(preRemoved.filter((r) => pickable.includes(r)));
       setOtherOn(otherEntries.length > 0);
       setOtherText(otherEntries.join(", "));
       setApplyAll(false);
@@ -155,6 +164,12 @@ export default function OrderConfirmModal() {
   // typed. This is the single list that flows to the cart line and the kitchen.
   const otherTrimmed = otherOn ? otherText.trim() : "";
   const finalRemoved = otherTrimmed ? [...removed, otherTrimmed] : removed;
+
+  // hasDeclared: does this dish list its own allergens? If so, the chips mean
+  // "remove this ingredient"; if not, we offer the common six so the guest can
+  // still flag an allergy ("avoid this") on an otherwise plain dish.
+  const hasDeclared = allergens.length > 0;
+  const pickable = hasDeclared ? allergens : COMMON_ALLERGEN_SLUGS;
 
   // confirm(): the "Add to Order" / "Update Order" button. It saves this dish
   // (with all its choices) into the cart in the browser's storage.
@@ -273,13 +288,14 @@ export default function OrderConfirmModal() {
           </div>
         ))}
 
-        {/* Allergen section: only shown if the dish lists any. Tapping one marks
-            it "removed" (e.g. "no milk"). */}
-        {allergens.length > 0 && (
+        {/* Allergen section. When the dish lists its own allergens the chips mean
+            "tap to remove that ingredient"; when it lists none we show the common
+            six so the guest can still flag an allergy to avoid on this dish. */}
+        {pickable.length > 0 && (
           <div className="oc-group">
-            <div className="oc-group-name">Contains — tap to remove</div>
+            <div className="oc-group-name">{hasDeclared ? "Contains — tap to remove" : "Any allergies? Tap what to avoid"}</div>
             <div className="oc-choices">
-              {allergens.map((a) => {
+              {pickable.map((a) => {
                 const off = removed.includes(a);
                 return (
                   <button
@@ -288,7 +304,7 @@ export default function OrderConfirmModal() {
                     className={`oc-allergen ${off ? "removed" : ""}`}
                     onClick={() => toggleRemove(a)}
                   >
-                    {allergenIcon(a)} {allergenLabel(a)}{off ? " — removed" : ""}
+                    {allergenIcon(a)} {allergenLabel(a)}{off ? (hasDeclared ? " — removed" : " — avoid") : ""}
                   </button>
                 );
               })}
