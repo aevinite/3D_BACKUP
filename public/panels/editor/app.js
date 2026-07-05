@@ -4118,7 +4118,11 @@ function addFloating(t) {
 // indexes are stable, so drag-outs/closes never move the rest; only a grid GROWTH (add with
 // no free gap) re-computes everyone's width. Pinned cards keep their dropped/resized geometry.
 function layoutFloatingRow() {
-  const GAP = 14, MARGIN = 20, TOP = 70;
+  // TOP adds the admin/owner ribbon's height (0 for real staff) — the inline top set
+  // below overrides the CSS default, so it must do the same --ribbon-h subtraction or
+  // popups tuck under the topbar in admin view.
+  const ribbonH = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--ribbon-h")) || 0;
+  const GAP = 14, MARGIN = 20, TOP = 70 + ribbonH;
   const phone = isPhoneLayout();
   const cols = Math.max(1, Math.min(MAX_FLOATING, state.floatCols || 1));
   const avail = window.innerWidth - (phone ? 16 : MARGIN * 2);
@@ -4128,7 +4132,7 @@ function layoutFloatingRow() {
   state.floatingTables.forEach((f) => {
     if (f.pinned || f.slot == null) return; // pinned = free-floating; keep its own position
     const el = document.querySelector(`[data-floating-table="${CSS.escape(String(f.table))}"]`);
-    if (el) { el.style.left = (startX + f.slot * (slotW + GAP)) + "px"; el.style.top = (phone ? 62 : TOP) + "px"; el.style.width = slotW + "px"; el.style.height = ""; el.style.right = "auto"; }
+    if (el) { el.style.left = (startX + f.slot * (slotW + GAP)) + "px"; el.style.top = (phone ? 62 + ribbonH : TOP) + "px"; el.style.width = slotW + "px"; el.style.height = ""; el.style.right = "auto"; }
   });
 }
 
@@ -5993,7 +5997,7 @@ function applyHierarchyView() {
 function renderXrayRibbon(higher, zones) {
   let rb = document.getElementById("xrayRibbon");
   const zp = document.getElementById("xrayZones");
-  if (!higher) { if (rb) rb.remove(); if (zp) zp.remove(); return; }
+  if (!higher) { if (rb) rb.remove(); if (zp) zp.remove(); syncRibbonHeight(); return; }
   if (!rb) { rb = document.createElement("div"); rb.id = "xrayRibbon"; document.body.insertBefore(rb, document.body.firstChild); }
   const who = XRAY_WHO.actor === "admin" ? "Admin" : "Owner";
   const restEl = document.getElementById("brandRest");
@@ -6010,6 +6014,16 @@ function renderXrayRibbon(higher, zones) {
     try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
   };
   document.getElementById("xrayZonesBtn").onclick = () => toggleXrayZones(zones);
+  syncRibbonHeight();
+}
+
+// The ribbon flows ABOVE the sticky topbar, but .layout / .floor-side / the floating
+// card size themselves with fixed 100vh calcs — publish the ribbon's real height as
+// --ribbon-h so those calcs subtract it (otherwise the page bottom hangs below the
+// viewport in admin/owner view and the detail footer gets clipped — owner 2026-07-05).
+function syncRibbonHeight() {
+  const rb = document.getElementById("xrayRibbon");
+  document.documentElement.style.setProperty("--ribbon-h", (rb ? rb.offsetHeight : 0) + "px");
 }
 
 function toggleXrayZones(zones) {
