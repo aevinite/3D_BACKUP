@@ -1014,6 +1014,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           const v = String(body.bill_footer ?? "").trim().slice(0, 200);
           body.bill_footer = v || null;
         }
+        // tax_label — the word the ON-SCREEN merged tax line uses ("Tax"/"GST"/"VAT"…,
+        // mig 125). Blank → null = the neutral default "Tax". Print is unaffected.
+        if ("tax_label" in body) {
+          const v = String(body.tax_label ?? "").trim().slice(0, 20);
+          body.tax_label = v || null;
+        }
         if ("table_seats" in body) {
           const raw = body.table_seats;
           const clean: Record<string, number> = {};
