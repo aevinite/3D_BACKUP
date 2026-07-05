@@ -2127,81 +2127,200 @@ function dashTodayBox(s) {
 }
 async function loadDashboard() {
   const body = document.getElementById("dashBody");
+  if (!body) return;
+  // Latest-wins guard (the app's standard stale-refresh fix): a fast tab+range
+  // double-click used to interleave two runs — the older one rebuilt the DOM
+  // mid-flight and Chart.js threw "can't acquire context".
+  const seq = (loadDashboard._seq = (loadDashboard._seq || 0) + 1);
   let s;
   try { s = await api("GET", "/stats?range=" + dashRange); }
-  catch (e) { body.innerHTML = `<div class="empty">Couldn't load stats: ${esc(e.message)}</div>`; return; }
+  catch (e) { if (seq === loadDashboard._seq) body.innerHTML = `<div class="empty">Couldn't load stats: ${esc(e.message)}</div>`; return; }
+  if (seq !== loadDashboard._seq) return;
   const RL = { today: "today", "30d": "last 30 days", year: "last 12 months" };
   const rangeLabel = RL[dashRange] || dashRange;
   // The range sub-nav lives in the LEFT SIDEBAR (renderList), so the content is
   // full-width: the Today view leads with the live per-channel summary box.
   const summary = dashRange === "today" ? dashTodayBox(s) : "";
+  // KPI cards (redesign 2026-07-05): icon chip + big number + a helping sub-line,
+  // derived ONLY from fields /stats already returns — no new reads. Every card is
+  // a BUTTON that opens its detail (owner's rule: no dead stat tiles), and no card
+  // repeats a number another card's sub-line already states.
+  const kpi = (id, icon, tint, label, value, sub, texty) => `
+    <button class="dash-card" data-kpi="${id}" type="button" title="Open detail">
+      <span class="kic" style="background:${tint}22;color:${tint}"><i class="fa-solid ${icon}"></i></span>
+      <span class="kbody"><small>${label}</small><b${texty ? ` class="ktext"` : ""}>${value}</b></span>
+      <span class="ksub">${sub}</span>
+      <i class="fa-solid fa-chevron-right kgo" aria-hidden="true"></i>
+    </button>`;
+  const peakHour = (s.hours || []).some((v) => v > 0) ? (s.hours || []).indexOf(Math.max(...s.hours)) : -1;
+  const topDish = (s.topDishes || [])[0];
   body.innerHTML = `
     ${summary}
     <div class="dash-cards">
-      <div class="dash-card"><small>Revenue · ${rangeLabel}</small><b>${inr(s.revenue)}</b></div>
-      <div class="dash-card"><small>Orders</small><b>${s.orderCount}</b></div>
-      <div class="dash-card"><small>Avg order</small><b>${inr(s.avgOrder)}</b></div>
-      <div class="dash-card"><small>Paid / unpaid</small><b>${s.paid} / ${s.unpaid}</b></div>
-      <div class="dash-card"><small>Cancelled</small><b>${s.cancelled}</b></div>
+      ${kpi("revenue", "fa-indian-rupee-sign", "#b97f35", `Revenue · ${rangeLabel}`, inr(s.revenue), s.paid ? `avg ${inr(s.avgOrder)} per paid bill` : "no paid bills yet")}
+      ${kpi("orders", "fa-utensils", "#2a78d6", "Orders", s.orderCount, `${s.paid} paid · ${s.unpaid} unpaid`)}
+      ${kpi("peak", "fa-clock", "#168e5d", "Busiest hour", peakHour < 0 ? "—" : `${peakHour}:00`, peakHour < 0 ? "no orders yet" : `${s.hours[peakHour]} order${s.hours[peakHour] === 1 ? "" : "s"} in that hour`)}
+      ${kpi("topdish", "fa-star", "#9085e9", "Top dish", topDish ? esc(topDish[0]) : "—", topDish ? `${topDish[1]} plates sold` : "no dishes sold yet", true)}
+      ${kpi("cancelled", "fa-ban", "#b34a4a", "Cancelled", s.cancelled, "kept out of revenue")}
     </div>
     <div class="dash-grid">
-      <div class="dash-chart"><h4>Sales · ${rangeLabel}</h4><canvas id="chSales"></canvas></div>
-      <div class="dash-chart"><h4>Top dishes</h4><canvas id="chTop"></canvas></div>
-      <div class="dash-chart"><h4>Orders by hour</h4><canvas id="chHours"></canvas></div>
-      <div class="dash-chart"><h4>Category share</h4><canvas id="chCats"></canvas></div>
-      <div class="dash-chart"><h4>Payment methods · ${rangeLabel}</h4><canvas id="chPay"></canvas></div>
+      <div class="dash-chart wide"><h4>Sales <span>· ${rangeLabel}</span></h4><div class="chart-wrap tall"><canvas id="chSales"></canvas></div></div>
+      <div class="dash-chart"><h4>Top dishes <span>· plates sold</span></h4><div class="chart-wrap"><canvas id="chTop"></canvas></div></div>
+      <div class="dash-chart"><h4>Busy hours <span>· orders by hour</span></h4><div class="chart-wrap"><canvas id="chHours"></canvas></div></div>
+      <div class="dash-chart"><h4>Category share <span>· by plates</span></h4>
+        <div class="pay-split">
+          <div class="pay-donut"><canvas id="chCats"></canvas><div class="pay-center" id="catCenter"></div></div>
+          <div class="pay-legend" id="catLegend"></div>
+        </div>
+      </div>
+      <div class="dash-chart"><h4>Payment methods <span>· ${rangeLabel}</span></h4>
+        <div class="pay-split">
+          <div class="pay-donut"><canvas id="chPay"></canvas><div class="pay-center" id="payCenter"></div></div>
+          <div class="pay-legend" id="payLegend"></div>
+        </div>
+      </div>
     </div>`;
+  // KPI click-through: each card jumps to where that number lives in full detail.
+  const goBills = (view) => { state.ordersView = view; lsSet("lfh_editor_ordersview", view); setTab("orders"); };
+  const KPI_GO = {
+    revenue: () => goBills(dashRange === "today" ? "daybills" : "previous"),
+    orders: () => goBills("live"),
+    cancelled: () => goBills("previous"),
+    peak: () => document.getElementById("chHours")?.closest(".dash-chart")?.scrollIntoView({ behavior: "smooth", block: "center" }),
+    topdish: () => {
+      const t = (s.topDishes || [])[0]?.[0];
+      const item = (state.data.items || []).find((i) => i.title === t);
+      if (item && typeof openDishEditModal === "function") openDishEditModal(item.id, () => {});
+      else setTab("items");
+    },
+  };
+  body.querySelectorAll("[data-kpi]").forEach((b) => (b.onclick = () => KPI_GO[b.dataset.kpi]?.()));
   dashCharts.forEach((c) => { try { c.destroy(); } catch {} });
   dashCharts = [];
   if (typeof Chart === "undefined") { body.insertAdjacentHTML("beforeend", `<div class="empty">Charts library didn't load (offline?) — the numbers above still work.</div>`); return; }
-  Chart.defaults.color = "#a89a87"; Chart.defaults.borderColor = "rgba(150,140,125,0.15)";
-  const gold = "#d4a574", goldSoft = "rgba(212,165,116,0.25)";
-  // Sales series (already bucketed + ordered by the server); shown in rupees (×INR_RATE) to match the cards.
-  dashCharts.push(new Chart(document.getElementById("chSales"), {
-    type: "line",
-    data: { labels: s.series.map((p) => p.label), datasets: [{ label: "₹ sales", data: s.series.map((p) => Math.round((p.revenue || 0) * INR_RATE)), borderColor: gold, backgroundColor: goldSoft, fill: true, tension: 0.35, pointRadius: 2 }] },
-    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
-  }));
-  // Empty-state instead of a blank canvas when there's no data (matches Payment methods below).
+  // PERMANENT AXIS RULE (owner 2026-07-05): a time axis picks how many labels it
+  // shows from the range AND the width — roughly one label per ~80px of chart, so
+  // an hour of data splits into ~10-minute steps, a day into ~2-hour steps, a
+  // month into ~2-3-day steps. Never a fixed tick count on any panel's chart.
+  const tickLimit = (canvasId, min = 4, max = 16) => {
+    const el2 = document.getElementById(canvasId);
+    const w = (el2 && el2.parentElement && el2.parentElement.clientWidth) || 600;
+    return Math.max(min, Math.min(max, Math.round(w / 80)));
+  };
+  // A real-but-tiny share reads better as "<1%" than a lying "0%".
+  const pctOf = (n, total) => { const p = (n / total) * 100; return p > 0 && p < 1 ? "<1" : String(Math.round(p)); };
+  const surface = (getComputedStyle(document.body).getPropertyValue("--panel") || "#1d1812").trim();
+  const mutedInk = (getComputedStyle(document.body).getPropertyValue("--muted") || "#a8997f").trim();
+  Chart.defaults.color = mutedInk;
+  Chart.defaults.borderColor = "rgba(150,140,125,0.15)";
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  const gold = "#b97f35", goldBar = "rgba(185,127,53,0.78)", goldSoft = "rgba(185,127,53,0.28)";
+  const emptyCard = (id, title, msg) =>
+    (document.getElementById(id).closest(".dash-chart").innerHTML = `<h4>${title}</h4><div class="empty">${msg}</div>`);
+  // Sales — gradient area, ₹k axis, index-hover. Words instead of a blank grid at ₹0.
+  const salesPts = s.series.map((p) => Math.round((p.revenue || 0) * INR_RATE));
+  if (salesPts.some((v) => v > 0)) {
+    const sctx = document.getElementById("chSales").getContext("2d");
+    const grad = sctx.createLinearGradient(0, 0, 0, 260);
+    grad.addColorStop(0, "rgba(185,127,53,.28)"); grad.addColorStop(1, "rgba(185,127,53,.02)");
+    dashCharts.push(new Chart(sctx, {
+      type: "line",
+      data: { labels: s.series.map((p) => p.label), datasets: [{ label: "₹ sales", data: salesPts, borderColor: gold, backgroundColor: grad, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 5, borderWidth: 2.25 }] },
+      options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => " " + inr(c.parsed.y) } } },
+        scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: tickLimit("chSales") } },
+                  y: { beginAtZero: true, border: { display: false }, ticks: { maxTicksLimit: 5, callback: (v) => v >= 1000 ? "₹" + Math.round(v / 1000) + "k" : "₹" + v } } } },
+    }));
+  } else {
+    emptyCard("chSales", `Sales <span>· ${rangeLabel}</span>`, "No sales in this range yet.");
+  }
+  // Top dishes — rounded bars.
   if ((s.topDishes || []).length) {
     dashCharts.push(new Chart(document.getElementById("chTop"), {
       type: "bar",
-      data: { labels: s.topDishes.map(([t]) => t), datasets: [{ label: "plates", data: s.topDishes.map(([, n]) => n), backgroundColor: gold }] },
-      options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } },
+      data: { labels: s.topDishes.map(([t]) => t), datasets: [{ label: "plates", data: s.topDishes.map(([, n]) => n), backgroundColor: goldBar, hoverBackgroundColor: gold, borderRadius: 6, borderSkipped: false }] },
+      options: { indexAxis: "y", maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${c.parsed.x} plates` } } },
+        scales: { x: { beginAtZero: true, border: { display: false }, ticks: { precision: 0, maxTicksLimit: 5 } }, y: { grid: { display: false }, border: { display: false }, ticks: { font: { size: 10.5 } } } } },
     }));
   } else {
-    document.getElementById("chTop").closest(".dash-chart").innerHTML = `<h4>Top dishes</h4><div class="empty">No dishes sold in this range yet.</div>`;
+    emptyCard("chTop", "Top dishes", "No dishes sold in this range yet.");
   }
-  dashCharts.push(new Chart(document.getElementById("chHours"), {
-    type: "bar",
-    data: { labels: Array.from({ length: 24 }, (_, h) => h + ":00"), datasets: [{ label: "orders", data: s.hours, backgroundColor: goldSoft, borderColor: gold, borderWidth: 1 }] },
-    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
-  }));
-  const catEntries = Object.entries(s.cats).sort((a, b) => b[1] - a[1]);
+  // Busy hours — the peak hour is solid gold, the rest stay soft.
+  const hoursData = s.hours || [];
+  if (hoursData.some((v) => v > 0)) {
+    const peakH = hoursData.indexOf(Math.max(...hoursData));
+    dashCharts.push(new Chart(document.getElementById("chHours"), {
+      type: "bar",
+      data: { labels: Array.from({ length: 24 }, (_, h) => h + ":00"), datasets: [{ label: "orders", data: hoursData, backgroundColor: hoursData.map((_, i) => (i === peakH ? gold : goldSoft)), borderRadius: 4, borderSkipped: false }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${c.parsed.y} order${c.parsed.y === 1 ? "" : "s"}` } } },
+        scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: tickLimit("chHours") } }, y: { beginAtZero: true, border: { display: false }, ticks: { precision: 0, maxTicksLimit: 5 } } } },
+    }));
+  } else {
+    emptyCard("chHours", "Busy hours <span>· orders by hour</span>", "No orders in this range yet.");
+  }
+  // Category share — same donut + written-legend pattern as Payment methods.
+  // Top 6 categories keep the fixed palette; everything after folds into "Other"
+  // (never invent an extra hue — dataviz rule).
+  const CAT_COLORS = ["#3987e5", "#199e70", "#c98500", "#9085e9", "#d55181", "#d95926"];
+  const OTHER_GRAY = "#6b7280";
+  let catEntries = Object.entries(s.cats).sort((a, b) => b[1] - a[1]);
+  if (catEntries.length > CAT_COLORS.length + 1) {
+    const rest = catEntries.slice(CAT_COLORS.length).reduce((a, [, n]) => a + n, 0);
+    catEntries = [...catEntries.slice(0, CAT_COLORS.length), ["other categories", rest]];
+  }
   if (catEntries.length) {
+    const catTotal = catEntries.reduce((a, [, n]) => a + n, 0);
+    const catColor = (i) => CAT_COLORS[i] || OTHER_GRAY;
+    document.getElementById("catCenter").innerHTML = `<b>${catTotal.toLocaleString("en-IN")}</b><small>plates</small>`;
+    document.getElementById("catLegend").innerHTML = catEntries.map(([c, n], i) => `
+      <div class="pay-row">
+        <span class="dot" style="background:${catColor(i)}"></span>
+        <span class="m">${esc(c)}</span><span class="amt">${n.toLocaleString("en-IN")}</span>
+        <span class="meta">${pctOf(n, catTotal)}% of plates</span>
+      </div>`).join("");
     dashCharts.push(new Chart(document.getElementById("chCats"), {
       type: "doughnut",
-      data: { labels: catEntries.map(([c]) => c), datasets: [{ data: catEntries.map(([, n]) => n), backgroundColor: ["#d4a574", "#7ec88a", "#4f9dff", "#e8a13c", "#b58ae6", "#ef7d7d", "#5bc8c8", "#c8b35b", "#8a93a6"] }] },
-      options: { plugins: { legend: { position: "right" } } },
+      data: { labels: catEntries.map(([c]) => c), datasets: [{ data: catEntries.map(([, n]) => n), backgroundColor: catEntries.map((_, i) => catColor(i)), borderColor: surface, borderWidth: 2, hoverOffset: 6 }] },
+      options: { cutout: "68%", plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${c.label}: ${c.parsed} plates` } } } },
     }));
   } else {
-    document.getElementById("chCats").closest(".dash-chart").innerHTML = `<h4>Category share</h4><div class="empty">No sales in this range yet.</div>`;
+    emptyCard("chCats", "Category share", "No sales in this range yet.");
   }
-  // Payment methods (owner, 2026-07-01): revenue split by how bills got paid —
-  // UPI/Cash/Card/Other, plus "Not recorded" for anything paid before this shipped
-  // or via the per-order correction toggle (which skips the picker on purpose).
-  const payEntries = (s.paymentMethods || []);
+  // Payment methods (redesigned 2026-07-05): revenue split by how bills got paid —
+  // UPI/Cash/Card/Other, plus "Not recorded" for older bills. One FIXED colour per
+  // method (same validated colorblind-safe set as the owner panel), the ₹ total in
+  // the donut hole, and an HTML legend with ₹ + % + bill count (the server sends
+  // [method, revenue, bills] triples; % lives in the legend, never angle-only).
+  const PAY_COLORS = { UPI: "#9085e9", Cash: "#199e70", Card: "#3987e5", Other: "#c98500", "Not recorded": "#6b7280" };
+  const payColor = (m) => PAY_COLORS[m] || PAY_COLORS["Not recorded"];
+  const payEntries = (s.paymentMethods || []).filter(([, rev]) => rev > 0);
   const payChart = document.getElementById("chPay");
   if (payEntries.length) {
+    const payTotal = payEntries.reduce((a, [, rev]) => a + rev, 0);
+    document.getElementById("payCenter").innerHTML = `<b>${inr(payTotal)}</b><small>collected</small>`;
+    document.getElementById("payLegend").innerHTML = payEntries.map(([m, rev, bills]) => `
+      <div class="pay-row">
+        <span class="dot" style="background:${payColor(m)}"></span>
+        <span class="m">${esc(m)}</span><span class="amt">${inr(rev)}</span>
+        <span class="meta">${pctOf(rev, payTotal)}%${bills ? ` · ${bills} bill${bills === 1 ? "" : "s"}` : ""}</span>
+      </div>`).join("");
     dashCharts.push(new Chart(payChart, {
       type: "doughnut",
-      data: { labels: payEntries.map(([m]) => m), datasets: [{ data: payEntries.map(([, rev]) => rev), backgroundColor: ["#d4a574", "#7ec88a", "#4f9dff", "#e8a13c", "#9aa3b0"] }] },
-      options: { plugins: { legend: { position: "right" }, tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${inr(ctx.parsed)}` } } } },
+      data: { labels: payEntries.map(([m]) => m), datasets: [{
+        data: payEntries.map(([, rev]) => rev),
+        backgroundColor: payEntries.map(([m]) => payColor(m)),
+        borderColor: surface, borderWidth: 2, hoverOffset: 6,
+      }] },
+      options: { cutout: "68%", plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${inr(ctx.parsed)}` } } } },
     }));
   } else if (payChart) {
-    payChart.closest(".dash-chart").innerHTML = `<h4>Payment methods · ${rangeLabel}</h4><div class="empty">No paid bills in this range yet.</div>`;
+    emptyCard("chPay", `Payment methods <span>· ${rangeLabel}</span>`, "No paid bills in this range yet.");
   }
 }
+// Chart ink (axis labels, donut slice-gaps) is baked into the canvas at draw
+// time, so a light↔dark flip while the Dashboard is open must redraw it once.
+new MutationObserver(() => {
+  if (document.querySelector('.tab[data-tab="dash"].active')) loadDashboard();
+}).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
 
 // ---------- printable bill ----------

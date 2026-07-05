@@ -157,7 +157,9 @@ export function HourlyBar({ data, color }: { data: { hour: number; orders: numbe
       <ResponsiveContainer>
         <BarChart data={full} margin={{ left: 0, right: 8, top: 6, bottom: 4 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} interval={2} />
+          {/* Adaptive ticks (owner's axis rule): let Recharts drop labels by available
+              width instead of a hard every-3rd-hour — narrow cards thin out, wide fill. */}
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" />
           <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={28} allowDecimals={false} />
           <Tooltip content={<CountTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="orders" name="Orders" fill={color} radius={[5, 5, 0, 0]} />
@@ -182,6 +184,66 @@ export function CategoryDonut({ data }: { data: { category: string; revenue: num
           <Legend wrapperStyle={{ fontSize: 11 }} />
         </PieChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+// ── PaymentDonut — how the money actually arrived (UPI / Cash / Card / …) ───
+// One FIXED colour per method, identical in every panel (set validated
+// colorblind-safe against dark surfaces, 2026-07-05). Every number is also
+// written out in the legend — nobody should have to judge slice angles.
+export const PAY_COLORS: Record<string, string> = {
+  UPI: "#9085e9", Cash: "#199e70", Card: "#3987e5", Other: "#c98500", "Not recorded": "#6b7280",
+};
+/** Canonical label for a stored payment_method (any casing, null, "" → "Not recorded"). */
+export function canonPayMethod(m: string | null | undefined): string {
+  const t = (m || "").trim();
+  if (!t) return "Not recorded";
+  return Object.keys(PAY_COLORS).find((k) => k.toLowerCase() === t.toLowerCase()) || t;
+}
+export function PaymentDonut({ data }: { data: { method: string; revenue: number; orders: number }[] }) {
+  const merged = new Map<string, { method: string; revenue: number; orders: number }>();
+  for (const p of data) {
+    const method = canonPayMethod(p.method);
+    const row = merged.get(method) || { method, revenue: 0, orders: 0 };
+    row.revenue += p.revenue; row.orders += p.orders;
+    merged.set(method, row);
+  }
+  const rows = [...merged.values()].filter((p) => p.revenue > 0).sort((a, b) => b.revenue - a.revenue);
+  const total = rows.reduce((a, p) => a + p.revenue, 0);
+  if (!rows.length || total <= 0) return <Empty />;
+  const color = (m: string) => PAY_COLORS[m] || PAY_COLORS["Not recorded"];
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 22 }}>
+      <div style={{ position: "relative", width: 180, height: 180, flex: "0 0 auto" }}>
+        <ResponsiveContainer>
+          <PieChart>
+            <Pie data={rows} dataKey="revenue" nameKey="method" innerRadius="68%" outerRadius="100%"
+              paddingAngle={2.5} stroke="var(--card)" strokeWidth={2} startAngle={90} endAngle={-270}>
+              {rows.map((p) => <Cell key={p.method} fill={color(p.method)} />)}
+            </Pie>
+            <Tooltip content={<MoneyTip />} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 19, fontWeight: 800, letterSpacing: -0.3, fontVariantNumeric: "tabular-nums" }}>{inr(total)}</div>
+            <div style={{ fontSize: 10.5, color: "var(--muted)", fontWeight: 600, letterSpacing: 0.6, textTransform: "uppercase" }}>collected</div>
+          </div>
+        </div>
+      </div>
+      <div style={{ flex: "1 1 220px", minWidth: 220, display: "flex", flexDirection: "column", gap: 11 }}>
+        {rows.map((p) => (
+          <div key={p.method} style={{ display: "grid", gridTemplateColumns: "10px 1fr auto", columnGap: 9, alignItems: "baseline" }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: color(p.method), alignSelf: "center" }} />
+            <span style={{ fontSize: 13, fontWeight: 700 }}>{p.method}</span>
+            <span style={{ fontSize: 13.5, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{inr(p.revenue)}</span>
+            <span style={{ gridColumn: "2 / 4", fontSize: 11.5, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
+              {Math.round((p.revenue / total) * 100)}% · {p.orders} bill{p.orders === 1 ? "" : "s"}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

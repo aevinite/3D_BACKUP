@@ -383,9 +383,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const catOf: Record<string, string> = Object.fromEntries(dishes.map((d: { id: string; category?: string }) => [d.id, d.category || "other"]));
       const hours = Array(24).fill(0);
       const topD: Record<string, number> = {}, cats: Record<string, number> = {}, seriesMap: Record<string, number> = {};
-      // Payment-method breakdown (owner, 2026-07-01): revenue per method for whatever's
-      // ALREADY marked paid in this range — no extra query, same orders array.
-      const paymentMethods: Record<string, number> = {};
+      // Payment-method breakdown (owner, 2026-07-01): revenue + bill count per method
+      // for whatever's ALREADY marked paid in this range — no extra query, same orders array.
+      const paymentMethods: Record<string, { rev: number; bills: number }> = {};
       const bucket = range === "today" ? "hour" : range === "year" ? "month" : "day";
       const keyFor = (d: Date) => bucket === "hour" ? String(d.getHours())
         : bucket === "month" ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
@@ -405,7 +405,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const k = keyFor(dt); seriesMap[k] = (seriesMap[k] || 0) + amt;
           paid++;
           const m = o.payment_method || "Not recorded";
-          paymentMethods[m] = (paymentMethods[m] || 0) + amt;
+          const pm = paymentMethods[m] || (paymentMethods[m] = { rev: 0, bills: 0 });
+          pm.rev += amt; pm.bills++;
         } else unpaid++;
         hours[dt.getHours()] += 1;
         for (const it of (Array.isArray(o.items) ? o.items : [])) {
@@ -449,7 +450,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         range, series, hours, cats, paid, unpaid, cancelled, revenue: r2(revenue),
         orderCount: orders.length, avgOrder,
         topDishes: Object.entries(topD).sort((a, b) => b[1] - a[1]).slice(0, 10),
-        paymentMethods: Object.entries(paymentMethods).map(([method, rev]) => [method, r2(rev)]).sort((a, b) => (b[1] as number) - (a[1] as number)),
+        // [method, revenue, billCount] triples, biggest first (bill count shipped 2026-07-05
+        // for the donut legend — same rows, no extra read; old clients ignore the 3rd slot).
+        paymentMethods: Object.entries(paymentMethods).map(([method, v]) => [method, r2(v.rev), v.bills]).sort((a, b) => (b[1] as number) - (a[1] as number)),
         live, platformToday,
       });
     }
