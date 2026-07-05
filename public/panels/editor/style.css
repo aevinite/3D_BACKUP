@@ -426,6 +426,32 @@ input:disabled { opacity: .55; cursor: not-allowed; }
 .pay-row .m { font-size: 12.5px; font-weight: 700; color: var(--text); }
 .pay-row .amt { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text); }
 .pay-row .meta { grid-column: 2 / 4; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pay-row.togglable { cursor: pointer; }
+.pay-row.togglable:hover { opacity: 0.75; }
+.pay-row.off { opacity: 0.35; }
+.pay-row.off .m, .pay-row.off .amt { text-decoration: line-through; }
+/* Crazy-dashboard v2 (2026-07-05) */
+.dash-fresh { font-size: 11px; color: var(--muted); margin: -4px 0 10px; }
+.dash-fresh i { margin-right: 5px; }
+.dash-card .kchip { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 99px; vertical-align: 3px; margin-left: 7px; }
+.dash-card .kchip.up { background: rgba(22,142,93,.13); color: #168e5d; }
+.dash-card .kchip.dn { background: rgba(206,74,74,.13); color: #c05252; }
+.dash-card .kchip.flat { background: rgba(150,140,125,.14); color: var(--muted); }
+html[data-theme="dark"] .dash-card .kchip.up { color: #4fd6a5; }
+html[data-theme="dark"] .dash-card .kchip.dn { color: #f08c8c; }
+.dash-card .kspark { margin-left: 8px; vertical-align: -2px; }
+/* The generic .dash-card b block rule is for the BIG number only — bolds inside
+   the sub-line must stay inline or every amount stacks on its own line. */
+.dash-card .ksub b { display: inline; font-size: inherit; font-weight: 800; letter-spacing: 0; }
+.dash-card.kalert { border-color: color-mix(in srgb, #c05252 55%, var(--line)); background: color-mix(in srgb, #c05252 6%, var(--panel)); }
+.dash-chart .narrate { font-size: 12px; margin-top: 10px; padding: 8px 12px; border-radius: 9px; background: rgba(185,127,53,.10); color: var(--text); line-height: 1.5; }
+.dash-chart .narrate i { color: var(--gold); margin-right: 6px; }
+/* weekday × hour heatmap: 1 label col + 24 hour cols */
+.hm { display: grid; grid-template-columns: 36px repeat(24, 1fr); gap: 2.5px; margin-top: 8px; }
+.hm .lab { font-size: 10px; font-weight: 700; color: var(--muted); align-self: center; }
+.hm .hx { font-size: 8.5px; color: var(--muted); text-align: center; }
+.hm .c { aspect-ratio: 1; border-radius: 3px; min-width: 0; }
+.hm .c.peak { outline: 2px solid var(--gold); outline-offset: 1px; }
 /* wrap the customers table so a narrow screen scrolls it sideways instead of
    clipping the right-hand columns under the page's overflow guard */
 .dash-body { overflow-x: auto; }

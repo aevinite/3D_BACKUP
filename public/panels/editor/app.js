@@ -2148,26 +2148,85 @@ async function loadDashboard() {
   // derived ONLY from fields /stats already returns — no new reads. Every card is
   // a BUTTON that opens its detail (owner's rule: no dead stat tiles), and no card
   // repeats a number another card's sub-line already states.
-  const kpi = (id, icon, tint, label, value, sub, texty) => `
-    <button class="dash-card" data-kpi="${id}" type="button" title="Open detail">
+  const kpi = (id, icon, tint, label, value, sub, opts = {}) => `
+    <button class="dash-card${opts.alert ? " kalert" : ""}" data-kpi="${id}" type="button" title="Open detail">
       <span class="kic" style="background:${tint}22;color:${tint}"><i class="fa-solid ${icon}"></i></span>
-      <span class="kbody"><small>${label}</small><b${texty ? ` class="ktext"` : ""}>${value}</b></span>
+      <span class="kbody"><small>${label}</small><b>${value}</b></span>
       <span class="ksub">${sub}</span>
       <i class="fa-solid fa-chevron-right kgo" aria-hidden="true"></i>
     </button>`;
+  // Crazy-dashboard v2 (owner, 2026-07-05): honest deltas, sparkline, narration,
+  // day-parts, channel split, weekday×hour heatmap — every number the server
+  // already sends, spelled out with context so nothing reads "blunt".
+  const pctOf = (n, total) => { const p = (n / total) * 100; return p > 0 && p < 1 ? "<1" : String(Math.round(p)); };
+  const CMP_LABEL = { today: "vs yesterday till this time", "30d": "vs the 30 days before (same point)", year: "vs last year (same point)" };
+  const cmpLabel = CMP_LABEL[dashRange] || "vs the period before";
+  const deltaChip = (nowV, prevV) => {
+    if (prevV == null || (!nowV && !prevV)) return "";
+    if (!prevV) return `<span class="kchip up" title="${cmpLabel}"><i class="fa-solid fa-arrow-up"></i>new</span>`;
+    const p = Math.round(((nowV - prevV) / prevV) * 100);
+    if (Math.abs(p) < 1) return `<span class="kchip flat" title="${cmpLabel}">±0%</span>`;
+    const up = p > 0, label = p >= 300 ? `${Math.round(nowV / prevV)}×` : `${Math.abs(p)}%`;
+    return `<span class="kchip ${up ? "up" : "dn"}" title="${cmpLabel}"><i class="fa-solid fa-arrow-${up ? "up" : "down"}"></i>${label}</span>`;
+  };
+  const sparkSvg = (pts, color) => {
+    if (!Array.isArray(pts) || pts.length < 2 || !pts.some((v) => v > 0)) return "";
+    const w = 64, h = 22, lo = Math.min(...pts), hi = Math.max(...pts), span = hi - lo || 1, step = w / (pts.length - 1);
+    const d = pts.map((v, i) => `${i ? "L" : "M"}${(i * step).toFixed(1)},${(h - ((v - lo) / span) * (h - 3) - 1.5).toFixed(1)}`).join(" ");
+    return `<svg class="kspark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/></svg>`;
+  };
   const peakHour = (s.hours || []).some((v) => v > 0) ? (s.hours || []).indexOf(Math.max(...s.hours)) : -1;
   const topDish = (s.topDishes || [])[0];
+  const prev = s.prev || {};
+  const disc = s.discounts || { total: 0, count: 0, max: null };
+  const chan = s.channels || {};
+  const onlineRev = (chan.zomato?.rev || 0) + (chan.swiggy?.rev || 0) + (chan.takeaway?.rev || 0);
+  const onlineCnt = (chan.zomato?.count || 0) + (chan.swiggy?.count || 0) + (chan.takeaway?.count || 0);
+  const revSub = [
+    s.paid ? `avg <b>${inr(s.avgOrder)}</b>/bill` : "no paid bills yet",
+    s.taxCollected > 0 ? `tax <b>${inr(s.taxCollected)}</b>` : "",
+    s.biggestBill ? `biggest <b>${inr(s.biggestBill.amt)}</b>${s.biggestBill.table ? ` (T${esc(s.biggestBill.table)})` : ""}` : "",
+  ].filter(Boolean).join(" · ");
+  const ordSub = [
+    `<b>${s.paid}</b> paid · <b>${s.unpaid}</b> unpaid`,
+    onlineCnt > 0 ? `avg ticket: dine-in <b>${inr(s.avgOrder)}</b> · online <b>${inr(onlineRev / onlineCnt)}</b>` : "",
+  ].filter(Boolean).join("<br>");
+  const heatRows = (s.heatmap || []);
+  const hasHeat = heatRows.some((r) => r.some((v) => v > 0));
+  const freshT = new Date(s.updatedAt || Date.now()).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  // Plain-English narration (the Square trick): say what happened in one sentence.
+  let narrate = "";
+  if (s.revenue > 0) {
+    const when = dashRange === "today" ? `Today till ${freshT}` : dashRange === "30d" ? "The last 30 days" : "The last 12 months";
+    let cmp = "";
+    if (prev.revenue > 0) {
+      const p = Math.round(((s.revenue - prev.revenue) / prev.revenue) * 100);
+      cmp = p >= 300 ? ` — <b>${Math.round(s.revenue / prev.revenue)}×</b> ${cmpLabel}`
+        : Math.abs(p) >= 1 ? ` — <b>${Math.abs(p)}% ${p > 0 ? "more" : "less"}</b> ${cmpLabel}` : ` — level ${cmpLabel}`;
+    }
+    const dpTop = (s.dayParts || []).filter((d) => d.revenue > 0).sort((a, b) => b.revenue - a.revenue)[0];
+    narrate = `<div class="narrate"><i class="fa-solid fa-wand-magic-sparkles"></i>${when} you've made <b>${inr(s.revenue)}</b>${cmp}.${dpTop ? ` ${esc(dpTop.label.split(" ")[0])} brought ${pctOf(dpTop.revenue, s.revenue)}% of it.` : ""}</div>`;
+  }
   body.innerHTML = `
     ${summary}
+    <div class="dash-fresh"><i class="fa-solid fa-clock-rotate-left"></i> Updated ${freshT} · deltas ${cmpLabel}</div>
     <div class="dash-cards">
-      ${kpi("revenue", "fa-indian-rupee-sign", "#b97f35", `Revenue · ${rangeLabel}`, inr(s.revenue), s.paid ? `avg ${inr(s.avgOrder)} per paid bill` : "no paid bills yet")}
-      ${kpi("orders", "fa-utensils", "#2a78d6", "Orders", s.orderCount, `${s.paid} paid · ${s.unpaid} unpaid`)}
-      ${kpi("peak", "fa-clock", "#168e5d", "Busiest hour", peakHour < 0 ? "—" : `${peakHour}:00`, peakHour < 0 ? "no orders yet" : `${s.hours[peakHour]} order${s.hours[peakHour] === 1 ? "" : "s"} in that hour`)}
-      ${kpi("topdish", "fa-star", "#9085e9", "Top dish", topDish ? esc(topDish[0]) : "—", topDish ? `${topDish[1]} plates sold` : "no dishes sold yet", true)}
-      ${kpi("cancelled", "fa-ban", "#b34a4a", "Cancelled", s.cancelled, "kept out of revenue")}
+      ${kpi("revenue", "fa-indian-rupee-sign", "#b97f35", `Revenue · ${rangeLabel}`, `<span data-cu="${s.revenue}" data-cu-fmt="inr">${inr(s.revenue)}</span>${deltaChip(s.revenue, prev.revenue)}${sparkSvg((s.series || []).map((p) => p.revenue), "#b97f35")}`, revSub)}
+      ${kpi("orders", "fa-utensils", "#2a78d6", "Orders", `<span data-cu="${s.orderCount}">${s.orderCount}</span>${deltaChip(s.orderCount, prev.orders)}`, ordSub)}
+      ${kpi("peak", "fa-clock", "#168e5d", `Busiest hour${dashRange === "today" ? " so far" : ""}`, peakHour < 0 ? "—" : `${peakHour}:00`, peakHour < 0 ? "no orders yet" : `<b>${s.hours[peakHour]}</b> order${s.hours[peakHour] === 1 ? "" : "s"} in that hour`)}
+      ${kpi("given", "fa-tag", "#a86e00", "Given away", `<span data-cu="${disc.total}" data-cu-fmt="inr">${inr(disc.total)}</span>`, disc.count ? `discounts on <b>${disc.count}</b> bill${disc.count === 1 ? "" : "s"}${s.revenue > 0 ? ` (${pctOf(disc.total, s.revenue + disc.total)}% given up)` : ""}${disc.max ? `<br>largest <b>${inr(disc.max.amt)}</b>${disc.max.table ? ` on T${esc(disc.max.table)}` : ""}` : ""}` : "no discounts — full price all round")}
+      ${kpi("cancelled", "fa-ban", "#b34a4a", "Lost to cancellations", `<span data-cu="${s.cancelledValue || 0}" data-cu-fmt="inr">${inr(s.cancelledValue || 0)}</span>${deltaChip(s.cancelled, prev.cancelled)}`, s.cancelled ? `<b>${s.cancelled}</b> cancelled order${s.cancelled === 1 ? "" : "s"} — tap to inspect` : "none — clean sheet", { alert: s.cancelled > 0 })}
     </div>
     <div class="dash-grid">
-      <div class="dash-chart wide"><h4>Sales <span>· ${rangeLabel}</span></h4><div class="chart-wrap tall"><canvas id="chSales"></canvas></div></div>
+      <div class="dash-chart wide"><h4>Sales <span>· ${rangeLabel} — click a point to open those bills</span></h4><div class="chart-wrap tall"><canvas id="chSales"></canvas></div>${narrate}</div>
+      <div class="dash-chart"><h4>Day parts <span>· where the money comes in</span></h4><div class="chart-wrap"><canvas id="chDay"></canvas></div></div>
+      <div class="dash-chart"><h4>Channels <span>· dine-in vs delivery apps — tap a row to hide it</span></h4>
+        <div class="pay-split">
+          <div class="pay-donut"><canvas id="chChan"></canvas><div class="pay-center" id="chanCenter"></div></div>
+          <div class="pay-legend" id="chanLegend"></div>
+        </div>
+      </div>
+      ${hasHeat ? `<div class="dash-chart wide"><h4>When is this place actually busy? <span>· ${rangeLabel}, weekday × hour — plan shifts with this</span></h4><div class="hm" id="hmGrid"></div></div>` : ""}
       <div class="dash-chart"><h4>Top dishes <span>· plates sold</span></h4><div class="chart-wrap"><canvas id="chTop"></canvas></div></div>
       <div class="dash-chart"><h4>Busy hours <span>· orders by hour</span></h4><div class="chart-wrap"><canvas id="chHours"></canvas></div></div>
       <div class="dash-chart"><h4>Category share <span>· by plates</span></h4>
@@ -2188,16 +2247,26 @@ async function loadDashboard() {
   const KPI_GO = {
     revenue: () => goBills(dashRange === "today" ? "daybills" : "previous"),
     orders: () => goBills("live"),
+    given: () => goBills(dashRange === "today" ? "daybills" : "previous"),
     cancelled: () => goBills("previous"),
     peak: () => document.getElementById("chHours")?.closest(".dash-chart")?.scrollIntoView({ behavior: "smooth", block: "center" }),
-    topdish: () => {
-      const t = (s.topDishes || [])[0]?.[0];
-      const item = (state.data.items || []).find((i) => i.title === t);
-      if (item && typeof openDishEditModal === "function") openDishEditModal(item.id, () => {});
-      else setTab("items");
-    },
   };
   body.querySelectorAll("[data-kpi]").forEach((b) => (b.onclick = () => KPI_GO[b.dataset.kpi]?.()));
+  // Count-up: the big numbers roll from 0 to their value in ~½s (respects reduced motion).
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    body.querySelectorAll("[data-cu]").forEach((el2) => {
+      const end = Number(el2.dataset.cu) || 0;
+      if (!end) return;
+      const fmt = el2.dataset.cuFmt === "inr" ? inr : (v) => Math.round(v).toLocaleString("en-IN");
+      const t0 = performance.now(), dur = 550;
+      const tick = (t) => {
+        const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+        el2.textContent = fmt(end * e);
+        if (k < 1 && seq === loadDashboard._seq) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+  }
   dashCharts.forEach((c) => { try { c.destroy(); } catch {} });
   dashCharts = [];
   if (typeof Chart === "undefined") { body.insertAdjacentHTML("beforeend", `<div class="empty">Charts library didn't load (offline?) — the numbers above still work.</div>`); return; }
@@ -2210,8 +2279,6 @@ async function loadDashboard() {
     const w = (el2 && el2.parentElement && el2.parentElement.clientWidth) || 600;
     return Math.max(min, Math.min(max, Math.round(w / 80)));
   };
-  // A real-but-tiny share reads better as "<1%" than a lying "0%".
-  const pctOf = (n, total) => { const p = (n / total) * 100; return p > 0 && p < 1 ? "<1" : String(Math.round(p)); };
   const surface = (getComputedStyle(document.body).getPropertyValue("--panel") || "#1d1812").trim();
   const mutedInk = (getComputedStyle(document.body).getPropertyValue("--muted") || "#a8997f").trim();
   Chart.defaults.color = mutedInk;
@@ -2220,21 +2287,93 @@ async function loadDashboard() {
   const gold = "#b97f35", goldBar = "rgba(185,127,53,0.78)", goldSoft = "rgba(185,127,53,0.28)";
   const emptyCard = (id, title, msg) =>
     (document.getElementById(id).closest(".dash-chart").innerHTML = `<h4>${title}</h4><div class="empty">${msg}</div>`);
-  // Sales — gradient area, ₹k axis, index-hover. Words instead of a blank grid at ₹0.
+  // Sales — gradient area + the previous period as a dashed ghost line (cut at the
+  // same elapsed time). Clicking a point opens that day's / that period's bills.
   const salesPts = s.series.map((p) => Math.round((p.revenue || 0) * INR_RATE));
+  const prevPts = (prev.series || []).map((v) => Math.round((v || 0) * INR_RATE));
+  const GHOST = { today: "Yesterday", "30d": "30 days before", year: "Last year" }[dashRange] || "Before";
   if (salesPts.some((v) => v > 0)) {
     const sctx = document.getElementById("chSales").getContext("2d");
     const grad = sctx.createLinearGradient(0, 0, 0, 260);
     grad.addColorStop(0, "rgba(185,127,53,.28)"); grad.addColorStop(1, "rgba(185,127,53,.02)");
+    const datasets = [{ label: dashRange === "today" ? "Today" : "This period", data: salesPts, borderColor: gold, backgroundColor: grad, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 5, borderWidth: 2.25 }];
+    if (prevPts.some((v) => v > 0))
+      datasets.push({ label: GHOST, data: prevPts, borderColor: "rgba(150,140,125,.55)", borderDash: [5, 4], fill: false, tension: 0.35, pointRadius: 0, pointHoverRadius: 4, borderWidth: 1.5 });
     dashCharts.push(new Chart(sctx, {
       type: "line",
-      data: { labels: s.series.map((p) => p.label), datasets: [{ label: "₹ sales", data: salesPts, borderColor: gold, backgroundColor: grad, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 5, borderWidth: 2.25 }] },
-      options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => " " + inr(c.parsed.y) } } },
+      data: { labels: s.series.map((p) => p.label), datasets },
+      options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+        onClick: (_e, els) => {
+          if (!els.length) return;
+          if (dashRange === "today") return goBills("daybills");
+          if (dashRange === "30d") {
+            // Jump to that DAY's bill records: prefill the Previous view's date search.
+            const d = new Date(Date.now() - (29 - els[0].index) * 864e5);
+            state.billSearchType = "date"; state.billSearch = d.toISOString().slice(0, 10); state.billHistRows = [];
+            loadBillHistory(state.billSearch, "date");
+          }
+          goBills("previous");
+        },
+        plugins: { legend: { display: datasets.length > 1, labels: { boxWidth: 18, font: { size: 10 } } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${inr(c.parsed.y)}` } } },
         scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: tickLimit("chSales") } },
                   y: { beginAtZero: true, border: { display: false }, ticks: { maxTicksLimit: 5, callback: (v) => v >= 1000 ? "₹" + Math.round(v / 1000) + "k" : "₹" + v } } } },
     }));
   } else {
     emptyCard("chSales", `Sales <span>· ${rangeLabel}</span>`, "No sales in this range yet.");
+  }
+  // Day parts (PetPooja pattern): the biggest slot is solid gold; tooltip carries orders.
+  const dpData = (s.dayParts || []).filter((d, i) => i < 4 || d.orders > 0 || d.revenue > 0);
+  if (dpData.some((d) => d.revenue > 0 || d.orders > 0)) {
+    const dpMax = Math.max(...dpData.map((d) => d.revenue));
+    dashCharts.push(new Chart(document.getElementById("chDay"), {
+      type: "bar",
+      data: { labels: dpData.map((d) => d.label), datasets: [{ data: dpData.map((d) => Math.round(d.revenue * INR_RATE)), backgroundColor: dpData.map((d) => (d.revenue === dpMax && dpMax > 0 ? gold : goldSoft)), borderRadius: 6, borderSkipped: false }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${inr(c.parsed.y)} · ${dpData[c.dataIndex].orders} order${dpData[c.dataIndex].orders === 1 ? "" : "s"}` } } },
+        scales: { x: { grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 } } }, y: { beginAtZero: true, border: { display: false }, ticks: { maxTicksLimit: 4, callback: (v) => v >= 1000 ? "₹" + Math.round(v / 1000) + "k" : "₹" + v } } } },
+    }));
+  } else {
+    emptyCard("chDay", "Day parts", "No orders in this range yet.");
+  }
+  // Channels — dine-in vs the delivery apps, with click-to-hide legend rows.
+  const CH_META = { dinein: ["Dine-in", "#b97f35"], zomato: ["Zomato", "#e23744"], swiggy: ["Swiggy", "#fc8019"], takeaway: ["Takeaway", "#6b7280"] };
+  const chRows = Object.entries(chan)
+    .map(([k, v]) => ({ k, name: (CH_META[k] || [k])[0], color: (CH_META[k] || [, "#6b7280"])[1], rev: v.rev || 0, count: v.count || 0 }))
+    .filter((c) => c.rev > 0).sort((a, b) => b.rev - a.rev);
+  if (chRows.length) {
+    const chTotal = chRows.reduce((a, c) => a + c.rev, 0);
+    document.getElementById("chanCenter").innerHTML = `<b>${inr(chTotal)}</b><small>${esc(rangeLabel)}</small>`;
+    document.getElementById("chanLegend").innerHTML = chRows.map((c) => `
+      <div class="pay-row togglable" data-ch="${c.k}">
+        <span class="dot" style="background:${c.color}"></span>
+        <span class="m">${esc(c.name)}</span><span class="amt">${inr(c.rev)}</span>
+        <span class="meta">${pctOf(c.rev, chTotal)}% · ${c.count} order${c.count === 1 ? "" : "s"}${c.count ? ` · avg ${inr(c.rev / c.count)}` : ""}</span>
+      </div>`).join("");
+    const chanChart = new Chart(document.getElementById("chChan"), {
+      type: "doughnut",
+      data: { labels: chRows.map((c) => c.name), datasets: [{ data: chRows.map((c) => Math.round(c.rev * INR_RATE)), backgroundColor: chRows.map((c) => c.color), borderColor: surface, borderWidth: 2, hoverOffset: 6 }] },
+      options: { cutout: "68%", plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${c.label}: ${inr(c.parsed)}` } } } },
+    });
+    dashCharts.push(chanChart);
+    document.querySelectorAll("#chanLegend .pay-row").forEach((row, i) => (row.onclick = () => {
+      chanChart.toggleDataVisibility(i); chanChart.update();
+      row.classList.toggle("off");
+    }));
+  } else {
+    emptyCard("chChan", "Channels", "No orders in this range yet.");
+  }
+  // Weekday × hour heatmap (30d/year): darker = busier; the ring marks the single
+  // hottest slot. Pure CSS grid — no chart lib, so it's crisp in both themes.
+  if (hasHeat) {
+    const hmDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    let hmMax = 0, pkD = 0, pkH = 0;
+    heatRows.forEach((row, d) => row.forEach((v, h) => { if (v > hmMax) { hmMax = v; pkD = d; pkH = h; } }));
+    document.getElementById("hmGrid").innerHTML =
+      `<span></span>` + Array.from({ length: 24 }, (_, h) => `<span class="hx">${h % 3 === 0 ? h : ""}</span>`).join("") +
+      heatRows.map((row, d) => `<span class="lab">${hmDays[d]}</span>` + row.map((v, h) => {
+        const a = hmMax ? v / hmMax : 0;
+        const bgc = a === 0 ? "rgba(150,140,125,.10)" : `rgba(185,127,53,${(0.10 + a * 0.85).toFixed(2)})`;
+        return `<span class="c${d === pkD && h === pkH ? " peak" : ""}" style="background:${bgc}" title="${hmDays[d]} ${h}:00 — ${v} order${v === 1 ? "" : "s"}"></span>`;
+      }).join("")).join("");
   }
   // Top dishes — rounded bars.
   if ((s.topDishes || []).length) {
@@ -2275,16 +2414,18 @@ async function loadDashboard() {
     const catColor = (i) => CAT_COLORS[i] || OTHER_GRAY;
     document.getElementById("catCenter").innerHTML = `<b>${catTotal.toLocaleString("en-IN")}</b><small>plates</small>`;
     document.getElementById("catLegend").innerHTML = catEntries.map(([c, n], i) => `
-      <div class="pay-row">
+      <div class="pay-row togglable">
         <span class="dot" style="background:${catColor(i)}"></span>
         <span class="m">${esc(c)}</span><span class="amt">${n.toLocaleString("en-IN")}</span>
         <span class="meta">${pctOf(n, catTotal)}% of plates</span>
       </div>`).join("");
-    dashCharts.push(new Chart(document.getElementById("chCats"), {
+    const catChart = new Chart(document.getElementById("chCats"), {
       type: "doughnut",
       data: { labels: catEntries.map(([c]) => c), datasets: [{ data: catEntries.map(([, n]) => n), backgroundColor: catEntries.map((_, i) => catColor(i)), borderColor: surface, borderWidth: 2, hoverOffset: 6 }] },
       options: { cutout: "68%", plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${c.label}: ${c.parsed} plates` } } } },
-    }));
+    });
+    dashCharts.push(catChart);
+    document.querySelectorAll("#catLegend .pay-row").forEach((row, i) => (row.onclick = () => { catChart.toggleDataVisibility(i); catChart.update(); row.classList.toggle("off"); }));
   } else {
     emptyCard("chCats", "Category share", "No sales in this range yet.");
   }
@@ -2301,12 +2442,12 @@ async function loadDashboard() {
     const payTotal = payEntries.reduce((a, [, rev]) => a + rev, 0);
     document.getElementById("payCenter").innerHTML = `<b>${inr(payTotal)}</b><small>collected</small>`;
     document.getElementById("payLegend").innerHTML = payEntries.map(([m, rev, bills]) => `
-      <div class="pay-row">
+      <div class="pay-row togglable">
         <span class="dot" style="background:${payColor(m)}"></span>
         <span class="m">${esc(m)}</span><span class="amt">${inr(rev)}</span>
         <span class="meta">${pctOf(rev, payTotal)}%${bills ? ` · ${bills} bill${bills === 1 ? "" : "s"}` : ""}</span>
       </div>`).join("");
-    dashCharts.push(new Chart(payChart, {
+    const payChartInst = new Chart(payChart, {
       type: "doughnut",
       data: { labels: payEntries.map(([m]) => m), datasets: [{
         data: payEntries.map(([, rev]) => rev),
@@ -2314,7 +2455,9 @@ async function loadDashboard() {
         borderColor: surface, borderWidth: 2, hoverOffset: 6,
       }] },
       options: { cutout: "68%", plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => ` ${ctx.label}: ${inr(ctx.parsed)}` } } } },
-    }));
+    });
+    dashCharts.push(payChartInst);
+    document.querySelectorAll("#payLegend .pay-row").forEach((row, i) => (row.onclick = () => { payChartInst.toggleDataVisibility(i); payChartInst.update(); row.classList.toggle("off"); }));
   } else if (payChart) {
     emptyCard("chPay", `Payment methods <span>· ${rangeLabel}</span>`, "No paid bills in this range yet.");
   }
