@@ -2141,10 +2141,16 @@ function printBill(t, sess, os) {
   // flagship (#1); every other restaurant prints its own name + sign-off.
   const r = state.data.restaurant || {};
   const isDefault = r.slug === "french-house" || r.id === "00000000-0000-0000-0000-000000000001";
+  // TEMPORARY brand defaults (owner 2026-07-05): until a restaurant fills its own
+  // Billing details, its bill shows these Aevidine placeholders instead of a blank
+  // header — so no bill ever prints empty. The flagship (#1) keeps its own identity.
+  // Each restaurant REPLACES these in Settings › Billing (and MUST set a real GSTIN
+  // before using the bill for actual tax filing — this GSTIN is a placeholder).
+  const DEFAULT_BILL = { address: "Aevidine, Ahmedabad, Gujarat 380015, India", phone: "+91 90000 00000", gstin: "24AAAAA0000A1Z5" };
   const name = esc(s.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")));
-  const addr = esc(s.restaurant_address || "");
-  const phone = esc(s.restaurant_phone || (isDefault ? "+91 90999 14418" : ""));
-  const gstin = esc(s.gstin || "");
+  const addr = esc(s.restaurant_address || (isDefault ? "" : DEFAULT_BILL.address));
+  const phone = esc(s.restaurant_phone || (isDefault ? "+91 90999 14418" : DEFAULT_BILL.phone));
+  const gstin = esc(s.gstin || (isDefault ? "" : DEFAULT_BILL.gstin));
   // Per-cuisine sign-off so each bill feels native to its restaurant.
   const FOOTERS = {
     "pizza-palace": "Grazie — a presto! 🍕",
