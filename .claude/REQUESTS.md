@@ -302,3 +302,14 @@ owner looks, with cache busting, before claiming anything.
   admin typing /tablet with no restaurant picked bounces to /aevinite. Staff logins unchanged (their
   session pins their restaurant; no rid in the URL — exactly the owner's ask). Also killed the silent
   "default to restaurant #1" fallback in panelRestaurantId: a scopeless admin API call now answers 400.
+
+## 2026-07-06 (night) — CRASH RECOVERY: 8 parallel sessions completed + landed
+Computer crashed mid-flight on ~8 parallel sessions. Everything half-done was found, finished, verified live and merged:
+- [x] **PR #163 per-restaurant panel URLs** — was OPEN+CONFLICTING; rebased integrating #164's act-as gate, smoke-tested (slug login 200 / unknown 404 / bare+slug bounces), merged.
+- [x] **PR #165 crazy dashboards (manager+owner)** — 2 stranded commits; rebase re-integrated #162's per-BILL money rule into the new day-parts/heatmap/prev-period code (per-order maths would have re-overstated revenue); mig 127 applied; both dashboards verified live (₹183,653 / 7× delta). NOTE: first 30d fetch after cold start ≈3.5s (on-demand, never polled).
+- [x] **PR #166 guest cart Edit-on-every-dish + common allergen chips** — was UNCOMMITTED in the main folder; extracted onto a clean branch, verified live (plain dish → "Any allergies?" six chips, avoid-tap, edit-reopen preselects; declared dishes unchanged).
+- [x] **PR #167 manager "To accept" card** — was UNCOMMITTED in wt-accept; rebuilt on main, ?v= bumped, verified live (T4 accept → card+tile+count synced).
+- [x] **PR #168 restaurant recycle bin** — was UNCOMMITTED (456 lines + mig, renumbered 127→128, applied); full cycle verified live (delete w/ reason+confirm → guest 404 → bin 90-days/purge-locked → restore → DB clean; JSON export 200).
+- [x] feat/admin-panel-improve — FALSE leftover: already merged as PR #58 long ago (worktree was stale).
+- [x] Older branch tips (#134/#136/#155/#160 dirs) — content already in main via their squash merges; nothing lost.
+- Cleanup: seeded test order on french-house T4 cancelled; main folder returned to `main`; prod READY throughout (last deploys 1:35–1:52 am all green).
