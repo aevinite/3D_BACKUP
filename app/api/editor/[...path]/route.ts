@@ -139,6 +139,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const { path = [] } = await ctx.params;
     const p = path.join("/");
 
+    // whoami — boot signal for the panel's hierarchy X-ray (2026-07-05). Tells the
+    // client WHO is viewing (admin super-user / owner / manager) and this restaurant's
+    // manager_permissions, so the nav can HIDE a disabled feature for the real manager
+    // but show it GREYED to a higher role (admin/owner) looking in. Read-only; the
+    // server still enforces every capability (managerCan) regardless of what the UI shows.
+    if (p === "whoami") {
+      const actor = g.user ? g.user.role : "admin"; // no staff user cookie = admin super-user
+      const r = (await sb.from("restaurants").select("manager_permissions").eq("id", rid).maybeSingle()).data as { manager_permissions?: Record<string, boolean> } | null;
+      return ok({
+        actor,
+        role: actor,
+        // A higher role is "viewing" a lower panel when it's the admin super-user or an
+        // owner opening the manager panel — those see greyed (not hidden) disabled items.
+        higherView: actor === "admin" || actor === "owner",
+        managerPermissions: r?.manager_permissions || {},
+      });
+    }
+
     if (p === "all") {
       const [items, categories, filters, settings, restaurant] = await Promise.all([
         sb.from("menu_items").select("*").eq("restaurant_id", rid).order("sort_order"),
