@@ -771,6 +771,7 @@ body {
 .sx-tag-open { background: rgba(79,157,255,0.2); color: #7db4ff; }
 .sx-tag-join { background: rgba(212,165,116,0.22); color: var(--gold); }
 .sx-tag-access { background: rgba(232,161,60,0.2); color: #e8a13c; }
+.sx-tag-new { background: rgba(232,161,60,0.2); color: #e8a13c; }
 .sx-badges { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
 .sx-badge { background: rgba(0,0,0,0.45); border-radius: 999px; padding: 2px 7px; font-size: 11px; font-weight: 700; }
 .sx-badge-call { animation: tblPulse 1.2s ease-in-out infinite; }

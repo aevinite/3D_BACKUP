@@ -4049,6 +4049,31 @@ function floorNeedsCardHtml() {
   ).join("") : `<div class="sx-empty">No active calls.</div>`}</div>`;
 }
 
+// floorAcceptCardHtml(): the "To accept" side-panel card — every table with a NEW order
+// still waiting for staff to accept it, each with a one-tap Accept. Before this, new orders
+// showed ONLY on the floor tiles, so the side panel looked empty while "Needs you" counted
+// them (owner asked for them to show + sync here, 2026-07-05). Uses the SAME tableTileState
+// .hasNew that drives the tiles and the "Needs you" count, so all three always agree. Same
+// shared-builder + delegated-button pattern as floorReqCardHtml (id #fcAccept); the Accept
+// button reuses data-quick-accept → acceptTableOrders, wired by the ONE floor delegated
+// handler, so the incremental patch can swap this node without orphaning a listener.
+function floorAcceptCardHtml() {
+  const s = state.data.settings || {};
+  if (!s.sessions_enabled) return "";
+  const _tcKey = tableCountKey();
+  let cachedN = _tcKey ? parseInt(localStorage.getItem(_tcKey), 10) : NaN;
+  if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
+  const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
+  const rows = [];
+  for (let i = 1; i <= n; i++) {
+    const ts = tableTileState(i);
+    if (ts.hasNew) rows.push({ t: i, meta: ts.meta || "" });
+  }
+  return `<div class="fc-card" id="fcAccept"><h3>To accept <span class="sub">· ${rows.length}</span></h3>${rows.length ? rows.map((r) =>
+    `<div class="sx-req"><div class="sx-req-info"><span class="sx-tag sx-tag-new">new</span> T${esc(r.t)}${r.meta ? `<small>${esc(r.meta)}</small>` : ""}</div><div class="sx-req-actions"><button class="btn small primary" data-quick-accept="${esc(r.t)}">✓ Accept</button></div></div>`
+  ).join("") : `<div class="sx-empty">No orders waiting.</div>`}</div>`;
+}
+
 // floorStatsHtml(): the floor-wide stats strip (Occupied / To pay / Needs you). Computed by
 // looping tableTileState over EVERY table (cheap — no DOM) so the patch can refresh it without
 // rebuilding the grid. Shared by floorHtml and patchFloorTiles.
@@ -4177,6 +4202,7 @@ function floorHtml() {
   // (floorReqCardHtml / floorNeedsCardHtml) so the incremental patch path can refresh
   // just these two cards in place with byte-identical markup. They carry stable ids
   // (#fcReq / #fcNeeds) and their buttons are wired by the ONE delegated click handler.
+  const acceptCard = floorAcceptCardHtml();
   const reqCard = floorReqCardHtml();
   const needsCard = floorNeedsCardHtml();
 
@@ -4218,7 +4244,7 @@ function floorHtml() {
         <div class="tp-detail-foot">${foot}</div>
       </div>`;
   } else {
-    sideInner = `${bulkCard}${reqCard}${needsCard}${blkCard}${controls}`;
+    sideInner = `${acceptCard}${bulkCard}${reqCard}${needsCard}${blkCard}${controls}`;
   }
   // FLOATING LAYER: every table in state.floatingTables gets its own draggable card,
   // rendered ALONGSIDE whatever the side panel is doing above — fully independent (owner,
@@ -4308,6 +4334,8 @@ function patchFloorTiles(tables) {
   if (reqEl) reqEl.outerHTML = floorReqCardHtml();
   const needsEl = ed.querySelector("#fcNeeds");
   if (needsEl) needsEl.outerHTML = floorNeedsCardHtml();
+  const acceptEl = ed.querySelector("#fcAccept");
+  if (acceptEl) acceptEl.outerHTML = floorAcceptCardHtml();
   // A patch draws the new summary WITHOUT updating loadSessions' lastBoardSig fingerprint.
   // If a later FULL poll lands carrying the PREVIOUS summary (a wake/reconnect/platform event
   // whose summary happens to match the pre-patch one), loadSessions(true) would see an unchanged
