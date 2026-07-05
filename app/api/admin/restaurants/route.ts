@@ -27,10 +27,38 @@ function genPassword(): string {
   return s;
 }
 
+// 90-day recycle-bin retention. Kept in ONE place (mirrored by the SQL guard in
+// admin_purge_restaurant, migration 127) so the lock can't drift between UI + DB.
+const RETENTION_DAYS = 90;
+
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
+
+  // ?deleted=1 → the RECYCLE BIN: only trashed restaurants, with the retention
+  // countdown + whether they're yet eligible to purge. Kept separate from the
+  // main list so a deleted restaurant never leaks back into the live table.
+  if (new URL(req.url).searchParams.get("deleted") === "1") {
+    const binQ = await sb.from("restaurants").select("id, slug, name, deleted_at, deleted_by, delete_reason")
+      .not("deleted_at", "is", null).order("deleted_at", { ascending: false });
+    if (binQ.error) return bad(binQ.error.message, 500);
+    const now = Date.now();
+    const trashed = (binQ.data || []).map((r) => {
+      const deletedAt = r.deleted_at as string;
+      const purgeEligibleAt = new Date(new Date(deletedAt).getTime() + RETENTION_DAYS * 86400000).toISOString();
+      const daysLeft = Math.max(0, Math.ceil((new Date(purgeEligibleAt).getTime() - now) / 86400000));
+      return {
+        id: r.id, slug: r.slug, name: r.name,
+        deletedAt, deletedBy: r.deleted_by || null, reason: r.delete_reason || null,
+        purgeEligibleAt, daysLeft, canPurge: now >= new Date(purgeEligibleAt).getTime(),
+      };
+    });
+    return ok({ trashed, retentionDays: RETENTION_DAYS });
+  }
+
   const [restQ, setQ, ownersQ] = await Promise.all([
-    sb.from("restaurants").select("id, slug, name, active, owner_user_id").order("name"),
+    // deleted_at IS NULL → the live/suspended list; trashed restaurants are hidden
+    // here (they live in the recycle bin above).
+    sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name"),
     // enabled_panels rides along (tiny JSONB) so the admin home can show each
     // restaurant's M/K/T/O panel chips WITHOUT a per-row fetch. Read-only add.
     sb.from("settings").select("restaurant_id, enabled_panels"),
@@ -110,6 +138,69 @@ export async function POST(req: NextRequest) {
     if (error) return bad(error.message, 500);
     await logAction("admin", active ? "restaurant_reactivate" : "restaurant_suspend", { restaurant_id: rid, actor: "admin", detail: `${r.name} ${active ? "reactivated" : "suspended"}` });
     return ok({ ok: true, active });
+  }
+
+  // ── soft_delete_restaurant — move a restaurant to the 90-day RECYCLE BIN. It
+  // disappears from the guest menu (resolver returns null → 404) and staff can no
+  // longer log in, but nothing is erased. Reversible via restore for 90 days, then
+  // purgeable. Restaurant #1 (the default) can never be binned. ─────────────────
+  if (action === "soft_delete_restaurant") {
+    const rid = String(body?.restaurant_id || "");
+    if (!rid) return bad("Missing restaurant_id.");
+    if (rid === DEFAULT_RID) return bad("The default restaurant can't be deleted.", 400);
+    const reason = String(body?.reason ?? "").trim().slice(0, 300) || null;
+    const r = (await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1)).data?.[0];
+    if (!r) return bad("Restaurant not found.", 404);
+    if (r.deleted_at) return bad("That restaurant is already in the recycle bin.", 409);
+    // deleted_at drives the resolver + login gates; active=false too so nothing
+    // (e.g. a cached panel session) treats a binned restaurant as live.
+    const { error } = await sb.from("restaurants")
+      .update({ deleted_at: new Date().toISOString(), deleted_by: "admin", delete_reason: reason, active: false })
+      .eq("id", rid);
+    if (error) return bad(error.message, 500);
+    await logAction("admin", "restaurant_soft_delete", { restaurant_id: rid, actor: "admin", detail: `${r.name} moved to recycle bin${reason ? ` · reason: ${reason}` : ""}` });
+    return ok({ ok: true, deleted: true });
+  }
+
+  // ── restore_restaurant — bring a binned restaurant back. It returns SUSPENDED
+  // by default (active=false) so it can't silently go live; pass activate:true to
+  // reactivate it in one step. Clears the recycle-bin fields. ───────────────────
+  if (action === "restore_restaurant") {
+    const rid = String(body?.restaurant_id || "");
+    if (!rid) return bad("Missing restaurant_id.");
+    const activate = body?.activate === true;
+    const r = (await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1)).data?.[0];
+    if (!r) return bad("Restaurant not found.", 404);
+    if (!r.deleted_at) return bad("That restaurant isn't in the recycle bin.", 409);
+    const { error } = await sb.from("restaurants")
+      .update({ deleted_at: null, deleted_by: null, delete_reason: null, active: activate })
+      .eq("id", rid);
+    if (error) return bad(error.message, 500);
+    await logAction("admin", "restaurant_restore", { restaurant_id: rid, actor: "admin", detail: `${r.name} restored${activate ? " and reactivated" : " (suspended)"}` });
+    return ok({ ok: true, restored: true, active: activate });
+  }
+
+  // ── purge_restaurant — PERMANENT, irreversible erase of a binned restaurant and
+  // ALL its data. The atomic SQL function admin_purge_restaurant enforces the two
+  // hard rules (never the default, never before 90 days) so a purge can't slip
+  // through even if the UI check is bypassed. There is NO early-purge override. ──
+  if (action === "purge_restaurant") {
+    const rid = String(body?.restaurant_id || "");
+    if (!rid) return bad("Missing restaurant_id.");
+    if (rid === DEFAULT_RID) return bad("The default restaurant can't be purged.", 400);
+    const r = (await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1)).data?.[0];
+    if (!r) return bad("Restaurant not found.", 404);
+    if (!r.deleted_at) return bad("Only a restaurant in the recycle bin can be purged.", 409);
+    const eligibleAt = new Date(r.deleted_at).getTime() + RETENTION_DAYS * 86400000;
+    if (Date.now() < eligibleAt) {
+      const daysLeft = Math.ceil((eligibleAt - Date.now()) / 86400000);
+      return bad(`Locked for ${daysLeft} more day(s) — a restaurant can only be purged 90 days after deletion.`, 423);
+    }
+    // Atomic hard delete (children → parents → the row) in one transaction.
+    const { error } = await sb.rpc("admin_purge_restaurant", { p_rid: rid });
+    if (error) return bad(error.message, 500);
+    await logAction("admin", "restaurant_purge", { actor: "admin", detail: `PERMANENTLY purged restaurant "${r.name}" (${rid})` });
+    return ok({ ok: true, purged: true });
   }
 
   // ── create_restaurant — the admin onboards a NEW restaurant in one go (owner 2026-06-29):

@@ -42,11 +42,14 @@ export async function getRestaurantBySlug(slug: string): Promise<Restaurant | nu
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
   const { data, error } = await supabase
     .from("restaurants")
-    .select("id, slug, name, active, logo_text, hero_title, tagline, accent_color, theme, logo_url")
+    .select("id, slug, name, active, deleted_at, logo_text, hero_title, tagline, accent_color, theme, logo_url")
     .eq("slug", slug)
     .maybeSingle();
+  // A restaurant in the recycle bin (deleted_at set) resolves to null — so every
+  // guest surface that already does `if (!r) notFound()` hides it automatically
+  // (menu page, item page, menu-data API), no per-caller change needed.
   const r: Restaurant | null =
-    !error && data
+    !error && data && !data.deleted_at
       ? {
           id: data.id, slug: data.slug, name: data.name, active: !!data.active,
           logoText: data.logo_text ?? null, heroTitle: data.hero_title ?? null,

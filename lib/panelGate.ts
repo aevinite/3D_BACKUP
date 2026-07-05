@@ -12,7 +12,7 @@ import { notFound, redirect } from "next/navigation";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, type Role } from "@/lib/userAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
-import { isPanelEnabled } from "@/lib/panelAccess";
+import { isPanelEnabled, isRestaurantDeleted } from "@/lib/panelAccess";
 import { getRestaurantBySlug } from "@/lib/tenant";
 
 // Where each role lands after login. The canonical copy — LoginForm keeps a
@@ -22,15 +22,18 @@ export const ROLE_HOME: Record<Role, string> = { owner: "/owner", manager: "/man
 export async function requirePanel(role: Role, next: string): Promise<void> {
   const store = await cookies();
   // A logged-in user whose role matches this exact panel AND whose restaurant has
-  // this panel ENABLED (mig 106) — a disabled panel bounces to login, so an
-  // already-signed-in user is locked out the moment the admin turns their panel off.
+  // this panel ENABLED (mig 106) AND isn't in the recycle bin (mig 128) — any of
+  // those failing bounces to login, so an already-signed-in user is locked out the
+  // moment the admin disables their panel or bins their restaurant.
   // Staff is checked FIRST (mirrors requireRole's order, QA sweep 2026-07-03): on a
   // device holding both cookies, the person who explicitly signed in wins.
   const u = await userFromCookie(store.get(USER_COOKIE)?.value);
-  if (u && u.role === role && (await isPanelEnabled(role, u.restaurant_id))) return;
+  if (u && u.role === role && !(await isRestaurantDeleted(u.restaurant_id)) && (await isPanelEnabled(role, u.restaurant_id))) return;
   // Admin super-access: may hop into any panel — even one turned OFF for the
   // restaurant (admin sets up / inspects everything) — but only via the admin
   // console's act-as flow, which names WHICH restaurant. No scope → back to /aevinite.
+  // (A binned restaurant stays reachable to the admin this way on purpose — the
+  // recycle bin is an admin surface; guests + staff are the ones locked out.)
   if (await tokenIsValid(store.get(AUTH_COOKIE)?.value)) {
     if (store.get(ADMIN_ACT_COOKIE)?.value) return;
     redirect("/aevinite");
