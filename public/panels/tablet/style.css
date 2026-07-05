@@ -591,7 +591,7 @@ body:has(.opt-overlay) #tabletClose { display: none; }
   z-index: 60; align-items: center; gap: 10px; padding: 13px 16px; border: 0; border-radius: 14px;
   background: var(--gold, #b8923f); color: #14110d; font-family: inherit; font-weight: 800; font-size: 15px;
   box-shadow: 0 8px 26px rgba(0,0,0,.32); cursor: pointer; }
-.om-viewpill.empty { opacity: .5; }
+.om-viewpill.vp-empty { opacity: .5; }
 .om-viewpill .vp-n { background: rgba(0,0,0,.18); border-radius: 999px; padding: 2px 11px; font-size: 14px; }
 .om-viewpill .vp-total { margin-left: auto; }
 .om-viewpill .vp-arrow { font-style: normal; font-weight: 900; }
@@ -641,4 +641,4 @@ body:has(.detail-pop) #tabletClose { display: none; }
    The floor is always full-width; the table detail only ever appears as the centered
    popup (loading state included). The old resting "Tap a table" side hint is dropped. */
 .layout { grid-template-columns: 1fr; }
-#panel:has(.empty) { display: none; }
+#panel:has(> .empty) { display: none; }
