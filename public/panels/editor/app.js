@@ -5912,19 +5912,22 @@ document.addEventListener("keydown", (e) => {
 setTab(state.tab);
 
 // ══════════════════════════════════════════════════════════════════════════════
-// HIERARCHY X-RAY (2026-07-05) — the same panel renders differently by WHO opened it:
+// HIERARCHY X-RAY (2026-07-05, refined) — the same panel renders differently by WHO
+// opened it:
 //   • the real MANAGER (own login): a feature the owner turned OFF is HIDDEN entirely.
-//   • a HIGHER role viewing in (admin super-user / owner): that feature shows GREYED
-//     (locked) — so they can see what the manager is missing — with a jump to the
-//     setting that controls it and a "Reveal all" master toggle. The server still
-//     enforces every capability; this is purely how the nav is presented.
+//   • a HIGHER role viewing in (admin / owner): that feature stays FULLY USABLE but is
+//     tinted (colour label only, NOT a lock) so you can see it's off for the staff
+//     below you. A faded top ribbon (like the owner panel) marks the admin view and a
+//     top-right popout lists every tinted zone; clicking one scrolls to it and points
+//     at the setting that controls it. The server still enforces every capability —
+//     this is purely presentation.
 // Extend XRAY_TABS as more tabs become permission-gated. Grant rule matches the
 // server's managerCan(): a manager is granted ONLY when the flag is explicitly true.
 // ══════════════════════════════════════════════════════════════════════════════
 const XRAY_TABS = [
   { tab: "dash", flag: "view_dashboard", label: "Dashboard" },
   // (Bills discount/void live inside the Bills tab as actions, not whole tabs — a
-  //  later vertical greys those controls the same way via this same WHO signal.)
+  //  later vertical tints those controls the same way via this same WHO signal.)
 ];
 // Manager powers all live on the OWNER panel's "Staff & powers" (Access) page.
 const XRAY_SETTING_URL = "/owner/staff";
@@ -5932,19 +5935,32 @@ let XRAY_WHO = null;
 
 (function injectXrayStyles() {
   const css = `
-  .tab.xray-locked { opacity: .45; position: relative; }
-  .tab.xray-locked::after { content: "\\f023"; font-family: "Font Awesome 6 Free"; font-weight: 900;
-    font-size: 9px; margin-left: 5px; opacity: .8; }
-  body.xray-reveal .tab.xray-locked { opacity: .8; }
-  #xrayBar { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 9999;
-    display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 999px;
-    background: #10141b; color: #e6ebf3; border: 1px solid #d97706; font-size: 12px; font-weight: 600;
-    box-shadow: 0 6px 24px rgba(0,0,0,.35); font-family: system-ui, sans-serif; }
-  #xrayBar .tag { color: #fbbf24; display: inline-flex; align-items: center; gap: 5px; }
-  #xrayBar .cnt { color: #8b94a7; font-weight: 500; cursor: pointer; text-decoration: underline dotted; }
-  #xrayBar button { background: #d97706; color: #fff; border: 0; border-radius: 999px; padding: 4px 11px;
-    font: inherit; font-weight: 700; cursor: pointer; }
-  #xrayBar button.off { background: transparent; color: #8b94a7; border: 1px solid #2a2a2a; }`;
+  /* Tinted (off-for-staff) — colour cue only; stays fully clickable for the higher role. */
+  .tab.xray-off { position: relative; color: var(--gold-strong, #b8860b) !important; opacity: .72; }
+  .tab.xray-off::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: #d97706; margin-left: 6px; vertical-align: middle; }
+  .xray-pulse { animation: xrayPulse 1.1s ease-out 2; border-radius: 8px; }
+  @keyframes xrayPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217,119,6,0); } 50% { box-shadow: 0 0 0 4px rgba(217,119,6,.55); } }
+  /* Faded admin ribbon across the very top — flows above the sticky topbar. */
+  #xrayRibbon { display: flex; align-items: center; gap: 12px; padding: 6px 16px;
+    background: color-mix(in srgb, #d97706 12%, var(--panel, #fff)); border-bottom: 1px solid color-mix(in srgb, #d97706 40%, transparent);
+    font-family: system-ui, sans-serif; font-size: 12px; color: var(--text, #222); position: relative; z-index: 40; }
+  #xrayRibbon .rb-tag { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; letter-spacing: .04em;
+    color: #b45309; text-transform: uppercase; font-size: 11px; }
+  #xrayRibbon .rb-rest { color: var(--muted, #777); font-weight: 600; }
+  #xrayRibbon .rb-spacer { margin-left: auto; }
+  #xrayRibbon button { font: inherit; cursor: pointer; border-radius: 999px; border: 1px solid color-mix(in srgb, #d97706 45%, transparent);
+    background: transparent; color: #b45309; font-weight: 700; padding: 4px 12px; }
+  #xrayRibbon button.rb-exit { border-color: var(--line, #ddd); color: var(--muted, #777); }
+  #xrayZones { position: absolute; top: calc(100% + 4px); right: 12px; z-index: 60; min-width: 240px;
+    background: var(--panel, #fff); border: 1px solid var(--line, #ddd); border-radius: 12px; padding: 6px;
+    box-shadow: 0 12px 32px rgba(0,0,0,.18); }
+  #xrayZones .zh { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted,#888); padding: 6px 8px 4px; }
+  #xrayZones .zrow { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent;
+    border: 0; border-radius: 8px; padding: 8px; font: inherit; font-size: 12.5px; color: var(--text,#222); cursor: pointer; }
+  #xrayZones .zrow:hover { background: color-mix(in srgb, #d97706 12%, transparent); }
+  #xrayZones .zrow .dot { width: 7px; height: 7px; border-radius: 50%; background: #d97706; flex-shrink: 0; }
+  #xrayZones .zrow small { color: var(--muted,#888); margin-left: auto; }`;
   const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
 })();
 
@@ -5953,53 +5969,69 @@ function xrayGrantedForManager(flag) { return XRAY_WHO && XRAY_WHO.managerPermis
 function applyHierarchyView() {
   if (!XRAY_WHO) return;
   const higher = !!XRAY_WHO.higherView;                 // admin/owner looking in
-  const revealed = higher && localStorage.getItem("lfh_xray_reveal") === "1";
-  document.body.classList.toggle("xray-reveal", revealed);
-  let lockedCount = 0;
-  for (const { tab } of XRAY_TABS) {
-    const btn = document.querySelector(`.tabs .tab[data-tab="${tab}"]`);
+  const zones = [];                                     // tinted things on this page (for the popout)
+  for (const entry of XRAY_TABS) {
+    const btn = document.querySelector(`.tabs .tab[data-tab="${entry.tab}"]`);
     if (!btn) continue;
-    const granted = xrayGrantedForManager(XRAY_TABS.find((x) => x.tab === tab).flag);
-    btn.hidden = false; btn.classList.remove("xray-locked"); btn.style.pointerEvents = "";
+    const granted = xrayGrantedForManager(entry.flag);
+    btn.hidden = false; btn.classList.remove("xray-off"); btn.removeAttribute("title");
     if (granted) continue;                               // manager has it → normal for everyone
     if (!higher) { btn.hidden = true; continue; }        // real manager → hide entirely
-    // higher role → show greyed (locked). Revealed = usable (admin is top power).
-    lockedCount++;
-    btn.classList.add("xray-locked");
-    if (!revealed) {
-      btn.title = "Turned off for managers — click to manage in the owner's Access settings";
-      btn.dataset.xrayLocked = "1";
-    } else {
-      btn.title = "Off for managers · you can use it (admin view)";
-      delete btn.dataset.xrayLocked;
-    }
+    // higher role → TINT (colour only), still fully usable. Record it as a zone.
+    btn.classList.add("xray-off");
+    btn.title = `${entry.label} is off for staff — you can still use it (admin view)`;
+    zones.push({ ...entry, el: btn });
   }
-  renderXrayBar(higher, lockedCount, revealed);
+  renderXrayRibbon(higher, zones);
 }
 
-function renderXrayBar(higher, lockedCount, revealed) {
-  let bar = document.getElementById("xrayBar");
-  if (!higher) { if (bar) bar.remove(); return; }
-  if (!bar) { bar = document.createElement("div"); bar.id = "xrayBar"; document.body.appendChild(bar); }
-  const who = XRAY_WHO.actor === "admin" ? "ADMIN" : "OWNER";
-  bar.innerHTML =
-    `<span class="tag"><i class="fas fa-user-shield"></i> Viewing as ${who}</span>` +
-    (lockedCount ? `<span class="cnt" id="xrayJump">${lockedCount} feature${lockedCount === 1 ? "" : "s"} off for staff</span>` : `<span class="cnt">nothing hidden here</span>`) +
-    `<button id="xrayReveal" class="${revealed ? "" : "off"}">${revealed ? "Hide greyed" : "Reveal all"}</button>`;
-  const rv = document.getElementById("xrayReveal");
-  if (rv) rv.onclick = () => { localStorage.setItem("lfh_xray_reveal", revealed ? "0" : "1"); applyHierarchyView(); };
-  const jump = document.getElementById("xrayJump");
-  if (jump) jump.onclick = () => { try { window.top.location.href = XRAY_SETTING_URL; } catch { window.location.href = XRAY_SETTING_URL; } };
+function renderXrayRibbon(higher, zones) {
+  let rb = document.getElementById("xrayRibbon");
+  const zp = document.getElementById("xrayZones");
+  if (!higher) { if (rb) rb.remove(); if (zp) zp.remove(); return; }
+  if (!rb) { rb = document.createElement("div"); rb.id = "xrayRibbon"; document.body.insertBefore(rb, document.body.firstChild); }
+  const who = XRAY_WHO.actor === "admin" ? "Admin" : "Owner";
+  const restEl = document.getElementById("brandRest");
+  const restName = restEl ? restEl.textContent.replace(/^·\s*/, "") : "";
+  const n = zones.length;
+  rb.innerHTML =
+    `<span class="rb-tag"><i class="fas fa-user-shield"></i> ${who} view</span>` +
+    (restName ? `<span class="rb-rest">${restName}</span>` : "") +
+    `<span class="rb-spacer"></span>` +
+    `<button id="xrayZonesBtn">${n} zone${n === 1 ? "" : "s"} off for staff <i class="fas fa-chevron-down" style="font-size:9px"></i></button>` +
+    `<button class="rb-exit" id="xrayExit"><i class="fas fa-arrow-rotate-left"></i> Exit view</button>`;
+  document.getElementById("xrayExit").onclick = async () => {
+    try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
+    try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+  };
+  document.getElementById("xrayZonesBtn").onclick = () => toggleXrayZones(zones);
 }
 
-// A locked tab, when NOT revealed, jumps to the setting instead of switching view.
+function toggleXrayZones(zones) {
+  let zp = document.getElementById("xrayZones");
+  if (zp) { zp.remove(); return; }
+  zp = document.createElement("div"); zp.id = "xrayZones";
+  zp.innerHTML = `<div class="zh">Off for staff on this page</div>` + (zones.length
+    ? zones.map((z, i) => `<button class="zrow" data-zi="${i}"><span class="dot"></span>${z.label}<small>tap to locate</small></button>`).join("")
+    : `<div class="zrow" style="cursor:default">Nothing is off here.</div>`);
+  document.getElementById("xrayRibbon").appendChild(zp);
+  zp.querySelectorAll(".zrow[data-zi]").forEach((row) => {
+    row.onclick = () => {
+      const z = zones[+row.dataset.zi];
+      zp.remove();
+      if (z && z.el) {
+        z.el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        z.el.classList.remove("xray-pulse"); void z.el.offsetWidth; z.el.classList.add("xray-pulse");
+        toast(`${z.label}: off for staff. Change it in the owner's Access settings.`, "ok");
+      }
+    };
+  });
+}
+// Close the zones popout on an outside click.
 document.addEventListener("click", (e) => {
-  const btn = e.target.closest && e.target.closest('.tab[data-xray-locked="1"]');
-  if (!btn) return;
-  e.preventDefault(); e.stopPropagation();
-  toast("This is off for managers — opening the owner's Access settings…", "ok");
-  setTimeout(() => { try { window.top.location.href = XRAY_SETTING_URL; } catch { window.location.href = XRAY_SETTING_URL; } }, 500);
-}, true); // capture: run before the normal setTab handler
+  const zp = document.getElementById("xrayZones");
+  if (zp && !e.target.closest("#xrayZones") && !e.target.closest("#xrayZonesBtn")) zp.remove();
+});
 
 api("GET", "/whoami").then((w) => { XRAY_WHO = w; applyHierarchyView(); }).catch(() => {});
 
@@ -6007,7 +6039,7 @@ api("GET", "/whoami").then((w) => { XRAY_WHO = w; applyHierarchyView(); }).catch
 // If the very first load fails, show "connection failed" so it's obvious the local
 // server probably isn't running.
 loadAll()
-  .then(() => { renderCatFilter(); renderList(); renderEditor(); startOrderWatch(); loadPlatform(); /* populate the Platform tab badge on boot */ })
+  .then(() => { renderCatFilter(); renderList(); renderEditor(); startOrderWatch(); loadPlatform(); applyHierarchyView(); /* refresh the admin ribbon with the restaurant name */ })
   .catch((e) => {
     $("#conn").textContent = "connection failed";
     $("#conn").className = "conn err";
