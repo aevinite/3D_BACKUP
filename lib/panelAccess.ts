@@ -57,6 +57,40 @@ export async function isPanelEnabledCached(role: Role, restaurantId: string): Pr
   return on;
 }
 
+// OWNER-panel entitlement for a specific OWNER USER. An owner's staff_users row
+// carries the #1 "home" restaurant_id (a namespace, not ownership), so checking
+// isPanelEnabled('owner', u.restaurant_id) tested restaurant #1's toggle — wrong
+// restaurant entirely (found in the 2026-07-06 owner-portfolio redesign). The
+// real rule: an owner may use the owner panel if ANY live (non-binned) restaurant
+// they own (restaurant_owners, mig 097) has the owner panel enabled. Cached like
+// the per-restaurant map — requireRole runs on every polled owner request.
+const _ownerCache = new Map<string, { at: number; on: boolean }>();
+export async function ownerPanelEnabled(userId: string, cached = true): Promise<boolean> {
+  if (!userId) return false;
+  const hit = cached ? _ownerCache.get(userId) : undefined;
+  if (hit && Date.now() - hit.at < PANEL_TTL_MS) return hit.on;
+  const links = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", userId).limit(50);
+  const ids = (links.data || []).map((r) => r.restaurant_id as string);
+  let on = false;
+  if (ids.length) {
+    // One scoped read: live restaurants ∩ owned ids, joined against their settings.
+    const [restQ, setQ] = await Promise.all([
+      sb.from("restaurants").select("id").in("id", ids).is("deleted_at", null),
+      sb.from("settings").select("restaurant_id, enabled_panels").in("restaurant_id", ids),
+    ]);
+    const live = new Set((restQ.data || []).map((r) => r.id as string));
+    const panelsByRid = new Map((setQ.data || []).map((r) => [r.restaurant_id as string, r.enabled_panels as Record<string, unknown> | null]));
+    on = ids.some((rid) => {
+      if (!live.has(rid)) return false;
+      const p = panelsByRid.get(rid);
+      // Missing row / key defaults ON (same backward-compat rule as getEnabledPanels).
+      return !(p && typeof p === "object" && (p as Record<string, unknown>).owner === false);
+    });
+  }
+  _ownerCache.set(userId, { at: Date.now(), on });
+  return on;
+}
+
 // Is this restaurant in the RECYCLE BIN (soft-deleted, migration 128)? A binned
 // restaurant is treated as gone: staff can't log in and existing sessions are
 // bounced (the guest resolver already hides it). Cached like the panel map so

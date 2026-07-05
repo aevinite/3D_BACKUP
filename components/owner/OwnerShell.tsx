@@ -7,6 +7,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { inr } from "@/components/admin/shared";
 
 type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean };
 type NavGroup = { label: string; quiet?: boolean; items: NavItem[] };
@@ -57,6 +58,37 @@ export default function OwnerShell({ children, adminViewing, restaurantName }: {
   useEffect(() => {
     try { const s = localStorage.getItem("aevidine_skin"); if (s === "dark" || s === "light") setSkin(s); } catch {}
   }, []);
+
+  // "My restaurants" — the full list the owner owns, ALWAYS visible in the sidebar
+  // (owner request 2026-07-06). ONE fetch of the already-pre-aggregated overview per
+  // hard page load (the layout survives client-side navigation, so this doesn't
+  // re-fetch when hopping Dashboard→Reports); the dashboard keeps its own live copy.
+  const [myRests, setMyRests] = useState<{ id: string; name: string; accentColor: string; revenueToday: number }[]>([]);
+  useEffect(() => {
+    let dead = false;
+    const scp = ridPin ? `&scope=${ridPin}` : "";
+    fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (dead || !Array.isArray(j?.restaurants)) return;
+        setMyRests(j.restaurants.map((r: { id: string; name: string; accentColor?: string; revenueToday?: number }) => ({
+          id: r.id, name: r.name, accentColor: r.accentColor || "#34d399", revenueToday: r.revenueToday || 0,
+        })));
+      })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, [ridPin]);
+
+  // Open one restaurant's dashboard from anywhere: on /owner the dashboard listens
+  // for this event (no reload); from any other page we navigate home with ?focus=.
+  const openRestaurant = (rid: string | null) => {
+    if (path === "/owner") {
+      window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid } }));
+    } else {
+      const q = [rid ? `focus=${rid}` : "", ridPin ? `rid=${ridPin}` : ""].filter(Boolean).join("&");
+      router.push(`/owner${q ? `?${q}` : ""}`);
+    }
+  };
   const toggleSkin = () => {
     setSkin((cur) => { const next = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("aevidine_skin", next); } catch {} return next; });
   };
@@ -92,6 +124,27 @@ export default function OwnerShell({ children, adminViewing, restaurantName }: {
             </div>
           ))}
         </nav>
+
+        {/* My restaurants — always ALL of them, on every page (>1 only: a single-
+            restaurant owner needs no list of one). Scrolls past ~7 so 15+ stays sane. */}
+        {myRests.length > 1 && (
+          <div className="owx-myrest">
+            <div className="hd">My restaurants <b>{myRests.length}</b></div>
+            <div className="rows">
+              <button className="rrow all" onClick={() => openRestaurant(null)}>
+                <i className="fas fa-layer-group" aria-hidden="true" />
+                <span className="nm">All restaurants</span>
+              </button>
+              {myRests.map((r) => (
+                <button key={r.id} className="rrow" onClick={() => openRestaurant(r.id)} title={`Open ${r.name}`}>
+                  <span className="sw" style={{ background: r.accentColor }} aria-hidden="true" />
+                  <span className="nm">{r.name}</span>
+                  <span className="rv">{inr(r.revenueToday)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="owx-side-foot">Aevidine · Restaurant OS</div>
       </aside>
 

@@ -52,13 +52,24 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
     if (acting) {
       // Show what the OWNER of the entered restaurant sees: ALL restaurants that owner
       // owns (an owner may run several), not just the one we entered — so the admin's
-      // owner-cockpit view matches the real owner's. Fall back to the single restaurant
-      // if it has no owner assigned. (2026-06-26: was scoped to only the one restaurant.)
-      const r = (await sb.from("restaurants").select("owner_user_id").eq("id", acting).maybeSingle()).data;
-      if (r?.owner_user_id) {
-        const { data } = await sb.from("restaurants").select("id").eq("owner_user_id", r.owner_user_id);
-        const ids = (data || []).map((x) => x.id as string);
-        return { all: false, ids: ids.length ? ids : [acting], ownerId: r.owner_user_id as string };
+      // owner-cockpit view matches the real owner's. Resolve the owner via the
+      // restaurant_owners JOIN TABLE (the scoping source of truth, mig 097) — prefer
+      // the primary owner_user_id when it's a member, else any co-owner — and widen
+      // through the same join table (2026-07-06; was keyed off owner_user_id alone,
+      // which missed hand-attached co-ownerships). Fall back to the single restaurant
+      // if nobody owns it.
+      const [primaryQ, membersQ] = await Promise.all([
+        sb.from("restaurants").select("owner_user_id").eq("id", acting).maybeSingle(),
+        sb.from("restaurant_owners").select("user_id").eq("restaurant_id", acting),
+      ]);
+      const members = (membersQ.data || []).map((m) => m.user_id as string);
+      const primary = primaryQ.data?.owner_user_id as string | null | undefined;
+      const ownerId = primary && members.includes(primary) ? primary : (members[0] ?? primary ?? null);
+      if (ownerId) {
+        const { data } = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId);
+        const ids = (data || []).map((x) => x.restaurant_id as string);
+        if (!ids.includes(acting)) ids.push(acting); // never lose the entered restaurant
+        return { all: false, ids, ownerId };
       }
       return { all: false, ids: [acting], ownerId: "admin" };
     }

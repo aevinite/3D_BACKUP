@@ -1,14 +1,19 @@
 "use client";
-// Owner · Dashboard (redesign 2026-07-04) — ADAPTIVE by restaurant count:
-//   · 1 restaurant  → the dashboard IS that restaurant (time/date charts up front —
-//     a "who earns more" bar with one bar is useless, owner's exact complaint).
+// Owner · Dashboard (redesign 2026-07-04, tiers extended 2026-07-06) — ADAPTIVE
+// by restaurant count:
+//   · 1 restaurant  → the dashboard IS that restaurant (hero header + charts up
+//     front — a "who earns more" bar with one bar is useless, owner's complaint).
 //   · 2 restaurants → head-to-head comparison + two-line trend.
-//   · 3+            → leaderboard bar + multi-line trend + card grid; click drills in.
+//   · 3–9           → leaderboard bar + multi-line trend + card grid; click drills in
+//     (5+ caps the trend at the top-5 lines so it stays readable).
+//   · 10+           → HQ mode: ONE sortable, searchable table (cards would be a wall
+//     of noise); scales to 50+. Sidebar (OwnerShell) always lists every restaurant.
 // Every KPI carries a ▲/▼ delta vs the previous equal-length period + a sparkline,
 // and an insight strip says in plain words what the numbers mean. All data arrives
 // pre-aggregated from /api/owner/{overview,analytics,reports} (tiny rows, mig-113
 // paid-only rule everywhere). Refresh: activity-gated ~60s + manual — no websocket.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import {
   AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod, Spark, DeltaChip,
@@ -185,11 +190,32 @@ export default function OwnerDashboard() {
   // no ?rid= and is scoped by their own cookie, so this is null and nothing changes.
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
+  // Hero quick-links must keep the admin's tab pin (same rule as OwnerShell.withRid).
+  const withPin = (href: string) => (scopePin ? `${href}?rid=${scopePin}` : href);
 
   const single = ov?.restaurants.length === 1;
   // With ONE restaurant the home page IS that restaurant — resolve its id once known.
   const homeRid = single ? ov!.restaurants[0].id : null;
   const activeRid = view.level === "home" ? homeRid : (view as { rid: string }).rid;
+  const restCount = ov?.restaurants.length ?? 0;
+  const hq = restCount >= 10; // HQ table mode — cards/charts don't scale past ~9
+
+  // HQ table controls (hooks must run unconditionally; cheap when unused).
+  const [hqQuery, setHqQuery] = useState("");
+  const [hqSort, setHqSort] = useState<"revenue" | "orders" | "openTables" | "name">("revenue");
+
+  // The sidebar's "My restaurants" rows (OwnerShell) open a restaurant from ANY
+  // page: same-page clicks arrive as this event, cross-page ones as ?focus=<rid>.
+  useEffect(() => {
+    const focus = new URLSearchParams(window.location.search).get("focus");
+    if (focus) setView({ level: "restaurant", rid: focus });
+    const onOpen = (e: Event) => {
+      const rid = (e as CustomEvent).detail?.rid as string | null | undefined;
+      setView(rid ? { level: "restaurant", rid } : { level: "home" });
+    };
+    window.addEventListener("lfh:owner-open-restaurant", onOpen);
+    return () => window.removeEventListener("lfh:owner-open-restaurant", onOpen);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -247,7 +273,10 @@ export default function OwnerDashboard() {
     if (!group) return { rows: [] as Record<string, unknown>[], lines: [] as { key: string; name: string; color: string }[] };
     // Key each series by restaurant ID, never by display name — two restaurants can share
     // a name, and keying by name silently merges their two lines into one (found 2026-07-05).
-    const lines = group.restaurantRevenue.slice(0, 8).map((r) => ({ key: r.id, name: r.name, color: r.accentColor || FALLBACK }));
+    // 5+ restaurants → only the top-5 earners get a line (8 lines were already noise;
+    // the rest are one tap away in the cards/HQ table).
+    const lineCap = group.restaurantRevenue.length >= 5 ? 5 : 8;
+    const lines = group.restaurantRevenue.slice(0, lineCap).map((r) => ({ key: r.id, name: r.name, color: r.accentColor || FALLBACK }));
     const byKey = new Map<string, Record<string, unknown>>();
     for (const t of group.timeseries) {
       const k = istKey(new Date(t.bucket), range);
@@ -337,6 +366,25 @@ export default function OwnerDashboard() {
     };
   }, [group]);
 
+  // HQ (10+) table rows: overview (live today/tables) merged with the range revenue,
+  // filtered by the search box, sorted by the active column. Rank is ALWAYS by range
+  // revenue so "#3" keeps meaning "3rd best earner" whatever the sort.
+  const hqRows = useMemo(() => {
+    if (!hq || !ov) return [];
+    const revById = new Map((group?.restaurantRevenue ?? []).map((r) => [r.id, r]));
+    const base = ov.restaurants.map((r) => ({
+      id: r.id, slug: r.slug, name: r.name, active: r.active, accent: r.accentColor || FALLBACK,
+      revenue: revById.get(r.id)?.revenue ?? 0, orders: revById.get(r.id)?.orders ?? 0,
+      openTables: r.openTables, revenueToday: r.revenueToday,
+    }));
+    const rank = new Map([...base].sort((a, b) => b.revenue - a.revenue).map((r, i) => [r.id, i + 1]));
+    const q = hqQuery.trim().toLowerCase();
+    const rows = q ? base.filter((r) => r.name.toLowerCase().includes(q) || r.slug.toLowerCase().includes(q)) : base;
+    rows.sort((a, b) => (hqSort === "name" ? a.name.localeCompare(b.name) : (b[hqSort] as number) - (a[hqSort] as number)));
+    return rows.map((r) => ({ ...r, rank: rank.get(r.id)! }));
+  }, [hq, ov, group, hqQuery, hqSort]);
+  const hqMaxRev = Math.max(1, ...hqRows.map((r) => r.revenue));
+
   const two = !!group && group.restaurantRevenue.length === 2;
 
   return (
@@ -386,6 +434,54 @@ export default function OwnerDashboard() {
             <Kpi k="Lost to cancellations" v={money?.cancelledValue ?? 0} money sub={money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great"} />
           </div>
 
+          {hq ? (
+            /* ── 10+ restaurants → HQ mode: one sortable, searchable table ── */
+            <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
+              <div className="hq-bar">
+                <span className="hq-search">
+                  <i className="fas fa-magnifying-glass" aria-hidden="true" />
+                  <input value={hqQuery} onChange={(e) => setHqQuery(e.target.value)} placeholder={`Search ${restCount} restaurants…`} aria-label="Search restaurants" />
+                  {hqQuery && <button className="hq-x" onClick={() => setHqQuery("")} aria-label="Clear search">×</button>}
+                </span>
+                <span className="hq-sorts" role="tablist" aria-label="Sort by">
+                  {([["revenue", `Revenue (${RANGE_LABEL[range]})`], ["orders", "Orders"], ["openTables", "Open tables"], ["name", "A–Z"]] as const).map(([k, lb]) => (
+                    <button key={k} role="tab" aria-selected={hqSort === k} className={hqSort === k ? "on" : ""} onClick={() => setHqSort(k)}>{lb}</button>
+                  ))}
+                </span>
+              </div>
+              <div className="hq-scroll">
+                <table className="hq-table">
+                  <thead><tr>
+                    <th className="rk">#</th><th style={{ textAlign: "left" }}>Restaurant</th>
+                    <th>Revenue ({RANGE_LABEL[range]})</th><th>Orders</th><th>Today</th><th>Open tables</th><th>Status</th><th aria-hidden="true" />
+                  </tr></thead>
+                  <tbody>
+                    {hqRows.length === 0 && (
+                      <tr><td colSpan={8} className="hq-empty">{ov ? "No restaurant matches that search." : "Loading…"}</td></tr>
+                    )}
+                    {hqRows.map((r) => (
+                      <tr key={r.id} className="hq-row" onClick={() => setView({ level: "restaurant", rid: r.id })}
+                        tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") setView({ level: "restaurant", rid: r.id }); }}>
+                        <td className="rk">{r.rank}</td>
+                        <td style={{ textAlign: "left" }}>
+                          <span className="hq-nm"><span className="sw" style={{ background: r.accent }} aria-hidden="true" />{r.name}</span>
+                        </td>
+                        <td>
+                          <b>{inr(r.revenue)}</b>
+                          <span className="hq-meter" aria-hidden="true"><span style={{ width: `${Math.round((r.revenue / hqMaxRev) * 100)}%`, background: r.accent }} /></span>
+                        </td>
+                        <td className="mut">{r.orders}</td>
+                        <td className="mut">{inr(r.revenueToday)}</td>
+                        <td className="mut">{r.openTables}</td>
+                        <td><span className={`own-pill ${r.active ? "on" : "off"}`}>{r.active ? "Active" : "Off"}</span></td>
+                        <td className="go"><i className="fas fa-chevron-right" aria-hidden="true" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (<>
           {two ? (
             /* ── exactly TWO restaurants → head-to-head ── */
             <div className="own-charts">
@@ -453,7 +549,29 @@ export default function OwnerDashboard() {
               </button>
             ))}
           </div>
+          </>)}
         </>
+      )}
+
+      {/* ═══════ SINGLE-OWNER HERO — identity + one-tap jumps (2026-07-06 polish):
+          with one restaurant there's no portfolio to browse, so the dashboard opens
+          with WHO you are and the three places you actually go next. ═══════ */}
+      {view.level === "home" && single && ov && (
+        <div className="own-hero" style={{ ["--rcol" as string]: ov.restaurants[0].accentColor || FALLBACK }}>
+          <div className="own-hero-id">
+            <div className="own-hero-name">{ov.restaurants[0].name}</div>
+            <div className="own-hero-sub">
+              <span className={`own-pill ${ov.restaurants[0].active ? "on" : "off"}`}>{ov.restaurants[0].active ? "Active" : "Off"}</span>
+              <span className="mono">{ov.restaurants[0].slug}</span>
+              <span className="live"><i className="fas fa-chair" aria-hidden="true" /> {ov.restaurants[0].openTables} table{ov.restaurants[0].openTables === 1 ? "" : "s"} open now</span>
+            </div>
+          </div>
+          <div className="own-hero-links">
+            <Link href={withPin("/owner/reports")} className="own-hero-link"><i className="fas fa-file-invoice" aria-hidden="true" /> Reports</Link>
+            <Link href={withPin("/owner/staff")} className="own-hero-link"><i className="fas fa-users-gear" aria-hidden="true" /> Staff &amp; powers</Link>
+            <Link href={withPin("/owner/issues")} className="own-hero-link"><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Feedback</Link>
+          </div>
+        </div>
       )}
 
       {/* ═══════ RESTAURANT (drill-down, or HOME when there's only one) ═══════ */}
@@ -522,7 +640,41 @@ export default function OwnerDashboard() {
         .own-h2h-col .meta { font-size: 11.5px; color: var(--muted); margin-top: 7px; }
         .own-dish-h { border-left: 4px solid var(--rcol); padding-left: 12px; }
         .own-dish-name { font-size: 22px; font-weight: 800; }
-        @media (max-width: 760px) { .own-charts { grid-template-columns: 1fr; } }
+        /* ── single-owner hero ── */
+        .own-hero { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border: var(--border); border-left: 4px solid var(--rcol); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; background: linear-gradient(90deg, color-mix(in srgb, var(--rcol) 9%, transparent), transparent 55%); }
+        .own-hero-id { min-width: 0; flex: 1; }
+        .own-hero-name { font-size: 20px; font-weight: 800; line-height: 1.2; }
+        .own-hero-sub { display: flex; align-items: center; gap: 10px; margin-top: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+        .own-hero-sub .live { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); }
+        .own-hero-sub .live i { color: var(--rcol); font-size: 11px; }
+        .own-hero-links { display: flex; gap: 8px; flex-wrap: wrap; }
+        :global(.own-hero-link) { display: inline-flex; align-items: center; gap: 8px; border: var(--border); background: var(--card); border-radius: 9px; padding: 8px 13px; font-size: 12.5px; font-weight: 700; color: var(--text) !important; text-decoration: none; transition: border-color .15s; }
+        :global(.own-hero-link:hover) { border-color: var(--rcol); }
+        :global(.own-hero-link i) { color: var(--rcol); font-size: 12px; }
+        /* ── HQ mode (10+ restaurants) ── */
+        .hq-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border-bottom: var(--border); }
+        .hq-search { flex: 1 1 220px; display: flex; align-items: center; gap: 9px; border: var(--border); background: var(--bg); border-radius: 9px; padding: 7px 12px; color: var(--muted); }
+        .hq-search input { flex: 1; min-width: 0; background: none; border: none; outline: none; font: inherit; font-size: 13px; color: var(--text); }
+        .hq-search i { font-size: 12px; }
+        .hq-x { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; padding: 0 2px; line-height: 1; }
+        .hq-sorts { display: inline-flex; background: var(--bg); border: var(--border); border-radius: 9px; padding: 3px; gap: 2px; flex-wrap: wrap; }
+        .hq-sorts button { background: none; border: none; padding: 5px 11px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; white-space: nowrap; }
+        .hq-sorts button.on { background: var(--accent); color: #fff; }
+        .hq-scroll { overflow: auto; max-height: 64vh; }
+        .hq-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .hq-table th { position: sticky; top: 0; background: var(--card); z-index: 1; text-align: right; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; padding: 9px 12px; border-bottom: var(--border); white-space: nowrap; }
+        .hq-table td { padding: 9px 12px; border-bottom: var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .hq-table .rk { width: 30px; text-align: left; color: var(--muted); font-weight: 800; font-size: 11.5px; }
+        .hq-row { cursor: pointer; }
+        .hq-row:hover td, .hq-row:focus-visible td { background: var(--muted2); }
+        .hq-nm { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .hq-nm .sw { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+        .hq-meter { display: inline-block; vertical-align: middle; width: 64px; height: 7px; border-radius: 4px; background: rgba(128,128,128,.14); overflow: hidden; margin-left: 10px; }
+        .hq-meter span { display: block; height: 100%; border-radius: 4px; }
+        .hq-table .mut { color: var(--muted); }
+        .hq-table .go i { color: var(--muted); font-size: 11px; }
+        .hq-empty { text-align: center !important; color: var(--muted); padding: 26px 12px !important; }
+        @media (max-width: 760px) { .own-charts { grid-template-columns: 1fr; } .hq-meter { display: none; } .hq-table .mut { display: none; } .hq-table th:nth-child(4), .hq-table th:nth-child(5), .hq-table th:nth-child(6) { display: none; } .own-hero-links { width: 100%; } :global(.own-hero-link) { flex: 1; justify-content: center; } }
       `}</style>
     </>
   );
