@@ -383,6 +383,9 @@ input:disabled { opacity: .55; cursor: not-allowed; }
   padding: 2px 8px; white-space: nowrap;
 }
 .ord-disc { display: flex; justify-content: space-between; color: #7ec88a; font-size: 13px; padding: 4px 0; }
+/* Subtotal / GST rows on the bill cards — muted, sits above the bold Total (owner,
+   2026-07-05: the live bill must show the tax % + amount, merged into ONE line). */
+.ord-sub { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; padding: 4px 0; }
 .sx-bill-actions { margin-top: 8px; display: flex; gap: 8px; }
 .tp-order-total s { color: var(--muted); font-weight: 400; margin-right: 4px; }
 
@@ -1328,11 +1331,16 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
    side looked bad — mostly empty). A table with one order is now a short card; a busy one
    grows to the cap and scrolls inside. Width/left/top come from layoutFloatingRow (auto) or
    a drag/resize (pinned). */
-.tp-detail-floating { position: fixed; top: 70px; right: 24px; z-index: 40; width: 400px; max-width: calc(100vw - 24px); height: auto; max-height: calc(100vh - 92px); min-height: 200px; transition: left .22s ease, top .22s ease, width .22s ease; }
+/* display:flex here is what makes the inner card's scroll work: the wrapper's height is
+   AUTO (only max-height-capped), so a child `height:100%` computes to auto and the body's
+   overflow-y:auto never got a bounded box — the popup clipped instead of scrolling
+   (owner bug, 2026-07-05). As a flex column, the card shrinks to the cap (or fills an
+   inline height set by the resize handle) and the body scrolls inside it. */
+.tp-detail-floating { position: fixed; top: 70px; right: 24px; z-index: 40; width: 400px; max-width: calc(100vw - 24px); height: auto; max-height: calc(100vh - 92px); min-height: 200px; display: flex; flex-direction: column; transition: left .22s ease, top .22s ease, width .22s ease; }
 .tp-detail-floating.tp-pinned { z-index: 41; transition: none; }
 /* While actively being dragged/resized, no transition — the pointer must control it 1:1. */
 .tp-detail-floating.dragging { transition: none; z-index: 42; }
-.tp-detail-floating .tp-detail { height: 100%; max-height: 100%; box-shadow: var(--shadow-md); }
+.tp-detail-floating .tp-detail { flex: 1 1 auto; min-height: 0; max-height: 100%; box-shadow: var(--shadow-md); }
 .tp-detail-floating.tp-pinned .tp-detail { box-shadow: 0 0 0 2px var(--gold), var(--shadow-md); }
 .tp-detail-floating .tp-detail-body { flex: 1; min-height: 0; overflow-y: auto; }
 .tp-detail-floating .tp-detail-head { cursor: grab; }

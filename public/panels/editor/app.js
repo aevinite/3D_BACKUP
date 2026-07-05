@@ -1085,6 +1085,7 @@ function formGeneral(s) {
       ${tf("GSTIN", "gstin", s.gstin ?? "")}
       ${tf("Invoice prefix", "invoice_prefix", s.invoice_prefix ?? "")}
     </div>
+    ${tf("Bill footer message", "bill_footer", s.bill_footer ?? "", { hint: "Printed at the very bottom of the customer's bill, e.g. “Thank you — visit again!”. Leave blank to use the default sign-off." })}
   </div>
   <div class="card"><h3>Tax</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
@@ -1265,7 +1266,9 @@ function orderCardHtml(o, freed = false) {
     <small class="ord-when">${esc(when)}</small>
     <div class="ord-items">${items}</div>
     ${allergy}
+    ${Number(o.subtotal) > 0 ? `<div class="ord-sub"><span>Subtotal</span><span>${inr(Number(o.subtotal))}</span></div>` : ""}
     ${Number(o.discount) > 0 ? `<div class="ord-disc">Discount${o.discount_note ? ` (${esc(o.discount_note)})` : ""}<span>− ${inr(o.discount)}</span></div>` : ""}
+    ${Number(o.tax) > 0 ? `<div class="ord-sub"><span>GST ${taxModel(state.data.settings).pct}%</span><span>${inr(Number(o.tax))}</span></div>` : ""}
     <div class="ord-total"><span>Total</span><span>${inr((Number(o.total) || 0) - (Number(o.discount) || 0))}</span></div>
     <div class="ord-actions">${actionsRow}</div>
   </div>`;
@@ -1388,7 +1391,9 @@ function mergedOrderCardHtml(g) {
     </div>
     <small class="ord-when">${esc(when)}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
     <div class="ord-items">${items}</div>
+    <div class="ord-sub"><span>Subtotal</span><span>${inr(_m.subtotal)}</span></div>
     ${disc > 0 ? `<div class="ord-disc">Discount<span>− ${inr(disc)}</span></div>` : ""}
+    ${_m.tax > 0 ? `<div class="ord-sub"><span>GST ${Math.round(_m.rate * 10000) / 100}%</span><span>${inr(_m.tax)}</span></div>` : ""}
     <div class="ord-total"><span>Total</span><span>${inr(total)}</span></div>
     <div class="ord-actions">${billBtns}${stage}${freeBtn}</div>
   </div>`;

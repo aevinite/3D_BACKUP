@@ -1008,6 +1008,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             .filter((c: { label: string; rate: number }) => c.label && c.rate > 0 && c.rate <= 100)
             .slice(0, 6);
         }
+        // bill_footer — free-text sign-off printed at the bottom of the customer bill
+        // (mig 124). Blank/whitespace → null so the print falls back to its default.
+        if ("bill_footer" in body) {
+          const v = String(body.bill_footer ?? "").trim().slice(0, 200);
+          body.bill_footer = v || null;
+        }
         if ("table_seats" in body) {
           const raw = body.table_seats;
           const clean: Record<string, number> = {};

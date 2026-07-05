@@ -12,13 +12,13 @@
 // Callers still override id / restaurant_id / the specific flag they're toggling.
 
 // Columns that must NEVER be inherited from the template restaurant. (Only REAL, nullable
-// settings columns — verified against the live schema; bill_footer is NOT a settings column,
-// so listing it would break the upsert.)
+// settings columns — verified against the live schema.)
 // NULLABLE tenant-specific columns — cleared to null so the new restaurant starts blank
 // (they all read with a sensible fallback, e.g. tax_rate → 5%, name → menu wordmark).
 const NULL_COLUMNS = [
   "restaurant_name", "restaurant_address", "restaurant_phone", // printed on the tax invoice
   "gstin", "invoice_prefix",                                   // invoice identity
+  "bill_footer",                                               // printed sign-off (mig 124)
   "tax_rate",                                                  // each restaurant sets its own
   "geo_lat", "geo_lng",                                        // location gate center → else #1's café coords leak in
 ] as const;
