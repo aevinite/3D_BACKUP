@@ -495,7 +495,7 @@ body.om-mode .panel.om-open { position: fixed; inset: 0; z-index: 40; border: 0;
   /* rail → sticky chip row */
   .om-nav { flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 10px; gap: 6px; scrollbar-width: none; }
   .om-nav::-webkit-scrollbar { display: none; }
-  .om-cat { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 13px; background: var(--bg); }
+  .om-cat { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 13px; background: var(--bg); min-height: 40px; display: inline-flex; align-items: center; }
   .om-cat.on { background: var(--gold); border-color: var(--gold); color: #14110d; }
   .om-scroll { padding: 10px 12px 20px; }
   /* cart docks below the browser — still ITS OWN scroll, never hidden */
