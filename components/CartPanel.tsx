@@ -361,12 +361,11 @@ export default function CartPanel() {
       },
     }));
   };
-  // isCustomizable(): can this dish be edited? True if it has options or allergens
-  // (otherwise there's nothing to customize, so we hide the "Edit" button).
-  const isCustomizable = (id: string) => {
-    const d = menuItems.find((m) => m.id === id);
-    return !!d && (((d.options || []).length > 0) || ((d.allergens || []).length > 0));
-  };
+  // canEdit(): show the "Edit" button on EVERY dish still in the menu (owner,
+  // 2026-07-05). Even a plain dish with no options/allergens can be customized —
+  // the popup always lets the guest flag a per-dish allergy and add a kitchen
+  // note. We only hide Edit if the dish is gone from the menu (nothing to open).
+  const canEdit = (id: string) => !!menuItems.find((m) => m.id === id);
 
   // Gentle pairing upsell: the top-rated drink/dessert not already on the bill.
   const cartIds = new Set(cart.map((c) => c.id));
@@ -672,7 +671,7 @@ export default function CartPanel() {
                       <button type="button" aria-label={`Decrease ${item.title}`} onClick={() => decrement(idx)} style={qtyBtn}>−</button>
                       <span style={{ minWidth: "32px", textAlign: "center", fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>{item.qty}x</span>
                       <button type="button" aria-label={`Increase ${item.title}`} onClick={() => increment(idx)} style={qtyBtn}>+</button>
-                      {isCustomizable(item.id) && (
+                      {canEdit(item.id) && (
                         <button type="button" className="cart-edit-btn" onClick={() => editLine(item)}>
                           <i className="fas fa-pen"></i> Edit
                         </button>
