@@ -3668,6 +3668,210 @@ a:focus:not(:focus-visible) { outline: none; }
 .ban-done { font-size: 14px; line-height: 1.5; color: #16a34a; font-weight: 600; margin: 4px 0 0; }
 
 /* ════════════════════════════════════════════════════════════════════════════
+   ADMIN OPS CONSOLE SKIN (redesign 2026-07-04) — scoped to `.adm.adx`, the
+   modifier class ONLY AdminShell adds. The owner panel keeps the plain `.adm`
+   skin above untouched. Dense, real-data console: DARK default, hairline
+   borders, no gradients/glows/grids, blue accent for data + one amber CTA.
+   ════════════════════════════════════════════════════════════════════════════ */
+.adm.adx {                              /* DARK (default) */
+  --bg: #0a0c10; --card: #10141b; --border: 1px solid #1d2430; --border-c: #1d2430;
+  --side: #0c0f15;
+  --text: #e6ebf3; --muted: #8b94a7; --muted2: rgba(230,235,243,0.10);
+  --accent: #3b82f6; --accent-dim: rgba(59,130,246,0.6);
+  --accent-grad: #3b82f6; --accent-glow: rgba(59,130,246,0.25);
+  --adm-cta: #d97706;
+  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24;
+  --elev: 0 1px 0 rgba(255,255,255,.03); --elev-hi: 0 1px 0 rgba(255,255,255,.03);
+  /* Access-control page tokens (it styles inline with --ac-* fallbacks). */
+  --ac-line: #1d2430; --ac-card: #10141b; --ac-muted: #8b94a7;
+  --ac-accent: #3b82f6; --ac-off: #232b3a;
+  background: var(--bg);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+.adm.adx[data-skin="light"] {           /* LIGHT (kept for the toggle) */
+  --bg: #f6f7f9; --card: #ffffff; --border: 1px solid #e5e8ee; --border-c: #e5e8ee;
+  --side: #ffffff;
+  --text: #111827; --muted: #6b7280; --muted2: rgba(17,24,39,0.08);
+  --accent: #2563eb; --accent-dim: rgba(37,99,235,0.6);
+  --accent-grad: #2563eb; --accent-glow: rgba(37,99,235,0.18);
+  --adm-cta: #d97706;
+  --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-warn: #d97706;
+  --elev: 0 1px 2px rgba(16,24,40,.04); --elev-hi: 0 1px 2px rgba(16,24,40,.04);
+  --ac-line: #e5e8ee; --ac-card: #ffffff; --ac-muted: #6b7280;
+  --ac-accent: #2563eb; --ac-off: #e5e8ee;
+  background: var(--bg);
+}
+/* Visible focus ring everywhere in the console. */
+.adx :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+.adx a, .adx button, .adx [role="button"] { cursor: pointer; }
+/* Mono stack for slugs / ids / rates. */
+.adx .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+/* ── sidebar (fixed 224px, grouped) ──────────────────────────────────────── */
+.adx-side {
+  width: 224px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--side); border-right: var(--border); padding: 12px 10px;
+  overflow-y: auto;
+}
+.adx-brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 12px; margin-bottom: 6px; border-bottom: var(--border); }
+.adx-brand .mark { width: 28px; height: 28px; border-radius: 8px; background: var(--accent); display: grid; place-items: center; color: #fff; font-size: 12px; flex-shrink: 0; }
+.adx-brand .who { min-width: 0; }
+.adx-brand .who b { display: block; font-size: 13.5px; font-weight: 700; line-height: 1.15; color: var(--text); }
+.adx-brand .who span { font-size: 11px; color: var(--muted); }
+.adx-nav { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.adx-group { display: flex; flex-direction: column; gap: 1px; }
+.adx-group-lbl {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); padding: 0 10px; margin: 14px 0 5px;
+}
+.adx-group:first-child .adx-group-lbl { margin-top: 4px; }
+.adx-group.quiet .adx-navlink { opacity: .62; }
+.adx-group.quiet .adx-navlink:hover, .adx-group.quiet .adx-navlink.active { opacity: 1; }
+.adx-navlink {
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px;
+  color: var(--text) !important; text-decoration: none; font-size: 13px; font-weight: 500;
+  transition: background .15s ease, color .15s ease;
+}
+.adx-navlink i { width: 16px; text-align: center; font-size: 13px; color: var(--muted); }
+.adx-navlink:hover { background: var(--muted2); }
+.adx-navlink.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent) !important; font-weight: 600; }
+.adx-navlink.active i { color: var(--accent); }
+.adx-navlink .navsoon {
+  margin-left: auto; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); border: var(--border); padding: 1px 5px; border-radius: 999px;
+}
+.adx-side-foot { margin-top: auto; font-size: 11px; color: var(--muted); padding: 10px 10px 2px; border-top: var(--border); }
+/* ── topbar ──────────────────────────────────────────────────────────────── */
+.adx-top {
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  border-bottom: var(--border); background: var(--card); flex-shrink: 0; min-height: 48px;
+}
+.adx .adm-icnbtn { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; }
+/* Restaurant quick-switcher */
+.adx-switch { position: relative; }
+.adx-switch-trig {
+  display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px;
+  border-radius: 8px; border: var(--border); background: var(--bg); color: var(--text);
+  font-size: 12.5px; font-weight: 600; transition: background .15s ease;
+}
+.adx-switch-trig:hover { background: var(--muted2); }
+.adx-switch-trig .chev { font-size: 9px; color: var(--muted); }
+.adx-switch-trig > i:first-child { color: var(--muted); font-size: 12px; }
+.adx-switch-pop {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 70; width: 300px;
+  background: var(--card); border: var(--border); border-radius: 10px; padding: 6px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+.adx-switch-search { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; border-bottom: var(--border); margin-bottom: 4px; }
+.adx-switch-search i { font-size: 11px; color: var(--muted); }
+.adx-switch-search input {
+  flex: 1; min-width: 0; background: transparent; border: 0; color: var(--text);
+  font-size: 13px; padding: 4px 0; outline: none;
+}
+.adx-switch-opt {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  background: transparent; border: 0; border-radius: 6px; padding: 7px 8px;
+  font-size: 13px; color: var(--text); transition: background .15s ease;
+}
+.adx-switch-opt.hi { background: var(--muted2); }
+.adx-switch-opt .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--muted2); flex-shrink: 0; }
+.adx-switch-opt .dot.on { background: var(--adm-ok); }
+.adx-switch-opt .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.adx-switch-opt .sl { margin-left: auto; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; flex-shrink: 0; }
+.adx-switch-empty { padding: 14px 10px; font-size: 12.5px; color: var(--muted); text-align: center; }
+/* ── page container / headers ────────────────────────────────────────────── */
+.adx .adm-main { padding: 20px; }
+.adx-wrap { max-width: 1280px; margin: 0 auto; }
+.adx .adm-page-h { font-size: 18px; font-weight: 700; }
+.adx .adm-page-sub { font-size: 13px; margin-bottom: 16px; }
+/* ── density overrides for the shared .adm-* components ──────────────────── */
+.adx .adm-card { border-radius: 10px; padding: 14px 16px; box-shadow: var(--elev); }
+.adx .adm-card h2 { font-size: 13.5px; }
+.adx .adm-card .hint { font-size: 12px; }
+.adx .adm-btn { padding: 6px 12px; border-radius: 8px; font-size: 12.5px; height: 30px; display: inline-flex; align-items: center; }
+.adx a.adm-btn { height: auto; min-height: 30px; }
+/* ONE primary (amber CTA) action per screen; blue stays for data/links. */
+.adx .adm-btn.primary { background: var(--adm-cta); border-color: transparent; color: #fff; box-shadow: none; }
+.adx .adm-btn.primary:hover { filter: brightness(1.08); }
+.adx .adm-stats { gap: 8px; margin-bottom: 14px; }
+.adx .adm-stat { border-radius: 10px; padding: 10px 14px; }
+.adx .adm-stat .k { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+.adx .adm-stat .v { font-size: 20px; letter-spacing: 0; }
+.adx .adm-stat:hover { transform: none; box-shadow: var(--elev); }
+.adx .adm-logwrap { border-radius: 10px; }
+.adx .adm-logrow { padding: 9px 14px; font-size: 13px; min-height: 40px; }
+.adx .adm-logrow.head { font-size: 11px; background: var(--muted2); }
+.adx .adm-toggle { border-radius: 8px; padding: 8px 11px; font-size: 13px; }
+.adx .adm-tabs { border-radius: 10px; }
+.adx .adm-tabs button { padding: 6px 13px; border-radius: 7px; font-size: 12.5px; }
+.adx .adm-tabs button.active { background: var(--accent); color: #fff; }
+.adx .adm-coming { box-shadow: var(--elev); border-radius: 14px; }
+.adx .adm-coming-ic { box-shadow: none; }
+.adx .adm-teaser { box-shadow: var(--elev); }
+.adx .adm-empty { padding: 28px 14px; font-size: 13px; }
+.adx .adm-rest { font-size: 12.5px; padding: 5px 11px; }
+/* ── responsive: sidebar → horizontally scrollable nav pills row (≤900px) ── */
+@media (max-width: 900px) {
+  .adx-side { width: 100%; flex-direction: row; align-items: center; gap: 8px; padding: 8px 10px; border-right: 0; border-bottom: var(--border); overflow: visible; }
+  .adx-brand { padding: 0 6px 0 0; margin: 0; border-bottom: 0; border-right: var(--border); flex-shrink: 0; }
+  .adx-brand .who { display: none; }
+  .adx-nav { flex-direction: row; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 4px; scrollbar-width: none; }
+  .adx-nav::-webkit-scrollbar { display: none; }
+  .adx-group { display: contents; }
+  .adx-group-lbl { display: none; }
+  .adx-navlink { flex: none; white-space: nowrap; padding: 6px 10px; font-size: 12.5px; border: var(--border); border-radius: 999px; }
+  .adx-navlink.active { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .adx-navlink .navsoon { display: none; }
+  .adx-side-foot { display: none; }
+  .adx-top { padding: 8px 12px; }
+  .adx .adm-main { padding: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .adx-navlink, .adx-switch-trig, .adx-switch-opt, .adx .adm-btn { transition: none; }
+}
+
+/* Live floor — the "year calendar" (owner 2026-07-04): restaurants = months,
+   tables = tiny date cells. Colour carries the state; keep cells ≥20px so the
+   number stays legible and the hover/tooltip target isn't fiddly. */
+.adx .adm-flooryear { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.adx .adm-floormonth { padding: 12px 14px; }
+.adx .adm-floormonth header { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.adx .adm-floormonth-name { background: none; border: 0; padding: 0; font: inherit; font-size: 13.5px; font-weight: 700; color: var(--text); cursor: pointer; text-align: left; }
+.adx .adm-floormonth-name:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.adx .adm-minigrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(22px, 1fr)); gap: 3px; }
+.adx .adm-minitile { display: grid; place-items: center; aspect-ratio: 1; border-radius: 4px; font-size: 8.5px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; cursor: default; }
+
+/* Analytics / Report / Health / Billing (2026-07-04) — shared layout + widget
+   classes for the four new admin surfaces. Prefixed .adx- per the project's
+   "new scoped classes only when needed" rule; everything else reuses .adm-*. */
+.adx-grid2col { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; align-items: start; }
+@media (max-width: 900px) { .adx-grid2col { grid-template-columns: 1fr; } }
+
+/* Health page's status pills (latency / db / realtime). */
+.adx-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+.adx-pill.good { background: color-mix(in srgb, var(--adm-ok) 18%, transparent); color: var(--adm-ok); }
+.adx-pill.warn { background: color-mix(in srgb, #d97706 18%, transparent); color: #d97706; }
+.adx-pill.bad { background: color-mix(in srgb, var(--adm-danger) 18%, transparent); color: var(--adm-danger); }
+.adx-pill .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+
+/* Billing status pills reuse the same visual language with dedicated states. */
+.adx-billpill { font-size: 10.5px; font-weight: 800; padding: 2px 9px; border-radius: 999px; text-transform: uppercase; white-space: nowrap; }
+.adx-billpill.active { background: color-mix(in srgb, var(--adm-ok) 20%, transparent); color: var(--adm-ok); }
+.adx-billpill.trial { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+.adx-billpill.paused { background: color-mix(in srgb, #d97706 20%, transparent); color: #d97706; }
+.adx-billpill.cancelled { background: var(--muted2, rgba(120,120,120,0.2)); color: var(--muted); }
+.adx-overdue { color: var(--adm-danger) !important; font-weight: 800; }
+
+/* Print-friendly per-restaurant Report: hide the admin chrome, keep only the
+   report content, when the admin hits the browser Print button. */
+@media print {
+  .adx-side, .adx-top, .adx-noprint { display: none !important; }
+  .adm-main { padding: 0 !important; overflow: visible !important; }
+  .adx-wrap { max-width: 100% !important; }
+  .adm-card { break-inside: avoid; box-shadow: none !important; border: 1px solid #ccc !important; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
    OWNER CONSOLE SKIN (redesign 2026-07-04) — scoped to `.adm.owx`, the modifier
    class ONLY OwnerShell adds. Same dense console language as the admin `.adx`
    skin the owner approved (dark default, hairline borders, tabular numerals,

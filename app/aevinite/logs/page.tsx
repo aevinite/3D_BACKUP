@@ -3,7 +3,7 @@
 // staff action, incl. the admin's own) and CUSTOMERS (guests, their orders/calls,
 // and the blocklist). The admin sees admin actions here; the manager never does.
 import { useCallback, useEffect, useState } from "react";
-import { ACT_LABEL, PANEL_COLOR, timeAgo, inr, type Action } from "@/components/admin/shared";
+import { ACT_LABEL, PANEL_COLOR, timeAgo, type Action } from "@/components/admin/shared";
 
 type Member = {
   id: string; name: string | null; phone: string | null; role: string;
@@ -68,10 +68,11 @@ function OpsTable({ rows }: { rows: Action[] | null }) {
 function CustTable({ data }: { data: CustData | null }) {
   if (data === null) return <div className="adm-empty">Loading…</div>;
   const { members, blocklist, orders, calls } = data;
-  // Roll up each member's orders (count + spend) and call count.
-  const byMember = new Map<string, { n: number; spend: number; calls: number }>();
-  for (const o of orders) { const m = byMember.get(o.member_id) || { n: 0, spend: 0, calls: 0 }; m.n++; m.spend += Number(o.total) || 0; byMember.set(o.member_id, m); }
-  for (const c of calls) { const m = byMember.get(c.member_id) || { n: 0, spend: 0, calls: 0 }; m.calls++; byMember.set(c.member_id, m); }
+  // Roll up each member's order count + call count. (No ₹ spend here — the admin
+  // panel shows no earnings anywhere, owner 2026-07-03.)
+  const byMember = new Map<string, { n: number; calls: number }>();
+  for (const o of orders) { const m = byMember.get(o.member_id) || { n: 0, calls: 0 }; m.n++; byMember.set(o.member_id, m); }
+  for (const c of calls) { const m = byMember.get(c.member_id) || { n: 0, calls: 0 }; m.calls++; byMember.set(c.member_id, m); }
   const cols = "1fr 70px 80px 1.2fr auto";
 
   return (
@@ -79,13 +80,13 @@ function CustTable({ data }: { data: CustData | null }) {
       <div className="adm-logwrap" style={{ marginBottom: 16 }}>
         <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>Guest</div><div>Table</div><div>Role</div><div>Did</div><div>When</div></div>
         {members.length === 0 ? <div className="adm-empty">No guests in sessions yet.</div> : members.map((m) => {
-          const did = byMember.get(m.id) || { n: 0, spend: 0, calls: 0 };
+          const did = byMember.get(m.id) || { n: 0, calls: 0 };
           return (
             <div key={m.id} className="adm-logrow" style={{ gridTemplateColumns: cols, opacity: m.removed ? 0.55 : 1 }}>
               <div><b>{m.name || "Guest"}</b>{m.phone ? <span className="adm-muted"> · {m.phone}</span> : ""}</div>
               <div>{m.session?.table_number ? `#${m.session.table_number}` : "—"}</div>
               <div className="adm-muted">{m.role === "owner" ? "Head" : "Guest"}</div>
-              <div className="adm-muted">{did.n} order{did.n !== 1 ? "s" : ""}{did.spend ? ` · ${inr(did.spend)}` : ""}{did.calls ? ` · ${did.calls} call${did.calls !== 1 ? "s" : ""}` : ""}</div>
+              <div className="adm-muted">{did.n} order{did.n !== 1 ? "s" : ""}{did.calls ? ` · ${did.calls} call${did.calls !== 1 ? "s" : ""}` : ""}</div>
               <div className="adm-when">{timeAgo(m.joined_at)}</div>
             </div>
           );

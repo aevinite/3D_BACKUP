@@ -1,79 +1,100 @@
 "use client";
-// AdminShell — the calm, sectioned dashboard frame for every /aevinite page:
-// a left sidebar (each section on its own page), a topbar with the restaurant
-// context + a light/dark theme toggle + logout, and a scrollable content area.
-// Token-driven, so it follows the app's warm light/dark themes automatically.
-import { usePathname } from "next/navigation";
+// AdminShell — the dense SaaS ops-console frame for every /aevinite page
+// (redesign 2026-07-04): a fixed 224px grouped sidebar, a topbar with a real
+// restaurant quick-switcher (search → jump to /aevinite/restaurants?focus=slug),
+// skin toggle + logout, and a 1280px content column. DARK is the default skin.
+// The chrome uses NEW .adx-* classes + the `.adm.adx` token skin at the END of
+// app/globals.css — the owner panel keeps the old `.adm` chrome untouched.
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import ReorderableNav, { type NavItem } from "@/components/admin/ReorderableNav";
+import { useEffect, useRef, useState } from "react";
 
-// Full platform sidebar. Real sections link to live pages; "soon" ones open a
-// branded Coming-soon page so the menu reads complete with no dead ends.
-const NAV: NavItem[] = [
-  { href: "/aevinite", label: "Overview", icon: "fa-gauge-high", exact: true },
-  { href: "/aevinite/restaurants", label: "Restaurants", icon: "fa-store" },
-  { href: "/aevinite/owners", label: "Owners", icon: "fa-crown", soon: true },
-  { href: "/aevinite/users", label: "Users & access", icon: "fa-users" },
-  { href: "/aevinite/floor", label: "Live floor", icon: "fa-chair" },
-  { href: "/aevinite/analytics", label: "Analytics", icon: "fa-chart-pie", soon: true },
-  { href: "/aevinite/logs", label: "Activity log", icon: "fa-scroll" },
-  { href: "/aevinite/features", label: "Features", icon: "fa-toggle-on" },
-  { href: "/aevinite/billing", label: "Billing & plans", icon: "fa-file-invoice-dollar", soon: true },
-  { href: "/aevinite/health", label: "System health", icon: "fa-heart-pulse", soon: true },
-  { href: "/aevinite/settings", label: "Settings", icon: "fa-gear" },
+type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean };
+type NavGroup = { label: string; items: NavItem[]; quiet?: boolean };
+
+// Grouped nav: Operate (daily work) / Manage (tenants & access) / Platform /
+// Coming soon (quiet — placeholders, no dead ends).
+// (Owner 2026-07-04: "Command" reads wrong → Dashboard. The old global "Features"
+// page confused him — per-restaurant features already live in each restaurant's
+// detail + the Access-control hub, so the nav entry is gone; the page itself stays
+// reachable by URL until we delete it.)
+const GROUPS: NavGroup[] = [
+  {
+    label: "Operate",
+    items: [
+      { href: "/aevinite", label: "Dashboard", icon: "fa-table-columns", exact: true },
+      { href: "/aevinite/floor", label: "Live floor", icon: "fa-chair" },
+      { href: "/aevinite/analytics", label: "Analytics", icon: "fa-chart-pie" },
+      { href: "/aevinite/logs", label: "Activity log", icon: "fa-scroll" },
+    ],
+  },
+  {
+    label: "Manage",
+    items: [
+      { href: "/aevinite/restaurants", label: "Restaurants", icon: "fa-store" },
+      { href: "/aevinite/access", label: "Access control", icon: "fa-key" },
+      { href: "/aevinite/users", label: "Users", icon: "fa-users" },
+    ],
+  },
+  {
+    label: "Platform",
+    items: [
+      { href: "/aevinite/billing", label: "Billing & plans", icon: "fa-file-invoice" },
+      { href: "/aevinite/health", label: "System health", icon: "fa-heart-pulse" },
+      { href: "/aevinite/settings", label: "Settings", icon: "fa-gear" },
+    ],
+  },
+  {
+    label: "Coming soon",
+    quiet: true,
+    items: [
+      { href: "/aevinite/owners", label: "Owners", icon: "fa-crown", soon: true },
+    ],
+  },
 ];
 
-const RESTAURANT = "All restaurants"; // admin is top of the hierarchy — it sees every tenant, not one
+type Rest = { id: string; slug: string; name: string; active: boolean };
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
-  const [skin, setSkin] = useState<"light" | "dark">("light");
-  const [restMenu, setRestMenu] = useState(false);
-
-  // Aevidine panel skin: light = Apple frosted glass (default), dark = Neon.
-  // Scoped to this panel via data-skin — independent of the guest menu's theme.
+  // DARK is the default skin (owner spec 2026-07-04) — light stays as the toggle.
+  const [skin, setSkin] = useState<"light" | "dark">("dark");
   useEffect(() => {
     try { const s = localStorage.getItem("aevidine_skin"); if (s === "dark" || s === "light") setSkin(s); } catch {}
   }, []);
-
   const toggleSkin = () => {
     setSkin((cur) => { const next = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("aevidine_skin", next); } catch {} return next; });
   };
 
+  const isActive = (n: NavItem) => (n.exact ? path === n.href : path.startsWith(n.href));
+
   return (
-    <div className="adm" data-skin={skin}>
-      <aside className="adm-side">
-        <div className="adm-brand">
-          <span className="mark">✦</span>
-          <span className="who"><b>Aevidine</b><span>Admin · all restaurants</span></span>
+    <div className="adm adx" data-skin={skin}>
+      <aside className="adx-side">
+        <div className="adx-brand">
+          <span className="mark"><i className="fas fa-diamond" aria-hidden="true" /></span>
+          <span className="who"><b>Aevidine</b><span>Platform admin</span></span>
         </div>
-        <ReorderableNav items={NAV} storageKey="lfh_admin_nav_order" pathname={path} />
-        <div className="adm-side-foot">Aevidine · Restaurant OS</div>
+        <nav className="adx-nav" aria-label="Admin sections">
+          {GROUPS.map((g) => (
+            <div key={g.label} className={"adx-group" + (g.quiet ? " quiet" : "")}>
+              <div className="adx-group-lbl">{g.label}</div>
+              {g.items.map((n) => (
+                <Link key={n.href} href={n.href} className={"adx-navlink" + (isActive(n) ? " active" : "")} title={n.label}>
+                  <i className={`fas ${n.icon}`} aria-hidden="true" />
+                  <span className="lbl">{n.label}</span>
+                  {n.soon && <span className="navsoon">Soon</span>}
+                </Link>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div className="adx-side-foot">Aevidine · Restaurant OS</div>
       </aside>
 
       <div className="adm-body">
-        <header className="adm-top">
-          {/* Restaurant context — single-tenant today, the shell for many later. */}
-          <div style={{ position: "relative" }}>
-            <button className="adm-rest" onClick={() => setRestMenu((v) => !v)} aria-haspopup="menu" aria-expanded={restMenu}>
-              <span className="dot" /> {RESTAURANT} <i className="fas fa-chevron-down" style={{ fontSize: 11, opacity: 0.6 }} aria-hidden="true" />
-            </button>
-            {restMenu && (
-              <div role="menu" className="anim-pop" onMouseLeave={() => setRestMenu(false)}
-                style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 50, minWidth: 240, background: "var(--card)", border: "var(--border)", borderRadius: 12, padding: 8, boxShadow: "0 16px 40px rgba(0,0,0,.28)", "--lfh-origin": "top left" } as React.CSSProperties}>
-                <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", borderRadius: 9, background: "color-mix(in srgb, var(--accent) 16%, transparent)", fontWeight: 700, fontSize: 13.5 }}>
-                  <i className="fas fa-check" style={{ color: "var(--accent)" }} aria-hidden="true" /> {RESTAURANT}
-                </div>
-                <Link href="/aevinite/restaurants" role="menuitem" onClick={() => setRestMenu(false)}
-                  style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 11px", marginTop: 4, color: "var(--muted)", fontSize: 13, textDecoration: "none" }}>
-                  <i className="fas fa-store" aria-hidden="true" /> Manage restaurants
-                  <i className="fas fa-arrow-right" style={{ marginLeft: "auto", fontSize: 11 }} aria-hidden="true" />
-                </Link>
-              </div>
-            )}
-          </div>
-
+        <header className="adx-top">
+          <RestaurantSwitcher />
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             <button className="adm-icnbtn" onClick={toggleSkin} title={skin === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">
               <i className={`fas ${skin === "dark" ? "fa-sun" : "fa-moon"}`} aria-hidden="true" />
@@ -84,8 +105,86 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           </div>
         </header>
 
-        <main className="adm-main">{children}</main>
+        <main className="adm-main"><div className="adx-wrap">{children}</div></main>
       </div>
+    </div>
+  );
+}
+
+// RestaurantSwitcher — topbar quick jump to any restaurant. Fetches the list ONCE
+// on first open (lazy, cached in state — no egress until the admin actually uses
+// it), filters client-side, and picking a row jumps to the Restaurants page with
+// ?focus=<slug> (that page scrolls to + highlights the row).
+function RestaurantSwitcher() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<Rest[] | null>(null);
+  const [q, setQ] = useState("");
+  const [hi, setHi] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    if (list === null) {
+      fetch("/api/admin/restaurants", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((j) => { if (!j.error) setList((j.restaurants || []).map((r: Rest) => ({ id: r.id, slug: r.slug, name: r.name, active: r.active }))); })
+        .catch(() => {});
+    }
+    inputRef.current?.focus();
+    const onDoc = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open, list]);
+
+  const needle = q.trim().toLowerCase();
+  const rows = (list || []).filter((r) => !needle || r.name.toLowerCase().includes(needle) || r.slug.toLowerCase().includes(needle)).slice(0, 12);
+
+  const pick = (r: Rest) => {
+    setOpen(false); setQ("");
+    router.push(`/aevinite/restaurants?focus=${encodeURIComponent(r.slug)}`);
+  };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setHi((i) => Math.min(rows.length - 1, i + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHi((i) => Math.max(0, i - 1)); }
+    else if (e.key === "Enter" && rows[hi]) { e.preventDefault(); pick(rows[hi]); }
+  };
+
+  return (
+    <div className="adx-switch" ref={wrapRef}>
+      <button type="button" className="adx-switch-trig" onClick={() => setOpen((v) => !v)}
+        aria-haspopup="listbox" aria-expanded={open} title="Jump to a restaurant">
+        <i className="fas fa-store" aria-hidden="true" />
+        <span className="t">Restaurants</span>
+        <i className="fas fa-chevron-down chev" aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="adx-switch-pop" role="listbox">
+          <div className="adx-switch-search">
+            <i className="fas fa-magnifying-glass" aria-hidden="true" />
+            <input ref={inputRef} value={q} onChange={(e) => { setQ(e.target.value); setHi(0); }} onKeyDown={onKeyDown}
+              placeholder="Search name or slug…" aria-label="Search restaurants" />
+          </div>
+          {list === null ? (
+            <div className="adx-switch-empty">Loading…</div>
+          ) : rows.length === 0 ? (
+            <div className="adx-switch-empty">No match.</div>
+          ) : (
+            rows.map((r, i) => (
+              <button key={r.id} type="button" role="option" aria-selected={i === hi}
+                className={"adx-switch-opt" + (i === hi ? " hi" : "")}
+                onMouseEnter={() => setHi(i)} onClick={() => pick(r)}>
+                <span className={"dot" + (r.active ? " on" : "")} aria-hidden="true" />
+                <span className="nm">{r.name}</span>
+                <span className="sl">{r.slug}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
