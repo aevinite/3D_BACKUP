@@ -672,14 +672,17 @@ body {
 /* ============================ FINISHING TOUCHES ============================ */
 /* Dark, gold-tinted scrollbars — the default OS scrollbars clash with the
    dark dashboard. Purely cosmetic; no layout change. */
-/* A slim, floating pill — the 3px transparent border + padding-box clip insets the
-   visible thumb to ~6px so it floats off the edge instead of a fat gold bar. */
+/* A slim, floating pill — the 2px transparent border + padding-box clip insets the
+   visible thumb to ~4px so it floats off the edge instead of a fat gold bar.
+   NOTE: styling ::-webkit-scrollbar makes Chrome paint CLASSIC (always-visible)
+   scrollbars on every OS, so this width IS the bar users see on Windows — keep it
+   slim (owner 2026-07-05: 12px read as fat double bars on a Windows PC). */
 * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--gold) 28%, transparent) transparent; }
-*::-webkit-scrollbar { width: 12px; height: 12px; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--gold) 24%, transparent);
-  border: 3px solid transparent; border-radius: 999px;
+  border: 2px solid transparent; border-radius: 999px;
   background-clip: padding-box; min-height: 40px;
 }
 *::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--gold) 46%, transparent); background-clip: padding-box; }
@@ -770,6 +773,16 @@ body {
   width: 290px; flex: 0 0 290px; display: flex; flex-direction: column; gap: 14px; margin-top: 10px;
   position: sticky; top: 10px; max-height: calc(100vh - 90px); overflow-y: auto; overscroll-behavior: contain;
 }
+/* This panel's own scrollbar sits right NEXT TO the page scrollbar (two bars side by
+   side — owner saw them "overlapping" on a Windows PC, 2026-07-05). Keep its thumb
+   INVISIBLE until the pointer is over the panel: the wheel still scrolls it, and at
+   rest only ONE scrollbar (the page's) is on screen. */
+.floor-side { scrollbar-color: transparent transparent; }
+.floor-side:hover { scrollbar-color: color-mix(in srgb, var(--gold) 28%, transparent) transparent; }
+.floor-side::-webkit-scrollbar { width: 8px; }
+.floor-side::-webkit-scrollbar-thumb { background: transparent; }
+.floor-side:hover::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--gold) 28%, transparent); background-clip: padding-box; }
+.floor-side:hover::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--gold) 46%, transparent); background-clip: padding-box; }
 /* Stack the floor + side panel below 1040px. The !important is required because
    the side panel carries an inline width:${sideW}px from the drag-to-resize
    handle, and an inline style would otherwise beat this rule and keep the panel
@@ -977,9 +990,10 @@ body {
 /* OUTLINE = payment (overrides the state-tinted border): red unpaid, green paid */
 .ftile.pay-red { border-color: #ef4444; }
 .ftile.pay-green { border-color: #22c55e; }
-/* RST / CLS pair on a finished tile (small, side by side) */
-.ft-quick2 { display: flex; gap: 6px; margin-top: 10px; }
-.ftq2 { flex: 1; padding: 6px 0; font-size: 11px; font-weight: 800; letter-spacing: .04em; }
+/* RST / CLS pair on a finished tile (small, side by side). 10px gap keeps the two
+   opposite actions from being mis-tapped for each other (owner: "too close"). */
+.ft-quick2 { display: flex; gap: 10px; margin-top: 10px; }
+.ftq2 { flex: 1; padding: 7px 0; font-size: 11px; font-weight: 800; letter-spacing: .04em; }
 /* legend: outline-meaning rings + section captions */
 .lring { width: 13px; height: 13px; border-radius: 4px; border: 2px solid; display: inline-block; box-sizing: border-box; }
 .lring-red { border-color: #ef4444; } .lring-green { border-color: #22c55e; }
@@ -1016,10 +1030,10 @@ body {
 /* labelled location fields */
 .fc-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
 .fc-field .sx-input { font-size: 13px; }
-/* drag-to-resize divider for the side panel */
-/* the separating line IS the drag handle — thin + subtle, golden on hover */
-.floor-resizer { flex: 0 0 3px; align-self: stretch; min-height: 240px; cursor: col-resize; background: var(--line); transition: background .15s, flex-basis .15s; }
-.floor-resizer:hover { background: var(--gold); flex-basis: 5px; }
+/* drag-to-resize divider for the side panel: styled in ONE place further down
+   ("the middle divider" block) — an earlier duplicate rule here used to fight it
+   (whole strip flashed gold + changed width on hover). Only the hide-on-mobile
+   media query lives here. */
 @media (max-width: 1040px) { .floor-resizer { display: none; } }
 /* separate order boxes inside a table panel */
 .tp-order-head { font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
@@ -1497,12 +1511,29 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .tp-detail-foot .tp-free, .tbl-modal-foot .tp-free { margin-left: 0; }
 .btn.green { background: linear-gradient(180deg, #4ade80, #22c55e); color: #06281a; border: 0; }
 
-/* ---- the middle divider: a visible, grabbable handle to resize both columns ---- */
-.floor-resizer { flex: 0 0 8px; align-self: stretch; min-height: 320px; cursor: col-resize; background: transparent; position: relative; transition: flex-basis .15s; }
-.floor-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); background: var(--line); border-radius: 999px; transition: background .15s, width .15s; }
-.floor-resizer::after { content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 6px; height: 38px; border-radius: 999px; background: color-mix(in srgb, var(--gold) 45%, var(--line)); transition: background .15s, height .15s; }
-.floor-resizer:hover::before, .floor-resizer:active::before { width: 4px; background: var(--gold); }
-.floor-resizer:hover::after, .floor-resizer:active::after { background: var(--gold); height: 54px; }
+/* ---- the middle divider: a grab HANDLE that resizes both columns — NOT a scrollbar.
+   It used to draw a full-height track line with a small pill, which read exactly like
+   a scrollbar; the owner kept trying to scroll with it and it felt "stuck"
+   (2026-07-05). At rest it now shows only a small dotted GRIP pill (⁝) centred in the
+   gap; the full-height gold guide line fades in on hover/drag as resize feedback. ---- */
+.floor-resizer { flex: 0 0 10px; align-self: stretch; min-height: 320px; cursor: col-resize; background: transparent; position: relative; }
+.floor-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); background: var(--gold); border-radius: 999px; opacity: 0; transition: opacity .15s; }
+.floor-resizer::after {
+  /* STICKY, not absolute-at-50%: with a 300-table floor the strip is thousands of
+     pixels tall, so a centred-in-the-strip pill would sit far below the fold.
+     Sticky keeps the grip floating at mid-viewport while the floor scrolls. */
+  content: ""; position: sticky; top: calc(50vh - 52px); display: block;
+  width: 12px; height: 44px; border-radius: 999px; margin-left: -1px;
+  background-color: var(--panel-2); border: 1px solid var(--line);
+  /* the ⁝ grip dots — a repeating one-dot gradient column */
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--gold) 72%, var(--line)) 1.5px, transparent 1.6px);
+  background-size: 10px 9px; background-repeat: repeat-y; background-position: 50% 50%;
+  box-shadow: 0 1px 4px rgba(0,0,0,.25);
+  transition: border-color .15s, transform .15s;
+}
+.floor-resizer:hover::before, .floor-resizer:active::before { opacity: .75; }
+.floor-resizer:hover::after, .floor-resizer:active::after { border-color: var(--gold); transform: scale(1.1); }
+@media (prefers-reduced-motion: reduce) { .floor-resizer::before, .floor-resizer::after { transition: none; } }
 
 /* ---- floor-control cards: match the rounder, gradient look ---- */
 .fc-card { border-radius: 16px; background: linear-gradient(180deg, var(--panel-2), var(--panel)); }
