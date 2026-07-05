@@ -436,7 +436,7 @@ html[data-theme="light"] .t-done .tlabel{ color:#15803d; }
 
   /* When a table is open, the panel fills the screen; the floor hides behind it. */
   body.tbl-open .floor { display: none; }
-  body.tbl-open #panel { position: fixed; inset: 0; z-index: 50; margin: 0; border: 0; border-radius: 0; min-height: 100dvh; max-height: 100dvh; overflow: auto; background: var(--bg); padding: 56px 14px calc(16px + env(safe-area-inset-bottom)); }
+  body.tbl-open #panel { position: fixed; inset: 0; z-index: 50; margin: 0; border: 0; border-radius: 0; min-height: 100dvh; max-height: 100dvh; overflow: auto; background: var(--bg); padding: 56px 14px calc(84px + env(safe-area-inset-bottom)); }
   body.tbl-open #tabletClose { display: inline-flex; align-items: center; justify-content: center; position: fixed; top: calc(env(safe-area-inset-top) + 10px); right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 22px; line-height: 1; z-index: 52; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
   body.tbl-open .backtop { display: none; } /* the ✕ replaces the "↑ Tables" link */
   /* comfortable touch targets */
@@ -557,7 +557,7 @@ body.om-mode #tabletClose { display: none; }
      no separate item scroll, no pinned footer.) */
   .om.lite .om-cart { flex: 47 1 0; min-height: 0; height: auto; max-height: none;
     overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; display: block;
-    border-top: 2px solid var(--line); margin-top: 6px; padding: 8px 0 calc(24px + env(safe-area-inset-bottom)); }
+    border-top: 2px solid var(--line); margin-top: 6px; padding: 8px 0 calc(84px + env(safe-area-inset-bottom)); }
   .om.lite .om-cart .cart { display: block; }
   .om.lite .om-cart .cart-lines { overflow: visible; max-height: none; }   /* merged into the ONE order scroll */
   .om.lite .om-cart .cart #sendOrder { margin-top: 10px; }
