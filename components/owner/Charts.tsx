@@ -89,7 +89,7 @@ export function AreaTrend({ data, lines, height = 240 }: {
           </defs>
           <CartesianGrid stroke={GRID} vertical={false} />
           <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} minTickGap={24} />
-          <YAxis domain={fitDomain(values)} tick={{ fontSize: 11, fill: AXIS }} tickFormatter={compact} width={48} />
+          <YAxis domain={fitDomain(values)} tick={{ fontSize: 11, fill: AXIS }} tickFormatter={compact} width={48} allowDecimals={false} />
           <Tooltip content={<MoneyTip />} />
           {!single && <Legend wrapperStyle={{ fontSize: 11 }} />}
           {lines.map((l) => (
@@ -114,7 +114,7 @@ export function TimeBar({ data, color, height = 240 }: { data: { label: string; 
         <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
           <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={16} />
-          <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} />
+          <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="revenue" name="Revenue" fill={color} radius={[5, 5, 0, 0]} maxBarSize={42} />
         </BarChart>
@@ -133,7 +133,7 @@ export function LeaderBar({ data, onSelect }: { data: RevDatum[]; onSelect?: (id
       <ResponsiveContainer>
         <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
           <CartesianGrid horizontal={false} stroke={GRID} />
-          <XAxis type="number" domain={[0, max]} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} />
+          <XAxis type="number" domain={[0, max]} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} allowDecimals={false} />
           <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11.5, fill: AXIS }} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="revenue" name="Revenue" radius={[0, 6, 6, 0]} cursor={onSelect ? "pointer" : undefined}

@@ -209,7 +209,7 @@ function renderColumns() {
   const draw = (key, list, plist) => {
     const html = list.map(ticketHtml).join("") + (plist || []).map(platTicketHtml).join("");
     $("#list-" + key).innerHTML = html || `<div class="empty">Nothing here.</div>`;
-    $("#count-" + key).textContent = (list.length + (plist ? plist.length : 0)) || "";
+    $("#count-" + key).textContent = String(list.length + (plist ? plist.length : 0)); // show "0", not a blank pill, when a column is empty (2026-07-05)
   };
   draw("new", buckets.new, pb.new); draw("cooking", buckets.cooking, pb.cooking); draw("ready", buckets.ready, pb.ready);
   bindButtons();

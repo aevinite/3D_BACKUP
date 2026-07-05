@@ -2091,22 +2091,31 @@ async function loadDashboard() {
     data: { labels: s.series.map((p) => p.label), datasets: [{ label: "₹ sales", data: s.series.map((p) => Math.round((p.revenue || 0) * INR_RATE)), borderColor: gold, backgroundColor: goldSoft, fill: true, tension: 0.35, pointRadius: 2 }] },
     options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
   }));
-  dashCharts.push(new Chart(document.getElementById("chTop"), {
-    type: "bar",
-    data: { labels: s.topDishes.map(([t]) => t), datasets: [{ label: "plates", data: s.topDishes.map(([, n]) => n), backgroundColor: gold }] },
-    options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } },
-  }));
+  // Empty-state instead of a blank canvas when there's no data (matches Payment methods below).
+  if ((s.topDishes || []).length) {
+    dashCharts.push(new Chart(document.getElementById("chTop"), {
+      type: "bar",
+      data: { labels: s.topDishes.map(([t]) => t), datasets: [{ label: "plates", data: s.topDishes.map(([, n]) => n), backgroundColor: gold }] },
+      options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } },
+    }));
+  } else {
+    document.getElementById("chTop").closest(".dash-chart").innerHTML = `<h4>Top dishes</h4><div class="empty">No dishes sold in this range yet.</div>`;
+  }
   dashCharts.push(new Chart(document.getElementById("chHours"), {
     type: "bar",
     data: { labels: Array.from({ length: 24 }, (_, h) => h + ":00"), datasets: [{ label: "orders", data: s.hours, backgroundColor: goldSoft, borderColor: gold, borderWidth: 1 }] },
     options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
   }));
   const catEntries = Object.entries(s.cats).sort((a, b) => b[1] - a[1]);
-  dashCharts.push(new Chart(document.getElementById("chCats"), {
-    type: "doughnut",
-    data: { labels: catEntries.map(([c]) => c), datasets: [{ data: catEntries.map(([, n]) => n), backgroundColor: ["#d4a574", "#7ec88a", "#4f9dff", "#e8a13c", "#b58ae6", "#ef7d7d", "#5bc8c8", "#c8b35b", "#8a93a6"] }] },
-    options: { plugins: { legend: { position: "right" } } },
-  }));
+  if (catEntries.length) {
+    dashCharts.push(new Chart(document.getElementById("chCats"), {
+      type: "doughnut",
+      data: { labels: catEntries.map(([c]) => c), datasets: [{ data: catEntries.map(([, n]) => n), backgroundColor: ["#d4a574", "#7ec88a", "#4f9dff", "#e8a13c", "#b58ae6", "#ef7d7d", "#5bc8c8", "#c8b35b", "#8a93a6"] }] },
+      options: { plugins: { legend: { position: "right" } } },
+    }));
+  } else {
+    document.getElementById("chCats").closest(".dash-chart").innerHTML = `<h4>Category share</h4><div class="empty">No sales in this range yet.</div>`;
+  }
   // Payment methods (owner, 2026-07-01): revenue split by how bills got paid —
   // UPI/Cash/Card/Other, plus "Not recorded" for anything paid before this shipped
   // or via the per-order correction toggle (which skips the picker on purpose).

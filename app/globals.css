@@ -3399,7 +3399,10 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm button { color: inherit; }
 /* Owner-panel segmented toggles + breadcrumb were leaking the UA button background
    (#efefef). Pin them to skin tokens here (global so it always applies). */
-.adm .own-range button { background: transparent; color: var(--muted); }
+/* .own-range had button colours but no CONTAINER, so the Issues "Open / All" toggle
+   rendered as two loose buttons. Give it the same segmented-pill shell as .owx-range. */
+.adm .own-range { display: inline-flex; background: var(--card); border: var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
+.adm .own-range button { background: transparent; color: var(--muted); border: none; padding: 5px 11px; border-radius: 7px; font-size: 12px; font-weight: 700; cursor: pointer; }
 .adm .own-range button.on { background: var(--accent); color: #fff; }
 .adm .own-crumb .lnk { background: transparent; }
 .adm .own-crumb .cur { color: var(--text); background: transparent; }
