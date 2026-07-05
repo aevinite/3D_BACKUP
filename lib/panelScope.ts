@@ -1,12 +1,15 @@
 // Which restaurant a STAFF-PANEL API request (kitchen/tablet/manager) is acting on.
 //
 //  • A logged-in staff member  → their OWN restaurant (staff_users.restaurant_id).
-//  • The ADMIN super-user       → the restaurant they're "viewing as" (set by the
-//    admin via /api/admin/act-as → ADMIN_ACT_COOKIE), else the default restaurant #1.
+//  • The ADMIN super-user       → the restaurant they're "viewing as" (?rid= per-tab
+//    pin, else the act-as cookie set by /api/admin/act-as/go). NO silent fallback:
+//    an admin request naming neither returns NULL and the handler answers 400 — the
+//    old "else default restaurant #1" let a scopeless admin call quietly act on #1
+//    (owner, 2026-07-06: panels are entered FROM the admin console, restaurant named).
 //
 // This is what lets an admin enter a restaurant first and then open its panels
-// scoped to THAT restaurant, instead of always defaulting to #1. Replaces the old
-// per-handler ridOf(g) so all three panels share one rule.
+// scoped to THAT restaurant. Replaces the old per-handler ridOf(g) so all three
+// panels share one rule.
 import type { NextRequest } from "next/server";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import type { StaffUser } from "@/lib/userAuth";
@@ -16,7 +19,7 @@ export const ADMIN_ACT_COOKIE = "aevidine_admin_rid";
 export function panelRestaurantId(
   req: { cookies: { get(name: string): { value: string } | undefined }; nextUrl?: { searchParams?: URLSearchParams } },
   g: { user: StaffUser | null },
-): string {
+): string | null {
   if (g.user) return g.user.restaurant_id || DEFAULT_RESTAURANT_ID;
   // Admin super-user ONLY (a staff request always has g.user — requireRole 401s
   // everyone else before this runs): a per-TAB ?rid= wins over the browser-wide
@@ -28,8 +31,7 @@ export function panelRestaurantId(
   // API call, so each tab stays pinned to ITS restaurant.
   const urlRid = req.nextUrl?.searchParams?.get("rid");
   if (urlRid) return urlRid;
-  const acting = req.cookies.get(ADMIN_ACT_COOKIE)?.value;
-  return acting || DEFAULT_RESTAURANT_ID;
+  return req.cookies.get(ADMIN_ACT_COOKIE)?.value || null;
 }
 
 // Convenience for handlers whose `req` is a NextRequest.

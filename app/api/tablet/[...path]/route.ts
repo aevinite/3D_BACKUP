@@ -116,6 +116,7 @@ type Ctx = { params: Promise<{ path?: string[] }> };
 export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   try {
     const { path = [] } = await ctx.params;
 
@@ -205,6 +206,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 export async function POST(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   // The logged-in waiter, for per-user permission checks. Bound here because the
   // tabletPerm call sites below shadow `g` with their own gate result.
   const actor = g.user;

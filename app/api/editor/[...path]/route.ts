@@ -135,6 +135,7 @@ type Ctx = { params: Promise<{ path?: string[] }> };
 export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   try {
     const { path = [] } = await ctx.params;
     const p = path.join("/");
@@ -508,6 +509,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 export async function POST(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
@@ -1089,6 +1091,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;
@@ -1176,6 +1179,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 export async function DELETE(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;

@@ -671,8 +671,9 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
 // cookie via /api/admin/act-as), then opens its operational panels in a new tab.
 // Because the panel APIs scope by panelRestaurantId (which reads that cookie for
 // the admin), the manager/kitchen/tablet show THIS restaurant's live data —
-// exactly what its own staff see — instead of the default restaurant. "Stop"
-// clears the cookie so the admin's panels revert to the default restaurant.
+// exactly what its own staff see. This flow is the ONLY way an admin reaches a
+// panel: a bare /tablet etc. with no restaurant scope bounces back to /aevinite.
+// "Stop" clears the cookie; already-open tabs stay pinned by their ?rid=.
 function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Record<string, boolean> | null }) {
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState(false);
@@ -701,7 +702,7 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
     setBusy(true); setMsg(null);
     try {
       await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) });
-      setViewing(false); setMsg("Stopped — your panels show the default restaurant again.");
+      setViewing(false); setMsg("Stopped — reopen a panel from here when you need it again.");
     } finally { setBusy(false); }
   };
 
