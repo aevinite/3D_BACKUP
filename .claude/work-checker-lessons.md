@@ -168,3 +168,10 @@ for "Tax" as the default for ALL restaurants (the printed bill keeps the configu
 CGST/SGST names). Lesson: user-facing default labels should never bake in one locale's
 tax/branding terms — use the neutral word and let per-restaurant settings supply the
 specific names.
+
+#ui #settings (2026-07-05) — A settings form whose values have runtime fallbacks must
+open showing the EFFECTIVE values (what the app actually uses right now), not blank
+boxes. I shipped Billing settings with empty fields while the bill printed fallback
+data; owner immediately: "not autofilled like i want". Fix pattern: one shared
+resolver (billIdentity) feeds both the renderer and the form, and the form prefills
+the working copy so Save persists what's shown.

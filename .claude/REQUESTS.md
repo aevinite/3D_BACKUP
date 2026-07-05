@@ -216,6 +216,8 @@ owner looks, with cache busting, before claiming anything.
 - [x] Live bill card (Bills → Live/Today/Previous) shows **Subtotal + merged "GST x%" + Total** (was Total only); % from settings, never hardcoded. Verified Aangan desktop + 390px.
 - [x] Printed bill: tax SPLIT per component (CGST/SGST, editable names+rates in Settings › Billing), same grand total as on screen; **bill footer message now editable** (mig 124 `settings.bill_footer`, blank = default sign-off; new restaurants don't inherit a template's footer).
 - [x] Floating table-detail popup **scrolls** (was clipped — % height against auto-height wrapper); head/foot stay pinned; docked/modal/phone variants intact.
+- [x] On-screen bill label default "Tax" not "GST" for all restaurants (PR #152); print unchanged.
+- [x] **Settings › Billing redesign (PR #156):** two stacked sections — ① Manager bill on screen (NEW renameable "tax word", `settings.tax_label` mig 125, e.g. Tax/GST/VAT) + ② Printed bill. Form opens **AUTOFILLED with exactly what the bill prints right now** (shared `billIdentity()` resolver = form and print can never drift), incl. materialised CGST/SGST 50/50 rows and a ⚠ hint on the placeholder GSTIN. Verified live on Aangan (rename→instant card update, print untouched), row restored after test.
 
 ## 2026-07-03 — DEFERRED (owner: "for now we will NOT do it — first make it live")
 - [x] **Per-restaurant tax, TWO tax types — SHIPPED 2026-07-05 as presentation-only split** (spec
