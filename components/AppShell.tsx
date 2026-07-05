@@ -168,7 +168,7 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
       {/* Per-restaurant theme (mode-scoped) — only when this restaurant set a palette. */}
       {themed && <style dangerouslySetInnerHTML={{ __html: themedCss }} />}
       {/* The one-time opening logo animation */}
-      <IntroSplash wordmark={logoText} accentColor={accentColor} logoUrl={logoUrl} />
+      <IntroSplash wordmark={logoText} accentColor={accentColor} logoUrl={logoUrl} scopeKey={restaurantId} />
       {/* Floating background bubbles — only if the toggle is on */}
       {bubbles && <Particles />}
       <div id="app" className={themed ? "brand-themed" : undefined}>

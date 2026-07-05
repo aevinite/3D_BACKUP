@@ -13,7 +13,9 @@ import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import {
   AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, Spark, DeltaChip,
 } from "@/components/owner/Charts";
+import { businessDayStartIso } from "@/lib/businessDay";
 
+const DAY_MS = 86400000;
 type Range = "today" | "yesterday" | "7d" | "30d" | "all";
 const RANGES: { k: Range; label: string }[] = [
   { k: "today", label: "Today" }, { k: "yesterday", label: "Yesterday" },
@@ -73,9 +75,16 @@ function expectedBuckets(range: Range): { key: string; label: string }[] {
   const now = new Date();
   const out: { key: string; label: string }[] = [];
   if (range === "today" || range === "yesterday") {
-    const base = new Date(now); if (range === "yesterday") base.setDate(base.getDate() - 1);
-    for (let h = 0; h < 24; h++) {
-      const d = new Date(base); d.setHours(h, 0, 0, 0);
+    // Align the hourly buckets to the SERVER's 05:00-IST business day, not the
+    // calendar day. Before this, the client built calendar-day hour keys while the
+    // server bucketed by the 05:00-IST business day, so between 00:00 and 05:00 IST
+    // the two key sequences never intersected and the chart went blank (bug H5).
+    // "today" also stops at the current hour so future hours aren't zero-padded
+    // (which used to drag the whole line down to zero for the rest of the day).
+    const startMs = Date.parse(businessDayStartIso(now)) - (range === "yesterday" ? DAY_MS : 0);
+    const endMs = range === "yesterday" ? startMs + DAY_MS - 1 : now.getTime();
+    for (let t = startMs; t <= endMs; t += 3600_000) {
+      const d = new Date(t);
       out.push({ key: istKey(d, range), label: d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST }) });
     }
   } else if (range === "7d" || range === "30d") {
@@ -139,6 +148,13 @@ export default function OwnerDashboard() {
   const [money, setMoney] = useState<MoneyTotals | null>(null); // discounts + lost business tiles
   const [err, setErr] = useState<string | null>(null);
   const [dishSort, setDishSort] = useState<"revenue" | "qty">("revenue");
+  // If an ADMIN opened this cockpit for a specific restaurant, the URL carries
+  // ?rid=<id>. Pin EVERY API call to that scope (as ?scope=) so a second tab — which
+  // overwrites the browser-wide act-as cookie — can never repaint or WRITE to this
+  // tab under a different restaurant (bug C1, 2026-07-05). A real logged-in owner has
+  // no ?rid= and is scoped by their own cookie, so this is null and nothing changes.
+  const [scopePin] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
 
   const single = ov?.restaurants.length === 1;
   // With ONE restaurant the home page IS that restaurant — resolve its id once known.
@@ -149,23 +165,28 @@ export default function OwnerDashboard() {
     try {
       const rg = range;
       const j = (r: Response) => r.json();
+      // The tab's scope pin (admin-in-one-restaurant) rides on EVERY call so the
+      // shared act-as cookie can't hijack this tab (C1). Null for a real owner.
+      const scp = scopePin ? `&scope=${scopePin}` : "";
+      // range=all now maps to an unbounded reports window (mig M11) — pass it through so the
+      // money tiles cover the same span as the all-time revenue KPIs (was collapsed to 12m).
       const moneyUrl = (rid: string | null) =>
-        `/api/owner/reports?type=sales&range=${rg === "all" ? "12m" : rg}${rid ? `&rid=${rid}` : ""}`;
+        `/api/owner/reports?type=sales&range=${rg}${rid ? `&rid=${rid}` : ""}${scp}`;
       if (view.level === "home") {
-        const o: Overview = await fetch("/api/owner/overview", { cache: "no-store" }).then(j);
+        const o: Overview = await fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then(j);
         if ((o as unknown as { error?: string }).error) throw new Error((o as unknown as { error: string }).error);
         setOv(o);
         if (o.restaurants.length === 1) {
           const rid = o.restaurants[0].id;
           const [a, m] = await Promise.all([
-            fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1`, { cache: "no-store" }).then(j),
+            fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${scp}`, { cache: "no-store" }).then(j),
             fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
           ]);
           if (a.error) throw new Error(a.error);
           setRest(a); setMoney(m.error ? null : m.totals); setGroup(null);
         } else {
           const [g, m] = await Promise.all([
-            fetch(`/api/owner/analytics?range=${rg}&compare=1`, { cache: "no-store" }).then(j),
+            fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}`, { cache: "no-store" }).then(j),
             fetch(moneyUrl(null), { cache: "no-store" }).then(j),
           ]);
           if (g.error) throw new Error(g.error);
@@ -174,7 +195,7 @@ export default function OwnerDashboard() {
       } else {
         const rid = (view as { rid: string }).rid;
         const [a, m] = await Promise.all([
-          fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1`, { cache: "no-store" }).then(j),
+          fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${scp}`, { cache: "no-store" }).then(j),
           fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
         ]);
         if (a.error) throw new Error(a.error);

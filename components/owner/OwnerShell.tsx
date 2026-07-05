@@ -44,6 +44,13 @@ const GROUPS: NavGroup[] = [
 export default function OwnerShell({ children, adminViewing, restaurantName }: { children: React.ReactNode; adminViewing?: boolean; restaurantName?: string }) {
   const path = usePathname();
   const router = useRouter();
+  // Admin scope pin (bug C1, 2026-07-05): when the admin drills into ONE restaurant
+  // the URL carries ?rid=<id>. Carry it across EVERY sidebar link so navigating
+  // dashboard→reports→staff keeps this tab pinned to that restaurant instead of
+  // falling back to the browser-wide act-as cookie (which a second tab can overwrite).
+  const [ridPin] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
+  const withRid = (href: string) => (ridPin ? `${href}${href.includes("?") ? "&" : "?"}rid=${ridPin}` : href);
   // Dark is the console default; the old stored preference still wins.
   const [skin, setSkin] = useState<"light" | "dark">("dark");
 
@@ -75,7 +82,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName }: {
             <div key={g.label} className={`owx-group${g.quiet ? " quiet" : ""}`}>
               <div className="owx-group-lbl">{g.label}</div>
               {g.items.map((it) => (
-                <Link key={it.href} href={it.href} className={`owx-navlink${isActive(it) ? " active" : ""}`}
+                <Link key={it.href} href={withRid(it.href)} className={`owx-navlink${isActive(it) ? " active" : ""}`}
                   aria-current={isActive(it) ? "page" : undefined}>
                   <i className={`fas ${it.icon}`} aria-hidden="true" />
                   {it.label}

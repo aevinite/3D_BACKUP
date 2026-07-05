@@ -74,10 +74,15 @@ export default function OwnerReports() {
   const [gen, setGen] = useState<{ type: RType; rid: string; range: Range } | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Admin-in-one-restaurant scope pin (bug C1, 2026-07-05) — mirrors app/owner/page.tsx.
+  // Rides on every call as ?scope= so a second tab's act-as cookie can't hijack this one.
+  const [scopePin] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
+  const scp = scopePin ? `&scope=${scopePin}` : "";
 
   // Restaurant list once (for the scope picker); single-restaurant owners skip it.
   useEffect(() => {
-    fetch("/api/owner/overview", { cache: "no-store" }).then((r) => r.json()).then((o) => {
+    fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then((r) => r.json()).then((o) => {
       const list: Rest[] = (o.restaurants ?? []).map((r: Row) => ({ id: r.id as string, name: r.name as string }));
       setRests(list);
       if (list.length === 1) setRid(list[0].id);
@@ -91,6 +96,7 @@ export default function OwnerReports() {
     try {
       const q = new URLSearchParams({ type, range });
       if (rid) q.set("rid", rid);
+      if (scopePin) q.set("scope", scopePin);
       const r = await fetch(`/api/owner/reports?${q}`, { cache: "no-store" }).then((x) => x.json());
       if (r.error) throw new Error(r.error);
       setRep(r); setGen({ type: asked.type, rid: asked.rid, range: asked.range });

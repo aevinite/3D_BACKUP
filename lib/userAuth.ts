@@ -14,6 +14,7 @@
 //   • Login is rate-limited: 5 wrong tries locks the account for 60 seconds.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sha256hex, safeEqual, AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { isPanelEnabledCached } from "@/lib/panelAccess";
 
 export const USER_COOKIE = "lfh_user";
 export type Role = "owner" | "manager" | "tablet" | "kitchen";
@@ -208,6 +209,11 @@ export async function requireRole(
     throw e;
   }
   if (u && roleSatisfies(u.role, role)) {
+    // Panel entitlement (bug M3, 2026-07-05): if the admin turned this role's panel OFF for
+    // the user's restaurant, block the request — not just new logins. Before, requireRole
+    // ignored the toggle, so an already-open manager/kitchen/tablet kept loading AND SAVING
+    // until it reloaded. Cached (30s TTL) so this hot path never adds a per-request read.
+    if (!(await isPanelEnabledCached(u.role, u.restaurant_id))) return { ok: false };
     // Presence heartbeat (throttled ~45s): mark this user active now so admin/owner
     // see who's working / which panel is open. Fire-and-forget; never blocks the call.
     const seen = (u as { last_seen_at?: string | null }).last_seen_at;

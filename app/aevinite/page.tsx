@@ -50,10 +50,13 @@ export default function AdminCommand() {
     }).catch(() => {});
     // Per-restaurant live open-table counts (one pre-aggregated RPC round-trip —
     // for the admin cookie it returns every restaurant). We read ONLY openTables.
-    fetch("/api/owner/overview", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+    // scope=all pins the /api/owner/* calls to the WHOLE platform. Without it, if
+    // the admin has drilled into a restaurant (which sets the 6h act-as cookie),
+    // these calls silently collapse to just that restaurant (bug H2, 2026-07-05).
+    fetch("/api/owner/overview?scope=all", { cache: "no-store" }).then((r) => r.json()).then((j) => {
       if (!j.error) setOvRows((j.restaurants || []).map((r: { id: string; openTables: number }) => ({ id: r.id, openTables: Number(r.openTables) || 0 })));
     }).catch(() => {});
-    fetch("/api/owner/issues", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setIssues(j.issues || []); }).catch(() => {});
+    fetch("/api/owner/issues?scope=all", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setIssues(j.issues || []); }).catch(() => {});
     fetch("/api/admin/users", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setStaff(j.users || []); }).catch(() => {});
     fetch("/api/admin/oplog?limit=18", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setActivity(j.actions || []); }).catch(() => {});
   }, []);

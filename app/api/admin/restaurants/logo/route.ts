@@ -12,7 +12,9 @@ export const dynamic = "force-dynamic";
 const ok = (d: any, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
-const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/svg+xml": "svg" };
+// SVG deliberately EXCLUDED (bug L5, 2026-07-05): an SVG can carry <script> that runs
+// when its public storage URL is opened directly, so we only accept raster formats.
+const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
 // restaurants.id is a uuid column — reject anything that isn't one up front, so a
 // malformed id can't write an orphan storage object before the DB update fails.
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);

@@ -4824,9 +4824,12 @@ function openShiftPicker(t, sess) {
 // Both modes just compute the same ₹ discount the server has always accepted — the API
 // call at the bottom (POST .../discount {amount, note}) is byte-identical to before, so
 // the clamp-to-bill-total safety net and the note field behave exactly as they did.
-function openDiscountModal(order, rerender) {
+function openDiscountModal(order, rerender, billTotal) {
   document.querySelector(".disc-overlay")?.remove();
-  const total = Number(order.total) || 0;
+  // billTotal = the WHOLE table's bill (the discount, though stored on one order, is
+  // applied table-wide by billMath). Falls back to the single order's total for any
+  // legacy caller (bug H8, 2026-07-05).
+  const total = billTotal != null ? Number(billTotal) || 0 : Number(order.total) || 0;
   const current = Number(order.discount) || 0;
   const round2 = (n) => Math.round(n * 100) / 100;
   const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
@@ -4966,11 +4969,15 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   }));
   // Add a dish to THIS order: a compact dish-picker modal → /orders/:id/add-item.
   root.querySelectorAll("[data-add-dish-order]").forEach((b) => (b.onclick = () => openAddDishModal(b.dataset.addDishOrder, rerender)));
-  // Per-bill discount: opens the "they pay / percent off" modal (openDiscountModal),
-  // capped to this order's own total — same cap the server has always clamped to.
+  // Per-bill discount: opens the "they pay / percent off" modal (openDiscountModal).
+  // The discount is stored on ONE order but billMath applies it to the WHOLE table's
+  // bill, so the modal must show + cap on the TABLE total (billMath(os)), not the one
+  // target order's total — else a multi-order table showed the first order's bill and
+  // capped the discount at it (bug H8, 2026-07-05).
   root.querySelectorAll("[data-disc]").forEach((b) => (b.onclick = () => {
     const order = (os || []).find((o) => o.id === b.dataset.disc) || { id: b.dataset.disc, total: parseFloat(b.dataset.discMax) || 0, discount: parseFloat(b.dataset.discCur) || 0 };
-    openDiscountModal(order, rerender);
+    const tableBill = (os && os.length) ? billMath(os).total : (Number(order.total) || 0);
+    openDiscountModal(order, rerender, tableBill);
   }));
   const auto = root.querySelector("#sxAuto"); if (auto && sess) auto.onchange = () => setSessAutoApprove(sess.id, auto.checked);
   root.querySelectorAll("[data-mem-approve]").forEach((b) => (b.onclick = () => memberAction(b.dataset.memApprove, "approve")));

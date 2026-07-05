@@ -36,10 +36,19 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
     // restaurant — so the owner cockpit shows exactly what THAT owner sees. This
     // reuses the same {all:false} path a real owner takes (one id), so no owner
     // route changes. Admin with NO act-as keeps the full all-restaurants view.
-    // A per-TAB ?rid= wins over the browser-wide act-as cookie (same rule as
-    // panelRestaurantId — the cookie is shared across tabs, so a second "view as"
-    // used to repoint the first tab's data; owner bug, 2026-07-03).
-    const acting = req.nextUrl?.searchParams?.get("rid") || req.cookies.get(ADMIN_ACT_COOKIE)?.value;
+    // A per-TAB scope pin wins over the browser-wide act-as cookie (the cookie is
+    // shared across tabs, so a second "view as" used to repoint the first tab's
+    // data — owner bug 2026-07-03, and worse it let a WRITE land on the wrong
+    // restaurant — bug C1, 2026-07-05). The owner cockpit/reports pages now send
+    // an explicit ?scope= on every call: `all` = the whole-platform view (so the
+    // /aevinite command center can't be silently collapsed to one restaurant for
+    // 6h by a drill-in — bug H2), or a restaurant id = pin to THAT owner's set.
+    // `scope` is deliberately separate from the analytics `rid` drill-in param.
+    const sp = req.nextUrl?.searchParams;
+    const scopeParam = sp?.get("scope");
+    if (scopeParam === "all") return { all: true };
+    // Legacy: an admin single-restaurant link may still carry ?rid=; honor it as a pin.
+    const acting = scopeParam || sp?.get("rid") || req.cookies.get(ADMIN_ACT_COOKIE)?.value;
     if (acting) {
       // Show what the OWNER of the entered restaurant sees: ALL restaurants that owner
       // owns (an owner may run several), not just the one we entered — so the admin's
