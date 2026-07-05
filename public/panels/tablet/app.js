@@ -766,7 +766,12 @@ function renderPanel() {
   }
 
   p.classList.add("has-detail");
+  // The table detail opens as ONE centered POPUP over the floor at every width
+  // (owner 2026-07-05: "keep popup only, not side view, for the tablet"). The floor
+  // stays behind it; #panel:has(.detail-pop) dims + centers the card via CSS.
   p.innerHTML = `
+   <div class="detail-pop">
+    <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
     <div class="phead">
       <div style="flex:1"><h2 style="margin:0;font-size:19px">Table ${esc(t)}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"}` : "closed"}</div></div>
       <button class="btn small backtop" id="backTop">↑ Tables</button>
@@ -788,7 +793,9 @@ function renderPanel() {
       ${s && os.length && a.unpaid && tperm("tablet_mark_paid") !== "off" ? `<button class="btn pay" id="payBill"${os.some((o) => o.status === "received") ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
     </div>
-    ${foot}`;
+    ${foot}
+   </div>`;
+  { const dc = $("#detailClose"); if (dc) dc.onclick = () => { state.table = null; renderPanel(); renderFloor(); }; }
 
   // wire it up
   document.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqApprove}/resolve`, { status: "approved" }))));

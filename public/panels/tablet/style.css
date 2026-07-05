@@ -615,3 +615,24 @@ body:has(.opt-overlay) #tabletClose { display: none; }
   .opt-overlay { align-items: flex-end; padding: 0; }
   .opt-pop { width: 100%; max-width: none; border-radius: 18px 18px 0 0; max-height: 86dvh; }
 }
+
+/* ── Table detail = ONE centered POPUP over the floor, ALL widths (owner 2026-07-05:
+   "keep popup only, not side view"). Replaces the desktop side pane AND the phone
+   full-screen detail. Scoped to :has(.detail-pop) so the take-order screen and the
+   empty state are unaffected. */
+body:has(.detail-pop) .layout { grid-template-columns: 1fr; }   /* floor fills; the panel floats */
+#panel:has(.detail-pop) { position: fixed; inset: 0; z-index: 48; display: flex; align-items: center; justify-content: center;
+  margin: 0; border: 0; border-radius: 0; min-height: 0; max-height: none; overflow: hidden; padding: 16px;
+  background: rgba(4,8,18,.5); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+.detail-pop { position: relative; z-index: 1; width: min(560px, 94vw); max-height: 88dvh; overflow-y: auto;
+  -webkit-overflow-scrolling: touch; background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,.5); padding: 16px 16px calc(18px + env(safe-area-inset-bottom)); }
+.detail-pop .backtop { display: none; }                          /* "↑ Tables" makes no sense in a popup */
+.detail-pop .detail-body { flex: none; overflow: visible; padding: 12px 0; }
+.detail-pop .dacts { background: transparent; border-top: 1px solid var(--line); padding: 12px 0 0; margin-top: 8px; }
+.detail-pop .phead { padding: 2px 40px 10px 0; }                 /* clear the ✕ */
+.detail-x { position: absolute; top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 16px; line-height: 1;
+  cursor: pointer; z-index: 2; }
+/* the popup carries its own ✕ — hide the global floating panel-✕ while it's open. */
+body:has(.detail-pop) #tabletClose { display: none; }
