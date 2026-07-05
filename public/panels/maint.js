@@ -55,24 +55,24 @@
     if (document.getElementById("lfh-set-style")) return;
     const css = `
     .lfh-ov{position:fixed;inset:0;background:rgba(4,8,18,.6);backdrop-filter:blur(4px);z-index:99998;display:flex;justify-content:flex-end}
-    .lfh-dw{width:min(92vw,430px);height:100%;overflow:auto;background:#0f1830;color:#e7eefc;box-shadow:-20px 0 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif;animation:lfhslide .2s cubic-bezier(.16,1,.3,1)}
+    .lfh-dw{width:min(92vw,430px);height:100%;overflow:auto;background:var(--panel,#0f1830);color:var(--text,#e7eefc);box-shadow:-20px 0 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif;animation:lfhslide .2s cubic-bezier(.16,1,.3,1)}
     @keyframes lfhslide{from{transform:translateX(40px);opacity:.2}to{transform:none;opacity:1}}
     .lfh-dw h2{font-size:16px;margin:0;font-weight:800}
-    .lfh-sec{padding:16px 18px;border-bottom:1px solid #1d2944}
-    .lfh-sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#7e93bd;margin:0 0 10px}
-    .lfh-lab{display:block;font-size:12px;color:#8aa0c9;margin:0 0 4px}
-    .lfh-in{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:10px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;margin:0 0 10px;outline:none;transition:border-color .15s,box-shadow .15s}
+    .lfh-sec{padding:16px 18px;border-bottom:1px solid var(--line,#1d2944)}
+    .lfh-sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted,#7e93bd);margin:0 0 10px}
+    .lfh-lab{display:block;font-size:12px;color:var(--muted,#8aa0c9);margin:0 0 4px}
+    .lfh-in{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:10px;border:1px solid var(--line,#2a3a5f);background:var(--bg,#0a1326);color:var(--text,#eaf1ff);font-size:14px;margin:0 0 10px;outline:none;transition:border-color .15s,box-shadow .15s}
     .lfh-in:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.22)}
     .lfh-bt{padding:11px 14px;border:0;border-radius:10px;font-weight:700;font-size:13.5px;cursor:pointer;color:#fff;transition:filter .15s,opacity .15s}
     .lfh-bt:hover{filter:brightness(1.08)}
     .lfh-bt:disabled{opacity:.6;cursor:default}
     .lfh-msg{font-size:12px;margin:2px 0 8px}
-    .lfh-note{font-size:12px;color:#8aa0c9}
+    .lfh-note{font-size:12px;color:var(--muted,#8aa0c9)}
     .lfh-av{width:46px;height:46px;border-radius:999px;display:grid;place-items:center;font-weight:800;font-size:20px;color:#0b1220;flex-shrink:0}
     .lfh-chip{display:inline-block;font-size:11px;font-weight:700;color:#0b1220;padding:2px 9px;border-radius:999px}
-    .lfh-welcome{margin:14px 18px 0;padding:15px 16px;border-radius:14px;background:linear-gradient(135deg,#16294a,#0e1830);border:1px solid #2a4474}
-    .lfh-welcome .wt{font-size:15.5px;font-weight:800;color:#eaf1ff;margin:0 0 5px}
-    .lfh-welcome .wd{font-size:12.5px;color:#a8bce0;line-height:1.5}`;
+    .lfh-welcome{margin:14px 18px 0;padding:15px 16px;border-radius:14px;background:var(--panel-2,var(--bg,#0e1830));border:1px solid var(--line,#2a4474)}
+    .lfh-welcome .wt{font-size:15.5px;font-weight:800;color:var(--text,#eaf1ff);margin:0 0 5px}
+    .lfh-welcome .wd{font-size:12.5px;color:var(--muted,#a8bce0);line-height:1.5}`;
     document.head.appendChild(el("style", { id: "lfh-set-style", html: css }));
   }
 
@@ -103,8 +103,8 @@
     const pinRequiredAtSetup = !!(profile.needsProfile && isManager && profile.canSelfSetPin && !profile.hasPin);
 
     // — header: avatar + name + role chip (no "username" shown anywhere) —
-    const closeBtn = el("button", { class: "lfh-bt", style: { background: "#243049", padding: "8px 12px" }, onClick: closeDrawer, "aria-label": "Close", html: "✕" });
-    const header = el("div", { class: "lfh-sec", style: { display: "flex", alignItems: "center", gap: "12px", position: "sticky", top: "0", background: "#0f1830", zIndex: "1" } }, [
+    const closeBtn = el("button", { class: "lfh-bt", style: { background: "var(--line,#243049)", padding: "8px 12px" }, onClick: closeDrawer, "aria-label": "Close", html: "✕" });
+    const header = el("div", { class: "lfh-sec", style: { display: "flex", alignItems: "center", gap: "12px", position: "sticky", top: "0", background: "var(--panel,#0f1830)", zIndex: "1" } }, [
       el("div", { class: "lfh-av", style: { background: accent } }, [(displayName || "?").charAt(0).toUpperCase()]),
       el("div", { style: { flex: "1", minWidth: "0" } }, [
         el("h2", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, [displayName]),
@@ -226,10 +226,10 @@
 
     // — guest menu live/offline (MANAGERS only; kitchen/tablet never see this) —
     if (isManager) {
-      const maintBtn = el("button", { class: "lfh-bt", style: { background: "#243049" } }, ["…"]);
+      const maintBtn = el("button", { class: "lfh-bt", style: { background: "var(--line,#243049)" } }, ["…"]);
       const renderMaint = () => {
         maintBtn.textContent = maintOn ? "🔴 Bring menu back online" : "🟢 Take guest menu offline";
-        maintBtn.style.background = maintOn ? "#7f1d1d" : "#243049";
+        maintBtn.style.background = maintOn ? "#7f1d1d" : "var(--line,#243049)";
       };
       maintBtn.addEventListener("click", async () => {
         const turnOn = !maintOn;
