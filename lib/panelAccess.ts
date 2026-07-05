@@ -56,3 +56,24 @@ export async function isPanelEnabledCached(role: Role, restaurantId: string): Pr
   _panelCache.set(key, { at: Date.now(), on });
   return on;
 }
+
+// Is this restaurant in the RECYCLE BIN (soft-deleted, migration 128)? A binned
+// restaurant is treated as gone: staff can't log in and existing sessions are
+// bounced (the guest resolver already hides it). Cached like the panel map so
+// this runs on the hot panel-gate path without a read per request; a fresh
+// delete/restore takes effect within TTL. Fail-OPEN on error (a DB blip must not
+// lock every restaurant out) — the guest resolver is the authoritative hide.
+const _deletedCache = new Map<string, { at: number; deleted: boolean }>();
+export async function isRestaurantDeleted(restaurantId: string): Promise<boolean> {
+  if (!restaurantId) return false;
+  const hit = _deletedCache.get(restaurantId);
+  if (hit && Date.now() - hit.at < PANEL_TTL_MS) return hit.deleted;
+  try {
+    const row = await sb.from("restaurants").select("deleted_at").eq("id", restaurantId).maybeSingle();
+    const deleted = !!row.data?.deleted_at;
+    _deletedCache.set(restaurantId, { at: Date.now(), deleted });
+    return deleted;
+  } catch {
+    return false;
+  }
+}

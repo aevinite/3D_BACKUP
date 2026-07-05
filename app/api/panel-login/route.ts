@@ -3,7 +3,7 @@
 // client which panel to go to (+ whether first-login profile capture is needed).
 import { NextRequest, NextResponse } from "next/server";
 import { loginUser, USER_COOKIE } from "@/lib/userAuth";
-import { isPanelEnabled } from "@/lib/panelAccess";
+import { isPanelEnabled, isRestaurantDeleted } from "@/lib/panelAccess";
 import { getRestaurantBySlug } from "@/lib/tenant";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 
@@ -26,6 +26,12 @@ export async function POST(req: NextRequest) {
   // NOT 401 "wrong password" (stress test 2026-07-03).
   if (!r.ok) return NextResponse.json({ ok: false, error: r.error }, { status: r.transient ? 503 : 401 });
   const u = r.user;
+  // Restaurant in the recycle bin (mig 128): its logins are dead until it's
+  // restored. Checked before the panel entitlement so a binned restaurant blocks
+  // every role, not just disabled panels.
+  if (await isRestaurantDeleted(u.restaurant_id)) {
+    return NextResponse.json({ ok: false, error: "This restaurant is no longer available. Contact your admin." }, { status: 403 });
+  }
   // Per-restaurant PANEL entitlement (mig 106): if the admin turned this role's panel OFF
   // for the user's restaurant, they can't sign in here. (The admin reaches panels via the
   // separate staff gate / act-as, not this route, so this never blocks the admin.)

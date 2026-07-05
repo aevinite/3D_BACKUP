@@ -22,6 +22,9 @@ const stripMarkers = (s: string) => stripBrandMarkers(s);
 type Restaurant = { id: string; slug: string; name: string; active: boolean; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null };
 type Owner = { id: string; name: string };
 
+// The seeded default restaurant (#1) — can never be deleted (matches the API + SQL guards).
+const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
+
 // The ten guest-facing switches (same set + labels as the Features tab).
 const FEATURES = [
   { key: "model3d", label: "3D dish viewer" }, { key: "ratings", label: "Star ratings" },
@@ -82,8 +85,15 @@ export default function AdminRestaurants() {
 
   return (
     <>
-      <h1 className="adm-page-h">Restaurants</h1>
-      <p className="adm-page-sub">Every restaurant on this backend. Pick one to turn its guest features on or off — the change shows only on that restaurant&apos;s menu.</p>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 className="adm-page-h">Restaurants</h1>
+          <p className="adm-page-sub">Every restaurant on this backend. Pick one to turn its guest features on or off — the change shows only on that restaurant&apos;s menu.</p>
+        </div>
+        <a className="adm-btn" href="/aevinite/recycle" title="Deleted restaurants — restore or permanently remove">
+          <i className="fas fa-trash-can" style={{ marginRight: 7 }} aria-hidden="true" />Recycle bin
+        </a>
+      </div>
 
       <NewRestaurant onCreated={loadList} />
 
@@ -450,14 +460,84 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
           : <div className="adm-togglegrid">{staffToggle("auto_print_kot_allowed", "Auto-print KOT (allow)")}</div>}
       </div>
 
-      <div className="adm-card">
+      <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2>Guest features</h2>
         <p className="hint">Each switch shows or hides a feature across <b>{restaurant.name}</b>&apos;s guest menu.</p>
         {features === null
           ? <div className="adm-empty">Loading switches…</div>
           : <div className="adm-togglegrid">{FEATURES.map((f) => <Toggle key={f.key} k={f.key} label={f.label} />)}</div>}
       </div>
+
+      <DangerCard restaurant={restaurant} onDeleted={onBack} />
     </>
+  );
+}
+
+// DangerCard — move a restaurant to the 90-day RECYCLE BIN. Distinct from Suspend:
+// suspend just hides the guest menu (reversible instantly, staff/admin keep working);
+// DELETE puts the whole restaurant in the bin (guest 404 + staff logins blocked) and
+// starts a 90-day clock, after which it can be permanently purged from the bin. To
+// make an accidental delete near-impossible, the admin must TYPE the exact name to
+// confirm (the GitHub pattern). Restaurant #1 (default) can never be deleted.
+function DangerCard({ restaurant, onDeleted }: { restaurant: Restaurant; onDeleted: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const isDefault = restaurant.id === DEFAULT_RID;
+  const nameMatches = confirmName.trim() === restaurant.name.trim();
+
+  const del = async () => {
+    if (!nameMatches) { setErr("Type the restaurant's exact name to confirm."); return; }
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch("/api/admin/restaurants", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "soft_delete_restaurant", restaurant_id: restaurant.id, reason: reason.trim() || undefined }),
+      });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't delete the restaurant.");
+      onDeleted(); // back to the list — the restaurant is now in the recycle bin
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+  };
+
+  if (isDefault) return null; // never offer to delete the default restaurant
+
+  return (
+    <div className="adm-card" style={{ marginTop: 14, borderColor: "var(--adm-danger)" }}>
+      <h2 style={{ color: "var(--adm-danger)" }}>Danger zone</h2>
+      <p className="hint">
+        Delete <b>{restaurant.name}</b> — it moves to the <b>recycle bin for 90 days</b>. Its guest menu goes offline and
+        staff can&apos;t log in, but nothing is erased. You can <b>restore</b> it any time in those 90 days; only after that can it be
+        permanently removed. This is different from Suspend (which just hides the menu, instantly reversible).
+      </p>
+      {!open ? (
+        <button className="adm-btn danger" onClick={() => { setOpen(true); setErr(null); }}>
+          <i className="fas fa-trash-can" style={{ marginRight: 7 }} aria-hidden="true" />Delete restaurant…
+        </button>
+      ) : (
+        <div style={{ display: "grid", gap: 10, maxWidth: 460 }}>
+          <label style={{ fontSize: 12.5 }}>
+            Reason (optional — shown in the recycle bin)
+            <input value={reason} onChange={(e) => setReason(e.target.value)} disabled={busy} placeholder="e.g. closed down, duplicate…"
+              style={{ width: "100%", marginTop: 4, padding: "8px 11px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />
+          </label>
+          <label style={{ fontSize: 12.5 }}>
+            Type <b style={{ fontFamily: "ui-monospace, monospace" }}>{restaurant.name}</b> to confirm
+            <input value={confirmName} onChange={(e) => setConfirmName(e.target.value)} disabled={busy} autoFocus placeholder={restaurant.name}
+              style={{ width: "100%", marginTop: 4, padding: "8px 11px", borderRadius: 8, border: nameMatches ? "1px solid var(--adm-ok)" : "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />
+          </label>
+          {err && <span style={{ color: "var(--adm-danger)", fontSize: 12.5 }}>{err}</span>}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="adm-btn danger" disabled={busy || !nameMatches} onClick={del}>
+              <i className="fas fa-trash-can" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Deleting…" : "Move to recycle bin"}
+            </button>
+            <button className="adm-btn" disabled={busy} onClick={() => { setOpen(false); setConfirmName(""); setReason(""); setErr(null); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
