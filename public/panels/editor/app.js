@@ -1268,7 +1268,7 @@ function orderCardHtml(o, freed = false) {
     ${allergy}
     ${Number(o.subtotal) > 0 ? `<div class="ord-sub"><span>Subtotal</span><span>${inr(Number(o.subtotal))}</span></div>` : ""}
     ${Number(o.discount) > 0 ? `<div class="ord-disc">Discount${o.discount_note ? ` (${esc(o.discount_note)})` : ""}<span>− ${inr(o.discount)}</span></div>` : ""}
-    ${Number(o.tax) > 0 ? `<div class="ord-sub"><span>GST ${taxModel(state.data.settings).pct}%</span><span>${inr(Number(o.tax))}</span></div>` : ""}
+    ${Number(o.tax) > 0 ? `<div class="ord-sub"><span>Tax ${taxModel(state.data.settings).pct}%</span><span>${inr(Number(o.tax))}</span></div>` : ""}
     <div class="ord-total"><span>Total</span><span>${inr((Number(o.total) || 0) - (Number(o.discount) || 0))}</span></div>
     <div class="ord-actions">${actionsRow}</div>
   </div>`;
@@ -1393,7 +1393,7 @@ function mergedOrderCardHtml(g) {
     <div class="ord-items">${items}</div>
     <div class="ord-sub"><span>Subtotal</span><span>${inr(_m.subtotal)}</span></div>
     ${disc > 0 ? `<div class="ord-disc">Discount<span>− ${inr(disc)}</span></div>` : ""}
-    ${_m.tax > 0 ? `<div class="ord-sub"><span>GST ${Math.round(_m.rate * 10000) / 100}%</span><span>${inr(_m.tax)}</span></div>` : ""}
+    ${_m.tax > 0 ? `<div class="ord-sub"><span>Tax ${Math.round(_m.rate * 10000) / 100}%</span><span>${inr(_m.tax)}</span></div>` : ""}
     <div class="ord-total"><span>Total</span><span>${inr(total)}</span></div>
     <div class="ord-actions">${billBtns}${stage}${freeBtn}</div>
   </div>`;
@@ -1675,7 +1675,7 @@ function openBillModal(key) {
       <div class="bm-totals">
         <div class="bm-trow"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
         ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount</span><span>− ${inr(m.disc)}</span></div>` : ""}
-        ${m.tax > 0 ? `<div class="bm-trow"><span>GST ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
+        ${m.tax > 0 ? `<div class="bm-trow"><span>Tax ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
         <div class="bm-trow grand"><span>Total</span><span>${inr(m.total)}</span></div>
       </div>
       <div class="bm-actions">
@@ -4738,7 +4738,7 @@ function tablePanelParts(t) {
   const sumSub = mBill.subtotal;
   const sumTax = mBill.tax;
   const sumDisc = mBill.disc;
-  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>Subtotal</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 ? `<div class="tp-bl"><span>GST</span><b>${inr(sumTax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
+  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>Subtotal</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 ? `<div class="tp-bl"><span>Tax</span><b>${inr(sumTax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
 
   // The PRIMARY table-wide action: accept everything that's new, else serve everything
   // that's cooked. (Per-order Accept stays on each new card; per-dish Serve on each row.)
