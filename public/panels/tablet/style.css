@@ -532,45 +532,43 @@ body.om-mode #tabletClose { display: none; }
 /* the cart: unchanged markup, its OWN scroll right below — never hidden */
 .om.lite .om-cart { border-left: 0; border-top: 1px solid var(--line); background: transparent; padding: 10px 2px 0; max-height: 42vh; max-height: 42dvh; overflow-y: auto; }
 
-/* ── Tablet order screen — PHONE (owner 2026-07-03): full-height split with TWO
-   independent scrolls (menu top, order bottom) so the whole screen never scrolls as
-   one; compact header. Desktop keeps the in-panel lite layout above. */
-@media (max-width: 760px) {
-  .om.lite { position: fixed; inset: 0; z-index: 45; background: var(--bg);
-    display: flex; flex-direction: column; height: 100vh; height: 100dvh; padding: 8px 12px; box-sizing: border-box; }
-  /* Compact ONE-ROW header (owner 2026-07-04: the top was eating ~25% of the phone):
-     the table number shrinks to a small pill, the search sits beside it instead of
-     wrapping onto its own row. */
-  .om.lite .om-head { padding: 2px 0 8px; margin: 0; align-items: center; flex-wrap: nowrap; gap: 8px; }
-  .om.lite .om-head h2 { flex: 0 0 auto; font-size: 12.5px; font-weight: 800; margin: 0;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 7px 11px; }
-  .om.lite .om-head .om-search { order: 0; flex: 1 1 auto; flex-basis: auto; margin-top: 0; min-width: 0; }
-  .om.lite .om-body, .om.lite .om-body.no-cart { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-  .om.lite .om-nav { flex: 0 0 auto; }
-  /* BROWSE screen (owner 2026-07-05, guest-menu model): the MENU fills the screen; the
-     order review is a SEPARATE screen reached by the floating "View order" pill. The
-     search + category chips stay pinned above the dish scroll. */
-  .om.lite:not(.vieworder) .om-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; padding-bottom: 84px; }
-  .om.lite:not(.vieworder) .om-cart { display: none; }        /* no side pane on the phone browse screen */
-  /* VIEW-ORDER screen: the added items, the ONE allergy/note field, the total AND SEND
-     all scroll TOGETHER, so SEND is always reachable. */
-  .om.lite.vieworder .om-voscroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
-    padding: 4px 0 calc(84px + env(safe-area-inset-bottom)); }
-  .om.lite.vieworder .om-cart { display: block; border: 0; margin: 0; padding: 0; }
-  .om.lite.vieworder .om-cart .cart { display: block; }
-  .om.lite.vieworder .om-cart .cart-lines { overflow: visible; max-height: none; }
-  .om.lite.vieworder .om-cart .cart #sendOrder { margin-top: 12px; }
-  /* The floating "View order" pill — only on the phone browse screen. */
-  .om.lite:not(.vieworder) .om-viewpill { display: flex; }
-  /* While ANY order screen (browse / view-order) or the item popup is open, hide the
-     floating panel-✕ — those screens have their own back. One button only. */
-  body:has(.om.lite) #tabletClose,
-  body:has(.opt-overlay) #tabletClose { display: none; }
+/* ── Take-order flow — ALL widths (owner 2026-07-05: "make the tablet like the phone
+   for all dimensions"). The order screen is a full-screen guest-menu-style flow at
+   every size: a browse screen (menu + ✎ per dish + floating "View order" pill) and a
+   SEPARATE view-order screen (items + ONE note + SEND, one scroll). Overrides the old
+   in-panel lite layout above. Desktop no longer keeps a side pane during ordering. */
+.om.lite { position: fixed; inset: 0; z-index: 45; background: var(--bg);
+  display: flex; flex-direction: column; height: 100vh; height: 100dvh; padding: 10px 14px; box-sizing: border-box; }
+/* Compact ONE-ROW header: the table number as a small pill, the search beside it. */
+.om.lite .om-head { padding: 2px 0 8px; margin: 0; align-items: center; flex-wrap: nowrap; gap: 8px; }
+.om.lite .om-head h2 { flex: 0 0 auto; font-size: 13px; font-weight: 800; margin: 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 8px 13px; }
+.om.lite .om-head .om-search { order: 0; flex: 1 1 auto; flex-basis: auto; margin-top: 0; min-width: 0; }
+.om.lite .om-body, .om.lite .om-body.no-cart { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.om.lite .om-nav { flex: 0 0 auto; }
+/* wider dish columns on big screens so it doesn't read as one giant phone column */
+.om.lite .om-scroll .dishgrid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+/* BROWSE: the menu fills the screen; the order review is a SEPARATE screen reached by
+   the floating "View order" pill. Search + chips stay pinned above the dish scroll. */
+.om.lite:not(.vieworder) .om-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; padding-bottom: 88px; }
+.om.lite:not(.vieworder) .om-cart { display: none; }        /* no side pane while browsing */
+.om.lite:not(.vieworder) .om-viewpill { display: flex; }
+/* VIEW-ORDER: the added items, the ONE allergy/note field, the total AND SEND all
+   scroll TOGETHER, so SEND is always reachable. */
+.om.lite.vieworder .om-voscroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 4px 0 calc(84px + env(safe-area-inset-bottom)); }
+.om.lite.vieworder .om-cart { display: block; border: 0; margin: 0; padding: 0; max-height: none; overflow: visible; background: transparent; }
+.om.lite.vieworder .om-cart .cart { display: block; }
+.om.lite.vieworder .om-cart .cart-lines { overflow: visible; max-height: none; }
+.om.lite.vieworder .om-cart .cart #sendOrder { margin-top: 12px; }
+/* On big screens keep the view-order content readable-width, centered. */
+.om.lite.vieworder .om-voscroll .cart { max-width: 720px; margin: 0 auto; }
+/* While any order screen or the item popup is open, hide the floating panel-✕. */
+body:has(.om.lite) #tabletClose,
+body:has(.opt-overlay) #tabletClose { display: none; }
 
-  /* Table detail on a phone: ONE natural scroll. The actions (Take order / Open this)
-     flow right BELOW the orders list as a plain row — not a highlighted box floating in
-     the middle, not pinned at the very bottom. With "No orders yet" that puts Take order
-     just under it near the top; with many orders you scroll down to it (owner 2026-07-05). */
+/* Table detail on a PHONE only: one natural scroll, actions below the orders list. */
+@media (max-width: 760px) {
   body.tbl-open #panel { overflow-y: auto; }
   body.tbl-open #panel .detail-body { flex: none; overflow: visible; }
   body.tbl-open #panel .dacts { background: transparent; border-top: 0; padding: 12px 0 0; }
