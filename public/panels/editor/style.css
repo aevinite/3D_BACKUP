@@ -821,6 +821,15 @@ body {
 .tp-detail-head h3 { margin: 0; font-family: var(--display); font-weight: 700; font-size: 20px; }
 .tp-detail-close { line-height: 1; }
 .tp-detail-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+/* SCROLL BUG (owner 2026-07-05): the in-panel detail card could NOT be scrolled.
+   .floor-side is a max-height'd flex column and .tp-detail has overflow:hidden,
+   which zeroes its automatic min-size — so the card SHRINKS to the panel's cap
+   and its overflow:hidden silently CLIPS the dish list (1948px of content in a
+   ~670px box; the panel itself then has nothing to overflow, so no scrollbar and
+   the wheel does nothing). Fix: let the BODY be the scroll region between the
+   pinned head and the pinned action footer. */
+.floor-side .tp-detail { min-height: 0; }
+.floor-side .tp-detail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .tp-detail-foot { padding: 14px 16px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tp-detail-foot .tp-free { margin-left: auto; }
 /* (selected-tile ring lives with the tile styles below — see .ftile.ft-sel,
