@@ -212,11 +212,20 @@ owner looks, with cache busting, before claiming anything.
 - [x] Manager Log hides owner + admin actions
 - [ ] Awaiting owner check on :4000 once the allergy session's work lands (feature verified on :4010 + PASS from work-checker)
 
+## 2026-07-05 — Bills tax display + printed-bill editing + popup scroll (branch worktree-two-tax-bill)
+- [x] Live bill card (Bills → Live/Today/Previous) shows **Subtotal + merged "GST x%" + Total** (was Total only); % from settings, never hardcoded. Verified Aangan desktop + 390px.
+- [x] Printed bill: tax SPLIT per component (CGST/SGST, editable names+rates in Settings › Billing), same grand total as on screen; **bill footer message now editable** (mig 124 `settings.bill_footer`, blank = default sign-off; new restaurants don't inherit a template's footer).
+- [x] Floating table-detail popup **scrolls** (was clipped — % height against auto-height wrapper); head/foot stay pinned; docked/modal/phone variants intact.
+
 ## 2026-07-03 — DEFERRED (owner: "for now we will NOT do it — first make it live")
-- [ ] **Per-restaurant tax, TWO tax types, ADMIN-managed, full redesign.** Each restaurant sets its own tax (owner saw 2.5% in the bill). There are TWO distinct taxes to manage separately:
-      (1) the tax shown in the manager panel's **Bills view**, and (2) the tax on the **actually-printed bill**.
-      The ADMIN (not the owner/manager) controls BOTH, per restaurant. Redesign this area completely + clean admin UI.
-      (Related known issue: settings.tax_rate=0 is currently overridden by a hardcoded 5% fallback in lfh_price_order + billMath.)
+- [x] **Per-restaurant tax, TWO tax types — SHIPPED 2026-07-05 as presentation-only split** (spec
+      `docs/superpowers/specs/2026-07-05-two-tax-bill-design.md`): ONE real rate (`tax_components`
+      sum → lib/tax.ts), shown MERGED ("GST 5%") in the manager Bills view/live cards/bill popup and
+      SPLIT (CGST/SGST per component) on the printed bill — totals byte-identical everywhere. Owner
+      chose manager Settings › Billing (not admin-only) as the edit surface; header/tax lines/footer
+      (`bill_footer`, mig 124) all editable. Verified on Aangan (screen+print+phone).
+      (Still open from the original note: settings.tax_rate=0 is overridden by the hardcoded 5%
+      fallback in lfh_price_order + billMath.)
 - [ ] **Admin "god-mode" control surface.** An admin-only area from /aevinite where the admin can change things the OWNER/MANAGER cannot even see — e.g. the two tax rates above, and (owner's words) "change the code and do everything." Good, clean admin interface. Build the individual sub-panels LATER (after the current live push); this is the umbrella requirement.
 - [ ] **Robustness/protection pass (lower urgency).** Owner: "if there is any error, add features that make my website protected." Harden against errors; owner grants latitude to add sensible safeguards.
 
