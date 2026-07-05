@@ -1,5 +1,5 @@
 "use client";
-// Admin · Recycle bin — restaurants that were DELETED (soft-deleted, mig 127). Each
+// Admin · Recycle bin — restaurants that were DELETED (soft-deleted, mig 128). Each
 // sits here for 90 days: it can be RESTORED any time, and only AFTER 90 days can it
 // be PERMANENTLY purged. The purge button stays locked (with a countdown) until the
 // retention window elapses — there is no early-purge override. Purge is irreversible,

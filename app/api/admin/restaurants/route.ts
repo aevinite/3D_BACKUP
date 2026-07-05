@@ -28,7 +28,7 @@ function genPassword(): string {
 }
 
 // 90-day recycle-bin retention. Kept in ONE place (mirrored by the SQL guard in
-// admin_purge_restaurant, migration 127) so the lock can't drift between UI + DB.
+// admin_purge_restaurant, migration 128) so the lock can't drift between UI + DB.
 const RETENTION_DAYS = 90;
 
 export async function GET(req: NextRequest) {

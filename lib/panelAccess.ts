@@ -57,7 +57,7 @@ export async function isPanelEnabledCached(role: Role, restaurantId: string): Pr
   return on;
 }
 
-// Is this restaurant in the RECYCLE BIN (soft-deleted, migration 127)? A binned
+// Is this restaurant in the RECYCLE BIN (soft-deleted, migration 128)? A binned
 // restaurant is treated as gone: staff can't log in and existing sessions are
 // bounced (the guest resolver already hides it). Cached like the panel map so
 // this runs on the hot panel-gate path without a read per request; a fresh
