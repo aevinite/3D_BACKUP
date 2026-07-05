@@ -1482,7 +1482,7 @@ function updateViewPill() {
   if (!pill) return;
   const n = state.cart.reduce((s, l) => s + l.qty, 0);
   const total = state.cart.reduce((s, l) => s + l.price * l.qty, 0);
-  pill.classList.toggle("empty", n === 0);
+  pill.classList.toggle("vp-empty", n === 0);
   pill.innerHTML = `<span class="vp-n">${n}</span><span class="vp-lbl">View order</span><span class="vp-total">${inr(total)}</span><i class="vp-arrow">→</i>`;
 }
 
@@ -1672,7 +1672,7 @@ function renderOrderMode() {
         <div class="om-scroll" id="omScroll">${addMode ? `<div class="muted small om-hint">Tap a dish to add it to this order — the bill updates automatically.</div>` : ""}${orderSectionsHtml()}</div>
         ${addMode ? "" : `<aside class="om-cart" id="omCart"></aside>`}
       </div>
-      ${addMode ? "" : `<button class="om-viewpill empty" id="omViewBtn" type="button"></button>`}
+      ${addMode ? "" : `<button class="om-viewpill vp-empty" id="omViewBtn" type="button"></button>`}
     </div>`;
   bindDishButtons();
   wireOrderNav();
