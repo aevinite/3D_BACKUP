@@ -101,8 +101,11 @@ async function sign(u: { id: string; role: string; token_version: number }): Pro
 
 // Verify username+password against staff_users (active only), with lockout. On
 // success resets the fail counter and returns the user + a ready-to-set cookie.
+// `restaurantId` (the tenant-scoped /r/<slug>/login door) restricts the lookup to
+// ONE restaurant's staff — the same name+password at another restaurant no longer
+// matches at all, which removes the bare login's cross-restaurant ambiguity below.
 export async function loginUser(
-  username: string, password: string,
+  username: string, password: string, restaurantId?: string,
 ): Promise<{ ok: true; user: StaffUser; cookie: string } | { ok: false; error: string; transient?: boolean }> {
   const uname = normalizeLoginName(username);
   if (!uname || !password) return { ok: false, error: "Enter your name and password." };
@@ -110,7 +113,9 @@ export async function loginUser(
   // several restaurants. Fetch every active match and pick the one whose PASSWORD
   // verifies — so the login form needs no restaurant field. (The only ambiguity is
   // two restaurants sharing BOTH the same name AND password; then the first wins.)
-  const candRes = await sb.from("staff_users").select("*").eq("username", uname).eq("active", true);
+  let candQ = sb.from("staff_users").select("*").eq("username", uname).eq("active", true);
+  if (restaurantId) candQ = candQ.eq("restaurant_id", restaurantId);
+  const candRes = await candQ;
   // A FAILED lookup is a server problem, not wrong credentials — don't gaslight the
   // waiter into resetting a password during a network blip (stress test 2026-07-03).
   if (candRes.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true };

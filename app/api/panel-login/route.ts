@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loginUser, USER_COOKIE } from "@/lib/userAuth";
 import { isPanelEnabled } from "@/lib/panelAccess";
+import { getRestaurantBySlug } from "@/lib/tenant";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,16 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   let body: any = {};
   try { body = await req.json(); } catch {}
-  const r = await loginUser(String(body?.username || ""), String(body?.password || ""));
+  // Tenant-scoped door (/r/<slug>/login) sends the slug: only THAT restaurant's
+  // staff may match. An unknown slug gets the same generic message as bad
+  // credentials — never confirm which slugs exist.
+  let restaurantId: string | undefined;
+  if (body?.restaurant) {
+    const rest = await getRestaurantBySlug(String(body.restaurant));
+    if (!rest) return NextResponse.json({ ok: false, error: "Wrong name or password." }, { status: 401 });
+    restaurantId = rest.id;
+  }
+  const r = await loginUser(String(body?.username || ""), String(body?.password || ""), restaurantId);
   // transient = the credential lookup itself failed (DB blip) → 503 "try again",
   // NOT 401 "wrong password" (stress test 2026-07-03).
   if (!r.ok) return NextResponse.json({ ok: false, error: r.error }, { status: r.transient ? 503 : 401 });
