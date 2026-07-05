@@ -70,7 +70,7 @@ const state = {
   floatCols: 0,
   floorTileDensity: lsGet("lfh_floor_tile_density", "m"), // s | m | l — how many tiles fit per row in the floor grid
   ordersView: lsGet("lfh_editor_ordersview", "live"), // Orders left-bar: live | previous | bills | calls — remembered across refresh
-  billSearch: "", billSearchType: "inv", billSort: "new", // Bills → Today/Previous search + sort
+  billSearch: "", billSearchType: "date", billSort: "new", // Bills → Today/Previous search + sort (default to Date picker)
   billHistRows: [], // server-side bills-history search results (bills older than the local 200-row window)
   logView: lsGet("lfh_editor_logview", "customers"),  // Log left-bar: customers | operations — remembered across refresh
   users: { members: [], customers: [], blocklist: [] }, // Log tab data
@@ -1572,16 +1572,22 @@ function ordersPreviousHtml(previous, kind = "previous") {
   const bills = groups.map((g) => {
     const o0 = g[0];
     const total = billMath(g).total;
+    // "paid" = every non-cancelled order on the bill is paid — the SAME rule the
+    // Dashboard revenue (/stats) uses (payment_status='paid', cancelled excluded).
+    // Only paid bills count toward the revenue total below, so a table freed WITHOUT
+    // collecting payment no longer inflates the Bills total above the Dashboard.
+    const liveOrders = g.filter((o) => o.status !== "cancelled");
+    const paid = liveOrders.length > 0 && liveOrders.every((o) => o.payment_status === "paid");
     return {
       key: o0.session_id || ("solo:" + o0.id), table: (o0.table_number || "").trim(),
       billNo: o0.bill_no, invNo: o0.invoice_no, voided: !!o0.invoice_voided,
-      customer: o0.customer_name || "", total, ts: new Date(o0.created_at || 0).getTime(),
+      customer: o0.customer_name || "", total, paid, ts: new Date(o0.created_at || 0).getTime(),
       when: o0.created_at ? new Date(o0.created_at).toLocaleString() : "",
       cancelled: g.every((o) => o.status === "cancelled"),
     };
   });
   const q = (state.billSearch || "").toLowerCase().trim();
-  const stype = state.billSearchType || "inv", sort = state.billSort || "new";
+  const stype = state.billSearchType || "date", sort = state.billSort || "new";
   const fieldOf = (b) => stype === "inv" ? String(invFmt(b.invNo)).toLowerCase()
     : stype === "bill" ? String(b.billNo ?? "")
     : stype === "table" ? String(b.table)
@@ -1609,7 +1615,7 @@ function ordersPreviousHtml(previous, kind = "previous") {
         <option value="hi"${sort === "hi" ? " selected" : ""}>Highest ₹</option>
         <option value="lo"${sort === "lo" ? " selected" : ""}>Lowest ₹</option>
       </select>
-      <span class="bill-count">${list.length} bill${list.length === 1 ? "" : "s"} · ${inr(list.reduce((s, b) => s + b.total, 0))}</span>
+      <span class="bill-count">${list.length} bill${list.length === 1 ? "" : "s"} · ${inr(list.reduce((s, b) => s + (b.paid ? b.total : 0), 0))} collected</span>
     </div>`;
   const grid = list.length
     ? `<div class="bill-grid">${list.map(billCardHtml).join("")}</div>`
