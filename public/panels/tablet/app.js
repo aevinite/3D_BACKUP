@@ -233,6 +233,20 @@ function summaryCallsOf(t) {
   return (state.summary.calls || []).filter((c) => !c.resolved && String(c.table_number).trim() === String(t));
 }
 
+// effRate(): the restaurant's effective tax rate as a decimal — mirrors lib/tax.ts and
+// SQL lfh_effective_tax_rate (sum of named tax_components, else tax_rate, else 5%). Used
+// so the tablet applies the discount BEFORE tax exactly like billMath / the printed bill,
+// instead of the old total−discount (which taxed the pre-discount amount and over-stated
+// the due by discount×rate). (2026-07-05)
+function effRate() {
+  const s = state.data.settings || {};
+  const comps = Array.isArray(s.tax_components)
+    ? s.tax_components.map((c) => ({ label: String((c && c.label) || "").trim(), rate: Number(c && c.rate) || 0 })).filter((c) => c.label && c.rate > 0)
+    : [];
+  if (comps.length) return comps.reduce((a, c) => a + c.rate, 0) / 100;
+  return Number(s.tax_rate) || 0.05;
+}
+
 // tableAgg(t): a tile's display data. For the SELECTED table we still compute from its full
 // slice (state.data) so the detail + optimistic taps stay exact; for every OTHER tile we read
 // the slim summary. Same shape either way so renderFloor doesn't care which tier it got.
@@ -244,18 +258,23 @@ function tableAgg(t) {
   if (String(state.table) === String(t)
       && ((state.data.orders || []).some((o) => String(o.table_number) === String(t)) || sessionOf(t))) {
     const os = ordersOf(t), s = sessionOf(t);
-    let nw = 0, ck = 0, rd = 0, sv = 0, due = 0;
+    let nw = 0, ck = 0, rd = 0, sv = 0, dueTot = 0, dueDisc = 0;
     const kots = [];
     os.forEach((o) => {
       if (o.kot_no != null) kots.push(o.kot_no);
-      // Due counts only ACCEPTED unpaid bills (not brand-new 'received' orders) — matches the
-      // summary's due so the grid tile and the detail never disagree on the amount owed.
-      if (o.status !== "cancelled" && o.status !== "received" && o.payment_status !== "paid") due += (Number(o.total) || 0) - (Number(o.discount) || 0);
+      // Due counts only ACCEPTED unpaid bills (not brand-new 'received' orders). Accumulate
+      // the bill's total & discount; the DUE is computed discount-BEFORE-tax below so it
+      // matches the printed bill / server summary and the waiter never over-collects.
+      if (o.status !== "cancelled" && o.status !== "received" && o.payment_status !== "paid") {
+        dueTot += Number(o.total) || 0; dueDisc += Number(o.discount) || 0;
+      }
       dishRowsOf(o).forEach((r) => {
         const q = r.qty || 1;
         if (r.status === "served") sv += q; else if (r.status === "ready") rd += q; else if (r.status === "preparing") ck += q; else nw += q;
       });
     });
+    // discount-before-tax: (Σtotal − Σdiscount×(1+rate)), clamped ≥0 == billMath's rule.
+    const due = Math.max(0, dueTot - dueDisc * (1 + effRate()));
     // Ring rule MUST match the summary/manager: it shows only for ACCEPTED orders — a brand-new
     // 'received' order rings NOTHING (no green, no red) until staff accept it. unpaid = any accepted
     // (not received/cancelled) order still owing; paid = any accepted order fully paid.

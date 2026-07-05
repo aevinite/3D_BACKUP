@@ -371,7 +371,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       else { since = new Date(Date.now() - 29 * 864e5); since.setHours(0, 0, 0, 0); }
 
       const [ordersQ, dishesQ, setQ] = await Promise.all([
-        sb.from("orders").select("id,subtotal,total,discount,status,payment_status,payment_method,created_at,items").eq("restaurant_id", rid).gte("created_at", since.toISOString()),
+        sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items").eq("restaurant_id", rid).gte("created_at", since.toISOString()),
         sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
         sb.from("settings").select("tax_rate,tax_components").eq("restaurant_id", rid).maybeSingle(),
       ]);
@@ -391,23 +391,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         : bucket === "month" ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
         : d.toISOString().slice(0, 10);
       let paid = 0, unpaid = 0, cancelled = 0, revenue = 0;
+      // Counts + kitchen volume (hours/top-dishes/categories) are PER ORDER; the ₹ figures
+      // are computed PER BILL below. Un-paid orders still count toward hours/top-dishes
+      // (kitchen load), just not toward revenue (owner, 2026-07-02 — the dashboard number
+      // must never disagree with what the Bills tab shows as settled today).
       for (const o of orders) {
         if (o.status === "cancelled") { cancelled++; continue; }
         const dt = new Date(o.created_at);
-        const amt = Math.max(0, (Number(o.subtotal) || 0) - (Number(o.discount) || 0)) * (1 + rate);
-        // Revenue = money actually COLLECTED, not "orders placed" — same rule as the
-        // Bills tab (a bill only counts once settled) and the Z-report's paidNet.
-        // Un-paid orders still count toward hours/top-dishes (kitchen load), just
-        // not toward the ₹ figure (owner, 2026-07-02 — the dashboard number must
-        // never disagree with what the Bills tab shows as settled today).
-        if (o.payment_status === "paid") {
-          revenue += amt;
-          const k = keyFor(dt); seriesMap[k] = (seriesMap[k] || 0) + amt;
-          paid++;
-          const m = o.payment_method || "Not recorded";
-          const pm = paymentMethods[m] || (paymentMethods[m] = { rev: 0, bills: 0 });
-          pm.rev += amt; pm.bills++;
-        } else unpaid++;
+        if (o.payment_status === "paid") paid++; else unpaid++;
         hours[dt.getHours()] += 1;
         for (const it of (Array.isArray(o.items) ? o.items : [])) {
           const q = Number(it.qty) || 1;
@@ -415,6 +406,28 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const c = catOf[it.id] || "other";
           cats[c] = (cats[c] || 0) + q;
         }
+      }
+      // Revenue / series / payment-methods are PER BILL (session), not per order. A
+      // whole-bill discount is stored on ONE order but is capped at the whole-bill total,
+      // so clamping max(0, subtotal−discount) PER ORDER dropped the excess and OVERSTATED
+      // revenue on multi-order tables. Group paid, non-cancelled orders into bills and
+      // apply the discount to the bill, discount-before-tax — matches billMath/Z-report.
+      const billAgg = new Map<string, { sub: number; disc: number; dt: Date; method: string }>();
+      for (const o of orders) {
+        if (o.status === "cancelled" || o.payment_status !== "paid") continue;
+        const key = o.session_id || ("solo:" + o.id);
+        const b = billAgg.get(key) || { sub: 0, disc: 0, dt: new Date(o.created_at), method: o.payment_method || "Not recorded" };
+        b.sub += Number(o.subtotal) || 0;
+        b.disc += Number(o.discount) || 0;
+        const d = new Date(o.created_at); if (d < b.dt) b.dt = d; // earliest order = the bill's time
+        billAgg.set(key, b);
+      }
+      for (const b of billAgg.values()) {
+        const amt = Math.max(0, b.sub - b.disc) * (1 + rate);
+        revenue += amt;
+        const k = keyFor(b.dt); seriesMap[k] = (seriesMap[k] || 0) + amt;
+        const pm = paymentMethods[b.method] || (paymentMethods[b.method] = { rev: 0, bills: 0 });
+        pm.rev += amt; pm.bills++;
       }
       // Zero-filled, ordered revenue series with friendly labels.
       const series: { label: string; revenue: number }[] = [];
@@ -435,10 +448,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const [openSessQ, platActiveQ, platTodayQ] = await Promise.all([
         sb.from("sessions").select("id").eq("status", "open").eq("restaurant_id", rid),
         sb.from("aggregator_orders").select("source").eq("restaurant_id", rid).in("status", ["new", "accepted", "preparing", "ready"]),
-        sb.from("aggregator_orders").select("total").eq("restaurant_id", rid).gte("created_at", todayStart),
+        sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", todayStart),
       ]);
       const platActive = (must(platActiveQ) || []) as { source: string }[];
-      const platToday = (must(platTodayQ) || []) as { total: number }[];
+      // Platform revenue counts a delivery order only once it's ACCEPTED+ (never a
+      // still-"new" ticket, never a cancelled one) — owner 2026-07-05, so today's
+      // platform ₹ matches the Z-report's platform basis (both exclude cancelled).
+      const platToday = ((must(platTodayQ) || []) as { total: number; status: string }[])
+        .filter((r) => r.status !== "cancelled" && r.status !== "new");
       const live = {
         dineIn: ((must(openSessQ) || []) as unknown[]).length,
         zomato: platActive.filter((r) => r.source === "zomato").length,
