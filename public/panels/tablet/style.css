@@ -547,38 +547,30 @@ body.om-mode #tabletClose { display: none; }
   .om.lite .om-head .om-search { order: 0; flex: 1 1 auto; flex-basis: auto; margin-top: 0; min-width: 0; }
   .om.lite .om-body, .om.lite .om-body.no-cart { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
   .om.lite .om-nav { flex: 0 0 auto; }
-  .om.lite .om-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; }   /* MENU — own scroll, fills the top */
-  /* ORDER — a FIRM half of the screen (owner 2026-07-04: 50-50, always room to review
-     what's been taken), not "grow up to 42dvh". Inside it only the item LINES scroll;
-     the allergy field, total and SEND button stay pinned and always visible. */
-  /* 60 / 40 split (owner 2026-07-05): the MENU (add dishes) gets ~60% up top, the ORDER
-     review ~40% below. Inside the order pane only the item LINES scroll; the allergy
-     field, total and SEND button stay pinned and always visible. */
-  .om.lite .om-cart { flex: 0 0 auto; height: 40vh; height: 40dvh; max-height: none; overflow: hidden;
-    display: flex; flex-direction: column; border-top: 2px solid var(--line); margin-top: 6px; padding-top: 8px; }
-  .om.lite .om-cart .cart { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-  /* item lines: their OWN scroll, separate from the allergy/total/SEND footer below */
-  .om.lite .om-cart .cart-lines { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-  /* the footer (allergy note + total + SEND) never scrolls away */
-  .om.lite .om-cart .cart .note.allergy,
-  .om.lite .om-cart .cart .ctotal,
-  .om.lite .om-cart .cart .muted.small,
-  .om.lite .om-cart .cart #sendOrder { flex: 0 0 auto; }
-  .om.lite .om-cart .cart #sendOrder { margin-top: 6px; }
+  /* 53 / 47 split (owner 2026-07-05): the MENU (add dishes) gets ~53% up top with the
+     search + category chips pinned above it; the ORDER review gets ~47% below. */
+  .om.lite .om-scroll { flex: 53 1 0; min-height: 0; max-height: none; overflow-y: auto; }   /* MENU — own scroll */
+  /* ORDER — ONE single scroll: the added items, the allergy/notes field, the item total
+     AND the SEND button all scroll TOGETHER, so SEND is always reachable. (owner
+     2026-07-05: the items scrolled on their own while the allergy/total/SEND stayed put
+     and got pushed off-screen — SEND was unreachable. Now it's one continuous scroll,
+     no separate item scroll, no pinned footer.) */
+  .om.lite .om-cart { flex: 47 1 0; min-height: 0; height: auto; max-height: none;
+    overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; display: block;
+    border-top: 2px solid var(--line); margin-top: 6px; padding: 8px 0 calc(24px + env(safe-area-inset-bottom)); }
+  .om.lite .om-cart .cart { display: block; }
+  .om.lite .om-cart .cart-lines { overflow: visible; max-height: none; }   /* merged into the ONE order scroll */
+  .om.lite .om-cart .cart #sendOrder { margin-top: 10px; }
   /* While the phone order screen OR the item-edit screen is open, hide the floating
-     panel-✕ — the screen has its own single "← back", and a mistap on ✕ used to drop
-     the whole flow. One button only (owner 2026-07-05). */
+     panel-✕ — the screen has its own single "← back". One button only. */
   body:has(.om.lite) #tabletClose,
   body:has(.om-optwrap) #tabletClose { display: none; }
 
-  /* Table detail on a phone: header stays, the PRIMARY actions (Take order / Open this)
-     sit right under it, the orders list scrolls in the middle, the bill line pins to the
-     bottom — so "Take order" is always visible without scrolling (owner 2026-07-05:
-     it was cut off at the very bottom and unreachable). */
-  body.tbl-open #panel { display: flex; flex-direction: column; overflow: hidden; }
-  body.tbl-open #panel .phead { order: 0; flex: 0 0 auto; }
-  body.tbl-open #panel .dacts { order: 1; flex: 0 0 auto; flex-wrap: wrap; margin: 8px 0 0; }
-  body.tbl-open #panel #takeOrder { order: -1; }   /* Take order first in the action row */
-  body.tbl-open #panel .detail-body { order: 2; flex: 1 1 auto; min-height: 0; overflow-y: auto; margin-top: 8px; }
-  body.tbl-open #panel .foot { order: 3; flex: 0 0 auto; }
+  /* Table detail on a phone: ONE natural scroll. The actions (Take order / Open this)
+     flow right BELOW the orders list as a plain row — not a highlighted box floating in
+     the middle, not pinned at the very bottom. With "No orders yet" that puts Take order
+     just under it near the top; with many orders you scroll down to it (owner 2026-07-05). */
+  body.tbl-open #panel { overflow-y: auto; }
+  body.tbl-open #panel .detail-body { flex: none; overflow: visible; }
+  body.tbl-open #panel .dacts { background: transparent; border-top: 0; padding: 12px 0 0; }
 }

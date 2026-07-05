@@ -152,3 +152,12 @@ our own — it killed 3 hunters last run. Follow ALWAYS (audit or build):
 5. If code-reading suggests a gap you can't confirm by normal use, just REPORT it as a
    finding — don't tamper to prove it.
 Canonical rules live in ~/.claude/skills/bulletproof/SKILL.md + ~/.claude/agents/bug-hunter.md.
+
+## "Responsive" means driving the DEEP phone screens, not just the ratio (2026-07-05)
+Owner reviewed the waiter tablet on his phone and found 3 real problems shipped as
+"done": the Send-to-kitchen button was cut off below the fold, "Take order" was at the
+bottom and unreachable, and the item-edit screen had TWO buttons (a floating ✕ that
+hard-exited + a back). Lesson: when the ask is "make it responsive," actually load the
+panel at 390px AND walk to the DEEPEST screens — can you SEE and tap Send? reach Take
+order without scrolling? is there exactly one clear back? A 50/50 split rendering isn't
+proof of usability. Verify reachability of the primary action on every sub-screen.
