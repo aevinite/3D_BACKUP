@@ -248,6 +248,63 @@ export function PaymentDonut({ data }: { data: { method: string; revenue: number
   );
 }
 
+// ── SameHourBar — "is today actually good?" (the Restroworks honest compare) ─
+// All four windows are cut at the SAME elapsed time, so a half-day is compared
+// to half-days only. Current window in the accent, history in fading grays.
+export function SameHourBar({ data, accent }: { data: { label: string; revenue: number }[]; accent: string }) {
+  if (!data.length || !data.some((d) => d.revenue > 0)) return <Empty />;
+  const grays = ["", "rgba(138,147,163,.45)", "rgba(138,147,163,.32)", "rgba(138,147,163,.22)"];
+  const max = Math.max(1, ...data.map((d) => d.revenue));
+  return (
+    <div style={{ width: "100%", height: 200 }}>
+      <ResponsiveContainer>
+        <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
+          <CartesianGrid stroke={GRID} vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} interval={0} />
+          <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
+          <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
+          <Bar dataKey="revenue" name="Revenue" radius={[6, 6, 0, 0]} maxBarSize={52}>
+            {data.map((d, i) => <Cell key={d.label} fill={i === 0 ? accent : grays[i] || grays[3]} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// ── PayTrendStack — how money arrives, per day × method (stacked) ───────────
+export function PayTrendStack({ data }: { data: { day: string; method: string; revenue: number }[] }) {
+  // pivot rows → one object per day with a key per method, fixed method order.
+  const methods = Object.keys(PAY_COLORS).filter((m) => data.some((r) => canonPayMethod(r.method) === m));
+  const byDay = new Map<string, Record<string, number | string>>();
+  for (const r of data) {
+    const d = String(r.day);
+    const row = byDay.get(d) || { day: d };
+    const m = canonPayMethod(r.method);
+    row[m] = (Number(row[m]) || 0) + r.revenue;
+    byDay.set(d, row);
+  }
+  const rows = [...byDay.values()].sort((a, b) => String(a.day).localeCompare(String(b.day)))
+    .map((r) => ({ ...r, label: new Date(String(r.day)).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) }));
+  if (!rows.length || !methods.length) return <Empty />;
+  return (
+    <div style={{ width: "100%", height: 200 }}>
+      <ResponsiveContainer>
+        <BarChart data={rows} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
+          <CartesianGrid stroke={GRID} vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" />
+          <YAxis tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
+          <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
+          <Legend wrapperStyle={{ fontSize: 11 }} />
+          {methods.map((m) => (
+            <Bar key={m} dataKey={m} name={m} stackId="pay" fill={PAY_COLORS[m]} radius={[2, 2, 0, 0]} maxBarSize={26} />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 // ── Spark — tiny inline sparkline for KPI tiles (pure SVG, no axes) ─────────
 export function Spark({ points, color, width = 72, height = 26 }: { points: number[]; color: string; width?: number; height?: number }) {
   if (points.length < 2) return null;

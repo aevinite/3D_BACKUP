@@ -371,12 +371,31 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       else if (range === "year") { since = new Date(now.getFullYear(), now.getMonth() - 11, 1); }
       else { since = new Date(Date.now() - 29 * 864e5); since.setHours(0, 0, 0, 0); }
 
-      const [ordersQ, dishesQ, setQ] = await Promise.all([
-        sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items").eq("restaurant_id", rid).gte("created_at", since.toISOString()),
+      // Crazy-dashboard upgrade (owner, 2026-07-05): fetch ONE window covering the
+      // current period AND the one before it, split in code. This doubles the rows
+      // of this on-demand (never polled) endpoint in exchange for honest deltas —
+      // the previous period is cut at the SAME elapsed time ("today till 5pm vs
+      // yesterday till 5pm", the Restroworks trick), so a half-day never gets
+      // compared against a full day. Channel split needs one extra SCOPED query
+      // on aggregator_orders (column list + limit, indexed by restaurant+time).
+      let prevSince: Date;
+      if (range === "today") prevSince = new Date(since.getTime() - 864e5);
+      else if (range === "year") prevSince = new Date(since.getFullYear() - 1, since.getMonth(), 1);
+      else prevSince = new Date(since.getTime() - 30 * 864e5);
+      const elapsedMs = now.getTime() - since.getTime();
+      const [ordersQ, dishesQ, setQ, platRangeQ] = await Promise.all([
+        sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()),
         sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
         sb.from("settings").select("tax_rate,tax_components").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("aggregator_orders").select("source,total,status,created_at").eq("restaurant_id", rid).gte("created_at", since.toISOString()).limit(5000),
       ]);
-      const orders = must(ordersQ), dishes = must(dishesQ);
+      const allRows = must(ordersQ), dishes = must(dishesQ);
+      const sinceMs = since.getTime(), prevSinceMs = prevSince.getTime();
+      const orders = allRows.filter((o: { created_at: string }) => new Date(o.created_at).getTime() >= sinceMs);
+      const prevRows = allRows.filter((o: { created_at: string }) => {
+        const t = new Date(o.created_at).getTime();
+        return t < sinceMs && t - prevSinceMs <= elapsedMs; // same-elapsed-time cut
+      });
       // Same effective rate + discount-before-tax rule as billMath/Z-report (lib/tax.ts),
       // so the dashboard revenue agrees with the Bills tab and the printed bills. Was
       // summing the STORED order total (taxed at a flat 5% on the pre-discount subtotal).
@@ -388,19 +407,48 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // for whatever's ALREADY marked paid in this range — no extra query, same orders array.
       const paymentMethods: Record<string, { rev: number; bills: number }> = {};
       const bucket = range === "today" ? "hour" : range === "year" ? "month" : "day";
-      const keyFor = (d: Date) => bucket === "hour" ? String(d.getHours())
+      // ALL hour-of-day stats bucket in IST explicitly — dt.getHours() was server-local,
+      // which on Vercel (UTC) shifted the busy-hours chart by 5½ hours (latent bug).
+      const IST_OFF = 5.5 * 3600e3;
+      const istHour = (d: Date) => new Date(d.getTime() + IST_OFF).getUTCHours();
+      const istDay = (d: Date) => (new Date(d.getTime() + IST_OFF).getUTCDay() + 6) % 7; // 0=Mon … 6=Sun
+      const keyFor = (d: Date) => bucket === "hour" ? String(istHour(d))
         : bucket === "month" ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
         : d.toISOString().slice(0, 10);
-      let paid = 0, unpaid = 0, cancelled = 0, revenue = 0;
-      // Counts + kitchen volume (hours/top-dishes/categories) are PER ORDER; the ₹ figures
-      // are computed PER BILL below. Un-paid orders still count toward hours/top-dishes
-      // (kitchen load), just not toward revenue (owner, 2026-07-02 — the dashboard number
-      // must never disagree with what the Bills tab shows as settled today).
+      // Day parts (PetPooja pattern): 7–11 breakfast · 11–15 lunch · 15–19 evening ·
+      // 19–23 dinner · 23–7 late. Weekday×hour heatmap fills for 30d/year only —
+      // today's window is too thin to mean anything.
+      const DAY_PARTS = ["Breakfast 7–11", "Lunch 11–15", "Evening 15–19", "Dinner 19–23", "Late 23–7"] as const;
+      const partOf = (h: number) => (h >= 7 && h < 11 ? 0 : h >= 11 && h < 15 ? 1 : h >= 15 && h < 19 ? 2 : h >= 19 && h < 23 ? 3 : 4);
+      const dayParts = DAY_PARTS.map((label) => ({ label, revenue: 0, orders: 0 }));
+      const heatmap: number[][] = range === "today" ? [] : Array.from({ length: 7 }, () => Array(24).fill(0));
+      let paid = 0, unpaid = 0, cancelled = 0, revenue = 0, cancelledValue = 0, taxCollected = 0;
+      let discTotal = 0, discCount = 0;
+      let discMax: { amt: number; table: string } | null = null;
+      let biggestBill: { amt: number; table: string } | null = null;
+      // Counts + kitchen volume (hours/top-dishes/categories/day-part order counts) are
+      // PER ORDER; every ₹ figure (revenue, series, payment methods, biggest bill, tax,
+      // day-part revenue) is computed PER BILL below — a whole-bill discount is stored on
+      // ONE order, so per-order clamping would drop the excess and overstate revenue.
       for (const o of orders) {
-        if (o.status === "cancelled") { cancelled++; continue; }
         const dt = new Date(o.created_at);
+        const h = istHour(dt);
+        if (o.status === "cancelled") {
+          // What the cancelled order WOULD have billed (its own net, gross of tax) —
+          // "lost business", shown on the dashboard as cancelledValue.
+          cancelled++;
+          cancelledValue += Math.max(0, (Number(o.subtotal) || 0) - (Number(o.discount) || 0)) * (1 + rate);
+          continue;
+        }
         if (o.payment_status === "paid") paid++; else unpaid++;
-        hours[dt.getHours()] += 1;
+        const disc = Number(o.discount) || 0;
+        if (disc > 0) {
+          discTotal += disc * (1 + rate); discCount++;
+          if (!discMax || disc * (1 + rate) > discMax.amt) discMax = { amt: disc * (1 + rate), table: String(o.table_number || "").trim() };
+        }
+        hours[h] += 1;
+        dayParts[partOf(h)].orders++;
+        if (heatmap.length) heatmap[istDay(dt)][h] += 1;
         for (const it of (Array.isArray(o.items) ? o.items : [])) {
           const q = Number(it.qty) || 1;
           if (it.title) topD[it.title] = (topD[it.title] || 0) + q;
@@ -408,27 +456,71 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           cats[c] = (cats[c] || 0) + q;
         }
       }
-      // Revenue / series / payment-methods are PER BILL (session), not per order. A
-      // whole-bill discount is stored on ONE order but is capped at the whole-bill total,
-      // so clamping max(0, subtotal−discount) PER ORDER dropped the excess and OVERSTATED
-      // revenue on multi-order tables. Group paid, non-cancelled orders into bills and
-      // apply the discount to the bill, discount-before-tax — matches billMath/Z-report.
-      const billAgg = new Map<string, { sub: number; disc: number; dt: Date; method: string }>();
+      // Revenue / series / payment-methods / tax / day-part ₹ / biggest bill are PER BILL
+      // (session), not per order. A whole-bill discount is stored on ONE order but is
+      // capped at the whole-bill total, so clamping max(0, subtotal−discount) PER ORDER
+      // dropped the excess and OVERSTATED revenue on multi-order tables. Group paid,
+      // non-cancelled orders into bills and apply the discount to the bill,
+      // discount-before-tax — matches billMath/Z-report.
+      const billAgg = new Map<string, { sub: number; disc: number; dt: Date; method: string; table: string }>();
       for (const o of orders) {
         if (o.status === "cancelled" || o.payment_status !== "paid") continue;
         const key = o.session_id || ("solo:" + o.id);
-        const b = billAgg.get(key) || { sub: 0, disc: 0, dt: new Date(o.created_at), method: o.payment_method || "Not recorded" };
+        const b = billAgg.get(key) || { sub: 0, disc: 0, dt: new Date(o.created_at), method: o.payment_method || "Not recorded", table: String(o.table_number || "").trim() };
         b.sub += Number(o.subtotal) || 0;
         b.disc += Number(o.discount) || 0;
         const d = new Date(o.created_at); if (d < b.dt) b.dt = d; // earliest order = the bill's time
+        if (!b.table) b.table = String(o.table_number || "").trim();
         billAgg.set(key, b);
       }
       for (const b of billAgg.values()) {
-        const amt = Math.max(0, b.sub - b.disc) * (1 + rate);
+        const net = Math.max(0, b.sub - b.disc);
+        const amt = net * (1 + rate);
         revenue += amt;
+        taxCollected += net * rate;
         const k = keyFor(b.dt); seriesMap[k] = (seriesMap[k] || 0) + amt;
         const pm = paymentMethods[b.method] || (paymentMethods[b.method] = { rev: 0, bills: 0 });
         pm.rev += amt; pm.bills++;
+        dayParts[partOf(istHour(b.dt))].revenue += amt;
+        if (!biggestBill || amt > biggestBill.amt) biggestBill = { amt, table: b.table };
+      }
+      // Previous period (already cut at the same elapsed time): totals for the delta
+      // chips + a bucket-aligned series so the sales chart can draw it as the dashed
+      // "last time" ghost line. Same PER-BILL rule as above so the delta compares
+      // like with like.
+      const prevLen = bucket === "hour" ? 24 : bucket === "day" ? 30 : 12;
+      const prevSeries = Array(prevLen).fill(0);
+      let prevRevenue = 0, prevOrders = 0, prevCancelled = 0;
+      const prevBills = new Map<string, { sub: number; disc: number; dt: Date }>();
+      for (const o of prevRows) {
+        if (o.status === "cancelled") { prevCancelled++; continue; }
+        prevOrders++;
+        if (o.payment_status !== "paid") continue;
+        const key = o.session_id || ("solo:" + o.id);
+        const b = prevBills.get(key) || { sub: 0, disc: 0, dt: new Date(o.created_at) };
+        b.sub += Number(o.subtotal) || 0;
+        b.disc += Number(o.discount) || 0;
+        const d = new Date(o.created_at); if (d < b.dt) b.dt = d;
+        prevBills.set(key, b);
+      }
+      for (const b of prevBills.values()) {
+        const amt = Math.max(0, b.sub - b.disc) * (1 + rate);
+        prevRevenue += amt;
+        const idx = bucket === "hour" ? istHour(b.dt)
+          : bucket === "day" ? Math.min(29, Math.max(0, Math.floor((b.dt.getTime() - prevSinceMs) / 864e5)))
+          : Math.min(11, Math.max(0, (b.dt.getFullYear() - prevSince.getFullYear()) * 12 + b.dt.getMonth() - prevSince.getMonth()));
+        prevSeries[idx] += amt;
+      }
+      // Channel split for the WHOLE range: dine-in from the same orders rows, the
+      // three platform channels from the one scoped aggregator query above.
+      const platRows = (must(platRangeQ) || []) as { source: string; total: number; status: string }[];
+      const channels: Record<string, { rev: number; count: number }> = {
+        dinein: { rev: 0, count: 0 }, zomato: { rev: 0, count: 0 }, swiggy: { rev: 0, count: 0 }, takeaway: { rev: 0, count: 0 },
+      };
+      for (const pr of platRows) {
+        if (pr.status === "cancelled" || pr.status === "rejected") continue;
+        const ch = channels[pr.source] || (channels[pr.source] = { rev: 0, count: 0 });
+        ch.rev += Number(pr.total) || 0; ch.count++;
       }
       // Zero-filled, ordered revenue series with friendly labels.
       const series: { label: string; revenue: number }[] = [];
@@ -464,6 +556,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         takeaway: platActive.filter((r) => r.source === "takeaway").length,
       };
       const platformToday = { count: platToday.length, revenue: r2(platToday.reduce((sum, r) => sum + (Number(r.total) || 0), 0)) };
+      // Dine-in channel = the collected dine-in figures computed above.
+      channels.dinein = { rev: r2(revenue), count: paid };
       return ok({
         range, series, hours, cats, paid, unpaid, cancelled, revenue: r2(revenue),
         orderCount: orders.length, avgOrder,
@@ -472,6 +566,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // for the donut legend — same rows, no extra read; old clients ignore the 3rd slot).
         paymentMethods: Object.entries(paymentMethods).map(([method, v]) => [method, r2(v.rev), v.bills]).sort((a, b) => (b[1] as number) - (a[1] as number)),
         live, platformToday,
+        // Crazy-dashboard fields (2026-07-05). prev is cut at the same elapsed time as
+        // the current period, so deltas stay honest mid-day/mid-month.
+        prev: { revenue: r2(prevRevenue), orders: prevOrders, cancelled: prevCancelled, series: prevSeries.map(r2) },
+        dayParts: dayParts.map((d) => ({ ...d, revenue: r2(d.revenue) })),
+        heatmap, // [] for today range; 7×24 Mon-first IST order counts otherwise
+        discounts: { total: r2(discTotal), count: discCount, max: discMax ? { amt: r2(discMax.amt), table: discMax.table } : null },
+        taxCollected: r2(taxCollected),
+        biggestBill: biggestBill ? { amt: r2(biggestBill.amt), table: biggestBill.table } : null,
+        cancelledValue: r2(cancelledValue),
+        channels: Object.fromEntries(Object.entries(channels).map(([k, v]) => [k, { rev: r2(v.rev), count: v.count }])),
+        updatedAt: now.toISOString(),
       });
     }
 

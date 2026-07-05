@@ -123,7 +123,22 @@ export async function GET(req: NextRequest) {
     // Restaurant scope — KPIs + per-dish/category/hourly + this restaurant's trend.
     // An owner may only drill into a restaurant they actually own.
     if (!scope.all && !scope.ids.includes(rid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-    const [meta, ts, dishes, cats, hourly, openT, pm] = await Promise.all([
+    // Crazy-dashboard extras (mig 127, all rid-scoped + pre-summed):
+    //  · sameHour — this window vs 3 older windows, ALL cut at the same elapsed
+    //    time ("today till 5pm" vs "last Sat till 5pm"): the honest comparison.
+    //  · payTrend — payment-method ₹ per IST day over the last 14 days.
+    //  · records — all-time bests (one JSONB row, on-demand only).
+    const fromMs = Date.parse(from);
+    const elapsedMs = Math.max(60_000, Math.min(Date.parse(to), Date.now()) - fromMs);
+    // Comparison window starts must never overlap the current window: day ranges
+    // step back 1 day / 1 week / 4 weeks (weekday-matched); 7d steps whole weeks;
+    // 30d steps whole 30-day blocks.
+    const stepsBack = range === "7d" ? [7, 14, 28] : range === "30d" ? [30, 60, 90] : [1, 7, 28];
+    const sameHourStarts = range === "all" ? [] : [
+      new Date(fromMs).toISOString(),
+      ...stepsBack.map((d) => new Date(fromMs - d * DAY).toISOString()),
+    ];
+    const [meta, ts, dishes, cats, hourly, openT, pm, sameHour, payTrend, records] = await Promise.all([
       sb.from("restaurants").select("id, slug, name, accent_color, hero_title").eq("id", rid).maybeSingle(),
       sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: bucket }),
       sb.rpc("lfh_owner_dish_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
@@ -131,10 +146,15 @@ export async function GET(req: NextRequest) {
       sb.rpc("lfh_owner_hourly", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open"),
       sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
+      sameHourStarts.length
+        ? sb.rpc("lfh_owner_samehour_compare", { p_restaurant_id: rid, p_starts: sameHourStarts, p_elapsed: `${Math.round(elapsedMs / 1000)} seconds` })
+        : Promise.resolve({ data: [], error: null }),
+      sb.rpc("lfh_owner_payment_trend", { p_restaurant_id: rid, p_from: new Date(Date.now() - 14 * DAY).toISOString(), p_to: to }),
+      sb.rpc("lfh_owner_records", { p_restaurant_id: rid }),
     ]);
     if (meta.error) throw meta.error;
     if (!meta.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
-    for (const e of [ts, dishes, cats, hourly, pm]) if (e.error) throw e.error;
+    for (const e of [ts, dishes, cats, hourly, pm, sameHour, payTrend, records]) if (e.error) throw e.error;
 
     const dishRows = (dishes.data ?? []).map((r: Record<string, unknown>) => ({
       title: r.title, qty: Number(r.qty) || 0, revenue: num(r.revenue),
@@ -155,6 +175,14 @@ export async function GET(req: NextRequest) {
       categories: (cats.data ?? []).map((r: Record<string, unknown>) => ({ category: r.category, qty: Number(r.qty) || 0, revenue: num(r.revenue) })),
       hourly: (hourly.data ?? []).map((r: Record<string, unknown>) => ({ hour: Number(r.hour) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
       paymentMethods: (pm.data ?? []).map((r: Record<string, unknown>) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 })),
+      // sameHour rows come back newest-first (window_start DESC) = the order we sent.
+      sameHour: ((sameHour.data ?? []) as Record<string, unknown>[]).map((r) => ({
+        start: r.window_start, revenue: num(r.revenue), orders: Number(r.orders) || 0,
+      })),
+      payTrend: ((payTrend.data ?? []) as Record<string, unknown>[]).map((r) => ({
+        day: r.day, method: String(r.method || "Not recorded"), revenue: num(r.revenue),
+      })),
+      records: records.data ?? null,
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });

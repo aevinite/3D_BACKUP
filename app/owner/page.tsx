@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import {
   AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod, Spark, DeltaChip,
+  SameHourBar, PayTrendStack,
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
 
@@ -46,11 +47,28 @@ type RestA = {
   kpis: { revenue: number; orders: number; avgOrder: number; openTables: number; topDish: string };
   timeseries: TsRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
   hourly: { hour: number; orders: number; revenue: number }[]; paymentMethods: Pay[];
+  sameHour?: { start: string; revenue: number; orders: number }[];
+  payTrend?: { day: string; method: string; revenue: number }[];
+  records?: {
+    bestDay?: { date: string; revenue: number } | null;
+    bigBill?: { table: string | null; revenue: number } | null;
+    fastHour?: { at: string; orders: number } | null;
+    starDish?: { title: string; qty: number } | null;
+    regulars?: number | null;
+  } | null;
 };
 type MoneyTotals = { revenue: number; discount: number; cancelledOrders: number; cancelledValue: number; tax: number };
 type View = { level: "home" } | { level: "restaurant"; rid: string } | { level: "dish"; rid: string; dish: string };
 
 const FALLBACK = "#34d399";
+// Labels for the same-elapsed-time comparison windows, per range. Order matches
+// the API: [current, the period right before, same weekday last week, 4 weeks back].
+const SAMEHOUR_LABEL: Partial<Record<Range, string[]>> = {
+  today: ["Today (till now)", "Yesterday (till now)", "Last week (till now)", "4 weeks ago (till now)"],
+  yesterday: ["Yesterday", "Day before", "Same day last week", "4 weeks before"],
+  "7d": ["This week", "Week before", "2 weeks back", "4 weeks back"],
+  "30d": ["These 30 days", "30 days before", "60 days back", "90 days back"],
+};
 
 const IST = "Asia/Kolkata";
 function tsLabel(iso: string, range: Range): string {
@@ -535,11 +553,58 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
         <div className="adm-card"><div className="rv-ct">Revenue by category</div><CategoryDonut data={rest.categories} /></div>
       </div>
 
+      {/* "Is today actually good?" — every window cut at the SAME elapsed time
+          (today-till-5pm vs last-week-till-5pm), so the comparison never lies. */}
+      {(rest.sameHour ?? []).length >= 2 && (rest.sameHour ?? []).some((w) => w.revenue > 0) && (
+        <div className="rv-charts" style={{ marginTop: 12 }}>
+          <div className="adm-card">
+            <div className="rv-ct">Is {range === "today" ? "today" : "this period"} actually good? <span>· all cut at the same time of day</span></div>
+            <SameHourBar accent={accent} data={(rest.sameHour ?? []).map((w, i) => ({
+              label: SAMEHOUR_LABEL[range]?.[i] ?? new Date(w.start).toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
+              revenue: w.revenue,
+            }))} />
+          </div>
+          <div className="adm-card">
+            <div className="rv-ct">How money arrives <span>· last 14 days by payment method</span></div>
+            <PayTrendStack data={rest.payTrend ?? []} />
+          </div>
+        </div>
+      )}
+
       {/* Payment split — how the money actually arrives */}
       {payTotal > 0 && (
         <div className="adm-card" style={{ marginTop: 12 }}>
           <div className="rv-ct">Payment methods <span>· how customers paid</span></div>
           <PaymentDonut data={rest.paymentMethods ?? []} />
+        </div>
+      )}
+
+      {/* Records strip — the numbers worth bragging about (all-time + 30d) */}
+      {rest.records && (rest.records.bestDay || rest.records.starDish) && (
+        <div className="adm-card" style={{ marginTop: 12 }}>
+          <div className="rv-ct">Your records <span>· the numbers worth bragging about</span></div>
+          <div className="rv-recs">
+            {rest.records.bestDay && (
+              <div className="rv-rec"><span className="e">🏆</span><span><small>BEST DAY EVER</small><b>{inr(rest.records.bestDay.revenue)}</b>
+                <i>{new Date(rest.records.bestDay.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })} — beat it!</i></span></div>
+            )}
+            {rest.records.starDish && (
+              <div className="rv-rec"><span className="e">👑</span><span><small>STAR DISH · 30 DAYS</small><b>{rest.records.starDish.title}</b>
+                <i>{rest.records.starDish.qty} plates</i></span></div>
+            )}
+            {rest.records.fastHour && (
+              <div className="rv-rec"><span className="e">⚡</span><span><small>BUSIEST HOUR EVER</small><b>{rest.records.fastHour.orders} orders</b>
+                <i>{new Date(rest.records.fastHour.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", hour12: true })}</i></span></div>
+            )}
+            {rest.records.bigBill && (
+              <div className="rv-rec"><span className="e">💎</span><span><small>BIGGEST BILL</small><b>{inr(rest.records.bigBill.revenue)}</b>
+                <i>{rest.records.bigBill.table ? `table ${rest.records.bigBill.table}` : "one sitting"}</i></span></div>
+            )}
+            {(rest.records.regulars ?? 0) > 0 && (
+              <div className="rv-rec"><span className="e">🔁</span><span><small>REGULARS · 30 DAYS</small><b>{rest.records.regulars} returning guests</b>
+                <i>same name, 2+ visits</i></span></div>
+            )}
+          </div>
         </div>
       )}
 
@@ -571,6 +636,12 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
         .rv-sort { display: inline-flex; gap: 2px; }
         .rv-sort button { background: none; border: var(--border); padding: 4px 10px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
         .rv-sort button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .rv-recs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+        .rv-rec { flex: 1 1 190px; min-width: 170px; display: flex; gap: 11px; align-items: center; border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 11px 14px; }
+        .rv-rec .e { font-size: 20px; }
+        .rv-rec small { display: block; font-size: 9.5px; color: var(--muted); font-weight: 800; letter-spacing: 0.5px; }
+        .rv-rec b { display: block; font-size: 14px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+        .rv-rec i { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); }
         .rv-dishes { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
         .rv-dish { display: grid; grid-template-columns: minmax(120px, 1.4fr) 2fr auto auto auto; align-items: center; gap: 12px; padding: 9px 8px; border: none; border-radius: 8px; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; }
         .rv-dish:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
