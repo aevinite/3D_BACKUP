@@ -157,3 +157,12 @@ html[data-theme="light"] .done.rdy{ color:#be185d; }
 html[data-theme="light"] .line-ready .ltitle{ color:#9d174d; }
 html[data-theme="light"] .alg-removed, html[data-theme="light"] .ltitle .alg-removed{ color:#b45309; }
 html[data-theme="light"] .alg-add{ color:#15803d; }
+
+/* PHONE (2026-07-05 phone audit): keep the header action row on one tidy strip
+   that never clips the Profile button off the right edge (it used to overflow
+   ~4px) — wrap instead of shaving — and give the small controls a 44px target. */
+@media (max-width: 760px) {
+  .top-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .top-actions .btn { padding: 9px 11px; min-height: 44px; display: inline-flex; align-items: center; }
+  .theme-toggle { width: 44px; height: 44px; }
+}
