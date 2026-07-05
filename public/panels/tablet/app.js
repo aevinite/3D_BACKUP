@@ -1619,9 +1619,17 @@ function updateOrderCart() {
 // Leave order mode by ANY exit (← back, ✓ Done, hardware back) — one place drops the
 // takeover class + the back-stack layer so none of them can leak.
 let omBackOff = null;
+let voBackOff = null;   // the view-order screen's own back step (peels to the dish list)
 function exitOrderMode() {
+  if (voBackOff) { voBackOff(); voBackOff = null; }   // drop the view-order back step if it's up
   state.ordering = false; state.addToOrderId = null; state._omTop = 0; state.viewOrder = false;
   renderPanel();
+}
+// Back / ← Menu from the view-order screen → the dish LIST (one step), not out of the order.
+function closeViewOrder() {
+  if (voBackOff) { voBackOff(); voBackOff = null; }
+  state.viewOrder = false;
+  renderOrderMode();
 }
 
 // The phone VIEW-ORDER screen (owner 2026-07-05): a separate screen (like the guest
@@ -1632,6 +1640,9 @@ function renderViewOrder() {
   p.classList.remove("has-detail");
   p.classList.add("om-open");
   if (window.LFH_BACK && !omBackOff) omBackOff = LFH_BACK.layer("tablet-order", exitOrderMode);
+  // The view-order screen is its OWN back step ON TOP of the order layer, so hardware
+  // back peels view-order → dish list (not straight out of the order). (owner 2026-07-05)
+  if (window.LFH_BACK && !voBackOff) voBackOff = LFH_BACK.layer("tablet-vieworder", closeViewOrder);
   p.innerHTML = `
     <div class="om lite vieworder">
       <div class="om-head">
@@ -1644,7 +1655,7 @@ function renderViewOrder() {
     </div>`;
   updateOrderCart();               // fills #omCart: items + one note + total + SEND, wires handlers
   const back = $("#voBack");
-  if (back) back.onclick = () => { state.viewOrder = false; renderOrderMode(); };
+  if (back) back.onclick = closeViewOrder;
 }
 function renderOrderMode() {
   // Phone: the added-items review lives on its OWN screen (like the guest menu), reached
@@ -1732,7 +1743,9 @@ async function sendOrder() {
     });
     if (!r || r.ok !== true) { toast("Rejected: " + ((r && r.reason) || "unknown") + (r && r.item ? ` (${r.item})` : ""), false); return; }
     toast(`Sent! Kitchen ticket #${r.kot_no}`);
-    state.ordering = false; state.cart = []; state.note = ""; state.allergies = ""; state._omTop = 0;
+    if (voBackOff) { voBackOff(); voBackOff = null; }   // drop the order's back steps on send
+    if (omBackOff) { omBackOff(); omBackOff = null; }
+    state.ordering = false; state.cart = []; state.viewOrder = false; state.note = ""; state.allergies = ""; state._omTop = 0;
     await load(); renderPanel();
   } catch (e) { toast("Failed: " + e.message, false); }
   finally {
