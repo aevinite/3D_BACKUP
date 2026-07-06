@@ -204,9 +204,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     if (p === "all") {
       const [items, categories, filters, settings, restaurant] = await Promise.all([
-        sb.from("menu_items").select("*").eq("restaurant_id", rid).order("sort_order"),
-        sb.from("categories").select("*").eq("restaurant_id", rid).order("sort_order"),
-        sb.from("filters").select("*").eq("restaurant_id", rid).order("sort_order"),
+        // SELECT * is kept here (the editor form edits every column), but bounded with a high
+        // .limit() so this boot/refresh bundle can never become an unbounded whole-table read.
+        sb.from("menu_items").select("*").eq("restaurant_id", rid).order("sort_order").limit(5000),
+        sb.from("categories").select("*").eq("restaurant_id", rid).order("sort_order").limit(500),
+        sb.from("filters").select("*").eq("restaurant_id", rid).order("sort_order").limit(500),
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         // The restaurant's own identity, so the printed bill is white-labelled to
         // THIS restaurant (its name/logo/footer) instead of the French House default.
@@ -333,7 +335,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // then drops off the live board. Cancelled never show. (owner, 2026-06-21)
       const handoverCutoff = new Date(Date.now() - 6 * 60 * 1000).toISOString();
       const [rows, settings] = await Promise.all([
-        sb.from("aggregator_orders").select("*").eq("restaurant_id", rid)
+        // Explicit column list (NOT select("*")) on this POLLED path — the board only renders
+        // these 8, and select("*") pulled the heavy `payload` (full webhook body) + growing
+        // `status_history` on every 60s/2s poll for nothing (egress). updated_at is only used
+        // in the server-side filter below, so it doesn't need selecting.
+        sb.from("aggregator_orders").select("id,source,items,total,status,kot_no,created_at,customer_name").eq("restaurant_id", rid)
           .or(`status.eq.new,status.eq.accepted,status.eq.preparing,status.eq.ready,and(status.eq.handed_over,updated_at.gte.${handoverCutoff})`)
           .order("created_at", { ascending: false }).limit(200),
         sb.from("settings").select("kitchen_can_accept_platform, platform_in_bills").eq("restaurant_id", rid).maybeSingle(),
@@ -346,14 +352,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "zreport") {
       if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
       const since = businessDayStartIso();
-      const [ordQ, invQ, voidQ, platQ, setQ] = await Promise.all([
-        sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status").eq("restaurant_id", rid).gte("created_at", since),
-        sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since),     // invoices GENERATED today
-        sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since),        // invoices VOIDED today
-        sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since),
+      // The day-close report MUST see the WHOLE business day. A plain select is capped at
+      // PostgREST's db-max-rows (~1000 rows), which on a busy day (>1000 orders) silently
+      // computed the till on a truncated sample → understated cash. Page through every order
+      // so the Z-report money is COMPLETE, not a partial read. (owner 2026-07-06)
+      const orders: any[] = [];
+      for (let from = 0; ; from += 1000) {
+        const page = must(await sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status")
+          .eq("restaurant_id", rid).gte("created_at", since)
+          .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null;
+        orders.push(...(page || []));
+        if (!page || page.length < 1000) break;
+      }
+      const [invQ, voidQ, platQ, setQ] = await Promise.all([
+        sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since).limit(50000),     // invoices GENERATED today
+        sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since).limit(50000),        // invoices VOIDED today
+        sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since).limit(5000),
         sb.from("settings").select("tax_rate,tax_components,restaurant_name,gstin,invoice_prefix").eq("restaurant_id", rid).maybeSingle(),
       ]);
-      const orders = (must(ordQ) || []) as any[];
       const set = (must(setQ) || {}) as any;
       // Effective rate = sum of named tax components (CGST/SGST/…), else the fallback
       // rate, else 5% — the SAME rule as billMath/the printed bill (lib/tax.ts), so the
@@ -385,7 +401,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         else { unpaidCount++; unpaidNet += tot; }
       }
       const plat = (must(platQ) || []) as any[];
-      const platActive = plat.filter((p2) => p2.status !== "cancelled");
+      // Exclude cancelled AND still-"new" (pending, unaccepted) delivery orders — the same
+      // filter the dashboard /stats uses — so the Z-report platform revenue matches the
+      // dashboard's "today" box instead of counting money that hasn't been accepted yet.
+      const platActive = plat.filter((p2) => p2.status !== "cancelled" && p2.status !== "new");
       const platRevenue = r2(platActive.reduce((a, p2) => a + (Number(p2.total) || 0), 0));
       return ok({
         date: new Date().toLocaleDateString(), since,
@@ -488,9 +507,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const IST_OFF = 5.5 * 3600e3;
       const istHour = (d: Date) => new Date(d.getTime() + IST_OFF).getUTCHours();
       const istDay = (d: Date) => (new Date(d.getTime() + IST_OFF).getUTCDay() + 6) % 7; // 0=Mon … 6=Sun
+      // Day/month bucket KEYS in IST too (they used to be UTC via toISOString()/getMonth(),
+      // while the hour buckets were already IST — so a post-midnight sale landed on the wrong
+      // day/bar and the axis labels were off by a day). One time zone everywhere now.
+      const istParts = (d: Date) => { const i = new Date(d.getTime() + IST_OFF); return { y: i.getUTCFullYear(), m: i.getUTCMonth(), day: i.getUTCDate() }; };
+      const dayKey = (d: Date) => { const p = istParts(d); return `${p.y}-${String(p.m + 1).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`; };
+      const monthKey = (d: Date) => { const p = istParts(d); return `${p.y}-${String(p.m + 1).padStart(2, "0")}`; };
       const keyFor = (d: Date) => bucket === "hour" ? String(istHour(d))
-        : bucket === "month" ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
-        : d.toISOString().slice(0, 10);
+        : bucket === "month" ? monthKey(d)
+        : dayKey(d);
       // Day parts (PetPooja pattern): 7–11 breakfast · 11–15 lunch · 15–19 evening ·
       // 19–23 dinner · 23–7 late. Weekday×hour heatmap fills for 30d/year only —
       // today's window is too thin to mean anything.
@@ -604,12 +629,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (bucket === "hour") {
         for (let h = 0; h < 24; h++) series.push({ label: `${h}:00`, revenue: r2(seriesMap[String(h)] || 0) });
       } else if (bucket === "day") {
-        for (let i = 29; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5); const k = d.toISOString().slice(0, 10); series.push({ label: k.slice(5), revenue: r2(seriesMap[k] || 0) }); }
+        // Build the last-30 IST days with the SAME dayKey the data was bucketed by (IST has no
+        // DST, so stepping back 24h holds the IST wall-clock and gives consecutive IST dates).
+        for (let i = 29; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5); const k = dayKey(d); series.push({ label: k.slice(5), revenue: r2(seriesMap[k] || 0) }); }
       } else {
         const MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        for (let i = 11; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; series.push({ label: MN[d.getMonth()], revenue: r2(seriesMap[k] || 0) }); }
+        const istNow = new Date(Date.now() + IST_OFF);
+        for (let i = 11; i >= 0; i--) { const d = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth() - i, 1)); const k = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; series.push({ label: MN[d.getUTCMonth()], revenue: r2(seriesMap[k] || 0) }); }
       }
-      const avgOrder = paid > 0 ? r2(revenue / paid) : 0;
+      // Average per BILL (revenue is aggregated per bill): divide by the number of paid BILLS,
+      // not paid ORDERS — dividing by orders understated the average on any multi-order table,
+      // and the card is labelled "/bill". billAgg holds exactly one entry per paid bill.
+      const avgOrder = billAgg.size > 0 ? r2(revenue / billAgg.size) : 0;
       // Live per-channel snapshot for the Today summary box: open dine-in tables,
       // active platform orders by source, and today's platform totals (platform
       // orders live in aggregator_orders, separate from dine-in `orders`).
@@ -636,7 +667,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       channels.dinein = { rev: r2(revenue), count: paid };
       return ok({
         range, series, hours, cats, paid, unpaid, cancelled, revenue: r2(revenue),
-        orderCount: orders.length, avgOrder,
+        // Non-cancelled only, so it equals paid+unpaid (the card's own sub-line) AND compares
+        // like-for-like against prev.orders (also non-cancelled). Counting cancelled here made
+        // the big number disagree with its sub-line and skewed the up/down delta chip.
+        orderCount: paid + unpaid, avgOrder,
         topDishes: Object.entries(topD).sort((a, b) => b[1] - a[1]).slice(0, 10),
         // [method, revenue, billCount] triples, biggest first (bill count shipped 2026-07-05
         // for the donut legend — same rows, no extra read; old clients ignore the 3rd slot).
@@ -658,15 +692,20 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
 
     if (p === "users") {
+      // The per-guest order/call tallies below are computed from these windows. The old 400/120
+      // caps undercounted an active restaurant (a guest whose orders fell outside the latest 400
+      // showed "0 orders"). Raised to a safer bound — this is an on-demand tab (not polled), and
+      // the order/call rows are 3 tiny columns. (A perfectly-accurate count needs a GROUP BY
+      // aggregate RPC; that's the follow-up if these windows ever prove too small.)
       const members = must(
         await sb.from("session_members")
           .select("id, name, phone, phone_verified, role, approved, removed, location_ok, joined_at, session:sessions(table_number, status)")
-          .eq("restaurant_id", rid).order("joined_at", { ascending: false }).limit(120)
+          .eq("restaurant_id", rid).order("joined_at", { ascending: false }).limit(500)
       );
-      const customers = must(await sb.from("customers").select("*").eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(120));
+      const customers = must(await sb.from("customers").select("*").eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(500));
       const blocklist = must(await sb.from("blocklist").select("*").eq("restaurant_id", rid).order("blocked_at", { ascending: false }));
-      const orders = must(await sb.from("orders").select("member_id, total, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(400));
-      const calls = must(await sb.from("waiter_calls").select("member_id, note, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(400));
+      const orders = must(await sb.from("orders").select("member_id, total, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(3000));
+      const calls = must(await sb.from("waiter_calls").select("member_id, note, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(3000));
       return ok({ members, customers, blocklist, orders, calls });
     }
 
@@ -870,16 +909,19 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
       // .eq(restaurant_id, rid) on every by-id write: sb is service-role (RLS bypassed), so
       // this is the only tenant boundary — a foreign order id can't be discounted/edited.
-      const cur = must(await sb.from("orders").select("total, session_id").eq("id", b).eq("restaurant_id", rid).single());
-      // The discount is stored on ONE order but billMath sums every order's discount and
-      // applies it to the WHOLE table's bill — so the cap must be the TABLE's total, not
-      // this one order's (capping at the single order's total made a multi-order table's
-      // discount silently clamp to the first order's amount — bug H8, 2026-07-05).
-      let billCap = Number(cur.total) || 0;
+      const cur = must(await sb.from("orders").select("subtotal, session_id").eq("id", b).eq("restaurant_id", rid).single());
+      // The stored discount is a PRE-TAX amount (billMath subtracts it from the SUBTOTAL, then
+      // adds tax). So the cap must be the TABLE's pre-tax subtotal, not the tax-INCLUSIVE total
+      // (capping at `total` let a discount exceed the food value and drive the taxable base
+      // negative). Also subtract any discount already sitting on the table's OTHER orders, so
+      // the combined bill discount can't exceed the food total — matches the client modal.
+      let billCap = Number(cur.subtotal) || 0;
       if (cur.session_id) {
-        const sessOrders = must(await sb.from("orders").select("total, status").eq("restaurant_id", rid).eq("session_id", cur.session_id));
-        billCap = sessOrders.filter((o: { status: string }) => o.status !== "cancelled")
-          .reduce((a: number, o: { total: number | null }) => a + (Number(o.total) || 0), 0);
+        const sessOrders = must(await sb.from("orders").select("id, subtotal, discount, status").eq("restaurant_id", rid).eq("session_id", cur.session_id));
+        const live = sessOrders.filter((o: { status: string }) => o.status !== "cancelled");
+        const subTotal = live.reduce((a: number, o: { subtotal: number | null }) => a + (Number(o.subtotal) || 0), 0);
+        const otherDisc = live.filter((o: { id: string }) => o.id !== b).reduce((a: number, o: { discount: number | null }) => a + (Number(o.discount) || 0), 0);
+        billCap = Math.max(0, subTotal - otherDisc);
       }
       const raw = Number(body && body.amount);
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), billCap) : 0;
@@ -1038,6 +1080,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
     if (a === "sessions" && c === "shift") {
       const to = String((body && body.to) || "").trim();
+      // Validate the destination is a plain positive integer (the RPC trusts whatever arrives).
+      if (!/^\d+$/.test(to) || Number(to) < 1) return err("Pick a valid table to move to.", 400);
+      // lfh_staff_shift_table takes no tenant param — confirm the session belongs to THIS
+      // restaurant AND the target is within its table count before shifting (service-role
+      // bypasses RLS; a foreign session id or an out-of-range table must be refused).
+      const [ownsShift, setRow] = await Promise.all([
+        sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle(),
+      ]);
+      if (!must(ownsShift)) return err("That table isn't for this restaurant.", 404);
+      const tableCount = Number((must(setRow) || {}).table_count) || 0;
+      if (tableCount && Number(to) > tableCount) return err("That table number is out of range.", 400);
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
       await logAction("editor", "table_shift", { detail: "→ table " + to, device_id: dev });

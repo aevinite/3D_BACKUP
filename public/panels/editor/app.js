@@ -119,8 +119,11 @@ try {
 const clone = (o) => (typeof structuredClone === "function" ? structuredClone(o) : JSON.parse(JSON.stringify(o)));
 // esc: make text safe to drop into HTML. It turns characters like < > & " into
 // their harmless codes so a dish name with a "<" can't break or hijack the page.
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) =>
-  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// fold: strip accents/diacritics + lowercase so search is accent-insensitive
+// ("creme brulee" finds "Crème Brûlée") — matches the guest menu's search (#190).
+const fold = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 // inr: show a stored USD amount as Indian rupees, rounded to whole ₹.
 // Orders store totals in USD (the menu's source-of-truth currency); the owner
@@ -213,8 +216,12 @@ function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
     const close = (val) => {
       wrap.classList.remove("show");
       setTimeout(() => wrap.remove(), 200);
+      document.removeEventListener("keydown", esc2); // don't leak the Escape listener
       resolve(val);
     };
+    // Let the hardware-BACK adapter cancel THIS dialog via its own close (resolves the
+    // promise false + cleans up), instead of a bare remove() that would leave it hanging.
+    wrap.__lfhClose = () => close(false);
     // Speed-click guard: the dialog pops up right under the pointer, so the
     // tail of a fast double-click lands ~100ms later on the backdrop (or even
     // on the Cancel/Confirm buttons). That used to silently cancel the dialog
@@ -251,10 +258,12 @@ function openIssueModal() {
     </div>`;
   document.body.appendChild(wrap);
   requestAnimationFrame(() => wrap.classList.add("show"));
-  const close = () => { wrap.classList.remove("show"); setTimeout(() => wrap.remove(), 200); };
+  const escI = (e) => { if (e.key === "Escape") close(); };
+  const close = () => { wrap.classList.remove("show"); setTimeout(() => wrap.remove(), 200); document.removeEventListener("keydown", escI); };
+  wrap.__lfhClose = close; // hardware BACK closes via our own close (removes the keydown listener)
   wrap.querySelector(".confirm-cancel").onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
-  document.addEventListener("keydown", function escI(e) { if (e.key === "Escape") { close(); document.removeEventListener("keydown", escI); } });
+  document.addEventListener("keydown", escI);
   setTimeout(() => { const f = wrap.querySelector("#issSubj"); if (f) f.focus(); }, 60);
   wrap.querySelector(".iss-send").onclick = async () => {
     const subject = wrap.querySelector("#issSubj").value.trim();
@@ -492,7 +501,7 @@ function renderList() {
     ul.appendChild(mk("operations", '<i class="fas fa-list-check"></i>', "Operation log", "staff actions"));
     return;
   }
-  const q = state.search.toLowerCase();
+  const q = fold(state.search); // accent-insensitive
   // On the Dishes tab, also narrow to the chosen category (if any).
   const catF = state.tab === "items" ? state.catFilter : "";
   records()
@@ -503,7 +512,7 @@ function renderList() {
     // unrelated rows — fixed 2026-07-06).
     .filter((r) => {
       if (!q) return true;
-      const hay = [recLabel(r), r.slug, r.id, r.category, Array.isArray(r.tags) ? r.tags.join(" ") : ""].filter(Boolean).join(" ").toLowerCase();
+      const hay = fold([recLabel(r), r.slug, r.id, r.category, Array.isArray(r.tags) ? r.tags.join(" ") : ""].filter(Boolean).join(" "));
       return hay.includes(q);
     })
     .forEach((r) => {
@@ -530,7 +539,9 @@ function renderList() {
           </div>
         </li>`
       );
-      li.onclick = () => {
+      li.onclick = async () => {
+        // Guard unsaved edits before switching rows (see confirmDiscardIfDirty).
+        if (!(await confirmDiscardIfDirty())) return;
         // INSTANT feedback: highlight this row right now, before any heavy
         // work, so the click never feels ignored (it used to take ~1s).
         ul.querySelectorAll(".list-item.active").forEach((x) => x.classList.remove("active"));
@@ -572,6 +583,7 @@ function blank(tab) {
 function selectRecord(r) {
   state.sel = clone(r);
   state.isNew = false;
+  state._snapPending = true; // re-baseline the unsaved-changes guard for this record
   // No renderList() here: rebuilding the whole sidebar on every click was a
   // big part of the lag, and the click handler already moved the highlight.
   renderEditor();
@@ -580,8 +592,27 @@ function selectRecord(r) {
 function newRecord() {
   state.sel = blank(state.tab);
   state.isNew = true;
+  state._snapPending = true;
   renderList();
   renderEditor();
+}
+
+// ---- Unsaved-changes guard (Editor / Settings) ----
+// state.sel is a throwaway CLONE the form mutates in place; nothing is saved until you
+// hit Save. Previously, clicking another row / + New / a tab (or refreshing/closing the
+// tab) silently threw the clone away with NO warning — hours of edits could vanish.
+// We snapshot the pristine record right AFTER each fresh render (so render-time autofill
+// is part of the baseline, not mistaken for a user edit), then compare before any
+// user-initiated navigation. In-form rebuilds (add/remove option rows via handleAction)
+// re-render WITHOUT setting _snapPending, so those edits correctly stay "dirty".
+function snapshotEditor() { state.selPristine = state.sel ? JSON.stringify(state.sel) : null; }
+function editorDirty() {
+  if (!state.sel || state.selPristine == null) return false;
+  try { return JSON.stringify(state.sel) !== state.selPristine; } catch { return false; }
+}
+async function confirmDiscardIfDirty() {
+  if (!editorDirty()) return true;
+  return await confirmDialog("You have unsaved changes here. Leave without saving them?", "Leave without saving");
 }
 
 // ---------- field builders ----------
@@ -1132,10 +1163,13 @@ function formGeneral(s) {
     // that hide what actually prints. We fill the WORKING COPY (s = state.sel), so what you
     // see is what Save persists; edit anything before saving to change it.
     const bi = billIdentity(s);
+    // Prefill only BRAND-SAFE defaults (name/prefix/footer/tax word). We deliberately DON'T
+    // materialise address / phone / GSTIN: for a not-yet-configured restaurant those fall back
+    // to shared PLACEHOLDERS (incl. a fake GSTIN), and writing them into the working copy meant
+    // any Save persisted the fakes — turning "not configured" into "looks configured", with a
+    // bogus tax id on invoices. They're shown as input HINTS instead (see the fields below), so
+    // the owner still sees what prints but nothing fake is saved unless they type a real value.
     if (!s.restaurant_name) s.restaurant_name = bi.name;
-    if (!s.restaurant_address) s.restaurant_address = bi.address;
-    if (!s.restaurant_phone) s.restaurant_phone = bi.phone;
-    if (!s.gstin) s.gstin = bi.gstin;
     if (!s.invoice_prefix) s.invoice_prefix = bi.prefix;
     if (!s.bill_footer) s.bill_footer = bi.footer;
     if (!s.tax_label) s.tax_label = bi.taxLabel;
@@ -1170,10 +1204,10 @@ function formGeneral(s) {
       <b>Invoice prefix</b> + financial year build the number (e.g. <code>LFH/2025-26/000042</code>).
     </p>
     ${tf("Restaurant name", "restaurant_name", s.restaurant_name ?? "")}
-    ${tf("Address", "restaurant_address", s.restaurant_address ?? "")}
+    ${tf("Address", "restaurant_address", s.restaurant_address ?? "", { ph: bi.address, hint: !s.restaurant_address && bi.address ? "Currently prints the placeholder shown — type your real address." : "" })}
     <div class="grid cols-3">
-      ${tf("Phone", "restaurant_phone", s.restaurant_phone ?? "")}
-      ${tf("GSTIN", "gstin", s.gstin ?? "", { hint: s.gstin === "24AAAAA0000A1Z5" ? "⚠ Placeholder — replace with your REAL GSTIN before tax filing." : "" })}
+      ${tf("Phone", "restaurant_phone", s.restaurant_phone ?? "", { ph: bi.phone })}
+      ${tf("GSTIN", "gstin", s.gstin ?? "", { ph: bi.gstin, hint: !s.gstin && bi.gstin ? "⚠ Prints a PLACEHOLDER GSTIN — enter your REAL GSTIN before tax filing." : "" })}
       ${tf("Invoice prefix", "invoice_prefix", s.invoice_prefix ?? "")}
     </div>
     ${tf("Bill footer message", "bill_footer", s.bill_footer ?? "", { hint: "Printed at the very bottom of the customer's bill, e.g. “Thank you — visit again!”." })}
@@ -1284,84 +1318,11 @@ function dishNoTag(title) {
   return d && d.dish_no != null ? ` <span class="dish-no">#${esc(String(d.dish_no))}</span>` : "";
 }
 
-// orderCardHtml: build the big card for ONE order in the Orders tab — its items,
-// allergy note, total, payment pill, and the action buttons that fit its current
-// stage. `freed` = true means it's an archived/cleared order shown in the lower
-// "Freed tables" section, which only gets a "Restore to floor" button.
-function orderCardHtml(o, freed = false) {
-  const status = o.status || "received"; // default a missing status to "received"
-  const meta = STATUS_META[status] || STATUS_META.received; // look up its label + colour
-  const when = o.created_at ? new Date(o.created_at).toLocaleString() : ""; // friendly date/time
-  // Build one line per item, including any chosen options, "NO …" removals, and notes.
-  const items = (o.items || [])
-    .map((i) => `<div class="ord-line"><span class="ol-name">${esc(i.title)}${dishNoTag(i.title)}</span><span class="ol-qty">×${esc(i.qty)}</span><span class="ol-price">${inr(parseFloat(i.price) || 0)}</span>${itemDetailLine(i)}</div>`)
-    .join("");
-  // Order-wide allergies shown READ-ONLY (no always-on toggle chips any more — owner,
-  // 2026-06-17). Adding/removing an allergen now lives in the gated staff EDIT flow.
-  const allergy = (o.allergies || []).length
-    ? `<div class="ord-allergy">⚠ Avoid: ${o.allergies.map(esc).join(", ")}</div>`
-    : "";
-  // Actions depend on where the order is in its lifecycle.
-  let actions = "";
-  if (status === "received") {
-    actions = `<button class="ord-btn accept" data-act="preparing" data-id="${esc(o.id)}">✓ Accept &amp; Prepare</button>
-               <button class="ord-btn ghost" data-act="cancelled" data-id="${esc(o.id)}">Cancel</button>`;
-  } else if (status === "preparing") {
-    actions = `<button class="ord-btn serve" data-act="served" data-id="${esc(o.id)}">🍽️ Mark Served</button>
-               <button class="ord-btn ghost" data-act="cancelled" data-id="${esc(o.id)}">Cancel</button>`;
-  } else if (status === "served") {
-    actions = `<button class="ord-btn ghost" data-act="preparing" data-id="${esc(o.id)}">↩ Reopen</button>`;
-  } else {
-    actions = `<button class="ord-btn ghost" data-act="received" data-id="${esc(o.id)}">↩ Restore</button>`;
-  }
-  const paid = o.payment_status === "paid"; // has the guest settled this order?
-  const cancelled = status === "cancelled"; // voided: no money is due, so no pay control
-  // Can this whole table leave the floor? Only when EVERY non-archived order on
-  // it is settled (paid or cancelled) — never free a table with money still due.
-  const tnum = (o.table_number || "").trim();
-  // tableOrders: every live order sharing this table number.
-  const tableOrders = tnum
-    ? (state.data.orders || []).filter((x) => !x.archived && (x.table_number || "").trim() === tnum)
-    : [];
-  // tableDue: add up the money still owed across the whole table.
-  const tableDue = tableOrders
-    .filter((x) => x.status !== "cancelled" && x.payment_status !== "paid")
-    .reduce((s, x) => s + (parseFloat(x.total) || 0), 0);
-  const tableSettled = tableOrders.length > 0 && tableDue === 0; // nothing left to pay → safe to free
-  // Freed cards: just a "restore to floor" affordance. Live cards: full actions.
-  const actionsRow = freed
-    ? `<button class="ord-btn ghost" data-restore="${esc(o.id)}">↩ Restore to floor</button>`
-    : `${cancelled ? "" : `<button class="ord-btn ${paid ? "ghost" : "pay"}" data-pay="${esc(o.id)}" data-paid="${paid ? "1" : "0"}"${status === "received" && !paid ? ' disabled title="Accept the order first — it can only be paid once accepted."' : ""}>
-        ${paid ? "↩ Mark unpaid" : "💳 Mark paid"}
-      </button>`}
-      ${actions}
-      ${tnum && paid
-        ? (tableSettled
-            ? `<button class="ord-btn free-table" data-free-table="${esc(tnum)}">🪑 Free table ${esc(tnum)}</button>`
-            : `<button class="ord-btn free-table" disabled title="Settle the rest of this table first">🪑 ${inr(tableDue)} still due</button>`)
-        : ""}`;
-  return `<div class="card ord-card ord-${meta.cls} ${paid ? "is-paid" : ""} ${freed ? "is-freed" : ""}">
-    <div class="ord-top">
-      <label class="ord-check"><input type="checkbox" class="ord-select" data-sel="${esc(o.id)}"> </label>
-      ${o.kot_no != null ? `<span class="kot-chip" title="Kitchen ticket number">#${esc(o.kot_no)}</span>` : ""}
-      <b>${o.table_number ? "Table " + esc(o.table_number) : "Walk-in / no table"}</b>
-      <span class="ord-pill ${meta.cls}">${meta.label}</span>
-      ${cancelled
-        ? `<span class="pay-pill voided">— Voided</span>`
-        : `<span class="pay-pill ${paid ? "paid" : "pending"}">${paid ? "💳 Paid" : "⏳ Unpaid"}</span>`}
-      ${o.archived ? `<span class="ord-pill freed-pill">✓ Freed</span>` : ""}
-      <button class="ord-del" data-del="${esc(o.id)}" title="Delete order">🗑</button>
-    </div>
-    <small class="ord-when">${esc(when)}</small>
-    <div class="ord-items">${items}</div>
-    ${allergy}
-    ${Number(o.subtotal) > 0 ? `<div class="ord-sub"><span>Subtotal</span><span>${inr(Number(o.subtotal))}</span></div>` : ""}
-    ${Number(o.discount) > 0 ? `<div class="ord-disc">Discount${o.discount_note ? ` (${esc(o.discount_note)})` : ""}<span>− ${inr(o.discount)}</span></div>` : ""}
-    ${Number(o.tax) > 0 ? `<div class="ord-sub"><span>${esc(taxLabel())} ${taxModel(state.data.settings).pct}%</span><span>${inr(Number(o.tax))}</span></div>` : ""}
-    <div class="ord-total"><span>Total</span><span>${inr((Number(o.total) || 0) - (Number(o.discount) || 0))}</span></div>
-    <div class="ord-actions">${actionsRow}</div>
-  </div>`;
-}
+// (Removed 2026-07-06: the old single-order `orderCardHtml` was DEAD — nothing called it,
+// the live Bills list renders exclusively through `mergedOrderCardHtml` (discount-BEFORE-tax
+// via billMath). The dead copy still computed the total as `o.total − o.discount`, i.e.
+// discount applied AFTER tax — the exact overcharge fixed elsewhere. Deleted so it can't be
+// revived by accident and reintroduce that bug.)
 
 // mergedOrderCardHtml: build ONE card for a whole group of orders that belong
 // together (same session / same table visit) — every dish from every order in one
@@ -1452,7 +1413,11 @@ function billMath(orders) {
 function mergedOrderCardHtml(g) {
   const o0 = g[0];
   const tnum = (o0.table_number || "").trim();
-  const sessKey = o0.session_id || o0.id; // group key for delete-all
+  // Group key for pay/accept/serve/print/delete. MUST carry the "solo:" prefix for a
+  // no-session order (e.g. a no-table banquet bill), because ordersInGroup() only treats
+  // "solo:"-prefixed keys as a single order — a bare id fell into the session_id branch,
+  // matched nothing, and the bill could never be settled (falsely said "already paid").
+  const sessKey = o0.session_id || ("solo:" + o0.id);
   const live = g.filter((o) => o.status !== "cancelled");
   // Items grouped per source order with a separator between orders, so the merged
   // bill still reads as "order 1 / order 2" with some distance between them.
@@ -2237,7 +2202,10 @@ let dashRange = "today"; // today | 30d | year — Today leads (the live summary
 // `live` + `platformToday` fields the /stats endpoint adds.
 function dashTodayBox(s) {
   const live = s.live || {}; const pt = s.platformToday || { count: 0, revenue: 0 };
-  const totalOrders = (s.orderCount || 0) + (pt.count || 0);
+  // The "Today" money card shows PAID-only revenue, so its order count must be the PAID
+  // activity too (paid dine-in orders + accepted platform orders) — pairing paid-only ₹ with
+  // an all-orders (incl. unpaid) count read inconsistently.
+  const totalOrders = (s.paid || 0) + (pt.count || 0);
   const totalRev = (s.revenue || 0) + (pt.revenue || 0);
   const card = (cls, ico, lbl, n, meta) =>
     `<div class="tbox ${cls}"><span class="tbox-bar"></span><div class="tbox-top"><span class="tbox-ico"><i class="fas ${ico}"></i></span><span class="tbox-lbl">${lbl}</span></div><div class="tbox-n">${n}</div><div class="tbox-meta">${esc(meta)}</div></div>`;
@@ -2248,7 +2216,7 @@ function dashTodayBox(s) {
       ${card("z", "fa-bolt", "Zomato", live.zomato || 0, "live orders")}
       ${card("s", "fa-bowl-food", "Swiggy", live.swiggy || 0, "live orders")}
       ${card("t", "fa-bag-shopping", "Takeaway", live.takeaway || 0, "live orders")}
-      ${card("tot", "fa-indian-rupee-sign", "Today", inr(totalRev), totalOrders + " orders")}
+      ${card("tot", "fa-indian-rupee-sign", "Today", inr(totalRev), totalOrders + " paid orders")}
     </div>
   </div>`;
 }
@@ -2307,7 +2275,7 @@ function renderRatings(d) {
   body.querySelectorAll("[data-rnote]").forEach((b) => (b.onclick = () => { const row = body.querySelector(`[data-rnoterow="${b.dataset.rnote}"]`); if (row) row.hidden = !row.hidden; }));
   body.querySelectorAll("[data-rnotesave]").forEach((b) => (b.onclick = async () => { const row = body.querySelector(`[data-rnoterow="${b.dataset.rnotesave}"]`); const val = row ? row.querySelector("input").value : ""; try { await api("POST", "/ratings/ack", { id: b.dataset.rnotesave, note: val }); loadRatings(); } catch (e) { toast("Failed: " + e.message, "err"); } }));
 }
-async function loadDashboard() {
+async function loadDashboard(useCache) {
   const body = document.getElementById("dashBody");
   if (!body) return;
   // Latest-wins guard (the app's standard stale-refresh fix): a fast tab+range
@@ -2315,9 +2283,17 @@ async function loadDashboard() {
   // mid-flight and Chart.js threw "can't acquire context".
   const seq = (loadDashboard._seq = (loadDashboard._seq || 0) + 1);
   let s;
-  try { s = await api("GET", "/stats?range=" + dashRange); }
-  catch (e) { if (seq === loadDashboard._seq) body.innerHTML = `<div class="empty">Couldn't load stats: ${esc(e.message)}</div>`; return; }
-  if (seq !== loadDashboard._seq) return;
+  // useCache: a pure REDRAW (e.g. light/dark theme flip) — re-render the SAME data with the
+  // new colours instead of re-running the heavy /stats scan. Only when we have data for the
+  // current range cached; otherwise fall through to a real fetch.
+  if (useCache && loadDashboard._last && loadDashboard._lastRange === dashRange) {
+    s = loadDashboard._last;
+  } else {
+    try { s = await api("GET", "/stats?range=" + dashRange); }
+    catch (e) { if (seq === loadDashboard._seq) body.innerHTML = `<div class="empty">Couldn't load stats: ${esc(e.message)}</div>`; return; }
+    if (seq !== loadDashboard._seq) return;
+    loadDashboard._last = s; loadDashboard._lastRange = dashRange;
+  }
   const RL = { today: "today", "30d": "last 30 days", year: "last 12 months" };
   const rangeLabel = RL[dashRange] || dashRange;
   // The range sub-nav lives in the LEFT SIDEBAR (renderList), so the content is
@@ -2647,7 +2623,8 @@ async function loadDashboard() {
 // Chart ink (axis labels, donut slice-gaps) is baked into the canvas at draw
 // time, so a light↔dark flip while the Dashboard is open must redraw it once.
 new MutationObserver(() => {
-  if (document.querySelector('.tab[data-tab="dash"].active')) loadDashboard();
+  // Theme flip = pure redraw: recolour the charts from cached data, DON'T re-run the /stats scan.
+  if (document.querySelector('.tab[data-tab="dash"].active')) loadDashboard(true);
 }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
 
@@ -2925,6 +2902,7 @@ function renderEditor() {
     const _t0 = performance.now();
     ed.innerHTML = floorHtml();
     bindFloor();
+    syncTableBackLayers(); // phone hardware BACK peels an open table detail instead of leaving
     window.__lfhPerf.fullRenders++;
     window.__lfhPerf.lastMs = performance.now() - _t0;
     return;
@@ -3135,6 +3113,9 @@ function renderEditor() {
     </div>
     ${body}`;
   bindEditor();
+  // Re-baseline the unsaved-changes guard ONLY on a fresh entry (select/new/tab/save),
+  // never on an in-form rebuild — so add/remove-row edits stay dirty. See newRecord().
+  if (state._snapPending) { snapshotEditor(); state._snapPending = false; }
 }
 
 // updatePreviews: as you type an image URL, icon, or colour, refresh the little
@@ -3347,6 +3328,10 @@ function updateMembCount(filterSlug) {
 // toast, reload everything, then re-select the freshly-saved row. Refuses to save
 // if the required key (id or slug) is missing.
 async function save() {
+  // Guard against a double-click / double-submit: a second Save while the first is still
+  // in flight would POST again and, for a brand-new dish, mint a SECOND dish (the server
+  // auto-suffixes the slug). Ignore re-entry and disable the button until we're done.
+  if (state.saving) return;
   const it = state.sel;
   const kind = state.tab === "general" ? "settings" : state.tab; // which table to write to
   const keyField = (state.tab === "items" || state.tab === "general") ? "id" : "slug"; // its unique-key column
@@ -3356,9 +3341,15 @@ async function save() {
   // another restaurant's (or this restaurant's own) dish with the same name. The SERVER
   // mints a tenant-namespaced, globally-unique id for new dishes instead. (Editing keeps
   // the existing id/slug untouched.)
+  const slugify = (s) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   if (state.tab === "items" && state.isNew) {
-    const slugify = (s) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     if (!it.slug && it.title) it.slug = slugify(it.title);
+  }
+  // Categories/tags: a slug is a permanent key dishes reference and the guest menu keys
+  // off. Normalize a NEW one (lowercase, dashes) so a typed "Main Courses" can't become a
+  // broken key with spaces/capitals, or a case-dupe the server's exact-match check misses.
+  if ((state.tab === "categories" || state.tab === "filters") && state.isNew && it.slug) {
+    it.slug = slugify(it.slug);
   }
   if (state.tab === "items" && !it.title) { toast("Give the dish a name first", "err"); return; }
   // For a brand-new dish the id is server-generated, so only require it when editing.
@@ -3373,6 +3364,9 @@ async function save() {
   // clobber an existing category/filter with the same slug) or an edit (update in place).
   if (state.tab === "items" || state.tab === "categories" || state.tab === "filters") payload.__create = !!state.isNew;
   const wasNew = state.tab === "items" && state.isNew;
+  state.saving = true;
+  const _saveBtn = document.getElementById("saveBtn");
+  if (_saveBtn) { _saveBtn.disabled = true; _saveBtn.textContent = "Saving…"; }
   try {
     const key = recKey(it);
     const saved = await api("POST", "/" + kind, payload);
@@ -3391,10 +3385,17 @@ async function save() {
       state.sel = fresh ? clone(fresh) : null;
     }
     state.isNew = false;
+    state._snapPending = true; // saved → the current form is now the clean baseline
     renderList();
     renderEditor();
   } catch (e) {
     toast("Save failed: " + e.message, "err");
+  } finally {
+    // renderEditor() rebuilds the Save button on success; re-query so we re-enable
+    // whatever button now exists (important on the failure path, where nothing re-rendered).
+    state.saving = false;
+    const b = document.getElementById("saveBtn");
+    if (b) { b.disabled = false; b.textContent = "Save"; }
   }
 }
 
@@ -3407,6 +3408,9 @@ async function removeRecord() {
   try {
     await api("DELETE", "/" + state.tab + "/" + encodeURIComponent(recKey(it)));
     toast("Deleted", "ok");
+    // If we just deleted the category the Dishes list is filtered by, clear the filter —
+    // otherwise the Dishes tab filters to a category that no longer exists (looks empty).
+    if (state.tab === "categories" && state.catFilter === recKey(it)) state.catFilter = "";
     state.sel = null;
     state.isNew = false;
     await loadAll();
@@ -3450,9 +3454,12 @@ function whenLabel(ts) {
 // "Sat, 14 Jun 2026, 14:32". Shown in the log detail dialog.
 function fullWhen(ts) {
   if (!ts) return "—";
+  // Pin to India time (Asia/Kolkata) so log times read the SAME for everyone — a manager or
+  // admin viewing from another timezone otherwise saw shifted times that disagreed with the
+  // IST business-day logic used everywhere else (one-time-zone rule, owner 2026-07-06).
   return new Date(ts).toLocaleString("en-GB", {
     weekday: "short", day: "numeric", month: "short", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
+    hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata",
   });
 }
 
@@ -3872,9 +3879,14 @@ async function closeAllTables() {
 // close while money is owed — so we offer an explicit "close anyway" override.
 async function closeSession(id, force) {
   if (!force && !(await confirmDialog("Close this session? Guests at this table can no longer order or call until it's reopened.", "Close session"))) return;
+  // Grab the table number BEFORE we close (the session row disappears after loadSessions),
+  // so we can also drop any FLOATING popup showing it — otherwise a popup lingered on the
+  // now-freed table (close from popup mode left the wrong table on screen).
+  const closedTnum = (state.board.sessions || []).find((s) => s.id === id)?.table_number;
   try {
     await api("POST", "/sessions/" + id + "/close", force ? { force: true } : undefined);
     state.openSess = null; state.selectedTable = null; document.querySelector(".tbl-modal-overlay")?.remove(); // close modal AND the in-panel detail
+    if (closedTnum != null) state.floatingTables = state.floatingTables.filter((f) => String(f.table) !== String(closedTnum));
     await loadSessions();
     toast("Table closed — bill moved to Previous", "ok");
   } catch (e) {
@@ -4545,10 +4557,15 @@ function patchFloorTiles(tables) {
   const ed = $("#editor");
   const grid = ed && ed.querySelector(".ftile-grid");
   if (state.tab !== "tables" || !state.boardLoaded || !grid) { loadSessions(true); return false; }
-  // While ANY table's DETAIL is open (docked, collapsed-mode modal, or a floating popup), the
-  // detail node(s) + their slice rows need the full render path to refresh — so patch isn't
-  // safe; fall back. (Churn while a few tables are open is bounded — not the steady-state freeze case.)
-  if (detailTables().length) { loadSessions(true); return false; }
+  // A DETAIL node (docked / collapsed-mode modal / floating popup) + its slice rows only need
+  // the full render path when the CHANGED table is the one being viewed. Previously we fell back
+  // whenever ANY detail was open — but a detail is open during almost all normal work, so every
+  // event (even on an unrelated table) rebuilt all ~300 tiles and the floor froze (the exact
+  // 300-table freeze this patch path exists to prevent). Now: if a changed table's own detail is
+  // open, full-render so that detail refreshes; otherwise patch just the changed tiles and leave
+  // the open (unrelated) detail untouched — its data didn't change, so it's already correct.
+  const openDetails = detailTables();
+  if (openDetails.length && tables.some((t) => openDetails.includes(String(t)))) { loadSessions(true); return false; }
   const _t0 = performance.now();
   let patched = 0;
   for (const t of tables) {
@@ -4981,6 +4998,55 @@ function selectTable(table) {
 }
 function deselectTable() { state.selectedTable = null; renderEditor(); }
 
+// Sync hardware-BACK layers to the open table details. On a phone the table detail is a
+// floating popup (or the docked detail on desktop); neither registered with LFH_BACK, so
+// pressing Android BACK on an open table popup left the panel instead of closing the popup.
+// Each open detail gets exactly one back layer; Back (or a UI close) peels one at a time.
+const _tableBackLayers = new Map(); // key -> unregister()
+function syncTableBackLayers() {
+  if (!window.LFH_BACK) return;
+  const openKeys = new Set();
+  state.floatingTables.forEach((f) => openKeys.add("float:" + f.table));
+  if (!state.floatingTables.length && state.selectedTable != null) openKeys.add("dock:" + state.selectedTable);
+  // Register a layer for any newly-open detail.
+  openKeys.forEach((k) => {
+    if (_tableBackLayers.has(k)) return;
+    const off = LFH_BACK.layer("table-detail", () => {
+      _tableBackLayers.delete(k); // Back already popped this layer — don't rewind it again
+      if (k.slice(0, 6) === "float:") {
+        const t = k.slice(6);
+        state.floatingTables = state.floatingTables.filter((f) => String(f.table) !== String(t));
+      } else {
+        state.selectedTable = null;
+      }
+      renderEditor();
+    });
+    _tableBackLayers.set(k, off);
+  });
+  // Drop layers for details closed by other means (✕, shift, close, free).
+  [..._tableBackLayers.keys()].forEach((k) => {
+    if (!openKeys.has(k)) { const off = _tableBackLayers.get(k); _tableBackLayers.delete(k); try { off(); } catch (e) {} }
+  });
+}
+
+// followShiftedTable(from, to): after a party is shifted, move whatever detail was showing
+// the SOURCE table onto the DESTINATION — in BOTH view modes. selectTable(to) alone only
+// moved the DOCKED detail; in popup/phone mode the OLD table stayed floating and the moved
+// party looked like it vanished (no popup for its new home). This handles the floating popup,
+// the docked detail, and the legacy modal, then refetches the new table's slice.
+function followShiftedTable(from, to) {
+  from = String(from); to = String(to);
+  const fi = state.floatingTables.findIndex((f) => String(f.table) === from);
+  if (fi >= 0) {
+    if (state.floatingTables.some((f) => String(f.table) === to)) state.floatingTables.splice(fi, 1); // dest already floats → just drop the old
+    else state.floatingTables[fi].table = to;
+  }
+  if (String(state.selectedTable) === from) state.selectedTable = to;
+  if (String(state.openSess) === from) state.openSess = to;
+  renderEditor();  // instant repaint at the new table
+  loadSessions();  // fetch the destination's full slice
+}
+
 // openFloatingTable(t): open (or re-focus) table t as a FLOATING popup — the tile-tap
 // entry point when the side panel is collapsed (owner, 2026-07-02: collapsed → popup mode).
 // Renders instantly (summary-accurate streaming), then loadSessions fills in the dishes —
@@ -5393,9 +5459,11 @@ function openShiftPicker(t, sess) {
   document.querySelector(".shift-overlay")?.remove();
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   const free = [];
-  // "Free to move to" = not THIS table and not currently open — read from the slim summary
-  // (the board is no longer fetched whole, so openSessionForTable only knows the open-detail table).
-  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !summaryTableOpen(i)) free.push(i); }
+  // "Free to move to" = not THIS table, not currently open, AND with no pending "wants in"
+  // request (summaryTableOpen treats a request-only table as not-open, so without this a shift
+  // could land on a table a guest is waiting to open, stranding their request).
+  const reqTables = new Set((state.summary && state.summary.requests || []).map((r) => String(r.table_number)));
+  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !summaryTableOpen(i) && !reqTables.has(String(i))) free.push(i); }
   const grid = free.length
     ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">Table ${i}</button>`).join("")
     : `<div class="muted" style="padding:14px">No free tables to move to right now.</div>`;
@@ -5409,8 +5477,8 @@ function openShiftPicker(t, sess) {
     try {
       const r = await api("POST", `/sessions/${sess.id}/shift`, { to });
       if (!r.ok) { toast(r.reason === "target_occupied" ? `Table ${to} already has a party` : "Couldn't shift: " + (r.reason || ""), "err"); return; }
-      await loadSessions(); toast(`Shifted to table ${to}`, "ok");
-      selectTable(to); // follow the party to its new home
+      toast(`Shifted to table ${to}`, "ok");
+      followShiftedTable(t, to); // follow the party to its new home in docked OR popup mode
     } catch (e) { toast("Failed: " + e.message, "err"); }
   }));
 }
@@ -5802,6 +5870,7 @@ async function freeTableAll(t, sess) {
   (state.data.orders || []).forEach((o) => { if (ids.includes(o.id)) { o.archived = true; opBegin(o.id); } });
   if (sess) sess.status = "closed";
   state.openSess = null; state.selectedTable = null; document.querySelector(".tbl-modal-overlay")?.remove(); // close modal AND the in-panel detail
+  state.floatingTables = state.floatingTables.filter((f) => String(f.table) !== String(t)); // drop the freed table's popup too
   floorOpsInFlight++;
   loadSessions(true); // instant redraw from local state
   // release first, then refresh — see restartTable for why this order matters.
@@ -6051,28 +6120,29 @@ function platCardHtml(o) {
 }
 function platformHtml() {
   const all = state.data.platform || [];
-  const tg = state.platformToggles || {};
   const cols = { new: [], prep: [], ready: [], done: [] };
   all.forEach((o) => { const c = platColOf(o.status); if (c) cols[c].push(o); });
   const col = (key, label) => `<div class="plat-col"><div class="plat-col-h">${label} <span class="ct">${cols[key].length}</span></div><div class="plat-col-body">${cols[key].map(platCardHtml).join("") || '<div class="plat-col-empty">—</div>'}</div></div>`;
+  // The "Add test order" button and the "Show in bills" toggle were REMOVED (owner 2026-07-06):
+  //  • the test button inserted a REAL, auto-accepted order that polluted live revenue / the
+  //    Z-report with fake money and couldn't be told apart — turned OFF so it can't happen.
+  //  • "Show in bills" wrote a flag nothing ever read — it did nothing, so it's gone.
+  // The "🆕 New" column shows ONLY when something is actually awaiting acceptance; today every
+  // order auto-accepts, so an always-empty New column + its Accept/Reject buttons were dead,
+  // misleading UI. It reappears automatically if a real integration ever sends a 'new' order.
+  const newCol = cols.new.length ? col("new", "🆕 New") : "";
   return `<div class="ed-head plat-head">
       <h2>Platform <span class="sub">· Zomato · Swiggy · Takeaway</span></h2>
       <div class="plat-head-actions">
-        <label class="plat-toggle"><input type="checkbox" id="platInBills" ${tg.platform_in_bills ? "checked" : ""}/> Show in bills</label>
-        <button class="btn primary" id="platTestBtn">＋ Add test order</button>
         <button class="btn" id="platRefresh" title="Refresh">↻</button>
       </div>
     </div>
     <div class="plat-board">
-      ${col("new", "🆕 New")}${col("prep", "🍳 Preparing")}${col("ready", "✅ Ready")}${col("done", "📦 Handed over")}
+      ${newCol}${col("prep", "🍳 Preparing")}${col("ready", "✅ Ready")}${col("done", "📦 Handed over")}
     </div>`;
 }
 function bindPlatform() {
-  const tb = document.getElementById("platTestBtn");
-  if (tb) tb.onclick = async () => { tb.disabled = true; try { await api("POST", "/platform/test"); await loadPlatform(); toast("Test order added", "ok"); } catch (e) { toast("Failed: " + e.message, "err"); } tb.disabled = false; };
   const rf = document.getElementById("platRefresh"); if (rf) rf.onclick = loadPlatform;
-  const ib = document.getElementById("platInBills");
-  if (ib) ib.onchange = async () => { try { await api("POST", "/platform/toggles", { platform_in_bills: ib.checked }); toast(ib.checked ? "Platform orders will show in bills" : "Platform orders hidden from bills", "ok"); } catch (e) { toast("Failed: " + e.message, "err"); ib.checked = !ib.checked; } };
   document.querySelectorAll("[data-plat-act]").forEach((b) => b.onclick = async () => {
     b.disabled = true;
     try { await api("POST", `/platform/${b.dataset.platId}/status`, { status: b.dataset.platAct }); await loadPlatform(); }
@@ -6103,6 +6173,12 @@ function setTab(tab) {
   state.tab = tab;
   try { localStorage.setItem("lfh_editor_tab", tab); } catch {}
   state.isNew = false;
+  state._snapPending = true; // re-baseline the unsaved-changes guard for the new tab
+  // Search/category-filter are per-sub-tab: carrying "burger" from Dishes into
+  // Categories/Tags made those lists look empty. Clear them on any tab switch.
+  state.search = "";
+  state.catFilter = ""; // "" = All (matches the default)
+  const _sb = document.getElementById("search"); if (_sb) _sb.value = "";
   state.sel = tab === "general"
     ? clone(state.data.settings || { id: "site", bubbles_enabled: true, service_mode: false })
     : null;
@@ -6334,8 +6410,16 @@ function reconcileBoard() {
     // rebuilding 200 cards every second ate clicks and scroll position. (The Orders
     // tab still renders from the full state.data.orders fetched in pollOrders.)
     const orders = state.data.orders || [];
+    // Redraw fingerprint. It MUST cover every field a bill card renders, or a change made
+    // on another device/tab (discount, a new/removed dish, invoice generate/void, bill_no)
+    // refetches but never repaints — the card shows a STALE total/invoice state until you
+    // touch something or Refresh. So we serialise the FULL rows minus a tiny volatile set
+    // (the exact rule kitchen/tablet use — see the boardSig gotcha in CLAUDE.md). Adding a
+    // new editable order column needs NO change here; a new heartbeat-y column goes in the set.
+    const RT_VOLATILE_ORDER = new Set(["updated_at"]);
+    const stripVol = (o) => { const c = {}; for (const k in o) if (!RT_VOLATILE_ORDER.has(k)) c[k] = o[k]; return c; };
     const sig = JSON.stringify([
-      orders.map((o) => [o.id, o.status, o.payment_status, o.archived ? 1 : 0]),
+      orders.map(stripVol),
       calls.map((c) => c.id),
       reqCount,
     ]);
@@ -6517,9 +6601,12 @@ window.addEventListener("resize", () => {
   }
   if (state.floatingTables.length) layoutFloatingRow();
 });
-document.querySelectorAll(".tab").forEach((t) => (t.onclick = () => setTab(t.dataset.tab))); // top tabs switch views
-document.querySelectorAll(".subtab").forEach((t) => (t.onclick = () => setTab(t.dataset.tab))); // Editor sub-nav: Dishes/Categories/Tags
-$("#newBtn").onclick = newRecord; // the "+ New" button
+// Top tabs + Editor sub-nav switch views — but first guard any unsaved edits.
+document.querySelectorAll(".tab").forEach((t) => (t.onclick = async () => { if (await confirmDiscardIfDirty()) setTab(t.dataset.tab); }));
+document.querySelectorAll(".subtab").forEach((t) => (t.onclick = async () => { if (await confirmDiscardIfDirty()) setTab(t.dataset.tab); }));
+$("#newBtn").onclick = async () => { if (await confirmDiscardIfDirty()) newRecord(); }; // the "+ New" button
+// Last-ditch guard: refresh / close-tab while a form has unsaved edits → browser prompt.
+window.addEventListener("beforeunload", (e) => { if (editorDirty()) { e.preventDefault(); e.returnValue = ""; } });
 { const _ib = document.getElementById("reportIssueBtn"); if (_ib) _ib.onclick = openIssueModal; } // 🚩 report an issue
 
 // Drag the left sidebar's right edge to resize it (width persists across reloads).
@@ -6569,7 +6656,10 @@ setTab(state.tab);
   if (!window.LFH_BACK || !document.body) return;
   const SEL = ".sx-modal-overlay, .bill-overlay, .confirm-overlay, .disc-overlay, .pay-overlay";
   const off = new WeakMap(); // overlay element → its LFH_BACK unregister fn
-  const track = (elm) => { if (off.has(elm)) return; off.set(elm, LFH_BACK.layer("editor-modal", () => { try { elm.remove(); } catch (e) {} })); };
+  // Prefer the overlay's OWN closer (elm.__lfhClose) when it has one — a bare elm.remove()
+  // skipped confirmDialog/issue-modal cleanup, leaving the awaited promise unresolved and a
+  // document keydown listener leaked on every phone-Back (2026-07-06). Fall back to remove().
+  const track = (elm) => { if (off.has(elm)) return; off.set(elm, LFH_BACK.layer("editor-modal", () => { try { elm.__lfhClose ? elm.__lfhClose() : elm.remove(); } catch (e) {} })); };
   const untrack = (elm) => { const fn = off.get(elm); if (fn) { off.delete(elm); fn(); } };
   const matches = (n) => n.nodeType === 1 && typeof n.matches === "function" && n.matches(SEL);
   new MutationObserver((muts) => {
@@ -6684,14 +6774,24 @@ function bindBanquet() {
     const id = row.dataset.bqId;
     const item = bq.items.find((i) => i.id === id);
     if (!item) return;
-    const save = async (patch) => {
-      try {
-        const saved = await api("POST", "/banquet/item-save", { id, title: item.title, price: item.price, unit: item.unit, active: item.active, sort_order: item.sort_order, ...patch });
-        Object.assign(item, saved);
-        renderEditor();
-      } catch (e) { toast("Couldn't save: " + e.message, "err"); }
+    // Track in-flight row saves so "Create the bill" can WAIT for them — otherwise editing a
+    // price then immediately creating a bill placed it at the OLD price (the place RPC re-prices
+    // from the DB, and the row save was still travelling).
+    bq._pending = bq._pending || new Set();
+    const save = (patch) => {
+      const p = (async () => {
+        try {
+          const saved = await api("POST", "/banquet/item-save", { id, title: item.title, price: item.price, unit: item.unit, active: item.active, sort_order: item.sort_order, ...patch });
+          Object.assign(item, saved);
+          renderEditor();
+        } catch (e) { toast("Couldn't save: " + e.message, "err"); }
+      })();
+      bq._pending.add(p); p.finally(() => bq._pending.delete(p));
+      return p;
     };
     row.querySelectorAll("[data-bq-f]").forEach((inp) => {
+      // Keep the local item live as you type so the bill total reflects the edit immediately.
+      inp.oninput = () => { const f = inp.dataset.bqF; item[f] = f === "price" ? Number(inp.value) || 0 : inp.value; };
       inp.onchange = () => save({ [inp.dataset.bqF]: inp.dataset.bqF === "price" ? Number(inp.value) || 0 : inp.value });
     });
     row.querySelector("[data-bq-toggle]").onclick = () => save({ active: !item.active });
@@ -6734,6 +6834,9 @@ function bindBanquet() {
     if (t && !/^\d+$/.test(t)) { toast("That table number doesn't look right — or leave it blank.", "err"); return; }
     place.disabled = true;
     try {
+      // Wait for any in-flight menu-row edit (price/title) so the bill is priced from the
+      // latest saved values, not a half-committed one.
+      if (bq._pending && bq._pending.size) await Promise.allSettled([...bq._pending]);
       const r = await api("POST", "/banquet/place", { table: t, lines: linesOut });
       bq.qty = {}; bq.table = t;
       toast(`Banquet bill created${t ? ` on table ${t}` : ""} — total ${inr(r.total)}.`, "ok");
