@@ -3859,6 +3859,31 @@ a:focus:not(:focus-visible) { outline: none; }
 .adx .adm-minigrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(22px, 1fr)); gap: 3px; }
 .adx .adm-minitile { display: grid; place-items: center; aspect-ratio: 1; border-radius: 4px; font-size: 8.5px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; cursor: default; }
 
+/* Live floor 2026-07-06: click-only refresh + platform strip.
+   .adm-skel = shimmering placeholder while the FIRST snapshot loads;
+   .adm-calcchip = the "Calculating live totals…" pulse while a fetch runs;
+   .adm-agochip = "Updated Xs ago" (amber once the snapshot is 2+ min old);
+   .adm-floorstats = the little per-restaurant order-count row. */
+.adx .adm-skel { position: relative; overflow: hidden; border-radius: 7px; background: color-mix(in srgb, var(--muted) 16%, transparent); }
+.adx .adm-skel::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 9%, transparent), transparent); animation: adm-shimmer 1.3s infinite; }
+@keyframes adm-shimmer { 100% { transform: translateX(100%); } }
+.adx .adm-calcchip { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; padding: 5px 11px; border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); white-space: nowrap; }
+.adx .adm-calcchip .dots i { font-style: normal; animation: adm-dotblink 1.2s infinite; }
+.adx .adm-calcchip .dots i:nth-child(2) { animation-delay: .2s; }
+.adx .adm-calcchip .dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes adm-dotblink { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+.adx .adm-agochip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 999px; color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); white-space: nowrap; }
+.adx .adm-agochip.old { color: #d97706; background: color-mix(in srgb, #d97706 15%, transparent); }
+.adx .adm-stat-calc .v { animation: adm-calcpulse 1s ease-in-out infinite; }
+@keyframes adm-calcpulse { 50% { opacity: .45; } }
+.adx .adm-stat-sub { font-size: 13px; font-weight: 700; color: var(--muted); margin-left: 2px; }
+.adx .adm-floorstats { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; font-weight: 600; color: var(--muted); margin: -3px 0 9px; }
+.adx .adm-floorstats i { font-size: 10px; margin-right: 3px; opacity: .75; }
+.adx .adm-floorstats .warn { color: #d97706; }
+@media (prefers-reduced-motion: reduce) {
+  .adx .adm-skel::after, .adx .adm-calcchip .dots i, .adx .adm-stat-calc .v { animation: none; }
+}
+
 /* Analytics / Report / Health / Billing (2026-07-04) — shared layout + widget
    classes for the four new admin surfaces. Prefixed .adx- per the project's
    "new scoped classes only when needed" rule; everything else reuses .adm-*. */
