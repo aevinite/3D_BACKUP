@@ -65,11 +65,39 @@ let audioCtx = null;
 // 2026-07-05). Fix: create the context eagerly and resume() it on the first ANY user
 // gesture (one-time), and also try to resume() on every chime in case it lapsed.
 function primeAudio() {
-  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume?.(); } catch {}
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const p = audioCtx.resume?.();
+    if (p && p.then) p.then(() => updateSoundNudge()).catch(() => {}); // resume() is async — re-check once it settles
+  } catch {}
+  updateSoundNudge();
 }
 if (typeof window !== "undefined") {
   const once = () => { primeAudio(); ["pointerdown", "keydown", "touchstart"].forEach((e) => window.removeEventListener(e, once)); };
   ["pointerdown", "keydown", "touchstart"].forEach((e) => window.addEventListener(e, once, { once: true, passive: true }));
+}
+// Is sound actually usable right now (context exists AND is running, not suspended)?
+const audioReady = () => !!(audioCtx && audioCtx.state === "running");
+// A wall-mounted KDS nobody ever taps never fires a user gesture, so the AudioContext stays
+// suspended and the chime is silent forever. Show a big one-tap "enable sound" affordance
+// WHILE sound is on but the context isn't running yet; tapping it primes+resumes the context
+// (that tap IS the user gesture the autoplay policy needs). It hides itself the instant the
+// context is running or the cook mutes. (The eager gesture-priming above still runs too.)
+let soundNudgeEl = null;
+function updateSoundNudge() {
+  const need = !state.muted && !audioReady();
+  if (need) {
+    if (!soundNudgeEl) {
+      soundNudgeEl = document.createElement("button");
+      soundNudgeEl.id = "soundNudge"; soundNudgeEl.type = "button"; soundNudgeEl.className = "sound-nudge";
+      soundNudgeEl.textContent = "🔊 Tap to enable sound";
+      soundNudgeEl.onclick = () => { primeAudio(); setTimeout(updateSoundNudge, 250); };
+      (document.body || document.documentElement).appendChild(soundNudgeEl);
+    }
+    soundNudgeEl.hidden = false;
+  } else if (soundNudgeEl) {
+    soundNudgeEl.hidden = true;
+  }
 }
 const chime = () => {
   if (state.muted) return;
@@ -86,19 +114,35 @@ const chime = () => {
       o.start(audioCtx.currentTime + at); o.stop(audioCtx.currentTime + at + 0.4);
     });
   } catch {}
+  updateSoundNudge(); // if the context couldn't run, surface the "enable sound" nudge
 };
 
 // ── drawing the board ────────────────────────────────────────────────────────
 // The per-dish rows of one order (session orders have order_items; legacy
 // orders carry their dishes in the order's own items JSON).
-const rowsOf = (o) => {
-  const dbRows = state.items.filter((i) => i.order_id === o.id);
+// itemsByOrderId(): build the order_id → item-rows index ONCE per render pass so the
+// board no longer runs state.items.filter() per order per ticket. It used to be called
+// 3× per order (orderPhase + ticketHtml twice) → O(orders × items) each render, which is
+// the rush-hour freeze. Callers pass the pre-filtered slice into rowsOf(o, slice); the
+// surgical single-order callers (markItemReady/moveCardToReady) still pass nothing and
+// fall back to a one-off filter, which is cheap for one order.
+const itemsByOrderId = () => {
+  const m = new Map();
+  for (const it of (state.items || [])) {
+    if (it == null || it.order_id == null) continue;
+    let arr = m.get(it.order_id); if (!arr) m.set(it.order_id, (arr = []));
+    arr.push(it);
+  }
+  return m;
+};
+const rowsOf = (o, dbRowsOpt) => {
+  const dbRows = dbRowsOpt || state.items.filter((i) => i.order_id === o.id);
   if (dbRows.length) return dbRows.map((r) => ({ id: r.id, title: r.title, qty: r.qty, status: r.status, note: r.note, options: r.options, removed: r.removed, added_allergens: r.added_allergens, removed_flag: r.removed_flag, fromDb: true }));
   return (Array.isArray(o.items) ? o.items : []).map((i) => ({ id: null, title: i.title, qty: i.qty || 1, status: i.status || o.status, note: i.note, options: i.options, removed: i.removed, fromDb: false }));
 };
 
-function ticketHtml(o) {
-  const rows = rowsOf(o);
+function ticketHtml(o, rows) {
+  rows = rows || rowsOf(o);
   // NO common allergy banner anywhere (owner, 2026-06-14). The order-wide "avoid" is
   // DISTRIBUTED onto every item, so each dish shows its own "NO x" — matching the
   // manager and tablet. Each item = its own removals ∪ the order-wide allergens.
@@ -127,8 +171,7 @@ function ticketHtml(o) {
       <span class="ltitle">${esc(r.title)}${remMark}${small}</span>
       ${tick}</div>`;
   }).join("");
-  const rows2 = rowsOf(o);
-  const allCooked = rows2.length > 0 && rows2.every((r) => r.status === "ready" || r.status === "served");
+  const allCooked = rows.length > 0 && rows.every((r) => r.status === "ready" || r.status === "served");
   // The kitchen does NOT accept orders (owner, 2026-06-14): a new order is shown
   // for visibility only — the waiter/manager accepts it. The kitchen's only job is
   // moving a COOKING dish to READY (the ✓ ticks, or "ALL READY").
@@ -145,25 +188,39 @@ function ticketHtml(o) {
 // A kitchen ticket's column comes from its DISHES, not the coarse order status:
 // New = not accepted; Ready = every dish cooked (awaiting the waiter); Cooking =
 // anything in between. Fully-served orders have been delivered and leave the board.
-function orderPhase(o) {
+function orderPhase(o, rows) {
   if (o.status === "received") return "new";
-  const rows = rowsOf(o);
+  rows = rows || rowsOf(o);
   if (!rows.length) return o.status === "served" ? "served" : "cooking";
   if (rows.every((r) => r.status === "served")) return "served";
   if (rows.every((r) => r.status === "ready" || r.status === "served")) return "ready";
   return "cooking";
 }
-// Wire the ✓ (per-dish ready) + ALL READY buttons. Scoped so we can rebind just a
-// refreshed card, or the whole active view, after each redraw.
-function bindButtons(scope) {
-  (scope || document).querySelectorAll("[data-ready]").forEach((b) => (b.onclick = () => markOrderReady(b.dataset.ready)));
-  // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
-  // Optimistic + debounced reconcile so rapid one-by-one ✓ taps in a rush stay snappy.
-  (scope || document).querySelectorAll("[data-item-ready]").forEach((b) => (b.onclick = (e) => markItemReady(b.dataset.itemReady, e.currentTarget)));
-  // Platform-order actions (accept gated by the manager toggle on the server too).
-  (scope || document).querySelectorAll("[data-plat-accept]").forEach((b) => (b.onclick = () => platAct(b.dataset.platAccept, "accepted")));
-  (scope || document).querySelectorAll("[data-plat-ready]").forEach((b) => (b.onclick = () => platAct(b.dataset.platReady, "ready")));
-  (scope || document).querySelectorAll("[data-plat-hand]").forEach((b) => (b.onclick = () => platAct(b.dataset.platHand, "handed_over")));
+// ONE delegated click handler for every ticket action (✓ per-dish ready, ALL READY, the
+// platform accept/ready/hand buttons). Attached ONCE to a stable ancestor (document.body,
+// which is never replaced) so the incremental tile patcher can add/remove/replace ticket
+// nodes freely WITHOUT re-binding a listener per card — the old bindButtons() re-bound
+// every button on every whole-board redraw, and a replaced node would orphan its handler
+// (the exact reason the board was rebuilt wholesale before). e.target.closest() finds the
+// clicked control on whichever card it lives, patched or not.
+let clickDelegationBound = false;
+function bindDelegation() {
+  if (clickDelegationBound) return;
+  clickDelegationBound = true;
+  document.body.addEventListener("click", (e) => {
+    const ready = e.target.closest("[data-ready]");
+    if (ready) { markOrderReady(ready.dataset.ready); return; }
+    // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
+    const item = e.target.closest("[data-item-ready]");
+    if (item) { markItemReady(item.dataset.itemReady, item); return; }
+    // Platform-order actions (accept gated by the manager toggle on the server too).
+    const pa = e.target.closest("[data-plat-accept]");
+    if (pa) { platAct(pa.dataset.platAccept, "accepted"); return; }
+    const pr = e.target.closest("[data-plat-ready]");
+    if (pr) { platAct(pr.dataset.platReady, "ready"); return; }
+    const ph = e.target.closest("[data-plat-hand]");
+    if (ph) { platAct(ph.dataset.platHand, "handed_over"); return; }
+  });
 }
 // ── platform (Zomato/Swiggy/takeaway) tickets ────────────────────────────────
 // Which kitchen column a platform order sits in (mirrors orderPhase for dine-in).
@@ -204,34 +261,98 @@ function platAct(id, status) {
   api("POST", `/platform/${id}/status`, { status }).then(() => load()).catch((e) => { toast("Failed: " + e.message); load(); });
 }
 
+// INCREMENTAL tile patcher. Given a container and the DESIRED ordered list of tickets
+// ({ id, html }), it reconciles the DOM in place: it REUSES an existing card node when its
+// id is unchanged, only REPLACES a card whose html actually changed, ADDS new cards, and
+// REMOVES cards that left — instead of blowing away and rebuilding every ticket's DOM on
+// every update (the rush-hour freeze: a full innerHTML rebuild + re-bind on each poll).
+// Cards keep their identity across updates, so a card the cook is mid-tap on isn't yanked
+// out from under them. Button clicks are handled by the ONE delegated handler on body, so
+// added/replaced nodes need NO re-binding. The rendered html is stashed on the node
+// (`__kdsHtml`) purely as the cheap change check — a stale value (after a surgical optimistic
+// tweak) just means the next reconcile refreshes that one card, which is correct.
+function reconcileList(container, desired) {
+  if (!container) return;
+  if (!desired.length) {
+    // Only (re)write the empty placeholder if it isn't already the sole child — avoids a
+    // needless rebuild/flicker when an already-empty column re-renders.
+    if (!(container.children.length === 1 && container.firstElementChild && container.firstElementChild.classList.contains("empty"))) {
+      container.innerHTML = `<div class="empty">Nothing here.</div>`;
+    }
+    return;
+  }
+  // Index existing ticket nodes by their id; drop anything without a data-ticket (skeleton
+  // shimmer cards, the "Nothing here" placeholder, strays).
+  const existing = new Map();
+  for (const node of Array.from(container.children)) {
+    const id = node.getAttribute("data-ticket");
+    if (id != null) existing.set(id, node); else node.remove();
+  }
+  let prev = null;
+  for (const d of desired) {
+    let node = existing.get(d.id);
+    if (node) {
+      existing.delete(d.id);
+      if (node.__kdsHtml !== d.html) { // content actually changed → swap just this card
+        const tmp = document.createElement("div"); tmp.innerHTML = d.html;
+        const fresh = tmp.firstElementChild;
+        if (fresh) { fresh.__kdsHtml = d.html; container.replaceChild(fresh, node); node = fresh; }
+      }
+    } else { // a brand-new card
+      const tmp = document.createElement("div"); tmp.innerHTML = d.html;
+      node = tmp.firstElementChild;
+      if (node) node.__kdsHtml = d.html;
+    }
+    if (!node) continue;
+    // Keep the DOM order matching `desired`: place this card right after the previous one.
+    const target = prev ? prev.nextSibling : container.firstChild;
+    if (node !== target) container.insertBefore(node, target);
+    prev = node;
+  }
+  // Anything still in `existing` is no longer on the board — remove it.
+  for (const node of existing.values()) node.remove();
+}
+
 // COLUMNS view — the classic New → Cooking → Ready board. Dine-in tickets first,
 // then platform tickets, in each column.
 function renderColumns() {
+  const map = itemsByOrderId(); // build the item index ONCE, not per ticket
   const buckets = { new: [], cooking: [], ready: [], served: [] };
-  state.orders.forEach((o) => { if (o.status !== "cancelled") buckets[orderPhase(o)].push(o); });
+  state.orders.forEach((o) => {
+    if (o.status === "cancelled") return;
+    const rows = rowsOf(o, map.get(o.id) || []);
+    buckets[orderPhase(o, rows)].push({ o, rows });
+  });
   const pb = { new: [], cooking: [], ready: [] };
   (state.platform || []).forEach((p) => { const c = platPhase(p.status); if (pb[c]) pb[c].push(p); });
   const draw = (key, list, plist) => {
-    const html = list.map(ticketHtml).join("") + (plist || []).map(platTicketHtml).join("");
-    $("#list-" + key).innerHTML = html || `<div class="empty">Nothing here.</div>`;
+    const desired = list.map(({ o, rows }) => ({ id: String(o.id), html: ticketHtml(o, rows) }))
+      .concat((plist || []).map((p) => ({ id: "plat-" + p.id, html: platTicketHtml(p) })));
+    reconcileList($("#list-" + key), desired);
     $("#count-" + key).textContent = String(list.length + (plist ? plist.length : 0)); // show "0", not a blank pill, when a column is empty (2026-07-05)
   };
   draw("new", buckets.new, pb.new); draw("cooking", buckets.cooking, pb.cooking); draw("ready", buckets.ready, pb.ready);
-  bindButtons();
 }
 // WALL view (the "expansion") — EVERY live ticket in one dense grid, FIRST-COME-
 // FIRST-SERVED (oldest top-left); fully-ready tickets sink to the end. Same tickets
 // + same ✓/ALL-READY actions as the columns. (owner, 2026-06-19)
 function renderWall() {
-  const live = state.orders.filter((o) => o.status !== "cancelled" && orderPhase(o) !== "served");
-  live.sort((a, b) => ((orderPhase(a) === "ready") - (orderPhase(b) === "ready")) || (new Date(a.created_at) - new Date(b.created_at)));
+  const map = itemsByOrderId(); // build the item index ONCE, not per ticket
+  const live = [];
+  state.orders.forEach((o) => {
+    if (o.status === "cancelled") return;
+    const rows = rowsOf(o, map.get(o.id) || []);
+    const phase = orderPhase(o, rows);
+    if (phase !== "served") live.push({ o, rows, phase });
+  });
+  live.sort((a, b) => ((a.phase === "ready") - (b.phase === "ready")) || (new Date(a.o.created_at) - new Date(b.o.created_at)));
   const plat = (state.platform || []).slice().sort((a, b) => ((platPhase(a.status) === "ready") - (platPhase(b.status) === "ready")) || (new Date(a.created_at) - new Date(b.created_at)));
-  const html = live.map(ticketHtml).join("") + plat.map(platTicketHtml).join("");
-  $("#wall").innerHTML = html || `<div class="empty">Nothing here.</div>`;
-  bindButtons($("#wall"));
+  const desired = live.map(({ o, rows }) => ({ id: String(o.id), html: ticketHtml(o, rows) }))
+    .concat(plat.map((p) => ({ id: "plat-" + p.id, html: platTicketHtml(p) })));
+  reconcileList($("#wall"), desired);
 }
-// Paint the ACTIVE view. Every existing render() caller (load, setLocalReady) now
-// repaints whichever layout the cook is on.
+// Paint the ACTIVE view. Every render() caller (load, loadTables, applyView) repaints
+// whichever layout the cook is on — via the incremental reconciler, not a full rebuild.
 function render() { return view === "wall" ? renderWall() : renderColumns(); }
 // Switch layout: show/hide the two <main>s, clear the inactive one, repaint, persist.
 function applyView() {
@@ -255,10 +376,26 @@ const act = async (fn) => { try { await fn(); await load(); } catch (e) { toast(
 // pendingReady keeps a just-tapped dish showing ready even if a realtime/poll refetch
 // lands mid-rush before the server caught up. (owner, 2026-06-18)
 const pendingReady = new Set();
+// Order-level optimistic overlay for LEGACY orders (no order_items rows — their dishes live
+// in orders[].items JSON). markOrderReady() adds the order id here so load()/loadTables() can
+// re-apply the "ready" overlay to that order's legacy items after they replace state.orders
+// with fresh server rows — otherwise a slow-DB reconcile reverts a just-tapped legacy order
+// to cooking until the server catches up (item-keyed pendingReady can't cover legacy items,
+// which have no id). (bug: legacy orders revert during optimistic ALL-READY)
+const pendingReadyOrders = new Set();
 let readyReconcileTimer = null;
 function scheduleReadyReconcile() {
   if (readyReconcileTimer) clearTimeout(readyReconcileTimer);
-  readyReconcileTimer = setTimeout(() => { readyReconcileTimer = null; pendingReady.clear(); load().catch(() => {}); }, 2500);
+  readyReconcileTimer = setTimeout(() => {
+    readyReconcileTimer = null;
+    // Refetch FIRST — while the optimistic overlay still protects the just-tapped dishes —
+    // and clear pendingReady only AFTER the server-confirmed board has landed. Clearing the
+    // overlay BEFORE the refetch (the old order) stripped the protection during the very
+    // refresh most likely to be stale, so a slow DB briefly flipped a ready dish back to
+    // cooking. load() re-applies the overlay during its run, so the painted board stays
+    // ready; we drop the overlay once the fetch resolves.
+    load().catch(() => {}).finally(() => { pendingReady.clear(); pendingReadyOrders.clear(); });
+  }, 2500);
 }
 function setLocalReady(matches) {
   (state.items || []).forEach((i) => { if (i.status !== "served" && matches(i)) { i.status = "ready"; pendingReady.add(i.id); } });
@@ -267,7 +404,8 @@ function setLocalReady(matches) {
   // Adopt the optimistic state as the baseline so a poll/realtime refetch carrying the
   // SAME (server-confirmed) data won't rebuild the tickets under the cook's finger.
   lastSig = boardSig({ orders: state.orders, items: state.items, dishes: state.dishes, platform: state.platform, platformAccept: state.platformAccept });
-  render();
+  // NOTE: no render() here — callers do a SURGICAL card update instead of a whole-board
+  // repaint (a full render() re-buckets/rebuilds every ticket, eating a concurrent tap).
 }
 // Mark ONE dish ready (the ✓ tick). Update ONLY this dish's line IN PLACE — do NOT
 // rebuild the whole board. A full render() per tap (a) re-buckets the ticket so it
@@ -296,13 +434,15 @@ function markItemReady(id, btn) {
 function moveCardToReady(o) {
   const card = document.querySelector(`.ticket[data-ticket="${o.id}"]`);
   if (!card) return;
-  const tmp = document.createElement("div"); tmp.innerHTML = ticketHtml(o);
+  const html = ticketHtml(o);
+  const tmp = document.createElement("div"); tmp.innerHTML = html;
   const fresh = tmp.firstElementChild;
   if (!fresh) return;
+  fresh.__kdsHtml = html; // keep the reconcile change-check in sync (buttons are delegated)
   // WALL view: just refresh this ONE card in place (footer → "ready — waiter serving",
   // ✓ buttons gone). The full re-sort to the end happens on the debounced reconcile —
   // rebuilding the whole grid per tap would jump cards + eat the cook's next tap.
-  if (view === "wall") { card.replaceWith(fresh); bindButtons(fresh); return; }
+  if (view === "wall") { card.replaceWith(fresh); return; }
   // COLUMNS view: slide the finished card into the Ready column + recount, without a
   // whole-board rebuild (so other tickets' ✓ buttons survive a rapid rush).
   const readyList = document.getElementById("list-ready");
@@ -310,7 +450,6 @@ function moveCardToReady(o) {
   readyList.querySelector(".empty")?.remove();
   card.remove();
   readyList.appendChild(fresh);
-  bindButtons(fresh);
   ["new", "cooking", "ready"].forEach((key) => {
     const list = document.getElementById("list-" + key); if (!list) return;
     const n = list.querySelectorAll(".ticket").length;
@@ -318,9 +457,21 @@ function moveCardToReady(o) {
     if (n === 0 && !list.querySelector(".empty")) list.innerHTML = `<div class="empty">Nothing here.</div>`;
   });
 }
-// Mark every not-served dish on an order ready (the "ALL READY" button).
+// Mark every not-served dish on an order ready (the "ALL READY" button). Update the board
+// SURGICALLY (move just this card to Ready), NOT a whole-board render() — a full repaint
+// re-buckets/rebuilds every ticket and eats a cook's concurrent tap on another card. Same
+// surgical approach as the single-✓ path (markItemReady → moveCardToReady).
 function markOrderReady(orderId) {
+  pendingReadyOrders.add(orderId); // legacy-order overlay so a slow-DB reconcile can't revert it
   setLocalReady((i) => i.order_id === orderId);
+  const o = (state.orders || []).find((x) => x.id === orderId);
+  if (o) {
+    if (orderPhase(o) === "ready") moveCardToReady(o); // fully ready → slide its card over
+    else { // (defensive) still cooking somehow → just refresh this one card in place
+      const card = document.querySelector(`.ticket[data-ticket="${o.id}"]`);
+      if (card) { const html = ticketHtml(o); const tmp = document.createElement("div"); tmp.innerHTML = html; const fresh = tmp.firstElementChild; if (fresh) { fresh.__kdsHtml = html; card.replaceWith(fresh); } }
+    }
+  }
   api("POST", `/orders/${orderId}/ready`).then(scheduleReadyReconcile).catch((e) => { toast("Failed: " + e.message); load(); });
 }
 
@@ -335,16 +486,39 @@ function renderDishes() {
       <button class="btn ${out ? "danger" : ""}" data-86="${esc(d.id)}" data-out="${out ? "1" : "0"}">${out ? "SOLD OUT" : "available"}</button>
     </div>`;
   }).join("");
+  // OPTIMISTIC sold-out toggle (audit polish 2026-07-07): flip the button + the local
+  // dish tag INSTANTLY (no ~1.5s dead window), disable to swallow a rapid double-tap, and
+  // roll back on failure. No full load() per tap — the server POST fires the guest 86-sync
+  // breadcrumb itself, and the kitchen tickets don't render sold-out, so a whole-board
+  // refetch was pure waste. Mirrors the ticket-✓ optimistic+surgical pattern.
+  const set86 = (btn, out) => {
+    btn.dataset.out = out ? "1" : "0";
+    btn.textContent = out ? "SOLD OUT" : "available";
+    btn.classList.toggle("danger", out);
+    btn.closest(".dish-row")?.classList.toggle("is-out", out);
+    const dish = state.dishes.find((d) => d.id === btn.dataset["86"]);
+    if (dish) { const tags = new Set(dish.tags || []); out ? tags.add("sold-out") : tags.delete("sold-out"); dish.tags = [...tags]; }
+  };
   document.querySelectorAll("[data-86]").forEach((b) => (b.onclick = async () => {
-    const id = b.dataset["86"], wasOut = b.dataset.out === "1";
+    if (b.disabled) return;
+    const id = b.dataset["86"], wasOut = b.dataset.out === "1", nowOut = !wasOut;
+    b.disabled = true; set86(b, nowOut);
     try {
-      await api("POST", `/dishes/${id}/sold-out`, { value: !wasOut });
-      await load(); // load() already re-renders the open 86 board (its drawer is open here)
+      await api("POST", `/dishes/${id}/sold-out`, { value: nowOut });
       const dish = state.dishes.find((d) => d.id === id);
       // No confirm — kitchens move fast — but always an UNDO escape hatch.
       toast(`${dish ? dish.title : "Dish"} ${wasOut ? "back on the menu" : "marked SOLD OUT"}`,
-        async () => { await api("POST", `/dishes/${id}/sold-out`, { value: wasOut }); await load(); });
-    } catch (e) { toast("Failed: " + e.message); }
+        async () => {
+          if (b.disabled) return;
+          b.disabled = true; set86(b, wasOut);
+          try { await api("POST", `/dishes/${id}/sold-out`, { value: wasOut }); }
+          catch (e) { set86(b, nowOut); toast("Undo failed: " + e.message); }
+          finally { b.disabled = false; }
+        });
+    } catch (e) {
+      set86(b, wasOut); // roll back the optimistic flip
+      toast("Failed: " + e.message);
+    } finally { b.disabled = false; }
   }));
 }
 
@@ -451,7 +625,14 @@ async function loadTables(tables) {
   let orders = (state.orders || []).filter((o) => !changedTables.has(String(o.table_number)));
   orders = dedupeById(orders.concat(freshOrders));
   orders.sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || ""))); // ascending, same as liveOrdersAndItems
-  state.orders = orders;
+  // Re-apply the LEGACY-order optimistic overlay (see load()) so a just-ALL-READY'd legacy
+  // order (dishes in orders[].items, no order_items rows) doesn't revert to cooking on a
+  // targeted refetch that landed before the server caught up.
+  state.orders = pendingReadyOrders.size
+    ? orders.map((o) => (pendingReadyOrders.has(o.id) && Array.isArray(o.items)
+        ? { ...o, items: o.items.map((i) => (i.status !== "served" ? { ...i, status: "ready" } : i)) }
+        : o))
+    : orders;
 
   // ITEMS — drop every item belonging to a purged order, add the slice's fresh items.
   // Re-apply the pendingReady overlay exactly like load() so a mid-rush ✓ doesn't flicker.
@@ -529,10 +710,11 @@ function printKot(order, itemRows, restaurant) {
 //  • Prints are SERIALIZED (spaced) so a burst doesn't stack N blocking dialogs at once
 //    in a non-kiosk browser (partially mitigates M7; kiosk mode prints silently anyway).
 const printedIds = new Set();
-function autoPrintNew(autoOn, orders, allItems, restaurant) {
-  if (!autoOn || document.hidden) return;
-  const queue = (orders || []).filter((o) => o.status === "received" && !printedIds.has(o.id));
-  if (!queue.length) return;
+// Serialized (spaced) printer for a queue of orders — the ONE place that actually prints,
+// so print-tracking (printedIds) stays consistent and a burst can't stack N blocking
+// dialogs at once in a non-kiosk browser. Paused while the tab is hidden mid-burst.
+function printQueue(queue, allItems, restaurant) {
+  if (!queue || !queue.length) return;
   let i = 0;
   const step = () => {
     if (document.hidden || i >= queue.length) return; // paused if tab hidden mid-burst
@@ -542,10 +724,25 @@ function autoPrintNew(autoOn, orders, allItems, restaurant) {
   };
   step();
 }
+function autoPrintNew(autoOn, orders, allItems, restaurant) {
+  if (!autoOn || document.hidden) return;
+  printQueue((orders || []).filter((o) => o.status === "received" && !printedIds.has(o.id)), allItems, restaurant);
+}
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) autoPrintNew(state.autoPrintKot, state.orders || [], state.items || [], state.restaurant);
+    if (document.hidden || !state.autoPrintKot) return;
+    // On becoming visible, print EVERY not-yet-printed order that still needs a ticket —
+    // not just those still 'received'. An order that advanced to 'preparing' (accepted by
+    // the waiter/manager) WHILE the tab was hidden never had a chance to print (the browser
+    // suppresses iframe printing on a hidden tab AND autoPrintNew only looks at 'received'),
+    // so it would be lost. printedIds guards against a double-print. (bug: auto-print skips
+    // a KOT accepted while the tab was hidden)
+    printQueue((state.orders || []).filter((o) => (o.status === "received" || o.status === "preparing") && !printedIds.has(o.id)), state.items || [], state.restaurant);
   });
+  // When the offline outbox drains on reconnect, snap the board to server truth at once
+  // (a replayed action could have been rejected → the optimistic tile would otherwise stay
+  // wrong until the 60s backstop). outbox.js dispatches this after a flush. (audit 2026-07-07)
+  window.addEventListener("lfh:outbox-flushed", () => { if (!document.hidden) load().catch(() => {}); });
 }
 
 async function load() {
@@ -564,15 +761,27 @@ async function load() {
     // never double-prints (printedIds).
     autoPrintNew(!!data.autoPrintKot, data.orders, data.items, data.restaurant);
   } else {
-    // FIRST load (no baseline yet): treat every current received order as already
-    // handled so we never retro-print the existing board on the next pass (bug H7's
-    // sibling — printedIds is separate from knownIds, so it needs its own baseline).
-    for (const o of data.orders) if (o.status === "received") printedIds.add(o.id);
+    // FIRST load (no baseline yet): treat EVERY order already on the board as already
+    // handled so we never retro-print the existing board (bug H7's sibling — printedIds is
+    // separate from knownIds, so it needs its own baseline). Baseline ALL statuses, not just
+    // 'received': otherwise the visibility-flush (which now also prints 'preparing') would
+    // retroactively print orders that were already cooking before this panel even opened.
+    for (const o of data.orders) printedIds.add(o.id);
   }
   state.autoPrintKot = !!data.autoPrintKot;
   state.restaurant = data.restaurant || null;
   state.knownIds = ids;
-  state.orders = data.orders; state.dishes = data.dishes;
+  state.dishes = data.dishes;
+  // Re-apply the LEGACY-order optimistic overlay so a just-ALL-READY'd legacy order (dishes
+  // in orders[].items, no order_items rows) doesn't revert to cooking when this refetch
+  // replaces state.orders before the server caught up. (pendingReady below only covers the
+  // order_items rows in state.items — legacy items have no id, so they need this order-keyed
+  // overlay too.) Cleared by the reconcile once the rush settles.
+  state.orders = pendingReadyOrders.size
+    ? data.orders.map((o) => (pendingReadyOrders.has(o.id) && Array.isArray(o.items)
+        ? { ...o, items: o.items.map((i) => (i.status !== "served" ? { ...i, status: "ready" } : i)) }
+        : o))
+    : data.orders;
   state.platform = data.platform || []; state.platformAccept = !!data.platformAccept;
   // Show WHICH restaurant this panel is scoped to (multi-tenant). Set here in load()
   // — NOT in render() — because render() is skipped when the board signature is
@@ -597,6 +806,8 @@ $("#muteBtn").onclick = () => {
   state.muted = !state.muted;
   localStorage.setItem("kds_muted", state.muted ? "1" : "0");
   $("#muteBtn").textContent = state.muted ? "🔕" : "🔔";
+  if (!state.muted) primeAudio(); // unmuting IS a gesture — unlock audio + re-check the nudge
+  updateSoundNudge();
 };
 // 86-board drawer. open/close are wrapped so the phone's BACK button closes the
 // drawer (via LFH_BACK) instead of leaving the kitchen panel.
@@ -617,6 +828,8 @@ $("#dishSearch").oninput = renderDishes;
 $("#viewBtn").onclick = () => { view = view === "wall" ? "columns" : "wall"; localStorage.setItem("kds_view", view); applyView(); };
 setInterval(() => ($("#clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })), 1000);
 
+bindDelegation(); // ONE delegated click handler for all ticket buttons (survives tile patching)
+updateSoundNudge(); // show the "enable sound" affordance if this is an untouched wall display
 applyView(); // honour the saved layout (sets which <main> shows) before the first paint
 load().catch((e) => toast("Can't reach the database: " + e.message));
 // Realtime: refetch only when an order/dish actually changes (instant), instead of

@@ -101,6 +101,23 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .dtitle { font-size: 14.5px; font-weight: 600; }
 .dtitle small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
 
+/* "Tap to enable sound" nudge — a big one-tap affordance for a wall-mounted KDS that
+   nobody ever touches (WebAudio stays suspended until a user gesture, so the chime would
+   be silent forever). Shown by app.js ONLY while sound is on but the AudioContext isn't
+   running; the tap that dismisses it IS the gesture that unlocks audio. Sits just above
+   the toasts so it never covers them. */
+.sound-nudge {
+  position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%);
+  z-index: 60; display: inline-flex; align-items: center; gap: 8px;
+  background: var(--amber); color: #201500; border: 0; border-radius: 999px;
+  padding: 12px 22px; font-family: inherit; font-size: 15px; font-weight: 800;
+  cursor: pointer; box-shadow: 0 8px 26px rgba(0,0,0,0.45);
+  animation: nudge-pulse 1.8s ease-in-out infinite;
+}
+.sound-nudge:active { transform: translateX(-50%) scale(0.97); }
+@keyframes nudge-pulse { 0%, 100% { box-shadow: 0 8px 26px rgba(0,0,0,0.45); } 50% { box-shadow: 0 10px 30px rgba(230,180,80,0.6); } }
+@media (prefers-reduced-motion: reduce) { .sound-nudge { animation: none; } }
+
 /* toasts (bottom-centre, with the UNDO escape hatch) */
 .toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 50; }
 .toast { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 11px 16px; font-size: 14px; display: flex; gap: 14px; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }

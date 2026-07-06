@@ -74,13 +74,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // showing here (and matches the manager). Was a day-clipped fetch before.
       const [live, dishes, platform, settings, restaurant] = await Promise.all([
         liveOrdersAndItems(rid, undefined, true), // activeOnly: received/preparing only (board never shows served)
-        sb.from("menu_items").select("id,title,category,tags").eq("restaurant_id", rid).order("category"),
+        sb.from("menu_items").select("id,title,category,tags").eq("restaurant_id", rid).order("category").limit(2000),
         // active platform (Zomato/Swiggy/takeaway) tickets — separate table, so dine-in is untouched.
         // Explicit columns (egress): the kitchen renders source/items/status/kot_no/created_at/
         // customer_name and NEVER reads `payload` (the raw webhook JSON) or `status_history` — the
         // two big JSON columns — so we drop ONLY those and keep every small column (verified unused
         // in the route + kitchen/app.js, so the board looks identical). (owner 2026-06-29)
-        sb.from("aggregator_orders").select("id, source, external_id, status, order_id, created_at, customer_name, customer_phone, items, total, kot_no, accepted_at, accepted_by, updated_at, restaurant_id").eq("restaurant_id", rid).in("status", ["new", "accepted", "preparing", "ready"]).order("created_at"),
+        sb.from("aggregator_orders").select("id, source, external_id, status, order_id, created_at, customer_name, customer_phone, items, total, kot_no, accepted_at, accepted_by, updated_at, restaurant_id").eq("restaurant_id", rid).in("status", ["new", "accepted", "preparing", "ready"]).order("created_at").limit(500),
         sb.from("settings").select("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle(),
         // THIS restaurant's identity, so the kitchen header shows which restaurant the
         // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
