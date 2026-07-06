@@ -31,6 +31,8 @@ import {
   checkLocation, tableStatus, joinSession, getSessionState, requestAccess,
   placeSessionOrder, callWaiterSession, setMemberName,
 } from "@/lib/session";
+// Offline: save the order on-device and send it automatically when back online.
+import { enqueueGuestOrder } from "@/lib/guestOutbox";
 // Phone back button: while this sheet is open, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
 // Which restaurant this guest is ordering at (from the /r/<slug> URL).
@@ -190,7 +192,16 @@ export default function SessionGate() {
     // EMAIL SEAM: when email verification lands, gate this on a verified member.
     // Only the item lines + allergies travel to the server — no prices. The
     // server prices the whole bill itself (see lfh_place_order).
-    const pl = p.payload as { items: unknown[]; allergies: string[] };
+    const pl = p.payload as { items: unknown[]; allergies: string[]; track?: { tableNumber?: string; total?: number; itemCount?: number; items?: { title: string; qty: number }[] } };
+    // OFFLINE: save the order on-device and send it automatically on reconnect
+    // (at-most-once via the guest outbox). The online path below is unchanged.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      await enqueueGuestOrder({ mode: "session", token: s.token, items: pl.items, allergies: pl.allergies || [], track: pl.track });
+      fireDone({ ok: true, action: "order", queued: true });
+      toast("Saved — will send when you're back online", "offline");
+      close();
+      return;
+    }
     const r = await placeSessionOrder(s.token, pl.items, pl.allergies || []);
     if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked" }); setStep("blocked"); return; } // table was blocked by staff
     if (r.ok) { fireDone({ ok: true, action: "order", orderId: r.order_id }); toast("Order placed", "to the kitchen"); close(); } // success
