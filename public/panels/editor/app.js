@@ -6377,6 +6377,31 @@ document.addEventListener("keydown", (e) => {
 // a moment), and the data fills into it when it arrives.
 setTab(state.tab);
 
+// ── Hardware BACK button ↔ modals ────────────────────────────────────────────
+// The manager panel opens ~10 different modals ad-hoc (appendChild + .remove()) and
+// never wired any of them to the phone's BACK button, so Back left the whole panel
+// mid-action instead of closing the open modal (bug 2026-07-06). Rather than hand-wire
+// each open/close (and risk missing one, now or in future), a single adapter WATCHES
+// the DOM: when an overlay appears it registers a back layer that closes it; when the
+// overlay is removed (by ✕ / backdrop / Esc / completion OR by a back press) it drops
+// the layer. Every editor overlay carries one of these classes, so this covers them all
+// AND any future modal that follows the same convention. Uses the sanctioned LFH_BACK
+// API (backstack.js) — no hand-rolled history in here.
+(function wireOverlayBack() {
+  if (!window.LFH_BACK || !document.body) return;
+  const SEL = ".sx-modal-overlay, .bill-overlay, .confirm-overlay, .disc-overlay, .pay-overlay";
+  const off = new WeakMap(); // overlay element → its LFH_BACK unregister fn
+  const track = (elm) => { if (off.has(elm)) return; off.set(elm, LFH_BACK.layer("editor-modal", () => { try { elm.remove(); } catch (e) {} })); };
+  const untrack = (elm) => { const fn = off.get(elm); if (fn) { off.delete(elm); fn(); } };
+  const matches = (n) => n.nodeType === 1 && typeof n.matches === "function" && n.matches(SEL);
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      m.addedNodes.forEach((n) => { if (matches(n)) track(n); });
+      m.removedNodes.forEach((n) => { if (n.nodeType === 1 && off.has(n)) untrack(n); });
+    }
+  }).observe(document.body, { childList: true });
+})();
+
 // ══════════════════════════════════════════════════════════════════════════════
 // HIERARCHY X-RAY (2026-07-05, refined) — the same panel renders differently by WHO
 // opened it:

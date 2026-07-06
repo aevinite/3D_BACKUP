@@ -65,8 +65,12 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="/panels/maint.js"></script>
   <script src="/panels/realtime.js"></script>
+  <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
+       (the guest app + kitchen/tablet already load this; the manager panel didn't,
+       so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
+  <script src="/panels/backstack.js"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=20260706f"></script>
+  <script src="/panels/editor/app.js?v=20260706g"></script>
 </body>
 </html>
