@@ -48,6 +48,8 @@ const state = {
   isNew: false,
   search: "",
   catFilter: "", // Dishes tab: selected category slug to filter by ("" = All)
+  bulkMode: false,          // Dishes tab: multi-select mode (mark sold-out / available / delete)
+  bulkSel: new Set(),       // ids of the dishes ticked in bulk mode
   board: { sessions: [], members: [], items: [], requests: [], blocklist: [] }, // v2 sessions live board (TIER 2: only the SELECTED table's full slice now)
   // Banquet module (mig 130): its items load on first tab open only. qty maps
   // item id → plate count in the "generate bill" builder; table = the target table.
@@ -411,6 +413,9 @@ function renderCatFilter() {
 function renderList() {
   const ul = $("#list");
   ul.innerHTML = ""; // wipe the old list before drawing the new one
+  // In Dishes multi-select, mark the list so mobile CSS makes it a normal vertical list
+  // (its default phone layout is a horizontal swipe strip, which is awkward for ticking rows).
+  ul.classList.toggle("list--bulk", state.bulkMode && state.tab === "items");
   if (state.tab === "general") {
     // Settings SECTIONS (owner, 2026-07-03): the sidebar lists the setting groups —
     // clicking one shows only that group's cards on the right (see formGeneral's
@@ -518,8 +523,12 @@ function renderList() {
       return hay.includes(q);
     })
     .forEach((r) => {
-      const active = state.sel && !state.isNew && recKey(r) === recKey(state.sel); // is this the row being edited?
+      const isItems = state.tab === "items";
+      const bulk = state.bulkMode && isItems;            // multi-select mode (Dishes only)
+      const checked = bulk && state.bulkSel.has(r.id);
+      const active = !bulk && state.sel && !state.isNew && recKey(r) === recKey(state.sel); // row being edited
       const hidden = state.tab !== "items" && r.active === false; // greyed-out "hidden from menu" rows
+      const soldOut = isItems && Array.isArray(r.tags) && r.tags.includes("sold-out"); // 86'd dish
       // Build the little thumbnail on the left of each list row: a photo for
       // dishes, a coloured icon for categories, an emoji for filters.
       let thumb;
@@ -533,15 +542,21 @@ function renderList() {
         thumb = `<div class="thumb">${esc(r.icon || "🏷️")}</div>`;
       }
       const li = el(
-        `<li class="list-item ${active ? "active" : ""} ${hidden ? "hidden-row" : ""}">
+        `<li class="list-item ${active ? "active" : ""} ${checked ? "bulk-on" : ""} ${hidden ? "hidden-row" : ""} ${soldOut ? "row-soldout" : ""}">
+          ${bulk ? `<span class="bulk-cb ${checked ? "on" : ""}" aria-hidden="true">${checked ? "✓" : ""}</span>` : ""}
           ${thumb}
           <div class="meta">
-            <b>${esc(recLabel(r))}${state.tab === "items" && r.dish_no != null ? ` <span class="dish-no">#${esc(String(r.dish_no))}</span>` : ""}${hidden ? '<span class="badge-off">hidden</span>' : ""}</b>
+            <b>${esc(recLabel(r))}${state.tab === "items" && r.dish_no != null ? ` <span class="dish-no">#${esc(String(r.dish_no))}</span>` : ""}${soldOut ? '<span class="badge-off">sold out</span>' : ""}${hidden ? '<span class="badge-off">hidden</span>' : ""}</b>
             <small>${esc(recKey(r) || "")}</small>
           </div>
         </li>`
       );
       li.onclick = async () => {
+        if (bulk) { // toggle this dish's selection instead of opening it
+          if (state.bulkSel.has(r.id)) state.bulkSel.delete(r.id); else state.bulkSel.add(r.id);
+          renderList();
+          return;
+        }
         // Guard unsaved edits before switching rows (see confirmDiscardIfDirty).
         if (!(await confirmDiscardIfDirty())) return;
         // INSTANT feedback: highlight this row right now, before any heavy
@@ -552,6 +567,65 @@ function renderList() {
       };
       ul.appendChild(li);
     });
+  // Dishes multi-select: a sticky action bar at the top of the list.
+  if (state.bulkMode && state.tab === "items") {
+    const n = state.bulkSel.size;
+    ul.insertAdjacentHTML("afterbegin", `<li class="bulk-bar">
+      <span class="bulk-count">${n} selected</span>
+      <span class="bulk-acts">
+        <button class="btn small" type="button" data-bulk="soldout" ${n ? "" : "disabled"}>🚫 Sold out</button>
+        <button class="btn small" type="button" data-bulk="avail" ${n ? "" : "disabled"}>✅ Available</button>
+        <button class="btn small danger" type="button" data-bulk="delete" ${n ? "" : "disabled"}>🗑 Delete</button>
+        <button class="btn small" type="button" data-bulk="cancel">Done</button>
+      </span></li>`);
+    const on = (act, fn) => { const b = ul.querySelector(`[data-bulk="${act}"]`); if (b) b.onclick = fn; };
+    on("soldout", () => bulkSoldOut(true));
+    on("avail", () => bulkSoldOut(false));
+    on("delete", bulkDeleteDishes);
+    on("cancel", () => { state.bulkMode = false; state.bulkSel.clear(); syncBulkBtn(); renderList(); });
+  }
+}
+// syncBulkBtn: keep the sidebar "Select" button in step with bulk mode (shown on Dishes only).
+function syncBulkBtn() {
+  const b = document.getElementById("bulkBtn");
+  if (!b) return;
+  b.hidden = state.tab !== "items";
+  b.classList.toggle("primary", state.bulkMode);
+  b.textContent = state.bulkMode ? "✓ Done" : "☑︎ Select";
+}
+// bulkSoldOut: add/remove the "sold-out" tag on every selected dish (partial {id,tags} write).
+async function bulkSoldOut(makeSoldOut) {
+  const ids = [...state.bulkSel];
+  if (!ids.length) return;
+  let done = 0;
+  for (const id of ids) {
+    const dish = (state.data.items || []).find((d) => d.id === id);
+    if (!dish) continue;
+    const tags = Array.isArray(dish.tags) ? dish.tags.slice() : [];
+    const has = tags.includes("sold-out");
+    if (makeSoldOut === has) continue; // already in the wanted state
+    if (makeSoldOut) tags.push("sold-out"); else tags.splice(tags.indexOf("sold-out"), 1);
+    try { await api("POST", "/items", { id, tags }); dish.tags = tags; done++; } catch (e) { /* skip one, keep going */ }
+  }
+  toast(`${done} dish${done === 1 ? "" : "es"} marked ${makeSoldOut ? "sold-out" : "available"}`, "ok");
+  renderList();
+}
+// bulkDeleteDishes: delete every selected dish, with a single confirm + a bulk Undo.
+async function bulkDeleteDishes() {
+  const ids = [...state.bulkSel];
+  if (!ids.length) return;
+  if (!(await confirmDialog(`Delete ${ids.length} dish${ids.length === 1 ? "" : "es"}?`, "Delete"))) return;
+  const snaps = (state.data.items || []).filter((d) => ids.includes(d.id)).map((d) => ({ ...d }));
+  let done = 0;
+  for (const id of ids) { try { await api("DELETE", "/items/" + encodeURIComponent(id)); done++; } catch (e) { /* keep going */ } }
+  state.bulkMode = false; state.bulkSel.clear(); syncBulkBtn();
+  await loadAll(); renderList(); renderEditor();
+  toast(`Deleted ${done} dish${done === 1 ? "" : "es"}`, "ok", { label: "Undo", fn: async () => {
+    let r = 0;
+    for (const s of snaps) { try { const p = { ...s }; delete p.created_at; delete p.updated_at; p.__create = true; await api("POST", "/items", p); r++; } catch (e) {} }
+    toast(`Restored ${r}`, "ok");
+    await loadAll(); renderList(); renderEditor();
+  } }, 8000);
 }
 
 // ---------- select / new ----------
@@ -1237,6 +1311,8 @@ function formGeneral(s) {
     ${s.auto_print_kot_allowed
       ? toggle("Auto-print the KOT when a new order arrives", "auto_print_kot", s.auto_print_kot === true)
       : `<div class="hint">Auto-print isn't enabled for this restaurant yet — ask your admin to turn it on.</div>`}
+    <button type="button" class="btn" id="kotPreviewBtn" style="margin-top:14px">🖨 Preview a sample KOT</button>
+    <p style="color:var(--muted);font-size:12px;margin:8px 0 0">Opens a test ticket and the print dialog — use it to check the printer &amp; the ticket layout.</p>
   </div>`;
   }
   if (sec === "sessions") {
@@ -1690,6 +1766,7 @@ function ordersPreviousHtml(previous, kind = "previous") {
     : stype === "bill" ? String(b.billNo ?? "")
     : stype === "table" ? String(b.table)
     : stype === "cust" ? b.customer.toLowerCase()
+    : stype === "amount" ? String(Math.round(Number(b.total) || 0)) // ₹ total, whole rupees
     : new Date(b.ts).toISOString().slice(0, 10);
   const matchB = (b) => !q || (stype === "date" ? fieldOf(b) === q : fieldOf(b).includes(q));
   const rankB = (b) => (!q ? 0 : fieldOf(b).startsWith(stype === "bill" ? q.replace(/[^0-9]/g, "") : q) ? 0 : 1);
@@ -1701,6 +1778,7 @@ function ordersPreviousHtml(previous, kind = "previous") {
           <option value="inv"${stype === "inv" ? " selected" : ""}>Invoice no.</option>
           <option value="bill"${stype === "bill" ? " selected" : ""}>Bill no.</option>
           <option value="table"${stype === "table" ? " selected" : ""}>Table</option>
+          <option value="amount"${stype === "amount" ? " selected" : ""}>Amount ₹</option>
           <option value="cust"${stype === "cust" ? " selected" : ""}>Customer</option>
           <option value="date"${stype === "date" ? " selected" : ""}>Date</option>
         </select>
@@ -3181,6 +3259,9 @@ function bindEditor() {
     });
   };
 
+  // Kitchen settings: "Preview a sample KOT" test-print button.
+  { const kb = document.getElementById("kotPreviewBtn"); if (kb) kb.onclick = previewSampleKOT; }
+
   // ---- "User setting" card (Settings tab): the manager's own team ----
   if (state.tab === "general" && !state.staffLoaded) loadStaffTeam();
 
@@ -3433,10 +3514,11 @@ async function removeRecord() {
   const it = state.sel;
   // Use the app's own styled confirm dialog (every other delete does), not the
   // browser's plain native popup — keeps the look consistent.
-  if (!(await confirmDialog(`Delete "${recLabel(it)}"? This can't be undone.`, "Delete"))) return;
+  if (!(await confirmDialog(`Delete "${recLabel(it)}"?`, "Delete"))) return;
+  const kind = state.tab; // the deleted record's kind (items/categories/filters)
+  const restored = { ...it }; // snapshot for Undo
   try {
     await api("DELETE", "/" + state.tab + "/" + encodeURIComponent(recKey(it)));
-    toast("Deleted", "ok");
     // If we just deleted the category the Dishes list is filtered by, clear the filter —
     // otherwise the Dishes tab filters to a category that no longer exists (looks empty).
     if (state.tab === "categories" && state.catFilter === recKey(it)) state.catFilter = "";
@@ -3444,9 +3526,43 @@ async function removeRecord() {
     state.isNew = false;
     await loadAll();
     renderEditor();
+    // 6s Undo — re-creates the record from the snapshot (safety net for a misclick).
+    toast(`Deleted "${recLabel(restored)}"`, "ok", { label: "Undo", fn: async () => {
+      try {
+        const payload = { ...restored }; delete payload.created_at; delete payload.updated_at; payload.__create = true;
+        await api("POST", "/" + kind, payload);
+        toast("Restored ✓", "ok");
+        if (state.tab === kind) { await loadAll(); renderList(); renderEditor(); }
+      } catch (e) { toast("Couldn't undo: " + e.message, "err"); }
+    } }, 6000);
   } catch (e) {
     toast("Delete failed: " + e.message, "err");
   }
+}
+
+// previewSampleKOT: open a sample kitchen ticket + the print dialog, so the owner can test
+// the printer and see the KOT layout from any device. Uses this restaurant's name (not #1's).
+function previewSampleKOT() {
+  const now = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+  const rest = (billIdentity(state.data.settings).name) || "Restaurant";
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Sample KOT</title>
+    <style>body{font-family:ui-monospace,monospace;max-width:280px;margin:0 auto;padding:12px;color:#000}
+    h2{text-align:center;margin:2px 0 6px;font-size:16px} .r{display:flex;justify-content:space-between;font-size:13px;margin:3px 0}
+    hr{border:0;border-top:1px dashed #000;margin:8px 0} .foot{text-align:center;font-size:12px;margin-top:10px}</style></head>
+    <body onload="setTimeout(function(){window.print()},80)">
+      <h2>KITCHEN TICKET</h2>
+      <div class="r"><span>${esc(rest)}</span><span>#SAMPLE</span></div>
+      <div class="r"><span>Table 5</span><span>${esc(now)}</span></div>
+      <hr>
+      <div class="r"><b>2×</b><span>Margherita Pizza</span></div>
+      <div class="r"><b>1×</b><span>Garlic Bread</span></div>
+      <div class="r"><b>1×</b><span>Coke — no ice</span></div>
+      <hr>
+      <div class="foot">— sample test print —</div>
+    </body></html>`;
+  const w = window.open("", "_blank", "width=340,height=560");
+  if (!w) { toast("Allow pop-ups to preview the KOT", "err"); return; }
+  w.document.write(html); w.document.close();
 }
 
 // ---------- v2 dining sessions: live board ----------
@@ -6241,6 +6357,10 @@ function setTab(tab) {
   // The search box and "+ New" don't apply to the General/Orders/Tables tabs.
   const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "platform" || tab === "log" || tab === "features" || tab === "dash" || tab === "banquet" || tab === "ratings";
   $("#newBtn").style.display = noList ? "none" : "";
+  // Multi-select is Dishes-only; leaving the Dishes tab exits it. syncBulkBtn shows/hides
+  // the "Select" button and reflects the current mode.
+  if (tab !== "items") { state.bulkMode = false; state.bulkSel.clear(); }
+  syncBulkBtn();
   $("#search").style.display = noList ? "none" : "";
   // Tables tab: drop the whole left sidebar (it only held a dead "Floor map" label).
   // The floor already has its own left tiles + right detail, so it takes the full
@@ -6650,6 +6770,8 @@ window.addEventListener("resize", () => {
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = async () => { if (await confirmDiscardIfDirty()) setTab(t.dataset.tab); }));
 document.querySelectorAll(".subtab").forEach((t) => (t.onclick = async () => { if (await confirmDiscardIfDirty()) setTab(t.dataset.tab); }));
 $("#newBtn").onclick = async () => { if (await confirmDiscardIfDirty()) newRecord(); }; // the "+ New" button
+// Dishes multi-select toggle.
+{ const bb = document.getElementById("bulkBtn"); if (bb) bb.onclick = () => { state.bulkMode = !state.bulkMode; state.bulkSel.clear(); syncBulkBtn(); renderList(); }; }
 // Last-ditch guard: refresh / close-tab while a form has unsaved edits → browser prompt.
 window.addEventListener("beforeunload", (e) => { if (editorDirty()) { e.preventDefault(); e.returnValue = ""; } });
 { const _ib = document.getElementById("reportIssueBtn"); if (_ib) _ib.onclick = openIssueModal; } // 🚩 report an issue
@@ -6676,6 +6798,28 @@ document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
     if (state.sel) save();
+    return;
+  }
+  // Power-user shortcuts — desktop only, and ONLY when you're not typing in a field or a
+  // modal is open, so they never swallow a keystroke. (Ctrl/Cmd+S above still saves.)
+  const el = document.activeElement;
+  const typing = el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
+  const modalOpen = document.querySelector(".sx-modal-overlay, .confirm-overlay, .bill-overlay, .disc-overlay, .pay-overlay");
+  if (typing || modalOpen || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === "/") { // focus the search box
+    const sb = document.getElementById("search");
+    if (sb && sb.style.display !== "none") { e.preventDefault(); sb.focus(); sb.select && sb.select(); }
+    return;
+  }
+  if (e.key.toLowerCase() === "n") { // + New (only on a list tab where it's shown)
+    const nb = document.getElementById("newBtn");
+    if (nb && nb.style.display !== "none") { e.preventDefault(); nb.click(); }
+    return;
+  }
+  if (/^[1-9]$/.test(e.key)) { // jump to the Nth visible top tab
+    const tabs = [...document.querySelectorAll(".tabs .tab")].filter((t) => !t.hidden && t.offsetParent !== null);
+    const idx = Number(e.key) - 1;
+    if (tabs[idx]) { e.preventDefault(); tabs[idx].click(); }
   }
 });
 

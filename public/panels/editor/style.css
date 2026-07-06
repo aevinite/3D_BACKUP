@@ -141,6 +141,14 @@ body {
 .list-item .meta small { color: var(--muted); font-size: 12px; }
 .list-item.hidden-row { opacity: .45; }
 .badge-off { font-size: 10px; background: var(--line); color: var(--muted); padding: 1px 6px; border-radius: 6px; margin-left: 6px; }
+/* Dishes multi-select (bulk edit) */
+.list-item .bulk-cb { flex: 0 0 20px; width: 20px; height: 20px; border-radius: 6px; border: 2px solid var(--line); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: #fff; }
+.list-item .bulk-cb.on { background: var(--gold); border-color: var(--gold); }
+.list-item.bulk-on { background: color-mix(in srgb, var(--gold) 15%, transparent); border-color: var(--gold); }
+.list-item.row-soldout .meta b { text-decoration: line-through; text-decoration-color: var(--muted); }
+.bulk-bar { position: sticky; top: -8px; z-index: 6; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 10px; margin: -8px -8px 8px; background: var(--panel); border-bottom: 1px solid var(--gold); list-style: none; cursor: default; }
+.bulk-bar .bulk-count { font-weight: 700; font-size: 13px; white-space: nowrap; }
+.bulk-bar .bulk-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
 /* Editor-only dish code (#7) shown next to a dish on the list + on order/bill
    lines. Subtle, monospace digits so it reads as a reference, not a price. */
 .dish-no { font-size: 11px; font-weight: 700; color: var(--gold); opacity: 0.75; font-variant-numeric: tabular-nums; }
@@ -1226,6 +1234,11 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
     overflow-x: auto; overflow-y: hidden;   /* scroll sideways, not down */
     scroll-snap-type: x proximity;          /* cards gently snap into place */
   }
+  /* Multi-select mode: a horizontal swipe strip is useless for ticking rows — flip the list
+     back to a normal full-width vertical list on the phone so selection is easy. */
+  .list.list--bulk { flex-direction: column; flex-wrap: nowrap; overflow-x: hidden; overflow-y: auto; scroll-snap-type: none; }
+  .list.list--bulk .list-item { width: auto; flex: 0 0 auto; scroll-snap-align: none; }
+  .list.list--bulk .bulk-bar { width: auto; }
   .list-item {
     flex: 0 0 auto; width: 210px;           /* each card is a fixed width */
     scroll-snap-align: start;
