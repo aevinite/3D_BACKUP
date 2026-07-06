@@ -47,6 +47,10 @@ export async function POST(req: NextRequest) {
   if ("tagline" in body) patch.tagline = body.tagline ? String(body.tagline).slice(0, 80) : null;
   if ("logo_text" in body) patch.logo_text = body.logo_text ? String(body.logo_text).slice(0, 60) : null;
   if (!Object.keys(patch).length) return bad("Nothing to update.");
+  // Confirm the restaurant exists — a valid-but-unknown id would update 0 rows and still
+  // return {ok:true}, a silent "success" that changed nothing (audit 2026-07-06).
+  const exists = (await sb.from("restaurants").select("id").eq("id", rid).maybeSingle()).data;
+  if (!exists) return bad("Restaurant not found.", 404);
   const { error } = await sb.from("restaurants").update(patch).eq("id", rid);
   if (error) return bad(error.message, 500);
   await logAction("admin", "restaurant_branding", { actor: "admin", restaurant_id: rid, detail: `updated branding (${Object.keys(patch).join(", ")})` });

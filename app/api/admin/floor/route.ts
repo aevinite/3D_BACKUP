@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     ]);
     if (restsQ.error) return NextResponse.json({ error: restsQ.error.message }, { status: 500 });
     const rests = restsQ.data ?? [];
-    type StatRow = { restaurant_id: string; orders_today: number; active_orders: number; unpaid_orders: number };
+    type StatRow = { restaurant_id: string; orders_today: number; active_orders: number; unpaid_orders: number; paid_today: number; cancelled_today: number };
     const statsBy = new Map(((statsQ.data as StatRow[] | null) ?? []).map((s) => [s.restaurant_id, s]));
     const floors = await Promise.all(rests.map(async (r) => {
       const { data, error } = await supabaseAdmin.rpc("lfh_floor_state", { p_restaurant_id: r.id });
@@ -52,6 +52,8 @@ export async function GET(req: NextRequest) {
         ordersToday: Number(st?.orders_today) || 0,
         activeOrders: Number(st?.active_orders) || 0,
         unpaidOrders: Number(st?.unpaid_orders) || 0,
+        paidToday: Number(st?.paid_today) || 0,
+        cancelledToday: Number(st?.cancelled_today) || 0,
         error: error?.message || null,
       };
     }));

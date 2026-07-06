@@ -94,7 +94,11 @@ export default function AccessPage() {
         fetch(`/api/admin/restaurants/panels?restaurant_id=${id}`).then((r) => r.json()).catch(() => ({})),
         fetch(`/api/admin/restaurants/features?restaurant_id=${id}`).then((r) => r.json()).catch(() => ({})),
         fetch(`/api/admin/restaurants/access?restaurant_id=${id}`).then((r) => r.json()).catch(() => ({})),
-        fetch(`/api/owner/staff?restaurant_id=${id}`).then((r) => r.json()).catch(() => ({})),
+        // ?rid= scopes the fetch server-side to this restaurant's OWNER portfolio (a few
+        // restaurants) instead of ALL tenants — the admin branch ignored ?restaurant_id=
+        // and returned every restaurant's staff just to render one restaurant's overrides
+        // (egress; audit 2026-07-06). The client filter below narrows to this exact id.
+        fetch(`/api/owner/staff?rid=${id}`).then((r) => r.json()).catch(() => ({})),
       ]);
       setPanels(p.panels || {});
       setFeatures(f.features || {});

@@ -30,7 +30,14 @@ export async function GET(req: NextRequest) {
   if (!(await gate(req))) return bad("unauthorized", 401);
   const rid = req.nextUrl.searchParams.get("restaurant_id") || "";
   if (!rid) return bad("restaurant_id required");
-  const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rid)) return bad("Invalid restaurant_id.");
+  // Check the read actually succeeded AND the restaurant exists — swallowing the error and
+  // returning HTTP 200 with all-default toggles for a bad/unknown id was misleading (it
+  // looked like a real restaurant with no permissions granted; audit 2026-07-06).
+  const rq = await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle();
+  if (rq.error) return bad(rq.error.message, 500);
+  if (!rq.data) return bad("Restaurant not found.", 404);
+  const r = rq.data;
   const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice").eq("restaurant_id", rid).maybeSingle()).data as Record<string, string> | null;
   const manager = { ...MP_DEFAULT, ...(r?.manager_permissions && typeof r.manager_permissions === "object" ? r.manager_permissions : {}) };
   const tablet: Record<string, string> = {};

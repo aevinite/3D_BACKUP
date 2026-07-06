@@ -27,6 +27,9 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const rid = url.searchParams.get("restaurant_id") || "";
   if (!rid) return bad("restaurant_id required");
+  // Validate the shape BEFORE it reaches a uuid column — a malformed id used to surface a
+  // raw Postgres "invalid input syntax for type uuid" 500 to the client (audit 2026-07-06).
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rid)) return bad("Invalid restaurant_id.");
   const range = url.searchParams.get("range") || "7d";
   const { from, to } = rangeBounds(["today", "7d", "30d"].includes(range) ? range : "7d");
   const fromIso = from.toISOString();

@@ -36,6 +36,7 @@ export default function AdminCommand() {
   const [ordersToday, setOrdersToday] = useState<number | null>(null);
   const [openTablesNow, setOpenTablesNow] = useState<number | null>(null);
   const [maintenance, setMaintenance] = useState(false);
+  const [maintenanceNames, setMaintenanceNames] = useState<string[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [activity, setActivity] = useState<Action[]>([]);
@@ -46,7 +47,7 @@ export default function AdminCommand() {
   const load = useCallback(() => {
     fetch("/api/admin/restaurants", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setRests(j.restaurants || []); }).catch(() => {});
     fetch("/api/admin/overview", { cache: "no-store" }).then((r) => r.json()).then((j) => {
-      if (!j.error) { setMaintenance(!!j.maintenance); setOrdersToday(Number(j.ordersToday) || 0); setOpenTablesNow(Number(j.openTables) || 0); }
+      if (!j.error) { setMaintenance(!!j.maintenance); setMaintenanceNames(Array.isArray(j.maintenanceNames) ? j.maintenanceNames : []); setOrdersToday(Number(j.ordersToday) || 0); setOpenTablesNow(Number(j.openTables) || 0); }
     }).catch(() => {});
     // Per-restaurant live open-table counts (one pre-aggregated RPC round-trip —
     // for the admin cookie it returns every restaurant). We read ONLY openTables.
@@ -102,7 +103,10 @@ export default function AdminCommand() {
       {maintenance && (
         <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 12, display: "flex", alignItems: "center", gap: 12 }}>
           <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-danger)", fontSize: 15 }} aria-hidden="true" />
-          <div style={{ flex: 1, fontSize: 13 }}><b>A guest menu is in maintenance.</b></div>
+          <div style={{ flex: 1, fontSize: 13 }}>
+            <b>{maintenanceNames.length === 1 ? "1 guest menu is in maintenance" : `${maintenanceNames.length} guest menus are in maintenance`}.</b>
+            {maintenanceNames.length > 0 && <span className="adm-muted"> — {maintenanceNames.join(", ")}</span>}
+          </div>
           <Link href="/aevinite/settings" className="adm-btn">Settings</Link>
         </div>
       )}

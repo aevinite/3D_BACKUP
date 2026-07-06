@@ -66,11 +66,20 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  const totalCollectedThisYear = Math.round(rows.reduce((s, r) => s + r.paidThisYear, 0) * 100) / 100;
+  // The headline total is shown with a ₹ symbol, so only sum restaurants billed in INR —
+  // mixing a USD/EUR amount into a ₹ figure as if 1:1 would be simply wrong (audit
+  // 2026-07-06). Every row is INR today; this keeps the number honest if a non-INR plan
+  // is ever entered (that currency would need its own line, a later feature).
+  const totalCollectedThisYear = Math.round(
+    rows.filter((r) => (r.currency || "INR") === "INR").reduce((s, r) => s + r.paidThisYear, 0) * 100
+  ) / 100;
   const statusCounts = rows.reduce((m: Record<string, number>, r) => { m[r.status] = (m[r.status] || 0) + 1; return m; }, {});
   const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
   const today = new Date().toISOString().slice(0, 10);
-  const dueSoon = rows.filter((r) => r.nextDueOn && r.nextDueOn <= in30).length;
+  // "Due soon" = due within the next 30 days but NOT already overdue — a lower bound of
+  // today keeps overdue rows out of it (they're counted separately in `overdue`), so the
+  // "5 (2 overdue)" card no longer double-counts the same restaurants (audit 2026-07-06).
+  const dueSoon = rows.filter((r) => r.nextDueOn && r.nextDueOn >= today && r.nextDueOn <= in30).length;
   const overdue = rows.filter((r) => r.nextDueOn && r.nextDueOn < today).length;
 
   return ok({ restaurants: rows, summary: { totalCollectedThisYear, statusCounts, dueSoon, overdue } });
