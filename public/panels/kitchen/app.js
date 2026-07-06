@@ -660,6 +660,10 @@ if (window.LFH_RT) {
     font-size: 12px; color: var(--text, #e8eefc); position: relative; z-index: 40; }
   #xrayRibbon .rb-tag { font-weight: 800; letter-spacing: .04em; color: #f59e0b; text-transform: uppercase; font-size: 11px; }
   #xrayRibbon .rb-rest { color: var(--muted, #9fb0cc); font-weight: 600; }
+  #xrayRibbon .rb-crumbs { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; flex-wrap: wrap; }
+  #xrayRibbon .rb-crumbs a { color: #f59e0b; text-decoration: none; cursor: pointer; }
+  #xrayRibbon .rb-crumbs a:hover { text-decoration: underline; }
+  #xrayRibbon .rb-sep { font-size: 10px; color: var(--muted, #9fb0cc); }
   #xrayRibbon .rb-spacer { margin-left: auto; }
   #xrayRibbon button { font: inherit; cursor: pointer; border-radius: 999px; border: 1px solid var(--line, #26324a);
     background: transparent; color: var(--muted, #9fb0cc); font-weight: 700; padding: 4px 12px; }`;
@@ -669,12 +673,24 @@ if (window.LFH_RT) {
     if (!w || !w.higherView) return;
     const rb = document.createElement("div"); rb.id = "xrayRibbon";
     const who = w.actor === "admin" ? "Admin" : w.actor.charAt(0).toUpperCase() + w.actor.slice(1);
+    // ADMIN came from the console → show the PATH (Restaurants › name › Kitchen
+    // panel), the owner panel's breadcrumb language (owner, 2026-07-06). Any other
+    // higher role keeps the plain name — no console to crumb back to.
+    const body = who === "Admin"
+      ? `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
+        `<span class="rb-sep">›</span><span id="xrayRest"></span>` +
+        `<span class="rb-sep">›</span><span>Kitchen panel</span></nav>`
+      : `<span class="rb-rest" id="xrayRest"></span>`;
     rb.innerHTML =
       `<span class="rb-tag">${who} view</span>` +
-      `<span class="rb-rest" id="xrayRest"></span>` +
+      body +
       `<span class="rb-spacer"></span>` +
       `<button id="xrayExit">Exit view</button>`;
     document.body.insertBefore(rb, document.body.firstChild);
+    const home = document.getElementById("xrayHome");
+    if (home) home.onclick = () => {
+      try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+    };
     // The restaurant name lands with the first /board load — mirror it when it does.
     const restEl = document.getElementById("restName");
     if (restEl) {

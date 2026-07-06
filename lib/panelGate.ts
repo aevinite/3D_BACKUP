@@ -41,6 +41,27 @@ export async function requirePanel(role: Role, next: string): Promise<void> {
   redirect(`/login?next=${encodeURIComponent(next)}`);
 }
 
+// Second half of the admin rule, run by the global panel PAGE (only pages can read
+// searchParams — the layout above can't). An admin tab must arrive PINNED to one
+// restaurant via ?rid=, which only the console's act-as/go link appends — so the
+// ONLY way in is /aevinite → pick a restaurant → open its panel. A hand-typed
+// /tablet with just the browser-wide act-as cookie (set up to 6h ago, maybe by a
+// different tab, maybe for a different restaurant) bounces back to the console
+// (owner, 2026-07-06: "you have to be specific about which restaurant").
+// Returns the rid to forward into the panel iframe for a VERIFIED admin view, else
+// null — so a staff login that hand-adds ?rid= gets it stripped (the API already
+// ignored it for staff; stripping keeps the iframe's admin path bar honest too).
+export async function panelAdminRid(role: Role, rid: string | undefined): Promise<string | null> {
+  const store = await cookies();
+  const u = await userFromCookie(store.get(USER_COOKIE)?.value);
+  if (u && u.role === role) return null; // real staff login — the layout already vetted them
+  if (await tokenIsValid(store.get(AUTH_COOKIE)?.value)) {
+    if (rid) return rid;
+    redirect("/aevinite"); // admin, but no restaurant named for THIS tab
+  }
+  return null; // not staff, not admin — the layout gate already bounced them to /login
+}
+
 // Gate for a TENANT-SCOPED panel route (/r/<slug>/tablet|kitchen|manager).
 //
 // The slug is a LABEL + a CHECK — never the data source. Staff data stays scoped

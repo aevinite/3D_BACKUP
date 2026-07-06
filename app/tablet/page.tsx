@@ -7,9 +7,14 @@
 //
 // ?rid= (ADMIN "view as" only) is forwarded into the iframe so this tab stays
 // pinned to its restaurant — see app/manager/page.tsx for the full story.
+// panelAdminRid enforces the entry rule (admin only via the console's link) and
+// strips ?rid= from non-admin visits.
+import { panelAdminRid } from "@/lib/panelGate";
+
 export default async function TabletPanel({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
   const { rid } = await searchParams;
-  const src = "/panels/tablet/index.html" + (rid ? `?rid=${encodeURIComponent(rid)}` : "");
+  const adminRid = await panelAdminRid("tablet", rid);
+  const src = "/panels/tablet/index.html" + (adminRid ? `?rid=${encodeURIComponent(adminRid)}` : "");
   return (
     <iframe
       src={src}

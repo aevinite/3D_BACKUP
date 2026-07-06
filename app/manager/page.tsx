@@ -8,11 +8,15 @@
 // ?rid=<restaurant id> (ADMIN "view as" only): forwarded into the iframe so the
 // panel echoes it on every API call — this pins THIS TAB to that restaurant even
 // if the admin opens another restaurant's panel later (the act-as cookie alone is
-// browser-wide, which made the first tab silently shift restaurants). The server
-// ignores ?rid= for real staff logins, so it grants nothing to non-admins.
+// browser-wide, which made the first tab silently shift restaurants). panelAdminRid
+// enforces the entry rule (admin may ONLY arrive via the console's per-restaurant
+// link, never a bare hand-typed /manager) and strips ?rid= from non-admin visits.
+import { panelAdminRid } from "@/lib/panelGate";
+
 export default async function ManagerPanel({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
   const { rid } = await searchParams;
-  const src = "/panels/editor/index.html" + (rid ? `?rid=${encodeURIComponent(rid)}` : "");
+  const adminRid = await panelAdminRid("manager", rid);
+  const src = "/panels/editor/index.html" + (adminRid ? `?rid=${encodeURIComponent(adminRid)}` : "");
   return (
     <iframe
       src={src}
