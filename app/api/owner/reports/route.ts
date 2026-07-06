@@ -57,6 +57,31 @@ function windowFor(range: string): { from: string; to: string; bucket: string } 
 const num = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
 type Row = Record<string, unknown>;
 
+// Every range windowFor() understands. An unknown value used to fall through to
+// "today" for the DATA but was still echoed back verbatim in the response, so the
+// client title (which looks range up in a fixed table) rendered blank (bug L-…).
+// Normalising here means `range` in the payload is ALWAYS a known key.
+const VALID_RANGES = new Set(["today", "yesterday", "7d", "30d", "month", "lastmonth", "12m", "fy", "all"]);
+
+// Fetch EVERY restaurant id, paging past PostgREST's default row cap. The admin
+// "all restaurants" merge for dishes/categories/hourly must cover the SAME universe
+// the sales/payments RPCs scan when passed NULL — a flat .limit(100) silently dropped
+// every restaurant past the 100th (bug M-…). These breakdown RPCs filter
+// `WHERE restaurant_id = p_restaurant_id` and DON'T accept NULL, so ids must be
+// enumerated explicitly (no active filter, matching the unfiltered NULL all-scan).
+async function allRestaurantIds(): Promise<string[]> {
+  const ids: string[] = [];
+  const PAGE = 1000;
+  for (let offset = 0; ; offset += PAGE) {
+    const r = await sb.from("restaurants").select("id").order("id").range(offset, offset + PAGE - 1);
+    if (r.error) throw r.error;
+    const batch = (r.data ?? []).map((x) => x.id as string);
+    ids.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return ids;
+}
+
 // Sum one numeric key across per-restaurant RPC result sets (small rows).
 function mergeBy<T extends Row>(rowsets: T[][], key: keyof T, numeric: (keyof T)[]): T[] {
   const out = new Map<unknown, T>();
@@ -75,7 +100,8 @@ export async function GET(req: NextRequest) {
 
   const sp = req.nextUrl.searchParams;
   const type = sp.get("type") || "sales";
-  const range = sp.get("range") || "30d";
+  const rawRange = sp.get("range") || "30d";
+  const range = VALID_RANGES.has(rawRange) ? rawRange : "today";
   const rid = sp.get("rid") || null;
   if (rid && !scope.all && !scope.ids.includes(rid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   // Mig 133: a REAL owner only reads reports for restaurants whose "reports" section
@@ -161,15 +187,12 @@ export async function GET(req: NextRequest) {
       const fn = type === "dishes" ? "lfh_owner_dish_breakdown"
         : type === "categories" ? "lfh_owner_category_breakdown" : "lfh_owner_hourly";
       // These RPCs are per-restaurant; "all" = run per restaurant and merge. For the
-      // admin all-view, list the active restaurants first.
+      // admin all-view, enumerate EVERY restaurant (paged, uncapped) so the merged
+      // total matches the sales/payments NULL all-scan universe — no 100-row cap.
       let ids: string[];
       if (rid) ids = [rid];
       else if (!scope.all) ids = scope.ids;
-      else {
-        const r = await sb.from("restaurants").select("id").limit(100);
-        if (r.error) throw r.error;
-        ids = (r.data ?? []).map((x) => x.id);
-      }
+      else ids = await allRestaurantIds();
       const per = await Promise.all(ids.map((id) => sb.rpc(fn, { p_restaurant_id: id, p_from: from, p_to: to })));
       for (const p of per) if (p.error) throw p.error;
       const keyCol = type === "dishes" ? "title" : type === "categories" ? "category" : "hour";

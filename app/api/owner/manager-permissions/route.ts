@@ -3,7 +3,7 @@
 // powers" knob: each flag, when false, means only the owner can do that action.
 //
 //   PATCH { restaurant_id, permissions: { manage_staff?, edit_menu?, give_discounts?,
-//           view_dashboard?, void_bills? } }  → merges the given booleans.
+//           view_dashboard?, void_bills?, edit_settings? } }  → merges the given booleans.
 //
 // AUTH: admin super-user, or an OWNER who owns that restaurant. A MANAGER is
 // explicitly refused — they must not be able to widen their own powers.
@@ -16,8 +16,11 @@ import { mergeOwnerEntitlements, powerEntitlementKey } from "@/lib/ownerEntitlem
 
 export const dynamic = "force-dynamic";
 
-// The full set of manager-capability flags (mirrors migration 091's default).
-const FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills"] as const;
+// The full set of manager-capability flags the owner can grant. `edit_settings` is
+// enforced by the editor route (managerCan(…, "edit_settings")) but had no toggle here,
+// so it was permanently off — added so the owner can actually grant it. New powers just
+// append to this whitelist (the owner page maps over it — no fixed count anywhere).
+const FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings"] as const;
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 
@@ -44,7 +47,13 @@ export async function PATCH(req: NextRequest) {
   // Validate + collect only known boolean flags from the request.
   const incoming = body?.permissions && typeof body.permissions === "object" ? body.permissions : {};
   const patch: Record<string, boolean> = {};
-  for (const k of FLAGS) if (k in incoming) patch[k] = incoming[k] === true;
+  for (const k of FLAGS) {
+    if (!(k in incoming)) continue;
+    // Reject junk — the old `incoming[k] === true` silently coerced a non-boolean
+    // (e.g. edit_menu:"maybe" quietly turned the power OFF) and still answered {ok:true}.
+    if (typeof incoming[k] !== "boolean") return bad(`"${k}" must be true or false.`);
+    patch[k] = incoming[k];
+  }
   if (!Object.keys(patch).length) return bad("No valid permission flags given.");
 
   // Merge onto the existing JSONB (don't clobber flags the caller didn't send).
@@ -62,7 +71,7 @@ export async function PATCH(req: NextRequest) {
   }
   const merged = { ...(cur.manager_permissions || {}), ...patch };
   const { error } = await sb.from("restaurants").update({ manager_permissions: merged }).eq("id", rid);
-  if (error) return bad(error.message, 500);
+  if (error) return bad("Something went wrong, please try again.", 500);
   await logAction("owner", "manager_permissions", { restaurant_id: rid, detail: `${cur.name}: ${Object.entries(patch).map(([k, v]) => `${k}=${v ? "on" : "off"}`).join(", ")}` });
   return ok({ ok: true, manager_permissions: merged });
 }

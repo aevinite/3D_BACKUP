@@ -221,6 +221,27 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       });
     }
 
+    // ── Guest ratings (mig 138) — manager view, gated by the view_ratings power ──
+    // The owner grants a manager the ability to see + handle guest star-ratings.
+    // Scoped to THIS restaurant; explicit columns + limit (egress-safe).
+    if (p === "ratings") {
+      if (!(await managerCan(g, rid, "view_ratings"))) return permDenied("see guest ratings");
+      const onlyUnhandled = new URL(req.url).searchParams.get("filter") === "unhandled";
+      const sum = await sb.rpc("lfh_ratings_summary", { p_ids: [rid] });
+      if (sum.error) return err(sum.error.message, 500);
+      const s = (sum.data?.[0] ?? {}) as Record<string, any>;
+      const summary = {
+        total: Number(s.total) || 0, avg: Number(s.avg) || 0,
+        dist: [Number(s.s1) || 0, Number(s.s2) || 0, Number(s.s3) || 0, Number(s.s4) || 0, Number(s.s5) || 0],
+        unhandled: Number(s.unhandled) || 0,
+      };
+      let rq = sb.from("feedback")
+        .select("id, rating, comment, name, table_number, created_at, acknowledged, acknowledged_at, acknowledged_by, staff_note")
+        .eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(200);
+      if (onlyUnhandled) rq = rq.eq("acknowledged", false);
+      return ok({ summary, ratings: must(await rq) || [] });
+    }
+
     if (p === "orders") {
       // TARGETED REFETCH (owner 2026-06-26 — egress cut): when a realtime breadcrumb
       // names ONE table, the panel asks for just that table's orders (?table=N) instead
@@ -692,6 +713,30 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         raised_role: g.user?.role || "manager",
       });
       if (ins.error) throw new Error(ins.error.message);
+      return ok({ ok: true });
+    }
+
+    // ── Handle a guest rating (mig 138) — mark handled / add an internal note ──
+    // Gated by the view_ratings power; the feedback row must belong to THIS restaurant.
+    if (a === "ratings" && b === "ack") {
+      if (!(await managerCan(g, rid, "view_ratings"))) return permDenied("handle guest ratings");
+      const rb = body as { id?: string; acknowledged?: unknown; note?: unknown };
+      const id = String(rb?.id || "");
+      if (!id) return err("id required", 400);
+      const hasAck = "acknowledged" in (rb || {});
+      if (hasAck && typeof rb.acknowledged !== "boolean") return err("acknowledged must be true/false", 400);
+      const hasNote = "note" in (rb || {});
+      if (hasNote && typeof rb.note !== "string") return err("note must be text", 400);
+      const row = (await sb.from("feedback").select("id, restaurant_id").eq("id", id).maybeSingle()).data as { restaurant_id: string } | null;
+      if (!row) return err("not found", 404);
+      if (row.restaurant_id !== rid) return err("forbidden", 403);
+      const who = g.user?.name || g.user?.username || "Manager";
+      const patch: Record<string, unknown> = {};
+      if (hasAck) { patch.acknowledged = rb.acknowledged; patch.acknowledged_at = rb.acknowledged ? new Date().toISOString() : null; patch.acknowledged_by = rb.acknowledged ? who : null; }
+      if (hasNote) patch.staff_note = (rb.note as string).trim() || null;
+      if (!Object.keys(patch).length) return err("nothing to update", 400);
+      const upd = await sb.from("feedback").update(patch).eq("id", id);
+      if (upd.error) throw new Error(upd.error.message);
       return ok({ ok: true });
     }
 

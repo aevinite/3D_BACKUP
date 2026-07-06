@@ -139,6 +139,20 @@ export default function OwnerReports() {
   const money = rep && ["sales", "tax", "discounts", "cancellations"].includes(rep.type);
   const mrows = (money ? (rep!.rows as unknown as MoneyRow[]) : []);
   const t = rep?.totals;
+  // The bucketed money summary lists EVERY day in the window. For Discounts / Cancellations
+  // that means a wall of all-zero days; show only the days that actually had a discount /
+  // a cancellation. Totals stay correct — they're summed server-side into `t`, not from
+  // these filtered rows. (bug L-…)
+  const tableRows = useMemo(() => {
+    if (!money) return mrows;
+    if (rep!.type === "discounts") return mrows.filter((r) => r.discount > 0);
+    if (rep!.type === "cancellations") return mrows.filter((r) => r.cancelledOrders > 0);
+    return mrows;
+  }, [money, mrows, rep]);
+  // The "Revenue" columns elsewhere are NET (after discount, tax-inclusive); the Dishes /
+  // Categories money column is raw list price (Σ price×qty, pre-tax, pre-discount). Label it
+  // differently so the two aren't read as the same number. (bug M-…)
+  const LIST_PRICE_LABEL = "Item sales (list price)";
 
   // Chart + table + CSV shapes per report type.
   const chart = useMemo(() => {
@@ -181,9 +195,9 @@ export default function OwnerReports() {
         ["Period", "Orders", "Paid orders", "Subtotal", "Tax", "Discount", "Revenue", "Cancelled orders", "Cancelled value"],
         mrows.map((r) => [bucketLabel(r.bucket, rep.range), r.orders, r.paidOrders, r.subtotal, r.tax, r.discount, r.revenue, r.cancelledOrders, r.cancelledValue]));
     } else if (rep.type === "dishes") {
-      downloadCsv(name, ["Dish", "Qty", "Revenue"], (rep.rows as { title: string; qty: number; revenue: number }[]).map((r) => [r.title, r.qty, r.revenue]));
+      downloadCsv(name, ["Dish", "Qty", LIST_PRICE_LABEL], (rep.rows as { title: string; qty: number; revenue: number }[]).map((r) => [r.title, r.qty, r.revenue]));
     } else if (rep.type === "categories") {
-      downloadCsv(name, ["Category", "Qty", "Revenue"], (rep.rows as { category: string; qty: number; revenue: number }[]).map((r) => [r.category, r.qty, r.revenue]));
+      downloadCsv(name, ["Category", "Qty", LIST_PRICE_LABEL], (rep.rows as { category: string; qty: number; revenue: number }[]).map((r) => [r.category, r.qty, r.revenue]));
     } else if (rep.type === "payments") {
       downloadCsv(name, ["Method", "Orders", "Revenue"], (rep.rows as { method: string; orders: number; revenue: number }[]).map((r) => [PAY_LABEL[r.method] || r.method || "Unknown", r.orders, r.revenue]));
     } else if (rep.type === "hourly") {
@@ -336,7 +350,7 @@ export default function OwnerReports() {
               {money && (<>
                 <thead><tr><th>Period</th><th>Orders</th><th>Paid</th><th>Subtotal</th><th>Tax</th><th>Discount</th><th>Revenue</th><th>Cancelled</th><th>Lost ₹</th></tr></thead>
                 <tbody>
-                  {mrows.map((r) => (
+                  {tableRows.map((r) => (
                     <tr key={r.bucket}>
                       <td>{bucketLabel(r.bucket, rep.range)}</td>
                       <td>{r.orders}</td><td>{r.paidOrders}</td>
@@ -355,13 +369,13 @@ export default function OwnerReports() {
                 )}
               </>)}
               {rep.type === "dishes" && (<>
-                <thead><tr><th>Dish</th><th>Qty</th><th>Revenue</th></tr></thead>
+                <thead><tr><th>Dish</th><th>Qty</th><th>{LIST_PRICE_LABEL}</th></tr></thead>
                 <tbody>{(rep.rows as { title: string; qty: number; revenue: number }[]).map((r) => (
                   <tr key={r.title}><td>{r.title}</td><td>{r.qty}</td><td><b>{inr(r.revenue)}</b></td></tr>
                 ))}</tbody>
               </>)}
               {rep.type === "categories" && (<>
-                <thead><tr><th>Category</th><th>Qty</th><th>Revenue</th></tr></thead>
+                <thead><tr><th>Category</th><th>Qty</th><th>{LIST_PRICE_LABEL}</th></tr></thead>
                 <tbody>{(rep.rows as { category: string; qty: number; revenue: number }[]).map((r) => (
                   <tr key={r.category}><td>{r.category}</td><td>{r.qty}</td><td><b>{inr(r.revenue)}</b></td></tr>
                 ))}</tbody>
@@ -379,7 +393,16 @@ export default function OwnerReports() {
                 ))}</tbody>
               </>)}
             </table>
-            {rep.rows.length === 0 && <div className="adm-empty">Nothing in this period.</div>}
+            {(money ? tableRows.length === 0 : rep.rows.length === 0) && (
+              <div className="adm-empty">
+                {rep.type === "discounts" ? "No discounts were given in this period."
+                  : rep.type === "cancellations" ? "No cancellations in this period."
+                  : "Nothing in this period."}
+              </div>
+            )}
+            {(rep.type === "dishes" || rep.type === "categories") && rep.rows.length > 0 && (
+              <p className="rp-note">{LIST_PRICE_LABEL} is menu list price × quantity — before discounts and tax, so it won&apos;t match the net Revenue on the Sales report.</p>
+            )}
           </div>
         </div>
       )}
@@ -401,6 +424,7 @@ export default function OwnerReports() {
         }
         .rp-title { font-size: 14px; }
         .rp-ct { font-size: 13px; font-weight: 800; }
+        .rp-note { font-size: 11.5px; color: var(--muted); margin: 8px 2px 0; }
         @media print {
           .rp-controls, .owx-chips { display: none !important; }
           .rp-head :global(.rp-sub) { display: none; }

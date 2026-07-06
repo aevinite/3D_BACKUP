@@ -31,7 +31,9 @@ export async function GET(req: NextRequest) {
   if (!gated) return disabledResp();
   scope = gated;
 
-  let q = sb.from("issues").select("*").order("status", { ascending: true }).order("created_at", { ascending: false }).limit(300);
+  let q = sb.from("issues")
+    .select("id, restaurant_id, subject, body, raised_by, raised_role, status, created_at, resolved_at")
+    .order("status", { ascending: true }).order("created_at", { ascending: false }).limit(300);
   if (!scope.all) {
     if (!scope.ids.length) return NextResponse.json({ issues: [] });
     q = q.in("restaurant_id", scope.ids);
@@ -66,7 +68,9 @@ export async function PATCH(req: NextRequest) {
   if (!issue) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!inScope(scope, issue.restaurant_id)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-  const who = scope.all ? "admin" : "owner";
+  // Record WHO resolved it: the concrete owner id (traceable when several co-own a
+  // restaurant), or "admin" for the super-user (audit 2026-07-06).
+  const who = scope.all ? "admin" : (scope.ownerId || "owner");
   const patch = status === "resolved"
     ? { status, resolved_at: new Date().toISOString(), resolved_by: who }
     : { status, resolved_at: null, resolved_by: null };

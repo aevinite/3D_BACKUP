@@ -38,7 +38,12 @@ export async function GET(req: NextRequest) {
   const scope = await ownerScope(req);
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const { data, error } = await sb.rpc("lfh_owner_overview");
+  // Scope the aggregation IN THE DATABASE (mig 138): pass the owner's restaurant
+  // ids so the RPC only scans + sums their orders, instead of summing the WHOLE
+  // platform every load and discarding the rest in JS (egress/cost fix). NULL = all
+  // (admin). The `allow` filter below stays as cheap defense-in-depth.
+  const pIds = scope.all ? null : scope.ids;
+  const { data, error } = await sb.rpc("lfh_owner_overview", { p_ids: pIds });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // Numerics arrive as strings over the wire — coerce once here so the client

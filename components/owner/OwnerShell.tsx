@@ -80,6 +80,17 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Mobile (≤900px): the sidebar collapses to a horizontally-scrolling pill strip.
+  // Pills past the first few (incl. the real "Feedback & issues") sit off-screen with
+  // no hint, so after mount / route change, scroll the ACTIVE pill into view within the
+  // strip (mirrors the staff page's scrollIntoView). block:"nearest" keeps it from
+  // yanking the page vertically; desktop is untouched (the guard bails >900px).
+  useEffect(() => {
+    if (typeof window === "undefined" || window.innerWidth > 900) return;
+    const el = document.querySelector<HTMLElement>(".owx-nav .owx-navlink.active");
+    el?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [path]);
+
   // "My restaurants" — the full list the owner owns, ALWAYS visible in the sidebar
   // (owner request 2026-07-06). ONE fetch of the already-pre-aggregated overview per
   // hard page load (the layout survives client-side navigation, so this doesn't

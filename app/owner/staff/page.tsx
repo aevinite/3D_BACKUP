@@ -7,18 +7,22 @@
 //
 // A manager who was granted "manage_staff" lands here too (same API), but sees only
 // their one restaurant and can't change the power toggles (those stay owner-only).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Perms = Record<string, boolean>;
 type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms };
 type Staff = { id: string; username: string; role: string; name: string | null; phone: string | null; active: boolean; restaurant_id: string; hasPin: boolean; last_seen_at?: string | null };
 
+// [flag, label, hint]. Rendered by mapping — add a new power here (and to the API
+// FLAGS whitelist) and it just appears; nothing is hardcoded to a fixed count.
 const PERMS: [string, string, string][] = [
   ["manage_staff", "Manage staff", "Add / remove team members"],
   ["edit_menu", "Edit menu", "Change dishes, prices, categories"],
   ["give_discounts", "Give discounts", "Apply a discount to a bill"],
   ["view_dashboard", "View dashboard", "See sales numbers & charts"],
   ["void_bills", "Void bills", "Cancel / void an invoiced bill"],
+  ["edit_settings", "Change settings", "Edit restaurant settings & preferences"],
+  ["view_ratings", "Guest ratings", "See & handle guest star-ratings"],
 ];
 const ROLES = ["manager", "kitchen", "tablet"];
 
@@ -29,7 +33,14 @@ export default function OwnerStaffPage() {
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const pwRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  // Inline rename / edit-phone editor: which row is open + its draft values.
+  const [editing, setEditing] = useState<{ id: string; name: string; phone: string } | null>(null);
+  // Synchronous re-entry guard so a fast double-click on "Add" can't fire twice before
+  // React flushes the disabled state (the exact race that showed a raw duplicate-key error).
+  const addingRef = useRef(false);
   // Admin-in-one-restaurant scope pin (bug C1) — mirrors app/owner/page.tsx & reports.
   // Rides on EVERY call as ?scope= so an admin viewing restaurant A in one tab and B
   // in another sees each tab's OWN restaurant, not the whole platform / the other tab's
@@ -88,16 +99,46 @@ export default function OwnerStaffPage() {
   }
 
   async function addStaff(rid: string, form: HTMLFormElement) {
-    const fd = new FormData(form);
-    const name = String(fd.get("name") || "").trim();
-    const role = String(fd.get("role") || "manager");
-    const password = String(fd.get("password") || "").trim();
-    if (name.length < 2) { setErr("Name must be at least 2 characters."); return; }
+    if (addingRef.current) return; // block a second immediate submit (double-click)
+    addingRef.current = true;
     try {
+      const fd = new FormData(form);
+      const name = String(fd.get("name") || "").trim();
+      const role = String(fd.get("role") || "manager");
+      const password = String(fd.get("password") || "").trim();
+      if (name.length < 2) { setErr("Name must be at least 2 characters."); return; }
       const d = await call(withScope("/api/owner/staff"), { method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: rid }) });
-      setReveal({ name: d.name, password: d.password });
+      setReveal({ name: d.name, password: d.password }); setCopied(false);
       form.reset();
       await load();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { addingRef.current = false; }
+  }
+
+  // Copy the one-time password. Confirms with "Copied!"; on a non-secure origin (no
+  // navigator.clipboard) it falls back to selecting the field so it's never silently lost.
+  async function copyPw(pw: string) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(pw);
+        setCopied(true); setTimeout(() => setCopied(false), 1800); return;
+      }
+    } catch { /* fall through to manual-select fallback */ }
+    const el = pwRef.current;
+    if (el) {
+      el.focus(); el.select();
+      try { document.execCommand?.("copy"); } catch { /* selection still lets them Ctrl/Cmd-C */ }
+      setCopied(true); setTimeout(() => setCopied(false), 1800);
+    }
+  }
+
+  async function saveEdit(s: Staff) {
+    if (!editing || editing.id !== s.id) return;
+    const name = editing.name.trim(); const phone = editing.phone.trim();
+    if (name.length < 2) { setErr("Name must be at least 2 characters."); return; }
+    try {
+      await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s.id, action: "edit", name, phone }) });
+      setEditing(null); await load();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
 
@@ -134,9 +175,9 @@ export default function OwnerStaffPage() {
       {reveal && (
         <div className="adm-card ost-reveal">
           <div><b>New password for {reveal.name}</b><div className="adm-muted" style={{ fontSize: 12.5 }}>Copy it now — it can&apos;t be shown again.</div></div>
-          <code className="ost-pw">{reveal.password}</code>
-          <button className="ost-btn" onClick={() => { navigator.clipboard?.writeText(reveal.password).catch(() => {}); }}>Copy</button>
-          <button className="ost-x" onClick={() => setReveal(null)}>Done</button>
+          <input ref={pwRef} className="ost-pw" readOnly value={reveal.password} onFocus={(e) => e.currentTarget.select()} aria-label="One-time password" />
+          <button className="ost-btn" onClick={() => copyPw(reveal.password)}>{copied ? "Copied!" : "Copy"}</button>
+          <button className="ost-x" onClick={() => { setReveal(null); setCopied(false); }}>Done</button>
         </div>
       )}
 
@@ -190,16 +231,28 @@ export default function OwnerStaffPage() {
                   <div className="ost-who">
                     <span className="ost-rolebadge" data-role={s.role}>{s.role}</span>
                     <span className="ost-pn">{s.name || s.username}</span>
+                    {s.phone && <span className="adm-muted" style={{ fontSize: 11.5 }}>{s.phone}</span>}
                     {!s.active && <span className="ost-disabled">disabled</span>}
                   </div>
                   <div className="ost-actions">
                     <select className="ost-mini" value={s.role} disabled={busy} onChange={(e) => setRole(s, e.target.value)} aria-label="Role">
                       {ROLES.map((ro) => <option key={ro} value={ro}>{ro}</option>)}
                     </select>
+                    <button className="ost-mini" disabled={busy} onClick={() => setEditing(editing?.id === s.id ? null : { id: s.id, name: s.name || s.username, phone: s.phone || "" })}>Rename / edit phone</button>
                     <button className="ost-mini" disabled={busy} onClick={() => resetPw(s)}>Reset password</button>
                     <button className="ost-mini" disabled={busy} onClick={() => setActive(s, !s.active)}>{s.active ? "Disable" : "Enable"}</button>
                     <button className="ost-mini danger" disabled={busy} onClick={() => del(s)}>Remove</button>
                   </div>
+                  {editing?.id === s.id && (
+                    <div className="ost-editrow">
+                      <input className="ost-in" value={editing.name} autoFocus placeholder="Name (their login)" autoComplete="off"
+                        onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+                      <input className="ost-in" value={editing.phone} placeholder="Phone (optional)" autoComplete="off"
+                        onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
+                      <button className="ost-btn" disabled={busy} onClick={() => saveEdit(s)}>Save</button>
+                      <button className="ost-mini" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -237,6 +290,7 @@ export default function OwnerStaffPage() {
         .ost-rolebadge[data-role="manager"] { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
         .ost-disabled { font-size: 10.5px; color: var(--adm-danger, #c0392b); font-weight: 700; }
         .ost-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+        .ost-editrow { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: var(--border); }
         .ost-mini { font: inherit; font-size: 11.5px; font-weight: 700; padding: 5px 9px; border-radius: 7px; border: var(--border); background: var(--card); color: var(--fg, inherit); cursor: pointer; }
         .ost-mini:hover:not(:disabled) { border-color: var(--accent); }
         .ost-mini.danger:hover:not(:disabled) { border-color: var(--adm-danger, #c0392b); color: var(--adm-danger, #c0392b); }
@@ -245,7 +299,7 @@ export default function OwnerStaffPage() {
         .ost-btn { font: inherit; font-size: 13px; font-weight: 700; padding: 8px 14px; border-radius: 8px; border: none; background: var(--accent); color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
         .ost-btn:disabled { opacity: .6; cursor: default; }
         .ost-reveal { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; border-color: var(--adm-ok, #2e7d32); }
-        .ost-pw { font-family: ui-monospace, monospace; font-size: 15px; font-weight: 700; padding: 6px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 12%, transparent); letter-spacing: .04em; }
+        .ost-pw { font-family: ui-monospace, monospace; font-size: 15px; font-weight: 700; padding: 6px 12px; border-radius: 8px; border: none; color: var(--fg, inherit); background: color-mix(in srgb, var(--accent) 12%, transparent); letter-spacing: .04em; min-width: 130px; }
         .ost-x { margin-left: auto; background: none; border: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; }
       `}</style>
     </>

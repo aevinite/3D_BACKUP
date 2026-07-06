@@ -4089,17 +4089,64 @@ a:focus:not(:focus-visible) { outline: none; }
   .owx-myrest .rrow .rv { display: none; }
   .owx-brand { padding: 0 6px 0 0; margin: 0; border-bottom: 0; border-right: var(--border); flex-shrink: 0; }
   .owx-brand .who { display: none; }
-  .owx-nav { flex-direction: row; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 4px; scrollbar-width: none; }
+  /* A subtle edge fade hints there's more to scroll on either side of the pill strip. */
+  .owx-nav { flex-direction: row; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 4px; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%); }
   .owx-nav::-webkit-scrollbar { display: none; }
   .owx-group { display: contents; }
   .owx-group-lbl { display: none; }
   .owx-navlink { flex: none; white-space: nowrap; padding: 6px 10px; font-size: 12.5px; border: var(--border); border-radius: 999px; }
   .owx-navlink.active { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-  .owx-navlink .navsoon { display: none; }
+  /* Keep the "Soon" badge visible on mobile (compact) so unbuilt placeholder sections
+     stay visually distinct from real working ones in the pill row (was display:none). */
+  .owx-navlink .navsoon { margin-left: 6px; padding: 1px 5px; font-size: 8.5px; }
   .owx-side-foot { display: none; }
   .owx-top { padding: 8px 12px; }
-  .owx .adm-main { padding: 14px; }
+  /* Bottom breathing room so scrolling content (last staff row / first chart title) never
+     butts the screen edge or sits under any floating control on phones. Desktop unchanged. */
+  .owx .adm-main { padding: 14px; padding-bottom: 32px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .owx-navlink, .owx-chip, .owx .adm-btn { transition: none; }
+}
+/* ── PRINT / PDF — force the owner console to a LIGHT palette ──────────────────
+   The owx skin is DARK by default: near-white text + dark cards. Printed, that put
+   invisible near-white text on white paper and turned cards into ink blocks. The two
+   older @media print blocks above only cover the admin skins (.adm-* / .adx-*), NOT
+   .owx. Here we (a) hide the panel chrome + report controls, (b) redefine the owx CSS
+   tokens to a light palette (so everything driven by var(--…) flips at once — for
+   BOTH data-skin="dark" and "light"), and (c) hard-reset stat/card/table surfaces to
+   white with dark text + hairline borders. Scoped to .adm.owx so the guest menu and
+   other panels are untouched. Placed last in the owx section so source order wins. */
+@media print {
+  .adm.owx,
+  .adm.owx[data-skin="dark"],
+  .adm.owx[data-skin="light"] {
+    --bg: #ffffff; --card: #ffffff; --side: #ffffff;
+    --border: 1px solid #cccccc; --border-c: #cccccc;
+    --text: #111111; --muted: #555555; --muted2: #f2f2f2;
+    --accent: #047857; --accent-dim: #047857; --accent-grad: #047857; --accent-glow: transparent;
+    --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309;
+    --elev: none;
+    background: #ffffff !important; color: #111111 !important; color-scheme: light !important;
+  }
+  /* Drop the chrome + interactive report controls — print the clean document only. */
+  .adm.owx .owx-side, .adm.owx .owx-top, .adm.owx .adm-adminbar,
+  .adm.owx .rp-controls, .adm.owx .rp-actions, .adm.owx .rp-select { display: none !important; }
+  .adm.owx, .adm.owx .adm-body, .adm.owx .adm-main {
+    display: block !important; height: auto !important; overflow: visible !important; background: #ffffff !important; }
+  .adm.owx .adm-main { padding: 0 !important; }
+  .adm.owx .owx-wrap { max-width: 100% !important; margin: 0 !important; }
+  /* Cards / stat tiles: white with dark text, hairline border, no dark elevation. */
+  .adm.owx .adm-card, .adm.owx .adm-stat {
+    background: #ffffff !important; color: #111111 !important; border: 1px solid #cccccc !important;
+    box-shadow: none !important; break-inside: avoid; }
+  .adm.owx .adm-muted, .adm.owx .adm-stat .k { color: #444444 !important; }
+  /* Report table: white cells, dark text, hairline rules; un-stick the header so it
+     doesn't overlap rows across a page break. */
+  .adm.owx .owx-tablewrap { max-height: none !important; overflow: visible !important; border: 1px solid #cccccc !important; }
+  .adm.owx .owx-table th, .adm.owx .owx-table td, .adm.owx .owx-table tfoot td {
+    background: #ffffff !important; color: #111111 !important; border-color: #cccccc !important; }
+  .adm.owx .owx-table th { position: static !important; color: #333333 !important; }
 }

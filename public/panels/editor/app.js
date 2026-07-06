@@ -2252,6 +2252,61 @@ function dashTodayBox(s) {
     </div>
   </div>`;
 }
+// ── Guest ratings (mig 138): the manager's view of diner star-ratings, gated by
+// the view_ratings power. Fetch + acknowledge/note; scoped to this restaurant server-side.
+const RCHIP = "display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(127,127,127,.12)";
+function ratingStars(n) {
+  return `<span style="color:#f5a623;letter-spacing:1px">${"★".repeat(n)}<span style="color:#ccc">${"★".repeat(5 - n)}</span></span>`;
+}
+async function loadRatings() {
+  const body = document.getElementById("ratingsBody");
+  if (!body) return;
+  if (!state.ratingsFilter) state.ratingsFilter = "all";
+  try {
+    const only = state.ratingsFilter === "unhandled" ? "?filter=unhandled" : "";
+    renderRatings(await api("GET", "/ratings" + only));
+  } catch (e) {
+    body.innerHTML = `<div class="empty">Couldn't load ratings. ${esc(e.message || "")}</div>`;
+  }
+}
+function renderRatings(d) {
+  const body = document.getElementById("ratingsBody");
+  if (!body) return;
+  const s = d.summary || { total: 0, avg: 0, dist: [0, 0, 0, 0, 0], unhandled: 0 };
+  const rows = d.ratings || [];
+  const bars = [5, 4, 3, 2, 1].map((star) => {
+    const c = s.dist[star - 1] || 0, pct = s.total ? Math.round((c / s.total) * 100) : 0;
+    return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12.5px"><span style="width:12px;text-align:right">${star}</span><span style="color:#f5a623">★</span><span style="flex:1;height:8px;background:#e5e7eb;border-radius:5px;overflow:hidden"><span style="display:block;height:100%;width:${pct}%;background:#f5a623"></span></span><span style="width:34px;text-align:right;color:#888">${c}</span></div>`;
+  }).join("");
+  const summaryHtml = s.total
+    ? `<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:16px"><div style="text-align:center;min-width:110px"><div style="font-size:40px;font-weight:800;line-height:1">${(s.avg || 0).toFixed(1)}</div><div style="font-size:18px">${ratingStars(Math.round(s.avg))}</div><div style="font-size:12.5px;color:#888;margin-top:2px">${s.total} rating${s.total === 1 ? "" : "s"}</div></div><div style="flex:1;min-width:200px">${bars}</div></div>`
+    : "";
+  const filterHtml = `<div style="display:flex;gap:8px;margin-bottom:12px"><button class="btn ${state.ratingsFilter === "all" ? "primary" : ""}" data-rfilter="all">All</button><button class="btn ${state.ratingsFilter === "unhandled" ? "primary" : ""}" data-rfilter="unhandled">To handle · ${s.unhandled || 0}</button></div>`;
+  const cards = rows.length ? rows.map((r) => {
+    const col = r.rating <= 2 ? "#e5484d" : r.rating === 3 ? "#f59e0b" : "#16a34a";
+    const when = new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    return `<div style="border-left:4px solid ${col};background:var(--panel,#fff);border:1px solid var(--line,#e5e7eb);border-radius:12px;padding:12px;margin-bottom:10px;opacity:${r.acknowledged ? 0.72 : 1}">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:15px">${ratingStars(r.rating)}</span>
+        ${r.table_number ? `<span style="${RCHIP}">Table ${esc(String(r.table_number))}</span>` : ""}
+        ${r.acknowledged ? `<span style="${RCHIP};color:#16a34a">handled</span>` : ""}
+        <span style="margin-left:auto;display:flex;gap:6px">
+          <button class="btn" data-rnote="${r.id}">✎ Note</button>
+          ${r.acknowledged ? `<button class="btn" data-rack="${r.id}" data-val="0">↺ Reopen</button>` : `<button class="btn primary" data-rack="${r.id}" data-val="1">✓ Mark handled</button>`}
+        </span>
+      </div>
+      ${r.comment ? `<p style="margin:8px 0 0;font-size:13px;line-height:1.5;overflow-wrap:anywhere;word-break:break-word">“${esc(r.comment)}”</p>` : ""}
+      <div style="margin-top:8px;font-size:12px;color:#888;overflow-wrap:anywhere">${r.name ? `<b>${esc(r.name)}</b>` : "Guest"} · ${esc(when)}${r.acknowledged && r.acknowledged_by ? ` · handled by ${esc(r.acknowledged_by)}` : ""}</div>
+      ${r.staff_note ? `<div style="margin-top:8px;font-size:12.5px;background:rgba(127,127,127,.08);border-radius:8px;padding:6px 9px;overflow-wrap:anywhere">📝 ${esc(r.staff_note)}</div>` : ""}
+      <div data-rnoterow="${r.id}" hidden style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><input class="search" style="flex:1;min-width:180px" maxlength="500" placeholder="Internal note" value="${esc(r.staff_note || "")}"/><button class="btn primary" data-rnotesave="${r.id}">Save</button></div>
+    </div>`;
+  }).join("") : `<div class="empty">${state.ratingsFilter === "unhandled" ? "Nothing left to handle 🎉" : "No guest ratings yet."}</div>`;
+  body.innerHTML = summaryHtml + filterHtml + cards;
+  body.querySelectorAll("[data-rfilter]").forEach((b) => (b.onclick = () => { state.ratingsFilter = b.dataset.rfilter; loadRatings(); }));
+  body.querySelectorAll("[data-rack]").forEach((b) => (b.onclick = async () => { try { await api("POST", "/ratings/ack", { id: b.dataset.rack, acknowledged: b.dataset.val === "1" }); loadRatings(); } catch (e) { toast("Failed: " + e.message, "err"); } }));
+  body.querySelectorAll("[data-rnote]").forEach((b) => (b.onclick = () => { const row = body.querySelector(`[data-rnoterow="${b.dataset.rnote}"]`); if (row) row.hidden = !row.hidden; }));
+  body.querySelectorAll("[data-rnotesave]").forEach((b) => (b.onclick = async () => { const row = body.querySelector(`[data-rnoterow="${b.dataset.rnotesave}"]`); const val = row ? row.querySelector("input").value : ""; try { await api("POST", "/ratings/ack", { id: b.dataset.rnotesave, note: val }); loadRatings(); } catch (e) { toast("Failed: " + e.message, "err"); } }));
+}
 async function loadDashboard() {
   const body = document.getElementById("dashBody");
   if (!body) return;
@@ -2890,6 +2945,12 @@ function renderEditor() {
     document.getElementById("zReport").onclick = () => printZReport();
     document.getElementById("mgrReport").onclick = () => printManagerReport();
     loadDashboard();
+    return;
+  }
+  if (state.tab === "ratings") {
+    ed.innerHTML = `<div class="ed-head"><h2>Guest ratings</h2><div style="display:flex;gap:8px"><button class="btn" id="ratingsRefresh">↻ Refresh</button></div></div><div id="ratingsBody" class="dash-body"><div class="empty">Loading ratings…</div></div>`;
+    document.getElementById("ratingsRefresh").onclick = () => loadRatings();
+    loadRatings();
     return;
   }
   if (state.tab === "platform") {
@@ -6057,14 +6118,14 @@ function setTab(tab) {
     sub.querySelectorAll(".subtab").forEach((s) => s.classList.toggle("active", s.dataset.tab === tab));
   }
   // The search box and "+ New" don't apply to the General/Orders/Tables tabs.
-  const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "platform" || tab === "log" || tab === "features" || tab === "dash" || tab === "banquet";
+  const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "platform" || tab === "log" || tab === "features" || tab === "dash" || tab === "banquet" || tab === "ratings";
   $("#newBtn").style.display = noList ? "none" : "";
   $("#search").style.display = noList ? "none" : "";
   // Tables tab: drop the whole left sidebar (it only held a dead "Floor map" label).
   // The floor already has its own left tiles + right detail, so it takes the full
   // width — the .no-sidebar class collapses the grid's first column to nothing.
   const layout = document.querySelector(".layout");
-  if (layout) layout.classList.toggle("no-sidebar", tab === "tables" || tab === "platform" || tab === "banquet");
+  if (layout) layout.classList.toggle("no-sidebar", tab === "tables" || tab === "platform" || tab === "banquet" || tab === "ratings");
   renderCatFilter(); // show category chips on Dishes, hide elsewhere
   renderList();
   renderEditor();
@@ -6703,6 +6764,7 @@ function syncBanquetTab() {
 const XRAY_TABS = [
   { tab: "dash", flag: "view_dashboard", label: "Dashboard" },
   { tab: "items", flag: "edit_menu", label: "Menu editor" },
+  { tab: "ratings", flag: "view_ratings", label: "Guest ratings" },
 ];
 // Phase 2 (the ladder, 2026-07-06): permission-gated CONTROLS inside tabs. Matched by
 // CSS selector on every repaint (MutationObserver below), so a live-poll re-render can

@@ -50,7 +50,7 @@ type Dish = { title: string; qty: number; revenue: number };
 type RestA = {
   scope: "restaurant"; prev: Prev;
   restaurant: { id: string; slug: string; name: string; accentColor: string; heroTitle: string };
-  kpis: { revenue: number; orders: number; avgOrder: number; openTables: number; topDish: string };
+  kpis: { revenue: number; orders: number; paidOrders?: number; avgOrder: number; openTables: number; topDish: string };
   timeseries: TsRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
   hourly: { hour: number; orders: number; revenue: number }[]; paymentMethods: Pay[];
   sameHour?: { start: string; revenue: number; orders: number }[];
@@ -77,6 +77,15 @@ const SAMEHOUR_LABEL: Partial<Record<Range, string[]>> = {
 };
 
 const IST = "Asia/Kolkata";
+// Some RPCs return a zone-LESS IST wall-clock timestamp (e.g. "2026-06-28T00:00:00").
+// `new Date(that)` reads it in the VIEWER's local zone, and re-applying timeZone:IST
+// then shifts it for anyone outside India (owner audit 2026-07-06). Treat a zone-less
+// value as UTC so the exact wall-clock numbers print regardless of where it's viewed.
+function istWall(ts: string, opts: Intl.DateTimeFormatOptions): string {
+  const zoneless = /T/.test(ts) && !/[Z+]|[+-]\d\d:?\d\d$/.test(ts);
+  const d = new Date(zoneless ? ts + "Z" : ts);
+  return d.toLocaleString("en-IN", { ...opts, timeZone: zoneless ? "UTC" : IST });
+}
 function tsLabel(iso: string, range: Range): string {
   const d = new Date(iso);
   if (range === "today" || range === "yesterday") return d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST });
@@ -217,7 +226,13 @@ export default function OwnerDashboard() {
     return () => window.removeEventListener("lfh:owner-open-restaurant", onOpen);
   }, []);
 
+  // Latest-wins guard (the app's standard stale-refresh fix): tag every load and drop
+  // any response that lands after a newer one started — so a slow earlier fetch can't
+  // overwrite the range you just switched to (owner audit 2026-07-06).
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const myGen = ++loadSeq.current;
+    const fresh = () => myGen === loadSeq.current;
     try {
       const rg = range;
       const j = (r: Response) => r.json();
@@ -231,6 +246,7 @@ export default function OwnerDashboard() {
       if (view.level === "home") {
         const o: Overview = await fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then(j);
         if ((o as unknown as { error?: string }).error) throw new Error((o as unknown as { error: string }).error);
+        if (!fresh()) return;
         setOv(o);
         if (o.restaurants.length === 1) {
           const rid = o.restaurants[0].id;
@@ -239,6 +255,7 @@ export default function OwnerDashboard() {
             fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
           ]);
           if (a.error) throw new Error(a.error);
+          if (!fresh()) return;
           setRest(a); setMoney(m.error ? null : m.totals); setGroup(null);
         } else {
           const [g, m] = await Promise.all([
@@ -246,6 +263,7 @@ export default function OwnerDashboard() {
             fetch(moneyUrl(null), { cache: "no-store" }).then(j),
           ]);
           if (g.error) throw new Error(g.error);
+          if (!fresh()) return;
           setGroup(g); setMoney(m.error ? null : m.totals); setRest(null);
         }
       } else {
@@ -255,11 +273,18 @@ export default function OwnerDashboard() {
           fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
         ]);
         if (a.error) throw new Error(a.error);
+        if (!fresh()) return;
         setRest(a); setMoney(m.error ? null : m.totals);
       }
-      setErr(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+      if (fresh()) setErr(null);
+    } catch (e) { if (fresh()) setErr(e instanceof Error ? e.message : String(e)); }
   }, [view, range]);
+
+  // Clear stale analytics the moment the range or drilled restaurant changes, so the
+  // charts show a brief "Loading…" instead of flashing an all-zero chart under the NEW
+  // range's labels (old data re-buckets to zeros). Auto-refresh does NOT change these,
+  // so it never triggers this clear — no 60s flicker (owner audit 2026-07-06).
+  useEffect(() => { setRest(null); setGroup(null); setMoney(null); }, [range, view]);
 
   const loadRef = useRef(load); loadRef.current = load;
   useEffect(() => { load(); }, [load]);
@@ -706,8 +731,9 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
           delta={rest.prev ? { now: k.revenue, prev: rest.prev.revenue } : undefined}
           prevTitle={PREV_LABEL[range]} spark={restSpark} color={accent} />
         <Kpi k="Orders" v={k.orders}
+          sub={k.paidOrders != null && k.paidOrders !== k.orders ? `${k.paidOrders} paid · rest still open` : undefined}
           delta={rest.prev ? { now: k.orders, prev: rest.prev.orders } : undefined} prevTitle={PREV_LABEL[range]} />
-        <Kpi k="Avg order" v={k.avgOrder} money />
+        <Kpi k="Avg order" v={k.avgOrder} money sub="per paid order" />
         <Kpi k="Open tables now" v={k.openTables} />
         <Kpi k="Lost to cancellations" v={money?.cancelledValue ?? 0} money sub={money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great"} />
       </div>
@@ -769,7 +795,7 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
             )}
             {rest.records.fastHour && (
               <div className="rv-rec"><span className="e">⚡</span><span><small>BUSIEST HOUR EVER</small><b>{rest.records.fastHour.orders} orders</b>
-                <i>{new Date(rest.records.fastHour.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", hour12: true, timeZone: IST })}</i></span></div>
+                <i>{istWall(rest.records.fastHour.at, { day: "numeric", month: "short", hour: "numeric", hour12: true })}</i></span></div>
             )}
             {rest.records.bigBill && (
               <div className="rv-rec"><span className="e">💎</span><span><small>BIGGEST BILL</small><b>{inr(rest.records.bigBill.revenue)}</b>

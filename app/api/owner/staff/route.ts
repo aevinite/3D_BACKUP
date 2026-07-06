@@ -35,6 +35,11 @@ const assignableFor = (actor: "admin" | "owner" | "manager"): Role[] =>
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 
+// Count REAL characters (Unicode letters/digits), not UTF-16 code units — a single
+// emoji is one glyph but two code units, so the old `key.length < 2` let one emoji
+// pass as a login name. Require at least this many alphanumerics to be a valid name.
+const realCharCount = (s: string) => (String(s).match(/[\p{L}\p{N}]/gu) || []).length;
+
 function genPassword(): string {
   const a = "abcdefghijkmnpqrstuvwxyz23456789";
   let s = ""; const r = crypto.getRandomValues(new Uint8Array(10));
@@ -122,7 +127,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await sb.from("staff_users")
       .select("id, username, role, name, phone, active, restaurant_id, last_seen_at, created_at, pin_hash, permissions")
       .in("restaurant_id", ids).in("role", assignableFor(s.actor)).order("created_at", { ascending: true }).limit(2000);
-    if (error) return bad(error.message, 500);
+    if (error) return bad("Something went wrong, please try again.", 500);
     // Never ship hashes; expose only whether a PIN exists.
     staff = (data || []).map(({ pin_hash, ...u }) => ({ ...u, hasPin: !!pin_hash }));
   }
@@ -136,7 +141,7 @@ export async function POST(req: NextRequest) {
   const key = normalizeLoginName(display);
   const role = String(body?.role || "") as Role;
   const rid = String(body?.restaurant_id || "");
-  if (key.length < 2) return bad("Name must be at least 2 characters.");
+  if (realCharCount(key) < 2) return bad("Name must be at least 2 characters.");
   // Hierarchy: a manager may only create BELOW their level (kitchen/tablet).
   if (!assignableFor(s.actor).includes(role)) return bad(s.actor === "manager" ? "Managers can only add kitchen or tablet logins." : "Pick a valid role (manager, kitchen, or tablet).");
   if (!s.restaurants.some((r) => r.id === rid)) return bad("That restaurant isn't yours to staff.", 403);
@@ -147,7 +152,15 @@ export async function POST(req: NextRequest) {
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const row = { username: key, role, restaurant_id: rid, password_hash: await hashSecret(password), name: display, phone: String(body?.phone || "").trim().slice(0, 20) || null };
   const { data, error } = await sb.from("staff_users").insert(row).select("id, username, role, name, restaurant_id").single();
-  if (error) return bad(error.message, 500);
+  if (error) {
+    // The pre-check above and this insert aren't atomic — two staff added at once (or a
+    // fast double-click) can both pass the check and race here. Postgres code 23505 =
+    // unique_violation on (restaurant_id, username): show the SAME friendly 409, never the
+    // raw "duplicate key value violates unique constraint …" DB message. Any other DB error
+    // is unexpected → a generic message, not the internals.
+    if ((error as { code?: string }).code === "23505") return bad("That name is taken at this restaurant — pick another.", 409);
+    return bad("Something went wrong, please try again.", 500);
+  }
   await logAction("owner", "staff_create", { restaurant_id: rid, actor: s.actor, detail: `created ${role} "${display}"` });
   return ok({ ok: true, id: data!.id, name: display, role, restaurant_id: rid, password });
 }
@@ -172,7 +185,10 @@ export async function PATCH(req: NextRequest) {
     return ok({ ok: true, password });
   }
   if (action === "set_active") {
-    const active = !!body?.active;
+    // Must be a REAL boolean — the old `!!body?.active` silently coerced junk (e.g.
+    // active:"false" is a truthy string → enabled), flipping state the wrong way.
+    if (typeof body?.active !== "boolean") return bad("`active` must be true or false.");
+    const active = body.active;
     await sb.from("staff_users").update({ active, token_version: active ? u.token_version : (u.token_version || 0) + 1 }).eq("id", id);
     await logAction("owner", active ? "staff_enable" : "staff_disable", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `${active ? "enabled" : "disabled"} "${u.username}"` });
     return ok({ ok: true });
@@ -214,7 +230,7 @@ export async function PATCH(req: NextRequest) {
     if (body?.name !== undefined) {
       const display = String(body.name || "").trim().slice(0, 80);
       const nkey = normalizeLoginName(display);
-      if (nkey.length < 2) return bad("Name must be at least 2 characters.");
+      if (realCharCount(nkey) < 2) return bad("Name must be at least 2 characters.");
       const clash = (await sb.from("staff_users").select("id").eq("username", nkey).eq("restaurant_id", u.restaurant_id).neq("id", id).limit(1)).data?.[0];
       if (clash) return bad("That name is taken at this restaurant.", 409);
       patch.name = display; patch.username = nkey;
