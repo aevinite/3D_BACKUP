@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
     restQ.data.owner_user_id ? sb.from("staff_users").select("name, username").eq("id", restQ.data.owner_user_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
     sb.from("restaurant_billing").select("plan, status, cycle, next_due_on").eq("restaurant_id", rid).maybeSingle(),
     sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle(),
-    sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso),
+    sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).neq("status", "cancelled").gte("created_at", fromIso).lt("created_at", toIso),
     sb.from("order_items").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso),
     sb.from("staff_actions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso),
     sb.from("waiter_calls").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).gte("created_at", fromIso).lt("created_at", toIso),

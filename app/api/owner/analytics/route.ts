@@ -173,12 +173,17 @@ export async function GET(req: NextRequest) {
     }));
     const revenue = num(tsRows.reduce((a: number, r: { revenue: number }) => a + r.revenue, 0));
     const orders = tsRows.reduce((a: number, r: { orders: number }) => a + r.orders, 0);
+    // Avg order = PAID revenue ÷ PAID order count (both from paid-only sources). `orders` above
+    // counts ALL non-cancelled orders (incl. open/unpaid), so revenue/orders understated the
+    // average and made it drift UPWARD as open tables settled with no new orders. paid-count
+    // comes from the payment breakdown (already fetched, WHERE payment_status='paid'). (owner 2026-07-06)
+    const paidOrders = (pm.data ?? []).reduce((a: number, r: Record<string, unknown>) => a + (Number(r.orders) || 0), 0);
     const prev = prevWin ? await windowTotals(rid, null, prevWin.from, prevWin.to) : null;
 
     return NextResponse.json({
       scope: "restaurant", range, prev,
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
-      kpis: { revenue, orders, avgOrder: orders ? num(revenue / orders) : 0, openTables: openT.count || 0, topDish: dishRows[0]?.title || "—" },
+      kpis: { revenue, orders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, openTables: openT.count || 0, topDish: dishRows[0]?.title || "—" },
       timeseries: tsRows,
       dishes: dishRows,
       categories: (cats.data ?? []).map((r: Record<string, unknown>) => ({ category: r.category, qty: Number(r.qty) || 0, revenue: num(r.revenue) })),

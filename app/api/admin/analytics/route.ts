@@ -68,11 +68,13 @@ export async function GET(req: NextRequest) {
   const toIso = to.toISOString();
 
   const [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ] = await Promise.all([
-    sb.from("restaurants").select("id, name, slug, active"),
+    // Live restaurants only (bug H4, 2026-07-06): binned restaurants must not inflate
+    // total/active counts. The busiest-restaurants RPC gets the same guard in mig 130.
+    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null),
     sb.from("staff_users").select("id", { count: "exact", head: true }).eq("active", true),
     sb.from("sessions").select("restaurant_id").eq("status", "open"),
     sb.from("settings").select("restaurant_id, table_count"),
-    sb.from("orders").select("id", { count: "exact", head: true }).gte("created_at", fromIso).lt("created_at", toIso),
+    sb.from("orders").select("id", { count: "exact", head: true }).neq("status", "cancelled").gte("created_at", fromIso).lt("created_at", toIso),
     // Today buckets HOURLY (adaptive time-axis rule — a one-day window ticks by
     // hours, never one flat day bucket); 7d/30d bucket by day. 4-arg overload = mig 129.
     sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: null, p_from: fromIso, p_to: toIso, p_bucket: range === "today" ? "hour" : "day" }),
