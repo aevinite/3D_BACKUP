@@ -14,13 +14,21 @@ export default function OwnerIssues() {
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const [filter, setFilter] = useState<"open" | "all">("open");
   const [busy, setBusy] = useState<string | null>(null);
+  // Admin-in-one-restaurant scope pin (bug C1) — mirrors app/owner/page.tsx & reports.
+  // Rides on EVERY call as ?scope= so a second tab's shared act-as cookie can't hijack
+  // this tab's restaurant (before, Issues ignored the pin and followed the cookie —
+  // an admin juggling two restaurant tabs saw/resolved the wrong one). Null for a real
+  // owner (no ?rid in their URL), so nothing changes for them.
+  const [scopePin] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
+  const scp = scopePin ? `?scope=${scopePin}` : "";
 
   const load = useCallback(async () => {
     try {
-      const j = await (await fetch("/api/owner/issues", { cache: "no-store" })).json();
+      const j = await (await fetch(`/api/owner/issues${scp}`, { cache: "no-store" })).json();
       if (!j.error) setIssues(j.issues || []);
     } catch {}
-  }, []);
+  }, [scp]);
   useEffect(() => { load(); }, [load]);
 
   const setStatus = async (id: string, status: "open" | "resolved") => {
@@ -28,7 +36,7 @@ export default function OwnerIssues() {
     // Optimistic update so the chip flips instantly.
     setIssues((cur) => (cur || []).map((i) => (i.id === id ? { ...i, status } : i)));
     try {
-      await fetch("/api/owner/issues", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) });
+      await fetch(`/api/owner/issues${scp}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) });
       await load();
     } finally { setBusy(null); }
   };

@@ -30,15 +30,25 @@ export default function OwnerStaffPage() {
   const [loading, setLoading] = useState(true);
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // Admin-in-one-restaurant scope pin (bug C1) — mirrors app/owner/page.tsx & reports.
+  // Rides on EVERY call as ?scope= so an admin viewing restaurant A in one tab and B
+  // in another sees each tab's OWN restaurant, not the whole platform / the other tab's
+  // (before, Staff ignored the pin: admin saw every restaurant regardless). Null for a
+  // real owner (server scopes them by membership and ignores the param anyway).
+  const [scopePin] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
+  const withScope = useCallback(
+    (p: string) => (scopePin ? `${p}${p.includes("?") ? "&" : "?"}scope=${scopePin}` : p),
+    [scopePin]);
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch("/api/owner/staff", { cache: "no-store" }).then((x) => x.json());
+      const r = await fetch(withScope("/api/owner/staff"), { cache: "no-store" }).then((x) => x.json());
       if (r.error) throw new Error(r.error);
       setRestaurants(r.restaurants || []); setStaff(r.staff || []); setActor(r.actor || ""); setErr(null);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setLoading(false); }
-  }, []);
+  }, [withScope]);
   useEffect(() => { load(); }, [load]);
 
   const canEditPowers = actor === "owner" || actor === "admin";
@@ -55,7 +65,7 @@ export default function OwnerStaffPage() {
 
   async function togglePerm(rid: string, key: string, value: boolean) {
     try {
-      const d = await call("/api/owner/manager-permissions", { method: "PATCH", body: JSON.stringify({ restaurant_id: rid, permissions: { [key]: value } }) });
+      const d = await call(withScope("/api/owner/manager-permissions"), { method: "PATCH", body: JSON.stringify({ restaurant_id: rid, permissions: { [key]: value } }) });
       setRestaurants((rs) => rs.map((r) => (r.id === rid ? { ...r, managerPermissions: d.manager_permissions } : r)));
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
@@ -67,7 +77,7 @@ export default function OwnerStaffPage() {
     const password = String(fd.get("password") || "").trim();
     if (name.length < 2) { setErr("Name must be at least 2 characters."); return; }
     try {
-      const d = await call("/api/owner/staff", { method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: rid }) });
+      const d = await call(withScope("/api/owner/staff"), { method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: rid }) });
       setReveal({ name: d.name, password: d.password });
       form.reset();
       await load();
@@ -77,21 +87,21 @@ export default function OwnerStaffPage() {
   async function resetPw(s: Staff) {
     if (!confirm(`Reset ${s.name || s.username}'s password? Their current login stops working.`)) return;
     try {
-      const d = await call("/api/owner/staff", { method: "PATCH", body: JSON.stringify({ id: s.id, action: "reset_password" }) });
+      const d = await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s.id, action: "reset_password" }) });
       setReveal({ name: s.name || s.username, password: d.password });
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
   async function setActive(s: Staff, active: boolean) {
-    try { await call("/api/owner/staff", { method: "PATCH", body: JSON.stringify({ id: s.id, action: "set_active", active }) }); await load(); }
+    try { await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s.id, action: "set_active", active }) }); await load(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
   async function setRole(s: Staff, role: string) {
-    try { await call("/api/owner/staff", { method: "PATCH", body: JSON.stringify({ id: s.id, action: "set_role", role }) }); await load(); }
+    try { await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s.id, action: "set_role", role }) }); await load(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
   async function del(s: Staff) {
     if (!confirm(`Remove ${s.name || s.username} for good? This can't be undone.`)) return;
-    try { await call(`/api/owner/staff?id=${encodeURIComponent(s.id)}`, { method: "DELETE" }); await load(); }
+    try { await call(withScope(`/api/owner/staff?id=${encodeURIComponent(s.id)}`), { method: "DELETE" }); await load(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
 
