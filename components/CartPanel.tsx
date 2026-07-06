@@ -96,6 +96,7 @@ export default function CartPanel() {
   const [otherOpen, setOtherOpen] = useState(false); // reveal the free-text field
   const [placing, setPlacing] = useState(false); // true while an order is being sent, to block double taps
   const declaredHydrated = useRef(false); // skip the first persist so restore can't be clobbered
+  const menuLoadedRef = useRef(false); // fetch the full menu (pairings/edit/allergens) only ONCE, on first open
 
   // Phone back button closes the bill instead of leaving the site. When editing a
   // line (which opens the customize popup ON TOP), back closes the popup first,
@@ -148,17 +149,24 @@ export default function CartPanel() {
   useEffect(() => {
     loadCart();
     setCurrencyState(getCurrency());
-    // allergen lookup by dish id (so the bill can warn) — THIS restaurant's menu,
-    // not the default one's (was leaking #1's dishes into every tenant's cart
-    // pairings + a needless whole-menu read of the wrong restaurant).
-    getMenuItems(restaurantId)
-      .then((items) => {
-        const m: Record<string, string[]> = {};
-        items.forEach((i) => (m[i.id] = i.allergens || []));
-        setAllergenMap(m);
-        setMenuItems(items);
-      })
-      .catch(() => {});
+    // The full menu (allergen lookup by dish id, "goes well with" pairings, and
+    // editing a line) is only needed once the cart is OPEN — the panel renders
+    // nothing while closed. So we DON'T read it on mount: that fired a full
+    // `menu_items` read on every guest page load, duplicating the menu the page
+    // already loaded from its cached endpoint (egress waste, seen 2026-07-06).
+    // loadMenuOnce() fetches it lazily on the first open, THIS restaurant's menu.
+    const loadMenuOnce = () => {
+      if (menuLoadedRef.current) return;
+      menuLoadedRef.current = true;
+      getMenuItems(restaurantId)
+        .then((items) => {
+          const m: Record<string, string[]> = {};
+          items.forEach((i) => (m[i.id] = i.allergens || []));
+          setAllergenMap(m);
+          setMenuItems(items);
+        })
+        .catch(() => { menuLoadedRef.current = false; }); // let a later open retry
+    };
     // How many tables exist, so we can reject an out-of-range table number.
     getSettings(restaurantId)
       .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); })
@@ -191,13 +199,13 @@ export default function CartPanel() {
     // handleOpen: when "lfh:open-cart" fires, slide the panel open and refresh
     // everything it shows.
     const handleOpen = () => {
-      setOpen(true); loadCart(); loadLive(); setShowHistory(false); prefillScanned(); syncSession();
+      setOpen(true); loadMenuOnce(); loadCart(); loadLive(); setShowHistory(false); prefillScanned(); syncSession();
       // re-read settings on open so a freshly-toggled sessions mode is always respected
       getSettings(restaurantId).then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); }).catch(() => {});
     };
     // handleShowPrev: open straight to the LIVE-STATUS tab (the live table view
     // with the served-progress bar). Fired when the multi-order tracker is tapped.
-    const handleShowPrev = () => { setOpen(true); setShowHistory(true); loadLive(); };
+    const handleShowPrev = () => { setOpen(true); loadMenuOnce(); setShowHistory(true); loadLive(); };
     const handleClose = () => setOpen(false); // "lfh:close-all" -> slide shut
     const handleScanned = prefillScanned; // a QR table scan arrived -> pre-fill table
     const handleCartUpdated = loadCart; // cart changed elsewhere -> re-read it

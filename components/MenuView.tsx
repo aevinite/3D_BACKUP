@@ -459,18 +459,26 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // Search matches the dish name OR its category (slug + translated name), so
   // typing "croissant" finds the croissant-category dishes even though their
   // display names don't contain the word.
-  // q = the search text, tidied up (no spaces, all lowercase) for comparing.
-  const q = searchQuery.trim().toLowerCase();
-  // Get a category's display name (in the current language), lowercased.
+  // fold(): lowercase AND strip accents so an un-accented search still matches
+  // an accented name — "caffe" finds "Caffè Latte", "canapes" finds "Canapés".
+  // This is essential on a French menu: most phone keyboards type no accents,
+  // yet most dish names carry them. NFD splits "è" into "e" + a combining mark,
+  // then we drop the marks (̀–ͯ). (Bug fix 2026-07-06.)
+  const fold = (s: string) =>
+    (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  // q = the search text, tidied up (trimmed, lowercased, accent-folded).
+  const q = fold(searchQuery.trim());
+  // Get a category's display name (in the current language), accent-folded.
   const catNameOf = (slug: string) =>
-    localized(dbCategories.find((c) => c.slug === slug)?.name, lang).toLowerCase();
+    fold(localized(dbCategories.find((c) => c.slug === slug)?.name, lang));
   // True if a dish matches the search — by name, category slug, category name,
-  // or a hidden search alias. (|| means "or".)
+  // or a hidden search alias. (|| means "or".) Every side is accent-folded so
+  // the comparison is accent-insensitive both ways.
   const matchesSearch = (i: FoodItem) =>
-    i.title.toLowerCase().includes(q) ||
-    i.category.toLowerCase().includes(q) ||
+    fold(i.title).includes(q) ||
+    fold(i.category).includes(q) ||
     catNameOf(i.category).includes(q) ||
-    (i.searchAlias || "").toLowerCase().includes(q);
+    fold(i.searchAlias || "").includes(q);
 
   // Decide which dishes to show. The menu is always the full grouped view; the
   // filter chips (which STACK) narrow it. .filter keeps only the dishes where
@@ -494,8 +502,8 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     ? menuData
         .filter(matchesSearch)
         .sort((a, b) => {
-          const aStarts = a.title.toLowerCase().startsWith(q) ? 0 : 1;
-          const bStarts = b.title.toLowerCase().startsWith(q) ? 0 : 1;
+          const aStarts = fold(a.title).startsWith(q) ? 0 : 1;
+          const bStarts = fold(b.title).startsWith(q) ? 0 : 1;
           return aStarts - bStarts || ratingOf(b) - ratingOf(a);
         })
         .slice(0, 8)
@@ -851,6 +859,18 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
             })}
           </div>
           )
+        ) : filteredItems.length === 0 ? (
+          // C0) searching (or filtering) found NOTHING — show a friendly message
+          // instead of a blank void. Without this the guest just sees empty space
+          // below the search box and thinks the page broke (bug fix 2026-07-06).
+          <div className="fav-empty" role="status">
+            <h3 className="fav-empty-title">
+              {q ? <>No dishes found for &ldquo;{searchQuery.trim()}&rdquo;</> : "No dishes match these filters."}
+            </h3>
+            <p className="fav-empty-sub">
+              {q ? "Try a different word, or check your spelling." : "Try turning a filter off."}
+            </p>
+          </div>
         ) : (
           // C) search results — a flat grid of every match across the menu.
           <div
