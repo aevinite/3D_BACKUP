@@ -309,7 +309,7 @@ function moveCardToReady(o) {
   ["new", "cooking", "ready"].forEach((key) => {
     const list = document.getElementById("list-" + key); if (!list) return;
     const n = list.querySelectorAll(".ticket").length;
-    const c = document.getElementById("count-" + key); if (c) c.textContent = n || "";
+    const c = document.getElementById("count-" + key); if (c) c.textContent = String(n); // "0" on empty, matching the full-render pill (was n||"" → blank→"0" flicker)
     if (n === 0 && !list.querySelector(".empty")) list.innerHTML = `<div class="empty">Nothing here.</div>`;
   });
 }

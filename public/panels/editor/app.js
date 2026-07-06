@@ -4999,7 +4999,13 @@ function tablePanelParts(t) {
   // the Z-report always agree. (Was summing the STORED per-order total, which carried a
   // flat 5% on the pre-discount subtotal → the staff collected a different amount than
   // the bill said.) A table settles all-or-nothing, so `due` is the unpaid slice's total.
-  const unpaidOs = os.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  // EXCLUDE 'received' (not-yet-accepted) orders from the due — a brand-new order isn't a
+  // confirmed bill yet, so it doesn't count toward "Due". This matches the floor tile
+  // (isUnpaidBill excludes received) AND the summary RPC (status NOT IN ('received','cancelled')).
+  // Without this, the detail head showed a HIGHER due than the tile the moment a guest added a
+  // new order staff hadn't accepted, and the streaming due (from the RPC) blipped up when the
+  // slice landed. (owner 2026-07-06)
+  const unpaidOs = os.filter((o) => o.status !== "cancelled" && o.status !== "received" && o.payment_status !== "paid");
   const mBill = billMath(os);
   const mDue = billMath(unpaidOs);
   const due = streaming ? (Number(sumTile.due) || 0) : mDue.total;
