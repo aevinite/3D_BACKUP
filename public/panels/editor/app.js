@@ -327,6 +327,7 @@ async function api(method, path, body) {
 // orders/calls/board, so they share one ticket and the newest of THEM wins.
 let allSeq = 0;
 let dataSeq = 0;
+let rtBootGraceUntil = 0; // window after boot during which the realtime CONNECT full-reconcile is skipped (boot already loaded everything) — see startOrderWatch
 async function loadAll() {
   const seq = ++allSeq;
   const data = await api("GET", "/all");
@@ -6375,6 +6376,14 @@ async function pollTables(tables) {
 // counts so we don't alert for orders that were already there; then setInterval
 // repeats it every second so the floor and alerts stay near-real-time.
 function startOrderWatch() {
+  // Boot grace: the initial page load already fetches /all + /summary + /platform fresh
+  // (loadAll + this pollOrders + loadPlatform). The realtime CONNECT then fires its own
+  // "full reconcile" (menu→loadAll, ops-full→pollOrders+loadPlatform) a moment later,
+  // which just re-fetches all three a SECOND time — the boot-load duplication (each was
+  // hit ~3×). Skip only the FULL realtime refresh during this short window; TARGETED
+  // table events are never skipped, and after the window everything runs normally, so
+  // there's zero steady-state staleness. (egress, 2026-07-06)
+  rtBootGraceUntil = Date.now() + 3000;
   pollOrders(); // sets the baseline immediately (no alert on first run)
   // Realtime: refresh the floor the instant an order/dish changes, instead of
   // polling every second. Slow 60s timer is the backup if the WebSocket drops;
@@ -6389,9 +6398,9 @@ function startOrderWatch() {
       // targeted path skips that extra fetch too.
       ops: (detail) => {
         if (detail && !detail.full && detail.tables && detail.tables.length) pollTables(detail.tables);
-        else { pollOrders(); loadPlatform(); }
+        else if (Date.now() >= rtBootGraceUntil) { pollOrders(); loadPlatform(); } // else: boot already loaded it
       },
-      menu: () => loadAll(),
+      menu: () => { if (Date.now() >= rtBootGraceUntil) loadAll(); }, // boot already loaded the menu
     }});
     setInterval(() => { pollOrders(); loadPlatform(); }, 60000); // backup sync (also ages out handed-over platform tickets)
   } else {
