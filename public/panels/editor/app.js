@@ -1729,11 +1729,25 @@ function billCardHtml(b) {
     ${b.invNo != null ? `<div class="bill-inv">${esc(invFmt(b.invNo))}${b.voided ? " · voided" : ""}</div>` : ""}
   </div>`;
 }
+// The orders a bill modal can open from = the locally-cached board PLUS any server-side
+// history search results (bills OLDER than the local 200-row window), deduped by id.
+// Without the union, tapping a bill you FOUND by searching did nothing — openBillModal
+// only looked in the local 200 (fixed 2026-07-06). The search rows carry the same columns
+// (server selects orders.*), so the modal renders them identically.
+function billOrdersPool() {
+  const pool = (state.data.orders || []).slice();
+  if (Array.isArray(state.billHistRows) && state.billHistRows.length) {
+    const seen = new Set(pool.map((o) => o.id));
+    for (const o of state.billHistRows) if (!seen.has(o.id)) pool.push(o);
+  }
+  return pool;
+}
 // Expand one bill into a modal: full item list + totals + Print / Restore / Close.
 function openBillModal(key) {
+  const pool = billOrdersPool();
   const g = (key || "").startsWith("solo:")
-    ? (state.data.orders || []).filter((o) => o.id === key.slice(5))
-    : (state.data.orders || []).filter((o) => o.session_id === key);
+    ? pool.filter((o) => o.id === key.slice(5))
+    : pool.filter((o) => o.session_id === key);
   if (!g.length) return;
   const o0 = g[0];
   const m = billMath(g);
