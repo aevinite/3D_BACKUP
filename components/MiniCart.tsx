@@ -73,6 +73,11 @@ export default function MiniCart() {
     };
   }, []);
 
+  // Re-read on navigation: the cart is tenant-scoped (tget keys off the current
+  // path's restaurant), so moving from /r/A to /r/B in the SAME tab must re-count
+  // against B's cart — otherwise A's pill lingered over B (audit fix 2026-07-06).
+  useEffect(() => { sync(); }, [pathname]);
+
   // Don't show the pill if the cart is empty or the full cart panel is already open.
   if (count === 0 || cartOpen) return null;
   // Also hide it on the 3D viewer page, which has its own bottom bar.

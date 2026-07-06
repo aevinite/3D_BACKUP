@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
+import { usePathname } from "next/navigation";
 import { getOrderStatus, updateOrderTableNumber, getSettings, type OrderStatus } from "@/lib/menu";
 import { useRestaurantId } from "@/lib/restaurant-context";
 import { getStoredSession, getSessionState } from "@/lib/session";

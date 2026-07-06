@@ -1,5 +1,6 @@
 "use client";
-import { useRestaurantId } from "@/lib/restaurant-context";
+import { useRestaurantId, useRestaurantMeta } from "@/lib/restaurant-context";
+import { DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
 
 // SessionStatusWidget — a small, DRAGGABLE, collapsible status card that tells a
 // guest they're connected to a table and lets them act on that connection:
@@ -63,6 +64,10 @@ const toast = (message: string, kicker = "table", variant = "success") =>
 // a guest they're connected to a table and lets them leave or switch tables.
 export default function SessionStatusWidget() {
   const restaurantId = useRestaurantId();
+  // The current restaurant's slug, so "Change table" returns the guest to THIS
+  // restaurant's menu (/r/<slug>/menu) instead of the bare /menu that always
+  // meant restaurant #1 — the cross-tenant bounce the audit found (2026-07-06).
+  const { slug: restaurantSlug } = useRestaurantMeta();
   // Tracks each piece of what we show and how the card behaves:
   const [enabled, setEnabled] = useState(false); // is the session system turned on?
   const [st, setSt] = useState<SState | null>(null); // the live table info, or null when not connected
@@ -291,7 +296,10 @@ export default function SessionStatusWidget() {
     setBusy(true);
     await leaveSession(token);
     clearLocal(); // also drops lfh_active_orders so the old table's tracker won't follow you
-    window.location.href = "/menu"; // go pick / scan another table
+    // Back to THIS restaurant's menu to pick/scan a different table. The bare
+    // /menu is restaurant #1's own menu, so only send there for the #1 default.
+    const dest = restaurantSlug && restaurantSlug !== DEFAULT_RESTAURANT_SLUG ? `/r/${restaurantSlug}/menu` : "/menu";
+    window.location.href = dest;
   };
 
   // ── drag (grip on the card, or the whole collapsed bubble) ──────────────────

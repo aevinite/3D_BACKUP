@@ -1,6 +1,16 @@
 // The big interactive dish page lives in ItemClient (runs in the browser).
 // This file is the thin "server" wrapper that reads the address bar first.
 import ItemClient from "./ItemClient";
+import { getMenuItem } from "@/lib/menu";
+
+// The bare /item/<slug> route is restaurant #1's own dish page. Give it #1's
+// dish-titled tab/share title instead of the platform brand fallback (audit fix
+// 2026-07-06). Restaurant #1 keeps "My Little French House" branding here.
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const dish = await getMenuItem(slug).catch(() => null);
+  return { title: dish?.title ? `${dish.title} — My Little French House` : "My Little French House — Menu" };
+}
 
 // This is the dish detail page, shown at addresses like "/item/croissant".
 // The "[slug]" folder name means the last part of the address (e.g.

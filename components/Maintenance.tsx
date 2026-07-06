@@ -1,13 +1,20 @@
 // Full-screen "under maintenance" screen shown when Service Mode is on
 // (toggled from the editor's General tab). Pure CSS continuous animations.
 
-// The web address of the restaurant logo image shown on this screen.
-const LOGO =
+// The flagship (#1) logo, shown ONLY for restaurant #1. Every other restaurant
+// passes its OWN logo (or none) so this screen can never leak French House
+// branding onto another tenant (the white-label rule; audit fix 2026-07-06).
+const DEFAULT_LOGO =
   "https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png";
 
 // The whole-screen "we're temporarily closed / under maintenance" page.
-// AppShell swaps the normal menu out for this when Service Mode is switched on.
-export default function Maintenance() {
+// AppShell swaps the normal menu out for this when Service Mode is switched on,
+// passing THIS restaurant's branding so the screen shows its own name/logo.
+export default function Maintenance({ logoText, logoUrl, isDefault = true }: { logoText?: string; logoUrl?: string; isDefault?: boolean }) {
+  // #1 keeps its hardcoded logo; other restaurants use their uploaded logo, or
+  // fall back to showing their name in text (never the French House mark).
+  const showLogo = isDefault ? DEFAULT_LOGO : (logoUrl || null);
+  const name = isDefault ? "Little French House" : (logoText || "");
   return (
     // role="alert" makes screen readers announce this important message.
     <div className="maint" role="alert" aria-label="Under maintenance">
@@ -21,8 +28,12 @@ export default function Maintenance() {
           <span />
           <span />
         </div>
-        {/* The restaurant logo */}
-        <img className="maint-logo" src={LOGO} alt="Little French House" />
+        {/* The restaurant logo (or, when a tenant has no logo, its name in text) */}
+        {showLogo ? (
+          <img className="maint-logo" src={showLogo} alt={name} />
+        ) : (
+          <div className="maint-logo maint-logo-text" aria-label={name}>{name}</div>
+        )}
       </div>
       {/* The small pill-shaped label */}
       <div className="maint-badge">🔧 Under Maintenance</div>

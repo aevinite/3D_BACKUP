@@ -19,6 +19,7 @@ import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // m
 import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
 import { useTranslation } from "@/lib/i18n";         // translated text strings
 import VegIcon from "@/components/VegIcon";           // the little veg/non-veg dot
+import { useBackClose } from "@/lib/backStack";       // phone back button closes overlays first
 
 // This describes the "shape" of one dish — every field a dish object can have.
 // It's a TypeScript guide so the editor can catch typos; it doesn't run.
@@ -38,6 +39,7 @@ interface FoodItem {
   description: string;
   longDescription: string;
   rating: string;
+  reviewCount?: number;   // real-review count from the aggregate (audit fix 2026-07-06)
   time: string;
   nutrition: {
     calories: string;
@@ -84,6 +86,9 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   const [imgZoom, setImgZoom] = useState(false);             // is the full-screen photo open?
   const [lbScale, setLbScale] = useState(1);                 // zoom level in the lightbox (1 = normal)
   const [lbPos, setLbPos] = useState({ x: 0, y: 0 });        // pan offset while zoomed in
+  // Phone back button closes the full-screen photo first, instead of leaving the
+  // dish page (every overlay must register — audit fix 2026-07-06).
+  useBackClose("item-zoom", imgZoom, () => { setImgZoom(false); setLbScale(1); setLbPos({ x: 0, y: 0 }); });
   // useRef holds a value across redraws WITHOUT causing a redraw — handy for
   // tracking finger gestures mid-pinch.
   const pinchRef = useRef<number | null>(null);              // distance between two fingers
@@ -239,7 +244,12 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // The "?from=" tells the viewer which dish to link back to.
   const goToViewer = () => {
     if (item?.is4d && item?.modelFolder) {
-      router.push(`/view/${item.modelFolder}?from=${encodeURIComponent(item.slug)}`);
+      // Carry the restaurant slug so the (tenant-less) /view route can build a
+      // back link into THIS restaurant and price/add against it — without it the
+      // viewer defaulted to restaurant #1, showing the wrong dish/price the moment
+      // any non-#1 restaurant enabled a 3D dish (audit fix 2026-07-06).
+      const r = restaurantSlug ? `&r=${encodeURIComponent(restaurantSlug)}` : "";
+      router.push(`/view/${item.modelFolder}?from=${encodeURIComponent(item.slug)}${r}`);
     }
   };
 
@@ -297,11 +307,16 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   useEffect(() => {
     if (!item) return;  // nothing to preload until we know the dish
     const urls: string[] = [];  // the model files we'll queue for download
-    // Add a dish's 3D model files (small + optimized) to the download list.
-    const queue4d = (it?: FoodItem | null) => {
+    // Add a dish's 3D model files to the download list. Skips ALL model bytes when
+    // this restaurant has 3D switched OFF (the button is hidden anyway — no point
+    // fetching ~9MB GLBs). Only the CURRENT dish warms the heavy optimized tier;
+    // neighbours get just the small (~2MB) file, so opening a dish doesn't quietly
+    // pull ~33MB on mobile data (audit fix 2026-07-06).
+    const queue4d = (it?: FoodItem | null, heavy = false) => {
+      if (!features.model3d) return; // 3D off for this restaurant → download nothing
       if (!it?.is4d) return;  // skip dishes without a 3D model
       if (it.modelSmallUrl) urls.push(it.modelSmallUrl);
-      if (it.modelOptimizedUrl) urls.push(it.modelOptimizedUrl);
+      if (heavy && it.modelOptimizedUrl) urls.push(it.modelOptimizedUrl);
     };
     // Quietly start loading a dish's PHOTO in the background.
     const preloadImg = (it?: FoodItem | null) => {
@@ -310,7 +325,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         im.src = it.image;
       }
     };
-    queue4d(item); // current dish first
+    queue4d(item, true); // current dish first — warm BOTH tiers so 3D opens instantly
     if (allItems.length) {
       // Figure out the dish's "neighbors" in the same category, so we can
       // preheat whatever the guest is most likely to open next.
@@ -328,7 +343,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     }
     // Hand the collected model URLs to the loader to download first.
     if (urls.length) modelLoader.prioritize(urls);
-  }, [item, allItems, fromCat]);
+  }, [item, allItems, fromCat, features.model3d]);
 
   // Builds the "You might like" row: a mix of same-category and other dishes,
   // picked by rating, then shuffled so they're interleaved rather than grouped.
@@ -479,13 +494,18 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     );
   }
 
-  // The shown rating: the average of the REAL reviews on screen (the list
-  // starts as the database's reviews and grows when this guest posts one).
-  // Zero reviews -> rating 0 and the UI shows a "New" badge instead of stars.
-  const rating = localReviews.length > 0
-    ? localReviews.reduce((sum, r) => sum + r.rating, 0) / localReviews.length
-    : 0;
-  const reviewCount = localReviews.length;  // how many reviews to show in "(N reviews)"
+  // The shown rating uses the SAME authoritative aggregate the menu card uses
+  // (item.rating / item.reviewCount from item_ratings), so the two never disagree.
+  // The old code averaged only the loaded review LIST, which is capped at 20 rows —
+  // so any dish with >20 reviews showed a different star average + count here than
+  // on the card (audit fix 2026-07-06). We still fall back to the on-screen list
+  // when there's no aggregate yet, and bump the count if this guest just posted one.
+  const aggCount = item.reviewCount ?? 0;
+  const aggAvg = parseFloat(item.rating) || 0;
+  const reviewCount = Math.max(aggCount, localReviews.length);
+  const rating = aggCount > 0
+    ? aggAvg
+    : (localReviews.length > 0 ? localReviews.reduce((sum, r) => sum + r.rating, 0) / localReviews.length : 0);
 
   // From here down is the actual dish page layout (the markup).
   return (

@@ -37,7 +37,7 @@ import { useFeatures, refreshFeatures } from "@/lib/features";
 // feature, without yanking the guest around.
 import { useRealtime } from "@/lib/useRealtime";
 // The default restaurant id, to keep restaurant #1's chrome byte-for-byte identical.
-import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { DEFAULT_RESTAURANT_ID, DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
 
 // The card list works with the full MenuItem shape from the data layer.
 type FoodItem = MenuItem;
@@ -68,6 +68,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // Dish links stay inside this restaurant when we're on /r/<slug>/menu; the default
   // menu passes no slug, so links stay global (/item/...) — unchanged for #1.
   const itemBase = restaurantSlug ? `/r/${restaurantSlug}` : "";
+  // Browse-state (search / diet / sort / scroll / folded categories) is scoped
+  // PER restaurant so it can't follow the guest to another restaurant in the same
+  // tab (which made the next restaurant open pre-filtered or "no results" — audit
+  // fix 2026-07-06). `layout` (list vs gallery) stays unscoped on purpose: it's a
+  // device-wide display preference, harmless to carry across restaurants.
+  const sk = (base: string) => `${base}:${restaurantSlug || DEFAULT_RESTAURANT_SLUG}`;
   const t = useTranslation();   // translated text for the current language
   const lang = useLanguage();   // which language is active right now
   const features = useFeatures(restaurantId); // this restaurant's switched-on features
@@ -197,14 +203,28 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // Cache-busting query so the BROWSER never holds a stale copy — the dedup we
     // want is the SERVER data cache inside the endpoint, not an HTTP cache.
     fetch(`/api/r/${restaurantSlug}/menu-data`, { cache: "no-store" })
-      .then((res) => { if (!res.ok) throw new Error(`menu-data ${res.status}`); return res.json(); })
+      .then((res) => {
+        // A 404 here means the restaurant was DEACTIVATED / deleted while this tab
+        // was open. Do NOT fall back to a direct DB read (that bypasses the active
+        // check and keeps serving the menu — audit fix 2026-07-06); reload so the
+        // server's notFound() shows the proper "not available" page instead.
+        if (res.status === 404) { if (seq === menuReqRef.current) window.location.reload(); throw new Error("menu-data 404 (deactivated)"); }
+        if (!res.ok) throw new Error(`menu-data ${res.status}`);
+        return res.json();
+      })
       .then((bundle: { items?: FoodItem[]; categories?: Category[] }) => {
         if (seq !== menuReqRef.current) return; // drop stale replies
         if (Array.isArray(bundle.items)) setMenuData(bundle.items);
         if (Array.isArray(bundle.categories)) setDbCategories(bundle.categories);
         setLoaded(true); // fetch resolved — even 0 items now shows an empty state, not endless skeletons
       })
-      .catch((err) => { console.error("Error loading menu data (cached endpoint):", err); applyDirect(); });
+      // Only a genuine network/5xx failure reaches here → safe to fall back to a
+      // direct read so a blip can't blank the menu. (The 404 case rethrows above
+      // but has already triggered the reload, so applyDirect won't re-serve it.)
+      .catch((err) => {
+        if (String(err?.message || "").includes("404")) return; // deactivated — reload already fired
+        console.error("Error loading menu data (cached endpoint):", err); applyDirect();
+      });
   };
 
   // Live: when the owner edits the menu (dish/price/sold-out/category) or flips a
@@ -226,16 +246,16 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       // for anyone who set it under the old build).
       const sl = localStorage.getItem("lfh_menu_layout") ?? sessionStorage.getItem("lfh_menu_layout");
       if (sl === "list" || sl === "gallery") setLayout(sl);
-      const ss = sessionStorage.getItem("lfh_menu_sort");
+      const ss = sessionStorage.getItem(sk("lfh_menu_sort"));
       if (ss !== null) setCurrentSort(ss);
-      const sd = sessionStorage.getItem("lfh_menu_diet");
+      const sd = sessionStorage.getItem(sk("lfh_menu_diet"));
       if (sd !== null) setCurrentDiet(sd);
-      const sq = sessionStorage.getItem("lfh_menu_search");
+      const sq = sessionStorage.getItem(sk("lfh_menu_search"));
       if (sq) setSearchQuery(sq);
       // Which "All view" dropdowns the guest had manually folded — restored only
       // if saved less than 10 minutes ago. Any older and it's likely a NEW guest
       // at the table, so they get the default everything-open view instead.
-      const cc = sessionStorage.getItem("lfh_menu_closed_cats");
+      const cc = sessionStorage.getItem(sk("lfh_menu_closed_cats"));
       if (cc) {
         const parsed = JSON.parse(cc); // shape: { cats: ["coffee", ...], ts: when-it-was-saved }
         const freshEnough = Date.now() - (parsed?.ts || 0) <= 10 * 60 * 1000; // 10 minutes
@@ -268,13 +288,13 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     if (!restoredRef.current) { restoredRef.current = true; return; }
     try {
       localStorage.setItem("lfh_menu_layout", layout); // lasting preference (survives browser close)
-      sessionStorage.setItem("lfh_menu_sort", currentSort);
-      sessionStorage.setItem("lfh_menu_diet", currentDiet);
-      sessionStorage.setItem("lfh_menu_search", searchQuery);
+      sessionStorage.setItem(sk("lfh_menu_sort"), currentSort);
+      sessionStorage.setItem(sk("lfh_menu_diet"), currentDiet);
+      sessionStorage.setItem(sk("lfh_menu_search"), searchQuery);
       // The manually-folded "All view" dropdowns, stamped with the time. The
       // restore above only trusts this for 10 minutes — after that it's ignored,
       // so a later guest starts with everything open again.
-      sessionStorage.setItem("lfh_menu_closed_cats", JSON.stringify({ cats: closedCats, ts: Date.now() }));
+      sessionStorage.setItem(sk("lfh_menu_closed_cats"), JSON.stringify({ cats: closedCats, ts: Date.now() }));
     } catch {}
   }, [layout, currentSort, currentDiet, searchQuery, closedCats]);
 
@@ -329,7 +349,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         // Remember how far down we are, in this browsing session.
-        try { sessionStorage.setItem("lfh_menu_scroll", String(el.scrollTop)); } catch {}
+        try { sessionStorage.setItem(sk("lfh_menu_scroll"), String(el.scrollTop)); } catch {}
         // SCROLL-LINKED SHRINK. The brand bar (.nav) is LOCKED at the top. As the
         // category bar pins right under it and you keep scrolling, the cards
         // shrink SMOOTHLY from big+icons to small text-only — driven frame by
@@ -401,7 +421,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     if (scrollRestored.current || !menuData.length) return;
     scrollRestored.current = true;  // mark done so we never jump twice
     try {
-      const y = parseInt(sessionStorage.getItem("lfh_menu_scroll") || "0", 10);
+      const y = parseInt(sessionStorage.getItem(sk("lfh_menu_scroll")) || "0", 10);
       if (y > 0) {
         const el = document.getElementById("main-scroll");
         // Two frames: let the cards lay out before we jump.
@@ -415,7 +435,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   useEffect(() => {
     if (!currentCategory) return;
     try {
-      sessionStorage.setItem("lfh_menu_cat", currentCategory);
+      sessionStorage.setItem(sk("lfh_menu_cat"), currentCategory);
     } catch {}
   }, [currentCategory]);
 
@@ -555,6 +575,11 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
           <HeroTitle greeting={isDefault ? t.greeting : (tagline || "Welcome")} title={isDefault ? t.heroTitle : (heroTitle || "Our Menu")} />
         </div>
 
+        {/* Categories heading + pinned bar hide entirely once we know the menu is
+            empty (loaded with 0 dishes): a fresh restaurant showed a row of
+            tappable category chips above "No dishes yet" that scrolled nowhere
+            (audit fix 2026-07-06). While still loading we keep showing them. */}
+        {!(loaded && menuData.length === 0) && (<>
         {/* "Categories" heading plus a small "slide →" hint. */}
         <div className="section-header">
           <span className="section-title">{t.categories}</span>
@@ -666,6 +691,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         </div>
         )}
         </div>
+        </>)}
         {/* /menu-sticky — ONLY the categories + search box stay pinned. */}
 
         {/* The filter/sort chips + the list/gallery toggle. These now live OUTSIDE

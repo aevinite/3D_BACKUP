@@ -36,7 +36,8 @@ import { enqueueGuestOrder } from "@/lib/guestOutbox";
 // Phone back button: while this sheet is open, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
 // Which restaurant this guest is ordering at (from the /r/<slug> URL).
-import { useRestaurantId } from "@/lib/restaurant-context";
+import { useRestaurantId, useRestaurantMeta } from "@/lib/restaurant-context";
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { tget, tset } from "@/lib/tenantStorage";
 
 // Once you're in a session, that table becomes your default everywhere (cart +
@@ -119,6 +120,12 @@ export default function SessionGate() {
   // re-registering the window listener on every id change.
   const ridRef = useRef(restaurantId);
   useEffect(() => { ridRef.current = restaurantId; }, [restaurantId]);
+  // The restaurant's OWN name for the gate header — never a hardcoded brand.
+  // #1 keeps "My Little French House"; any other restaurant shows its own name
+  // once resolved (null during the brief resolve window → we render no kicker
+  // rather than flash French House). White-label leak fix, 2026-07-06.
+  const { name: restaurantName } = useRestaurantMeta();
+  const brandLabel = restaurantName || (restaurantId === DEFAULT_RESTAURANT_ID ? "My Little French House" : null);
   // What the on-screen pop-up needs to remember:
   const [open, setOpen] = useState(false); // is the pop-up showing?
   const [step, setStep] = useState<Step>("idle"); // which screen we're on (see Step above)
@@ -674,7 +681,7 @@ export default function SessionGate() {
             QR scanner is added it will fill this in and skip straight past. */}
         {step === "ask_table" && (<>
           <div className="sg-badge"><i className="fas fa-chair"></i></div>
-          <div className="sg-kicker">My Little French House</div>
+          {brandLabel && <div className="sg-kicker">{brandLabel}</div>}
           <h3 className="sg-title">Which table are you at?</h3>
           <p className="sg-sub">Scan the QR sticker on your table, or type the table number to start your order.</p>
           <div className="sg-input-wrap">
@@ -710,7 +717,7 @@ export default function SessionGate() {
             browser prompt. Tapping continue records consent and runs the check. */}
         {step === "location_intro" && (<>
           <div className="sg-badge"><i className="fas fa-location-dot"></i></div>
-          <div className="sg-kicker">My Little French House</div>
+          {brandLabel && <div className="sg-kicker">{brandLabel}</div>}
           <h3 className="sg-title">You&apos;re at table {pending.current?.table}</h3>
           <p className="sg-sub">Before you order, we quickly confirm you&apos;re here at the restaurant — so every order is genuine. Your location is used once, just for this. We never store or share it.</p>
           <div className="sg-actions">

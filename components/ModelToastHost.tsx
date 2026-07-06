@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { modelWatchlist } from "@/lib/modelWatchlist";
+import { tenantSlug } from "@/lib/tenantStorage";
+import { DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
 
 // Headless: listens for 3D model load/fail and turns them into the app's one
 // café-ticket notification (`lfh:toast`). Loaded models become a tappable
@@ -30,8 +32,13 @@ export default function ModelToastHost() {
       announcedRef.current.add(key);
       // Stop watching this model now that it's ready.
       modelWatchlist.unwatchByFolder(entry.folder);
-      // If we know the dish slug, remember where the guest came from in the link.
-      const qs = entry.slug ? `?from=${encodeURIComponent(entry.slug)}` : "";
+      // If we know the dish slug, remember where the guest came from in the link,
+      // AND which restaurant (so the viewer stays in this tenant, not #1 — audit
+      // fix 2026-07-06). The tab's current restaurant is the right one: the guest
+      // is on its page right now. #1 keeps the bare link (no ?r=), unchanged.
+      const slug = tenantSlug();
+      const rParam = slug && slug !== DEFAULT_RESTAURANT_SLUG ? `&r=${encodeURIComponent(slug)}` : "";
+      const qs = entry.slug ? `?from=${encodeURIComponent(entry.slug)}${rParam}` : "";
       // Fire the app's one toast event with a tappable "view in 3D" ticket.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
         message: `${entry.title} in 3D`,

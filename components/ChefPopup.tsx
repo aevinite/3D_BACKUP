@@ -1,7 +1,8 @@
 "use client";
 
-// React building blocks: useState remembers values, useEffect runs setup code.
-import { useEffect, useState } from "react";
+// React building blocks: useState remembers values, useEffect runs setup code,
+// useRef holds a value that survives re-draws without causing one.
+import { useEffect, useRef, useState } from "react";
 // callWaiter sends a service request; getSettings reads restaurant on/off options.
 import { callWaiter, getSettings } from "@/lib/menu";
 import { useRestaurantId } from "@/lib/restaurant-context";
@@ -27,6 +28,10 @@ export default function ChefPopup() {
   const [tableCount, setTableCount] = useState(0); // how many tables exist; 0 = no limit known
   const [sessionsEnabled, setSessionsEnabled] = useState(false); // v2 dining-session system
   const [sending, setSending] = useState(false); // true while a request is being sent
+  // Synchronous re-entrancy lock: `sending` (state) only blocks AFTER a re-render,
+  // so a fast double-tap could fire two requests before the button disables. This
+  // ref flips instantly, so the second tap is dropped in the same tick.
+  const sendingRef = useRef(false);
 
   // Phone back button closes the popup instead of leaving the site.
   useBackClose("chef-popup", open, () => setOpen(false));
@@ -94,7 +99,7 @@ export default function ChefPopup() {
 
   // This runs when the guest taps one of the request buttons (Water, Bill, etc.).
   const handleSend = async (reason: string) => {
-    if (sending) return; // already sending one — ignore double taps
+    if (sendingRef.current || sending) return; // already sending one — ignore double taps (sync + state)
     // Table number is required AND must be a real table (see lib/table.ts).
     const check = validateTable(tableNumber, tableCount);
     if (!check.ok) {
@@ -102,35 +107,51 @@ export default function ChefPopup() {
       return;
     }
     // v2: when sessions are ON, route the waiter call through the SessionGate
-    // (location + session membership) instead of the open call.
+    // (location + session membership) instead of the open call. Lock synchronously
+    // so a fast double-tap can't fire the gate flow twice.
     if (sessionsEnabled) {
+      sendingRef.current = true;
       window.dispatchEvent(new Event("lfh:close-all"));
       window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "call", table: check.value, payload: { reason } } }));
       setTableNumber("");
+      // The gate owns the rest; release the lock shortly so the popup can be reused.
+      setTimeout(() => { sendingRef.current = false; }, 800);
       return;
     }
     // Otherwise (sessions off): send the call directly the old, simple way.
+    sendingRef.current = true;
     setSending(true);
     try {
-      // Tell the server staff are needed at this table for this reason.
-      await callWaiter(check.value, reason, restaurantId);
-      // Show a friendly "On our way!" confirmation toast.
-      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
-        message: "On our way!",
-        subtitle: `${reason} · staff notified`,
-        kicker: "service",
-        variant: "success",
-        icon: "🛎",
-      } }));
-      // Close the pop-up and clear the field now that the request went through.
-      window.dispatchEvent(new Event("lfh:close-all"));
-      setTableNumber("");
+      // Tell the server staff are needed at this table for this reason, and read
+      // its ACTUAL answer — a blocked table or a dropped duplicate is NOT success.
+      const res = await callWaiter(check.value, reason, restaurantId);
+      if (res.ok && res.reason !== "already_sent" && res.reason !== "capped") {
+        // A brand-new call actually landed.
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+          message: "On our way!", subtitle: `${reason} · staff notified`,
+          kicker: "service", variant: "success", icon: "🛎",
+        } }));
+        window.dispatchEvent(new Event("lfh:close-all"));
+        setTableNumber("");
+      } else if (res.reason === "blocked") {
+        // The table is blocked from calling staff — say so, don't fake success.
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Can't call staff from this table", subtitle: "please ask a member of staff directly", kicker: "service", variant: "error" } }));
+      } else if (res.reason === "capped") {
+        // Too many requests already pending for this table.
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "You've a few requests pending", subtitle: "staff are on the way", kicker: "service", icon: "🛎" } }));
+        window.dispatchEvent(new Event("lfh:close-all"));
+      } else {
+        // already_sent: a recent identical request — reassure without a new call.
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Already sent", subtitle: `${reason} · staff are on the way`, kicker: "service", icon: "🛎" } }));
+        window.dispatchEvent(new Event("lfh:close-all"));
+      }
     } catch {
       // If the request failed, show an error toast asking them to try again.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't reach staff", subtitle: "please try again", kicker: "service", variant: "error" } }));
     } finally {
       // Either way, we're no longer sending — re-enable the buttons.
       setSending(false);
+      sendingRef.current = false;
     }
   };
 

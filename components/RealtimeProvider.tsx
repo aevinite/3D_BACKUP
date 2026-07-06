@@ -110,6 +110,11 @@ export default function RealtimeProvider() {
     };
     window.addEventListener("lfh:session-changed", onSession);
     window.addEventListener("lfh:cart-updated", onSession);
+    // A guest can first establish their table by TYPING it into the waiter popup
+    // (no cart activity) — that fires lfh:table-scanned. Without this the live
+    // socket stayed unsubscribed until the next cart change / wake (audit fix
+    // 2026-07-06); now it subscribes as soon as the table is known.
+    window.addEventListener("lfh:table-scanned", onSession);
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", onWake);
     window.addEventListener("pageshow", onWake); // bfcache restore (phone wake)
@@ -122,6 +127,7 @@ export default function RealtimeProvider() {
       if (channel) supabase.removeChannel(channel);
       window.removeEventListener("lfh:session-changed", onSession);
       window.removeEventListener("lfh:cart-updated", onSession);
+      window.removeEventListener("lfh:table-scanned", onSession);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onWake);
       window.removeEventListener("pageshow", onWake);
