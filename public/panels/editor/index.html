@@ -10,7 +10,7 @@
         href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=20260707a" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=20260707mgr1" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js"></script>
 </head>
@@ -52,6 +52,8 @@
       </div>
       <div class="sidebar-head">
         <input id="search" class="search" type="search" placeholder="Search…" />
+        <!-- Dishes tab only: enter multi-select to mark many dishes sold-out/available or delete. -->
+        <button id="bulkBtn" class="btn" type="button" hidden title="Select several dishes at once">☑︎ Select</button>
         <button id="newBtn" class="btn primary">+ New</button>
       </div>
       <!-- Category filter chips (Dishes tab only): tap a category to see just its
@@ -82,6 +84,6 @@
   <script src="/panels/backstack.js"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=20260707c"></script>
+  <script src="/panels/editor/app.js?v=20260707mgr1"></script>
 </body>
 </html>
