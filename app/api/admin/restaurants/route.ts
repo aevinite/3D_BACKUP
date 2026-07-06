@@ -234,7 +234,13 @@ export async function POST(req: NextRequest) {
     const baseRow = cleanClonedSettings(template.data);
     const settingsRow = { ...baseRow, id: slug, restaurant_id: rid, enabled_panels: panels };
     const setRes = await sb.from("settings").upsert(settingsRow, { onConflict: "restaurant_id" });
-    if (setRes.error) return bad(setRes.error.message, 500);
+    if (setRes.error) {
+      // Roll back the orphaned restaurant row (bug #5, 2026-07-06): without a settings
+      // row the tenant is unusable, and leaving it made the admin — who just saw
+      // "couldn't create" — retry and produce a duplicate with a "-2" slug.
+      await sb.from("restaurants").delete().eq("id", rid);
+      return bad(setRes.error.message, 500);
+    }
     // 2b) Seed the starter menu (categories → filters → items), scoped to this restaurant.
     //     Best-effort: a seed failure must NOT orphan the already-created restaurant — we
     //     report it in the response so the admin knows, and the restaurant is still usable
@@ -267,13 +273,14 @@ export async function POST(req: NextRequest) {
     // 3) one starter login per ENABLED panel. Username = the panel name (unique PER restaurant),
     //    random password returned once. The owner login is also mapped as the restaurant's owner.
     const logins: { panel: string; role: string; username: string; password: string }[] = [];
+    const loginErrors: string[] = []; // panels whose starter login failed (bug #5) — reported so the admin isn't left with an enabled panel nobody can sign into
     for (const panel of ["manager", "kitchen", "tablet", "owner"] as const) {
       if (!panels[panel]) continue;
       const pw = genPassword();
       const ins = await sb.from("staff_users")
         .insert({ username: panel, name: `${name} ${panel}`, role: panel, restaurant_id: rid, password_hash: await hashSecret(pw), active: true })
         .select("id").single();
-      if (ins.error) continue; // don't fail the whole create over one login; report what we made
+      if (ins.error) { loginErrors.push(panel); continue; } // don't fail the whole create over one login; report what we made
       logins.push({ panel, role: panel, username: panel, password: pw });
       if (panel === "owner") {
         await sb.from("restaurants").update({ owner_user_id: ins.data.id }).eq("id", rid);
@@ -282,7 +289,7 @@ export async function POST(req: NextRequest) {
     }
     const onPanels = (Object.keys(panels) as (keyof typeof panels)[]).filter((k) => panels[k]);
     await logAction("admin", "restaurant_create", { actor: "admin", detail: `created restaurant "${name}" (${slug}) · panels ${onPanels.join("+")}${seedMenu ? (menuSeeded ? " · menu seeded" : " · menu seed FAILED") : " · no menu"}` });
-    return ok({ ok: true, id: rid, slug, name, panels, logins, menuSeeded, seedError });
+    return ok({ ok: true, id: rid, slug, name, panels, logins, loginErrors, menuSeeded, seedError });
   }
 
   if (action !== "create_owner") return bad("Unknown action.");

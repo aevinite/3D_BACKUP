@@ -29,7 +29,11 @@ export async function GET(req: NextRequest) {
     // themselves. Counts only, NO revenue (owner 2026-07-03: the admin panel
     // shows no earnings anywhere).
     const [restsQ, statsQ] = await Promise.all([
-      supabaseAdmin.from("restaurants").select("id, name, slug, active").order("name"),
+      // Exclude recycle-bin restaurants (bug H4, 2026-07-06): a soft-deleted restaurant
+      // must not render a live floor tile — the deleted_at filter matches the Restaurants
+      // list, which was the only read that had it. Also trims the per-restaurant floor
+      // fan-out (egress #4) to live tenants only.
+      supabaseAdmin.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name"),
       supabaseAdmin.rpc("lfh_admin_floor_stats"),
     ]);
     if (restsQ.error) return NextResponse.json({ error: restsQ.error.message }, { status: 500 });

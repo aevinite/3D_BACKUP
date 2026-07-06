@@ -114,19 +114,23 @@ function RestaurantSwitcher() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [list, setList] = useState<Rest[] | null>(null);
+  const [loadErr, setLoadErr] = useState(false); // show Retry instead of a stuck "Loading…" (bug #7, 2026-07-06)
   const [q, setQ] = useState("");
   const [hi, setHi] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const loadList = () => {
+    setLoadErr(false);
+    fetch("/api/admin/restaurants", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (j.error) setLoadErr(true); else setList((j.restaurants || []).map((r: Rest) => ({ id: r.id, slug: r.slug, name: r.name, active: r.active }))); })
+      .catch(() => setLoadErr(true));
+  };
+
   useEffect(() => {
     if (!open) return;
-    if (list === null) {
-      fetch("/api/admin/restaurants", { cache: "no-store" })
-        .then((r) => r.json())
-        .then((j) => { if (!j.error) setList((j.restaurants || []).map((r: Rest) => ({ id: r.id, slug: r.slug, name: r.name, active: r.active }))); })
-        .catch(() => {});
-    }
+    if (list === null) loadList();
     inputRef.current?.focus();
     const onDoc = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false); };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
@@ -163,7 +167,9 @@ function RestaurantSwitcher() {
             <input ref={inputRef} value={q} onChange={(e) => { setQ(e.target.value); setHi(0); }} onKeyDown={onKeyDown}
               placeholder="Search name or slug…" aria-label="Search restaurants" />
           </div>
-          {list === null ? (
+          {loadErr && list === null ? (
+            <div className="adx-switch-empty">Couldn&rsquo;t load. <button type="button" className="adm-btn" style={{ marginLeft: 6 }} onClick={loadList}>Retry</button></div>
+          ) : list === null ? (
             <div className="adx-switch-empty">Loading…</div>
           ) : rows.length === 0 ? (
             <div className="adx-switch-empty">No match.</div>

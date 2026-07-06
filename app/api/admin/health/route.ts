@@ -22,7 +22,9 @@ export async function GET(req: NextRequest) {
 
   const [estimatesQ, restQ, staffQ, issuesQ] = await Promise.all([
     sb.rpc("lfh_admin_table_estimates"),
-    sb.from("restaurants").select("id, active"),
+    // Live restaurants only (bug H4/#6, 2026-07-06): binned restaurants must not be
+    // counted as "suspended". With deleted_at excluded, suspended = live-but-inactive.
+    sb.from("restaurants").select("id, active").is("deleted_at", null),
     sb.from("staff_users").select("id, last_seen_at").eq("active", true),
     sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open"),
   ]);

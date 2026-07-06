@@ -11,18 +11,22 @@ type Member = {
   session?: { table_number?: string; status?: string } | null;
 };
 type Block = { id: string; device_id?: string | null; phone?: string | null; table_number?: string | null; reason?: string | null; blocked_at: string };
-type CustData = { members: Member[]; blocklist: Block[]; orders: { member_id: string; total: number }[]; calls: { member_id: string }[] };
+type CustData = { members: Member[]; blocklist: Block[]; orders: { member_id: string }[]; calls: { member_id: string }[] };
 
 export default function AdminLogs() {
   const [tab, setTab] = useState<"ops" | "cust">("ops");
   const [ops, setOps] = useState<Action[] | null>(null);
   const [cust, setCust] = useState<CustData | null>(null);
+  // Error flags so a failed fetch shows a retry instead of an eternal "Loading…"
+  // (bug #7, 2026-07-06 — the catch used to swallow errors and never clear the sentinel).
+  const [opsErr, setOpsErr] = useState(false);
+  const [custErr, setCustErr] = useState(false);
 
   const loadOps = useCallback(async () => {
-    try { const j = await (await fetch("/api/admin/oplog?limit=200", { cache: "no-store" })).json(); if (!j.error) setOps(j.actions || []); } catch {}
+    try { const j = await (await fetch("/api/admin/oplog?limit=200", { cache: "no-store" })).json(); if (j.error) setOpsErr(true); else { setOps(j.actions || []); setOpsErr(false); } } catch { setOpsErr(true); }
   }, []);
   const loadCust = useCallback(async () => {
-    try { const j = await (await fetch("/api/admin/custlog", { cache: "no-store" })).json(); if (!j.error) setCust(j); } catch {}
+    try { const j = await (await fetch("/api/admin/custlog", { cache: "no-store" })).json(); if (j.error) setCustErr(true); else { setCust(j); setCustErr(false); } } catch { setCustErr(true); }
   }, []);
   useEffect(() => { if (tab === "ops") loadOps(); else loadCust(); }, [tab, loadOps, loadCust]);
 
@@ -39,13 +43,16 @@ export default function AdminLogs() {
         <button className="adm-btn" onClick={() => (tab === "ops" ? loadOps() : loadCust())}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>
       </div>
 
-      {tab === "ops" ? <OpsTable rows={ops} /> : <CustTable data={cust} />}
+      {tab === "ops"
+        ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} />
+        : <CustTable data={cust} err={custErr} onRetry={loadCust} />}
     </>
   );
 }
 
-function OpsTable({ rows }: { rows: Action[] | null }) {
+function OpsTable({ rows, err, onRetry }: { rows: Action[] | null; err: boolean; onRetry: () => void }) {
   const cols = "92px 1fr auto";
+  if (err) return <div className="adm-empty">Couldn&rsquo;t load the operations log. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={onRetry}>Retry</button></div>;
   if (rows === null) return <div className="adm-empty">Loading…</div>;
   if (rows.length === 0) return <div className="adm-empty">No staff actions yet.</div>;
   return (
@@ -65,7 +72,8 @@ function OpsTable({ rows }: { rows: Action[] | null }) {
   );
 }
 
-function CustTable({ data }: { data: CustData | null }) {
+function CustTable({ data, err, onRetry }: { data: CustData | null; err: boolean; onRetry: () => void }) {
+  if (err) return <div className="adm-empty">Couldn&rsquo;t load the customer log. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={onRetry}>Retry</button></div>;
   if (data === null) return <div className="adm-empty">Loading…</div>;
   const { members, blocklist, orders, calls } = data;
   // Roll up each member's order count + call count. (No ₹ spend here — the admin

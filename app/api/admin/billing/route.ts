@@ -40,7 +40,9 @@ export async function GET(req: NextRequest) {
 
   const yearStart = `${new Date().getUTCFullYear()}-01-01`;
   const [restQ, billingQ, yearPaymentsQ, lastPaymentsQ] = await Promise.all([
-    sb.from("restaurants").select("id, name, slug, active").order("name"),
+    // Live restaurants only (bug H4, 2026-07-06): a binned restaurant must not appear
+    // as a billable row in the SaaS billing table.
+    sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name"),
     sb.from("restaurant_billing").select("*"),
     sb.from("restaurant_payments").select("restaurant_id, amount").gte("paid_on", yearStart).limit(5000),
     sb.from("restaurant_payments").select("restaurant_id, amount, paid_on").order("paid_on", { ascending: false }).limit(1000),

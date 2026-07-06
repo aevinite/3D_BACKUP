@@ -14,7 +14,7 @@
 //   • Login is rate-limited: 5 wrong tries locks the account for 60 seconds.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sha256hex, safeEqual, AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { isPanelEnabledCached, ownerPanelEnabled } from "@/lib/panelAccess";
+import { isPanelEnabledCached, ownerPanelEnabled, isRestaurantDeleted } from "@/lib/panelAccess";
 
 export const USER_COOKIE = "lfh_user";
 export type Role = "owner" | "manager" | "tablet" | "kitchen";
@@ -183,7 +183,15 @@ export async function userFromCookie(value: string | undefined | null): Promise<
   const iat = Number(iatStr);
   if (!id || !Number.isFinite(iat)) return null;
   if (Date.now() - iat > TOKEN_TTL_MS) return null; // expired
-  const res = await sb.from("staff_users").select("*").eq("id", id).eq("active", true).limit(1);
+  // Retry the lookup once on a hard error before giving up (bug #9, 2026-07-06): a
+  // brief DB/DNS flap otherwise threw AuthDbError, which the page/layout gates surface
+  // as a raw 500. A single ~120ms retry clears most transient flaps so the gate never
+  // trips; a SUSTAINED outage still throws (fail-closed, requireRole answers 503).
+  let res = await sb.from("staff_users").select("*").eq("id", id).eq("active", true).limit(1);
+  if (res.error) {
+    await new Promise((r) => setTimeout(r, 120));
+    res = await sb.from("staff_users").select("*").eq("id", id).eq("active", true).limit(1);
+  }
   if (res.error) throw new AuthDbError(res.error.message);
   const u = res.data?.[0];
   if (!u) return null;
@@ -238,7 +246,16 @@ export async function requireRole(
     // the owner panel on" (ownerPanelEnabled reads the restaurant_owners join).
     if (u.role === "owner") {
       if (!(await ownerPanelEnabled(u.id))) return { ok: false };
-    } else if (!(await isPanelEnabledCached(u.role, u.restaurant_id))) return { ok: false };
+    } else {
+      if (!(await isPanelEnabledCached(u.role, u.restaurant_id))) return { ok: false };
+      // Recycle-bin block (bug H2, 2026-07-06): if the admin soft-deleted this restaurant,
+      // a manager/kitchen/tablet tab left OPEN kept loading AND saving orders on a "deleted"
+      // restaurant until it reloaded — the M3 panel-toggle fix never added the parallel
+      // deleted_at check. Same 30s-TTL cache as the panel map, so no per-request read; a
+      // fresh delete takes effect within TTL. Owners are exempt here — their restaurant_id is
+      // the #1 home namespace, and ownerPanelEnabled already excludes binned restaurants.
+      if (await isRestaurantDeleted(u.restaurant_id)) return { ok: false };
+    }
     // Presence heartbeat (throttled ~45s): mark this user active now so admin/owner
     // see who's working / which panel is open. Fire-and-forget; never blocks the call.
     const seen = (u as { last_seen_at?: string | null }).last_seen_at;

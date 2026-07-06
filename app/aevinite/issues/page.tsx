@@ -26,12 +26,15 @@ export default function AdminIssues() {
   const [filter, setFilter] = useState("open");
   const [busy, setBusy] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // Track a failed load so we never show the "No open issues 🎉" all-clear when the
+  // fetch actually errored (bug #8, 2026-07-06 — real complaints were being hidden).
+  const [err, setErr] = useState(false);
 
   const load = useCallback(() => {
     fetch("/api/owner/issues", { cache: "no-store" })
       .then((r) => r.json())
-      .then((j) => { if (!j.error) setIssues(j.issues || []); })
-      .catch(() => {})
+      .then((j) => { if (j.error) setErr(true); else { setIssues(j.issues || []); setErr(false); } })
+      .catch(() => setErr(true))
       .finally(() => setLoaded(true));
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -70,6 +73,8 @@ export default function AdminIssues() {
 
       {!loaded ? (
         <div className="adm-empty">Loading issues…</div>
+      ) : err ? (
+        <div className="adm-empty">Couldn&rsquo;t load issues. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>
       ) : shown.length === 0 ? (
         <div className="adm-empty">{filter === "open" ? "No open issues right now. 🎉" : "Nothing here."}</div>
       ) : (

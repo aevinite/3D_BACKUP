@@ -20,7 +20,9 @@ export async function GET(req: NextRequest) {
         .order("joined_at", { ascending: false }).limit(120),
       sb.from("customers").select("*").order("last_seen_at", { ascending: false }).limit(120),
       sb.from("blocklist").select("*").order("blocked_at", { ascending: false }).limit(200),
-      sb.from("orders").select("member_id, total, created_at").not("member_id", "is", null).order("created_at", { ascending: false }).limit(400),
+      // No `total` (bug H3, 2026-07-06): the admin Logs page only counts orders per member;
+      // it must not receive per-order money. Dropping the column keeps the payload honest.
+      sb.from("orders").select("member_id, created_at").not("member_id", "is", null).order("created_at", { ascending: false }).limit(400),
       sb.from("waiter_calls").select("member_id, note, created_at").not("member_id", "is", null).order("created_at", { ascending: false }).limit(400),
     ]);
     return NextResponse.json({

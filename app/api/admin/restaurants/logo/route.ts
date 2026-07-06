@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   if (!isUuid(rid)) return bad("Invalid restaurant_id.");
   if (!(file instanceof File)) return bad("Missing file.");
   const ext = EXT[file.type];
-  if (!ext) return bad("Logo must be a PNG, JPG, WEBP or SVG image.");
+  if (!ext) return bad("Logo must be a PNG, JPG or WEBP image.");
   if (file.size > 1048576) return bad("Logo must be 1 MB or smaller.");
   await purgeLogos(rid); // drop any previous logo so Storage keeps just the current one
   const path = `${rid}/logo-${Date.now()}.${ext}`;
