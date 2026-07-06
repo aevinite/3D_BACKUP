@@ -15,6 +15,7 @@ import { USER_COOKIE, userFromCookie, AuthDbError } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { getOwnerEntitlements, getOwnerEntitlementsUnion } from "@/lib/ownerEntitlements";
 import OwnerShell from "@/components/owner/OwnerShell";
 import OwnerReconnecting from "@/components/owner/OwnerReconnecting";
 
@@ -41,14 +42,21 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
     throw e;
   }
 
-  // 1) OWNER role → their own cockpit.
-  if (u && u.role === "owner") return <OwnerShell initialSkin={initialSkin}>{children}</OwnerShell>;
+  // 1) OWNER role → their own cockpit. Sections the ADMIN removed for their
+  // restaurant(s) (mig 133) are HIDDEN here — union across a multi-restaurant
+  // owner's estate, so a section survives if ANY of their restaurants still has it.
+  if (u && u.role === "owner") {
+    const owned = ((await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", u.id)).data || []).map((r) => r.restaurant_id as string);
+    const ents = await getOwnerEntitlementsUnion(owned.length ? owned : [u.restaurant_id]);
+    return <OwnerShell initialSkin={initialSkin} entitlements={ents}>{children}</OwnerShell>;
+  }
 
   // 2) ADMIN viewing a specific restaurant (act-as) → top-power, invisible view.
+  // The admin sees removed sections TINTED (hierarchy X-ray), never hidden.
   if (acting && actingValid) {
     const r = (await sb.from("restaurants").select("name").eq("id", acting).limit(1)).data?.[0];
     return (
-      <OwnerShell adminViewing restaurantName={r?.name || "this restaurant"} initialSkin={initialSkin}>
+      <OwnerShell adminViewing restaurantName={r?.name || "this restaurant"} initialSkin={initialSkin} entitlements={await getOwnerEntitlements(acting)}>
         {children}
       </OwnerShell>
     );

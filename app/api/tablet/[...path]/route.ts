@@ -60,6 +60,10 @@ const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName 
 const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet"] as const;
 const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
+  // Admin super-user (no staff cookie — the gate already vetted the admin token):
+  // never blocked by a waiter tri-state. This is what makes the X-ray's tinted
+  // buttons honest — a revealed control the admin clicks genuinely works.
+  if (!user) return { allow: true, managerName: "admin" };
   const override = (user?.permissions ?? {})[key];
   let mode: string;
   if (isPermMode(override)) mode = override;
@@ -127,6 +131,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   try {
     const { path = [] } = await ctx.params;
+
+    // whoami — boot signal for the tablet's hierarchy X-ray (Phase 3, 2026-07-06).
+    // Same contract as the manager panel's: WHO is viewing, so the client can HIDE an
+    // off capability from the real waiter but show it TINTED to the admin looking in.
+    // higherView is ADMIN-ONLY on purpose: tabletPerm's bypass is admin-only, so an
+    // owner/manager tint would promise a button that 403s on tap (work-checker).
+    if (path.join("/") === "whoami") {
+      const actor = g.user ? g.user.role : "admin"; // no staff cookie = admin super-user
+      return ok({ actor, higherView: !g.user });
+    }
 
     // ── GET /api/tablet/summary — TIER 1 of the two-tier floor (mig 101) ──────
     // The slim per-tile SUMMARY drives the tablet GRID (each tile's state/label/meta/counts/

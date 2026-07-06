@@ -15,7 +15,13 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 
-export type OwnerScope = { all: true } | { all: false; ids: string[]; ownerId: string };
+// `admin: true` marks the ADMIN's session (all-view OR act-as pin) — set on every
+// admin branch below. Gates that restrict a REAL owner (e.g. the mig 132 owner
+// entitlements) must check THIS flag, never `ownerId === "admin"`: the act-as path
+// deliberately borrows the real owner's id whenever the restaurant has one, so that
+// sentinel almost never fires (work-checker, 2026-07-06 — the admin was getting
+// wrongly locked out of the very sections it had switched off).
+export type OwnerScope = { all: true; admin?: true } | { all: false; ids: string[]; ownerId: string; admin?: true };
 
 export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
   // A logged-in OWNER wins over a stray admin cookie in the same browser. This
@@ -46,7 +52,7 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
     // `scope` is deliberately separate from the analytics `rid` drill-in param.
     const sp = req.nextUrl?.searchParams;
     const scopeParam = sp?.get("scope");
-    if (scopeParam === "all") return { all: true };
+    if (scopeParam === "all") return { all: true, admin: true };
     // Legacy: an admin single-restaurant link may still carry ?rid=; honor it as a pin.
     const acting = scopeParam || sp?.get("rid") || req.cookies.get(ADMIN_ACT_COOKIE)?.value;
     if (acting) {
@@ -57,7 +63,8 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
       // the primary owner_user_id when it's a member, else any co-owner — and widen
       // through the same join table (2026-07-06; was keyed off owner_user_id alone,
       // which missed hand-attached co-ownerships). Fall back to the single restaurant
-      // if nobody owns it.
+      // if nobody owns it. Carries `admin: true` — this is still the ADMIN's session
+      // borrowing the owner's id, so entitlement gates must never fire on it.
       const [primaryQ, membersQ] = await Promise.all([
         sb.from("restaurants").select("owner_user_id").eq("id", acting).maybeSingle(),
         sb.from("restaurant_owners").select("user_id").eq("restaurant_id", acting),
@@ -69,11 +76,11 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
         const { data } = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId);
         const ids = (data || []).map((x) => x.restaurant_id as string);
         if (!ids.includes(acting)) ids.push(acting); // never lose the entered restaurant
-        return { all: false, ids, ownerId };
+        return { all: false, ids, ownerId, admin: true };
       }
-      return { all: false, ids: [acting], ownerId: "admin" };
+      return { all: false, ids: [acting], ownerId: "admin", admin: true };
     }
-    return { all: true };
+    return { all: true, admin: true };
   }
   return null;
 }

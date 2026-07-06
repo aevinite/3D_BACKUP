@@ -46,6 +46,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   try {
     const { path = [] } = await ctx.params;
+
+    // whoami — boot signal for the kitchen's hierarchy X-ray ribbon (Phase 4,
+    // 2026-07-06). The kitchen has no permission-gated actions (yet), so this only
+    // drives the "Admin view" marker; add capability maps here when kitchen gets any.
+    if (path.join("/") === "whoami") {
+      const actor = g.user ? g.user.role : "admin"; // no staff cookie = admin super-user
+      return ok({ actor, higherView: !g.user }); // admin-only, like the tablet's
+    }
+
     if (path.join("/") === "board") {
       // TARGETED REFETCH (owner 2026-06-26 — egress cut): when a realtime breadcrumb names
       // ONE table, the kitchen asks for just that table's orders+items (?table=N) instead of

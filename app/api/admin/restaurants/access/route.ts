@@ -1,14 +1,17 @@
 // GET/POST /api/admin/restaurants/access?restaurant_id=… — the admin's per-restaurant
 // ACCESS controls that don't already have their own route: the manager powers
-// (restaurants.manager_permissions) and the tablet billing tri-states
-// (settings.tablet_discount / tablet_mark_paid / tablet_invoice). Panels + guest
-// features keep their existing routes (panels, features); this fills the two gaps the
-// admin panel needs to "toggle every access bit". Admin-gated; service-role.
+// (restaurants.manager_permissions), the tablet billing tri-states
+// (settings.tablet_discount / tablet_mark_paid / tablet_invoice), and the OWNER
+// entitlements (restaurants.owner_entitlements, mig 133 — which owner-panel sections
+// and manager-power toggles even exist for this restaurant). Panels + guest features
+// keep their existing routes (panels, features); this route is how the admin console
+// "toggles every access bit" of the ladder. Admin-gated; service-role.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { OWNER_ENTITLEMENT_KEYS, mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -27,12 +30,12 @@ export async function GET(req: NextRequest) {
   if (!(await gate(req))) return bad("unauthorized", 401);
   const rid = req.nextUrl.searchParams.get("restaurant_id") || "";
   if (!rid) return bad("restaurant_id required");
-  const r = (await sb.from("restaurants").select("manager_permissions").eq("id", rid).maybeSingle()).data;
+  const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data;
   const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice").eq("restaurant_id", rid).maybeSingle()).data as Record<string, string> | null;
   const manager = { ...MP_DEFAULT, ...(r?.manager_permissions && typeof r.manager_permissions === "object" ? r.manager_permissions : {}) };
   const tablet: Record<string, string> = {};
   for (const k of TABLET_CAPS) tablet[k] = isTri(s?.[k]) ? (s![k] as string) : "off";
-  return NextResponse.json({ manager, tablet });
+  return NextResponse.json({ manager, tablet, owner: mergeOwnerEntitlements(r?.owner_entitlements) });
 }
 
 export async function POST(req: NextRequest) {
@@ -49,6 +52,16 @@ export async function POST(req: NextRequest) {
     const next: Record<string, boolean> = { ...MP_DEFAULT, ...cur };
     for (const k of MANAGER_POWERS) if (k in (body.manager as object)) next[k] = (body.manager as Record<string, unknown>)[k] === true;
     const up = await sb.from("restaurants").update({ manager_permissions: next }).eq("id", rid).select("manager_permissions");
+    if (up.error) return bad(up.error.message, 500);
+  }
+
+  // Owner entitlements → restaurants.owner_entitlements (merge only known boolean keys).
+  // Storing only explicit booleans keeps "absent = on" true for keys added later.
+  if (body.owner && typeof body.owner === "object") {
+    const cur = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data?.owner_entitlements || {};
+    const next: Record<string, boolean> = { ...(typeof cur === "object" ? cur : {}) };
+    for (const k of OWNER_ENTITLEMENT_KEYS) if (k in (body.owner as object)) next[k] = (body.owner as Record<string, unknown>)[k] === true;
+    const up = await sb.from("restaurants").update({ owner_entitlements: next }).eq("id", rid);
     if (up.error) return bad(up.error.message, 500);
   }
 
