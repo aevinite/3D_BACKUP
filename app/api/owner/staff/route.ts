@@ -49,15 +49,35 @@ type Scope =
 // Resolve which restaurants this caller may manage staff for (see header).
 async function scope(req: NextRequest): Promise<Scope> {
   const cols = "id, name, slug, accent_color, manager_permissions, owner_user_id";
-  // Admin super-user → all restaurants, UNLESS a per-tab scope pin (?scope=/?rid=) says
-  // the admin is viewing ONE restaurant (bug C1): then show only that owner's set, so two
-  // admin tabs on different restaurants don't cross-list staff. ?scope=all or no pin = all.
+  // Prefer a logged-in OWNER/MANAGER over a stray admin cookie in the SAME browser —
+  // this mirrors lib/ownerScope + app/owner/layout (owner cookie → owner chrome). Before,
+  // this checked the admin cookie FIRST, so a browser holding BOTH cookies rendered owner
+  // chrome but listed EVERY restaurant's staff (inconsistent scoping, found 2026-07-06).
+  const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  if (u?.role === "owner") {
+    // Multi-owner (migration 097): the restaurants an owner may staff are EVERY
+    // restaurant they're a member of in restaurant_owners — not just the one where
+    // they're the primary owner. Resolve the ids first, then fetch those rows.
+    const memb = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", u.id)).data;
+    const ownedIds = (memb || []).map((m) => m.restaurant_id as string);
+    if (!ownedIds.length) return { ok: true, actor: "owner", actorId: u.id, restaurants: [] };
+    const { data } = await sb.from("restaurants").select(cols).in("id", ownedIds).order("name");
+    return { ok: true, actor: "owner", actorId: u.id, restaurants: (data || []) as Restaurant[] };
+  }
+  if (u?.role === "manager") {
+    const { data } = await sb.from("restaurants").select(cols).eq("id", u.restaurant_id).limit(1);
+    const r = (data || [])[0] as Restaurant | undefined;
+    if (!r || !r.manager_permissions?.manage_staff)
+      return { ok: false, resp: bad("Your owner hasn't given you staff management.", 403) };
+    return { ok: true, actor: "manager", actorId: u.id, restaurants: [r] };
+  }
+  // Admin super-user (no owner/manager session) → all restaurants, UNLESS a per-tab scope
+  // pin (?scope=/?rid=) says the admin is viewing ONE restaurant (bug C1): then show only
+  // that owner's set, so two admin tabs on different restaurants don't cross-list staff.
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) {
     const sp = req.nextUrl?.searchParams;
     const pin = sp?.get("scope") || sp?.get("rid");
     if (pin && pin !== "all") {
-      // Mirror lib/ownerScope: show every restaurant the pinned restaurant's owner owns
-      // (an owner may run several), falling back to just the pinned one if unowned.
       const owner = (await sb.from("restaurants").select("owner_user_id").eq("id", pin).maybeSingle()).data;
       const ids = owner?.owner_user_id
         ? ((await sb.from("restaurants").select("id").eq("owner_user_id", owner.owner_user_id)).data || []).map((x) => x.id as string)
@@ -68,25 +88,7 @@ async function scope(req: NextRequest): Promise<Scope> {
     const { data } = await sb.from("restaurants").select(cols).order("name");
     return { ok: true, actor: "admin", actorId: null, restaurants: (data || []) as Restaurant[] };
   }
-  const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   if (!u) return { ok: false, resp: bad("Not authorised — please log in.", 401) };
-  if (u.role === "owner") {
-    // Multi-owner (migration 097): the restaurants an owner may staff are EVERY
-    // restaurant they're a member of in restaurant_owners — not just the one where
-    // they're the primary owner. Resolve the ids first, then fetch those rows.
-    const memb = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", u.id)).data;
-    const ownedIds = (memb || []).map((m) => m.restaurant_id as string);
-    if (!ownedIds.length) return { ok: true, actor: "owner", actorId: u.id, restaurants: [] };
-    const { data } = await sb.from("restaurants").select(cols).in("id", ownedIds).order("name");
-    return { ok: true, actor: "owner", actorId: u.id, restaurants: (data || []) as Restaurant[] };
-  }
-  if (u.role === "manager") {
-    const { data } = await sb.from("restaurants").select(cols).eq("id", u.restaurant_id).limit(1);
-    const r = (data || [])[0] as Restaurant | undefined;
-    if (!r || !r.manager_permissions?.manage_staff)
-      return { ok: false, resp: bad("Your owner hasn't given you staff management.", 403) };
-    return { ok: true, actor: "manager", actorId: u.id, restaurants: [r] };
-  }
   return { ok: false, resp: bad("Not authorised.", 403) };
 }
 
@@ -101,7 +103,7 @@ export async function GET(req: NextRequest) {
     // tablet) — they never even SEE other managers' or owners' accounts.
     const { data, error } = await sb.from("staff_users")
       .select("id, username, role, name, phone, active, restaurant_id, last_seen_at, created_at, pin_hash, permissions")
-      .in("restaurant_id", ids).in("role", assignableFor(s.actor)).order("created_at", { ascending: true });
+      .in("restaurant_id", ids).in("role", assignableFor(s.actor)).order("created_at", { ascending: true }).limit(2000);
     if (error) return bad(error.message, 500);
     // Never ship hashes; expose only whether a PIN exists.
     staff = (data || []).map(({ pin_hash, ...u }) => ({ ...u, hasPin: !!pin_hash }));

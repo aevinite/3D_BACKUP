@@ -691,6 +691,12 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
   const maxRev = Math.max(1, ...dishes.map((d) => d.revenue));
   const k = rest.kpis;
   const payTotal = (rest.paymentMethods ?? []).reduce((a, p) => a + p.revenue, 0);
+  // These two cards are independent: the same-hour comparison needs comparison windows,
+  // but the 14-day payment trend always has data. They used to share ONE render guard,
+  // so on the All-time view (no sameHour) the payment trend silently vanished too — now
+  // each has its own guard (fixed 2026-07-06).
+  const showSameHour = (rest.sameHour ?? []).length >= 2 && (rest.sameHour ?? []).some((w) => w.revenue > 0);
+  const showPayTrend = (rest.payTrend ?? []).length > 0;
   return (
     <>
       <div className="adm-stats">
@@ -715,20 +721,26 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
       </div>
 
       {/* "Is today actually good?" — every window cut at the SAME elapsed time
-          (today-till-5pm vs last-week-till-5pm), so the comparison never lies. */}
-      {(rest.sameHour ?? []).length >= 2 && (rest.sameHour ?? []).some((w) => w.revenue > 0) && (
-        <div className="rv-charts" style={{ marginTop: 12 }}>
-          <div className="adm-card">
-            <div className="rv-ct">Is {range === "today" ? "today" : "this period"} actually good? <span>· all cut at the same time of day</span></div>
-            <SameHourBar accent={accent} data={(rest.sameHour ?? []).map((w, i) => ({
-              label: SAMEHOUR_LABEL[range]?.[i] ?? new Date(w.start).toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
-              revenue: w.revenue,
-            }))} />
-          </div>
-          <div className="adm-card">
-            <div className="rv-ct">How money arrives <span>· last 14 days by payment method</span></div>
-            <PayTrendStack data={rest.payTrend ?? []} />
-          </div>
+          (today-till-5pm vs last-week-till-5pm), so the comparison never lies. The
+          14-day payment trend rides alongside it but has its OWN guard so it survives
+          ranges (e.g. All-time) where the same-hour comparison has nothing to show. */}
+      {(showSameHour || showPayTrend) && (
+        <div className="rv-charts" style={{ marginTop: 12, gridTemplateColumns: showSameHour && showPayTrend ? undefined : "1fr" }}>
+          {showSameHour && (
+            <div className="adm-card">
+              <div className="rv-ct">Is {range === "today" ? "today" : "this period"} actually good? <span>· all cut at the same time of day</span></div>
+              <SameHourBar accent={accent} data={(rest.sameHour ?? []).map((w, i) => ({
+                label: SAMEHOUR_LABEL[range]?.[i] ?? new Date(w.start).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST }),
+                revenue: w.revenue,
+              }))} />
+            </div>
+          )}
+          {showPayTrend && (
+            <div className="adm-card">
+              <div className="rv-ct">How money arrives <span>· last 14 days by payment method</span></div>
+              <PayTrendStack data={rest.payTrend ?? []} />
+            </div>
+          )}
         </div>
       )}
 
@@ -747,7 +759,7 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
           <div className="rv-recs">
             {rest.records.bestDay && (
               <div className="rv-rec"><span className="e">🏆</span><span><small>BEST DAY EVER</small><b>{inr(rest.records.bestDay.revenue)}</b>
-                <i>{new Date(rest.records.bestDay.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })} — beat it!</i></span></div>
+                <i>{new Date(rest.records.bestDay.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: IST })} — beat it!</i></span></div>
             )}
             {rest.records.starDish && (
               <div className="rv-rec"><span className="e">👑</span><span><small>STAR DISH · 30 DAYS</small><b>{rest.records.starDish.title}</b>
@@ -755,7 +767,7 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
             )}
             {rest.records.fastHour && (
               <div className="rv-rec"><span className="e">⚡</span><span><small>BUSIEST HOUR EVER</small><b>{rest.records.fastHour.orders} orders</b>
-                <i>{new Date(rest.records.fastHour.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", hour12: true })}</i></span></div>
+                <i>{new Date(rest.records.fastHour.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", hour12: true, timeZone: IST })}</i></span></div>
             )}
             {rest.records.bigBill && (
               <div className="rv-rec"><span className="e">💎</span><span><small>BIGGEST BILL</small><b>{inr(rest.records.bigBill.revenue)}</b>

@@ -32,6 +32,21 @@ function windowFor(range: string): { from: string; to: string; bucket: string } 
   if (range === "12m") return { from: new Date(now - 365 * DAY).toISOString(), to, bucket: "month" };
   if (range === "30d") return { from: new Date(now - 30 * DAY).toISOString(), to, bucket: "day" };
   if (range === "7d") return { from: new Date(now - 7 * DAY).toISOString(), to, bucket: "day" };
+  // GST filing periods — proper IST calendar boundaries (a rolling 30d/12m window is NOT
+  // a filing period). "month"/"lastmonth" = a calendar month for GSTR; "fy" = the Indian
+  // financial year Apr 1 → Mar 31. 00:00 IST on the 1st, shifted back to UTC.
+  if (range === "month" || range === "lastmonth" || range === "fy") {
+    const istNow = new Date(now + 5.5 * 3600_000);
+    const y = istNow.getUTCFullYear(), m = istNow.getUTCMonth();
+    const istMonthStart = (yy: number, mm: number) => new Date(Date.UTC(yy, mm, 1) - 5.5 * 3600_000).toISOString();
+    if (range === "month") return { from: istMonthStart(y, m), to, bucket: "day" };
+    if (range === "lastmonth") {
+      const pm = m === 0 ? 11 : m - 1, py = m === 0 ? y - 1 : y;
+      return { from: istMonthStart(py, pm), to: istMonthStart(y, m), bucket: "day" };
+    }
+    const fyStart = m >= 3 ? y : y - 1; // April (index 3) starts the Indian FY
+    return { from: istMonthStart(fyStart, 3), to, bucket: "month" };
+  }
   const biz = new Date(now + 5.5 * 3600_000 - 5 * 3600_000);
   const todayStart = Date.UTC(biz.getUTCFullYear(), biz.getUTCMonth(), biz.getUTCDate(), 5, 0, 0) - 5.5 * 3600_000;
   if (range === "yesterday") return { from: new Date(todayStart - DAY).toISOString(), to: new Date(todayStart).toISOString(), bucket: "hour" };

@@ -6,12 +6,12 @@
 // it. The Tax / GST report shows the ONE merged rate the manager panel shows, then
 // breaks the same figure into its named components (CGST/SGST/…) underneath —
 // identical totals, only the presentation differs (owner's tax spec).
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
 import { TimeBar, LeaderBar } from "@/components/owner/Charts";
 
 type RType = "sales" | "tax" | "dishes" | "categories" | "payments" | "discounts" | "cancellations" | "hourly";
-type Range = "today" | "yesterday" | "7d" | "30d" | "12m";
+type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy";
 
 const REPORTS: { k: RType; label: string; icon: string; blurb: string }[] = [
   { k: "sales", label: "Sales summary", icon: "fa-chart-line", blurb: "Money in, per day — subtotal, tax, discounts, what you kept" },
@@ -23,9 +23,12 @@ const REPORTS: { k: RType; label: string; icon: string; blurb: string }[] = [
   { k: "cancellations", label: "Cancellations", icon: "fa-ban", blurb: "Lost business — voided orders and their value" },
   { k: "hourly", label: "Busy hours", icon: "fa-clock", blurb: "Orders and revenue by hour of day" },
 ];
+// Rolling windows first, then the calendar/filing periods a GST return actually needs.
 const RANGES: { k: Range; label: string }[] = [
   { k: "today", label: "Today" }, { k: "yesterday", label: "Yesterday" },
-  { k: "7d", label: "7 days" }, { k: "30d", label: "30 days" }, { k: "12m", label: "12 months" },
+  { k: "7d", label: "7 days" }, { k: "30d", label: "30 days" },
+  { k: "month", label: "This month" }, { k: "lastmonth", label: "Last month" },
+  { k: "12m", label: "12 months" }, { k: "fy", label: "FY (Apr–Mar)" },
 ];
 
 type Row = Record<string, unknown>;
@@ -43,7 +46,7 @@ function bucketLabel(iso: string, range: Range): string {
   // on a GST document (found 2026-07-05). tz pinned to Asia/Kolkata always.
   const tz = "Asia/Kolkata";
   if (range === "today" || range === "yesterday") return d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: tz });
-  if (range === "12m") return d.toLocaleDateString("en-IN", { month: "short", year: "2-digit", timeZone: tz });
+  if (range === "12m" || range === "fy") return d.toLocaleDateString("en-IN", { month: "short", year: "2-digit", timeZone: tz });
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: tz });
 }
 
@@ -90,7 +93,13 @@ export default function OwnerReports() {
     }).catch(() => setReady(true));
   }, []);
 
+  // Latest-wins guard: rapidly switching report type/restaurant fires overlapping
+  // fetches; without this the SLOWEST response wins and paints a report that doesn't
+  // match the selected chip (this app's classic stale-response race). Each call takes a
+  // sequence number and only the newest one is allowed to touch state (added 2026-07-06).
+  const seqRef = useRef(0);
   const generate = useCallback(async () => {
+    const myseq = ++seqRef.current;
     setBusy(true); setErr(null);
     const asked = { type, rid, range };
     try {
@@ -98,10 +107,15 @@ export default function OwnerReports() {
       if (rid) q.set("rid", rid);
       if (scopePin) q.set("scope", scopePin);
       const r = await fetch(`/api/owner/reports?${q}`, { cache: "no-store" }).then((x) => x.json());
+      if (myseq !== seqRef.current) return; // a newer request superseded this one
       if (r.error) throw new Error(r.error);
       setRep(r); setGen({ type: asked.type, rid: asked.rid, range: asked.range });
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setRep(null); setGen(null); }
-    setBusy(false);
+    } catch (e) {
+      if (myseq !== seqRef.current) return;
+      setErr(e instanceof Error ? e.message : String(e)); setRep(null); setGen(null);
+    } finally {
+      if (myseq === seqRef.current) setBusy(false);
+    }
   }, [type, range, rid]);
 
   // Auto-generate once the restaurant list is in (so single-restaurant owners have
@@ -110,6 +124,12 @@ export default function OwnerReports() {
   // RESTAURANT changes (clicking a chip / dropdown is itself an on-demand ask). A
   // RANGE change stays behind the Generate button (the heavier date choice).
   useEffect(() => { if (ready) generate(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [ready, type, rid]);
+
+  // The period picker is the ONE control gated behind Generate — so if the selected
+  // range no longer matches the generated report, the numbers on screen are for a
+  // DIFFERENT period than the highlighted chip. Flag it so we can cue "press Generate"
+  // instead of silently showing 30-day figures under a "7 days" selection (2026-07-06).
+  const rangeDirty = !!gen && gen.range !== range;
 
   // Title + scope come from the GENERATED report, so heading and body can't disagree.
   const shownType = gen?.type ?? type;
@@ -127,7 +147,14 @@ export default function OwnerReports() {
       const key = rep.type === "sales" ? "revenue" : rep.type === "tax" ? "tax" : rep.type === "discounts" ? "discount" : "cancelledValue";
       return mrows.map((r) => ({ label: bucketLabel(r.bucket, rep.range), revenue: Number(r[key as keyof MoneyRow]) || 0 }));
     }
-    if (rep.type === "hourly") return (rep.rows as { hour: number; revenue: number }[]).map((r) => ({ label: `${r.hour}:00`, revenue: r.revenue }));
+    if (rep.type === "hourly") {
+      // Zero-fill all 24 hours so quiet hours read as empty bars, not as if they never
+      // existed (the old chart plotted only hours with sales and drew them contiguously,
+      // misrepresenting dead hours — found 2026-07-06).
+      const byHour = new Map<number, number>();
+      for (const r of rep.rows as { hour: number; revenue: number }[]) byHour.set(r.hour, r.revenue);
+      return Array.from({ length: 24 }, (_, h) => ({ label: `${h}:00`, revenue: byHour.get(h) || 0 }));
+    }
     return null;
   }, [rep, money, mrows]);
 
@@ -135,7 +162,21 @@ export default function OwnerReports() {
     if (!rep) return;
     const stamp = new Date().toISOString().slice(0, 10);
     const name = `${meta.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${rep.range}-${stamp}.csv`;
-    if (money) {
+    if (rep.type === "tax") {
+      // The whole point of the Tax report is the CGST/SGST split "for filing" — the CSV
+      // used to drop it entirely (found 2026-07-06). Emit the period rows, then a labelled
+      // split block underneath (ragged rows are valid CSV).
+      const header = ["Period", "Orders", "Paid orders", "Subtotal", "Tax", "Discount", "Revenue", "Cancelled orders", "Cancelled value"];
+      const rows: (string | number)[][] = mrows.map((r) => [bucketLabel(r.bucket, rep.range), r.orders, r.paidOrders, r.subtotal, r.tax, r.discount, r.revenue, r.cancelledOrders, r.cancelledValue]);
+      if (t) rows.push(["Total", t.orders, t.paidOrders, t.subtotal, t.tax, t.discount, t.revenue, t.cancelledOrders, t.cancelledValue]);
+      if (rep.tax) {
+        rows.push([]);
+        rows.push(["Tax split", "Rate %", "Collected"]);
+        rows.push(["Total tax (as the manager panel shows)", rep.tax.effectivePct, t?.tax ?? 0]);
+        for (const c of rep.tax.components) rows.push([c.label, c.rate, c.amount]);
+      }
+      downloadCsv(name, header, rows);
+    } else if (money) {
       downloadCsv(name,
         ["Period", "Orders", "Paid orders", "Subtotal", "Tax", "Discount", "Revenue", "Cancelled orders", "Cancelled value"],
         mrows.map((r) => [bucketLabel(r.bucket, rep.range), r.orders, r.paidOrders, r.subtotal, r.tax, r.discount, r.revenue, r.cancelledOrders, r.cancelledValue]));
@@ -182,10 +223,15 @@ export default function OwnerReports() {
             <button key={r.k} role="tab" aria-selected={range === r.k} className={range === r.k ? "on" : ""} onClick={() => setRange(r.k)}>{r.label}</button>
           ))}
         </div>
-        <button className="adm-btn primary" onClick={generate} disabled={busy}>
+        <button className={`adm-btn primary${rangeDirty ? " rp-dirty" : ""}`} onClick={generate} disabled={busy}>
           <i className={`fas ${busy ? "fa-spinner fa-spin" : "fa-bolt"}`} style={{ marginRight: 6 }} aria-hidden="true" />
-          {busy ? "Generating…" : "Generate"}
+          {busy ? "Generating…" : rangeDirty ? `Generate · ${RANGES.find((r) => r.k === range)?.label}` : "Generate"}
         </button>
+        {rangeDirty && !busy && (
+          <span className="rp-dirty-hint" role="status">
+            <i className="fas fa-arrow-left" aria-hidden="true" /> Press Generate to apply “{RANGES.find((r) => r.k === range)?.label}”
+          </span>
+        )}
         {rep && (
           <div className="rp-actions">
             <button className="adm-btn" onClick={exportCsv} title="Download this report as a CSV (opens in Excel/Sheets)">
@@ -344,6 +390,11 @@ export default function OwnerReports() {
         .rp-sub { font-size: 12.5px; color: var(--muted); margin: 3px 0 0; }
         .rp-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 14px; }
         .rp-actions { display: flex; gap: 8px; margin-left: auto; }
+        /* When the picked period hasn't been applied yet, draw the eye to Generate. */
+        .rp-dirty { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); animation: rp-pulse 1.6s ease-in-out infinite; }
+        @keyframes rp-pulse { 0%,100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); } 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 12%, transparent); } }
+        @media (prefers-reduced-motion: reduce) { .rp-dirty { animation: none; } }
+        .rp-dirty-hint { font-size: 11.5px; font-weight: 700; color: var(--accent); display: inline-flex; align-items: center; gap: 6px; }
         .rp-select {
           height: 32px; padding: 0 10px; border-radius: 8px; border: var(--border);
           background: var(--card); color: var(--text); font-size: 12.5px; font-weight: 600;
