@@ -3934,7 +3934,14 @@ function tableTileStateFromBoard(t) {
   const cartCount = cart.reduce((a, it) => a + (parseInt(it.qty, 10) || 1), 0);
   const calls = callsForTable(t);
   const reqs = reqsForTable(t); // pending open/join/access requests (guest asked staff to let them in)
-  const items = os.flatMap((o) => orderItemRows(o));
+  // EXCLUDE cancelled orders from the dish tally — a cancelled order's item rows keep their last
+  // status (ready/cooking/served), so counting them made the SELECTED tile disagree with (a) the
+  // detail head (which filters cancelled via liveRowsAll), (b) the SQL summary every OTHER tile
+  // uses (mig 105: WHERE status <> 'cancelled'), and (c) the tablet (ordersOf). That mismatch was
+  // the "click a table → its served/total jumps + state flips wrong" bug (owner 2026-07-06). PARITY
+  // IS LAW: this now matches all three. (Money/`due`/`pay` already exclude cancelled via isUnpaidBill.)
+  const liveOs = os.filter((o) => o.status !== "cancelled"); // the orders that actually count (summary uses this too)
+  const items = liveOs.flatMap((o) => orderItemRows(o));
   // Counts are by QUANTITY (plates), not row count — a "2× Cappuccino" line is 2 cooking, not 1.
   // Mirrors the summary RPC (mig 105) and the tablet detail so every tile agrees. (owner 2026-06-29)
   const qtyOf = (i) => Math.max(0, parseInt(i.qty, 10) || 1);
@@ -3950,7 +3957,7 @@ function tableTileStateFromBoard(t) {
   const due = billMath(os.filter(isUnpaidBill)).total;
 
   let st = "free", label = "Free", meta = "tap to open";
-  if (os.length) {
+  if (liveOs.length) { // gate on NON-cancelled orders — matches the summary's v_has_orders (mig 105 excludes cancelled)
     if (anyReceived) { st = "new"; label = "New order"; }
     // ANY cooked-but-unserved dish turns the tile pink ("Ready to serve") — even if
     // OTHER dishes are still cooking — so staff see at a glance there's something to
@@ -3966,7 +3973,7 @@ function tableTileStateFromBoard(t) {
     else { st = "done"; label = "Cleared"; }
     const served = items.filter((i) => i.status === "served").reduce((a, i) => a + qtyOf(i), 0);
     const totalQ = items.reduce((a, i) => a + qtyOf(i), 0);
-    meta = items.length ? `${served}/${totalQ} served${due > 0 ? ` · ${inr(due)} due` : ""}` : `${os.length} order${os.length > 1 ? "s" : ""}`;
+    meta = items.length ? `${served}/${totalQ} served${due > 0 ? ` · ${inr(due)} due` : ""}` : `${liveOs.length} order${liveOs.length > 1 ? "s" : ""}`;
   } else if (sess) {
     // Someone actually seated → teal "Seated". Open but nobody seated yet → a
     // bright YELLOW "waiting" tile (owner: an open-but-empty table should light up
