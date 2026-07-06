@@ -1996,6 +1996,10 @@ const XRAY_CAPS = [
     font-size: 12px; color: var(--text, #e8eefc); position: relative; z-index: 40; }
   #xrayRibbon .rb-tag { font-weight: 800; letter-spacing: .04em; color: #f59e0b; text-transform: uppercase; font-size: 11px; }
   #xrayRibbon .rb-rest { color: var(--muted, #9fb0cc); font-weight: 600; }
+  #xrayRibbon .rb-crumbs { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; flex-wrap: wrap; }
+  #xrayRibbon .rb-crumbs a { color: #f59e0b; text-decoration: none; cursor: pointer; }
+  #xrayRibbon .rb-crumbs a:hover { text-decoration: underline; }
+  #xrayRibbon .rb-sep { font-size: 10px; color: var(--muted, #9fb0cc); }
   #xrayRibbon .rb-spacer { margin-left: auto; }
   #xrayRibbon button { font: inherit; cursor: pointer; border-radius: 999px; border: 1px solid color-mix(in srgb, #d97706 45%, transparent);
     background: transparent; color: #f59e0b; font-weight: 700; padding: 4px 12px; }
@@ -2030,10 +2034,18 @@ function renderXrayRibbon() {
   const n = zones.length;
   rb.innerHTML =
     `<span class="rb-tag">Admin view</span>` +
-    (rest ? `<span class="rb-rest">${esc(rest)}</span>` : "") +
+    // The PATH the admin walked in through — Restaurants › name › Tablet panel —
+    // the owner panel's breadcrumb language (owner, 2026-07-06). This ribbon is
+    // admin-only (tHigher), so the console crumb is always right here.
+    `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
+    `<span class="rb-sep">›</span><span>${rest ? esc(rest) : "…"}</span>` +
+    `<span class="rb-sep">›</span><span>Tablet panel</span></nav>` +
     `<span class="rb-spacer"></span>` +
     `<button id="xrayZonesBtn">${n} control${n === 1 ? "" : "s"} off for waiters ▾</button>` +
     `<button class="rb-exit" id="xrayExit">Exit view</button>`;
+  document.getElementById("xrayHome").onclick = () => {
+    try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+  };
   document.getElementById("xrayExit").onclick = async () => {
     try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
     try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }

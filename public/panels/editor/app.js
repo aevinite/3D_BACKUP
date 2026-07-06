@@ -6522,6 +6522,10 @@ function xraySettingUrl(flag) {
   #xrayRibbon .rb-tag { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; letter-spacing: .04em;
     color: #b45309; text-transform: uppercase; font-size: 11px; }
   #xrayRibbon .rb-rest { color: var(--muted, #777); font-weight: 600; }
+  #xrayRibbon .rb-crumbs { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; flex-wrap: wrap; }
+  #xrayRibbon .rb-crumbs a { color: #b45309; text-decoration: none; cursor: pointer; }
+  #xrayRibbon .rb-crumbs a:hover { text-decoration: underline; }
+  #xrayRibbon .rb-sep { font-size: 9px; color: var(--muted, #888); }
   #xrayRibbon .rb-spacer { margin-left: auto; }
   #xrayRibbon button { font: inherit; cursor: pointer; border-radius: 999px; border: 1px solid color-mix(in srgb, #d97706 45%, transparent);
     background: transparent; color: #b45309; font-weight: 700; padding: 4px 12px; }
@@ -6628,12 +6632,25 @@ function renderXrayRibbon(higher, zones) {
   const sig = `${who}|${restName}|${zones.map((z) => z.label).join(",")}`;
   if (rb.dataset.sig === sig) return;
   rb.dataset.sig = sig;
+  // The ADMIN came here from the console → show the PATH (Restaurants › name ›
+  // Manager panel), the same breadcrumb the owner panel's admin bar uses (owner,
+  // 2026-07-06). An OWNER looking into their own manager panel has no console to
+  // crumb back to, so they keep the plain restaurant-name label.
+  const crumbs = who === "Admin"
+    ? `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
+      `<i class="fas fa-chevron-right rb-sep"></i><span>${esc(restName) || "…"}</span>` +
+      `<i class="fas fa-chevron-right rb-sep"></i><span>Manager panel</span></nav>`
+    : (restName ? `<span class="rb-rest">${esc(restName)}</span>` : "");
   rb.innerHTML =
     `<span class="rb-tag"><i class="fas fa-user-shield"></i> ${who} view</span>` +
-    (restName ? `<span class="rb-rest">${restName}</span>` : "") +
+    crumbs +
     `<span class="rb-spacer"></span>` +
     `<button id="xrayZonesBtn">${n} zone${n === 1 ? "" : "s"} off for staff <i class="fas fa-chevron-down" style="font-size:9px"></i></button>` +
     `<button class="rb-exit" id="xrayExit"><i class="fas fa-arrow-rotate-left"></i> Exit view</button>`;
+  const xrayHome = document.getElementById("xrayHome");
+  if (xrayHome) xrayHome.onclick = () => {
+    try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+  };
   document.getElementById("xrayExit").onclick = async () => {
     try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
     try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
