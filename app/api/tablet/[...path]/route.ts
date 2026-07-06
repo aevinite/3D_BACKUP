@@ -271,12 +271,32 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const tn = Number(t);
       if (tableCount > 0 && (tn < 1 || tn > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
       if (!Array.isArray(items) || !items.length) return err("items required");
-      // Double-tap guard: refuse an IDENTICAL order for the same table within 8s
-      // (prevents a fat-fingered "Send" from issuing two KOTs / double-charging).
-      const sig = JSON.stringify(items.map((i: any) => ({ id: i.id, qty: i.qty, options: i.options })));
-      const recent = must(await sb.from("orders").select("items")
-        .eq("table_number", t).eq("restaurant_id", rid).gte("created_at", new Date(Date.now() - 8000).toISOString()).limit(5));
-      if (recent.some((o: any) => JSON.stringify((o.items || []).map((i: any) => ({ id: i.id, qty: i.qty, options: i.options }))) === sig)) {
+      // Double-tap guard: refuse an IDENTICAL order for the same table within 3s
+      // (prevents a fat-fingered "Send" / a network retry from issuing two KOTs). The
+      // window used to be 8s, which wrongly blocked a LEGITIMATE second identical order
+      // — e.g. a second guest at the same table ordering the same drink a few seconds
+      // later (bug, 2026-07-06). A true fat-finger double-fire is sub-second, and the
+      // client already disables the button + clears the cart on success, so 3s is ample.
+      // The signature now also folds in the whole-order allergies, so an order that
+      // differs only by its allergy/avoid list is no longer wrongly treated as a dupe.
+      // (There is no orders.note column — the note rides on each order_item — so it isn't
+      // part of this order-level signature.)
+      // Normalise each line to {id, qty, options} with options coerced to null. The
+      // INCOMING order omits options entirely (→ undefined, dropped by JSON.stringify),
+      // but the STORED row keeps options:null — so without this coercion the two
+      // signatures never matched and the guard silently never fired (pre-existing bug
+      // found 2026-07-06). Coercing both to null makes identical orders compare equal.
+      const lineSig = (i: any) => ({ id: i.id, qty: Number(i.qty) || 1, options: i.options ?? null });
+      const sig = JSON.stringify({
+        items: items.map(lineSig),
+        allergies: Array.isArray(allergies) ? allergies : [],
+      });
+      const recent = must(await sb.from("orders").select("items, allergies")
+        .eq("table_number", t).eq("restaurant_id", rid).gte("created_at", new Date(Date.now() - 3000).toISOString()).limit(5));
+      if (recent.some((o: any) => JSON.stringify({
+        items: (o.items || []).map(lineSig),
+        allergies: Array.isArray(o.allergies) ? o.allergies : [],
+      }) === sig)) {
         return err("That order was just sent — check the ticket before re-sending.", 409);
       }
       const { data, error } = await sb.rpc("lfh_staff_place_order", {
@@ -620,6 +640,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_add_item_to_order", { p_order: b, p_items: [line] });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
+      // A dish ADDED by a WAITER on the tablet is already confirmed — push it straight to the
+      // kitchen (received→preparing), never leave it stuck at 'received' with a dead Accept.
+      // Only when the parent order is ALREADY accepted (status 'preparing'/'served'); a still-
+      // 'received' online order accepts as a whole via the normal Accept flow, so we leave it.
+      const parent = must(await sb.from("orders").select("items, status").eq("id", b).eq("restaurant_id", rid).single());
+      if (parent && parent.status !== "received" && parent.status !== "cancelled") {
+        const its = Array.isArray(parent.items)
+          ? parent.items.map((i: any) => (i.status === "received" ? { ...i, status: "preparing" } : i)) : [];
+        await sb.from("orders").update({ items: its }).eq("id", b).eq("restaurant_id", rid);
+        await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
+      }
       await logAction("tablet", "order_add_item", { order_id: b, detail: dishId, device_id: dev });
       await stampEdited(b, rid);
       return ok(data);
@@ -644,6 +675,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "move") {
       const to = String((body && body.to) || "").trim();
       if (!/^\d+$/.test(to)) return err("valid target table required");
+      // Reject a target table that doesn't exist (1..table_count) — same guard as place-order.
+      const mtc = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const mTableCount = Number((mtc.data as { table_count?: number } | null)?.table_count) || 0;
+      if (mTableCount > 0 && (Number(to) < 1 || Number(to) > mTableCount)) return err(`Table ${to} doesn't exist (this place has ${mTableCount} tables).`, 400);
+      // Never re-home a PAID order — it's settled revenue on a closed bill; moving it onto
+      // another party's live bill would double-count / corrupt the money trail. (rid-scoped.)
+      const src = must(await sb.from("orders").select("payment_status, table_number").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!src) return err("That order isn't for this restaurant.", 404);
+      if (src.payment_status === "paid") return err("Won't move a PAID order — mark it unpaid first.", 409);
+      if (String(src.table_number) === to) return err("That order is already on that table.", 400);
       // Find (or open) the target table's session, then re-home the order onto it.
       let target = (must(await sb.from("sessions").select("id").eq("table_number", to).eq("restaurant_id", rid).neq("status", "closed").limit(1)))[0];
       if (!target) target = (must(await sb.from("sessions").insert({ table_number: to, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select()))[0];
