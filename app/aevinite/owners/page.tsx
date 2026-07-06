@@ -119,7 +119,7 @@ export default function AdminOwners() {
       {/* No-owner warning — an unowned ACTIVE restaurant has an unreachable owner panel */}
       {unowned.length > 0 && (
         <div style={{ ...card, padding: 12, marginBottom: 14, borderColor: "#b45309", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "#fcd34d" }}>⚠ No owner assigned:</span>
+          <span style={{ fontSize: 13, color: "#fcd34d" }}><i className="fas fa-triangle-exclamation" style={{ marginRight: 7 }} aria-hidden="true" />No owner assigned:</span>
           {unowned.map((r) => <span key={r.id} style={{ ...chip, borderColor: "#b45309" }}><span style={{ ...dot, background: chipColor(r.id) }} />{r.name}</span>)}
           <span style={{ fontSize: 12, color: "var(--muted)" }}>— attach them to an owner below.</span>
         </div>
@@ -159,13 +159,13 @@ export default function AdminOwners() {
                     <span key={r.id} style={chip} title={r.primary ? "Primary owner of this restaurant" : undefined}>
                       <span style={{ ...dot, background: chipColor(r.id) }} />{r.name}
                       <button aria-label={`Detach ${r.name}`} disabled={busy} style={xBtn}
-                        onClick={(e) => { e.stopPropagation(); if (confirm(`Detach "${r.name}" from ${o.name}? They immediately stop seeing its numbers.`)) act(async () => { await patch({ owner_id: o.id, action: "detach", restaurant_id: r.id }); }); }}>×</button>
+                        onClick={(e) => { e.stopPropagation(); if (confirm(`Detach "${r.name}" from ${o.name}? They immediately stop seeing its numbers.`)) act(async () => { await patch({ owner_id: o.id, action: "detach", restaurant_id: r.id }); }); }}><i className="fas fa-xmark" aria-hidden="true" /></button>
                     </span>
                   ))}
                   {o.restaurants.length === 0 && <span style={{ fontSize: 12, color: "var(--muted)" }}>no restaurants yet</span>}
                   {o.active && (
                     <button style={{ ...chip, borderStyle: "dashed", color: "#60a5fa", cursor: "pointer", background: "transparent" }} disabled={busy}
-                      onClick={(e) => { e.stopPropagation(); setAttachFor(openAttach ? null : o.id); }}>+ Attach</button>
+                      onClick={(e) => { e.stopPropagation(); setAttachFor(openAttach ? null : o.id); }}><i className="fas fa-plus" style={{ marginRight: 5, fontSize: 10 }} aria-hidden="true" />Attach</button>
                   )}
                 </div>
 
@@ -188,13 +188,13 @@ export default function AdminOwners() {
                 <div style={{ display: "flex", gap: 7, borderTop: "var(--border)", paddingTop: 11, flexWrap: "wrap" }}>
                   {o.restaurants.length > 0 && (
                     <a style={{ ...actBtn, textDecoration: "none" }} title="Open their owner panel exactly as they see it (no password, invisible to them)"
-                      href={`/api/admin/act-as/go?rid=${encodeURIComponent(o.restaurants[0].id)}&to=/owner`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>👁 View their panel</a>
+                      href={`/api/admin/act-as/go?rid=${encodeURIComponent(o.restaurants[0].id)}&to=/owner`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><i className="fas fa-eye" style={ic} aria-hidden="true" />View their panel</a>
                   )}
                   <button style={actBtn} disabled={busy}
-                    onClick={(e) => { e.stopPropagation(); if (confirm(`Set a NEW password for ${o.name}? They'll be logged out everywhere.`)) act(async () => { const j = await patch({ owner_id: o.id, action: "reset_password" }); setReveal({ name: o.name, password: j.password }); }); }}>🔑 Reset password</button>
+                    onClick={(e) => { e.stopPropagation(); if (confirm(`Set a NEW password for ${o.name}? They'll be logged out everywhere.`)) act(async () => { const j = await patch({ owner_id: o.id, action: "reset_password" }); setReveal({ name: o.name, password: j.password }); }); }}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
                   <button style={{ ...actBtn, color: o.active ? "#fca5a5" : "#86efac" }} disabled={busy}
                     onClick={(e) => { e.stopPropagation(); if (confirm(o.active ? `Suspend ${o.name}? They're logged out immediately and can't sign in.` : `Restore ${o.name}'s access?`)) act(async () => { await patch({ owner_id: o.id, action: "set_active", active: !o.active }); }); }}>
-                    {o.active ? "⛔ Suspend" : "↩ Restore"}</button>
+                    <i className={`fas ${o.active ? "fa-ban" : "fa-rotate-left"}`} style={ic} aria-hidden="true" />{o.active ? "Suspend" : "Restore"}</button>
                 </div>
               </div>
             );
@@ -209,7 +209,7 @@ export default function AdminOwners() {
       )}
 
       {detailOwner && (
-        <OwnerDetailModal owner={detailOwner}
+        <OwnerDetailModal owner={detailOwner} rests={rests}
           onClose={() => setDetailFor(null)}
           onChanged={load}
           onDeleted={() => { setDetailFor(null); load(); }}
@@ -226,6 +226,8 @@ const chip: React.CSSProperties = { display: "inline-flex", gap: 6, alignItems: 
 const dot: React.CSSProperties = { width: 7, height: 7, borderRadius: "50%", flexShrink: 0 };
 const xBtn: React.CSSProperties = { background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", fontSize: 13, padding: "0 0 0 2px", lineHeight: 1 };
 const actBtn: React.CSSProperties = { flex: "1 1 auto", border: "var(--border)", background: "var(--bg)", borderRadius: 9, padding: "7px 8px", fontSize: 12, fontWeight: 700, color: "var(--text)", cursor: "pointer", textAlign: "center" };
+// Leading-icon spacing for the action buttons (icons replace the old emojis).
+const ic: React.CSSProperties = { marginRight: 6, fontSize: 11 };
 
 // ── Create-owner modal: name + optional password + multi-select restaurants ──
 function CreateOwnerModal({ rests, onClose, onCreated }: {
@@ -282,7 +284,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
                 return (
                   <button type="button" key={r.id} style={{ display: "flex", gap: 10, alignItems: "center", width: "100%", padding: "9px 12px", background: "transparent", border: 0, borderTop: "var(--border)", color: "var(--text)", fontSize: 13.5, cursor: "pointer", textAlign: "left" }}
                     onClick={() => setPicked((s) => { const n = new Set(s); if (on) n.delete(r.id); else n.add(r.id); return n; })}>
-                    <span aria-hidden style={{ width: 17, height: 17, borderRadius: 5, border: on ? 0 : "1.5px solid var(--muted)", background: on ? "#22c55e" : "transparent", color: "#052e16", display: "grid", placeItems: "center", fontSize: 11, fontWeight: 900, flexShrink: 0 }}>{on ? "✓" : ""}</span>
+                    <span aria-hidden style={{ width: 17, height: 17, borderRadius: 5, border: on ? 0 : "1.5px solid var(--muted)", background: on ? "#22c55e" : "transparent", color: "#052e16", display: "grid", placeItems: "center", fontSize: 10, fontWeight: 900, flexShrink: 0 }}>{on ? <i className="fas fa-check" /> : null}</span>
                     <span style={{ ...dot, background: chipColor(r.id) }} />
                     <span style={{ flex: 1 }}>{r.name}</span>
                     <span style={{ fontSize: 11, color: r.hasOwner ? "var(--muted)" : "#fcd34d" }}>{r.hasOwner ? "has an owner" : "no owner yet"}</span>
@@ -313,14 +315,18 @@ type ActivityRow = { id: string; panel: string; action: string; actor: string | 
 
 const PANEL_COLOR: Record<string, string> = { owner: "#34d399", admin: "#60a5fa", manager: "#d4a574", kitchen: "#7ec88a", tablet: "#a78bfa", editor: "#d4a574" };
 
-function OwnerDetailModal({ owner, onClose, onChanged, onDeleted, onPatch, onReveal }: {
-  owner: Owner; onClose: () => void; onChanged: () => void; onDeleted: () => void;
+function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch, onReveal }: {
+  owner: Owner; rests: Rest[]; onClose: () => void; onChanged: () => void; onDeleted: () => void;
   onPatch: (payload: object) => Promise<any>; onReveal: (name: string, password: string) => void;
 }) {
   const [activity, setActivity] = useState<ActivityRow[] | null>(null);
   const [created, setCreated] = useState<string | null>(owner.createdAt || null);
   const [mErr, setMErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // Add-restaurant picker (inline, no nested modal). The list is driven by the
+  // live `owner` prop, so after attach/detach → onChanged reloads → this recomputes.
+  const [showAttach, setShowAttach] = useState(false);
+  const attachable = rests.filter((r) => !owner.restaurants.some((x) => x.id === r.id));
 
   useEffect(() => {
     let dead = false;
@@ -343,6 +349,12 @@ function OwnerDetailModal({ owner, onClose, onChanged, onDeleted, onPatch, onRev
     setMErr(""); setBusy(true);
     try { await fn(); onChanged(); } catch (e: any) { setMErr(e.message || "Action failed."); }
     finally { setBusy(false); }
+  };
+
+  const attachRestaurant = (rid: string) => { setShowAttach(false); run(async () => { await onPatch({ owner_id: owner.id, action: "attach", restaurant_id: rid }); }); };
+  const detachRestaurant = (r: OwnedRest) => {
+    if (!confirm(`Remove "${r.name}" from ${owner.name}? They immediately stop seeing its numbers.`)) return;
+    run(async () => { await onPatch({ owner_id: owner.id, action: "detach", restaurant_id: r.id }); });
   };
 
   // Permanent delete: suspend-first is enforced server-side too; the typed-name
@@ -381,7 +393,7 @@ function OwnerDetailModal({ owner, onClose, onChanged, onDeleted, onPatch, onRev
                 signs in as &ldquo;{owner.username}&rdquo; · created {created ? new Date(created).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"} · seen {seen(owner.lastSeenAt)}
               </div>
             </div>
-            <button onClick={onClose} aria-label="Close" style={{ background: "transparent", border: 0, color: "var(--muted)", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: 6 }}>×</button>
+            <button onClick={onClose} aria-label="Close" style={{ background: "transparent", border: 0, color: "var(--muted)", fontSize: 18, cursor: "pointer", lineHeight: 1, padding: 6 }}><i className="fas fa-xmark" aria-hidden="true" /></button>
           </div>
 
           <div style={{ padding: 18, display: "grid", gap: 14 }}>
@@ -391,24 +403,50 @@ function OwnerDetailModal({ owner, onClose, onChanged, onDeleted, onPatch, onRev
             <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
               {owner.restaurants.length > 0 && (
                 <a style={{ ...actBtn, textDecoration: "none", color: "#60a5fa" }} title="Open their owner panel exactly as they see it (no password, invisible to them)"
-                  href={`/api/admin/act-as/go?rid=${encodeURIComponent(owner.restaurants[0].id)}&to=/owner`} target="_blank" rel="noreferrer">👁 Open their screen</a>
+                  href={`/api/admin/act-as/go?rid=${encodeURIComponent(owner.restaurants[0].id)}&to=/owner`} target="_blank" rel="noreferrer"><i className="fas fa-eye" style={ic} aria-hidden="true" />Open their screen</a>
               )}
               <button style={actBtn} disabled={busy}
-                onClick={() => { if (confirm(`Set a NEW password for ${owner.name}? They'll be logged out everywhere.`)) run(async () => { const j = await onPatch({ owner_id: owner.id, action: "reset_password" }); onReveal(owner.name, j.password); }); }}>🔑 Reset password</button>
+                onClick={() => { if (confirm(`Set a NEW password for ${owner.name}? They'll be logged out everywhere.`)) run(async () => { const j = await onPatch({ owner_id: owner.id, action: "reset_password" }); onReveal(owner.name, j.password); }); }}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
               <button style={{ ...actBtn, color: owner.active ? "#fca5a5" : "#86efac" }} disabled={busy}
                 onClick={() => { if (confirm(owner.active ? `Suspend ${owner.name}? They're logged out immediately and can't sign in.` : `Restore ${owner.name}'s access?`)) run(async () => { await onPatch({ owner_id: owner.id, action: "set_active", active: !owner.active }); }); }}>
-                {owner.active ? "⛔ Suspend" : "↩ Restore"}</button>
+                <i className={`fas ${owner.active ? "fa-ban" : "fa-rotate-left"}`} style={ic} aria-hidden="true" />{owner.active ? "Suspend" : "Restore"}</button>
             </div>
 
-            {/* Their restaurants (managed on the card; shown here for context) */}
+            {/* Restaurants — fully managed HERE (add + remove), owner request 2026-07-06.
+                Each chip has a remove (×); "Add restaurant" opens an inline picker. */}
             <div>
-              <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 7 }}>Owns {owner.restaurants.length} restaurant{owner.restaurants.length === 1 ? "" : "s"}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+                <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", flex: 1 }}>Owns {owner.restaurants.length} restaurant{owner.restaurants.length === 1 ? "" : "s"}</div>
+                <button style={{ ...chip, borderStyle: "dashed", color: "#60a5fa", cursor: "pointer", background: "transparent" }} disabled={busy}
+                  onClick={() => setShowAttach((s) => !s)}>
+                  <i className={`fas ${showAttach ? "fa-xmark" : "fa-plus"}`} style={{ fontSize: 10 }} aria-hidden="true" />{showAttach ? "Close" : "Add restaurant"}</button>
+              </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {owner.restaurants.map((r) => (
-                  <span key={r.id} style={chip}><span style={{ ...dot, background: chipColor(r.id) }} />{r.name}{r.primary ? " ★" : ""}</span>
+                  <span key={r.id} style={chip} title={r.primary ? "Primary owner of this restaurant" : undefined}>
+                    {r.primary && <i className="fas fa-star" style={{ fontSize: 9, color: "#fbbf24" }} aria-hidden="true" />}
+                    <span style={{ ...dot, background: chipColor(r.id) }} />{r.name}
+                    <button aria-label={`Remove ${r.name}`} disabled={busy} style={xBtn} onClick={() => detachRestaurant(r)}><i className="fas fa-xmark" aria-hidden="true" /></button>
+                  </span>
                 ))}
-                {owner.restaurants.length === 0 && <span style={{ fontSize: 12, color: "var(--muted)" }}>none</span>}
+                {owner.restaurants.length === 0 && <span style={{ fontSize: 12, color: "var(--muted)" }}>none yet — add one below</span>}
               </div>
+
+              {/* Add-restaurant picker */}
+              {showAttach && (
+                <div style={{ border: "var(--border)", borderRadius: 10, maxHeight: 200, overflowY: "auto", marginTop: 8 }}>
+                  {attachable.length === 0 && <div style={{ padding: 10, fontSize: 12.5, color: "var(--muted)" }}>They already own every restaurant.</div>}
+                  {attachable.map((r) => (
+                    <button key={r.id} disabled={busy} style={{ display: "flex", gap: 9, alignItems: "center", width: "100%", padding: "9px 12px", background: "transparent", border: 0, borderTop: "var(--border)", color: "var(--text)", fontSize: 13, cursor: "pointer", textAlign: "left" }}
+                      onClick={() => attachRestaurant(r.id)}>
+                      <i className="fas fa-plus" style={{ fontSize: 10, color: "#60a5fa" }} aria-hidden="true" />
+                      <span style={{ ...dot, background: chipColor(r.id) }} />
+                      <span style={{ flex: 1 }}>{r.name}</span>
+                      <span style={{ fontSize: 11, color: r.hasOwner ? "var(--muted)" : "#fcd34d" }}>{r.hasOwner ? "co-own" : "no owner yet"}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Activity trail */}
@@ -444,7 +482,7 @@ function OwnerDetailModal({ owner, onClose, onChanged, onDeleted, onPatch, onRev
                   <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
                     This owner is suspended. Deleting is <b>permanent</b> — no restore, ever. Their restaurants fall to a co-owner or become &ldquo;no owner&rdquo;; the activity log above is kept for the record.
                   </div>
-                  <button style={btn("#991b1b")} disabled={busy} onClick={deleteForever}>🗑 Delete forever</button>
+                  <button style={btn("#991b1b")} disabled={busy} onClick={deleteForever}><i className="fas fa-trash-can" style={ic} aria-hidden="true" />Delete forever</button>
                 </>
               )}
             </div>
