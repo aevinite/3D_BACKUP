@@ -330,6 +330,21 @@ the browser handles their back for free; only state-driven overlays need wiring.
   bookkeeping (rapid double-back, `lfh:close-all`, reconcile, the exit-guard) lives
   in the two manager files above; components only ever call `useBackClose` / `LFH_BACK.layer`.
 
+## Offline sync — connection light + offline queue (LIVE 2026-07-07 — KEEP EXTENDING)
+
+The app has a green/yellow/red **connection light** on all six panels and an **offline
+action queue**: writes taken while offline are saved on-device and replayed on reconnect,
+guarded so each runs **at most once** (no double bills). Full guide + roadmap:
+**`docs/OFFLINE-SYNC.md`** — READ IT before adding a panel, a write endpoint, or touching
+ordering/billing. Hard rules: the ONLINE path stays untouched (queue diverts only when
+`navigator.onLine === false`); every new staff write handler must be wrapped with
+`withIdempotency(..., "<panel>")` and every new client write must go through the panel's
+`api()` / the guest outbox so it carries an `X-LFH-Action-Id`; the dedup guard FAILS OPEN.
+Only guest place-order is queued so far — other guest writes and a real-device test are the
+main TODOs. Code: `lib/idempotency.ts`, `lib/connectionStatus.ts`, `lib/guestOutbox.ts`,
+`components/ConnectionBadge.tsx`, `public/panels/{outbox,connbadge}.js`, `realtime.js`,
+`app/api/guest/place-order/route.ts`, migration `138_action_idempotency.sql`.
+
 ## Known gotchas (read before editing)
 
 - **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The
