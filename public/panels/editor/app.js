@@ -834,7 +834,16 @@ async function loadStaffTeam() {
     const r = await fetch(ridQ("/api/owner/staff"), { cache: "no-store" }); // ridQ: keep the admin's per-tab restaurant pin
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { state.staffDenied = d.error || "Couldn't load your team."; state.staffTeam = []; state.staffRestaurantId = null; }
-    else { state.staffDenied = null; state.staffTeam = d.staff || []; state.staffRestaurantId = (d.restaurants || [])[0]?.id || null; state.staffActor = d.actor || "manager"; }
+    else {
+      state.staffDenied = null; state.staffTeam = d.staff || [];
+      // Default the "Add" target to the restaurant THIS panel is pinned to (admin view-as
+      // or a pinned owner), not just the alphabetically-first one the server returned —
+      // otherwise "+ Add" could create a login on the wrong restaurant. Falls back to the
+      // first (a plain manager only ever has their own restaurant anyway).
+      const rlist = d.restaurants || [];
+      state.staffRestaurantId = ((PANEL_RID && rlist.some((x) => x.id === PANEL_RID)) ? PANEL_RID : rlist[0]?.id) || null;
+      state.staffActor = d.actor || "manager";
+    }
   } catch (e) { state.staffDenied = "Couldn't reach the server."; }
   state.staffLoaded = true;
   if (state.tab === "general") renderEditor();
