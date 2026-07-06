@@ -113,6 +113,18 @@ async function invoiceLockedByItem(itemId: string): Promise<boolean> {
   return it?.order_id ? invoiceLockedByOrder(it.order_id) : false;
 }
 
+// Tenant guard for the id-only staff RPCs. Those RPCs (edit qty/note, add-item,
+// delete-item, shift, invoice, void) resolve their target by id ALONE — and the
+// service-role client bypasses RLS — so a crafted request carrying a foreign
+// row id could edit another restaurant's data. Confirm the id belongs to THIS
+// restaurant first, exactly like the invoice/void branches already do inline.
+// order_items / orders / sessions all carry restaurant_id (backfilled mig 081+).
+async function ownsRow(table: "sessions" | "orders" | "order_items", id: string, rid: string): Promise<boolean> {
+  if (!id) return false;
+  const { data } = await sb.from(table).select("id").eq("id", id).eq("restaurant_id", rid).maybeSingle();
+  return !!data;
+}
+
 // Friendly message for a staff-edit RPC's { ok:false, reason } (shared by the
 // edit-qty / edit-note / add-item / delete endpoints).
 const editErrMsg = (reason?: string) =>
@@ -393,7 +405,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const tbl = new URL(req.url).searchParams.get("table");
       const { data, error } = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl || null });
       if (error) throw new Error(error.message);
-      return ok(data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] });
+      const summary: any = data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] };
+      // order_ids: live (non-archived, non-cancelled) order ids so the panel can chime for a
+      // genuinely-NEW order id even when another order drops out of the count in the SAME poll
+      // tick (plain count-diffing silently missed that — audit 2026-07-06). Ids only + bounded,
+      // so it's egress-light, and only on the FULL-floor summary (the chime path; a ?table=N
+      // targeted refetch doesn't drive the chime and stays as slim as before).
+      if (!tbl) {
+        const live = (await sb.from("orders").select("id").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled").limit(1000)).data;
+        summary.order_ids = (live || []).map((o: { id: string }) => o.id);
+      }
+      return ok(summary);
     }
 
     if (p === "sessions") {
@@ -990,6 +1012,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
     if (a === "sessions" && c === "shift") {
       const to = String((body && body.to) || "").trim();
+      if (!(await ownsRow("sessions", b, rid))) return err("That table isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
       await logAction("editor", "table_shift", { detail: "→ table " + to, device_id: dev });
@@ -1025,6 +1048,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // dishes (and cancels the order if it's now empty), all in one transaction.
     // The RPC refuses to touch a PAID bill. Returns { ok, items_left, total, ... }.
     if (a === "items" && c === "delete") {
+      if (!(await ownsRow("order_items", b, rid))) return err("That item isn't for this restaurant.", 404);
       if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
       const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
       if (error) throw new Error(error.message);
@@ -1047,6 +1071,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // from order_items (orders.total is a stored server-priced number). Refuses a
     // PAID/cancelled order. (owner, 2026-06-17 — gated behind the UI confirm.)
     if (a === "items" && c === "qty") {
+      if (!(await ownsRow("order_items", b, rid))) return err("That item isn't for this restaurant.", 404);
       if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
       const qty = Math.round(Number(body?.qty));
       if (!Number.isFinite(qty) || qty < 1) return err("invalid quantity");
@@ -1060,6 +1085,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // items/:id/note — STAFF EDIT: change ONE dish's note on a PLACED order.
     if (a === "items" && c === "note") {
+      if (!(await ownsRow("order_items", b, rid))) return err("That item isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -1118,6 +1144,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         removed: Array.isArray(body?.removed) ? body.removed : undefined,
         note: body?.note ? String(body.note) : undefined,
       };
+      if (!(await ownsRow("orders", b, rid))) return err("That order isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_staff_add_item_to_order", { p_order: b, p_items: [line] });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);

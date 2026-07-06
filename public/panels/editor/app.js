@@ -6126,6 +6126,15 @@ let lastCallCount = null;  // pending waiter calls baseline (kept for the unseen
 // announced makes the alert fire EXACTLY once per real call, no matter how many
 // times we re-poll. null = not baselined yet (don't alert for calls already there).
 let seenCallIds = null;
+// New-order alerts are keyed by ORDER ID too, for the same reason (see seenCallIds).
+// Count-diffing summary.order_count silently MISSES a new order when another order
+// drops out of the live count (archived/settled/cancelled) in the SAME poll tick —
+// the net count is unchanged so no chime/badge fired. Tracking which live order ids
+// we've already announced fires the alert once per genuinely-new order regardless.
+// This needs summary.order_ids (array of live, non-archived, non-cancelled order ids)
+// from the /summary RPC; when that field is absent we fall back to the old count-diff.
+// null = not baselined yet (don't alert for orders already there on first poll).
+let seenOrderIds = null;
 // Optimistic-click bookkeeping: while a save is still travelling to the
 // server, the 1-second poll must not overwrite that order with stale data
 // (it would flicker the click back). Deletes get the same protection.
@@ -6286,9 +6295,26 @@ function reconcileBoard() {
     }
   }
 
-  // new order alert (order_count is live orders only; the latest order's table comes
-  // alongside it in the summary so the toast still names the table).
-  if (prev !== null && orderCount > prev) {
+  // new order alert — fire ONCE per genuinely-new order id (mirrors the seenCallIds
+  // path above). Preferred: track live order ids from summary.order_ids so a new order
+  // still chimes even if another order dropped out of the count in the same tick (the
+  // count-diff bug). Fallback (order_ids not in the payload yet): the old count-diff.
+  // The latest order's table comes alongside so the toast still names it.
+  const liveOrderIds = Array.isArray(summary.order_ids) ? summary.order_ids : null;
+  if (liveOrderIds) {
+    if (seenOrderIds === null) {
+      seenOrderIds = new Set(liveOrderIds); // first poll: baseline, don't alert for existing orders
+    } else {
+      const fresh = liveOrderIds.filter((id) => !seenOrderIds.has(id));
+      if (fresh.length) {
+        const where = summary.latest_order_table ? "Table " + summary.latest_order_table : "Walk-in";
+        playOrderChime();
+        toast(`🔔 ${fresh.length} new order${fresh.length > 1 ? "s" : ""} — ${where}`, "ok", null, 6000);
+        if (state.tab !== "orders") { unseenOrders += fresh.length; updateOrdersBadge(); }
+      }
+      seenOrderIds = new Set(liveOrderIds); // track exactly the orders still live
+    }
+  } else if (prev !== null && orderCount > prev) {
     const newCount = orderCount - prev;
     const where = summary.latest_order_table ? "Table " + summary.latest_order_table : "Walk-in";
     playOrderChime();
@@ -6426,10 +6452,26 @@ function startOrderWatch() {
       },
       menu: () => { if (Date.now() >= rtBootGraceUntil) loadAll(); }, // boot already loaded the menu
     }});
-    setInterval(() => { pollOrders(); loadPlatform(); }, 60000); // backup sync (also ages out handed-over platform tickets)
+    // BACKUP SYNC (also ages out handed-over platform tickets). PAUSE while the tab is
+    // HIDDEN so a backgrounded/forgotten manager tab stops hammering the DB (egress
+    // budget) — mirrors realtime.js's idle/visibility teardown. Catch-up on show is
+    // handled by LFH_RT.wake (it refetches via the ops handler), so no extra listener here.
+    setInterval(backupPoll, 60000);
   } else {
-    setInterval(() => { pollOrders(); loadPlatform(); }, 2000); // fallback poll
+    // No realtime → this 2s poll is the ONLY live source. Same hidden-tab pause; plus an
+    // explicit catch-up refetch the instant the tab is shown again (no realtime wake to
+    // do it), so a hidden-then-shown tab is instantly fresh instead of waiting a tick.
+    setInterval(backupPoll, 2000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) backupPoll(); });
   }
+}
+// One guarded backup fetch: skip entirely while the tab is hidden (see the intervals in
+// startOrderWatch). The initial boot pollOrders()/loadPlatform() run directly, not through
+// this, so first load always happens even if the page opens in a background tab.
+function backupPoll() {
+  if (document.hidden) return;
+  pollOrders();
+  loadPlatform();
 }
 
 // --- final wiring: connect the static page controls and start everything up ---

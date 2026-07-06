@@ -393,7 +393,7 @@ export default function OwnerDashboard() {
       <div className="own-bar">
         <div className="own-crumb">
           <button className={view.level === "home" ? "cur" : "lnk"} onClick={goHome}>
-            {single ? (ov?.restaurants[0]?.name || "Dashboard") : "All restaurants"}
+            {!ov ? "Dashboard" : single ? (ov.restaurants[0]?.name || "Dashboard") : "All restaurants"}
           </button>
           {!single && view.level !== "home" && rest && (<>
             <span className="sep">›</span>
@@ -420,8 +420,17 @@ export default function OwnerDashboard() {
         </div>
       )}
 
+      {/* ═══════ HOME · LOADING ═══════ */}
+      {/* Hold the single-vs-group decision until `ov` actually resolves. Before this,
+          `single` was false while `ov` was still null, so the multi-restaurant layout
+          ("All restaurants / Who earns more / ₹0") flashed for a single-restaurant
+          owner on every load (fixed 2026-07-06). */}
+      {view.level === "home" && !ov && (
+        <div className="adm-empty" style={{ padding: "40px 0" }}>Loading…</div>
+      )}
+
       {/* ═══════ HOME · MULTI (2 and 3+) ═══════ */}
-      {view.level === "home" && !single && (
+      {view.level === "home" && ov && !single && (
         <>
           <div className="adm-stats">
             <Kpi k={`Revenue (${RANGE_LABEL[range]})`} v={groupTotals?.revenue ?? 0} money

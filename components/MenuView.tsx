@@ -83,6 +83,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   const [favOnly, setFavOnly] = useState(false);   // Favorites filter (the guest's hearted dishes)
   const [layout, setLayout] = useState("gallery"); // gallery is the default first-visit view
   const [searchQuery, setSearchQuery] = useState(""); // what's typed in the search box
+  const [searchFocused, setSearchFocused] = useState(false); // is the search box focused? (drives the suggestions dropdown so it closes on outside tap)
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
   const [closedCats, setClosedCats] = useState<string[]>([]); // "All" view: which dropdowns the guest manually FOLDED (default: none — everything starts open)
   const [spyCat, setSpyCat] = useState(""); // scroll-spy: which category's section is under the header right now (drives the auto-shifting chips)
@@ -574,7 +575,11 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
           {dbCategories.length === 0
             ? // Still loading: show empty placeholder boxes (only once it's clearly
               // slow — not the lone Chef's Special star, and not a flash when cached).
-              (showSkeleton
+              // Once the fetch has RESOLVED (loaded) and there are genuinely zero
+              // categories, render NOTHING — not endless skeletons (mirrors the dish
+              // list's "loaded but empty" handling below; bug: empty restaurant showed
+              // 8 stuck skeletons forever).
+              (showSkeleton && !loaded
                 ? Array.from({ length: 8 }).map((_, i) => (
                     <div key={`skc-${i}`} className="cat-card cat-skeleton" aria-hidden="true">
                       <div className="cat-icon sk-cat-icon"></div>
@@ -642,9 +647,14 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
               aria-label={t.searchPlaceholder}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              // Close the suggestions on blur / outside tap. The small delay lets a
+              // tap on a result register first (blur fires before the result's click).
+              onBlur={() => setTimeout(() => setSearchFocused(false), 150)}
             />
-            {/* When there are matches, show the dropdown of quick results. */}
-            {searchResults.length > 0 && (
+            {/* When there are matches AND the box is focused, show the dropdown of
+                quick results. Gating on focus closes it on an outside tap. */}
+            {searchFocused && searchResults.length > 0 && (
               <div className="search-dropdown" role="listbox">
                 {searchResults.map((r) => (
                   <Link

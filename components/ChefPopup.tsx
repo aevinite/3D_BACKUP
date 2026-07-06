@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 // callWaiter sends a service request; getSettings reads restaurant on/off options.
 import { callWaiter, getSettings } from "@/lib/menu";
-import { useRestaurantId } from "@/lib/restaurant-context";
+import { useRestaurantId, useResolvedRestaurantId } from "@/lib/restaurant-context";
 // Helpers for checking/cleaning the table number and reading a scanned-QR table.
 import { validateTable, flagTableInput, getScannedTable, setScannedTable } from "@/lib/table";
 // Reads the saved dining session (if the guest is seated at a table).
@@ -18,6 +18,7 @@ import { useBackClose } from "@/lib/backStack";
 // (water, cutlery, the bill, etc.) and it gets sent to the staff for their table.
 export default function ChefPopup() {
   const restaurantId = useRestaurantId();
+  const resolvedId = useResolvedRestaurantId(); // null until the /r/<slug> tenant is known
   const features = useFeatures(restaurantId); // which restaurant features are switched on
   // Tracks each piece of what the pop-up needs to remember:
   const [open, setOpen] = useState(false); // is the pop-up showing right now?
@@ -58,10 +59,14 @@ export default function ChefPopup() {
     // Runs when something asks the pop-up to close: just hide it.
     const handleClose = () => setOpen(false);
 
-    // How many tables exist, so we can reject an out-of-range table number.
-    getSettings(restaurantId)
-      .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); })
-      .catch(() => {});
+    // How many tables exist, so we can reject an out-of-range table number. Only
+    // read once the REAL restaurant id is resolved — otherwise a /r/<slug> guest
+    // fires a wasted settings read as restaurant #1 before its id lands.
+    if (resolvedId) {
+      getSettings(resolvedId)
+        .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); })
+        .catch(() => {});
+    }
 
     // Listen for app-wide events: open the pop-up, close everything, a QR table
     // was scanned, or the session changed — and react to each.
@@ -77,10 +82,13 @@ export default function ChefPopup() {
       window.removeEventListener("lfh:table-scanned", prefillScanned);
       window.removeEventListener("lfh:session-changed", syncSession);
     };
-    // restaurantId in deps: the global widgets resolve their restaurant async (starts at
-    // #1, then fixes itself). Re-run so tableCount reflects the REAL restaurant once its
-    // id lands — else the "call a waiter" popup validated table numbers against #1's count.
-  }, [restaurantId]);
+    // resolvedId in deps: the global widgets resolve their restaurant async. It's
+    // null until the REAL restaurant id is known, so the mount settings read above
+    // fires exactly ONCE — for the real tenant — never a wasted #1 read first. Re-run
+    // when it lands so tableCount reflects the REAL restaurant (else the "call a
+    // waiter" popup validated table numbers against #1's count). Cleanup drops old
+    // listeners, so re-running never double-subscribes.
+  }, [resolvedId]);
 
   // The list of things a guest can ask for — each is an icon plus a label.
   const REASONS = [

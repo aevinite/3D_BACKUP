@@ -8,7 +8,7 @@
 // identical totals, only the presentation differs (owner's tax spec).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
-import { TimeBar, LeaderBar } from "@/components/owner/Charts";
+import { TimeBar, LeaderBar, canonPayMethod } from "@/components/owner/Charts";
 
 type RType = "sales" | "tax" | "dishes" | "categories" | "payments" | "discounts" | "cancellations" | "hourly";
 type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy";
@@ -37,7 +37,8 @@ type TaxInfo = { effectivePct: number; components: { label: string; rate: number
 type Report = { type: RType; range: Range; rows: Row[]; totals?: Record<string, number>; tax?: TaxInfo };
 type Rest = { id: string; name: string };
 
-const PAY_LABEL: Record<string, string> = { upi: "UPI", cash: "Cash", card: "Card", other: "Other" };
+// Payment-method labels are canonicalised via canonPayMethod (shared with the dashboard)
+// so both screens show identical, tidy labels regardless of stored casing.
 
 function bucketLabel(iso: string, range: Range): string {
   const d = new Date(iso);
@@ -185,7 +186,7 @@ export default function OwnerReports() {
     } else if (rep.type === "categories") {
       downloadCsv(name, ["Category", "Qty", "Revenue"], (rep.rows as { category: string; qty: number; revenue: number }[]).map((r) => [r.category, r.qty, r.revenue]));
     } else if (rep.type === "payments") {
-      downloadCsv(name, ["Method", "Orders", "Revenue"], (rep.rows as { method: string; orders: number; revenue: number }[]).map((r) => [PAY_LABEL[r.method] || r.method || "Unknown", r.orders, r.revenue]));
+      downloadCsv(name, ["Method", "Orders", "Revenue"], (rep.rows as { method: string; orders: number; revenue: number }[]).map((r) => [canonPayMethod(r.method), r.orders, r.revenue]));
     } else if (rep.type === "hourly") {
       downloadCsv(name, ["Hour", "Orders", "Revenue"], (rep.rows as { hour: number; orders: number; revenue: number }[]).map((r) => [`${r.hour}:00`, r.orders, r.revenue]));
     }
@@ -326,7 +327,7 @@ export default function OwnerReports() {
           {rep.type === "payments" && (
             <div className="adm-card" style={{ marginTop: 10 }}>
               <div className="rp-ct">Payment methods</div>
-              <LeaderBar data={(rep.rows as { method: string; orders: number; revenue: number }[]).map((d) => ({ id: d.method || "unknown", name: PAY_LABEL[d.method] || d.method || "Unknown", revenue: d.revenue, orders: d.orders, accentColor: "var(--accent)" }))} />
+              <LeaderBar data={(rep.rows as { method: string; orders: number; revenue: number }[]).map((d) => ({ id: d.method || "unknown", name: canonPayMethod(d.method), revenue: d.revenue, orders: d.orders, accentColor: "var(--accent)" }))} />
             </div>
           )}
 
@@ -369,7 +370,7 @@ export default function OwnerReports() {
               {rep.type === "payments" && (<>
                 <thead><tr><th>Method</th><th>Orders</th><th>Revenue</th></tr></thead>
                 <tbody>{(rep.rows as { method: string; orders: number; revenue: number }[]).map((r) => (
-                  <tr key={r.method || "unknown"}><td>{PAY_LABEL[r.method] || r.method || "Unknown"}</td><td>{r.orders}</td><td><b>{inr(r.revenue)}</b></td></tr>
+                  <tr key={r.method || "unknown"}><td>{canonPayMethod(r.method)}</td><td>{r.orders}</td><td><b>{inr(r.revenue)}</b></td></tr>
                 ))}</tbody>
               </>)}
               {rep.type === "hourly" && (<>

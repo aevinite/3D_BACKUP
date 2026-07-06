@@ -10,6 +10,7 @@ import InfinityLoader from "@/components/InfinityLoader";       // loading spinn
 import { modelLoader } from "@/lib/modelLoader";     // 3D model download manager
 import { modelWatchlist } from "@/lib/modelWatchlist"; // tracks who's waiting on a model (for toasts)
 import { getMenuItem, type MenuItem } from "@/lib/menu"; // fetch one dish's details
+import { getRestaurantBySlug } from "@/lib/tenant"; // resolve the ?r=<slug> to a restaurant id
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
 import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // money formatting
 
@@ -86,8 +87,14 @@ export default function ViewerClient({ folder }: { folder: string }) {
   const modelSeenRef = useRef(false);  // has the model actually appeared on screen?
   const searchParams = useSearchParams();        // the address's "?..." part
   const fromSlug = searchParams.get("from") || ""; // which dish we came from
-  // Where the Back button goes: to that dish if we know it, else the menu.
-  const backHref = fromSlug ? `/item/${fromSlug}` : "/menu";
+  // The restaurant we came from (?r=<slug>), so Back returns to the RIGHT tenant's
+  // dish/menu and the dish details load scoped to that restaurant — not #1's. Empty
+  // on the default single-restaurant page (no slug), which keeps that path unchanged.
+  const restaurantSlug = searchParams.get("r") || "";
+  const itemBase = restaurantSlug ? `/r/${restaurantSlug}` : "";
+  // Where the Back button goes: to that dish if we know it, else the menu — inside
+  // this restaurant when a slug is present.
+  const backHref = fromSlug ? `${itemBase}/item/${fromSlug}` : `${itemBase}/menu`;
 
   // The bar's name/stats/price come from the actual MENU item, not config.json
   // (config is only the hotspots/tags). Falls back to config if the item is missing.
@@ -97,10 +104,26 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // CONCURRENCY GUARD: fromSlug can change (back/forward between dishes); ignore a
     // late reply from a previous fromSlug so it can't overwrite the current dish.
     let cancelled = false;
-    // If we know which dish we came from, fetch its menu details for the bar.
-    if (fromSlug) getMenuItem(fromSlug).then((m) => { if (!cancelled) setMenuItem(m); }).catch(() => {});
+    // If we know which dish we came from, fetch its menu details for the bar —
+    // scoped to the restaurant in ?r=<slug>. When a slug IS present we resolve it to
+    // an id first and NEVER fall back to restaurant #1 (an unknown slug just leaves
+    // the bar on the config.json fallback rather than leaking #1's dish data). With
+    // no slug (the default single-restaurant page) getMenuItem defaults to #1 as before.
+    if (fromSlug) {
+      (async () => {
+        let rid: string | undefined;
+        if (restaurantSlug) {
+          const r = await getRestaurantBySlug(restaurantSlug);
+          if (cancelled) return;
+          if (!r?.id) return; // unknown slug — do NOT load restaurant #1's data
+          rid = r.id;
+        }
+        const m = await getMenuItem(fromSlug, rid);
+        if (!cancelled) setMenuItem(m);
+      })().catch(() => {});
+    }
     return () => { cancelled = true; };
-  }, [fromSlug]);
+  }, [fromSlug, restaurantSlug]);
 
   // Open the SAME confirm popup the dish-detail page uses (qty picker + total),
   // handled by the globally-mounted OrderConfirmModal.

@@ -31,8 +31,17 @@ function windowFor(range: string): { from: string; to: string; bucket: string } 
   // the dashboard mapped range=all → 12m here and undercounted everything >1yr old (bug M11).
   if (range === "all") return { from: "2020-01-01T00:00:00Z", to, bucket: "month" };
   if (range === "12m") return { from: new Date(now - 365 * DAY).toISOString(), to, bucket: "month" };
-  if (range === "30d") return { from: new Date(now - 30 * DAY).toISOString(), to, bucket: "day" };
-  if (range === "7d") return { from: new Date(now - 7 * DAY).toISOString(), to, bucket: "day" };
+  // 7d / 30d: MUST match /api/owner/analytics exactly — N whole IST calendar days aligned to
+  // 00:00 IST, NOT a rolling now−N×24h window. Before, this rolling window and analytics'
+  // IST-aligned one disagreed across a day boundary, so the dashboard's "last 7 days" revenue
+  // KPI (analytics) and its cancellation/discount tiles + this reports page (rolling) could
+  // show two different totals for the same "7 days" (bug, audit 2026-07-06). Keep in sync.
+  if (range === "7d" || range === "30d") {
+    const n = range === "7d" ? 7 : 30;
+    const istNow = new Date(now + 5.5 * 3600_000);
+    const istMidnightToday = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate()) - 5.5 * 3600_000;
+    return { from: new Date(istMidnightToday - (n - 1) * DAY).toISOString(), to, bucket: "day" };
+  }
   // GST filing periods — proper IST calendar boundaries (a rolling 30d/12m window is NOT
   // a filing period). "month"/"lastmonth" = a calendar month for GSTR; "fy" = the Indian
   // financial year Apr 1 → Mar 31. 00:00 IST on the 1st, shifted back to UTC.

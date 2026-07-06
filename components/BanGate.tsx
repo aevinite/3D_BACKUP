@@ -9,8 +9,10 @@
 
 import { useEffect, useState } from "react";
 import { checkBan, requestUnban } from "@/lib/session";
+import { useResolvedRestaurantId } from "@/lib/restaurant-context";
 
 export default function BanGate() {
+  const resolvedId = useResolvedRestaurantId();         // null until the /r/<slug> tenant is known
   const [banned, setBanned] = useState(false);          // is this device blocked?
   const [reason, setReason] = useState<string | null>(null); // optional staff reason
   const [requested, setRequested] = useState(false);    // has an unblock request already gone in?
@@ -20,9 +22,12 @@ export default function BanGate() {
   // Ask the server on mount, and re-ask when the tab is refocused — so the moment
   // staff unblock them, the wall lifts on their next look without a manual reload.
   useEffect(() => {
+    // Wait for the real restaurant id — bans are per-restaurant, so checking as
+    // the #1 default before the /r/<slug> tenant resolves would use the wrong scope.
+    if (!resolvedId) return;
     let alive = true;
     const check = async () => {
-      const r = await checkBan();
+      const r = await checkBan(resolvedId);
       if (!alive) return;
       if (r.ok !== false && r.banned) {
         setBanned(true);
@@ -37,7 +42,7 @@ export default function BanGate() {
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onVis);
     return () => { alive = false; document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
-  }, []);
+  }, [resolvedId]);
 
   // Not banned → render nothing (normal guests are unaffected).
   if (!banned) return null;

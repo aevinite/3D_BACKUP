@@ -43,6 +43,14 @@ export async function GET(req: NextRequest) {
 
   // Numerics arrive as strings over the wire — coerce once here so the client
   // gets clean numbers and the totals add up.
+  //
+  // NO-MONEY RULE: the whole-platform ADMIN command centre (scope.all, admin-only)
+  // must never receive any restaurant's food revenue — the /aevinite dashboard only
+  // renders open-table counts. So we STRIP revenue to 0 on the all-view. (A real
+  // owner is never scope.all; an admin acting-as a single owner keeps that owner's
+  // own numbers, which is the owner panel they're helping with.) Fixes the audit
+  // find that every restaurant's revenue + a platform total was shipping to admin.
+  const hideMoney = scope.all === true;
   const allow = scope.all ? null : new Set(scope.ids);
   const restaurants: OutRow[] = (data ?? []).filter((r: Row) => !allow || allow.has(r.restaurant_id)).map((r: Row) => ({
     id: r.restaurant_id,
@@ -51,9 +59,9 @@ export async function GET(req: NextRequest) {
     active: r.active,
     accentColor: r.accent_color || "#e3c06f",
     ordersToday: Number(r.orders_today) || 0,
-    revenueToday: Math.round((Number(r.revenue_today) || 0) * 100) / 100,
+    revenueToday: hideMoney ? 0 : Math.round((Number(r.revenue_today) || 0) * 100) / 100,
     ordersAll: Number(r.orders_all) || 0,
-    revenueAll: Math.round((Number(r.revenue_all) || 0) * 100) / 100,
+    revenueAll: hideMoney ? 0 : Math.round((Number(r.revenue_all) || 0) * 100) / 100,
     openTables: Number(r.open_tables) || 0,
   }));
 

@@ -572,6 +572,10 @@ body:has(.opt-overlay) #tabletClose { display: none; }
   body.tbl-open #panel { overflow-y: auto; }
   body.tbl-open #panel .detail-body { flex: none; overflow: visible; }
   body.tbl-open #panel .dacts { background: transparent; border-top: 0; padding: 12px 0 0; }
+  /* Keep the LAST dish clear of the floating "View order" pill. The flat 88px above
+     ignores the phone's home-indicator safe area, so the pill (bottom 12px + safe-area
+     + ~44px tall) overlapped the last row. Pad by the pill's full footprint + a little. */
+  .om.lite:not(.vieworder) .om-scroll { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
 }
 
 /* ── Take-order redesign (mobile), 2026-07-05 ──────────────────────────────────

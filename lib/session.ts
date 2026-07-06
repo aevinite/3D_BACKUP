@@ -152,9 +152,13 @@ export const tableStatus = (table: string, restaurantId: string = DEFAULT_RESTAU
 // server can enforce the geofence itself; pass null when location is bypassed.
 export const joinSession = (table: string, name: string | null, lat: number | null, lng: number | null, restaurantId: string = DEFAULT_RESTAURANT_ID) =>
   rpc("lfh_join_session", { p_table: table, p_name: name, p_lat: lat, p_lng: lng, p_device: getGuestDeviceId(), p_restaurant_id: restaurantId });
-// Is THIS device (or phone) banned? The guest app calls this on load to decide
-// whether to show the full "you're banned" screen instead of the menu (migration 077).
-export const checkBan = () => rpc("lfh_check_ban", { p_device: getGuestDeviceId(), p_phone: null });
+// Is THIS device (or phone) banned AT THIS RESTAURANT? The guest app calls this
+// on load to decide whether to show the full "you're banned" screen instead of the
+// menu (migration 077). Bans are per-restaurant, so the check is scoped to the
+// current tenant — a device blocked at one restaurant can still order at another
+// (the scoped RPC replaces the old global lfh_check_ban).
+export const checkBan = (restaurantId: string = DEFAULT_RESTAURANT_ID) =>
+  rpc("lfh_check_ban_scoped", { p_device: getGuestDeviceId(), p_phone: null, p_restaurant_id: restaurantId });
 // A banned guest leaves a mobile number to ask staff to unban them; it surfaces on
 // the manager's ban panel (migration 077).
 export const requestUnban = (phone: string) =>

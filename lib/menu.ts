@@ -213,8 +213,14 @@ export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID)
   // its error is swallowed and dishes just show as unrated.
   // item_ratings exposes restaurant_id since migration 116 — read ONLY this
   // restaurant's aggregates, with an explicit column list (egress rule).
+  // Explicit column list = exactly what mapRow reads below (egress rule — never
+  // `select("*")` on this hot/polled path, which shipped every column to every
+  // guest). A generous `.limit()` caps a runaway read while comfortably clearing
+  // any real menu size.
+  const MENU_COLS =
+    "id, slug, title, price, image, category, veg, is4d, model_folder, model_small_url, model_optimized_url, description, long_description, time, nutrition, ingredients, reviews, related_slugs, tags, allergens, search_alias, options";
   const [items, ratings] = await Promise.all([
-    supabase.from("menu_items").select("*").eq("restaurant_id", restaurantId).order("sort_order"),
+    supabase.from("menu_items").select(MENU_COLS).eq("restaurant_id", restaurantId).order("sort_order").limit(1000),
     supabase.from("item_ratings").select("item_slug, avg_rating, review_count").eq("restaurant_id", restaurantId),
   ]);
   if (items.error) throw new Error(`Failed to load menu: ${items.error.message}`);

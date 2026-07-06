@@ -122,6 +122,17 @@ const editErrMsg = (reason?: string) =>
 
 async function readBody(req: NextRequest): Promise<any> { try { return await req.json(); } catch { return {}; } }
 
+// Tenant guard for the id-only staff RPCs. Those RPCs (edit qty/note, add-item,
+// delete-item, shift, invoice) resolve their target by id ALONE and the service-role
+// client bypasses RLS, so a foreign row id would otherwise be editable across tenants.
+// Confirm the id belongs to THIS restaurant first (order_items/orders/sessions all
+// carry restaurant_id, backfilled mig 081+) — mirrors the editor route's ownsRow.
+async function ownsRow(table: "sessions" | "orders" | "order_items", id: string, rid: string): Promise<boolean> {
+  if (!id) return false;
+  const { data } = await sb.from(table).select("id").eq("id", id).eq("restaurant_id", rid).maybeSingle();
+  return !!data;
+}
+
 type Ctx = { params: Promise<{ path?: string[] }> };
 
 // ── GET /api/tablet/state — everything the tablet floor needs in one call ─────
@@ -384,7 +395,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // Capture the guest's DEVICE id too, so the ban targets their device (and the
       // guest "you're blocked" wall sticks), not just a phone they may not have. (077)
       const device = m.device_id ? String(m.device_id).trim() : null;
-      must(await sb.from("blocklist").insert({ member_id: b, phone, device_id: device, reason: "banned from tablet" }).select());
+      // restaurant_id MUST be stamped or the row is orphaned: the manager's ban list
+      // reads blocklist scoped by restaurant_id, so a NULL-tenant row can never be seen
+      // or lifted (un-banned) — yet it still triggers the ban wall. Mirrors editor:1178.
+      must(await sb.from("blocklist").insert({ member_id: b, phone, device_id: device, reason: "banned from tablet", restaurant_id: rid }).select());
       if (phone) await sb.from("customers").upsert({ phone, blocked: true, restaurant_id: rid }, { onConflict: "restaurant_id,phone" });
       const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).eq("restaurant_id", rid).select());
       await logAction("tablet", "member_ban", { detail: (phone ? `banned ${phone}` : "banned") + byNote(g), device_id: dev });
@@ -421,6 +435,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // existing invoice), so there's no double-invoice risk.
     if (a === "sessions" && c === "invoice") {
       const g = await tabletPerm("tablet_invoice", req, body, rid, actor); if (!g.allow) return g.resp;
+      if (!(await ownsRow("sessions", b, rid))) return err("That table isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
       if (error) throw new Error(error.message);
       await logAction("tablet", "invoice_generate", { detail: `session ${b}` + byNote(g), device_id: dev });
@@ -461,6 +476,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const to = String((body && body.to) || "").trim();
       // lfh_staff_shift_table derives the restaurant from the session itself and
       // checks the target table within that same restaurant — no rid needed here.
+      if (!(await ownsRow("sessions", b, rid))) return err("That table isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
       return ok(data);
@@ -535,6 +551,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     // editor: the lfh_delete_order_item RPC re-prices the order and refuses a
     // PAID bill (orders.total is a stored, server-priced number).
     if (a === "items" && c === "delete") {
+      if (!(await ownsRow("order_items", b, rid))) return err("That item isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) {
@@ -552,6 +569,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "items" && c === "qty") {
       const qty = Math.round(Number(body?.qty));
       if (!Number.isFinite(qty) || qty < 1) return err("invalid quantity");
+      if (!(await ownsRow("order_items", b, rid))) return err("That item isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -562,6 +580,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     // items/:id/note — STAFF EDIT: change ONE dish's note on a PLACED order.
     if (a === "items" && c === "note") {
+      if (!(await ownsRow("order_items", b, rid))) return err("That item isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -614,6 +633,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         removed: Array.isArray(body?.removed) ? body.removed : undefined,
         note: body?.note ? String(body.note) : undefined,
       };
+      if (!(await ownsRow("orders", b, rid))) return err("That order isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_staff_add_item_to_order", { p_order: b, p_items: [line] });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);

@@ -239,7 +239,12 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // The "?from=" tells the viewer which dish to link back to.
   const goToViewer = () => {
     if (item?.is4d && item?.modelFolder) {
-      router.push(`/view/${item.modelFolder}?from=${encodeURIComponent(item.slug)}`);
+      // Carry the restaurant slug (?r=<slug>) so the viewer loads THIS restaurant's
+      // dish data + branding and its Back button returns here — never leaking
+      // restaurant #1's menu/data onto another tenant. Omitted on the default (#1)
+      // page, where there's no slug, so that path is unchanged.
+      const r = restaurantSlug ? `&r=${encodeURIComponent(restaurantSlug)}` : "";
+      router.push(`/view/${item.modelFolder}?from=${encodeURIComponent(item.slug)}${r}`);
     }
   };
 

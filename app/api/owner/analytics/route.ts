@@ -60,7 +60,10 @@ const num = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
 // Paid revenue + orders summed over a window (tiny pre-summed rows), scoped to
 // the caller's restaurants — ONE extra RPC per dashboard load when compare=1.
 async function windowTotals(rid: string | null, allow: Set<string> | null, from: string, to: string) {
-  const rev = await sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to });
+  // Scope the aggregation to just these restaurants in the DB (mig 143) — never
+  // aggregate every tenant then drop them in JS. null = admin all-view.
+  const ids = rid ? [rid] : allow ? [...allow] : null;
+  const rev = await sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to, p_ids: ids });
   if (rev.error) throw rev.error;
   let revenue = 0, orders = 0;
   for (const r of (rev.data ?? []) as Record<string, unknown>[]) {
@@ -87,8 +90,9 @@ export async function GET(req: NextRequest) {
     if (!rid) {
       // Group scope — the "who earns more" bar + multi-line trend.
       const allow = scope.all ? null : new Set(scope.ids);
+      const scopedIds = allow ? [...allow] : null; // DB-side filter (mig 143), not JS-only
       const [rev, ts] = await Promise.all([
-        sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to }),
+        sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to, p_ids: scopedIds }),
         sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket }),
       ]);
       if (rev.error) throw rev.error;
