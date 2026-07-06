@@ -427,7 +427,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       else prevSince = new Date(since.getTime() - 30 * 864e5);
       const elapsedMs = now.getTime() - since.getTime();
       const [ordersQ, dishesQ, setQ, platRangeQ] = await Promise.all([
-        sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()),
+        // NEWEST-FIRST + explicit high bound. Without an .order()/.limit() PostgREST
+        // silently returns an ARBITRARY capped page (db-max-rows), so on a busy restaurant
+        // the totals/deltas were computed on a random subset → wrong, non-deterministic
+        // numbers. Ordering desc means any truncation drops only the OLDEST rows, keeping
+        // the recent window complete and the result reproducible. (Follow-up for extreme
+        // scale: pre-aggregated daily summary table per CLAUDE.md — this endpoint is
+        // on-demand, never polled, so a bounded scan is acceptable until then.)
+        sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).order("created_at", { ascending: false }).limit(50000),
         sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
         sb.from("settings").select("tax_rate,tax_components").eq("restaurant_id", rid).maybeSingle(),
         sb.from("aggregator_orders").select("source,total,status,created_at").eq("restaurant_id", rid).gte("created_at", since.toISOString()).limit(5000),
