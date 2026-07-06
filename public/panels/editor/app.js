@@ -213,6 +213,10 @@ function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
     requestAnimationFrame(() => wrap.classList.add("show")); // next frame: trigger the fade-in animation
     // "close" hides the dialog, removes it after the fade-out, and reports the
     // answer (true/false) back to whoever is awaiting this Promise.
+    // esc2 must be a hoisted declaration (NOT a named function expression) so both close()
+    // and the listener below can reference it in this scope — a named expression's name is
+    // only visible INSIDE itself, which threw "esc2 is not defined" from close().
+    function esc2(e) { if (e.key === "Escape") close(false); }
     const close = (val) => {
       wrap.classList.remove("show");
       setTimeout(() => wrap.remove(), 200);
@@ -234,9 +238,7 @@ function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
     wrap.querySelector(".confirm-cancel").onclick = () => { if (settled()) close(false); };
     wrap.querySelector(".confirm-ok").onclick = () => { if (settled()) close(true); };
     wrap.onclick = (e) => { if (e.target === wrap && settled()) close(false); };
-    document.addEventListener("keydown", function esc2(e) {
-      if (e.key === "Escape") { close(false); document.removeEventListener("keydown", esc2); }
-    });
+    document.addEventListener("keydown", esc2);
   });
 }
 
@@ -1716,7 +1718,7 @@ function ordersPreviousHtml(previous, kind = "previous") {
   const grid = list.length
     ? `<div class="bill-grid">${list.map(billCardHtml).join("")}</div>`
     : `<div class="empty">${q ? "No bills match that search." : (isToday ? "No bills settled today yet." : "No previous bills yet.")}</div>`;
-  const headRow = `<div class="ord-section-divider"><h3>${isToday ? "📅 Today's bills" : "✓ Previous bills"}</h3>${isToday ? "" : `<button class="btn danger" id="clearFreed">🗑 Clear all</button>`}</div>`;
+  const headRow = `<div class="ord-section-divider"><h3>${isToday ? "📅 Today's bills" : "✓ Previous bills"}</h3>${isToday ? "" : `<button class="btn danger" id="clearFreed" title="Removes freed table records only; paid & cancelled bills are kept as records">🗑 Clear freed</button>`}</div>`;
   return headRow + bar + grid;
 }
 function billCardHtml(b) {
@@ -2104,6 +2106,10 @@ function openPaymentMethodModal(due, label) {
     const close = () => wrap.remove();
     const finish = (method, note) => { resolved = true; close(); resolve({ method, note }); };
     const cancel = () => { close(); if (!resolved) resolve(null); };
+    // Hardware BACK must cancel THIS sheet via cancel() (resolves the awaited promise as null),
+    // not the adapter's bare remove() — else payOrdersWithMethod awaits forever and the bill is
+    // silently never settled with no feedback.
+    wrap.__lfhClose = cancel;
     wrap.querySelector(".tbl-modal-close").onclick = cancel;
     wrap.querySelector(".dish-edit-cancel").onclick = cancel;
     wrap.onclick = (e) => { if (e.target === wrap) cancel(); };
@@ -2888,7 +2894,10 @@ async function saveFeature(key, value) {
   const prev = (state.data.settings || {}).features || {};
   const next = { ...prev, [key]: value };
   state.data.settings = { ...(state.data.settings || {}), features: next }; // optimistic
-  try { const r = await api("POST", "/settings", { features: next }); state.data.settings = r; toast("Saved", "ok"); }
+  // When offline, api() returns the outbox STUB ({ok,queued,action_id}), not the settings row —
+  // overwriting state.data.settings with it would wipe table_count/features/tax etc. Keep the
+  // optimistic value in that case (the queued write replays on reconnect).
+  try { const r = await api("POST", "/settings", { features: next }); if (!(r && r.queued)) state.data.settings = r; toast(r && r.queued ? "Saved (will sync)" : "Saved", "ok"); }
   catch (e) {
     state.data.settings = { ...(state.data.settings || {}), features: prev }; // undo
     renderEditor();
@@ -3302,10 +3311,10 @@ async function toggleTagMembership(filterSlug, dishId, inputEl) {
   if (row) row.classList.toggle("on", adding);
   updateMembCount(filterSlug);
   try {
-    const payload = { ...dish };
-    delete payload.created_at;
-    delete payload.updated_at;
-    await api("POST", "/items", payload);
+    // Send ONLY id + tags, not the whole dish snapshot — posting the full (possibly stale)
+    // row here reverted a price/name someone else had just edited on this dish. The server
+    // upsert updates only the columns we send (onConflict=id), so this touches tags alone.
+    await api("POST", "/items", { id: dish.id, tags: dish.tags });
     toast(`${dish.title}: ${adding ? "added to" : "removed from"} "${filterSlug}"`, "ok");
   } catch (e) {
     // revert on failure
@@ -3357,13 +3366,33 @@ async function save() {
   if (state.tab === "items" && !it.slug) { toast("Slug is required", "err"); return; }
 
   // Copy the record but drop the timestamps — the database manages those itself.
-  const payload = { ...it };
+  let payload = { ...it };
   delete payload.created_at;
   delete payload.updated_at;
   // Tell the server whether this is a brand-new row (mint a fresh unique id / refuse to
   // clobber an existing category/filter with the same slug) or an edit (update in place).
   if (state.tab === "items" || state.tab === "categories" || state.tab === "filters") payload.__create = !!state.isNew;
   const wasNew = state.tab === "items" && state.isNew;
+  // EDIT → send only the CHANGED top-level fields (plus the identity keys the server matches
+  // the row on: id + slug, and __create). A full-row write from a stale snapshot could revert
+  // a field someone else just changed on another device — and the settings floor-toggles /
+  // retention already save partial, so a full form-save would undo them. The server upsert
+  // updates ONLY the columns we send (settings is if(k in body)-guarded; entities key on
+  // id / restaurant_id,slug), so a partial write is safe. Falls back to the full payload if
+  // we somehow have no clean baseline to diff against.
+  if (!state.isNew && state.selPristine) {
+    try {
+      const before = JSON.parse(state.selPristine);
+      const slim = {};
+      for (const k of Object.keys(payload)) {
+        if (JSON.stringify(payload[k]) !== JSON.stringify(before[k])) slim[k] = payload[k];
+      }
+      if (payload.id != null) slim.id = payload.id;       // items / settings match on id
+      if (payload.slug != null) slim.slug = payload.slug; // categories / filters conflict on slug
+      if ("__create" in payload) slim.__create = payload.__create;
+      payload = slim;
+    } catch (e) { /* keep the full payload on any diff error */ }
+  }
   state.saving = true;
   const _saveBtn = document.getElementById("saveBtn");
   if (_saveBtn) { _saveBtn.disabled = true; _saveBtn.textContent = "Saving…"; }
@@ -4947,7 +4976,7 @@ async function saveSetting(key, value) {
   state.data.settings = { ...(state.data.settings || {}), [key]: value };
   floorOpsInFlight++;
   loadSessions(true);
-  try { const r = await api("POST", "/settings", { [key]: value }); state.data.settings = r; loadSessions(true); toast("Saved", "ok"); }
+  try { const r = await api("POST", "/settings", { [key]: value }); if (!(r && r.queued)) state.data.settings = r; loadSessions(true); toast(r && r.queued ? "Saved (will sync)" : "Saved", "ok"); }
   catch (e) {
     state.data.settings = { ...(state.data.settings || {}), [key]: prev }; // undo
     loadSessions(true);
@@ -4959,9 +4988,13 @@ async function saveGeo() {
   const lat = (document.getElementById("fcLat").value || "").trim();
   const lng = (document.getElementById("fcLng").value || "").trim();
   const rad = (document.getElementById("fcRad").value || "").trim();
+  const patch = { geo_lat: lat === "" ? null : parseFloat(lat), geo_lng: lng === "" ? null : parseFloat(lng), geo_radius_m: rad === "" ? 250 : parseInt(rad, 10) };
   try {
-    const r = await api("POST", "/settings", { geo_lat: lat === "" ? null : parseFloat(lat), geo_lng: lng === "" ? null : parseFloat(lng), geo_radius_m: rad === "" ? 250 : parseInt(rad, 10) });
-    state.data.settings = r; toast("Location saved", "ok");
+    const r = await api("POST", "/settings", patch);
+    // Offline → outbox stub, not the row: merge the patch onto the current settings instead of
+    // overwriting with the stub (which would blank the rest of the settings until reload).
+    state.data.settings = (r && r.queued) ? { ...(state.data.settings || {}), ...patch } : r;
+    toast(r && r.queued ? "Location saved (will sync)" : "Location saved", "ok");
   } catch (e) { toast("Failed: " + e.message, "err"); }
 }
 
@@ -6170,6 +6203,18 @@ async function loadPlatform() {
 }
 
 function setTab(tab) {
+  // Leaving the Dashboard: destroy its live Chart.js instances so their detached canvases +
+  // resize handlers don't linger until the next Dashboard visit.
+  if (state.tab === "dash" && tab !== "dash") { dashCharts.forEach((c) => { try { c.destroy(); } catch {} }); dashCharts = []; }
+  // Leaving the Tables floor: close any open table detail/popup and tear down its hardware-BACK
+  // layers (they were only re-synced on the Tables render, so a stray popup left one registered
+  // on another tab → a wasted Back press).
+  if (state.tab === "tables" && tab !== "tables") {
+    state.floatingTables = [];
+    state.selectedTable = null;
+    state.openSess = null;
+    syncTableBackLayers();
+  }
   state.tab = tab;
   try { localStorage.setItem("lfh_editor_tab", tab); } catch {}
   state.isNew = false;

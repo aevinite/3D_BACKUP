@@ -37,6 +37,9 @@ body {
 }
 .brand { font-weight: 700; font-size: 17px; letter-spacing: .3px; }
 .brand span { margin-right: 4px; }
+/* Right-side actions cluster (theme + report + connection light). margin-left:auto pushes it
+   to the far right regardless of how wide the tab strip is, so the connbadge pill sits top-right. */
+.top-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .brand-rest { margin-left: 7px; font-weight: 600; font-size: 14px; color: var(--gold); letter-spacing: .2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38vw; display: inline-block; vertical-align: bottom; }
 /* The 7 tabs can crowd a mid-width window before the phone layout kicks in;
    let them scroll sideways rather than overflow/wrap awkwardly. min-width:0

@@ -357,12 +357,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // computed the till on a truncated sample → understated cash. Page through every order
       // so the Z-report money is COMPLETE, not a partial read. (owner 2026-07-06)
       const orders: any[] = [];
-      for (let from = 0; ; from += 1000) {
-        const page = must(await sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status")
+      // Advance by the ACTUAL number of rows returned and stop only on an EMPTY page — so this
+      // stays complete even if PostgREST's db-max-rows is configured below 1000 (a fixed +1000
+      // step would break early and undercount there). Hard cap the loop as a safety belt.
+      for (let from = 0, guard = 0; guard < 500; guard++) {
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status")
           .eq("restaurant_id", rid).gte("created_at", since)
-          .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null;
-        orders.push(...(page || []));
-        if (!page || page.length < 1000) break;
+          .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null) || [];
+        orders.push(...page);
+        if (page.length === 0) break;
+        from += page.length;
       }
       const [invQ, voidQ, platQ, setQ] = await Promise.all([
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since).limit(50000),     // invoices GENERATED today
