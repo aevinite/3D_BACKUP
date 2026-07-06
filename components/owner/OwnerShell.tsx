@@ -42,7 +42,7 @@ const GROUPS: NavGroup[] = [
   },
 ];
 
-export default function OwnerShell({ children, adminViewing, restaurantName }: { children: React.ReactNode; adminViewing?: boolean; restaurantName?: string }) {
+export default function OwnerShell({ children, adminViewing, restaurantName, initialSkin }: { children: React.ReactNode; adminViewing?: boolean; restaurantName?: string; initialSkin?: "light" | "dark" }) {
   const path = usePathname();
   const router = useRouter();
   // Admin scope pin (bug C1, 2026-07-05): when the admin drills into ONE restaurant
@@ -52,11 +52,16 @@ export default function OwnerShell({ children, adminViewing, restaurantName }: {
   const [ridPin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
   const withRid = (href: string) => (ridPin ? `${href}${href.includes("?") ? "&" : "?"}rid=${ridPin}` : href);
-  // Dark is the console default; the old stored preference still wins.
-  const [skin, setSkin] = useState<"light" | "dark">("dark");
+  // Skin: the server passes the cookie value as `initialSkin` so SSR already emits the
+  // RIGHT data-skin — no dark→light flash on load for owners who chose light (fixed
+  // 2026-07-06). Falls back to dark on a first-ever visit (no cookie yet).
+  const [skin, setSkin] = useState<"light" | "dark">(initialSkin ?? "dark");
 
   useEffect(() => {
-    try { const s = localStorage.getItem("aevidine_skin"); if (s === "dark" || s === "light") setSkin(s); } catch {}
+    // Reconcile with localStorage only if it and the SSR cookie disagree (rare) — keeps
+    // the toggle working even if the cookie was cleared but localStorage kept.
+    try { const s = localStorage.getItem("aevidine_skin"); if ((s === "dark" || s === "light") && s !== skin) setSkin(s); } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // "My restaurants" — the full list the owner owns, ALWAYS visible in the sidebar
@@ -90,7 +95,13 @@ export default function OwnerShell({ children, adminViewing, restaurantName }: {
     }
   };
   const toggleSkin = () => {
-    setSkin((cur) => { const next = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("aevidine_skin", next); } catch {} return next; });
+    setSkin((cur) => {
+      const next = cur === "dark" ? "light" : "dark";
+      try { localStorage.setItem("aevidine_skin", next); } catch {}
+      // Persist to a cookie too so the NEXT server render starts on the right skin.
+      try { document.cookie = `aevidine_skin=${next}; path=/; max-age=31536000; samesite=lax`; } catch {}
+      return next;
+    });
   };
 
   // Admin "exit view": clear the act-as cookie, then back to the admin hub.
@@ -153,7 +164,10 @@ export default function OwnerShell({ children, adminViewing, restaurantName }: {
         {adminViewing && (
           <div className="adm-adminbar" role="status">
             <nav className="adm-crumbs" aria-label="Breadcrumb">
-              <Link href="/aevinite/restaurants">Restaurants</Link>
+              {/* Clear the act-as cookie BEFORE leaving — like "Exit view". A plain link
+                  left the admin still "acting as" this restaurant for 6h, so re-opening
+                  /owner silently re-entered it (fixed 2026-07-06). */}
+              <a href="/aevinite/restaurants" onClick={(e) => { e.preventDefault(); exitAdminView(); }}>Restaurants</a>
               <i className="fas fa-chevron-right sep" aria-hidden="true" />
               <span className="cur">{restaurantName}</span>
               <i className="fas fa-chevron-right sep" aria-hidden="true" />

@@ -21,6 +21,10 @@ import OwnerReconnecting from "@/components/owner/OwnerReconnecting";
 export default async function OwnerLayout({ children }: { children: React.ReactNode }) {
   const store = await cookies();
   const acting = store.get(ADMIN_ACT_COOKIE)?.value;
+  // Pass the persisted skin to the shell so SSR emits the right theme immediately (no
+  // dark→light flash for light-mode owners). Written as a cookie by OwnerShell's toggle.
+  const skinCookie = store.get("aevidine_skin")?.value;
+  const initialSkin = skinCookie === "light" || skinCookie === "dark" ? skinCookie : undefined;
 
   // Resolve auth INSIDE try/catch so a transient DB blip (AuthDbError) shows a calm
   // "reconnecting" retry instead of crashing the whole panel or bouncing a logged-in
@@ -38,13 +42,13 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
   }
 
   // 1) OWNER role → their own cockpit.
-  if (u && u.role === "owner") return <OwnerShell>{children}</OwnerShell>;
+  if (u && u.role === "owner") return <OwnerShell initialSkin={initialSkin}>{children}</OwnerShell>;
 
   // 2) ADMIN viewing a specific restaurant (act-as) → top-power, invisible view.
   if (acting && actingValid) {
     const r = (await sb.from("restaurants").select("name").eq("id", acting).limit(1)).data?.[0];
     return (
-      <OwnerShell adminViewing restaurantName={r?.name || "this restaurant"}>
+      <OwnerShell adminViewing restaurantName={r?.name || "this restaurant"} initialSkin={initialSkin}>
         {children}
       </OwnerShell>
     );

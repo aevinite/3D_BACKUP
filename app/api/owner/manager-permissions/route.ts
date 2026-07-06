@@ -25,17 +25,19 @@ export async function PATCH(req: NextRequest) {
   const rid = String(body?.restaurant_id || "");
   if (!rid) return bad("Missing restaurant_id.");
 
-  // Authorise: admin (any restaurant) OR an owner who owns THIS restaurant.
-  const isAdmin = await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
-  if (!isAdmin) {
-    const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
-    if (!u) return bad("Not authorised — please log in.", 401);
-    if (u.role !== "owner") return bad("Only the owner can change manager powers.", 403);
+  // Authorise: an OWNER who owns THIS restaurant, OR (failing that) the admin super-user.
+  // Owner is checked FIRST so a browser holding both an owner and an admin cookie is
+  // treated as the owner (scoped to owned restaurants) — consistent with lib/ownerScope
+  // and the staff route, not silently escalated to admin (found 2026-07-06).
+  const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  if (u?.role === "owner") {
     // Multi-owner (migration 097): authorise via membership in restaurant_owners,
     // not the single primary-owner column, so any co-owner of this restaurant can
     // change its manager powers — and only an actual owner of it can.
     const owned = (await sb.from("restaurant_owners").select("restaurant_id").eq("restaurant_id", rid).eq("user_id", u.id).limit(1)).data?.[0];
     if (!owned) return bad("That restaurant isn't yours.", 403);
+  } else if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value))) {
+    return bad(u ? "Only the owner can change manager powers." : "Not authorised — please log in.", u ? 403 : 401);
   }
 
   // Validate + collect only known boolean flags from the request.

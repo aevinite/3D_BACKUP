@@ -14,6 +14,7 @@ export default function OwnerIssues() {
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const [filter, setFilter] = useState<"open" | "all">("open");
   const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   // Admin-in-one-restaurant scope pin (bug C1) — mirrors app/owner/page.tsx & reports.
   // Rides on EVERY call as ?scope= so a second tab's shared act-as cookie can't hijack
   // this tab's restaurant (before, Issues ignored the pin and followed the cookie —
@@ -26,8 +27,17 @@ export default function OwnerIssues() {
   const load = useCallback(async () => {
     try {
       const j = await (await fetch(`/api/owner/issues${scp}`, { cache: "no-store" })).json();
-      if (!j.error) setIssues(j.issues || []);
-    } catch {}
+      if (j.error) throw new Error(j.error);
+      setIssues(j.issues || []);
+      setErr(null);
+    } catch (e) {
+      // Surface the failure instead of swallowing it — otherwise a failed FIRST load
+      // leaves `issues` null and the page stuck on "Loading issues…" forever, and a
+      // failed refresh silently kept stale data with no cue (found 2026-07-06). Keep any
+      // rows we already had (stale), but drop out of the infinite "loading" state.
+      setErr(e instanceof Error ? e.message : String(e));
+      setIssues((cur) => cur ?? []);
+    }
   }, [scp]);
   useEffect(() => { load(); }, [load]);
 
@@ -57,6 +67,13 @@ export default function OwnerIssues() {
           </div>
           <button className="adm-btn" style={{ marginLeft: "auto" }} onClick={load}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
         </div>
+
+        {err && (
+          <div className="adm-card" style={{ borderColor: "var(--adm-danger)", margin: "0 0 12px" }}>
+            <b>Couldn&apos;t load issues.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span>{" "}
+            <button className="adm-btn" style={{ marginLeft: 6 }} onClick={load}>Try again</button>
+          </div>
+        )}
 
         {issues === null ? (
           <div className="adm-empty">Loading issues…</div>

@@ -92,6 +92,9 @@ export default function OwnerStaffPage() {
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
   async function setActive(s: Staff, active: boolean) {
+    // Disabling bumps their token → instant logout mid-shift, so confirm first (a mis-click
+    // used to kick a working staffer off with no prompt). Re-enabling is harmless, no confirm.
+    if (!active && !confirm(`Disable ${s.name || s.username}? They'll be logged out immediately and can't sign in until re-enabled.`)) return;
     try { await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s.id, action: "set_active", active }) }); await load(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
