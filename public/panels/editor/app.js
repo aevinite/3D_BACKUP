@@ -2014,9 +2014,12 @@ async function deleteOrders(ids, all = false) {
 // Marking PAID asks first ("has the money actually been collected?") so a stray
 // tap can't record a payment that never happened. The bulk "settle whole table"
 // path passes skipConfirm so it asks once, not per order.
+// Returns true when the payment state was actually saved, false on cancel/failure — so a
+// bulk caller (payOrdersWithMethod) can report an HONEST result instead of always toasting
+// success even when the server refused an order (over-collection bug, 2026-07-06).
 async function setOrderPayment(id, paid, opts = {}) {
   if (paid && !opts.skipConfirm) {
-    if (!(await confirmDialog("Mark this order PAID? Only confirm if the payment has actually been collected.", "Yes, payment done"))) return;
+    if (!(await confirmDialog("Mark this order PAID? Only confirm if the payment has actually been collected.", "Yes, payment done"))) return false;
   }
   const o = (state.data.orders || []).find((x) => x.id === id);
   const prev = o ? o.payment_status : null;
@@ -2025,7 +2028,7 @@ async function setOrderPayment(id, paid, opts = {}) {
   let revertReason = null;
   if (!paid && prev === "paid") {
     revertReason = (window.prompt("This bill is PAID. Reason for reverting it to unpaid (refund / wrong entry)?") || "").trim();
-    if (!revertReason) { toast("Revert cancelled — a reason is required.", "err"); return; }
+    if (!revertReason) { toast("Revert cancelled — a reason is required.", "err"); return false; }
   }
   if (o) o.payment_status = paid ? "paid" : "pending"; // flip the screen NOW
   opBegin(id);                     // shield this order from the poll meanwhile
@@ -2040,11 +2043,13 @@ async function setOrderPayment(id, paid, opts = {}) {
     // The bulk "settle whole table" path passes quiet:true so we toast once at the
     // end instead of once per order.
     if (!opts.quiet) toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
+    return true;
   } catch (e) {
     if (o && prev !== null) o.payment_status = prev;   // undo on failure
     renderEditor();
     renderTablePanel();
-    toast("Could not update payment: " + e.message, "err");
+    if (!opts.quiet) toast("Could not update payment: " + e.message, "err");
+    return false;
   } finally {
     opEnd(id);
   }
@@ -2110,15 +2115,33 @@ function openPaymentMethodModal(due, label) {
 // own confirm — that's a fix-a-mistake action, not a new payment being collected.
 async function payOrdersWithMethod(orders, label) {
   if (!orders.length) { toast("Nothing to settle — already paid", "ok"); return false; }
+  // NEVER try to settle an order that hasn't been ACCEPTED yet: the server refuses to pay a
+  // 'received' order (accept-before-pay), so including it inflated the "amount collected"
+  // shown to staff AND left it unpaid while a blanket success toast still fired — the till
+  // then read higher than the system recorded as paid (over-collection bug, 2026-07-06).
+  // Drop un-accepted orders from BOTH the collected amount and the settle loop.
+  const payable = orders.filter((o) => o.status !== "received");
+  const skipped = orders.length - payable.length;
+  if (!payable.length) {
+    toast(skipped ? "Accept the new order first, then collect payment." : "Nothing to settle — already paid", skipped ? "err" : "ok");
+    return false;
+  }
   // "Amount collected" MUST equal the printed bill: billMath applies the discount
   // BEFORE tax. The old Σ(total − discount) taxed the pre-discount amount and told
   // staff to collect discount×rate too much on any discounted bill (2026-07-05 fix).
-  const due = billMath(orders).total;
+  const due = billMath(payable).total;
   const picked = await openPaymentMethodModal(due, label);
   if (!picked) return false; // cancelled
-  for (const o of orders) await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true, method: picked.method, note: picked.note });
-  toast(`Marked paid via ${picked.method} 💳`, "ok");
-  return true;
+  let okCount = 0, failCount = 0;
+  for (const o of payable) {
+    const done = await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true, method: picked.method, note: picked.note });
+    if (done) okCount++; else failCount++;
+  }
+  // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
+  if (okCount && !failCount) toast(skipped ? `Marked paid via ${picked.method} — ${skipped} new order still needs accepting.` : `Marked paid via ${picked.method} 💳`, "ok");
+  else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
+  else toast("Couldn't settle the payment — check the order.", "err");
+  return okCount > 0;
 }
 
 // markTablePaid: settle the WHOLE table in one go — mark every unpaid (non-
