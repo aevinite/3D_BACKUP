@@ -10,8 +10,10 @@ import InfinityLoader from "@/components/InfinityLoader";       // loading spinn
 import { modelLoader } from "@/lib/modelLoader";     // 3D model download manager
 import { modelWatchlist } from "@/lib/modelWatchlist"; // tracks who's waiting on a model (for toasts)
 import { getMenuItem, type MenuItem } from "@/lib/menu"; // fetch one dish's details
+import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant"; // resolve the restaurant this viewer belongs to
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
 import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // money formatting
+import { useBackClose } from "@/lib/backStack"; // phone back button closes overlays first
 
 // Describes the "config.json" file each dish folder has — the 3D model URLs,
 // the title/subtitle/stats, and the hotspot "tags" pinned onto the model.
@@ -78,6 +80,9 @@ export default function ViewerClient({ folder }: { folder: string }) {
   const [menuItem, setMenuItem] = useState<MenuItem | null>(null); // the dish's menu details
   const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // currency for prices
   const [showInfo, setShowInfo] = useState(false);       // is the details sheet open?
+  // Phone back button closes the details sheet first, not the whole viewer page
+  // (every overlay must register with the back manager — audit fix 2026-07-06).
+  useBackClose("viewer-info", showInfo, () => setShowInfo(false));
   const [hintVisible, setHintVisible] = useState(false); // is the "triple-tap to replay" hint showing?
   // Refs hold values across redraws without triggering one:
   const mvRef = useRef<ModelViewerElement>(null); // a handle to the actual <model-viewer> element
@@ -86,21 +91,34 @@ export default function ViewerClient({ folder }: { folder: string }) {
   const modelSeenRef = useRef(false);  // has the model actually appeared on screen?
   const searchParams = useSearchParams();        // the address's "?..." part
   const fromSlug = searchParams.get("from") || ""; // which dish we came from
-  // Where the Back button goes: to that dish if we know it, else the menu.
-  const backHref = fromSlug ? `/item/${fromSlug}` : "/menu";
+  // Which RESTAURANT this viewer belongs to (carried as ?r=<slug> from the dish
+  // page). The /view route has no tenant in its path, so without this the dish
+  // details + Back link + prices all defaulted to restaurant #1 — showing the
+  // wrong restaurant's dish for any non-#1 tenant (audit fix 2026-07-06).
+  const fromRestaurant = searchParams.get("r") || "";
+  const itemBase = fromRestaurant ? `/r/${fromRestaurant}` : "";
+  // Where the Back button goes: to that dish (in THIS restaurant) if we know it,
+  // else that restaurant's menu.
+  const backHref = fromSlug ? `${itemBase}/item/${fromSlug}` : `${itemBase}/menu`;
 
   // The bar's name/stats/price come from the actual MENU item, not config.json
   // (config is only the hotspots/tags). Falls back to config if the item is missing.
-  // Runs when we arrive (and if the source dish changes).
+  // Runs when we arrive (and if the source dish/restaurant changes).
   useEffect(() => {
     setCurrency(getCurrency());  // figure out the currency for prices
     // CONCURRENCY GUARD: fromSlug can change (back/forward between dishes); ignore a
     // late reply from a previous fromSlug so it can't overwrite the current dish.
     let cancelled = false;
-    // If we know which dish we came from, fetch its menu details for the bar.
-    if (fromSlug) getMenuItem(fromSlug).then((m) => { if (!cancelled) setMenuItem(m); }).catch(() => {});
+    // Resolve the restaurant (from ?r=) FIRST, then fetch the dish scoped to it,
+    // so a non-#1 restaurant's viewer shows ITS dish + price, not #1's.
+    (async () => {
+      let rid = DEFAULT_RESTAURANT_ID;
+      if (fromRestaurant) { const r = await getRestaurantBySlug(fromRestaurant); if (r) rid = r.id; }
+      if (cancelled || !fromSlug) return;
+      try { const m = await getMenuItem(fromSlug, rid); if (!cancelled) setMenuItem(m); } catch {}
+    })();
     return () => { cancelled = true; };
-  }, [fromSlug]);
+  }, [fromSlug, fromRestaurant]);
 
   // Open the SAME confirm popup the dish-detail page uses (qty picker + total),
   // handled by the globally-mounted OrderConfirmModal.
@@ -503,7 +521,9 @@ export default function ViewerClient({ folder }: { folder: string }) {
     if (mvRef.current?.canActivateAR && mvRef.current.activateAR) {
       mvRef.current.activateAR();
     } else {
-      alert("AR requires HTTPS.\n\nUpload to tiiny.host and open on phone.");
+      // Guest-facing message (no internal dev instructions). AR needs a supported
+      // phone/tablet; on desktop or unsupported devices it just isn't available.
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "AR isn't available on this device", subtitle: "open the menu on your phone to place the dish in your room", kicker: "3D view" } }));
     }
   };
 

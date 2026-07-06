@@ -25,12 +25,23 @@ import BackQuitDialog from "@/components/BackQuitDialog";
 import PointerCaptureGuard from "@/components/PointerCaptureGuard";
 import BanGate from "@/components/BanGate";
 
-// Staff routes never get guest chrome.
-const STAFF_PREFIXES = ["/aevinite", "/admin", "/manager", "/editor", "/kitchen", "/tablet", "/staff-login", "/login"];
+// Staff routes never get guest chrome. Two shapes must both be caught:
+//  - the flat admin routes (/manager, /kitchen, /tablet, /login, …), and
+//  - the PER-RESTAURANT panels /r/<slug>/manager|kitchen|tablet|login|owner.
+// The old list only had the flat ones, so when the panels moved under /r/<slug>/
+// the guest cart + dining-session machinery started mounting on top of the staff
+// panels + login again (the exact bug this file exists to prevent). Matching the
+// staff SEGMENT wherever it appears fixes it for good, even as routes grow.
+// (Audit fix 2026-07-06.)
+const STAFF_SEGMENTS = ["aevinite", "admin", "manager", "editor", "kitchen", "tablet", "staff-login", "login", "owner"];
+// Matches: /<seg>...  OR  /r/<slug>/<seg>...  (seg at path end or followed by "/")
+const STAFF_RE = new RegExp(
+  `^(?:/r/[^/]+)?/(?:${STAFF_SEGMENTS.join("|")})(?:/|$)`
+);
 
 export default function GuestChrome() {
   const pathname = usePathname() || "/";
-  const isStaff = STAFF_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
+  const isStaff = STAFF_RE.test(pathname);
   if (isStaff) return null;
   return (
     <>

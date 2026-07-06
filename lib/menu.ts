@@ -134,18 +134,26 @@ export interface OrderInput {
 }
 // Guest taps "Call a Waiter" — inserts a row the restaurant sees live in the editor.
 // `async` means this talks to the database and we wait for it to finish.
-export async function callWaiter(tableNumber: string, note?: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<void> {
+// The server's answer to a waiter call. `ok:false` with reason "blocked" means a
+// blocked table; `ok:true` with reason "already_sent"/"capped" means the call was
+// NOT newly created (a recent duplicate, or the table already has 6 pending). The
+// caller uses this to tell the guest the truth instead of always saying "sent"
+// (audit fix 2026-07-06).
+export interface CallWaiterResult { ok: boolean; reason?: string }
+export async function callWaiter(tableNumber: string, note?: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<CallWaiterResult> {
   // Go through the GUARDED RPC (not a direct insert): the database function
   // refuses blocked tables, throttles rapid repeats, and caps pile-up. Direct
   // inserts to waiter_calls are no longer allowed (see migration 050).
-  const { error } = await supabase.rpc("lfh_call_waiter_table", {
+  const { data, error } = await supabase.rpc("lfh_call_waiter_table", {
     p_table: tableNumber || null,
     p_note: note || null,
     p_restaurant_id: restaurantId,
   });
-  // Only a real transport/DB failure is an error. A throttled/blocked call comes
-  // back ok:false on purpose (anti-spam) — not something to alarm the guest with.
+  // A real transport/DB failure is an error we surface.
   if (error) throw new Error(`Call failed: ${error.message}`);
+  // Otherwise hand back the RPC's own {ok, reason} so the UI can react honestly.
+  const res = (data ?? {}) as CallWaiterResult;
+  return { ok: res.ok !== false, reason: res.reason };
 }
 
 // Order lifecycle status. The restaurant advances received -> preparing -> served.

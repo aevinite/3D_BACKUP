@@ -96,6 +96,7 @@ export default function CartPanel() {
   const [otherAllergy, setOtherAllergy] = useState(""); // free-text allergy not in the list
   const [otherOpen, setOtherOpen] = useState(false); // reveal the free-text field
   const [placing, setPlacing] = useState(false); // true while an order is being sent, to block double taps
+  const placingRef = useRef(false); // synchronous lock so a fast double-tap can't fire two orders before React disables the button
   const declaredHydrated = useRef(false); // skip the first persist so restore can't be clobbered
   const menuLoadedRef = useRef(false); // fetch the full menu (pairings/edit/allergens) only ONCE, on first open
 
@@ -132,8 +133,11 @@ export default function CartPanel() {
     else next.splice(idx, 1); // was 1 -> remove the line
     commit(next);
   };
-  // increment(): the "+" button. Add one to the quantity.
+  // increment(): the "+" button. Add one to the quantity, capped at 99 to match
+  // the server's per-line LEAST(99, …) clamp — otherwise the cart quoted (and the
+  // guest expected) more than the kitchen would ever receive (audit fix 2026-07-06).
   const increment = (idx: number) => {
+    if (cart[idx].qty >= 99) return; // already at the max the server accepts
     const next = [...cart];
     next[idx] = { ...next[idx], qty: next[idx].qty + 1 };
     commit(next);
@@ -376,6 +380,13 @@ export default function CartPanel() {
   // note. We only hide Edit if the dish is gone from the menu (nothing to open).
   const canEdit = (id: string) => !!menuItems.find((m) => m.id === id);
 
+  // Which cart lines have gone sold-out (best-effort, from the menu we loaded on
+  // open). Used to flag lines in the bill and to block placing with a CLEAR reason
+  // instead of the old generic "try again" dead-end (audit fix 2026-07-06). The
+  // server re-checks authoritatively, so a stale view here is only a UI hint.
+  const soldOutIds = new Set(menuItems.filter((m) => (m.tags || []).includes("sold-out")).map((m) => m.id));
+  const isSoldOut = (id: string) => soldOutIds.has(id);
+
   // Gentle pairing upsell: the top-rated drink/dessert not already on the bill.
   const cartIds = new Set(cart.map((c) => c.id));
   const PAIR_CATS = ["coffee", "beverages", "desserts"];
@@ -413,7 +424,7 @@ export default function CartPanel() {
   // placeOrder(): the big "Place Order" button. Validates the table number, then
   // either routes through the v2 dining-session flow or sends the order directly.
   const placeOrder = async () => {
-    if (cart.length === 0 || placing) return; // nothing to send, or already sending
+    if (cart.length === 0 || placing || placingRef.current) return; // nothing to send, or already sending (sync + state)
     // Table number is required AND must be a real table (see lib/table.ts).
     const check = validateTable(tableNumber, tableCount);
     if (!check.ok) {
@@ -423,10 +434,22 @@ export default function CartPanel() {
     }
     const tableTrim = check.value; // the cleaned-up table number
 
+    // Sold-out guard (covers BOTH the session and non-session paths below): if a
+    // dish on the bill went sold-out, tell the guest EXACTLY which one to remove
+    // instead of the old generic "try again" that repeated forever (bug fix). The
+    // server also rejects it, so this is a friendlier front line, not the only one.
+    const soldLines = cart.filter((it) => isSoldOut(it.id));
+    if (soldLines.length) {
+      const names = [...new Set(soldLines.map((it) => it.title))].join(", ");
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `Sold out: ${names}`, subtitle: "please remove it to place your order", kicker: "order", variant: "error" } }));
+      return;
+    }
+
     // v2: when the dining-session system is ON, route the order through the
     // SessionGate (location -> join -> OTP -> the server places it). On success
     // we still record it locally so the existing tracker follows its status.
     if (sessionsEnabled) {
+      placingRef.current = true;
       setPlacing(true);
       // Bundle up everything the session flow will need, captured now (before we
       // clear the cart), so it's all still here when the gate finishes.
@@ -446,6 +469,7 @@ export default function CartPanel() {
         // WITHOUT deregistering, so a gated add mid-placement can't steal our listener.
         if (d?.action !== "order") return;
         window.removeEventListener("lfh:session-done", onDone);
+        placingRef.current = false;
         setPlacing(false);
         if (d?.queued) {
           // Saved OFFLINE: the gate already toasted "will send when back online". The
@@ -477,6 +501,7 @@ export default function CartPanel() {
     }
 
     // ── Non-session path: send the order straight to the kitchen. ──
+    placingRef.current = true;
     setPlacing(true);
     try {
       const allergies = [...declared, ...(otherAllergy.trim() ? [otherAllergy.trim()] : [])];
@@ -529,10 +554,19 @@ export default function CartPanel() {
       setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
       window.dispatchEvent(new Event("lfh:cart-updated"));
       window.dispatchEvent(new Event("lfh:close-all"));
-    } catch {
-      // Something failed (network, server) — tell the guest to try again.
-      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Order didn't go through", subtitle: "please try again", kicker: "order", variant: "error" } }));
+    } catch (err) {
+      // If the server rejected because a dish went sold-out (or is unknown) between
+      // loading and placing, say WHICH dish rather than a generic "try again" — the
+      // message carries "sold_out (Title)" from createOrder (audit fix 2026-07-06).
+      const msg = String((err as Error)?.message || "");
+      if (/sold_out/i.test(msg)) {
+        const m = msg.match(/\(([^)]+)\)/); // the dish title in parentheses, if present
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: m ? `Sold out: ${m[1]}` : "A dish just sold out", subtitle: "please remove it to place your order", kicker: "order", variant: "error" } }));
+      } else {
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Order didn't go through", subtitle: "please try again", kicker: "order", variant: "error" } }));
+      }
     } finally {
+      placingRef.current = false;
       setPlacing(false); // re-enable the button either way
     }
   };
@@ -661,7 +695,14 @@ export default function CartPanel() {
               return (
                 <div key={`${item.id}-${item.sig || ""}-${idx}`} className="cart-item">
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="cart-item-name">{item.title}</div>
+                    <div className="cart-item-name">
+                      {item.title}
+                      {isSoldOut(item.id) && (
+                        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: "#fca5a5", border: "1px solid rgba(252,165,165,0.5)", borderRadius: 6, padding: "1px 6px", whiteSpace: "nowrap" }}>
+                          Sold out
+                        </span>
+                      )}
+                    </div>
                     {/* Chosen options (e.g. "Large, Oat milk"), if any. */}
                     {item.options && item.options.length > 0 && (
                       <div className="cart-item-opts">

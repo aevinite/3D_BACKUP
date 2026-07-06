@@ -5,30 +5,65 @@
 // instead they read it from this context, which derives the restaurant from the
 // URL (/r/<slug>) and resolves the slug to its id. Everything else (bare /menu,
 // /item, ...) is restaurant #1.
-import { createContext, useContext, useEffect, useState } from "react";
+//
+// The context now also carries the SLUG and NAME, not just the id. Global widgets
+// need these to (a) navigate back into the SAME restaurant (/r/<slug>/menu) instead
+// of the bare /menu that always meant restaurant #1, and (b) show the restaurant's
+// OWN name in the session/table gates instead of a hardcoded "My Little French
+// House" (the white-label leak the audit found). The slug comes straight from the
+// URL synchronously; the name resolves async (cached) right behind it.
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
-import { DEFAULT_RESTAURANT_ID, getRestaurantBySlug } from "./tenant";
+import { DEFAULT_RESTAURANT_ID, DEFAULT_RESTAURANT_SLUG, getRestaurantBySlug } from "./tenant";
 
-const RestaurantIdContext = createContext<string>(DEFAULT_RESTAURANT_ID);
+export interface RestaurantMeta {
+  /** Resolved restaurant id (defaults to #1 until a /r/<slug> resolves). */
+  id: string;
+  /** URL slug for the active restaurant — used to build /r/<slug>/... links. */
+  slug: string;
+  /** The restaurant's display name, once resolved (null while resolving / on bare routes). */
+  name: string | null;
+}
+
+const DEFAULT_META: RestaurantMeta = { id: DEFAULT_RESTAURANT_ID, slug: DEFAULT_RESTAURANT_SLUG, name: null };
+const RestaurantContext = createContext<RestaurantMeta>(DEFAULT_META);
 
 /** The active restaurant id for the current URL (defaults to restaurant #1). */
 export function useRestaurantId(): string {
-  return useContext(RestaurantIdContext);
+  return useContext(RestaurantContext).id;
+}
+
+/** The active restaurant's id + slug + name — for global widgets that need to
+ *  navigate back into this restaurant or show its own branding. */
+export function useRestaurantMeta(): RestaurantMeta {
+  return useContext(RestaurantContext);
 }
 
 export function RestaurantProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [rid, setRid] = useState<string>(DEFAULT_RESTAURANT_ID);
+  // Slug is known SYNCHRONOUSLY from the URL, so a widget can always build a
+  // correct /r/<slug>/... link even before the id/name resolve.
+  const slug = useMemo(() => {
+    const m = (pathname || "").match(/^\/r\/([^/]+)/);
+    return m ? decodeURIComponent(m[1]) : DEFAULT_RESTAURANT_SLUG;
+  }, [pathname]);
+
+  const [id, setId] = useState<string>(DEFAULT_RESTAURANT_ID);
+  const [name, setName] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    // Only /r/<slug>/... is a non-default restaurant; resolve the slug to an id.
     const m = (pathname || "").match(/^\/r\/([^/]+)/);
-    const slug = m ? decodeURIComponent(m[1]) : null;
-    if (!slug) { setRid(DEFAULT_RESTAURANT_ID); return; }
-    getRestaurantBySlug(slug)
-      .then((r) => { if (alive) setRid(r?.id || DEFAULT_RESTAURANT_ID); })
+    const s = m ? decodeURIComponent(m[1]) : null;
+    // Reset name so a stale name from the previous restaurant can't flash during
+    // the resolve window (the audit's "widget briefly on old tenant" note).
+    setName(null);
+    if (!s) { setId(DEFAULT_RESTAURANT_ID); return; }
+    getRestaurantBySlug(s)
+      .then((r) => { if (alive) { setId(r?.id || DEFAULT_RESTAURANT_ID); setName(r?.name || null); } })
       .catch(() => {});
     return () => { alive = false; };
   }, [pathname]);
-  return <RestaurantIdContext.Provider value={rid}>{children}</RestaurantIdContext.Provider>;
+
+  const value = useMemo<RestaurantMeta>(() => ({ id, slug, name }), [id, slug, name]);
+  return <RestaurantContext.Provider value={value}>{children}</RestaurantContext.Provider>;
 }

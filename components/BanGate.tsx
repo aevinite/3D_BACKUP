@@ -9,8 +9,12 @@
 
 import { useEffect, useState } from "react";
 import { checkBan, requestUnban } from "@/lib/session";
+import { useRestaurantId } from "@/lib/restaurant-context";
 
 export default function BanGate() {
+  // The ban check is scoped to THIS restaurant so a ban at another restaurant
+  // doesn't wall this one (mig 139 / audit fix 2026-07-06).
+  const restaurantId = useRestaurantId();
   const [banned, setBanned] = useState(false);          // is this device blocked?
   const [reason, setReason] = useState<string | null>(null); // optional staff reason
   const [requested, setRequested] = useState(false);    // has an unblock request already gone in?
@@ -22,7 +26,7 @@ export default function BanGate() {
   useEffect(() => {
     let alive = true;
     const check = async () => {
-      const r = await checkBan();
+      const r = await checkBan(restaurantId);
       if (!alive) return;
       if (r.ok !== false && r.banned) {
         setBanned(true);
@@ -37,7 +41,9 @@ export default function BanGate() {
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onVis);
     return () => { alive = false; document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
-  }, []);
+    // Re-check when the restaurant id resolves (it starts at #1, then flips to the
+    // real one) so the wall reflects THIS restaurant's bans, not #1's.
+  }, [restaurantId]);
 
   // Not banned → render nothing (normal guests are unaffected).
   if (!banned) return null;
