@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
+import { enqueueGuestOrder } from "@/lib/guestOutbox"; // offline: save order, send on reconnect
 import { useRestaurantId } from "@/lib/restaurant-context";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 // Per-restaurant feature switches: the allergy section can be turned off.
@@ -439,13 +440,22 @@ export default function CartPanel() {
       // onDone: runs once the SessionGate finishes (after location/join/OTP). If the
       // server actually placed the order, we record it locally so the tracker follows it.
       const onDone = (e: Event) => {
-        const d = (e as CustomEvent).detail as { ok?: boolean; action?: string; orderId?: string };
+        const d = (e as CustomEvent).detail as { ok?: boolean; action?: string; orderId?: string; queued?: boolean };
         // Only react to OUR order's result. Other gate completions (e.g. the
         // Add-to-cart "connect" flow) also fire lfh:session-done — ignore those
         // WITHOUT deregistering, so a gated add mid-placement can't steal our listener.
         if (d?.action !== "order") return;
         window.removeEventListener("lfh:session-done", onDone);
         setPlacing(false);
+        if (d?.queued) {
+          // Saved OFFLINE: the gate already toasted "will send when back online". The
+          // guest outbox records the order into the tracker once it actually sends,
+          // so we DON'T record a local entry now — just clear the cart and close.
+          setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
+          window.dispatchEvent(new Event("lfh:cart-updated"));
+          window.dispatchEvent(new Event("lfh:close-all"));
+          return;
+        }
         if (!d?.ok || !d.orderId) return; // order cancelled / failed — the gate showed its own message
         try {
           // Save into the "active orders" list so the OrderTracker shows it.
@@ -462,7 +472,7 @@ export default function CartPanel() {
       };
       // Listen for the gate's result, then kick off the session flow.
       window.addEventListener("lfh:session-done", onDone);
-      window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "order", table: tableTrim, payload: { items: itemsS, allergies: allergiesS } } }));
+      window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "order", table: tableTrim, payload: { items: itemsS, allergies: allergiesS, track: { tableNumber: tableTrim, total: totalS, itemCount: countS, items: trackS } } } }));
       return; // the rest below is the non-session path
     }
 
@@ -472,9 +482,20 @@ export default function CartPanel() {
       const allergies = [...declared, ...(otherAllergy.trim() ? [otherAllergy.trim()] : [])];
       // Send ONLY id + qty + options (group/label) + removed + note — no prices.
       // The server prices and stores the order, then hands back its id to track.
+      const itemsS = cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note }));
+      // OFFLINE: save the order on-device and send it automatically on reconnect
+      // (at-most-once via the guest outbox). The online path below is unchanged.
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, items: itemsS, allergies, track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) } });
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Saved — will send when you're back online", subtitle: "we'll send it automatically", kicker: "offline", icon: "📴", variant: "success" } }));
+        setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
+        window.dispatchEvent(new Event("lfh:cart-updated"));
+        window.dispatchEvent(new Event("lfh:close-all"));
+        return;
+      }
       const orderId = await createOrder({
         tableNumber: tableTrim,
-        items: cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note })),
+        items: itemsS,
         allergies,
       }, restaurantId);
       // Remember this order on THIS device so the guest can follow its status.
