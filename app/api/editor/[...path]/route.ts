@@ -1270,15 +1270,42 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         }
       }
       if (a === "items" && body && typeof body === "object") {
+        // Whether the client is CREATING a brand-new dish vs EDITING an existing one.
+        // (The `__create` hint is transient — never a real column, so strip it.)
+        const isCreate = (body as Record<string, unknown>).__create === true;
+        delete (body as Record<string, unknown>).__create;
         const slugify = (s: string) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
         if (!body.slug && body.title) body.slug = slugify(body.title);
-        // menu_items.id is the GLOBAL primary key, so a new id must be unique across
-        // ALL restaurants. #1 keeps the historical slug-as-id (non-breaking); other
-        // restaurants get a restaurant-namespaced id so two places can both have a
-        // "burger" slug without colliding on the PK (slug stays unique per restaurant).
-        if (!body.id) {
-          const base = body.slug || slugify(body.title);
-          body.id = rid === DEFAULT_RESTAURANT_ID ? base : `${base}__${rid.slice(0, 8)}`;
+        // menu_items.id is the GLOBAL primary key. A bare slug-as-id would let a save
+        // silently OVERWRITE another restaurant's (or this restaurant's own existing)
+        // dish that happens to share the name. So we never trust a client-supplied id
+        // to decide create-vs-overwrite:
+        //   • CREATE → mint an id that is unique across ALL restaurants (namespaced for
+        //     non-default tenants) and a slug unique WITHIN this restaurant, so a new
+        //     dish can never clobber an existing row.
+        //   • EDIT   → keep the id, but refuse if that id belongs to a DIFFERENT tenant.
+        if (isCreate) {
+          const base = body.slug || slugify(body.title) || "item";
+          const nsBase = rid === DEFAULT_RESTAURANT_ID ? base : `${base}__${rid.slice(0, 8)}`;
+          let candidate = nsBase, n = 1;
+          // id is a global PK → the candidate must be free for EVERY restaurant.
+          while ((await sb.from("menu_items").select("id").eq("id", candidate).maybeSingle()).data) {
+            n += 1; candidate = `${nsBase}-${n}`;
+          }
+          body.id = candidate;
+          // Keep the guest-facing slug unique within this restaurant so /item/<slug> is 1:1.
+          let slugCand = body.slug || base, m = 1;
+          while ((await sb.from("menu_items").select("id").eq("restaurant_id", rid).eq("slug", slugCand).maybeSingle()).data) {
+            m += 1; slugCand = `${body.slug || base}-${m}`;
+          }
+          body.slug = slugCand;
+        } else {
+          if (!body.id) {
+            const base = body.slug || slugify(body.title);
+            body.id = rid === DEFAULT_RESTAURANT_ID ? base : `${base}__${rid.slice(0, 8)}`;
+          }
+          const owner = (await sb.from("menu_items").select("restaurant_id").eq("id", String(body.id)).maybeSingle()).data as { restaurant_id?: string } | null;
+          if (owner && owner.restaurant_id !== rid) return err("That dish belongs to another restaurant", 409);
         }
       }
       // Stamp ownership + match the per-restaurant unique key: categories/filters are

@@ -3185,29 +3185,42 @@ async function save() {
   const it = state.sel;
   const kind = state.tab === "general" ? "settings" : state.tab; // which table to write to
   const keyField = (state.tab === "items" || state.tab === "general") ? "id" : "slug"; // its unique-key column
-  // New dish: if the id (permanent key) or slug (URL) weren't filled in, derive
-  // them from the title so adding a dish never fails for a missing key. You only
-  // have to type a name. (Editing keeps the existing id/slug untouched.)
+  // New dish: derive the slug from the title so adding never fails for a missing key —
+  // you only have to type a name. We deliberately do NOT assign the `id` here:
+  // menu_items.id is a GLOBAL primary key, so a bare slug-as-id would silently OVERWRITE
+  // another restaurant's (or this restaurant's own) dish with the same name. The SERVER
+  // mints a tenant-namespaced, globally-unique id for new dishes instead. (Editing keeps
+  // the existing id/slug untouched.)
   if (state.tab === "items" && state.isNew) {
     const slugify = (s) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     if (!it.slug && it.title) it.slug = slugify(it.title);
-    if (!it.id) it.id = it.slug || slugify(it.title);
   }
   if (state.tab === "items" && !it.title) { toast("Give the dish a name first", "err"); return; }
-  if (!it[keyField]) { toast(`${keyField === "id" ? "ID" : "Slug"} is required`, "err"); return; }
+  // For a brand-new dish the id is server-generated, so only require it when editing.
+  if (!(state.tab === "items" && state.isNew) && !it[keyField]) { toast(`${keyField === "id" ? "ID" : "Slug"} is required`, "err"); return; }
   if (state.tab === "items" && !it.slug) { toast("Slug is required", "err"); return; }
 
   // Copy the record but drop the timestamps — the database manages those itself.
   const payload = { ...it };
   delete payload.created_at;
   delete payload.updated_at;
+  // Tell the server whether this is a brand-new dish (mint a fresh unique id, never
+  // overwrite an existing row) or an edit (update the existing id in place).
+  if (state.tab === "items") payload.__create = !!state.isNew;
+  const wasNew = state.tab === "items" && state.isNew;
   try {
     const key = recKey(it);
-    await api("POST", "/" + kind, payload);
+    const saved = await api("POST", "/" + kind, payload);
     toast("Saved ✓", "ok");
     await loadAll();
     if (state.tab === "general") {
       state.sel = clone(state.data.settings || it);
+    } else if (wasNew) {
+      // id was minted by the server — re-select the freshly created dish by the id it
+      // returned (fall back to a slug match if the response shape ever changes).
+      const newId = saved && saved.id;
+      const fresh = records().find((r) => r.id === newId) || records().find((r) => r.slug === it.slug);
+      state.sel = fresh ? clone(fresh) : null;
     } else {
       const fresh = records().find((r) => recKey(r) === key);
       state.sel = fresh ? clone(fresh) : null;
