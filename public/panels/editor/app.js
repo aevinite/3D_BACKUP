@@ -1746,6 +1746,9 @@ function ordersPreviousHtml(previous, kind = "previous") {
 }
 function billCardHtml(b) {
   const dot = b.cancelled ? "cancelled" : (b.voided ? "voided" : "paid");
+  // 🖨 Print straight from the card (Today's + Previous bills) without opening it first —
+  // owner ask 2026-07-06. Bottom-right so it clears the status dot (top-right); its own
+  // click stops propagation so it prints WITHOUT also opening the bill modal.
   return `<div class="bill-card" data-bill-open="${esc(b.key)}">
     <span class="bill-dot ${dot}"></span>
     <div class="bill-bn">${b.table ? "Table " + esc(b.table) + " · " : ""}#${esc(b.billNo ?? "—")}</div>
@@ -1753,6 +1756,7 @@ function billCardHtml(b) {
     <div class="bill-amt">${inr(b.total)}</div>
     <div class="bill-when">${esc(b.when)}</div>
     ${b.invNo != null ? `<div class="bill-inv">${esc(invFmt(b.invNo))}${b.voided ? " · voided" : ""}</div>` : ""}
+    <button type="button" class="bill-print" data-bill-print="${esc(b.key)}" title="Print this bill" aria-label="Print bill" style="position:absolute;bottom:9px;right:11px;background:none;border:0;cursor:pointer;font-size:16px;opacity:.5;padding:3px;line-height:1">🖨</button>
   </div>`;
 }
 // The orders a bill modal can open from = the locally-cached board PLUS any server-side
@@ -1767,6 +1771,18 @@ function billOrdersPool() {
     for (const o of state.billHistRows) if (!seen.has(o.id)) pool.push(o);
   }
   return pool;
+}
+// Print a bill straight from its Today's/Previous card, without opening the modal first.
+// Resolves the bill's orders exactly like openBillModal (cached board ∪ history search),
+// so it works for searched OLDER bills too. (owner ask 2026-07-06)
+function printBillFromKey(key) {
+  const pool = billOrdersPool();
+  const g = (key || "").startsWith("solo:")
+    ? pool.filter((o) => o.id === key.slice(5))
+    : pool.filter((o) => o.session_id === key);
+  if (!g.length) { toast("Couldn't load that bill to print", "err"); return; }
+  const o0 = g[0];
+  printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, g);
 }
 // Expand one bill into a modal: full item list + totals + Print / Restore / Close.
 function openBillModal(key) {
@@ -2936,6 +2952,9 @@ function renderEditor() {
     });
     // Today/Previous: bill cards open a modal; search + sort drive the grid.
     ed.querySelectorAll("[data-bill-open]").forEach((c) => { c.onclick = () => openBillModal(c.dataset.billOpen); });
+    // Per-card 🖨: print without opening the bill. stopPropagation so the card's own
+    // open-modal click doesn't also fire.
+    ed.querySelectorAll("[data-bill-print]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); printBillFromKey(b.dataset.billPrint); }));
     const _bst = ed.querySelector("[data-bill-stype]");
     if (_bst) _bst.onchange = () => { state.billSearchType = _bst.value; state.billSearch = ""; state.billHistRows = []; renderEditor(); };
     const _bso = ed.querySelector("[data-bill-sort]");
