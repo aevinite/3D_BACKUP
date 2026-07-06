@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
+import { getOwnerEntitlementsUnion, mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic"; // always fresh — these are live numbers
 
@@ -67,8 +68,18 @@ export async function GET(req: NextRequest) {
   );
   totals.revenueToday = Math.round(totals.revenueToday * 100) / 100;
 
+  // Section entitlements (mig 133) ride along so the DASHBOARD can hide its hero
+  // shortcut buttons (Reports / Staff & powers / Feedback) for a REAL owner whose
+  // section the admin removed — the nav already hides them (OwnerShell), but the
+  // hero shortcuts leaked (found in the PR #173 visual pass). Admin sees all-on:
+  // its view keeps every shortcut (the X-ray tints live in the nav, not here).
+  const entitlements = scope.admin || scope.all
+    ? mergeOwnerEntitlements(null)
+    : await getOwnerEntitlementsUnion(scope.ids);
+
   return NextResponse.json({
     restaurants,
     totals: { ...totals, restaurantCount: restaurants.length },
+    entitlements,
   });
 }

@@ -40,7 +40,7 @@ type Restaurant = {
   id: string; slug: string; name: string; active: boolean; accentColor: string;
   ordersToday: number; revenueToday: number; ordersAll: number; revenueAll: number; openTables: number;
 };
-type Overview = { restaurants: Restaurant[]; totals: { revenueToday: number; ordersToday: number; openTables: number; restaurantCount: number } };
+type Overview = { restaurants: Restaurant[]; totals: { revenueToday: number; ordersToday: number; openTables: number; restaurantCount: number }; entitlements?: Record<string, boolean> };
 type GroupRev = { id: string; slug: string; name: string; accentColor: string; revenue: number; orders: number };
 type TsRow = { bucket: string; restaurantId?: string; revenue: number; orders: number };
 type Pay = { method: string; revenue: number; orders: number };
@@ -566,10 +566,12 @@ export default function OwnerDashboard() {
               <span className="live"><i className="fas fa-chair" aria-hidden="true" /> {ov.restaurants[0].openTables} table{ov.restaurants[0].openTables === 1 ? "" : "s"} open now</span>
             </div>
           </div>
+          {/* The ladder (mig 133): a section the admin removed loses its hero shortcut
+              too, not just its nav link — absent map = everything on (older server). */}
           <div className="own-hero-links">
-            <Link href={withPin("/owner/reports")} className="own-hero-link"><i className="fas fa-file-invoice" aria-hidden="true" /> Reports</Link>
-            <Link href={withPin("/owner/staff")} className="own-hero-link"><i className="fas fa-users-gear" aria-hidden="true" /> Staff &amp; powers</Link>
-            <Link href={withPin("/owner/issues")} className="own-hero-link"><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Feedback</Link>
+            {ov.entitlements?.reports !== false && <Link href={withPin("/owner/reports")} className="own-hero-link"><i className="fas fa-file-invoice" aria-hidden="true" /> Reports</Link>}
+            {ov.entitlements?.staff !== false && <Link href={withPin("/owner/staff")} className="own-hero-link"><i className="fas fa-users-gear" aria-hidden="true" /> Staff &amp; powers</Link>}
+            {ov.entitlements?.issues !== false && <Link href={withPin("/owner/issues")} className="own-hero-link"><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Feedback</Link>}
           </div>
         </div>
       )}
