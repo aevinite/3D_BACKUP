@@ -10,13 +10,17 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 
 // Owner-panel SECTIONS the admin can switch off (nav + API both honour these).
-export const OWNER_SECTION_KEYS = ["reports", "staff", "issues"] as const;
+// "ratings" (mig 138) gates the guest star-ratings view/management the owner + manager
+// get on the Feedback & issues page.
+export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings"] as const;
 export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 
-// The five manager powers (mig 091). The admin's availability switch for each lives
-// under "power_<flag>" — OFF means the toggle disappears from the owner's panel and
-// the manager's effective power is off no matter what the owner granted before.
-export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills"] as const;
+// The manager powers (mig 091). The admin's availability switch for each lives under
+// "power_<flag>" — OFF means the toggle disappears from the owner's panel and the
+// manager's effective power is off no matter what the owner granted before.
+//  · edit_settings  — enforced in the editor (mig, route:1203) but had no owner toggle.
+//  · view_ratings   — see + handle guest ratings in the manager panel (mig 138).
+export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings"] as const;
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
 export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [

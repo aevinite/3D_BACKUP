@@ -59,13 +59,13 @@ const num = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
 
 // Paid revenue + orders summed over a window (tiny pre-summed rows), scoped to
 // the caller's restaurants — ONE extra RPC per dashboard load when compare=1.
-async function windowTotals(rid: string | null, allow: Set<string> | null, from: string, to: string) {
-  const rev = await sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to });
+// p_ids pushes the scope INTO the DB (mig 138) so we never sum the whole platform
+// just to keep one owner's delta (the cost bomb this fixed). NULL = all (admin).
+async function windowTotals(pIds: string[] | null, from: string, to: string) {
+  const rev = await sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to, p_ids: pIds });
   if (rev.error) throw rev.error;
   let revenue = 0, orders = 0;
   for (const r of (rev.data ?? []) as Record<string, unknown>[]) {
-    const id = r.restaurant_id as string;
-    if (rid ? id !== rid : allow && !allow.has(id)) continue;
     revenue += Number(r.revenue) || 0;
     orders += Number(r.orders) || 0;
   }
@@ -87,9 +87,10 @@ export async function GET(req: NextRequest) {
     if (!rid) {
       // Group scope — the "who earns more" bar + multi-line trend.
       const allow = scope.all ? null : new Set(scope.ids);
+      const pIds = scope.all ? null : scope.ids; // DB-side scope (mig 138) — no whole-platform scan
       const [rev, ts] = await Promise.all([
-        sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to }),
-        sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket }),
+        sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to, p_ids: pIds }),
+        sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket, p_ids: pIds }),
       ]);
       if (rev.error) throw rev.error;
       if (ts.error) throw ts.error;
@@ -125,7 +126,7 @@ export async function GET(req: NextRequest) {
         }
       }
       const paymentMethods = Array.from(pmByMethod.values()).sort((a, b) => b.revenue - a.revenue);
-      const prev = prevWin ? await windowTotals(null, allow, prevWin.from, prevWin.to) : null;
+      const prev = prevWin ? await windowTotals(pIds, prevWin.from, prevWin.to) : null;
       return NextResponse.json({ scope: "group", range, restaurantRevenue, timeseries, paymentMethods, prev });
     }
 
@@ -178,12 +179,15 @@ export async function GET(req: NextRequest) {
     // average and made it drift UPWARD as open tables settled with no new orders. paid-count
     // comes from the payment breakdown (already fetched, WHERE payment_status='paid'). (owner 2026-07-06)
     const paidOrders = (pm.data ?? []).reduce((a: number, r: Record<string, unknown>) => a + (Number(r.orders) || 0), 0);
-    const prev = prevWin ? await windowTotals(rid, null, prevWin.from, prevWin.to) : null;
+    const prev = prevWin ? await windowTotals([rid], prevWin.from, prevWin.to) : null;
 
+    // `orders` counts ALL non-cancelled (incl. open/unpaid) while revenue+avgOrder are
+    // PAID-only — so Revenue ÷ Orders ≠ Avg order and looks like a wrong number. Ship
+    // `paidOrders` too so the dashboard can label the tile honestly (owner audit 2026-07-06).
     return NextResponse.json({
       scope: "restaurant", range, prev,
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
-      kpis: { revenue, orders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, openTables: openT.count || 0, topDish: dishRows[0]?.title || "—" },
+      kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, openTables: openT.count || 0, topDish: dishRows[0]?.title || "—" },
       timeseries: tsRows,
       dishes: dishRows,
       categories: (cats.data ?? []).map((r: Record<string, unknown>) => ({ category: r.category, qty: Number(r.qty) || 0, revenue: num(r.revenue) })),
