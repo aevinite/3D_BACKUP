@@ -32,6 +32,7 @@ const GROUPS: NavGroup[] = [
     label: "Manage",
     items: [
       { href: "/aevinite/restaurants", label: "Restaurants", icon: "fa-store" },
+      { href: "/aevinite/owners", label: "Owners", icon: "fa-crown" },
       { href: "/aevinite/recycle", label: "Recycle bin", icon: "fa-trash-can" },
       { href: "/aevinite/access", label: "Access control", icon: "fa-key" },
       { href: "/aevinite/users", label: "Users", icon: "fa-users" },
@@ -43,13 +44,6 @@ const GROUPS: NavGroup[] = [
       { href: "/aevinite/billing", label: "Billing & plans", icon: "fa-file-invoice" },
       { href: "/aevinite/health", label: "System health", icon: "fa-heart-pulse" },
       { href: "/aevinite/settings", label: "Settings", icon: "fa-gear" },
-    ],
-  },
-  {
-    label: "Coming soon",
-    quiet: true,
-    items: [
-      { href: "/aevinite/owners", label: "Owners", icon: "fa-crown", soon: true },
     ],
   },
 ];

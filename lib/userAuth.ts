@@ -14,7 +14,7 @@
 //   • Login is rate-limited: 5 wrong tries locks the account for 60 seconds.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sha256hex, safeEqual, AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { isPanelEnabledCached } from "@/lib/panelAccess";
+import { isPanelEnabledCached, ownerPanelEnabled } from "@/lib/panelAccess";
 
 export const USER_COOKIE = "lfh_user";
 export type Role = "owner" | "manager" | "tablet" | "kitchen";
@@ -113,13 +113,28 @@ export async function loginUser(
   // several restaurants. Fetch every active match and pick the one whose PASSWORD
   // verifies — so the login form needs no restaurant field. (The only ambiguity is
   // two restaurants sharing BOTH the same name AND password; then the first wins.)
-  let candQ = sb.from("staff_users").select("*").eq("username", uname).eq("active", true);
-  if (restaurantId) candQ = candQ.eq("restaurant_id", restaurantId);
-  const candRes = await candQ;
+  const candRes = await sb.from("staff_users").select("*").eq("username", uname).eq("active", true);
   // A FAILED lookup is a server problem, not wrong credentials — don't gaslight the
   // waiter into resetting a password during a network blip (stress test 2026-07-03).
   if (candRes.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true };
-  const candidates = (candRes.data || []) as any[];
+  let candidates = (candRes.data || []) as any[];
+  if (restaurantId) {
+    // Tenant door (/r/<slug>/login): only THAT restaurant's people may match. Staff
+    // rows carry the restaurant directly; OWNER rows carry the #1 "home" namespace,
+    // not the restaurants they own — so an owner used to be locked out of their own
+    // restaurant's door (2026-07-06 fix). Owners match via the restaurant_owners
+    // join table instead: keep an owner candidate only if they OWN this restaurant.
+    const ownerIds = candidates.filter((u) => u.role === "owner" && u.restaurant_id !== restaurantId).map((u) => u.id);
+    let ownsHere = new Set<string>();
+    if (ownerIds.length) {
+      const links = await sb.from("restaurant_owners").select("user_id")
+        .eq("restaurant_id", restaurantId).in("user_id", ownerIds);
+      if (links.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true };
+      ownsHere = new Set((links.data || []).map((l) => l.user_id as string));
+    }
+    candidates = candidates.filter((u) =>
+      u.restaurant_id === restaurantId || (u.role === "owner" && ownsHere.has(u.id)));
+  }
   // Same generic message whether the name is missing or the password is wrong —
   // never reveal which names exist.
   if (!candidates.length) return { ok: false, error: "Wrong name or password." };
@@ -218,7 +233,12 @@ export async function requireRole(
     // the user's restaurant, block the request — not just new logins. Before, requireRole
     // ignored the toggle, so an already-open manager/kitchen/tablet kept loading AND SAVING
     // until it reloaded. Cached (30s TTL) so this hot path never adds a per-request read.
-    if (!(await isPanelEnabledCached(u.role, u.restaurant_id))) return { ok: false };
+    // OWNERS are special (2026-07-06): their row's restaurant_id is the #1 "home"
+    // namespace, not what they own — their entitlement is "any owned restaurant has
+    // the owner panel on" (ownerPanelEnabled reads the restaurant_owners join).
+    if (u.role === "owner") {
+      if (!(await ownerPanelEnabled(u.id))) return { ok: false };
+    } else if (!(await isPanelEnabledCached(u.role, u.restaurant_id))) return { ok: false };
     // Presence heartbeat (throttled ~45s): mark this user active now so admin/owner
     // see who's working / which panel is open. Fire-and-forget; never blocks the call.
     const seen = (u as { last_seen_at?: string | null }).last_seen_at;
