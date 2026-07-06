@@ -49,8 +49,22 @@ type Scope =
 // Resolve which restaurants this caller may manage staff for (see header).
 async function scope(req: NextRequest): Promise<Scope> {
   const cols = "id, name, slug, accent_color, manager_permissions, owner_user_id";
-  // Admin super-user → all restaurants.
+  // Admin super-user → all restaurants, UNLESS a per-tab scope pin (?scope=/?rid=) says
+  // the admin is viewing ONE restaurant (bug C1): then show only that owner's set, so two
+  // admin tabs on different restaurants don't cross-list staff. ?scope=all or no pin = all.
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) {
+    const sp = req.nextUrl?.searchParams;
+    const pin = sp?.get("scope") || sp?.get("rid");
+    if (pin && pin !== "all") {
+      // Mirror lib/ownerScope: show every restaurant the pinned restaurant's owner owns
+      // (an owner may run several), falling back to just the pinned one if unowned.
+      const owner = (await sb.from("restaurants").select("owner_user_id").eq("id", pin).maybeSingle()).data;
+      const ids = owner?.owner_user_id
+        ? ((await sb.from("restaurants").select("id").eq("owner_user_id", owner.owner_user_id)).data || []).map((x) => x.id as string)
+        : [];
+      const { data } = await sb.from("restaurants").select(cols).in("id", ids.length ? ids : [pin]).order("name");
+      return { ok: true, actor: "admin", actorId: null, restaurants: (data || []) as Restaurant[] };
+    }
     const { data } = await sb.from("restaurants").select(cols).order("name");
     return { ok: true, actor: "admin", actorId: null, restaurants: (data || []) as Restaurant[] };
   }

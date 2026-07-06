@@ -11,22 +11,37 @@
 //      owner (it's the admin's own separate session).
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
+import { USER_COOKIE, userFromCookie, AuthDbError } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import OwnerShell from "@/components/owner/OwnerShell";
+import OwnerReconnecting from "@/components/owner/OwnerReconnecting";
 
 export default async function OwnerLayout({ children }: { children: React.ReactNode }) {
   const store = await cookies();
+  const acting = store.get(ADMIN_ACT_COOKIE)?.value;
+
+  // Resolve auth INSIDE try/catch so a transient DB blip (AuthDbError) shows a calm
+  // "reconnecting" retry instead of crashing the whole panel or bouncing a logged-in
+  // owner to /login (a blip ≠ logged out — same rule as lib/userAuth.ts gates). The
+  // branching/redirect stays OUTSIDE: redirect() throws NEXT_REDIRECT internally, and
+  // catching that here would silently break the redirect.
+  let u: Awaited<ReturnType<typeof userFromCookie>> = null;
+  let actingValid = false;
+  try {
+    u = await userFromCookie(store.get(USER_COOKIE)?.value);
+    if (acting) actingValid = await tokenIsValid(store.get(AUTH_COOKIE)?.value);
+  } catch (e) {
+    if (e instanceof AuthDbError) return <OwnerReconnecting />;
+    throw e;
+  }
 
   // 1) OWNER role → their own cockpit.
-  const u = await userFromCookie(store.get(USER_COOKIE)?.value);
   if (u && u.role === "owner") return <OwnerShell>{children}</OwnerShell>;
 
   // 2) ADMIN viewing a specific restaurant (act-as) → top-power, invisible view.
-  const acting = store.get(ADMIN_ACT_COOKIE)?.value;
-  if (acting && (await tokenIsValid(store.get(AUTH_COOKIE)?.value))) {
+  if (acting && actingValid) {
     const r = (await sb.from("restaurants").select("name").eq("id", acting).limit(1)).data?.[0];
     return (
       <OwnerShell adminViewing restaurantName={r?.name || "this restaurant"}>

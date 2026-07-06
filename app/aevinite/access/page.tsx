@@ -118,7 +118,10 @@ export default function AccessPage() {
     setStaff((list) => list.map((u) => u.id === userId ? { ...u, permissions: { ...(u.permissions || {}), [key]: value } } : u));
     // "default" clears the override (null) so the user inherits the restaurant-wide setting.
     const perm = value === "default" ? null : value;
-    const r = await fetch("/api/owner/staff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: userId, action: "set_permissions", permissions: { [key]: perm } }) });
+    // set_permissions is a per-id action → PATCH. POST is the create-new-staff handler
+    // and rejects this body ("Name must be at least 2 characters"), so the override
+    // never saved (found 2026-07-06). PATCH dispatches on `action` correctly.
+    const r = await fetch("/api/owner/staff", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: userId, action: "set_permissions", permissions: { [key]: perm } }) });
     if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
   };
 

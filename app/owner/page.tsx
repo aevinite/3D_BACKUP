@@ -15,6 +15,7 @@ import {
   SameHourBar, PayTrendStack,
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
+import RangeSlider from "@/components/owner/RangeSlider";
 
 const DAY_MS = 86400000;
 type Range = "today" | "yesterday" | "7d" | "30d" | "all";
@@ -112,6 +113,18 @@ function expectedBuckets(range: Range): { key: string; label: string }[] {
     }
   }
   return out;
+}
+
+// Plain-language "exact days" caption under the range control, so the owner always
+// knows the precise window a number covers (part of the 2026-07-06 range redesign).
+function rangeSpanText(k: Range): string {
+  const now = new Date();
+  const f = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
+  if (k === "today") return `Today · ${f(now)}`;
+  if (k === "yesterday") return `Yesterday · ${f(new Date(now.getTime() - DAY_MS))}`;
+  if (k === "7d") return `${f(new Date(now.getTime() - 6 * DAY_MS))} – ${f(now)} (7 days)`;
+  if (k === "30d") return `${f(new Date(now.getTime() - 29 * DAY_MS))} – ${f(now)} (30 days)`;
+  return `Everything up to ${f(now)}`;
 }
 
 // Count-up: eases a number to its target so tiles feel alive without lying —
@@ -340,13 +353,9 @@ export default function OwnerDashboard() {
           </>)}
           {view.level === "dish" && (<><span className="sep">›</span><span className="cur">{view.dish}</span></>)}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <div className="owx-range" role="tablist" aria-label="Date range">
-            {RANGES.map((r) => (
-              <button key={r.k} role="tab" aria-selected={range === r.k} className={range === r.k ? "on" : ""} onClick={() => setRange(r.k)}>{r.label}</button>
-            ))}
-          </div>
-          <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now (auto-updates are throttled to save load)">
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+          <RangeSlider items={RANGES} value={range} onChange={setRange} caption={rangeSpanText(range)} />
+          <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now (auto-updates are throttled to save load)" style={{ marginTop: 2 }}>
             <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
           </button>
         </div>

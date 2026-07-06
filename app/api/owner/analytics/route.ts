@@ -21,8 +21,17 @@ function windowFor(range: string): { from: string; to: string; bucket: string } 
   const now = Date.now();
   const to = new Date(now).toISOString();
   if (range === "all") return { from: "2020-01-01T00:00:00Z", to, bucket: "day" };
-  if (range === "7d") return { from: new Date(now - 7 * DAY).toISOString(), to, bucket: "day" };
-  if (range === "30d") return { from: new Date(now - 30 * DAY).toISOString(), to, bucket: "day" };
+  // 7d / 30d: EXACTLY N whole IST calendar days ending today (inclusive), aligned to
+  // 00:00 IST. A rolling now−N×24h window instead spilled into a partial (N+1)th IST
+  // day whose day-bucket the client's whole-day zero-filled axis drops — so the chart
+  // total came out LESS than the KPI above it (bug, 2026-07-06). Aligning the window to
+  // the same IST day boundaries the client plots makes chart sum == KPI by construction.
+  if (range === "7d" || range === "30d") {
+    const n = range === "7d" ? 7 : 30;
+    const istNow = new Date(now + 5.5 * 3600_000);
+    const istMidnightToday = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate()) - 5.5 * 3600_000;
+    return { from: new Date(istMidnightToday - (n - 1) * DAY).toISOString(), to, bucket: "day" };
+  }
   // today's 05:00 IST business-day start (shift to IST, step back 5h, floor to the day).
   const biz = new Date(now + 5.5 * 3600_000 - 5 * 3600_000);
   const todayStart = Date.UTC(biz.getUTCFullYear(), biz.getUTCMonth(), biz.getUTCDate(), 5, 0, 0) - 5.5 * 3600_000;
