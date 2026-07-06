@@ -4160,6 +4160,16 @@ function floorNeedsCardHtml() {
 // shared-builder + delegated-button pattern as floorReqCardHtml (id #fcAccept); the Accept
 // button reuses data-quick-accept → acceptTableOrders, wired by the ONE floor delegated
 // handler, so the incremental patch can swap this node without orphaning a listener.
+// The floor normally draws tables 1..table_count, but a table numbered ABOVE the current
+// count can still be OCCUPIED (e.g. the count was lowered while it had a live order). Extend
+// the drawn range to cover any such table so it never vanishes from the grid / "to accept" /
+// stats (and its bill stays reachable/payable). (fixed 2026-07-06)
+function floorDrawCount(baseN) {
+  let hi = baseN;
+  const tiles = (state.summary && state.summary.tiles) || {};
+  for (const k in tiles) { const num = parseInt(k, 10); if (Number.isFinite(num) && num > hi) hi = num; }
+  return hi;
+}
 function floorAcceptCardHtml() {
   const s = state.data.settings || {};
   if (!s.sessions_enabled) return "";
@@ -4168,7 +4178,7 @@ function floorAcceptCardHtml() {
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
   const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
   const rows = [];
-  for (let i = 1; i <= n; i++) {
+  for (let i = 1; i <= floorDrawCount(n); i++) {
     const ts = tableTileState(i);
     if (ts.hasNew) rows.push({ t: i, meta: ts.meta || "" });
   }
@@ -4188,7 +4198,7 @@ function floorStatsHtml() {
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
   const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
   let cOcc = 0, cPay = 0, cNew = 0, cCall = 0;
-  for (let i = 1; i <= n; i++) {
+  for (let i = 1; i <= floorDrawCount(n); i++) {
     const { st, pay, hasNew, hasCall } = tableTileState(i);
     if (st !== "free" && st !== "req") cOcc++;
     if (pay === "red" || st === "bill") cPay++;
@@ -4261,7 +4271,7 @@ function floorHtml() {
   }
 
   let tiles = "";
-  for (let i = 1; i <= n; i++) {
+  for (let i = 1; i <= floorDrawCount(n); i++) {
     tiles += floorTileHtml(i); // SHARED tile builder — single source of truth (full render + patch)
   }
   // The header keeps ONLY the safe Refresh button. Open all / Close all used to
@@ -5530,6 +5540,28 @@ async function serveAllOrder(orderId) {
 // Quick action: accept ALL new orders on a table in one tap. Used by BOTH the
 // floor tile's Accept AND the detail's "Accept all & prepare" button — one tap
 // accepts the whole table (owner: never open the detail just to accept each).
+// Optimistic tile feedback for a NON-selected table: the grid + "To accept" card render
+// from state.summary (NOT the board), so an accept/attend that only patched state.data.*
+// left the tile looking dead until the server round-trip (fixed 2026-07-06). These patch
+// the slim summary tile immediately; pollTables() reconciles exact counts right after.
+function patchSummaryTileAccept(t) {
+  const s = state.summary || {};
+  const tile = (s.tiles || {})[String(t)];
+  if (!tile) return;
+  const nt = Object.assign({}, tile, { hasNew: false });
+  const c = Object.assign({ nw: 0, ck: 0, rd: 0, sv: 0 }, nt.counts || {});
+  c.ck += c.nw; c.nw = 0; nt.counts = c;                 // the just-accepted dishes are now cooking
+  if (nt.state === "new") { nt.state = "prep"; nt.label = "Preparing"; }
+  state.summary = Object.assign({}, s, { tiles: Object.assign({}, s.tiles, { [String(t)]: nt }) });
+}
+function patchSummaryTileAttend(t) {
+  const s = state.summary || {};
+  const calls = (s.calls || []).filter((c) => (c.table_number || "").trim() !== String(t)); // drop this table's calls
+  const patch = { calls };
+  const tile = (s.tiles || {})[String(t)];
+  if (tile) patch.tiles = Object.assign({}, s.tiles, { [String(t)]: Object.assign({}, tile, { hasCall: false }) });
+  state.summary = Object.assign({}, s, patch);
+}
 async function acceptTableOrders(t) {
   // TWO-TIER: a tile quick-action can fire on a NON-selected table, whose full order rows
   // aren't in the cache (the grid renders from the slim summary). Ensure this table's slice
@@ -5548,6 +5580,7 @@ async function acceptTableOrders(t) {
   // OPTIMISTIC: tile flips to "Preparing" instantly, server told in background.
   recv.forEach((o) => { o.status = "preparing"; flipOrderItems(o, "received", "preparing"); opBegin(o.id); });
   floorOpsInFlight++;
+  patchSummaryTileAccept(t); // instant tile feedback even on a non-selected table
   loadSessions(true); renderTablePanel();
   // release first, then refresh — see restartTable for why this order matters.
   let released = false;
@@ -5588,8 +5621,10 @@ async function attendTableCalls(t) {
   if (!cs.length) return;
   // OPTIMISTIC: the call emojis leave the tile instantly (detail panel reads state.data.calls).
   const before = state.data.calls || [];
+  const beforeSummary = state.summary;
   const ids = new Set(cs.map((c) => c.id));
   state.data.calls = before.filter((c) => !ids.has(c.id));
+  patchSummaryTileAttend(t); // instant tile feedback (grid reads state.summary, not the board)
   floorOpsInFlight++;
   loadSessions(true);
   try {
@@ -5597,7 +5632,7 @@ async function attendTableCalls(t) {
     toast("Attended", "ok");
     floorOpsInFlight--; await pollTables([String(t)]); // clears the tile's call emoji from the summary
   }
-  catch (e) { floorOpsInFlight--; state.data.calls = before; await pollTables([String(t)]); toast("Failed: " + e.message, "err"); }
+  catch (e) { floorOpsInFlight--; state.data.calls = before; state.summary = beforeSummary; await pollTables([String(t)]); toast("Failed: " + e.message, "err"); }
 }
 // RST: clear a finished table's orders off the floor but KEEP the table open for a new round.
 async function restartTable(t) {
@@ -6237,27 +6272,37 @@ function reconcileBoard() {
 // the latest. If a named table is the SELECTED one, ALSO refresh its FULL slice so its detail
 // stays live. Then reconcileBoard() runs the same counts/chimes/redraw as the full poll. ANY
 // surprise → full pollOrders (safe fallback). (owner 2026-06-26 — scope egress per table.)
+const tileSeq = {}; // per-table ticket for targeted polls (see below)
 async function pollTables(tables) {
   if (!tables || !tables.length) return pollOrders();
-  const seq = ++dataSeq;
+  // A FULL reload (pollOrders/loadSessions) bumps dataSeq; capture it so we drop these tile
+  // patches only if a full reload started meanwhile (its whole-board snapshot is fresher).
+  // pollTables no longer bumps dataSeq itself: two targeted polls for DIFFERENT tables must
+  // NOT cancel each other — sharing one counter meant the earlier table's tile went stale
+  // until the 60s backstop (fixed 2026-07-06). A per-table ticket handles same-table overlap.
+  const born = dataSeq;
+  const tlist = tables.map(String);
+  const mySeq = {};
+  for (const t of tlist) mySeq[t] = (tileSeq[t] = (tileSeq[t] || 0) + 1);
   let results;
   try {
-    results = await Promise.all(tables.map(async (t) => {
+    results = await Promise.all(tlist.map(async (t) => {
       const sum = await api("GET", "/summary?table=" + encodeURIComponent(t));
-      return { table: String(t), sum: sum || {} };
+      return { table: t, sum: sum || {} };
     }));
   } catch (e) { return pollOrders(); }      // network/parse blip → safe full reload
-  if (seq !== dataSeq) return;              // a newer loader started — drop this stale snapshot
+  if (dataSeq !== born) return;             // a FULL reload started — its fresher board wins
 
   // Patch the changed tables' tiles + refresh the restaurant-wide aggregates (unless a floor
   // action is mid-save, mirroring the board's floorOpsInFlight guard so optimism isn't clobbered).
   if (!floorOpsInFlight) {
     const s = state.summary || { tiles: {} };
     const tiles = Object.assign({}, s.tiles || {});
-    const tset = new Set(tables.map(String));
+    const tset = new Set(tlist);
     let latest = null;
     for (const r of results) {
       const t = r.table;
+      if (mySeq[t] !== tileSeq[t]) continue; // a newer targeted poll for THIS table won → skip just its tile
       const tile = r.sum.tiles && r.sum.tiles[t];
       if (tile) tiles[t] = tile;            // the table now has a tile (occupied)
       else delete tiles[t];                 // the table dropped off the floor universe → back to plain Free
@@ -6278,7 +6323,7 @@ async function pollTables(tables) {
     const toRefresh = detailTables().filter((t) => tset.has(t));
     if (toRefresh.length) {
       try {
-        if (seq !== dataSeq) return;
+        if (dataSeq !== born) return;
         await Promise.all(toRefresh.map((t) => loadTableSlice(t)));
       } catch {}
     }
