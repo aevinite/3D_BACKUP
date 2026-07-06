@@ -5251,21 +5251,29 @@ function openShiftPicker(t, sess) {
 // Both modes just compute the same ₹ discount the server has always accepted — the API
 // call at the bottom (POST .../discount {amount, note}) is byte-identical to before, so
 // the clamp-to-bill-total safety net and the note field behave exactly as they did.
-function openDiscountModal(order, rerender, billTotal) {
+function openDiscountModal(order, rerender, billTotal, bm) {
   document.querySelector(".disc-overlay")?.remove();
-  // billTotal = the WHOLE table's bill (the discount, though stored on one order, is
-  // applied table-wide by billMath). Falls back to the single order's total for any
-  // legacy caller (bug H8, 2026-07-05).
-  const total = billTotal != null ? Number(billTotal) || 0 : Number(order.total) || 0;
-  const current = Number(order.discount) || 0;
   const round2 = (n) => Math.round(n * 100) / 100;
   const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
-  // ONE interface, no mode toggle (owner, 2026-07-03 — "merge the two modes… both things
-  // in one interface"): a Percent field and an Amount(₹) field that are TWO-WAY LINKED —
-  // edit one and the other recalculates from the same discAmount, so they can never disagree.
-  // Default 0%. discAmount (₹ off) is the single source of truth the server has always taken.
-  let discAmount = current;
-  let pctVal = total > 0 ? Math.round((current / total) * 1000) / 10 : 0;
+  const current = Number(order.discount) || 0;
+  // The stored discount is a PRE-TAX rupee amount: billMath subtracts it from the subtotal
+  // and THEN adds tax. So "They pay" must recompute the tax — subtracting the discount from
+  // the tax-INCLUSIVE total overstated it by discount×taxrate and mis-scaled the % (fixed
+  // 2026-07-06). We discount against the table's pre-tax base, preserving any discount
+  // already on OTHER orders of the same table (bm = billMath(os), passed by the caller;
+  // billTotal is kept only for legacy callers that don't pass bm).
+  const rate = bm ? bm.rate : taxModel(state.data.settings).rate;
+  const subtotal = bm ? bm.subtotal : ((Number(order.total) || 0) / (1 + rate) + current);
+  const otherDisc = bm ? Math.max(0, bm.disc - current) : 0;
+  const base = Math.max(0, round2(subtotal - otherDisc)); // pre-tax base THIS modal discounts
+  const payFor = (d) => round2(Math.max(0, base - clamp(d, 0, base)) * (1 + rate)); // what the customer pays
+  const total = payFor(0); // the table total BEFORE this order's discount (shown as "Bill total")
+  const maxDisc = base;    // can't discount more than the food (pre-tax) base
+  // ONE interface, no mode toggle (owner, 2026-07-03): a Percent and an Amount(₹) field,
+  // two-way linked from a single discAmount (₹ off, pre-tax — the value the server stores),
+  // so they can never disagree. The % is off the pre-tax base.
+  let discAmount = clamp(current, 0, maxDisc);
+  let pctVal = base > 0 ? Math.round((discAmount / base) * 1000) / 10 : 0;
 
   const wrap = el(`<div class="sx-modal-overlay disc-overlay"><div class="sx-modal disc-modal">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Apply discount</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
@@ -5285,7 +5293,7 @@ function openDiscountModal(order, rerender, billTotal) {
       <div class="chips disc-pct-quick">${[0, 5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p ? p + "%" : "None"}</span>`).join("")}</div>
       <div class="disc-preview">
         <div class="disc-prev-row"><span>Discount</span><b id="discPrevAmt">− ${inr(current)}</b></div>
-        <div class="disc-prev-row grand"><span>They pay</span><b id="discPrevPay">${inr(round2(total - current))}</b></div>
+        <div class="disc-prev-row grand"><span>They pay</span><b id="discPrevPay">${inr(payFor(discAmount))}</b></div>
       </div>
       <label class="dish-edit-lbl" style="margin-top:14px">Reason <span class="muted small">(optional, shows on the bill)</span></label>
       <input type="text" class="dish-edit-custominput" id="discNoteInput" maxlength="200" placeholder="e.g. loyalty, comp, manager approval">
@@ -5307,18 +5315,19 @@ function openDiscountModal(order, rerender, billTotal) {
   // Refresh ONLY the preview + the OTHER field from discAmount — never the field the
   // user is typing in (so their caret/partial number isn't clobbered mid-keystroke).
   const paint = (typing) => {
-    pctVal = total > 0 ? Math.round((discAmount / total) * 1000) / 10 : 0;
+    pctVal = base > 0 ? Math.round((discAmount / base) * 1000) / 10 : 0;
     if (typing !== "pct") pctInput.value = discAmount ? String(pctVal) : "";
     if (typing !== "amt") amtInput.value = discAmount ? String(round2(discAmount)) : "";
     wrap.querySelector("#discPrevAmt").textContent = "− " + inr(discAmount);
-    wrap.querySelector("#discPrevPay").textContent = inr(round2(total - discAmount));
+    wrap.querySelector("#discPrevPay").textContent = inr(payFor(discAmount));
   };
   paint();
 
-  // Edit % → derive amount. Edit amount → derive %. Both clamp to the bill.
-  pctInput.oninput = () => { const p = clamp(parseFloat(pctInput.value), 0, 100); discAmount = round2((total * p) / 100); paint("pct"); };
-  amtInput.oninput = () => { discAmount = clamp(parseFloat(amtInput.value), 0, total); paint("amt"); };
-  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { discAmount = round2((total * Number(c.dataset.pct)) / 100); paint(); }));
+  // Edit % → derive amount (off the pre-tax base). Edit amount → derive %. Both clamp so
+  // the discount can't exceed the food's pre-tax value (beyond which they'd just pay ₹0).
+  pctInput.oninput = () => { const p = clamp(parseFloat(pctInput.value), 0, 100); discAmount = round2((base * p) / 100); paint("pct"); };
+  amtInput.oninput = () => { discAmount = clamp(parseFloat(amtInput.value), 0, maxDisc); paint("amt"); };
+  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { discAmount = round2((base * Number(c.dataset.pct)) / 100); paint(); }));
 
   const close = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = close;
@@ -5331,7 +5340,7 @@ function openDiscountModal(order, rerender, billTotal) {
     try {
       await api("POST", `/orders/${order.id}/discount`, { amount, note: amount > 0 ? note : "" });
       await loadSessions(); if (rerender) rerender();
-      toast(amount > 0 ? `Discount ${inr(amount)} applied — they pay ${inr(round2(total - amount))}` : "Discount removed", "ok");
+      toast(amount > 0 ? `Discount ${inr(amount)} applied — they pay ${inr(payFor(amount))}` : "Discount removed", "ok");
     } catch (e) { toast("Failed: " + e.message, "err"); }
   };
   wrap.querySelector(".disc-apply").onclick = () => save(discAmount);
@@ -5403,8 +5412,8 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // capped the discount at it (bug H8, 2026-07-05).
   root.querySelectorAll("[data-disc]").forEach((b) => (b.onclick = () => {
     const order = (os || []).find((o) => o.id === b.dataset.disc) || { id: b.dataset.disc, total: parseFloat(b.dataset.discMax) || 0, discount: parseFloat(b.dataset.discCur) || 0 };
-    const tableBill = (os && os.length) ? billMath(os).total : (Number(order.total) || 0);
-    openDiscountModal(order, rerender, tableBill);
+    const bm = (os && os.length) ? billMath(os) : null;
+    openDiscountModal(order, rerender, bm ? bm.total : (Number(order.total) || 0), bm);
   }));
   const auto = root.querySelector("#sxAuto"); if (auto && sess) auto.onchange = () => setSessAutoApprove(sess.id, auto.checked);
   root.querySelectorAll("[data-mem-approve]").forEach((b) => (b.onclick = () => memberAction(b.dataset.memApprove, "approve")));
