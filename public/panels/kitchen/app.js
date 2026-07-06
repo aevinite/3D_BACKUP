@@ -486,16 +486,39 @@ function renderDishes() {
       <button class="btn ${out ? "danger" : ""}" data-86="${esc(d.id)}" data-out="${out ? "1" : "0"}">${out ? "SOLD OUT" : "available"}</button>
     </div>`;
   }).join("");
+  // OPTIMISTIC sold-out toggle (audit polish 2026-07-07): flip the button + the local
+  // dish tag INSTANTLY (no ~1.5s dead window), disable to swallow a rapid double-tap, and
+  // roll back on failure. No full load() per tap — the server POST fires the guest 86-sync
+  // breadcrumb itself, and the kitchen tickets don't render sold-out, so a whole-board
+  // refetch was pure waste. Mirrors the ticket-✓ optimistic+surgical pattern.
+  const set86 = (btn, out) => {
+    btn.dataset.out = out ? "1" : "0";
+    btn.textContent = out ? "SOLD OUT" : "available";
+    btn.classList.toggle("danger", out);
+    btn.closest(".dish-row")?.classList.toggle("is-out", out);
+    const dish = state.dishes.find((d) => d.id === btn.dataset["86"]);
+    if (dish) { const tags = new Set(dish.tags || []); out ? tags.add("sold-out") : tags.delete("sold-out"); dish.tags = [...tags]; }
+  };
   document.querySelectorAll("[data-86]").forEach((b) => (b.onclick = async () => {
-    const id = b.dataset["86"], wasOut = b.dataset.out === "1";
+    if (b.disabled) return;
+    const id = b.dataset["86"], wasOut = b.dataset.out === "1", nowOut = !wasOut;
+    b.disabled = true; set86(b, nowOut);
     try {
-      await api("POST", `/dishes/${id}/sold-out`, { value: !wasOut });
-      await load(); // load() already re-renders the open 86 board (its drawer is open here)
+      await api("POST", `/dishes/${id}/sold-out`, { value: nowOut });
       const dish = state.dishes.find((d) => d.id === id);
       // No confirm — kitchens move fast — but always an UNDO escape hatch.
       toast(`${dish ? dish.title : "Dish"} ${wasOut ? "back on the menu" : "marked SOLD OUT"}`,
-        async () => { await api("POST", `/dishes/${id}/sold-out`, { value: wasOut }); await load(); });
-    } catch (e) { toast("Failed: " + e.message); }
+        async () => {
+          if (b.disabled) return;
+          b.disabled = true; set86(b, wasOut);
+          try { await api("POST", `/dishes/${id}/sold-out`, { value: wasOut }); }
+          catch (e) { set86(b, nowOut); toast("Undo failed: " + e.message); }
+          finally { b.disabled = false; }
+        });
+    } catch (e) {
+      set86(b, wasOut); // roll back the optimistic flip
+      toast("Failed: " + e.message);
+    } finally { b.disabled = false; }
   }));
 }
 
@@ -716,6 +739,10 @@ if (typeof document !== "undefined") {
     // a KOT accepted while the tab was hidden)
     printQueue((state.orders || []).filter((o) => (o.status === "received" || o.status === "preparing") && !printedIds.has(o.id)), state.items || [], state.restaurant);
   });
+  // When the offline outbox drains on reconnect, snap the board to server truth at once
+  // (a replayed action could have been rejected → the optimistic tile would otherwise stay
+  // wrong until the 60s backstop). outbox.js dispatches this after a flush. (audit 2026-07-07)
+  window.addEventListener("lfh:outbox-flushed", () => { if (!document.hidden) load().catch(() => {}); });
 }
 
 async function load() {
