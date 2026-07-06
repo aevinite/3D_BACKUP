@@ -238,7 +238,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (type === "inv" || type === "bill") {
           // invoice_no / bill_no live on the SESSION → find matching sessions, then their orders.
           const col = type === "inv" ? "invoice_no" : "bill_no";
-          const n = parseInt(histQ.replace(/\D/g, ""), 10);
+          // Match the LAST run of digits so a full formatted invoice pasted in
+          // ("INV/2025-26/000042") resolves to its sequence number (42) — the old
+          // strip-ALL-non-digits turned that into 2025260000042 and found nothing (2026-07-06).
+          const m = histQ.match(/(\d+)(?!.*\d)/);
+          const n = m ? parseInt(m[1], 10) : NaN;
           if (!Number.isFinite(n)) return ok([]);
           const sess = must(await sb.from("sessions").select("id").eq("restaurant_id", rid).eq(col, n).limit(200));
           const ids = (sess as any[]).map((s) => s.id);
@@ -427,7 +431,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       else prevSince = new Date(since.getTime() - 30 * 864e5);
       const elapsedMs = now.getTime() - since.getTime();
       const [ordersQ, dishesQ, setQ, platRangeQ] = await Promise.all([
-        sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()),
+        // NEWEST-FIRST + explicit high bound. Without an .order()/.limit() PostgREST
+        // silently returns an ARBITRARY capped page (db-max-rows), so on a busy restaurant
+        // the totals/deltas were computed on a random subset → wrong, non-deterministic
+        // numbers. Ordering desc means any truncation drops only the OLDEST rows, keeping
+        // the recent window complete and the result reproducible. (Follow-up for extreme
+        // scale: pre-aggregated daily summary table per CLAUDE.md — this endpoint is
+        // on-demand, never polled, so a bounded scan is acceptable until then.)
+        sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).order("created_at", { ascending: false }).limit(50000),
         sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
         sb.from("settings").select("tax_rate,tax_components").eq("restaurant_id", rid).maybeSingle(),
         sb.from("aggregator_orders").select("source,total,status,created_at").eq("restaurant_id", rid).gte("created_at", since.toISOString()).limit(5000),
@@ -1174,11 +1185,32 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const t = TABLES[a];
       if (!t) return err("unknown kind", 404);
       if ((a === "items" || a === "categories" || a === "filters") && !(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the menu");
+      // Is the client CREATING a brand-new row vs EDITING an existing one? Read + strip the
+      // transient hint once for every kind (it's never a real column). Lets a create refuse
+      // to silently overwrite an existing row via the upsert's DO UPDATE arm.
+      const isCreate = !!(body && typeof body === "object" && (body as Record<string, unknown>).__create === true);
+      if (body && typeof body === "object") delete (body as Record<string, unknown>).__create;
+      // A new category/filter must not clobber an existing one with the same slug (the upsert
+      // keys on (restaurant_id,slug), so a dup-slug create would DO UPDATE over it — silent
+      // data loss, 2026-07-06). Tell the user instead.
+      if (isCreate && (a === "categories" || a === "filters") && body && typeof body === "object" && body.slug) {
+        const clash = (await sb.from(t.name).select("slug").eq("restaurant_id", rid).eq("slug", String(body.slug)).maybeSingle()).data;
+        if (clash) return err(`A ${a === "categories" ? "category" : "filter"} with that name already exists.`, 409);
+      }
       // Settings save is owner-only unless the owner has granted a manager the power
       // (owner role always passes managerCan). Previously this endpoint had NO gate — any
       // authenticated staff could PATCH the settings row. (2026-07-04 audit #4)
       if (a === "settings" && !(await managerCan(g, rid, "edit_settings"))) return permDenied("change settings");
       if (a === "settings" && body && typeof body === "object") {
+        // settings is ONE row per restaurant (UNIQUE restaurant_id) whose PRIMARY KEY id is
+        // legacy ('site' for #1, the slug for others). It must NEVER come from the client:
+        // the retention save sent id:'site', which collided with #1's PK on every OTHER
+        // restaurant and 500'd the save (2026-07-06). Always use the EXISTING row's real id
+        // (looked up by restaurant_id) so the upsert UPDATEs the right row; for a brand-new
+        // restaurant with no row yet, fall back to the restaurant id (guaranteed unique, so
+        // the INSERT can't collide with 'site').
+        const existingSet = (await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle()).data as { id?: string } | null;
+        (body as Record<string, unknown>).id = existingSet?.id || rid;
         // Admin-only ENTITLEMENTS (mig 107, e.g. auto_print_kot_allowed) are granted ONLY
         // from the admin panel (/aevinite). Strip them here so a manager/owner can't
         // self-grant an entitlement the admin controls. Any `*_allowed` flag is admin-only.
@@ -1270,15 +1302,39 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         }
       }
       if (a === "items" && body && typeof body === "object") {
+        // isCreate (create vs edit) was resolved + stripped above, shared across kinds.
         const slugify = (s: string) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
         if (!body.slug && body.title) body.slug = slugify(body.title);
-        // menu_items.id is the GLOBAL primary key, so a new id must be unique across
-        // ALL restaurants. #1 keeps the historical slug-as-id (non-breaking); other
-        // restaurants get a restaurant-namespaced id so two places can both have a
-        // "burger" slug without colliding on the PK (slug stays unique per restaurant).
-        if (!body.id) {
-          const base = body.slug || slugify(body.title);
-          body.id = rid === DEFAULT_RESTAURANT_ID ? base : `${base}__${rid.slice(0, 8)}`;
+        // menu_items.id is the GLOBAL primary key. A bare slug-as-id would let a save
+        // silently OVERWRITE another restaurant's (or this restaurant's own existing)
+        // dish that happens to share the name. So we never trust a client-supplied id
+        // to decide create-vs-overwrite:
+        //   • CREATE → mint an id that is unique across ALL restaurants (namespaced for
+        //     non-default tenants) and a slug unique WITHIN this restaurant, so a new
+        //     dish can never clobber an existing row.
+        //   • EDIT   → keep the id, but refuse if that id belongs to a DIFFERENT tenant.
+        if (isCreate) {
+          const base = body.slug || slugify(body.title) || "item";
+          const nsBase = rid === DEFAULT_RESTAURANT_ID ? base : `${base}__${rid.slice(0, 8)}`;
+          let candidate = nsBase, n = 1;
+          // id is a global PK → the candidate must be free for EVERY restaurant.
+          while ((await sb.from("menu_items").select("id").eq("id", candidate).maybeSingle()).data) {
+            n += 1; candidate = `${nsBase}-${n}`;
+          }
+          body.id = candidate;
+          // Keep the guest-facing slug unique within this restaurant so /item/<slug> is 1:1.
+          let slugCand = body.slug || base, m = 1;
+          while ((await sb.from("menu_items").select("id").eq("restaurant_id", rid).eq("slug", slugCand).maybeSingle()).data) {
+            m += 1; slugCand = `${body.slug || base}-${m}`;
+          }
+          body.slug = slugCand;
+        } else {
+          if (!body.id) {
+            const base = body.slug || slugify(body.title);
+            body.id = rid === DEFAULT_RESTAURANT_ID ? base : `${base}__${rid.slice(0, 8)}`;
+          }
+          const owner = (await sb.from("menu_items").select("restaurant_id").eq("id", String(body.id)).maybeSingle()).data as { restaurant_id?: string } | null;
+          if (owner && owner.restaurant_id !== rid) return err("That dish belongs to another restaurant", 409);
         }
       }
       // Stamp ownership + match the per-restaurant unique key: categories/filters are
@@ -1430,6 +1486,19 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
       // slug is unique only PER restaurant now (categories/filters), so a delete by
       // key MUST also pin the restaurant or it would wipe that slug everywhere.
       must(await sb.from(t.name).delete().eq(t.key, id).eq("restaurant_id", rid));
+      // Reconcile dishes that still referenced the deleted category/filter, else they'd
+      // keep a dead slug (a category chip that no longer exists / an orphan tag) — 2026-07-06.
+      // Best-effort (the delete already succeeded): never fail the request on cleanup.
+      try {
+        if (a === "categories") {
+          await sb.from("menu_items").update({ category: null }).eq("restaurant_id", rid).eq("category", id);
+        } else if (a === "filters") {
+          const { data: tagged } = await sb.from("menu_items").select("id,tags").eq("restaurant_id", rid).contains("tags", [id]);
+          for (const d of ((tagged || []) as { id: string; tags: string[] | null }[])) {
+            await sb.from("menu_items").update({ tags: (d.tags || []).filter((x) => x !== id) }).eq("id", d.id).eq("restaurant_id", rid);
+          }
+        }
+      } catch { /* orphan cleanup is best-effort */ }
       // Deleting a dish/category/filter changes the SHARED guest menu → bust cache.
       bustMenuCache(rid);
       return ok({ ok: true });

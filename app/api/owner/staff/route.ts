@@ -65,7 +65,14 @@ async function scope(req: NextRequest): Promise<Scope> {
     const memb = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", u.id)).data;
     const ownedIds = (memb || []).map((m) => m.restaurant_id as string);
     if (!ownedIds.length) return { ok: true, actor: "owner", actorId: u.id, restaurants: [] };
-    const { data } = await sb.from("restaurants").select(cols).in("id", ownedIds).order("name");
+    // A pinned context — e.g. the manager panel viewing ONE restaurant via ?rid= — narrows
+    // to just that restaurant (if the owner actually owns it), so a multi-restaurant owner
+    // sees/adds staff for the restaurant they're looking at, not a mixed list. The owner
+    // panel sends no pin (or scope=all) and keeps the full set. (Mirrors the admin branch.)
+    const osp = req.nextUrl?.searchParams;
+    const opin = osp?.get("scope") || osp?.get("rid");
+    const scopeIds = (opin && opin !== "all" && ownedIds.includes(opin)) ? [opin] : ownedIds;
+    const { data } = await sb.from("restaurants").select(cols).in("id", scopeIds).order("name");
     const rows = ((data || []) as Restaurant[]).filter((r) => mergeOwnerEntitlements(r.owner_entitlements).staff !== false);
     if (!rows.length)
       return { ok: false, resp: bad("Staff management isn't enabled for your restaurant — contact Aevidine.", 403) };

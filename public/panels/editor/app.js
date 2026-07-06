@@ -24,7 +24,11 @@ const ALLERGENS = [
 const TAB_LABEL = { items: "Dish", categories: "Category", filters: "Tag", general: "Settings" };
 
 // The tabs across the top of the editor. Anything not in this list is ignored.
-const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "features", "general", "banquet"];
+// NOTE: "features" is intentionally OMITTED — that tab was moved to the admin panel
+// (/aevinite). Leaving it here let a browser whose last-used tab was "features" boot
+// straight into the removed guest-feature toggle grid (owner could flip admin-controlled
+// flags from the manager panel). A stale saved "features" now falls back to "items".
+const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "general", "banquet"];
 // Remember which tab you were on so a refresh keeps you there (e.g. stay on
 // Orders during a busy service instead of snapping back to Dishes).
 const savedTab = (() => { try { return localStorage.getItem("lfh_editor_tab"); } catch { return null; } })();
@@ -284,15 +288,30 @@ const tableCountKey = () => { const r = panelRid(); return r ? "lfh_editor_table
 // ("GET"/"POST"/"PATCH"/"DELETE"), the path (e.g. "/orders"), and optionally a
 // body object. It sends the request to our local server, reads back the JSON,
 // and throws a clear error if the server reported a problem.
+const _inflightGET = new Map(); // coalesce concurrent identical GETs into ONE network hit
 async function api(method, path, body) {
-  const res = await fetch("/api/editor" + ridQ(path), {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined, // turn the body object into JSON text to send
-  });
-  const json = await res.json().catch(() => ({})); // read the reply; if it isn't JSON, fall back to {}
-  if (!res.ok) throw new Error(json.error || res.statusText); // not OK? surface the server's error message
-  return json;
+  const url = "/api/editor" + ridQ(path);
+  // On boot the page's initial load AND the realtime connect BOTH kick off the same reads
+  // (/summary, /all, /platform), so a single load fired each 3–4× — ~470 KB of duplicate
+  // JSON. Share one in-flight promise per identical GET url; it's cleared the instant it
+  // settles, so every real poll tick afterwards still fetches fresh. (dedupe 2026-07-06)
+  if (method === "GET" && _inflightGET.has(url)) return _inflightGET.get(url);
+  const run = (async () => {
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined, // turn the body object into JSON text to send
+    });
+    const json = await res.json().catch(() => ({})); // read the reply; if it isn't JSON, fall back to {}
+    if (!res.ok) throw new Error(json.error || res.statusText); // not OK? surface the server's error message
+    return json;
+  })();
+  if (method === "GET") {
+    _inflightGET.set(url, run);
+    const cleanup = () => { if (_inflightGET.get(url) === run) _inflightGET.delete(url); };
+    run.then(cleanup, cleanup); // drop the entry once settled (both fulfil + reject), no unhandled rejection
+  }
+  return run;
 }
 
 // ---------- data + list ----------
@@ -473,8 +492,14 @@ function renderList() {
   records()
     // keep only dishes in the chosen category (Dishes tab; "" = All)
     .filter((r) => !catF || r.category === catF)
-    // keep only rows that match the search box (search across the whole row's text)
-    .filter((r) => !q || JSON.stringify(r).toLowerCase().includes(q))
+    // keep only rows that match the search box — search the VISIBLE fields (name, slug, id,
+    // category, tags), NOT the raw JSON (which matched hidden image/GLB URLs and surfaced
+    // unrelated rows — fixed 2026-07-06).
+    .filter((r) => {
+      if (!q) return true;
+      const hay = [recLabel(r), r.slug, r.id, r.category, Array.isArray(r.tags) ? r.tags.join(" ") : ""].filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(q);
+    })
     .forEach((r) => {
       const active = state.sel && !state.isNew && recKey(r) === recKey(state.sel); // is this the row being edited?
       const hidden = state.tab !== "items" && r.active === false; // greyed-out "hidden from menu" rows
@@ -834,7 +859,16 @@ async function loadStaffTeam() {
     const r = await fetch(ridQ("/api/owner/staff"), { cache: "no-store" }); // ridQ: keep the admin's per-tab restaurant pin
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { state.staffDenied = d.error || "Couldn't load your team."; state.staffTeam = []; state.staffRestaurantId = null; }
-    else { state.staffDenied = null; state.staffTeam = d.staff || []; state.staffRestaurantId = (d.restaurants || [])[0]?.id || null; state.staffActor = d.actor || "manager"; }
+    else {
+      state.staffDenied = null; state.staffTeam = d.staff || [];
+      // Default the "Add" target to the restaurant THIS panel is pinned to (admin view-as
+      // or a pinned owner), not just the alphabetically-first one the server returned —
+      // otherwise "+ Add" could create a login on the wrong restaurant. Falls back to the
+      // first (a plain manager only ever has their own restaurant anyway).
+      const rlist = d.restaurants || [];
+      state.staffRestaurantId = ((PANEL_RID && rlist.some((x) => x.id === PANEL_RID)) ? PANEL_RID : rlist[0]?.id) || null;
+      state.staffActor = d.actor || "manager";
+    }
   } catch (e) { state.staffDenied = "Couldn't reach the server."; }
   state.staffLoaded = true;
   if (state.tab === "general") renderEditor();
@@ -1720,11 +1754,25 @@ function billCardHtml(b) {
     ${b.invNo != null ? `<div class="bill-inv">${esc(invFmt(b.invNo))}${b.voided ? " · voided" : ""}</div>` : ""}
   </div>`;
 }
+// The orders a bill modal can open from = the locally-cached board PLUS any server-side
+// history search results (bills OLDER than the local 200-row window), deduped by id.
+// Without the union, tapping a bill you FOUND by searching did nothing — openBillModal
+// only looked in the local 200 (fixed 2026-07-06). The search rows carry the same columns
+// (server selects orders.*), so the modal renders them identically.
+function billOrdersPool() {
+  const pool = (state.data.orders || []).slice();
+  if (Array.isArray(state.billHistRows) && state.billHistRows.length) {
+    const seen = new Set(pool.map((o) => o.id));
+    for (const o of state.billHistRows) if (!seen.has(o.id)) pool.push(o);
+  }
+  return pool;
+}
 // Expand one bill into a modal: full item list + totals + Print / Restore / Close.
 function openBillModal(key) {
+  const pool = billOrdersPool();
   const g = (key || "").startsWith("solo:")
-    ? (state.data.orders || []).filter((o) => o.id === key.slice(5))
-    : (state.data.orders || []).filter((o) => o.session_id === key);
+    ? pool.filter((o) => o.id === key.slice(5))
+    : pool.filter((o) => o.session_id === key);
   if (!g.length) return;
   const o0 = g[0];
   const m = billMath(g);
@@ -1991,9 +2039,12 @@ async function deleteOrders(ids, all = false) {
 // Marking PAID asks first ("has the money actually been collected?") so a stray
 // tap can't record a payment that never happened. The bulk "settle whole table"
 // path passes skipConfirm so it asks once, not per order.
+// Returns true when the payment state was actually saved, false on cancel/failure — so a
+// bulk caller (payOrdersWithMethod) can report an HONEST result instead of always toasting
+// success even when the server refused an order (over-collection bug, 2026-07-06).
 async function setOrderPayment(id, paid, opts = {}) {
   if (paid && !opts.skipConfirm) {
-    if (!(await confirmDialog("Mark this order PAID? Only confirm if the payment has actually been collected.", "Yes, payment done"))) return;
+    if (!(await confirmDialog("Mark this order PAID? Only confirm if the payment has actually been collected.", "Yes, payment done"))) return false;
   }
   const o = (state.data.orders || []).find((x) => x.id === id);
   const prev = o ? o.payment_status : null;
@@ -2002,7 +2053,7 @@ async function setOrderPayment(id, paid, opts = {}) {
   let revertReason = null;
   if (!paid && prev === "paid") {
     revertReason = (window.prompt("This bill is PAID. Reason for reverting it to unpaid (refund / wrong entry)?") || "").trim();
-    if (!revertReason) { toast("Revert cancelled — a reason is required.", "err"); return; }
+    if (!revertReason) { toast("Revert cancelled — a reason is required.", "err"); return false; }
   }
   if (o) o.payment_status = paid ? "paid" : "pending"; // flip the screen NOW
   opBegin(id);                     // shield this order from the poll meanwhile
@@ -2017,11 +2068,13 @@ async function setOrderPayment(id, paid, opts = {}) {
     // The bulk "settle whole table" path passes quiet:true so we toast once at the
     // end instead of once per order.
     if (!opts.quiet) toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
+    return true;
   } catch (e) {
     if (o && prev !== null) o.payment_status = prev;   // undo on failure
     renderEditor();
     renderTablePanel();
-    toast("Could not update payment: " + e.message, "err");
+    if (!opts.quiet) toast("Could not update payment: " + e.message, "err");
+    return false;
   } finally {
     opEnd(id);
   }
@@ -2087,15 +2140,33 @@ function openPaymentMethodModal(due, label) {
 // own confirm — that's a fix-a-mistake action, not a new payment being collected.
 async function payOrdersWithMethod(orders, label) {
   if (!orders.length) { toast("Nothing to settle — already paid", "ok"); return false; }
+  // NEVER try to settle an order that hasn't been ACCEPTED yet: the server refuses to pay a
+  // 'received' order (accept-before-pay), so including it inflated the "amount collected"
+  // shown to staff AND left it unpaid while a blanket success toast still fired — the till
+  // then read higher than the system recorded as paid (over-collection bug, 2026-07-06).
+  // Drop un-accepted orders from BOTH the collected amount and the settle loop.
+  const payable = orders.filter((o) => o.status !== "received");
+  const skipped = orders.length - payable.length;
+  if (!payable.length) {
+    toast(skipped ? "Accept the new order first, then collect payment." : "Nothing to settle — already paid", skipped ? "err" : "ok");
+    return false;
+  }
   // "Amount collected" MUST equal the printed bill: billMath applies the discount
   // BEFORE tax. The old Σ(total − discount) taxed the pre-discount amount and told
   // staff to collect discount×rate too much on any discounted bill (2026-07-05 fix).
-  const due = billMath(orders).total;
+  const due = billMath(payable).total;
   const picked = await openPaymentMethodModal(due, label);
   if (!picked) return false; // cancelled
-  for (const o of orders) await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true, method: picked.method, note: picked.note });
-  toast(`Marked paid via ${picked.method} 💳`, "ok");
-  return true;
+  let okCount = 0, failCount = 0;
+  for (const o of payable) {
+    const done = await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true, method: picked.method, note: picked.note });
+    if (done) okCount++; else failCount++;
+  }
+  // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
+  if (okCount && !failCount) toast(skipped ? `Marked paid via ${picked.method} — ${skipped} new order still needs accepting.` : `Marked paid via ${picked.method} 💳`, "ok");
+  else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
+  else toast("Couldn't settle the payment — check the order.", "err");
+  return okCount > 0;
 }
 
 // markTablePaid: settle the WHOLE table in one go — mark every unpaid (non-
@@ -2187,13 +2258,16 @@ async function loadDashboard() {
   const pctOf = (n, total) => { const p = (n / total) * 100; return p > 0 && p < 1 ? "<1" : String(Math.round(p)); };
   const CMP_LABEL = { today: "vs yesterday till this time", "30d": "vs the 30 days before (same point)", year: "vs last year (same point)" };
   const cmpLabel = CMP_LABEL[dashRange] || "vs the period before";
-  const deltaChip = (nowV, prevV) => {
+  // lowerIsBetter: for a "bad" metric (e.g. cancellations) a RISE should read as bad (red),
+  // not green — so the COLOUR reflects good/bad while the ARROW still shows the real
+  // direction. (Was direction-agnostic: more cancellations showed a green up chip — 2026-07-06.)
+  const deltaChip = (nowV, prevV, lowerIsBetter) => {
     if (prevV == null || (!nowV && !prevV)) return "";
-    if (!prevV) return `<span class="kchip up" title="${cmpLabel}"><i class="fa-solid fa-arrow-up"></i>new</span>`;
+    if (!prevV) return `<span class="kchip ${lowerIsBetter ? "dn" : "up"}" title="${cmpLabel}"><i class="fa-solid fa-arrow-up"></i>new</span>`;
     const p = Math.round(((nowV - prevV) / prevV) * 100);
     if (Math.abs(p) < 1) return `<span class="kchip flat" title="${cmpLabel}">±0%</span>`;
-    const up = p > 0, label = p >= 300 ? `${Math.round(nowV / prevV)}×` : `${Math.abs(p)}%`;
-    return `<span class="kchip ${up ? "up" : "dn"}" title="${cmpLabel}"><i class="fa-solid fa-arrow-${up ? "up" : "down"}"></i>${label}</span>`;
+    const rising = p > 0, good = lowerIsBetter ? !rising : rising, label = p >= 300 ? `${Math.round(nowV / prevV)}×` : `${Math.abs(p)}%`;
+    return `<span class="kchip ${good ? "up" : "dn"}" title="${cmpLabel}"><i class="fa-solid fa-arrow-${rising ? "up" : "down"}"></i>${label}</span>`;
   };
   const sparkSvg = (pts, color) => {
     if (!Array.isArray(pts) || pts.length < 2 || !pts.some((v) => v > 0)) return "";
@@ -2241,7 +2315,7 @@ async function loadDashboard() {
       ${kpi("orders", "fa-utensils", "#2a78d6", "Orders", `<span data-cu="${s.orderCount}">${s.orderCount}</span>${deltaChip(s.orderCount, prev.orders)}`, ordSub)}
       ${kpi("peak", "fa-clock", "#168e5d", `Busiest hour${dashRange === "today" ? " so far" : ""}`, peakHour < 0 ? "—" : `${peakHour}:00`, peakHour < 0 ? "no orders yet" : `<b>${s.hours[peakHour]}</b> order${s.hours[peakHour] === 1 ? "" : "s"} in that hour`)}
       ${kpi("given", "fa-tag", "#a86e00", "Given away", `<span data-cu="${disc.total}" data-cu-fmt="inr">${inr(disc.total)}</span>`, disc.count ? `discounts on <b>${disc.count}</b> bill${disc.count === 1 ? "" : "s"}${s.revenue > 0 ? ` (${pctOf(disc.total, s.revenue + disc.total)}% given up)` : ""}${disc.max ? `<br>largest <b>${inr(disc.max.amt)}</b>${disc.max.table ? ` on T${esc(disc.max.table)}` : ""}` : ""}` : "no discounts — full price all round")}
-      ${kpi("cancelled", "fa-ban", "#b34a4a", "Lost to cancellations", `<span data-cu="${s.cancelledValue || 0}" data-cu-fmt="inr">${inr(s.cancelledValue || 0)}</span>${deltaChip(s.cancelled, prev.cancelled)}`, s.cancelled ? `<b>${s.cancelled}</b> cancelled order${s.cancelled === 1 ? "" : "s"} — tap to inspect` : "none — clean sheet", { alert: s.cancelled > 0 })}
+      ${kpi("cancelled", "fa-ban", "#b34a4a", "Lost to cancellations", `<span data-cu="${s.cancelledValue || 0}" data-cu-fmt="inr">${inr(s.cancelledValue || 0)}</span>${deltaChip(s.cancelled, prev.cancelled, true)}`, s.cancelled ? `<b>${s.cancelled}</b> cancelled order${s.cancelled === 1 ? "" : "s"} — tap to inspect` : "none — clean sheet", { alert: s.cancelled > 0 })}
     </div>
     <div class="dash-grid">
       <div class="dash-chart wide"><h4>Sales <span>· ${rangeLabel} — click a point to open those bills</span></h4><div class="chart-wrap tall"><canvas id="chSales"></canvas></div>${narrate}</div>
@@ -3185,29 +3259,42 @@ async function save() {
   const it = state.sel;
   const kind = state.tab === "general" ? "settings" : state.tab; // which table to write to
   const keyField = (state.tab === "items" || state.tab === "general") ? "id" : "slug"; // its unique-key column
-  // New dish: if the id (permanent key) or slug (URL) weren't filled in, derive
-  // them from the title so adding a dish never fails for a missing key. You only
-  // have to type a name. (Editing keeps the existing id/slug untouched.)
+  // New dish: derive the slug from the title so adding never fails for a missing key —
+  // you only have to type a name. We deliberately do NOT assign the `id` here:
+  // menu_items.id is a GLOBAL primary key, so a bare slug-as-id would silently OVERWRITE
+  // another restaurant's (or this restaurant's own) dish with the same name. The SERVER
+  // mints a tenant-namespaced, globally-unique id for new dishes instead. (Editing keeps
+  // the existing id/slug untouched.)
   if (state.tab === "items" && state.isNew) {
     const slugify = (s) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     if (!it.slug && it.title) it.slug = slugify(it.title);
-    if (!it.id) it.id = it.slug || slugify(it.title);
   }
   if (state.tab === "items" && !it.title) { toast("Give the dish a name first", "err"); return; }
-  if (!it[keyField]) { toast(`${keyField === "id" ? "ID" : "Slug"} is required`, "err"); return; }
+  // For a brand-new dish the id is server-generated, so only require it when editing.
+  if (!(state.tab === "items" && state.isNew) && !it[keyField]) { toast(`${keyField === "id" ? "ID" : "Slug"} is required`, "err"); return; }
   if (state.tab === "items" && !it.slug) { toast("Slug is required", "err"); return; }
 
   // Copy the record but drop the timestamps — the database manages those itself.
   const payload = { ...it };
   delete payload.created_at;
   delete payload.updated_at;
+  // Tell the server whether this is a brand-new row (mint a fresh unique id / refuse to
+  // clobber an existing category/filter with the same slug) or an edit (update in place).
+  if (state.tab === "items" || state.tab === "categories" || state.tab === "filters") payload.__create = !!state.isNew;
+  const wasNew = state.tab === "items" && state.isNew;
   try {
     const key = recKey(it);
-    await api("POST", "/" + kind, payload);
+    const saved = await api("POST", "/" + kind, payload);
     toast("Saved ✓", "ok");
     await loadAll();
     if (state.tab === "general") {
       state.sel = clone(state.data.settings || it);
+    } else if (wasNew) {
+      // id was minted by the server — re-select the freshly created dish by the id it
+      // returned (fall back to a slug match if the response shape ever changes).
+      const newId = saved && saved.id;
+      const fresh = records().find((r) => r.id === newId) || records().find((r) => r.slug === it.slug);
+      state.sel = fresh ? clone(fresh) : null;
     } else {
       const fresh = records().find((r) => recKey(r) === key);
       state.sel = fresh ? clone(fresh) : null;
@@ -3318,8 +3405,10 @@ function retentionControl(which) {
 async function saveRetention(which, val) {
   const days = Math.min(Math.max(parseInt(val, 10) || 90, 1), 90);
   try {
-    await api("POST", "/settings", { id: "site", [which]: days });
-    state.data.settings = { ...(state.data.settings || { id: "site" }), [which]: days };
+    // No id here — the server keys settings by restaurant_id and fills the row's real id
+    // itself. (Sending the legacy id:"site" used to collide with #1's PK on other tenants.)
+    await api("POST", "/settings", { [which]: days });
+    state.data.settings = { ...(state.data.settings || {}), [which]: days };
     const lbl = (RETENTION_OPTS.find((o) => o.d === days) || {}).label || days + " days";
     toast("Saved — old logs auto-delete after " + lbl, "ok");
   } catch (e) {
@@ -3694,7 +3783,7 @@ async function closeSession(id, force) {
   if (!force && !(await confirmDialog("Close this session? Guests at this table can no longer order or call until it's reopened.", "Close session"))) return;
   try {
     await api("POST", "/sessions/" + id + "/close", force ? { force: true } : undefined);
-    state.openSess = null; state.selectedTable = null; document.querySelector(".sx-modal-overlay")?.remove(); // close modal AND the in-panel detail
+    state.openSess = null; state.selectedTable = null; document.querySelector(".tbl-modal-overlay")?.remove(); // close modal AND the in-panel detail
     await loadSessions();
     toast("Table closed — bill moved to Previous", "ok");
   } catch (e) {
@@ -4099,6 +4188,16 @@ function floorNeedsCardHtml() {
 // shared-builder + delegated-button pattern as floorReqCardHtml (id #fcAccept); the Accept
 // button reuses data-quick-accept → acceptTableOrders, wired by the ONE floor delegated
 // handler, so the incremental patch can swap this node without orphaning a listener.
+// The floor normally draws tables 1..table_count, but a table numbered ABOVE the current
+// count can still be OCCUPIED (e.g. the count was lowered while it had a live order). Extend
+// the drawn range to cover any such table so it never vanishes from the grid / "to accept" /
+// stats (and its bill stays reachable/payable). (fixed 2026-07-06)
+function floorDrawCount(baseN) {
+  let hi = baseN;
+  const tiles = (state.summary && state.summary.tiles) || {};
+  for (const k in tiles) { const num = parseInt(k, 10); if (Number.isFinite(num) && num > hi) hi = num; }
+  return hi;
+}
 function floorAcceptCardHtml() {
   const s = state.data.settings || {};
   if (!s.sessions_enabled) return "";
@@ -4107,7 +4206,7 @@ function floorAcceptCardHtml() {
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
   const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
   const rows = [];
-  for (let i = 1; i <= n; i++) {
+  for (let i = 1; i <= floorDrawCount(n); i++) {
     const ts = tableTileState(i);
     if (ts.hasNew) rows.push({ t: i, meta: ts.meta || "" });
   }
@@ -4127,7 +4226,7 @@ function floorStatsHtml() {
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
   const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
   let cOcc = 0, cPay = 0, cNew = 0, cCall = 0;
-  for (let i = 1; i <= n; i++) {
+  for (let i = 1; i <= floorDrawCount(n); i++) {
     const { st, pay, hasNew, hasCall } = tableTileState(i);
     if (st !== "free" && st !== "req") cOcc++;
     if (pay === "red" || st === "bill") cPay++;
@@ -4200,7 +4299,7 @@ function floorHtml() {
   }
 
   let tiles = "";
-  for (let i = 1; i <= n; i++) {
+  for (let i = 1; i <= floorDrawCount(n); i++) {
     tiles += floorTileHtml(i); // SHARED tile builder — single source of truth (full render + patch)
   }
   // The header keeps ONLY the safe Refresh button. Open all / Close all used to
@@ -4773,7 +4872,7 @@ async function saveGeo() {
 // flicker — just the dish list filling in. (owner report, 2026-07-02: the modal took 1-2s
 // to appear at all; this is the stale-while-revalidate fix.)
 function openTablePanel(table) { state.openSess = String(table); renderTablePanel(); loadSessions(); }
-function closeTablePanel() { state.openSess = null; document.querySelector(".sx-modal-overlay")?.remove(); }
+function closeTablePanel() { state.openSess = null; document.querySelector(".tbl-modal-overlay")?.remove(); }
 
 // selectTable / deselectTable — the NEW master-detail (Tables tab). Selecting a
 // table shows its full detail IN the right side panel (not a pop-up); deselecting
@@ -5235,21 +5334,29 @@ function openShiftPicker(t, sess) {
 // Both modes just compute the same ₹ discount the server has always accepted — the API
 // call at the bottom (POST .../discount {amount, note}) is byte-identical to before, so
 // the clamp-to-bill-total safety net and the note field behave exactly as they did.
-function openDiscountModal(order, rerender, billTotal) {
+function openDiscountModal(order, rerender, billTotal, bm) {
   document.querySelector(".disc-overlay")?.remove();
-  // billTotal = the WHOLE table's bill (the discount, though stored on one order, is
-  // applied table-wide by billMath). Falls back to the single order's total for any
-  // legacy caller (bug H8, 2026-07-05).
-  const total = billTotal != null ? Number(billTotal) || 0 : Number(order.total) || 0;
-  const current = Number(order.discount) || 0;
   const round2 = (n) => Math.round(n * 100) / 100;
   const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
-  // ONE interface, no mode toggle (owner, 2026-07-03 — "merge the two modes… both things
-  // in one interface"): a Percent field and an Amount(₹) field that are TWO-WAY LINKED —
-  // edit one and the other recalculates from the same discAmount, so they can never disagree.
-  // Default 0%. discAmount (₹ off) is the single source of truth the server has always taken.
-  let discAmount = current;
-  let pctVal = total > 0 ? Math.round((current / total) * 1000) / 10 : 0;
+  const current = Number(order.discount) || 0;
+  // The stored discount is a PRE-TAX rupee amount: billMath subtracts it from the subtotal
+  // and THEN adds tax. So "They pay" must recompute the tax — subtracting the discount from
+  // the tax-INCLUSIVE total overstated it by discount×taxrate and mis-scaled the % (fixed
+  // 2026-07-06). We discount against the table's pre-tax base, preserving any discount
+  // already on OTHER orders of the same table (bm = billMath(os), passed by the caller;
+  // billTotal is kept only for legacy callers that don't pass bm).
+  const rate = bm ? bm.rate : taxModel(state.data.settings).rate;
+  const subtotal = bm ? bm.subtotal : ((Number(order.total) || 0) / (1 + rate) + current);
+  const otherDisc = bm ? Math.max(0, bm.disc - current) : 0;
+  const base = Math.max(0, round2(subtotal - otherDisc)); // pre-tax base THIS modal discounts
+  const payFor = (d) => round2(Math.max(0, base - clamp(d, 0, base)) * (1 + rate)); // what the customer pays
+  const total = payFor(0); // the table total BEFORE this order's discount (shown as "Bill total")
+  const maxDisc = base;    // can't discount more than the food (pre-tax) base
+  // ONE interface, no mode toggle (owner, 2026-07-03): a Percent and an Amount(₹) field,
+  // two-way linked from a single discAmount (₹ off, pre-tax — the value the server stores),
+  // so they can never disagree. The % is off the pre-tax base.
+  let discAmount = clamp(current, 0, maxDisc);
+  let pctVal = base > 0 ? Math.round((discAmount / base) * 1000) / 10 : 0;
 
   const wrap = el(`<div class="sx-modal-overlay disc-overlay"><div class="sx-modal disc-modal">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Apply discount</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
@@ -5269,7 +5376,7 @@ function openDiscountModal(order, rerender, billTotal) {
       <div class="chips disc-pct-quick">${[0, 5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p ? p + "%" : "None"}</span>`).join("")}</div>
       <div class="disc-preview">
         <div class="disc-prev-row"><span>Discount</span><b id="discPrevAmt">− ${inr(current)}</b></div>
-        <div class="disc-prev-row grand"><span>They pay</span><b id="discPrevPay">${inr(round2(total - current))}</b></div>
+        <div class="disc-prev-row grand"><span>They pay</span><b id="discPrevPay">${inr(payFor(discAmount))}</b></div>
       </div>
       <label class="dish-edit-lbl" style="margin-top:14px">Reason <span class="muted small">(optional, shows on the bill)</span></label>
       <input type="text" class="dish-edit-custominput" id="discNoteInput" maxlength="200" placeholder="e.g. loyalty, comp, manager approval">
@@ -5291,18 +5398,19 @@ function openDiscountModal(order, rerender, billTotal) {
   // Refresh ONLY the preview + the OTHER field from discAmount — never the field the
   // user is typing in (so their caret/partial number isn't clobbered mid-keystroke).
   const paint = (typing) => {
-    pctVal = total > 0 ? Math.round((discAmount / total) * 1000) / 10 : 0;
+    pctVal = base > 0 ? Math.round((discAmount / base) * 1000) / 10 : 0;
     if (typing !== "pct") pctInput.value = discAmount ? String(pctVal) : "";
     if (typing !== "amt") amtInput.value = discAmount ? String(round2(discAmount)) : "";
     wrap.querySelector("#discPrevAmt").textContent = "− " + inr(discAmount);
-    wrap.querySelector("#discPrevPay").textContent = inr(round2(total - discAmount));
+    wrap.querySelector("#discPrevPay").textContent = inr(payFor(discAmount));
   };
   paint();
 
-  // Edit % → derive amount. Edit amount → derive %. Both clamp to the bill.
-  pctInput.oninput = () => { const p = clamp(parseFloat(pctInput.value), 0, 100); discAmount = round2((total * p) / 100); paint("pct"); };
-  amtInput.oninput = () => { discAmount = clamp(parseFloat(amtInput.value), 0, total); paint("amt"); };
-  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { discAmount = round2((total * Number(c.dataset.pct)) / 100); paint(); }));
+  // Edit % → derive amount (off the pre-tax base). Edit amount → derive %. Both clamp so
+  // the discount can't exceed the food's pre-tax value (beyond which they'd just pay ₹0).
+  pctInput.oninput = () => { const p = clamp(parseFloat(pctInput.value), 0, 100); discAmount = round2((base * p) / 100); paint("pct"); };
+  amtInput.oninput = () => { discAmount = clamp(parseFloat(amtInput.value), 0, maxDisc); paint("amt"); };
+  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { discAmount = round2((base * Number(c.dataset.pct)) / 100); paint(); }));
 
   const close = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = close;
@@ -5315,7 +5423,7 @@ function openDiscountModal(order, rerender, billTotal) {
     try {
       await api("POST", `/orders/${order.id}/discount`, { amount, note: amount > 0 ? note : "" });
       await loadSessions(); if (rerender) rerender();
-      toast(amount > 0 ? `Discount ${inr(amount)} applied — they pay ${inr(round2(total - amount))}` : "Discount removed", "ok");
+      toast(amount > 0 ? `Discount ${inr(amount)} applied — they pay ${inr(payFor(amount))}` : "Discount removed", "ok");
     } catch (e) { toast("Failed: " + e.message, "err"); }
   };
   wrap.querySelector(".disc-apply").onclick = () => save(discAmount);
@@ -5387,8 +5495,8 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // capped the discount at it (bug H8, 2026-07-05).
   root.querySelectorAll("[data-disc]").forEach((b) => (b.onclick = () => {
     const order = (os || []).find((o) => o.id === b.dataset.disc) || { id: b.dataset.disc, total: parseFloat(b.dataset.discMax) || 0, discount: parseFloat(b.dataset.discCur) || 0 };
-    const tableBill = (os && os.length) ? billMath(os).total : (Number(order.total) || 0);
-    openDiscountModal(order, rerender, tableBill);
+    const bm = (os && os.length) ? billMath(os) : null;
+    openDiscountModal(order, rerender, bm ? bm.total : (Number(order.total) || 0), bm);
   }));
   const auto = root.querySelector("#sxAuto"); if (auto && sess) auto.onchange = () => setSessAutoApprove(sess.id, auto.checked);
   root.querySelectorAll("[data-mem-approve]").forEach((b) => (b.onclick = () => memberAction(b.dataset.memApprove, "approve")));
@@ -5415,9 +5523,9 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
 function renderTablePanel() {
   if (state.openSess == null) return;
   // keep the scroll position so serving an item doesn't fling the panel back to the top
-  const prevModal = document.querySelector(".sx-modal-overlay .tbl-modal");
+  const prevModal = document.querySelector(".tbl-modal-overlay .tbl-modal");
   const savedScroll = prevModal ? prevModal.scrollTop : 0;
-  document.querySelector(".sx-modal-overlay")?.remove();
+  document.querySelector(".tbl-modal-overlay")?.remove();
   const t = state.openSess;
   const parts = tablePanelParts(t);
   const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
@@ -5466,6 +5574,28 @@ async function serveAllOrder(orderId) {
 // Quick action: accept ALL new orders on a table in one tap. Used by BOTH the
 // floor tile's Accept AND the detail's "Accept all & prepare" button — one tap
 // accepts the whole table (owner: never open the detail just to accept each).
+// Optimistic tile feedback for a NON-selected table: the grid + "To accept" card render
+// from state.summary (NOT the board), so an accept/attend that only patched state.data.*
+// left the tile looking dead until the server round-trip (fixed 2026-07-06). These patch
+// the slim summary tile immediately; pollTables() reconciles exact counts right after.
+function patchSummaryTileAccept(t) {
+  const s = state.summary || {};
+  const tile = (s.tiles || {})[String(t)];
+  if (!tile) return;
+  const nt = Object.assign({}, tile, { hasNew: false });
+  const c = Object.assign({ nw: 0, ck: 0, rd: 0, sv: 0 }, nt.counts || {});
+  c.ck += c.nw; c.nw = 0; nt.counts = c;                 // the just-accepted dishes are now cooking
+  if (nt.state === "new") { nt.state = "prep"; nt.label = "Preparing"; }
+  state.summary = Object.assign({}, s, { tiles: Object.assign({}, s.tiles, { [String(t)]: nt }) });
+}
+function patchSummaryTileAttend(t) {
+  const s = state.summary || {};
+  const calls = (s.calls || []).filter((c) => (c.table_number || "").trim() !== String(t)); // drop this table's calls
+  const patch = { calls };
+  const tile = (s.tiles || {})[String(t)];
+  if (tile) patch.tiles = Object.assign({}, s.tiles, { [String(t)]: Object.assign({}, tile, { hasCall: false }) });
+  state.summary = Object.assign({}, s, patch);
+}
 async function acceptTableOrders(t) {
   // TWO-TIER: a tile quick-action can fire on a NON-selected table, whose full order rows
   // aren't in the cache (the grid renders from the slim summary). Ensure this table's slice
@@ -5484,6 +5614,7 @@ async function acceptTableOrders(t) {
   // OPTIMISTIC: tile flips to "Preparing" instantly, server told in background.
   recv.forEach((o) => { o.status = "preparing"; flipOrderItems(o, "received", "preparing"); opBegin(o.id); });
   floorOpsInFlight++;
+  patchSummaryTileAccept(t); // instant tile feedback even on a non-selected table
   loadSessions(true); renderTablePanel();
   // release first, then refresh — see restartTable for why this order matters.
   let released = false;
@@ -5524,8 +5655,10 @@ async function attendTableCalls(t) {
   if (!cs.length) return;
   // OPTIMISTIC: the call emojis leave the tile instantly (detail panel reads state.data.calls).
   const before = state.data.calls || [];
+  const beforeSummary = state.summary;
   const ids = new Set(cs.map((c) => c.id));
   state.data.calls = before.filter((c) => !ids.has(c.id));
+  patchSummaryTileAttend(t); // instant tile feedback (grid reads state.summary, not the board)
   floorOpsInFlight++;
   loadSessions(true);
   try {
@@ -5533,7 +5666,7 @@ async function attendTableCalls(t) {
     toast("Attended", "ok");
     floorOpsInFlight--; await pollTables([String(t)]); // clears the tile's call emoji from the summary
   }
-  catch (e) { floorOpsInFlight--; state.data.calls = before; await pollTables([String(t)]); toast("Failed: " + e.message, "err"); }
+  catch (e) { floorOpsInFlight--; state.data.calls = before; state.summary = beforeSummary; await pollTables([String(t)]); toast("Failed: " + e.message, "err"); }
 }
 // RST: clear a finished table's orders off the floor but KEEP the table open for a new round.
 async function restartTable(t) {
@@ -5577,7 +5710,7 @@ async function freeTableAll(t, sess) {
   if (!(await confirmDialog(`Free Table ${t}? Settled orders leave the floor${sess ? " and the session closes" : ""} (kept in records).`, "Free table"))) return;
   (state.data.orders || []).forEach((o) => { if (ids.includes(o.id)) { o.archived = true; opBegin(o.id); } });
   if (sess) sess.status = "closed";
-  state.openSess = null; state.selectedTable = null; document.querySelector(".sx-modal-overlay")?.remove(); // close modal AND the in-panel detail
+  state.openSess = null; state.selectedTable = null; document.querySelector(".tbl-modal-overlay")?.remove(); // close modal AND the in-panel detail
   floorOpsInFlight++;
   loadSessions(true); // instant redraw from local state
   // release first, then refresh — see restartTable for why this order matters.
@@ -6173,27 +6306,37 @@ function reconcileBoard() {
 // the latest. If a named table is the SELECTED one, ALSO refresh its FULL slice so its detail
 // stays live. Then reconcileBoard() runs the same counts/chimes/redraw as the full poll. ANY
 // surprise → full pollOrders (safe fallback). (owner 2026-06-26 — scope egress per table.)
+const tileSeq = {}; // per-table ticket for targeted polls (see below)
 async function pollTables(tables) {
   if (!tables || !tables.length) return pollOrders();
-  const seq = ++dataSeq;
+  // A FULL reload (pollOrders/loadSessions) bumps dataSeq; capture it so we drop these tile
+  // patches only if a full reload started meanwhile (its whole-board snapshot is fresher).
+  // pollTables no longer bumps dataSeq itself: two targeted polls for DIFFERENT tables must
+  // NOT cancel each other — sharing one counter meant the earlier table's tile went stale
+  // until the 60s backstop (fixed 2026-07-06). A per-table ticket handles same-table overlap.
+  const born = dataSeq;
+  const tlist = tables.map(String);
+  const mySeq = {};
+  for (const t of tlist) mySeq[t] = (tileSeq[t] = (tileSeq[t] || 0) + 1);
   let results;
   try {
-    results = await Promise.all(tables.map(async (t) => {
+    results = await Promise.all(tlist.map(async (t) => {
       const sum = await api("GET", "/summary?table=" + encodeURIComponent(t));
-      return { table: String(t), sum: sum || {} };
+      return { table: t, sum: sum || {} };
     }));
   } catch (e) { return pollOrders(); }      // network/parse blip → safe full reload
-  if (seq !== dataSeq) return;              // a newer loader started — drop this stale snapshot
+  if (dataSeq !== born) return;             // a FULL reload started — its fresher board wins
 
   // Patch the changed tables' tiles + refresh the restaurant-wide aggregates (unless a floor
   // action is mid-save, mirroring the board's floorOpsInFlight guard so optimism isn't clobbered).
   if (!floorOpsInFlight) {
     const s = state.summary || { tiles: {} };
     const tiles = Object.assign({}, s.tiles || {});
-    const tset = new Set(tables.map(String));
+    const tset = new Set(tlist);
     let latest = null;
     for (const r of results) {
       const t = r.table;
+      if (mySeq[t] !== tileSeq[t]) continue; // a newer targeted poll for THIS table won → skip just its tile
       const tile = r.sum.tiles && r.sum.tiles[t];
       if (tile) tiles[t] = tile;            // the table now has a tile (occupied)
       else delete tiles[t];                 // the table dropped off the floor universe → back to plain Free
@@ -6214,7 +6357,7 @@ async function pollTables(tables) {
     const toRefresh = detailTables().filter((t) => tset.has(t));
     if (toRefresh.length) {
       try {
-        if (seq !== dataSeq) return;
+        if (dataSeq !== born) return;
         await Promise.all(toRefresh.map((t) => loadTableSlice(t)));
       } catch {}
     }
@@ -6312,6 +6455,31 @@ document.addEventListener("keydown", (e) => {
 // the whole network round-trip. Now the correct tab is shown right away (empty for
 // a moment), and the data fills into it when it arrives.
 setTab(state.tab);
+
+// ── Hardware BACK button ↔ modals ────────────────────────────────────────────
+// The manager panel opens ~10 different modals ad-hoc (appendChild + .remove()) and
+// never wired any of them to the phone's BACK button, so Back left the whole panel
+// mid-action instead of closing the open modal (bug 2026-07-06). Rather than hand-wire
+// each open/close (and risk missing one, now or in future), a single adapter WATCHES
+// the DOM: when an overlay appears it registers a back layer that closes it; when the
+// overlay is removed (by ✕ / backdrop / Esc / completion OR by a back press) it drops
+// the layer. Every editor overlay carries one of these classes, so this covers them all
+// AND any future modal that follows the same convention. Uses the sanctioned LFH_BACK
+// API (backstack.js) — no hand-rolled history in here.
+(function wireOverlayBack() {
+  if (!window.LFH_BACK || !document.body) return;
+  const SEL = ".sx-modal-overlay, .bill-overlay, .confirm-overlay, .disc-overlay, .pay-overlay";
+  const off = new WeakMap(); // overlay element → its LFH_BACK unregister fn
+  const track = (elm) => { if (off.has(elm)) return; off.set(elm, LFH_BACK.layer("editor-modal", () => { try { elm.remove(); } catch (e) {} })); };
+  const untrack = (elm) => { const fn = off.get(elm); if (fn) { off.delete(elm); fn(); } };
+  const matches = (n) => n.nodeType === 1 && typeof n.matches === "function" && n.matches(SEL);
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      m.addedNodes.forEach((n) => { if (matches(n)) track(n); });
+      m.removedNodes.forEach((n) => { if (n.nodeType === 1 && off.has(n)) untrack(n); });
+    }
+  }).observe(document.body, { childList: true });
+})();
 
 // ══════════════════════════════════════════════════════════════════════════════
 // HIERARCHY X-RAY (2026-07-05, refined) — the same panel renders differently by WHO
