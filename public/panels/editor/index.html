@@ -10,7 +10,7 @@
         href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=20260706a" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=20260707a" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js"></script>
 </head>
@@ -31,9 +31,14 @@
       
       <button class="tab" data-tab="general">Settings</button>
     </nav>
-    <button id="themeToggle" class="theme-toggle" type="button"></button>
-    <button id="reportIssueBtn" class="theme-toggle" type="button" title="Report an issue to the owner" aria-label="Report an issue">🚩</button>
-    <div class="conn" id="conn">connecting…</div>
+    <!-- Right-side actions cluster. The shared connbadge.js mounts the 🟢/🟡/🔴 connection
+         light as the FIRST child of .top-actions (kitchen/tablet have this wrapper too); without
+         it the pill was inserted at the far LEFT of the topbar, before the brand. -->
+    <div class="top-actions">
+      <button id="themeToggle" class="theme-toggle" type="button"></button>
+      <button id="reportIssueBtn" class="theme-toggle" type="button" title="Report an issue to the owner" aria-label="Report an issue">🚩</button>
+      <div class="conn" id="conn">connecting…</div>
+    </div>
   </header>
 
   <main class="layout">
@@ -77,6 +82,6 @@
   <script src="/panels/backstack.js"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=20260706j"></script>
+  <script src="/panels/editor/app.js?v=20260707c"></script>
 </body>
 </html>

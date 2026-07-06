@@ -37,6 +37,9 @@ body {
 }
 .brand { font-weight: 700; font-size: 17px; letter-spacing: .3px; }
 .brand span { margin-right: 4px; }
+/* Right-side actions cluster (theme + report + connection light). margin-left:auto pushes it
+   to the far right regardless of how wide the tab strip is, so the connbadge pill sits top-right. */
+.top-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .brand-rest { margin-left: 7px; font-weight: 600; font-size: 14px; color: var(--gold); letter-spacing: .2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38vw; display: inline-block; vertical-align: bottom; }
 /* The 7 tabs can crowd a mid-width window before the phone layout kicks in;
    let them scroll sideways rather than overflow/wrap awkwardly. min-width:0
@@ -1267,19 +1270,59 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   .opt-choice { grid-template-columns: 1fr; }
   .opt-choice .btn.small.danger { height: auto; }
 
-  /* log: the 7-column table can't fit — drop the header and let cells wrap in 2s.
-     Clear the desktop min-width so the phone stack doesn't trigger a sideways
-     scroll (the horizontal-scroll fallback is only for the mid-width range). */
-  .logrow.loghead { display: none; }
-  .logrow { grid-template-columns: 1fr 1fr; min-width: 0; }
-  .logtable { overflow-x: visible; }
-  .logacts { justify-content: flex-start; }
-  /* Operation log: same phone reflow as the customer log above (it kept the
-     desktop 700px min-width, so it scrolled sideways while its neighbour stacked). */
-  .oprow.ophead { display: none; }
-  .oprow { grid-template-columns: 1fr 1fr; min-width: 0; }
-  .oplist { overflow-x: visible; }
-  .opacts { justify-content: flex-start; }
+  /* Banquet tab: the item rows (.bq-row) and the bill-builder line rows are laid
+     out with INLINE grid-template-columns in app.js (banquetHtml → "1fr 110px
+     130px auto auto" and "1fr 130px 110px"). Those ~280–350px of fixed inner
+     columns crush the name field and overflow a phone. Override the inline grid
+     here — an inline style can ONLY be beaten by !important — so the name goes
+     full-width and the price/unit/qty controls wrap onto their own row below. */
+  .bq-row { grid-template-columns: 1fr 1fr !important; }
+  .bq-row [data-bq-f="title"] { grid-column: 1 / -1; }   /* name input spans the whole width */
+  /* The bill-builder line rows carry NO class, so target them by the quantity
+     input they contain (only those rows have [data-bq-qty]); they are direct
+     children of the right-hand .card in banquetHtml. */
+  #editor .card > div:has([data-bq-qty]) { grid-template-columns: 1fr auto !important; }
+  #editor .card > div:has([data-bq-qty]) > div:first-child { grid-column: 1 / -1; } /* name + unit line full width */
+
+  /* log: the 6–7 column table can't fit on a phone. The previous fix dropped the
+     header row and reflowed the cells into 2 columns — but the data cells carry
+     NO label, so Device/Panel/Action/Where/When (and Guest/Table/Role/Did/Status/
+     When) became unlabelled and ambiguous once the header was hidden. Fix: stack
+     each row into ONE column and give every cell an inline label via ::before.
+     The cells expose no data-label attribute, so the labels are keyed to cell
+     ORDER — keep this order in sync with the header <div>s built in app.js's log
+     render. Clear the desktop min-width so the stack never scrolls sideways. */
+  .logrow.loghead, .oprow.ophead { display: none; }
+  .logrow, .oprow { grid-template-columns: 1fr; min-width: 0; }
+  .logtable, .oplist { overflow-x: visible; }
+
+  /* one "LABEL  value" line per cell (only data rows carry .logcell / .opcell;
+     the header cells are bare <div>s, so ::before never hits them) */
+  .logcell, .opcell {
+    display: flex; gap: 8px; align-items: baseline; padding: 3px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+  }
+  .logrow .logcell:last-child, .oprow .opcell:last-child { border-bottom: none; }
+  .logcell:empty, .opcell:empty { display: none; }        /* hide an empty actions/where cell (and its label) */
+  .logcell::before, .opcell::before {
+    flex: 0 0 64px; color: var(--muted);
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+  }
+  /* Customer log columns: Guest / Table / Role / Did / Status / When / Actions */
+  .logcell:nth-child(1)::before { content: "Guest"; }
+  .logcell:nth-child(2)::before { content: "Table"; }
+  .logcell:nth-child(3)::before { content: "Role"; }
+  .logcell:nth-child(4)::before { content: "Did"; }
+  .logcell:nth-child(5)::before { content: "Status"; }
+  .logcell:nth-child(6)::before { content: "When"; }
+  .logcell:nth-child(7)::before { content: "Actions"; }
+  /* Operation log columns: Device / Panel / Action / Where / When / Actions */
+  .opcell:nth-child(1)::before { content: "Device"; }
+  .opcell:nth-child(2)::before { content: "Panel"; }
+  .opcell:nth-child(3)::before { content: "Action"; }
+  .opcell:nth-child(4)::before { content: "Where"; }
+  .opcell:nth-child(5)::before { content: "When"; }
+  .opcell:nth-child(6)::before { content: "Actions"; }
 }
 
 /* ============================ POLISH & OVERFLOW SAFETY ============================
