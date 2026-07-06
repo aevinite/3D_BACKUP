@@ -749,20 +749,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         await logAction("manager", "banquet_item_delete", { restaurant_id: rid, device_id: dev });
         return ok({ ok: true });
       }
-      // banquet/place — { table, lines:[{id, qty}] } → a normal order lands on the
-      // table at 'served' (bill-only) and the existing billing flow takes over.
+      // banquet/place — { table?, lines:[{id, qty}] }. With a table the bill lands on
+      // it like a normal order; WITHOUT one (mig 132) it lands as a standalone
+      // "Walk-in / no table" bill in the Bills tab — no phantom table needed.
       if (b === "place") {
         const t = String(body?.table || "").trim();
-        if (!/^\d+$/.test(t)) return err("valid table required");
-        const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
-        const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
-        if (tableCount > 0 && (Number(t) < 1 || Number(t) > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
+        if (t) {
+          if (!/^\d+$/.test(t)) return err("valid table required");
+          const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+          const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
+          if (tableCount > 0 && (Number(t) < 1 || Number(t) > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
+        }
         const lines = Array.isArray(body?.lines) ? body.lines : [];
         if (!lines.length) return err("lines required");
-        const { data, error } = await sb.rpc("lfh_banquet_place_order", { p_table: t, p_lines: lines, p_restaurant_id: rid });
+        const { data, error } = await sb.rpc("lfh_banquet_place_order", { p_table: t || null, p_lines: lines, p_restaurant_id: rid });
         if (error) throw new Error(error.message);
         if (!(data as any)?.ok) return err(banquetErrMsg((data as any)?.reason), 400);
-        await logAction("manager", "banquet_place", { restaurant_id: rid, table_number: t, detail: `total ${(data as any)?.total}`, device_id: dev });
+        await logAction("manager", "banquet_place", { restaurant_id: rid, table_number: t || null, detail: `total ${(data as any)?.total}`, device_id: dev });
         return ok(data);
       }
       return err("unknown banquet action", 404);

@@ -305,6 +305,8 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
   const [staffFeat, setStaffFeat] = useState<Record<string, boolean> | null>(null);
   const [busy, setBusy] = useState(false);
+  // Which staff-feature help screenshot is zoomed full-size (null = none).
+  const [zoomImg, setZoomImg] = useState<string | null>(null);
   // "Full report" (owner's words: "every single bit" of ONE restaurant) swaps the
   // whole detail view for its own report — its own component, own data load —
   // instead of cramming another card into an already-long page.
@@ -409,6 +411,20 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       </button>
     );
   };
+  // Staff-feature CARD: the toggle plus a tiny real screenshot + one-line reminder of
+  // what the feature actually is (owner 2026-07-06: "add small ss images in admin panel
+  // so admin can remember what it's for"). The thumbnail zooms on tap (setZoomImg).
+  const staffFeatCard = (k: string, label: string, hint: string, img: string) => (
+    <div key={k} className="adm-featcard">
+      {/* eslint-disable-next-line @next/next/no-img-element -- tiny local help shot, no next/image needed */}
+      <img src={img} alt={`What "${label}" looks like`} loading="lazy"
+        onClick={() => setZoomImg(img)} title="Tap to enlarge" />
+      <div className="adm-featcard-body">
+        {staffToggle(k, label)}
+        <p>{hint}</p>
+      </div>
+    </div>
+  );
 
   if (showReport) {
     return <RestaurantReport restaurantId={restaurant.id} restaurantName={restaurant.name} onBack={() => setShowReport(false)} />;
@@ -454,11 +470,24 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2>Staff features</h2>
-        <p className="hint">Operational features you allow <b>{restaurant.name}</b> to use. Allowing one just makes the owner&apos;s own on/off toggle appear — it doesn&apos;t turn it on.</p>
+        <p className="hint">Operational features you allow <b>{restaurant.name}</b> to use. The little picture shows what each one looks like (tap to enlarge).</p>
         {staffFeat === null
           ? <div className="adm-empty">Loading…</div>
-          : <div className="adm-togglegrid">{staffToggle("auto_print_kot_allowed", "Auto-print KOT (allow)")}{staffToggle("banquet_allowed", "Banquet billing (allow)")}</div>}
+          : <div className="adm-featgrid">
+              {staffFeatCard("auto_print_kot_allowed", "Auto-print KOT (allow)",
+                "The kitchen screen prints the order ticket by itself the moment an order arrives. Allowing it only reveals the owner's own on/off in Manager → Settings → Kitchen.",
+                "/admin-help/auto-print-kot.png")}
+              {staffFeatCard("banquet_allowed", "Banquet billing (allow)",
+                "Gives the manager panel a 🎪 Banquet tab — a separate per-plate menu just for banquet bills (plates × price, no kitchen ticket). Waiter-tablet access stays a manager setting.",
+                "/admin-help/banquet.png")}
+            </div>}
       </div>
+      {zoomImg && (
+        <div className="adm-imgzoom" onClick={() => setZoomImg(null)} role="button" title="Tap anywhere to close">
+          {/* eslint-disable-next-line @next/next/no-img-element -- local help screenshot lightbox */}
+          <img src={zoomImg} alt="Feature screenshot, enlarged" />
+        </div>
+      )}
 
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2>Guest features</h2>

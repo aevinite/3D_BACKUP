@@ -2121,8 +2121,8 @@ function renderBanquetBody() {
   body.innerHTML =
     bqItems.map(row).join("") +
     `<div style="display:flex;gap:12px;align-items:flex-end;justify-content:space-between;border-top:1px solid var(--line);padding-top:14px;margin-top:4px">
-      <label style="font-size:12px;color:var(--muted)">Table<br/>
-        <input id="bqTable" type="number" min="1" max="${tableCount()}" inputmode="numeric" placeholder="e.g. 11"
+      <label style="font-size:12px;color:var(--muted)">Table (optional)<br/>
+        <input id="bqTable" type="number" min="1" max="${tableCount()}" inputmode="numeric" placeholder="none"
           style="width:84px;margin-top:4px;text-align:center;padding:9px 6px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);font-weight:700" /></label>
       <div style="text-align:right;font-size:13px">
         <div>Subtotal <b id="bqSub">₹0</b></div>
@@ -2157,7 +2157,9 @@ function renderBanquetBody() {
       .filter((l) => l.qty > 0);
     const t = String(body.querySelector("#bqTable").value || "").trim();
     if (!lines.length) { toast("Set a plate count first.", false); return; }
-    if (!/^\d+$/.test(t)) { toast("Pick the table the bill should land on.", false); return; }
+    // Table is optional (mig 132): blank → a standalone bill the manager settles
+    // from the Bills tab; only validate when the waiter actually typed one.
+    if (t && !/^\d+$/.test(t)) { toast("That table number doesn't look right — or leave it blank.", false); return; }
     const btn = body.querySelector("#bqCreate");
     btn.disabled = true;
     try {
@@ -2176,9 +2178,10 @@ function renderBanquetBody() {
         }
         if (!pin && !r) { btn.disabled = false; return; } // cancelled
       }
-      toast(`Banquet bill created on table ${t} — total ${inr(r.total)}.`);
+      toast(t ? `Banquet bill created on table ${t} — total ${inr(r.total)}.`
+             : `Banquet bill created — total ${inr(r.total)}. The manager settles it under Bills.`);
       closeBanquet();
-      await load(); // the table now shows the due like any other bill
+      await load(); // with a table, its tile now shows the due like any other bill
     } catch (e) {
       toast("Couldn't create the bill: " + e.message, false);
       btn.disabled = false;
