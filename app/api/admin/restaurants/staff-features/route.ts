@@ -13,7 +13,7 @@ import { cleanClonedSettings } from "@/lib/settingsClone";
 export const dynamic = "force-dynamic";
 
 // The staff-feature ENTITLEMENT columns the admin may flip (all default false = off).
-const STAFF_FEATURE_KEYS = ["auto_print_kot_allowed"];
+const STAFF_FEATURE_KEYS = ["auto_print_kot_allowed", "banquet_allowed"];
 
 const isUuid = (v: unknown): v is string =>
   typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);

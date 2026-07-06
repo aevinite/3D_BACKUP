@@ -57,7 +57,7 @@ const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName 
 // is re-read from the DB on every request by userFromCookie, so revoking someone's
 // access takes effect on their very next tap (no re-login needed). Admin bypasses via
 // managerPinGate as before.
-const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice"] as const;
+const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet"] as const;
 const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   const override = (user?.permissions ?? {})[key];
@@ -96,6 +96,14 @@ const must = (r: any) => { if (r.error) throw new Error(r.error.message); return
  
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
+
+// Friendly message for the banquet RPC's { ok:false, reason }.
+const banquetErrMsg = (reason?: string) =>
+  reason === "not_allowed" ? "Banquet billing isn't enabled for this restaurant."
+  : reason === "empty_order" ? "Add at least one banquet line."
+  : reason === "unknown_item" ? "That banquet item no longer exists — reopen the banquet screen."
+  : reason === "bad_table" ? "Pick a valid table."
+  : (reason || "Couldn't create the banquet bill.");
 
 // Friendly message for a staff-edit RPC's { ok:false, reason } (edit-qty/note/add).
 const editErrMsg = (reason?: string) =>
@@ -147,6 +155,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         settings: overlayUserPerms(must(settings), g.user), dishes: must(dishes), categories: must(categories),
         restaurant: must(restaurant) || null,
       });
+    }
+
+    // ── GET /api/tablet/banquet-items — the banquet menu (mig 130), fetched ONLY
+    // when the waiter opens the banquet screen (no polling, scoped, slim columns).
+    // Server-gated the same as placing: entitlement + the tablet_banquet capability
+    // ('pin' may still READ the list — the PIN protects the billing action itself).
+    if (path.join("/") === "banquet-items") {
+      const flags = await sb.from("settings").select("banquet_allowed, tablet_banquet").eq("restaurant_id", rid).maybeSingle();
+      const f = overlayUserPerms((flags.data as Record<string, any> | null), g.user);
+      if (!f?.banquet_allowed) return err("Banquet billing isn't enabled for this restaurant.", 403);
+      if ((f.tablet_banquet || "off") === "off" && g.user) return err("Banquet billing is off for the tablet — ask a manager.", 403);
+      const items = must(await sb.from("banquet_items")
+        .select("id,title,price,unit,sort_order,active").eq("restaurant_id", rid).eq("active", true)
+        .order("sort_order").limit(200));
+      return ok({ items });
     }
 
     if (path.join("/") === "state") {
@@ -258,6 +281,27 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("restaurant_id", rid).eq("status", "received");
       }
       await logAction("tablet", "order_place", { table_number: t, device_id: dev });
+      return ok(data);
+    }
+
+    // banquet/place — generate a banquet bill (mig 130). Priced server-side from
+    // banquet_items by the RPC (which also re-checks the admin entitlement); the
+    // tablet needs the tablet_banquet capability (tri-state + per-user override,
+    // same gate family as discount/mark-paid — 'pin' rides the actGated PIN flow).
+    if (a === "banquet" && b === "place") {
+      const gate2 = await tabletPerm("tablet_banquet", req, body, rid, actor);
+      if (!gate2.allow) return gate2.resp;
+      const t = String(body?.table || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
+      if (tableCount > 0 && (Number(t) < 1 || Number(t) > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
+      const lines = Array.isArray(body?.lines) ? body.lines : [];
+      if (!lines.length) return err("lines required");
+      const { data, error } = await sb.rpc("lfh_banquet_place_order", { p_table: t, p_lines: lines, p_restaurant_id: rid });
+      if (error) throw new Error(error.message);
+      if (!(data as any)?.ok) return err(banquetErrMsg((data as any)?.reason), 400);
+      await logAction("tablet", "banquet_place", { table_number: t, device_id: dev, detail: `total ${(data as any)?.total}${byNote(gate2)}` });
       return ok(data);
     }
 

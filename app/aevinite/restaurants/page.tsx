@@ -457,7 +457,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         <p className="hint">Operational features you allow <b>{restaurant.name}</b> to use. Allowing one just makes the owner&apos;s own on/off toggle appear — it doesn&apos;t turn it on.</p>
         {staffFeat === null
           ? <div className="adm-empty">Loading…</div>
-          : <div className="adm-togglegrid">{staffToggle("auto_print_kot_allowed", "Auto-print KOT (allow)")}</div>}
+          : <div className="adm-togglegrid">{staffToggle("auto_print_kot_allowed", "Auto-print KOT (allow)")}{staffToggle("banquet_allowed", "Banquet billing (allow)")}</div>}
       </div>
 
       <div className="adm-card" style={{ marginBottom: 14 }}>

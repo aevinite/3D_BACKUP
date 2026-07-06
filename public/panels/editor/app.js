@@ -24,7 +24,7 @@ const ALLERGENS = [
 const TAB_LABEL = { items: "Dish", categories: "Category", filters: "Tag", general: "Settings" };
 
 // The tabs across the top of the editor. Anything not in this list is ignored.
-const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "features", "general"];
+const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "features", "general", "banquet"];
 // Remember which tab you were on so a refresh keeps you there (e.g. stay on
 // Orders during a busy service instead of snapping back to Dishes).
 const savedTab = (() => { try { return localStorage.getItem("lfh_editor_tab"); } catch { return null; } })();
@@ -45,6 +45,9 @@ const state = {
   search: "",
   catFilter: "", // Dishes tab: selected category slug to filter by ("" = All)
   board: { sessions: [], members: [], items: [], requests: [], blocklist: [] }, // v2 sessions live board (TIER 2: only the SELECTED table's full slice now)
+  // Banquet module (mig 130): its items load on first tab open only. qty maps
+  // item id → plate count in the "generate bill" builder; table = the target table.
+  banquet: { loaded: false, items: [], qty: {}, table: "" },
   // TIER 1 of the two-tier Table view: the slim, server-computed per-tile summary the GRID
   // renders from (mig 101, lfh_table_view_summary). tiles is keyed by table number → the
   // computed { state,label,meta,counts,due,pay,members,pending,hasNew/Call/Req/Join,reqs,calls }.
@@ -324,6 +327,7 @@ async function loadAll() {
   const restName = rr.logo_text || (rr.name && rr.name.en) || rr.name_en || (state.data.settings || {}).restaurant_name || "";
   const brandEl = document.getElementById("brandRest");
   if (brandEl) brandEl.textContent = restName ? "· " + restName : "";
+  syncBanquetTab(); // Banquet tab follows the admin entitlement (mig 130)
   $("#conn").textContent = "connected";
   $("#conn").className = "conn ok";
   renderList();
@@ -415,9 +419,9 @@ function renderList() {
     ul.appendChild(mk("calls", "🔔", "Calls", callCount));
     return;
   }
-  if (state.tab === "tables") {
-    // Nothing in the sidebar for Tables — it's hidden (see setTab's .no-sidebar);
-    // the floor uses the full width.
+  if (state.tab === "tables" || state.tab === "banquet") {
+    // Nothing in the sidebar for Tables/Banquet — it's hidden (see setTab's
+    // .no-sidebar); the content uses the full width.
     return;
   }
   if (state.tab === "features") {
@@ -953,7 +957,15 @@ const ACCESS_CAPS = [
   { key: "tablet_discount", label: "Apply discount" },
   { key: "tablet_mark_paid", label: "Mark bill paid" },
   { key: "tablet_invoice", label: "Generate invoice" },
+  // Banquet module (mig 130) — only meaningful when the admin entitlement is on;
+  // accessCapsFor() drops it from both Access cards otherwise (no dead UI).
+  { key: "tablet_banquet", label: "Banquet billing" },
 ];
+// The Access cards' cap list, minus modules this restaurant doesn't have.
+function accessCapsFor() {
+  const s = state.data.settings || {};
+  return ACCESS_CAPS.filter((c) => c.key !== "tablet_banquet" || !!s.banquet_allowed);
+}
 const ACCESS_MODE_LABEL = { on: "On", pin: "On — needs PIN", off: "Off" };
 
 // accessDefaultsCardHtml: the restaurant-wide defaults — the same three tri-states
@@ -967,7 +979,7 @@ function accessDefaultsCardHtml(s) {
       <b>On · needs manager PIN</b> = allowed but a manager PIN is asked each time.
     </p>
     <div class="grid cols-3">
-      ${ACCESS_CAPS.map((c) => triSel(c.label, c.key, s[c.key])).join("")}
+      ${accessCapsFor().map((c) => triSel(c.label, c.key, s[c.key])).join("")}
     </div>
   </div>`;
 }
@@ -1006,7 +1018,7 @@ function accessUsersCardHtml(s) {
           ${u.active ? "" : `<span style="font-size:10.5px;color:var(--red);font-weight:700">disabled</span>`}
           ${Object.keys(u.permissions || {}).length ? `<span style="font-size:10.5px;color:var(--gold-strong);font-weight:700" title="This person has their own settings">· custom</span>` : ""}
         </div>
-        <div class="grid cols-3" style="gap:8px">${ACCESS_CAPS.map((c) => selFor(u, c)).join("")}</div>
+        <div class="grid cols-3" style="gap:8px">${accessCapsFor().map((c) => selFor(u, c)).join("")}</div>
       </div>`).join("")
     : `<div class="sx-empty">No tablet logins yet — add one in <b>Users</b>.</div>`;
   return `<div class="card"><h3>Per-user access</h3>
@@ -2768,6 +2780,12 @@ function renderEditor() {
   if (state.tab === "platform") {
     ed.innerHTML = platformHtml();
     bindPlatform();
+    return;
+  }
+  if (state.tab === "banquet") {
+    ed.innerHTML = banquetHtml();
+    bindBanquet();
+    if (!state.banquet.loaded) loadBanquet(); // re-renders when the items land
     return;
   }
   if (state.tab === "orders") {
@@ -5846,14 +5864,14 @@ function setTab(tab) {
     sub.querySelectorAll(".subtab").forEach((s) => s.classList.toggle("active", s.dataset.tab === tab));
   }
   // The search box and "+ New" don't apply to the General/Orders/Tables tabs.
-  const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "platform" || tab === "log" || tab === "features" || tab === "dash";
+  const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "platform" || tab === "log" || tab === "features" || tab === "dash" || tab === "banquet";
   $("#newBtn").style.display = noList ? "none" : "";
   $("#search").style.display = noList ? "none" : "";
   // Tables tab: drop the whole left sidebar (it only held a dead "Floor map" label).
   // The floor already has its own left tiles + right detail, so it takes the full
   // width — the .no-sidebar class collapses the grid's first column to nothing.
   const layout = document.querySelector(".layout");
-  if (layout) layout.classList.toggle("no-sidebar", tab === "tables" || tab === "platform");
+  if (layout) layout.classList.toggle("no-sidebar", tab === "tables" || tab === "platform" || tab === "banquet");
   renderCatFilter(); // show category chips on Dishes, hide elsewhere
   renderList();
   renderEditor();
@@ -6275,6 +6293,171 @@ setTab(state.tab);
 //     top-right popout lists every tinted zone; clicking one scrolls to it and points
 //     at the setting that controls it. The server still enforces every capability —
 //     this is purely presentation.
+// ══════════════════════════════════════════════════════════════════════════════
+// BANQUET MODULE (mig 130) — a SEPARATE bill-only menu for fixed-plate events.
+// The tab exists only when the admin entitlement (settings.banquet_allowed) is on
+// (syncBanquetTab). Left card: the banquet menu (CRUD, priced per plate). Right
+// card: the bill builder — pick a table, set plate counts, one tap lands a normal
+// order on that table at 'served' (no kitchen ticket), and the existing Tables
+// billing flow (invoice / discount / mark paid) takes over.
+// ══════════════════════════════════════════════════════════════════════════════
+async function loadBanquet() {
+  try {
+    const r = await api("GET", "/banquet/items");
+    state.banquet.items = r.items || [];
+  } catch (e) {
+    state.banquet.items = [];
+    toast("Couldn't load the banquet menu: " + e.message, "err");
+  }
+  state.banquet.loaded = true;
+  if (state.tab === "banquet") renderEditor();
+}
+
+function banquetHtml() {
+  const bq = state.banquet;
+  if (!bq.loaded) return `<div class="ed-head"><h2>🎪 Banquet</h2></div><div class="empty">Loading the banquet menu…</div>`;
+  const tm = taxModel(state.data.settings);
+  const rows = bq.items.map((it) => `
+    <div class="bq-row${it.active ? "" : " bq-off"}" data-bq-id="${esc(it.id)}" style="display:grid;grid-template-columns:1fr 110px 130px auto auto;gap:8px;align-items:center;padding:8px 10px;border-radius:9px;background:var(--panel-2);margin-bottom:8px${it.active ? "" : ";opacity:.55"}">
+      <input class="sx-input" data-bq-f="title" value="${esc(it.title)}" placeholder="Item name" />
+      <input class="sx-input" data-bq-f="price" type="number" min="0" step="1" value="${esc(String(it.price))}" title="Price per unit (₹)" />
+      <input class="sx-input" data-bq-f="unit" value="${esc(it.unit || "per plate")}" placeholder="per plate" title='Shown on the bill after the name, e.g. "per plate"' />
+      <button class="btn small" data-bq-toggle title="${it.active ? "Hide from the bill builder" : "Show in the bill builder"}">${it.active ? "On" : "Off"}</button>
+      <button class="btn small danger" data-bq-del title="Delete">🗑</button>
+    </div>`).join("");
+  const activeItems = bq.items.filter((it) => it.active);
+  let sub = 0;
+  const lines = activeItems.map((it) => {
+    const q = Math.max(0, Math.round(Number(bq.qty[it.id]) || 0));
+    sub += q * (Number(it.price) || 0);
+    return `<div style="display:grid;grid-template-columns:1fr 130px 110px;gap:8px;align-items:center;margin-bottom:8px">
+      <div><b style="font-size:13.5px">${esc(it.title)}</b><small style="color:var(--muted);display:block">${inr(it.price)} ${esc(it.unit || "per plate")}</small></div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn small" data-bq-minus="${esc(it.id)}">−</button>
+        <input class="sx-input" data-bq-qty="${esc(it.id)}" type="number" min="0" max="5000" value="${q}" style="width:64px;text-align:center" title="Plates / count" />
+        <button class="btn small" data-bq-plus="${esc(it.id)}">+</button>
+      </div>
+      <div style="text-align:right;font-weight:700">${q ? inr(q * (Number(it.price) || 0)) : "—"}</div>
+    </div>`;
+  }).join("");
+  const tax = Math.round(sub * tm.rate * 100) / 100;
+  const tableCount = Number((state.data.settings || {}).table_count) || 0;
+  return `<div class="ed-head"><h2>🎪 Banquet</h2><button class="btn" id="bqRefresh">↻ Refresh</button></div>
+  <div class="grid cols-2" style="align-items:start;gap:14px">
+    <div class="card">
+      <h3>Banquet menu</h3>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 12px;line-height:1.5">
+        Separate from the dining menu — these lines exist ONLY to build banquet bills
+        (price per plate × guests). Guests never see them.</p>
+      ${rows || `<div class="sx-empty">No banquet items yet — add the first one below.</div>`}
+      <div style="display:grid;grid-template-columns:1fr 110px auto;gap:8px;margin-top:10px">
+        <input class="sx-input" id="bqNewTitle" placeholder="New item — e.g. Gujarati Thali" />
+        <input class="sx-input" id="bqNewPrice" type="number" min="0" step="1" placeholder="₹ / plate" />
+        <button class="btn primary" id="bqAdd">+ Add</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Generate a banquet bill</h3>
+      <p style="color:var(--muted);font-size:13px;margin:0 0 12px;line-height:1.5">
+        Set the plate counts, pick the table, and the bill lands there like a normal
+        order (no kitchen ticket) — then invoice / discount / mark paid from Tables as usual.</p>
+      ${activeItems.length ? lines : `<div class="sx-empty">Turn on at least one banquet item first.</div>`}
+      <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;border-top:1px solid var(--line);padding-top:12px;margin-top:6px">
+        <div class="field" style="margin:0"><label style="font-size:11px">Table</label>
+          <input class="sx-input" id="bqTable" type="number" min="1" ${tableCount ? `max="${tableCount}"` : ""} value="${esc(bq.table)}" placeholder="e.g. 11" style="width:90px" /></div>
+        <div style="text-align:right;font-size:13px">
+          <div>Subtotal <b>${inr(sub)}</b></div>
+          <div style="color:var(--muted)">${esc(taxLabel())} ${tm.pct}% · ${inr(tax)}</div>
+          <div style="font-size:15px;margin-top:2px">Total <b>${inr(sub + tax)}</b></div>
+        </div>
+      </div>
+      <button class="btn primary" id="bqPlace" style="width:100%;margin-top:12px" ${sub > 0 ? "" : "disabled"}>🧾 Create the bill</button>
+    </div>
+  </div>`;
+}
+
+function bindBanquet() {
+  const ed = $("#editor");
+  const bq = state.banquet;
+  const rf = document.getElementById("bqRefresh");
+  if (rf) rf.onclick = () => { bq.loaded = false; renderEditor(); };
+  // Menu card — save a row's edits on change (title/price/unit), toggle, delete.
+  ed.querySelectorAll("[data-bq-id]").forEach((row) => {
+    const id = row.dataset.bqId;
+    const item = bq.items.find((i) => i.id === id);
+    if (!item) return;
+    const save = async (patch) => {
+      try {
+        const saved = await api("POST", "/banquet/item-save", { id, title: item.title, price: item.price, unit: item.unit, active: item.active, sort_order: item.sort_order, ...patch });
+        Object.assign(item, saved);
+        renderEditor();
+      } catch (e) { toast("Couldn't save: " + e.message, "err"); }
+    };
+    row.querySelectorAll("[data-bq-f]").forEach((inp) => {
+      inp.onchange = () => save({ [inp.dataset.bqF]: inp.dataset.bqF === "price" ? Number(inp.value) || 0 : inp.value });
+    });
+    row.querySelector("[data-bq-toggle]").onclick = () => save({ active: !item.active });
+    row.querySelector("[data-bq-del]").onclick = async () => {
+      if (!confirm(`Delete "${item.title}" from the banquet menu?`)) return;
+      try {
+        await api("POST", "/banquet/item-delete", { id });
+        bq.items = bq.items.filter((i) => i.id !== id);
+        delete bq.qty[id];
+        renderEditor();
+        toast("Deleted", "ok");
+      } catch (e) { toast("Couldn't delete: " + e.message, "err"); }
+    };
+  });
+  const add = document.getElementById("bqAdd");
+  if (add) add.onclick = async () => {
+    const title = (document.getElementById("bqNewTitle").value || "").trim();
+    const price = Number(document.getElementById("bqNewPrice").value) || 0;
+    if (!title) { toast("Give the item a name.", "err"); return; }
+    try {
+      const row = await api("POST", "/banquet/item-save", { title, price, unit: "per plate", active: true, sort_order: bq.items.length + 1 });
+      bq.items.push(row);
+      renderEditor();
+      toast("Added", "ok");
+    } catch (e) { toast("Couldn't add: " + e.message, "err"); }
+  };
+  // Bill-builder card — qty steppers re-render for the live total.
+  const setQty = (id, v) => { bq.qty[id] = Math.max(0, Math.min(5000, Math.round(Number(v) || 0))); renderEditor(); };
+  ed.querySelectorAll("[data-bq-qty]").forEach((inp) => { inp.onchange = () => setQty(inp.dataset.bqQty, inp.value); });
+  ed.querySelectorAll("[data-bq-minus]").forEach((b) => { b.onclick = () => setQty(b.dataset.bqMinus, (Number(bq.qty[b.dataset.bqMinus]) || 0) - 1); });
+  ed.querySelectorAll("[data-bq-plus]").forEach((b) => { b.onclick = () => setQty(b.dataset.bqPlus, (Number(bq.qty[b.dataset.bqPlus]) || 0) + 1); });
+  const tableInp = document.getElementById("bqTable");
+  if (tableInp) tableInp.onchange = () => { bq.table = tableInp.value; };
+  const place = document.getElementById("bqPlace");
+  if (place) place.onclick = async () => {
+    const linesOut = state.banquet.items.filter((i) => i.active && (Number(bq.qty[i.id]) || 0) > 0)
+      .map((i) => ({ id: i.id, qty: Math.round(Number(bq.qty[i.id])) }));
+    const t = String((tableInp && tableInp.value) || "").trim();
+    if (!linesOut.length) { toast("Set a plate count on at least one item.", "err"); return; }
+    if (!/^\d+$/.test(t)) { toast("Pick the table the bill should land on.", "err"); return; }
+    place.disabled = true;
+    try {
+      const r = await api("POST", "/banquet/place", { table: t, lines: linesOut });
+      bq.qty = {}; bq.table = t;
+      toast(`Banquet bill created on table ${t} — total ${inr(r.total)}.`, "ok");
+      setTab("tables"); // the bill is now a normal open table — settle it there
+    } catch (e) {
+      toast("Couldn't create the bill: " + e.message, "err");
+      place.disabled = false;
+    }
+  };
+}
+
+// Show/hide the Banquet tab from the entitlement — called after every loadAll so
+// an admin grant appears on the manager's next refresh without a deploy. If the
+// remembered tab IS banquet but the module got revoked, fall back to Dishes.
+function syncBanquetTab() {
+  const btn = document.querySelector('.tabs .tab[data-tab="banquet"]');
+  if (!btn) return;
+  const allowed = !!(state.data.settings || {}).banquet_allowed;
+  btn.hidden = !allowed;
+  if (!allowed && state.tab === "banquet") setTab("items");
+}
+
 // Extend XRAY_TABS as more tabs become permission-gated. Grant rule matches the
 // server's managerCan(): a manager is granted ONLY when the flag is explicitly true.
 // ══════════════════════════════════════════════════════════════════════════════

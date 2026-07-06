@@ -2019,13 +2019,18 @@ if (window.LFH_RT) {
     '<div><div class="dw-prof">Signed in as</div><div class="dw-name" id="dwName">…</div><div class="dw-prof" id="dwRole"></div></div>' +
     '<div class="dw-row"><span>Restaurant</span><span class="dw-prof" id="dwRest"></span></div>' +
     '<div class="dw-row"><span>Theme</span><button class="btn small" id="dwTheme" type="button">Light / Dark</button></div>' +
-    '<a class="dw-btn danger" id="dwLogout" href="/api/panel-logout">Log out</a>';
+    // Banquet module (mig 130): shown only when the admin entitlement AND the
+    // waiter's tablet_banquet capability allow it (openDrawer re-checks each open).
+    '<button class="dw-btn" id="dwBanquet" type="button" hidden style="margin-top:auto;margin-bottom:10px">🎪 Banquet billing</button>' +
+    '<a class="dw-btn danger" id="dwLogout" href="/api/panel-logout" style="margin-top:0">Log out</a>';
   document.body.appendChild(backdrop); document.body.appendChild(drawer);
 
   let drawerOff = null;
   const openDrawer = () => {
     backdrop.classList.add("open"); drawer.classList.add("open");
     drawer.querySelector("#dwRest").textContent = (document.getElementById("restName")?.textContent || "").trim() || "—";
+    const bqBtn = drawer.querySelector("#dwBanquet");
+    if (bqBtn) bqBtn.hidden = !((state.data.settings || {}).banquet_allowed && tperm("tablet_banquet") !== "off");
     loadProfile();
     if (window.LFH_BACK && !drawerOff) drawerOff = LFH_BACK.layer("tablet-drawer", closeDrawer);
   };
@@ -2036,6 +2041,8 @@ if (window.LFH_RT) {
   backdrop.onclick = closeDrawer;
   drawer.querySelector(".dw-close").onclick = closeDrawer;
   drawer.querySelector("#dwTheme").onclick = () => document.getElementById("themeToggle")?.click();
+  const bqDrawerBtn = drawer.querySelector("#dwBanquet");
+  if (bqDrawerBtn) bqDrawerBtn.onclick = () => { closeDrawer(); openBanquet(); };
   const ham = document.getElementById("hamburger"); if (ham) ham.onclick = openDrawer;
 
   let profileLoaded = false;
@@ -2052,3 +2059,125 @@ if (window.LFH_RT) {
     } catch { /* offline — leave the placeholder */ }
   }
 })();
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   BANQUET BILLING (mig 130) — opened from the drawer, shown only when the admin
+   entitlement + the waiter's tablet_banquet capability allow it. A full-screen
+   overlay: plate-count steppers over the restaurant's banquet menu, a table pick,
+   one tap lands the bill on that table as a normal 'served' order (no kitchen
+   ticket) — then the usual invoice / mark-paid flow settles it. 'pin' mode rides
+   the same manager-PIN prompt as discounts (the server asks, we prompt and retry).
+   ══════════════════════════════════════════════════════════════════════════════ */
+let bqOff = null, bqEl = null, bqItems = [];
+function closeBanquet() {
+  if (bqEl) { bqEl.remove(); bqEl = null; }
+  if (bqOff) { bqOff(); bqOff = null; }
+}
+async function openBanquet() {
+  closeBanquet();
+  bqEl = document.createElement("div");
+  bqEl.style.cssText = "position:fixed;inset:0;z-index:120;background:var(--bg);display:flex;flex-direction:column";
+  bqEl.innerHTML =
+    '<div style="display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel)">' +
+      '<button class="btn small" id="bqBack" type="button">← Back</button>' +
+      '<b style="font-size:16px">🎪 Banquet billing</b></div>' +
+    '<div id="bqBody" style="flex:1;overflow-y:auto;padding:16px;max-width:640px;width:100%;margin:0 auto;box-sizing:border-box">' +
+      '<div class="muted" style="padding:20px;text-align:center">Loading the banquet menu…</div></div>';
+  document.body.appendChild(bqEl);
+  bqEl.querySelector("#bqBack").onclick = closeBanquet;
+  if (window.LFH_BACK) bqOff = LFH_BACK.layer("tablet-banquet", closeBanquet);
+  try {
+    const r = await api("GET", "/banquet-items");
+    bqItems = r.items || [];
+  } catch (e) {
+    toast("Couldn't open banquet billing: " + e.message, false);
+    closeBanquet();
+    return;
+  }
+  renderBanquetBody();
+}
+function renderBanquetBody() {
+  const body = bqEl && bqEl.querySelector("#bqBody");
+  if (!body) return;
+  if (!bqItems.length) {
+    body.innerHTML = '<div class="muted" style="padding:20px;text-align:center">No banquet items yet — the manager adds them in the manager panel’s Banquet tab.</div>';
+    return;
+  }
+  const row = (it) =>
+    `<div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);margin-bottom:10px">
+      <div><b style="font-size:14.5px">${it.title.replace(/</g, "&lt;")}</b>
+        <small style="display:block;color:var(--muted)">${inr(it.price)} ${(it.unit || "per plate").replace(/</g, "&lt;")}</small></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn small" data-bq-step="-1" data-bq-id="${it.id}" type="button">−</button>
+        <input data-bq-qty="${it.id}" type="number" min="0" max="5000" value="0" inputmode="numeric"
+          style="width:70px;text-align:center;padding:9px 6px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);font-weight:700" />
+        <button class="btn small" data-bq-step="1" data-bq-id="${it.id}" type="button">+</button>
+      </div>
+    </div>`;
+  body.innerHTML =
+    bqItems.map(row).join("") +
+    `<div style="display:flex;gap:12px;align-items:flex-end;justify-content:space-between;border-top:1px solid var(--line);padding-top:14px;margin-top:4px">
+      <label style="font-size:12px;color:var(--muted)">Table<br/>
+        <input id="bqTable" type="number" min="1" max="${tableCount()}" inputmode="numeric" placeholder="e.g. 11"
+          style="width:84px;margin-top:4px;text-align:center;padding:9px 6px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);font-weight:700" /></label>
+      <div style="text-align:right;font-size:13px">
+        <div>Subtotal <b id="bqSub">₹0</b></div>
+        <div style="color:var(--muted)">+ tax <span id="bqTax">₹0</span></div>
+        <div style="font-size:15px;margin-top:2px">Total <b id="bqTotal">₹0</b></div>
+      </div>
+    </div>
+    <button class="btn primary" id="bqCreate" type="button" disabled style="width:100%;margin-top:14px;padding:13px">🧾 Create the bill</button>`;
+  const totals = () => {
+    let sub = 0;
+    for (const it of bqItems) {
+      const inp = body.querySelector(`[data-bq-qty="${it.id}"]`);
+      sub += Math.max(0, Math.round(Number(inp && inp.value) || 0)) * (Number(it.price) || 0);
+    }
+    const tax = Math.round(sub * effRate() * 100) / 100;
+    body.querySelector("#bqSub").textContent = inr(sub);
+    body.querySelector("#bqTax").textContent = inr(tax);
+    body.querySelector("#bqTotal").textContent = inr(sub + tax);
+    body.querySelector("#bqCreate").disabled = sub <= 0;
+  };
+  body.querySelectorAll("[data-bq-step]").forEach((b) => {
+    b.onclick = () => {
+      const inp = body.querySelector(`[data-bq-qty="${b.dataset.bqId}"]`);
+      inp.value = Math.max(0, Math.min(5000, (Math.round(Number(inp.value) || 0)) + Number(b.dataset.bqStep)));
+      totals();
+    };
+  });
+  body.querySelectorAll("[data-bq-qty]").forEach((inp) => { inp.oninput = totals; });
+  body.querySelector("#bqCreate").onclick = async () => {
+    const lines = bqItems
+      .map((it) => ({ id: it.id, qty: Math.max(0, Math.round(Number(body.querySelector(`[data-bq-qty="${it.id}"]`).value) || 0)) }))
+      .filter((l) => l.qty > 0);
+    const t = String(body.querySelector("#bqTable").value || "").trim();
+    if (!lines.length) { toast("Set a plate count first.", false); return; }
+    if (!/^\d+$/.test(t)) { toast("Pick the table the bill should land on.", false); return; }
+    const btn = body.querySelector("#bqCreate");
+    btn.disabled = true;
+    try {
+      let r;
+      try {
+        r = await api("POST", "/banquet/place", { table: t, lines });
+      } catch (e) {
+        if (!/manager pin/i.test(String(e && e.message))) throw e;
+        let pin = await pinPrompt("Banquet billing needs a manager PIN.");
+        while (pin) {
+          try { r = await api("POST", "/banquet/place", { table: t, lines, managerPin: pin }); break; }
+          catch (e2) {
+            if (/manager pin/i.test(String(e2 && e2.message))) { pin = await pinPrompt("Banquet billing needs a manager PIN.", "That PIN didn't match — try again."); continue; }
+            throw e2;
+          }
+        }
+        if (!pin && !r) { btn.disabled = false; return; } // cancelled
+      }
+      toast(`Banquet bill created on table ${t} — total ${inr(r.total)}.`);
+      closeBanquet();
+      await load(); // the table now shows the due like any other bill
+    } catch (e) {
+      toast("Couldn't create the bill: " + e.message, false);
+      btn.disabled = false;
+    }
+  };
+}

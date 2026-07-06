@@ -158,7 +158,7 @@ export async function PATCH(req: NextRequest) {
   // (inherits the restaurant-wide tri-state). Keys/values are strictly validated so a
   // buggy client can never write junk into the JSONB.
   if (action === "set_permissions") {
-    const PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice"];
+    const PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet"];
     const PERM_MODES = ["on", "pin", "off"];
     const patch = body?.permissions;
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing permissions object.");
