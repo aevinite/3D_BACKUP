@@ -290,6 +290,11 @@ const tableCountKey = () => { const r = panelRid(); return r ? "lfh_editor_table
 // and throws a clear error if the server reported a problem.
 const _inflightGET = new Map(); // coalesce concurrent identical GETs into ONE network hit
 async function api(method, path, body) {
+  // Writes go through the offline outbox (sent now if online, else saved + replayed
+  // on reconnect, at-most-once). GETs keep the in-flight-dedup fetch below.
+  if (method !== "GET" && window.LFH_OUTBOX) {
+    return window.LFH_OUTBOX.send({ base: "/api/editor", method, path: ridQ(path), body, panel: "editor" });
+  }
   const url = "/api/editor" + ridQ(path);
   // On boot the page's initial load AND the realtime connect BOTH kick off the same reads
   // (/summary, /all, /platform), so a single load fired each 3–4× — ~470 KB of duplicate

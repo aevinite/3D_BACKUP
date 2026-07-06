@@ -29,6 +29,11 @@ let view = localStorage.getItem("kds_view") === "wall" ? "wall" : "columns";
 const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
 const ridQ = (path) => PANEL_RID ? path + (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID) : path;
 const api = async (method, path, body) => {
+  // Writes go through the offline outbox (sent now if online, else saved + replayed
+  // on reconnect, at-most-once). GETs stay a plain fetch. Same contract as before.
+  if (method !== "GET" && window.LFH_OUTBOX) {
+    return window.LFH_OUTBOX.send({ base: "/api/kitchen", method, path: ridQ(path), body, panel: "kitchen" });
+  }
   const r = await fetch("/api/kitchen" + ridQ(path), { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
   const j = await r.json().catch(() => null);

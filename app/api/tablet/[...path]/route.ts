@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { withIdempotency } from "@/lib/idempotency";
 import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
@@ -240,7 +241,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 }
 
 // ── POST: place order / attend call / approve member / open session ──────────
-export async function POST(req: NextRequest, ctx: Ctx) {
+// Wrapped so a replayed offline action runs at most once (see lib/idempotency.ts).
+export const POST = withIdempotency(postImpl, "tablet");
+async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);

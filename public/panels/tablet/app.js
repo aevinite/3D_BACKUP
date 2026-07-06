@@ -76,6 +76,12 @@ const state = {
 const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
 const ridQ = (path) => PANEL_RID ? path + (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID) : path;
 const api = async (method, path, body) => {
+  // Writes go through the offline outbox: sent now if online, else saved on this
+  // device and replayed on reconnect (at-most-once via X-LFH-Action-Id). GETs stay
+  // a plain fetch. Same return/throw contract as before (see outbox.js send()).
+  if (method !== "GET" && window.LFH_OUTBOX) {
+    return window.LFH_OUTBOX.send({ base: "/api/tablet", method, path: ridQ(path), body, panel: "tablet" });
+  }
   const r = await fetch("/api/tablet" + ridQ(path), { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
   const j = await r.json().catch(() => null);

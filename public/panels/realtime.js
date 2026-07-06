@@ -30,6 +30,29 @@
   };
   window.__lfh_rt = metrics;
 
+  // ── connection status (drives the top-right green/yellow/red badge) ─────────
+  // Three human states the badge paints:
+  //   "online"  🟢  websocket subscribed → live updates are flowing.
+  //   "weak"    🟡  the device HAS internet but the live socket is connecting /
+  //                 errored / reconnecting (so updates may lag).
+  //   "offline" 🔴  the device has NO internet at all (navigator.onLine === false).
+  // Starts pessimistic ("weak") until the first SUBSCRIBED flips it green.
+  const statusListeners = new Set();
+  let connStatus = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : "weak";
+  metrics.status = connStatus;
+  function setStatus(s) {
+    if (s === connStatus) return;
+    connStatus = s; metrics.status = s;
+    statusListeners.forEach((fn) => { try { fn(s); } catch (e) {} });
+  }
+  // A hard device-level offline/online flips the badge INSTANTLY, before the
+  // websocket even notices. (The reconnect wake() inside start() is separate —
+  // this pair only moves the badge colour.)
+  if (typeof window !== "undefined") {
+    window.addEventListener("offline", () => setStatus("offline"));
+    window.addEventListener("online", () => { if (connStatus === "offline") setStatus("weak"); });
+  }
+
   async function getClient() {
     if (sbPromise) return sbPromise;
     sbPromise = (async () => {
@@ -124,8 +147,12 @@
               noteEvent(topic, payload && payload.new);
             })
           .subscribe((status) => {
-            if (status === "SUBSCRIBED") { metrics.subscribed++; if (everSubscribed) { metrics.reconnects++; fireAll(); } everSubscribed = true; }
-            else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") { metrics.errors++; }
+            if (status === "SUBSCRIBED") { metrics.subscribed++; setStatus("online"); if (everSubscribed) { metrics.reconnects++; fireAll(); } everSubscribed = true; }
+            // Only genuine socket faults downgrade the badge — NOT "CLOSED", which
+            // also fires on our own intentional teardown (idle/resubscribe) and would
+            // flash yellow on every tab-wake. A hard device drop is caught by the
+            // window "offline" listener above.
+            else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") { metrics.errors++; setStatus(navigator.onLine === false ? "offline" : "weak"); }
           })
       );
     };
@@ -134,6 +161,7 @@
       subscribe();
     } catch (e) {
       metrics.errors++; // realtime failed to boot — the backup poll keeps the panel alive
+      setStatus((typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : "weak");
     }
 
     // Catch anything missed while the tab slept / lost focus / dropped network, AND
@@ -170,5 +198,12 @@
     fireAll(); // initial load
   }
 
-  window.LFH_RT = { start, metrics };
+  window.LFH_RT = {
+    start, metrics,
+    // Current connection state: "online" | "weak" | "offline".
+    getStatus: () => connStatus,
+    // Subscribe to status changes. Fires once immediately with the current state,
+    // then on every change. Returns an unsubscribe fn.
+    onStatus: (cb) => { statusListeners.add(cb); try { cb(connStatus); } catch (e) {} return () => statusListeners.delete(cb); },
+  };
 })();

@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { withIdempotency } from "@/lib/idempotency";
 import { menuTag } from "@/lib/menuDataServer";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
@@ -665,7 +666,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 }
 
 // ── POST ─────────────────────────────────────────────────────────────────────
-export async function POST(req: NextRequest, ctx: Ctx) {
+// Wrapped so a replayed offline action runs at most once (see lib/idempotency.ts).
+export const POST = withIdempotency(postImpl, "editor");
+async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
@@ -1358,7 +1361,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 }
 
 // ── PATCH ────────────────────────────────────────────────────────────────────
-export async function PATCH(req: NextRequest, ctx: Ctx) {
+export const PATCH = withIdempotency(patchImpl, "editor");
+async function patchImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
@@ -1446,7 +1450,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 }
 
 // ── DELETE ───────────────────────────────────────────────────────────────────
-export async function DELETE(req: NextRequest, ctx: Ctx) {
+export const DELETE = withIdempotency(deleteImpl, "editor");
+async function deleteImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
