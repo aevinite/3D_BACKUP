@@ -53,6 +53,14 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
 
+// Friendly message for the banquet RPC's { ok:false, reason } (mig 130).
+const banquetErrMsg = (reason?: string) =>
+  reason === "not_allowed" ? "Banquet isn't enabled for this restaurant."
+  : reason === "empty_order" ? "Add at least one banquet line."
+  : reason === "unknown_item" ? "That banquet item no longer exists — reload and try again."
+  : reason === "bad_table" ? "Pick a valid table."
+  : (reason || "Couldn't create the banquet bill.");
+
 const nowIso = () => new Date().toISOString();
 // Mark an order as EDITED after it was placed → drives the persistent "✎ Edited"
 // badge on the kitchen/tablet/manager ticket so staff re-check what changed.
@@ -156,6 +164,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         higherView: actor === "admin" || actor === "owner",
         managerPermissions: r?.manager_permissions || {},
       });
+    }
+
+    // banquet/items — the banquet menu (mig 130). Manager-panel surface; only
+    // exists when the admin entitlement is on (renders nothing otherwise, and the
+    // place RPC re-checks server-side anyway). Includes inactive rows so the
+    // manager can toggle them back on.
+    if (p === "banquet/items") {
+      const flags = await sb.from("settings").select("banquet_allowed").eq("restaurant_id", rid).maybeSingle();
+      if (!(flags.data as { banquet_allowed?: boolean } | null)?.banquet_allowed) {
+        return err("Banquet isn't enabled for this restaurant.", 403);
+      }
+      const items = must(await sb.from("banquet_items")
+        .select("id,title,price,unit,sort_order,active").eq("restaurant_id", rid)
+        .order("sort_order").limit(200));
+      return ok({ items });
     }
 
     if (p === "all") {
@@ -694,6 +717,55 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       must(await sb.from("settings").update(patch).eq("restaurant_id", rid).select());
       await logAction("manager", "platform_toggle", { detail: JSON.stringify(patch), device_id: dev });
       return ok({ ok: true, ...patch });
+    }
+
+    // ── banquet (mig 130): item CRUD + bill generation. All rid-scoped; the
+    // entitlement is re-checked here (and again inside the place RPC) so a
+    // restaurant without the module can't be driven even by a forged client.
+    if (a === "banquet") {
+      const flags = await sb.from("settings").select("banquet_allowed").eq("restaurant_id", rid).maybeSingle();
+      if (!(flags.data as { banquet_allowed?: boolean } | null)?.banquet_allowed) {
+        return err("Banquet isn't enabled for this restaurant.", 403);
+      }
+      // banquet/item-save — create/update one banquet line ({ id?, title, price, unit, active, sort_order })
+      if (b === "item-save") {
+        if (!(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the banquet menu");
+        const title = String(body?.title || "").trim().slice(0, 120);
+        if (!title) return err("title required");
+        const price = Math.max(0, Math.min(1_000_000, Number(body?.price) || 0));
+        const unit = String(body?.unit ?? "per plate").trim().slice(0, 40);
+        const patch = { title, price, unit, active: body?.active !== false, sort_order: Math.round(Number(body?.sort_order) || 0) };
+        const row = body?.id
+          ? must(await sb.from("banquet_items").update(patch).eq("id", String(body.id)).eq("restaurant_id", rid).select("id,title,price,unit,sort_order,active"))[0]
+          : must(await sb.from("banquet_items").insert({ ...patch, restaurant_id: rid }).select("id,title,price,unit,sort_order,active"))[0];
+        if (!row) return err("banquet item not found", 404);
+        await logAction("manager", "banquet_item_save", { restaurant_id: rid, detail: `"${title}" ₹${price}`, device_id: dev });
+        return ok(row);
+      }
+      // banquet/item-delete — { id }
+      if (b === "item-delete") {
+        if (!(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the banquet menu");
+        must(await sb.from("banquet_items").delete().eq("id", String(body?.id || "")).eq("restaurant_id", rid).select("id"));
+        await logAction("manager", "banquet_item_delete", { restaurant_id: rid, device_id: dev });
+        return ok({ ok: true });
+      }
+      // banquet/place — { table, lines:[{id, qty}] } → a normal order lands on the
+      // table at 'served' (bill-only) and the existing billing flow takes over.
+      if (b === "place") {
+        const t = String(body?.table || "").trim();
+        if (!/^\d+$/.test(t)) return err("valid table required");
+        const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+        const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
+        if (tableCount > 0 && (Number(t) < 1 || Number(t) > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
+        const lines = Array.isArray(body?.lines) ? body.lines : [];
+        if (!lines.length) return err("lines required");
+        const { data, error } = await sb.rpc("lfh_banquet_place_order", { p_table: t, p_lines: lines, p_restaurant_id: rid });
+        if (error) throw new Error(error.message);
+        if (!(data as any)?.ok) return err(banquetErrMsg((data as any)?.reason), 400);
+        await logAction("manager", "banquet_place", { restaurant_id: rid, table_number: t, detail: `total ${(data as any)?.total}`, device_id: dev });
+        return ok(data);
+      }
+      return err("unknown banquet action", 404);
     }
 
     // orders/delete (bulk/clear) — keep settled bills.
