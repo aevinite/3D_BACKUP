@@ -7,6 +7,7 @@
 // Guests pass only { menu } so they never receive the 'ops' order firehose.
 import { useEffect, useRef } from "react";
 import { createClient, type SupabaseClient, type RealtimeChannel } from "@supabase/supabase-js";
+import { reportRealtime } from "@/lib/connectionStatus";
 
 type Topic = "ops" | "menu";
 type Handlers = Partial<Record<Topic, () => void | Promise<void>>>;
@@ -72,7 +73,12 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
               fire(topic);
             }
           )
-          .subscribe()
+          .subscribe((status: string) => {
+            // Feed the top-right connection light. Only genuine faults downgrade it;
+            // "CLOSED" is skipped (it also fires on our own idle/resubscribe teardown).
+            if (status === "SUBSCRIBED") reportRealtime("online");
+            else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") reportRealtime("weak");
+          })
       );
     };
     getClient().then((client) => {
