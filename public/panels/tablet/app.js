@@ -76,6 +76,12 @@ const state = {
 const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
 const ridQ = (path) => PANEL_RID ? path + (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID) : path;
 const api = async (method, path, body) => {
+  // Writes go through the offline outbox: sent now if online, else saved on this
+  // device and replayed on reconnect (at-most-once via X-LFH-Action-Id). GETs stay
+  // a plain fetch. Same return/throw contract as before (see outbox.js send()).
+  if (method !== "GET" && window.LFH_OUTBOX) {
+    return window.LFH_OUTBOX.send({ base: "/api/tablet", method, path: ridQ(path), body, panel: "tablet" });
+  }
   const r = await fetch("/api/tablet" + ridQ(path), { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
   const j = await r.json().catch(() => null);
@@ -104,8 +110,13 @@ const confirmDialog = (text, yesLabel = "Yes, send it") => new Promise((resolve)
   $("#confirmText").textContent = text;
   $("#confirmYes").textContent = yesLabel;
   $("#confirmOverlay").hidden = false;
-  $("#confirmYes").onclick = () => { $("#confirmOverlay").hidden = true; resolve(true); };
-  $("#confirmNo").onclick = () => { $("#confirmOverlay").hidden = true; resolve(false); };
+  // Register with the back-stack so the hardware/browser back button closes THIS
+  // dialog (as a cancel) instead of the layer underneath / the whole panel.
+  let off = null;
+  const finish = (val) => { $("#confirmOverlay").hidden = true; if (off) { off(); off = null; } resolve(val); };
+  off = window.LFH_BACK ? LFH_BACK.layer("tablet-confirm", () => finish(false)) : null;
+  $("#confirmYes").onclick = () => finish(true);
+  $("#confirmNo").onclick = () => finish(false);
 });
 
 // Ask for a MANAGER PIN (a self-contained modal so it needs nothing in the HTML).
@@ -131,7 +142,8 @@ const pinPrompt = (message, errText) => new Promise((resolve) => {
   const input = box.querySelector(".pp-in");
   const err = box.querySelector(".pp-err");
   setTimeout(() => input.focus(), 50);
-  const done = (val) => { ov.remove(); resolve(val); };
+  let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-pin", () => done(null)) : null;
+  const done = (val) => { if (backOff) { backOff(); backOff = null; } ov.remove(); resolve(val); };
   box.querySelector(".pp-cancel").onclick = () => done(null);
   box.querySelector(".pp-ok").onclick = () => {
     const v = input.value.trim();
@@ -363,7 +375,7 @@ const txray = (k) => (tperm(k) === "off" && tHigher() ? " xray-off" : "");
 // re-render after the slice lands. Mirrors the manager selecting a table. (owner 2026-06-27)
 async function selectTable(t) {
   state.table = String(t);
-  state.ordering = false; state.cart = []; state.note = ""; state.dishSearch = "";
+  state.ordering = false; state.cart = []; state.note = ""; state.allergies = ""; state.dishSearch = "";
   renderFloor(); renderPanel();         // instant feedback (selected tile highlights; detail fills in next)
   // Stacked (phone/narrow) layout: the detail sits below the floor — jump to it.
   if (window.matchMedia("(max-width: 760px)").matches) {
@@ -620,7 +632,8 @@ function openDishEditModal(itemId) {
   const addCustom = () => { const v = norm(input.value); if (v) working.add(v); input.value = ""; redraw(); input.focus(); };
   ov.querySelector(".dish-edit-customadd").onclick = addCustom;
   input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } };
-  const close = () => ov.remove();
+  let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-dish-edit", () => close()) : null;
+  const close = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); };
   ov.querySelector(".dish-edit-close").onclick = close;
   ov.querySelector(".dish-edit-cancel").onclick = close;
   ov.onclick = (e) => { if (e.target === ov) close(); };
@@ -697,7 +710,7 @@ function renderPanel() {
       ${billBox}
      </div>`;
     { const dc = $("#detailClose"); if (dc) dc.onclick = () => { state.table = null; renderPanel(); renderFloor(); }; }
-    $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
+    $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
     return;
   }
 
@@ -727,7 +740,14 @@ function renderPanel() {
     const remMark = r.removed_flag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : "";
     const note = r.note ? `<div class="iopt">“${esc(r.note)}”</div>` : "";
     const priceTag = r.price > 0 ? `<span class="iprice">${inr(r.price * r.qty)}</span>` : "";
-    const statusBadge = `<span class="ist ${r.status}">${STATUS_WORD[r.status] || r.status}</span>`;
+    // The status pill is TAPPABLE for real saved dishes that are past 'received' — one tap
+    // advances it (preparing→served / ready→served) or UNDOES a mis-tap (served→received).
+    // 'received' dishes stay a plain badge so they go through the order-level Accept flow,
+    // not a per-dish flip. (Was dead: the handler bound `.ist.tap[data-item]` but the markup
+    // never emitted the tap class / data-item, so tapping did nothing — fixed 2026-07-06.)
+    const statusBadge = (r.fromDb && r.status !== "received")
+      ? `<span class="ist tap ${r.status}" data-item="${esc(r.id)}" data-cur="${esc(r.status)}" title="Tap to change status">${STATUS_WORD[r.status] || r.status}</span>`
+      : `<span class="ist ${r.status}">${STATUS_WORD[r.status] || r.status}</span>`;
     const serveBtn = (r.fromDb && (r.status === "preparing" || r.status === "ready"))
       ? `<button class="ist-serve" data-serve="${esc(r.id)}" data-cur="${esc(r.status)}">✓ Serve</button>` : "";
     // Per-dish delete (only for real saved dishes, not served): removes the dish and
@@ -827,6 +847,7 @@ function renderPanel() {
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
       <button class="btn primary big" id="takeOrder">＋ Take order</button>
       ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
+      ${s && os.length ? `<button class="btn" id="moveOrderBtn">⇄ Move an order</button>` : ""}
       ${s && os.length ? `<button class="btn" id="restartTable">↻ Restart</button>` : ""}
       ${s && os.length && !invoiced && tshow("tablet_invoice") ? `<button class="btn${txray("tablet_invoice")}" id="genInvoiceBtn">🧾 Generate invoice</button>` : ""}
       ${s && os.length && a.unpaid && tshow("tablet_mark_paid") ? `<button class="btn pay${txray("tablet_mark_paid")}" id="payBill"${os.some((o) => o.status === "received") ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
@@ -916,6 +937,7 @@ function renderPanel() {
   }));
   const ob = $("#openTable"); if (ob) ob.onclick = () => optimisticOpen(t);
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
+  const mob = $("#moveOrderBtn"); if (mob && s) mob.onclick = () => renderMoveOrderPicker(t);   // was dead: renderMoveOrderPicker/Target existed but nothing opened them (fixed 2026-07-06)
   // Restart: clear this round's orders off the floor (they stay served+archived in
   // records) but keep the table OPEN for a fresh round. Mirrors the manager.
   const rsb = $("#restartTable"); if (rsb && s) rsb.onclick = async () => {
@@ -955,7 +977,7 @@ function renderPanel() {
     }
   };
   const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
+  $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
 }
 
 // Advance one dish new→cooking→served (wrapping). Optimistic so it feels instant.
@@ -987,14 +1009,61 @@ function advanceDish(id, cur) {
 // (one bulk call per order), then reconcile once after. Mirrors advanceDish above
 // and the manager's serveAllOrders/acceptTableOrders so it feels instant instead of
 // making the waiter wait on the network. (owner, 2026-06-18)
+// patchTileFromSlice(t): after an optimistic action mutates a table's cached SLICE
+// (state.data), recompute that table's TIER-1 summary tile from the slice and write it
+// back into state.summary.tiles — because an UN-selected floor tile renders from the
+// summary, not the slice (see tableAgg/tileState). Without this a floor quick-action
+// (Accept / Serve all / Mark paid) on a table you haven't opened left the tile showing
+// the OLD state until the ~2.5s reconcile/realtime round-trip (the "stale for ~1s then
+// refresh" owner flags). Mirrors optimisticOpen's explicit tile patch. The counting +
+// state precedence deliberately match tableAgg + tileState so the optimistic tile equals
+// what load() will reconcile to. (2026-07-06)
+function patchTileFromSlice(t) {
+  const tk = String(t);
+  const os = ordersOf(t), s = sessionOf(t);
+  let nw = 0, ck = 0, rd = 0, sv = 0, dueTot = 0, dueDisc = 0;
+  os.forEach((o) => {
+    if (o.status !== "cancelled" && o.status !== "received" && o.payment_status !== "paid") {
+      dueTot += Number(o.total) || 0; dueDisc += Number(o.discount) || 0;
+    }
+    dishRowsOf(o).forEach((r) => {
+      const q = r.qty || 1;
+      if (r.status === "served") sv += q; else if (r.status === "ready") rd += q; else if (r.status === "preparing") ck += q; else nw += q;
+    });
+  });
+  const due = Math.max(0, dueTot - dueDisc * (1 + effRate()));
+  const accepted = os.filter((o) => o.status !== "cancelled" && o.status !== "received");
+  const unpaid = accepted.some((o) => o.payment_status !== "paid");
+  const paid = !unpaid && accepted.some((o) => o.payment_status === "paid");
+  const hasOrders = os.length > 0;
+  let st, label;
+  if (nw > 0) { st = "new"; label = "New order"; }
+  else if (rd > 0) { st = "ready"; label = "Ready to serve"; }
+  else if (ck > 0) { st = "prep"; label = "Preparing"; }
+  else if (hasOrders && sv > 0) { st = unpaid ? "bill" : "done"; label = unpaid ? "Served" : "Cleared"; }
+  else if (s) { const g = membersOf(t).length; st = g ? "seated" : "waiting"; label = g ? "Seated" : "Open"; }
+  else if (reqsOf(t).length) { st = "req"; label = "Wants in"; }
+  else { st = "free"; label = "Free"; }
+  const tiles = Object.assign({}, state.summary.tiles || {});
+  tiles[tk] = Object.assign({}, tiles[tk] || {}, {
+    state: st, label,
+    counts: { nw, ck, rd, sv }, due,
+    pay: unpaid ? "red" : (paid ? "green" : ""),
+    hasNew: nw > 0,
+  });
+  state.summary = Object.assign({}, state.summary, { tiles });
+}
+
 function flipOrders(orderIds, { from, to, orderStatus }) {
   const items = state.data.items || [];
+  const touched = new Set();
   orderIds.forEach((oid) => {
     const o = (state.data.orders || []).find((x) => x.id === oid);
-    if (o) o.status = orderStatus;
+    if (o) { o.status = orderStatus; touched.add(String(o.table_number)); }
     items.forEach((it) => { if (it.order_id === oid && (from ? it.status === from : it.status !== "served")) it.status = to; });
     if (o && Array.isArray(o.items)) o.items = o.items.map((i) => ((from ? i.status === from : i.status !== "served") ? { ...i, status: to } : i));
   });
+  touched.forEach((t) => patchTileFromSlice(t));   // keep the UN-selected floor tile in sync
   lastSig = boardSig(state);           // adopt as baseline so a poll can't flicker it back
   renderFloor();
   if (!state.ordering) renderPanel();
@@ -1016,6 +1085,27 @@ function optimisticServeAll(orderIds) {
 
 // Shift the WHOLE party to another free table. Optimistic: move the tiles/labels
 // immediately, fire the RPC, then reconcile on the next load — no dead wait.
+// A picker renders INSIDE the centered detail popup (keeps .has-detail + .detail-pop, so it
+// never falls out below the floor on desktop — 2026-07-06) and registers its OWN back-stack
+// layer so the hardware/browser Back button steps back to the table detail, not out to the
+// floor. `onBack` is where ← / ✕ / Back / backdrop go.
+function renderPickerShell(titleHtml, bodyHtml, layerId, onBack) {
+  const p = $("#panel"); p.classList.add("has-detail");
+  let backOff = window.LFH_BACK ? LFH_BACK.layer(layerId, () => go()) : null;
+  const go = () => { if (backOff) { backOff(); backOff = null; } onBack(); };
+  p.innerHTML = `
+   <div class="detail-pop">
+    <button class="detail-x picker-back" type="button" aria-label="Back">✕</button>
+    <div class="phead"><div style="flex:1"><h2 style="margin:0;font-size:19px">${titleHtml}</h2></div></div>
+    <div class="detail-body">${bodyHtml}</div>
+   </div>`;
+  p.querySelector(".picker-back").onclick = go;
+  // Tap the dimmed area outside the card → back (consistent with every other tablet popup).
+  p.onclick = (e) => { if (e.target === p) go(); };
+  // Fire an action AND drop this picker's back layer first (renderPanel will replace the DOM).
+  return { dropLayer: () => { if (backOff) { backOff(); backOff = null; } } };
+}
+
 function renderShiftPicker(t, s) {
   const n = tableCount();
   const free = [];
@@ -1025,14 +1115,11 @@ function renderShiftPicker(t, s) {
   const btns = free.length
     ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">Table ${i}</button>`).join("")
     : `<div class="muted">No free tables to shift to.</div>`;
-  $("#panel").classList.remove("has-detail");
-  $("#panel").innerHTML = `
-    <div class="phead"><h2>Move Table ${esc(t)} →</h2><button class="btn small" id="shiftBack">← back</button></div>
-    <div class="muted small" style="margin-bottom:10px">Move this party — orders &amp; calls included — to a free table:</div>
-    <div class="shiftgrid">${btns}</div>`;
-  $("#shiftBack").onclick = renderPanel;
+  const body = `<div class="muted small" style="margin-bottom:10px">Move this party — orders &amp; calls included — to a free table:</div><div class="shiftgrid">${btns}</div>`;
+  const { dropLayer } = renderPickerShell(`Move Table ${esc(t)} →`, body, "tablet-shift-picker", renderPanel);
   document.querySelectorAll("[data-shiftto]").forEach((b) => (b.onclick = () => {
     const to = b.dataset.shiftto;
+    dropLayer();
     runOptimistic(
       () => { if (s) s.table_number = to; state.data.orders.forEach((o) => { if (String(o.table_number) === String(t)) o.table_number = to; }); state.table = to; },
       () => api("POST", `/sessions/${s.id}/shift`, { to }),
@@ -1041,16 +1128,12 @@ function renderShiftPicker(t, s) {
 }
 
 // Move a SINGLE order to another table's bill. Two taps: pick the order, pick the
-// target table.
+// target table. PAID / cancelled orders are excluded — settled revenue can't be re-homed.
 function renderMoveOrderPicker(t) {
-  const os = ordersOf(t);
+  const os = ordersOf(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled");
   const list = os.map((o, i) => `<button class="btn" style="text-align:left" data-pickorder="${esc(o.id)}">#${esc(o.kot_no ?? "—")} · Order ${i + 1} · ${inr(o.total)}</button>`).join("");
-  $("#panel").classList.remove("has-detail");
-  $("#panel").innerHTML = `
-    <div class="phead"><h2>Move an order</h2><button class="btn small" id="moveBack">← back</button></div>
-    <div class="muted small" style="margin-bottom:10px">Pick the order to move off Table ${esc(t)}:</div>
-    <div class="pactions">${list || `<div class="muted">No orders.</div>`}</div>`;
-  $("#moveBack").onclick = renderPanel;
+  const body = `<div class="muted small" style="margin-bottom:10px">Pick the order to move off Table ${esc(t)}:</div><div class="pactions">${list || `<div class="muted">No movable orders (paid bills can't be moved).</div>`}</div>`;
+  renderPickerShell("Move an order", body, "tablet-move-picker", renderPanel);
   document.querySelectorAll("[data-pickorder]").forEach((b) => (b.onclick = () => renderMoveOrderTarget(t, b.dataset.pickorder)));
 }
 function renderMoveOrderTarget(t, orderId) {
@@ -1061,13 +1144,11 @@ function renderMoveOrderTarget(t, orderId) {
     const st = tileState(i);
     tiles.push(`<button class="btn shiftpick" data-moveto="${i}">Table ${i}<br><span class="muted small">${st.label}</span></button>`);
   }
-  $("#panel").innerHTML = `
-    <div class="phead"><h2>Move order →</h2><button class="btn small" id="moveBack2">← back</button></div>
-    <div class="muted small" style="margin-bottom:10px">Send this order to which table's bill?</div>
-    <div class="shiftgrid">${tiles.join("")}</div>`;
-  $("#moveBack2").onclick = () => renderMoveOrderPicker(t);
+  const body = `<div class="muted small" style="margin-bottom:10px">Send this order to which table's bill?</div><div class="shiftgrid">${tiles.join("")}</div>`;
+  const { dropLayer } = renderPickerShell("Move order →", body, "tablet-move-target", () => renderMoveOrderPicker(t));
   document.querySelectorAll("[data-moveto]").forEach((b) => (b.onclick = () => {
     const to = b.dataset.moveto;
+    dropLayer();
     runOptimistic(
       () => { const o = state.data.orders.find((x) => x.id === orderId); if (o) o.table_number = to; },
       () => api("POST", `/orders/${orderId}/move`, { to }),
@@ -1153,7 +1234,10 @@ function optimisticOpen(table) {
 // + reconcile. runOptimistic's load() reverts on failure. (owner, 2026-06-20)
 function optimisticPay(t, method, note) {
   runOptimistic(
-    () => { state.data.orders.forEach((o) => { if (String(o.table_number) === String(t)) o.payment_status = "paid"; }); },
+    () => {
+      state.data.orders.forEach((o) => { if (String(o.table_number) === String(t)) o.payment_status = "paid"; });
+      patchTileFromSlice(t);   // flip the UN-selected floor tile to paid/no-due now, not after reconcile
+    },
     () => api("POST", `/tables/${t}/pay`, method ? { payment_method: method, payment_note: note || "" } : null),
   );
 }
@@ -1202,7 +1286,8 @@ function openPaymentMethodModal(due, label) {
     </div>`;
     document.body.appendChild(ov);
     let resolved = false;
-    const close = () => ov.remove();
+    let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-pay", () => cancel()) : null;
+    const close = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); };
     const finish = (method, note) => { resolved = true; close(); resolve({ method, note }); };
     const cancel = () => { close(); if (!resolved) resolve(null); };
     ov.querySelector(".pay-close").onclick = cancel;
@@ -1255,11 +1340,21 @@ function genInvoice(sid) {
 // self-contained modals (openDishEditModal, pinPrompt).
 function openDiscountModal(order) {
   document.querySelector(".disc-overlay")?.remove();
-  const total = Number(order.total) || 0;
-  const current = Number(order.discount) || 0;
+  const round2 = (n) => Math.round(n * 100) / 100;
+  const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
+  const total = Number(order.total) || 0;       // GROSS, tax-incl, BEFORE discount (orders.total)
+  const current = Number(order.discount) || 0;  // stored discount is a PRE-TAX rupee amount
+  const rate = effRate();
+  // Pre-tax food base this modal discounts. The stored discount is pre-tax and the bill is
+  // (total − discount×(1+rate)); computing "They pay" off the tax-INCLUSIVE total (the old bug,
+  // 2026-07-06) overstated it by discount×rate and mis-scaled the %. Mirror the manager's fix so
+  // the on-screen "They pay" == the floor-tile due == the printed bill.
+  const base = Math.max(0, round2(total / (1 + rate)));
+  const maxDisc = base; // can't discount more than the food's pre-tax value
+  const payFor = (d) => round2(Math.max(0, base - clamp(d, 0, base)) * (1 + rate));
   let mode = "pay"; // "pay" | "percent"
-  let payVal = total > 0 ? Math.max(0, total - current) : total;
-  let pctVal = total > 0 ? Math.round((current / total) * 1000) / 10 : 0;
+  let payVal = payFor(current);
+  let pctVal = base > 0 ? Math.round((clamp(current, 0, base) / base) * 1000) / 10 : 0;
 
   const ov = document.createElement("div");
   ov.className = "disc-overlay";
@@ -1302,19 +1397,18 @@ function openDiscountModal(order) {
   payInput.value = payVal ? String(payVal) : "";
   pctInput.value = pctVal ? String(pctVal) : "";
 
-  let discAmount = current;
-  const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
-  const round2 = (n) => Math.round(n * 100) / 100;
+  let discAmount = clamp(current, 0, maxDisc);
   const updatePreview = () => {
     if (mode === "pay") {
-      payVal = clamp(parseFloat(payInput.value), 0, total);
-      discAmount = round2(total - payVal);
+      // "They pay P" (tax-incl) → discount d = base − P/(1+rate), clamped to the food base.
+      const p = clamp(parseFloat(payInput.value), 0, payFor(0));
+      discAmount = clamp(round2(base - p / (1 + rate)), 0, maxDisc);
     } else {
-      pctVal = clamp(parseFloat(pctInput.value), 0, 100);
-      discAmount = round2((total * pctVal) / 100);
-      payVal = round2(total - discAmount);
+      const pct = clamp(parseFloat(pctInput.value), 0, 100);
+      discAmount = round2((base * pct) / 100);
     }
-    pctVal = total > 0 ? Math.round((discAmount / total) * 1000) / 10 : 0;
+    payVal = payFor(discAmount);
+    pctVal = base > 0 ? Math.round((discAmount / base) * 1000) / 10 : 0;
     ov.querySelector(".disc-prev-amt").textContent = "− " + inr(discAmount);
     ov.querySelector(".disc-prev-pct").textContent = pctVal + "% off";
     ov.querySelector(".disc-prev-pay").textContent = inr(payVal);
@@ -1334,7 +1428,8 @@ function openDiscountModal(order) {
   payInput.oninput = updatePreview;
   pctInput.oninput = updatePreview;
 
-  const close = () => ov.remove();
+  let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-discount", () => close()) : null;
+  const close = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); };
   ov.querySelector(".disc-close").onclick = close;
   ov.querySelector(".disc-cancel-btn").onclick = close;
   ov.onclick = (e) => { if (e.target === ov) close(); };
@@ -1621,7 +1716,7 @@ function orderCartHtml() {
   return `<div class="cart">
       <h3>This order</h3>
       <div class="cart-lines">${lines || `<div class="muted">Tap dishes to add them.</div>`}</div>
-      <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Allergies / notes for the kitchen (e.g. nuts, less ice) — whole order" value="${esc(state.allergies || "")}">
+      <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Allergies to avoid in ALL dishes (e.g. nuts, dairy) — whole order" value="${esc(state.allergies || "")}">
       <div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
       <div class="muted small">Final bill (incl. tax) is computed by the system when you send it.</div>
       <button class="btn primary big" id="sendOrder" ${state.cart.length ? "" : "disabled"}>SEND TO KITCHEN</button>
@@ -1645,8 +1740,11 @@ function updateOrderCart() {
     const d = l && state.data.dishes.find((x) => x.id === l.id);
     if (d) renderDishOptions(d, +b.dataset.edit);
   }));
-  // The separate kitchen-note field was removed (owner, 2026-07-03 — allergy covers it);
-  // the allergy box now doubles as the whole-order note-to-kitchen.
+  // ONE box, ALLERGY-only (owner, 2026-07-06). Its text is the whole-order avoid list
+  // applied to every dish ("no X" on each line + "⚠ AVOID" on the KOT) — so it must NOT
+  // be used for free-text notes (a note like "birthday cake" would read as "no birthday
+  // cake"). The label is worded allergen-only to steer waiters away from notes; per-dish
+  // notes go through the ✎ Edit modal instead.
   const al = c.querySelector("#orderAllergy"); if (al) al.oninput = (e) => (state.allergies = e.target.value);
   const send = c.querySelector("#sendOrder"); if (send) send.onclick = sendOrder;
 }
@@ -1657,6 +1755,7 @@ let voBackOff = null;   // the view-order screen's own back step (peels to the d
 function exitOrderMode() {
   if (voBackOff) { voBackOff(); voBackOff = null; }   // drop the view-order back step if it's up
   state.ordering = false; state.addToOrderId = null; state._omTop = 0; state.viewOrder = false;
+  state.cart = []; state.allergies = "";   // abandoning an order clears its cart + allergy list (no leak to the next table)
   renderPanel();
 }
 // Back / ← Menu from the view-order screen → the dish LIST (one step), not out of the order.

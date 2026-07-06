@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import NavPicker from "./NavPicker";
+import ConnectionBadge from "./ConnectionBadge";
 // Per-restaurant feature switches: currency/language pickers can be turned off.
 import { useFeatures } from "@/lib/features";
 import { useRestaurantId } from "@/lib/restaurant-context";
@@ -148,6 +149,8 @@ export default function Header({ logoText }: { logoText?: string }) {
       </div>
       {/* Right: all the action buttons (currency, language, theme, cart). */}
       <div className="nav-actions">
+        {/* Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline). */}
+        <ConnectionBadge />
         {/* Currency dropdown: button shows the current symbol; the list lets
             the guest pick another. onSelect calls setCurrency to switch.
             Gone when the currency feature is off (₹-only menu). */}

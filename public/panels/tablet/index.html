@@ -71,6 +71,10 @@
   </div>
   <script src="/panels/maint.js"></script>
   <script src="/panels/realtime.js"></script>
+  <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
+  <script src="/panels/outbox.js?v=1"></script>
+  <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
+  <script src="/panels/connbadge.js?v=2"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js"></script>
   <script src="app.js?v=20260706d"></script>

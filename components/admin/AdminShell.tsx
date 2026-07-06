@@ -8,6 +8,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import ConnectionBadge from "@/components/ConnectionBadge";
 
 type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean };
 type NavGroup = { label: string; items: NavItem[]; quiet?: boolean };
@@ -90,7 +91,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       <div className="adm-body">
         <header className="adx-top">
           <RestaurantSwitcher />
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            <ConnectionBadge />
             <button className="adm-icnbtn" onClick={toggleSkin} title={skin === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">
               <i className={`fas ${skin === "dark" ? "fa-sun" : "fa-moon"}`} aria-hidden="true" />
             </button>

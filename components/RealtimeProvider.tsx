@@ -12,6 +12,7 @@ import { useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { intendedTable } from "@/lib/tableConnection";
 import { useRestaurantId } from "@/lib/restaurant-context";
+import { reportRealtime } from "@/lib/connectionStatus";
 
 type GuestMetrics = { events: number; ticks: number; reconnects: number; lastEventAt: number; topic: string | null };
 
@@ -62,6 +63,9 @@ export default function RealtimeProvider() {
             metrics.events++; metrics.lastEventAt = Date.now(); tick();
           })
         .subscribe((status) => {
+          // Feed the top-right connection light (only real faults downgrade it).
+          if (status === "SUBSCRIBED") reportRealtime("online");
+          else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") reportRealtime("weak");
           if (status === "SUBSCRIBED") { if (everSubscribed) { metrics.reconnects++; tick(); } everSubscribed = true; }
         });
     };

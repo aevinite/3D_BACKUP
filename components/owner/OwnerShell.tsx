@@ -9,6 +9,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { inr } from "@/components/admin/shared";
 import { useBackClose } from "@/lib/backStack";
+import ConnectionBadge from "@/components/ConnectionBadge";
 
 type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean; ent?: string };
 type NavGroup = { label: string; quiet?: boolean; items: NavItem[] };
@@ -246,7 +247,8 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
           <span className="owx-scope">
             <span className="dot" aria-hidden="true" /> {adminViewing ? shownName : "Owner overview"}
           </span>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            <ConnectionBadge />
             <button className="adm-icnbtn" onClick={toggleSkin} title={skin === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">
               <i className={`fas ${skin === "dark" ? "fa-sun" : "fa-moon"}`} aria-hidden="true" />
             </button>
