@@ -1186,6 +1186,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       // authenticated staff could PATCH the settings row. (2026-07-04 audit #4)
       if (a === "settings" && !(await managerCan(g, rid, "edit_settings"))) return permDenied("change settings");
       if (a === "settings" && body && typeof body === "object") {
+        // settings is ONE row per restaurant (UNIQUE restaurant_id) whose PRIMARY KEY id is
+        // legacy ('site' for #1, the slug for others). It must NEVER come from the client:
+        // the retention save sent id:'site', which collided with #1's PK on every OTHER
+        // restaurant and 500'd the save (2026-07-06). Always use the EXISTING row's real id
+        // (looked up by restaurant_id) so the upsert UPDATEs the right row; for a brand-new
+        // restaurant with no row yet, fall back to the restaurant id (guaranteed unique, so
+        // the INSERT can't collide with 'site').
+        const existingSet = (await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle()).data as { id?: string } | null;
+        (body as Record<string, unknown>).id = existingSet?.id || rid;
         // Admin-only ENTITLEMENTS (mig 107, e.g. auto_print_kot_allowed) are granted ONLY
         // from the admin panel (/aevinite). Strip them here so a manager/owner can't
         // self-grant an entitlement the admin controls. Any `*_allowed` flag is admin-only.

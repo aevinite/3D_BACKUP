@@ -3377,8 +3377,10 @@ function retentionControl(which) {
 async function saveRetention(which, val) {
   const days = Math.min(Math.max(parseInt(val, 10) || 90, 1), 90);
   try {
-    await api("POST", "/settings", { id: "site", [which]: days });
-    state.data.settings = { ...(state.data.settings || { id: "site" }), [which]: days };
+    // No id here — the server keys settings by restaurant_id and fills the row's real id
+    // itself. (Sending the legacy id:"site" used to collide with #1's PK on other tenants.)
+    await api("POST", "/settings", { [which]: days });
+    state.data.settings = { ...(state.data.settings || {}), [which]: days };
     const lbl = (RETENTION_OPTS.find((o) => o.d === days) || {}).label || days + " days";
     toast("Saved — old logs auto-delete after " + lbl, "ok");
   } catch (e) {
