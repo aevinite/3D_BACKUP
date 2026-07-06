@@ -5,7 +5,7 @@
 // (scoped by restaurant_id), so the change shows ONLY on that restaurant's guest
 // menu (/r/<slug>/menu). Mirrors the single-restaurant Features tab's UI + the
 // .adm-* styling, parameterised by restaurant.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { splitBrandSegments, stripBrandMarkers } from "@/lib/brandText";
 import { openRestaurantPanel } from "@/components/admin/shared";
 import RestaurantReport from "@/components/admin/RestaurantReport";
@@ -165,7 +165,10 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
   const [seedMenu, setSeedMenu] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [done, setDone] = useState<{ name: string; slug: string; logins: { panel: string; username: string; password: string }[]; menuSeeded?: boolean; seedError?: string | null } | null>(null);
+  const [done, setDone] = useState<{ name: string; slug: string; logins: { panel: string; username: string; password: string }[]; loginErrors?: string[]; menuSeeded?: boolean; seedError?: string | null } | null>(null);
+  // Synchronous re-entry guard (bug #12, 2026-07-06): `busy` only disables the button
+  // after a re-render, so a fast double-click fired two creates → a duplicate "-2" tenant.
+  const creatingRef = useRef(false);
 
   const PANELS = [
     { key: "manager", label: "Manager panel" }, { key: "kitchen", label: "Kitchen display" },
@@ -173,8 +176,10 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
   ];
 
   const create = async () => {
+    if (creatingRef.current) return; // block a fast second click before `busy` re-renders
     if (name.trim().length < 2) { setMsg("Enter a name (at least 2 characters)."); return; }
     if (!Object.values(panels).some(Boolean)) { setMsg("Turn on at least one panel."); return; }
+    creatingRef.current = true;
     setBusy(true); setMsg(null);
     try {
       const r = await fetch("/api/admin/restaurants", {
@@ -182,10 +187,10 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
         body: JSON.stringify({ action: "create_restaurant", name: name.trim(), panels, seedMenu }),
       });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't create the restaurant.");
-      setDone({ name: d.name, slug: d.slug, logins: d.logins || [], menuSeeded: d.menuSeeded, seedError: d.seedError });
+      setDone({ name: d.name, slug: d.slug, logins: d.logins || [], loginErrors: d.loginErrors || [], menuSeeded: d.menuSeeded, seedError: d.seedError });
       setName(""); setPanels({ manager: true, kitchen: true, tablet: true, owner: false }); setSeedMenu(true);
       onCreated();
-    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); creatingRef.current = false; }
   };
 
   if (!open) {
@@ -253,6 +258,11 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
               </div>
             </>
           ) : <span> No panels were enabled.</span>}
+          {done.loginErrors && done.loginErrors.length > 0 && (
+            <p className="hint" style={{ margin: "8px 0 0", color: "var(--adm-bad, #c0392b)" }}>
+              ⚠ Couldn&rsquo;t create a login for: <b>{done.loginErrors.join(", ")}</b>. Those panels are on but have no sign-in yet — add a user for them in Users.
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -702,16 +712,16 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
           </div>
           <label className="adm-btn" style={{ cursor: logoBusy ? "default" : "pointer" }}>
             <i className="fas fa-upload" style={{ marginRight: 6 }} aria-hidden="true" />{logoBusy ? "Uploading…" : "Upload logo image"}
-            <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" disabled={logoBusy} style={{ display: "none" }}
+            <input type="file" accept="image/png,image/jpeg,image/webp" disabled={logoBusy} style={{ display: "none" }}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadLogo(f); e.target.value = ""; }} />
           </label>
           {logoUrl && <button className="adm-btn" disabled={logoBusy} onClick={removeLogo}>Remove logo</button>}
           {logoMsg && <span className="adm-muted" style={{ fontSize: 12 }}>{logoMsg}</span>}
         </div>
-        <p className="hint" style={{ margin: 0 }}>PNG / JPG / WEBP / SVG, up to 1 MB. Shows on the opening screen and next to the search bar.</p>
-        <label style={{ fontSize: 12 }}>Logo text (header + opening screen)<input value={logoText} placeholder={restaurant.name} disabled={busy} onChange={(e) => setLogoText(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
-        <label style={{ fontSize: 12 }}>Hero title<input value={hero} placeholder="Our Menu" disabled={busy} onChange={(e) => setHero(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
-        <label style={{ fontSize: 12 }}>Greeting / tagline<input value={tagline} placeholder="Welcome" disabled={busy} onChange={(e) => setTagline(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
+        <p className="hint" style={{ margin: 0 }}>PNG / JPG / WEBP, up to 1 MB. Shows on the opening screen and next to the search bar.</p>
+        <label style={{ fontSize: 12 }}>Logo text (header + opening screen)<input value={logoText} maxLength={60} placeholder={restaurant.name} disabled={busy} onChange={(e) => setLogoText(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
+        <label style={{ fontSize: 12 }}>Hero title<input value={hero} maxLength={120} placeholder="Our Menu" disabled={busy} onChange={(e) => setHero(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
+        <label style={{ fontSize: 12 }}>Greeting / tagline<input value={tagline} maxLength={80} placeholder="Welcome" disabled={busy} onChange={(e) => setTagline(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14 }}>

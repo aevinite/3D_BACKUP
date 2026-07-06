@@ -99,6 +99,14 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
     return () => { dead = true; };
   }, [ridPin]);
 
+  // Banner name must match THIS tab, not the browser-wide act-as cookie (bug #10,
+  // 2026-07-06): with two admin owner-tabs open, the cookie holds the last-opened
+  // restaurant, so tab A's banner showed tab B's name over tab A's (correctly
+  // ?rid-scoped) numbers. When this tab is pinned (?rid), prefer the name of the
+  // pinned restaurant from the already-fetched list; fall back to the server prop.
+  const pinnedName = ridPin ? myRests.find((r) => r.id === ridPin)?.name : undefined;
+  const shownName = pinnedName || restaurantName;
+
   // Open one restaurant's dashboard from anywhere: on /owner the dashboard listens
   // for this event (no reload); from any other page we navigate home with ?focus=.
   const openRestaurant = (rid: string | null) => {
@@ -202,7 +210,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                   /owner silently re-entered it (fixed 2026-07-06). */}
               <a href="/aevinite/restaurants" onClick={(e) => { e.preventDefault(); exitAdminView(); }}>Restaurants</a>
               <i className="fas fa-chevron-right sep" aria-hidden="true" />
-              <span className="cur">{restaurantName}</span>
+              <span className="cur">{shownName}</span>
               <i className="fas fa-chevron-right sep" aria-hidden="true" />
               <span className="cur">Owner panel</span>
             </nav>
@@ -236,7 +244,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
         )}
         <header className="owx-top">
           <span className="owx-scope">
-            <span className="dot" aria-hidden="true" /> {adminViewing ? restaurantName : "Owner overview"}
+            <span className="dot" aria-hidden="true" /> {adminViewing ? shownName : "Owner overview"}
           </span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             <button className="adm-icnbtn" onClick={toggleSkin} title={skin === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">

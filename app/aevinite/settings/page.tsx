@@ -2,6 +2,7 @@
 // Admin · Settings — the owner-only switches that aren't features: the guest-menu
 // maintenance mode, how long logs are kept, and the restaurant identity.
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 
 const RET_OPTS = [{ d: 7, label: "7 days" }, { d: 30, label: "1 month" }, { d: 90, label: "3 months" }];
 
@@ -10,12 +11,16 @@ export default function AdminSettings() {
   const [ret, setRet] = useState<{ oplog_retention_days: number; custlog_retention_days: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  // Load-error flags so a failed fetch shows a Retry instead of a button stuck on "…"
+  // / dropdowns disabled forever (bug #7, 2026-07-06).
+  const [maintErr, setMaintErr] = useState(false);
+  const [retErr, setRetErr] = useState(false);
 
   const loadMaint = useCallback(async () => {
-    try { const j = await (await fetch("/api/admin/overview", { cache: "no-store" })).json(); if (!j.error) setMaint(!!j.maintenance); } catch {}
+    try { const j = await (await fetch("/api/admin/overview", { cache: "no-store" })).json(); if (j.error) setMaintErr(true); else { setMaint(!!j.maintenance); setMaintErr(false); } } catch { setMaintErr(true); }
   }, []);
   const loadRet = useCallback(async () => {
-    try { const j = await (await fetch("/api/admin/settings", { cache: "no-store" })).json(); if (!j.error) setRet(j); } catch {}
+    try { const j = await (await fetch("/api/admin/settings", { cache: "no-store" })).json(); if (j.error) setRetErr(true); else { setRet(j); setRetErr(false); } } catch { setRetErr(true); }
   }, []);
   useEffect(() => { loadMaint(); loadRet(); }, [loadMaint, loadRet]);
 
@@ -40,7 +45,7 @@ export default function AdminSettings() {
       const r = await fetch("/api/admin/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [which]: val }) });
       if (!r.ok) throw new Error();
       setMsg("Saved — old logs auto-delete after the chosen window.");
-    } catch { setMsg("Couldn't save that just now."); }
+    } catch { setMsg("Couldn't save that just now."); loadRet(); /* revert the dropdown to server truth (bug #15) */ }
   };
 
   return (
@@ -50,17 +55,22 @@ export default function AdminSettings() {
 
       <div className="adm-grid2" style={{ marginBottom: 14 }}>
         <div className="adm-card">
-          <h2>Guest menu</h2>
-          <p className="hint">Take the guest menu offline with a &ldquo;we&rsquo;ll be right back&rdquo; screen. Staff panels keep working.</p>
-          <button className={`adm-btn ${maint ? "ok" : "danger"}`} style={{ width: "100%" }} disabled={maint === null || busy} onClick={toggleMaint}>
-            {maint === null ? "…" : maint ? "Bring menu back online" : "Take menu offline"}
-          </button>
-          {maint && <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>⚠ The menu is currently offline.</p>}
+          <h2>Guest menu · <span className="adm-muted">My Little French House</span></h2>
+          <p className="hint">Puts the <b>flagship restaurant&rsquo;s</b> guest menu behind a &ldquo;we&rsquo;ll be right back&rdquo; screen. Staff panels keep working. To take <b>another</b> restaurant offline, open it in Restaurants and use <b>Suspend</b>.</p>
+          {maintErr ? (
+            <button className="adm-btn" style={{ width: "100%" }} onClick={loadMaint}>Couldn&rsquo;t load — Retry</button>
+          ) : (
+            <button className={`adm-btn ${maint ? "ok" : "danger"}`} style={{ width: "100%" }} disabled={maint === null || busy} onClick={toggleMaint}>
+              {maint === null ? "…" : maint ? "Bring menu back online" : "Take menu offline"}
+            </button>
+          )}
+          {maint && !maintErr && <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>⚠ The flagship menu is currently offline.</p>}
         </div>
 
         <div className="adm-card">
-          <h2>Log retention</h2>
-          <p className="hint">Logs older than this are deleted automatically each night. Bills are never touched.</p>
+          <h2>Log retention <span className="adm-muted">· platform-wide</span></h2>
+          <p className="hint">Applies to the admin activity &amp; customer logs across all restaurants. Older entries are deleted automatically each night. Bills are never touched.</p>
+          {retErr && <p className="adm-muted" style={{ fontSize: 12, marginBottom: 8 }}>Couldn&rsquo;t load retention. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={loadRet}>Retry</button></p>}
           <div style={{ display: "grid", gap: 12 }}>
             <label className="adm-ret" style={{ justifyContent: "space-between" }}>
               <span>Operations log</span>
@@ -80,16 +90,11 @@ export default function AdminSettings() {
       </div>
 
       <div className="adm-card">
-        <h2>Restaurant</h2>
-        <p className="hint">This control room currently manages one restaurant. Managing several from here is coming later.</p>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 12, border: "var(--border)", background: "var(--bg)" }}>
-          <span style={{ width: 34, height: 34, borderRadius: 10, background: "var(--accent-grad, var(--accent))", display: "grid", placeItems: "center" }}>🏠</span>
-          <div style={{ flex: 1 }}>
-            <b>My Little French House</b>
-            <div className="adm-muted" style={{ fontSize: 12 }}>All-Day Café &amp; Bakery</div>
-          </div>
-          <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-ok) 20%, transparent)", color: "var(--adm-ok)" }}>active</span>
-        </div>
+        <h2>Restaurants</h2>
+        <p className="hint">Each restaurant&rsquo;s identity, branding, guest features, panels and suspend/delete are managed on its own page.</p>
+        <Link href="/aevinite/restaurants" className="adm-btn" style={{ display: "inline-flex", marginTop: 4 }}>
+          Manage restaurants
+        </Link>
       </div>
     </>
   );

@@ -51,13 +51,20 @@ export async function requirePanel(role: Role, next: string): Promise<void> {
 // Returns the rid to forward into the panel iframe for a VERIFIED admin view, else
 // null — so a staff login that hand-adds ?rid= gets it stripped (the API already
 // ignored it for staff; stripping keeps the iframe's admin path bar honest too).
+// A restaurant id is a uuid. A hand-typed ?rid that isn't one (bug #17, 2026-07-06)
+// used to be forwarded raw, pinning the iframe to a non-existent restaurant → a blank
+// panel. Reject the malformed value up front (no DB read on this hot path) and bounce
+// to the console. (A well-formed-but-unknown uuid still just shows empty data — a far
+// rarer, admin-only, self-inflicted case not worth a per-request existence read.)
+const RID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function panelAdminRid(role: Role, rid: string | undefined): Promise<string | null> {
   const store = await cookies();
   const u = await userFromCookie(store.get(USER_COOKIE)?.value);
   if (u && u.role === role) return null; // real staff login — the layout already vetted them
   if (await tokenIsValid(store.get(AUTH_COOKIE)?.value)) {
-    if (rid) return rid;
-    redirect("/aevinite"); // admin, but no restaurant named for THIS tab
+    if (rid && RID_RE.test(rid)) return rid;
+    redirect("/aevinite"); // admin, but no (valid) restaurant named for THIS tab
   }
   return null; // not staff, not admin — the layout gate already bounced them to /login
 }
