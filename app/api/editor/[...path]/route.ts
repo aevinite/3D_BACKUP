@@ -1231,6 +1231,20 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           }
           body.table_seats = clean;
         }
+        // table_names (mig 131) — display labels per table. Trimmed, capped at 24
+        // chars; blank entries are dropped (the panel falls back to "T<n>").
+        if ("table_names" in body) {
+          const raw = body.table_names;
+          const clean: Record<string, string> = {};
+          if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+            for (const [k, v] of Object.entries(raw)) {
+              const tn = parseInt(k, 10);
+              const name = String(v ?? "").trim().slice(0, 24);
+              if (Number.isFinite(tn) && tn >= 1 && name) clean[String(tn)] = name;
+            }
+          }
+          body.table_names = clean;
+        }
       }
       if (a === "items" && body && typeof body === "object") {
         const slugify = (s: string) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");

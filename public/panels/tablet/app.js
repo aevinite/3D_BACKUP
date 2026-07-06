@@ -332,6 +332,10 @@ function needsAttention(i) {
 }
 
 function tableCount() { return Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12); }
+// tableLabel(t): the table's display name (mig 131) with the number kept alongside,
+// else "Table t". Display-only — bills/KOTs/ids all keep the number.
+const tname = (t) => (((state.data.settings || {}).table_names || {})[String(t)] || "").trim();
+const tableLabel = (t) => { const n = tname(t); return n ? `${n} (T${t})` : `Table ${t}`; };
 // Is table i OPEN (has a dining session / live orders)? Read from the summary tile state so it
 // works for EVERY tile, not just the loaded one — "free" and "req" are the only not-open states.
 function tileIsOpen(i) {
@@ -422,7 +426,7 @@ function tileHtml(i) {
   }
   return `<button class="tile t-${st.cls} ${payCls} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
       <span class="tbadges">${calls.length ? `<em class="b-call" title="${esc(calls.map((c) => c.note || "call").join(", "))}">${[...new Set(calls.map((c) => callIcon(c.note)))].join("")}</em>` : ""}${reqsN ? `<em class="b-req">📨${reqsN}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
-      <span class="tnum">${i}</span>
+      <span class="tnum" ${tname(i) ? `title="T${i}"` : ""}>${esc(tname(i) || i)}</span>
       <span class="tlabel">${st.label}</span>
       ${body}
     </button>`;
@@ -670,7 +674,7 @@ function renderPanel() {
      <div class="detail-pop">
       <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
       <div class="phead">
-        <div style="flex:1"><h2 style="margin:0;font-size:19px">Table ${esc(t)}</h2><div class="pmeta">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${dishN ? `${dishN} dish${dishN === 1 ? "" : "es"}` : "opening…"}</div></div>
+        <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${dishN ? `${dishN} dish${dishN === 1 ? "" : "es"}` : "opening…"}</div></div>
         <span class="live">● open</span>
       </div>
       <div class="detail-body">
@@ -797,7 +801,7 @@ function renderPanel() {
    <div class="detail-pop">
     <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
     <div class="phead">
-      <div style="flex:1"><h2 style="margin:0;font-size:19px">Table ${esc(t)}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"}` : "closed"}</div></div>
+      <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"}` : "closed"}</div></div>
       <button class="btn small backtop" id="backTop">↑ Tables</button>
       ${s ? `<span class="live">● open</span>` : `<span class="off">closed</span>`}
     </div>
@@ -1666,7 +1670,7 @@ function renderViewOrder() {
     <div class="om lite vieworder">
       <div class="om-head">
         <button class="btn small" id="voBack">← Menu</button>
-        <h2>Your order · Table ${esc(state.table)}</h2>
+        <h2>Your order · ${esc(tableLabel(state.table))}</h2>
       </div>
       <div class="om-voscroll">
         <aside class="om-cart" id="omCart"></aside>
@@ -1693,7 +1697,7 @@ function renderOrderMode() {
   p.innerHTML = `
     <div class="om lite">
       <div class="om-head">
-        <h2>${addMode ? "Add · " : ""}Table ${esc(state.table)}</h2>
+        <h2>${addMode ? "Add · " : ""}${esc(tableLabel(state.table))}</h2>
         <input type="search" id="dishSearch" class="order-search om-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">
         <button class="btn small ${addMode ? "primary" : ""}" id="omExit">${addMode ? "✓ Done" : "← back"}</button>
       </div>

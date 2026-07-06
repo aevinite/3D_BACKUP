@@ -910,6 +910,14 @@ function userSettingCardHtml() {
   </div>`;
 }
 
+// tableLabel(t): what staff panels CALL table t — its display name (mig 131) with
+// the number kept alongside, else the plain "Table t". Display-only; every id/bill
+// still uses the number.
+function tableLabel(t) {
+  const nm = (((state.data.settings || {}).table_names || {})[String(t)] || "").trim();
+  return nm ? `${nm} (T${t})` : `Table ${t}`;
+}
+
 // tableSeatingCardHtml: the "Table setting" card — how many people can sit at EACH
 // table (owner request, 2026-07-01). One small number input per table, backed by the
 // table_seats JSONB column (migration 111) keyed by table number. Falls back to 4 when
@@ -919,20 +927,26 @@ function userSettingCardHtml() {
 function tableSeatingCardHtml(s) {
   const n = Math.max(1, parseInt(s.table_count, 10) || 12);
   const seats = s.table_seats && typeof s.table_seats === "object" ? s.table_seats : {};
+  const names = s.table_names && typeof s.table_names === "object" ? s.table_names : {};
   let cells = "";
   for (let i = 1; i <= n; i++) {
+    // Name (mig 131, display-only) + seat count (mig 111) per table — one cell each.
     cells += `<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:8px;background:var(--panel-2)">
       <span style="font-weight:700;font-size:13px;min-width:26px">T${i}</span>
-      <input type="number" min="1" max="30" data-path="table_seats.${i}" value="${esc(seats[String(i)] ?? 4)}"
+      <input type="text" maxlength="24" data-path="table_names.${i}" value="${esc(names[String(i)] ?? "")}" placeholder="Name"
+        title='A display name for this table (e.g. "Banquet") — bills and QR codes keep the number'
+        style="flex:1;min-width:0;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text)"/>
+      <input type="number" min="1" max="30" data-path="table_seats.${i}" value="${esc(seats[String(i)] ?? 4)}" title="Seats"
         style="width:56px;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text)"/>
     </div>`;
   }
   return `<div class="card"><h3>Table setting</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      How many people can sit at each table. Shows next to the chair icon on the floor
-      map and the tablet — a table with nothing set here defaults to 4.
+      Each table's <b>name</b> (optional — e.g. the last table as "Banquet"; tiles and
+      table views show it, while bills &amp; QR codes keep the number) and how many
+      people can sit there (shows next to the chair icon; nothing set = 4).
     </p>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;max-height:340px;overflow-y:auto;padding-right:4px">${cells}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;max-height:340px;overflow-y:auto;padding-right:4px">${cells}</div>
   </div>`;
 }
 
@@ -4024,9 +4038,12 @@ function floorTileHtml(i) {
   // person can sit"), from the table_seats setting (migration 111); no entry → 4.
   const seats = (s.table_seats || {})[String(i)] || 4;
   const offIcon = st === "free" ? `<div class="ft-officon" aria-hidden="true"><i class="fas fa-chair"></i><span>${seats}</span></div>` : "";
+  // Display name (mig 131): the tile badge shows the name when one is set — the
+  // number stays in the tooltip (and everywhere data lives).
+  const tnm = ((s.table_names || {})[String(i)] || "").trim();
   return `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0">
         ${offIcon}
-        <div class="ft-top"><span class="ft-num">${i}</span>${badges ? `<span class="ft-badges">${badges}</span>` : ""}</div>
+        <div class="ft-top"><span class="ft-num" ${tnm ? `title="T${i}"` : ""}>${esc(tnm || i)}</span>${badges ? `<span class="ft-badges">${badges}</span>` : ""}</div>
         <div class="ft-label">${esc(label)}</div><div class="ft-meta">${esc(meta)}</div>${strip}
         ${quick ? `<div class="ft-quick">${quick}</div>` : ""}</div>`;
 }
@@ -4255,7 +4272,7 @@ function floorHtml() {
     const floatBtn = alreadyFloating ? "" : `<button class="tp-detail-float" data-float-open="${esc(t)}" title="Pop out as a movable floating window">⤢ Float</button>`;
     sideInner = `<div class="tp-detail" data-table-detail="${esc(t)}">
         <div class="tp-detail-head">
-          <div class="tp-detail-top"><h3>Table ${esc(t)}</h3>${headPill}${floatBtn}<button class="tp-detail-close" id="tpDetailClose" aria-label="Back to floor controls" title="Back to floor controls">✕</button></div>
+          <div class="tp-detail-top"><h3>${esc(tableLabel(t))}</h3>${headPill}${floatBtn}<button class="tp-detail-close" id="tpDetailClose" aria-label="Back to floor controls" title="Back to floor controls">✕</button></div>
           ${headMeta}
         </div>
         <div class="tp-detail-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div>
@@ -4281,7 +4298,7 @@ function floorHtml() {
     return `<div class="tp-detail-floating${f.pinned ? " tp-pinned" : ""}" data-floating-table="${esc(f.table)}" style="${styleParts.join(";")}">
       <div class="tp-detail" data-table-detail="${esc(f.table)}">
         <div class="tp-detail-head">
-          <div class="tp-detail-top"><h3>Table ${esc(f.table)}</h3>${headPill}${dockBtn}<button class="tp-detail-close" data-float-close="${esc(f.table)}" aria-label="Close" title="Close">✕</button></div>
+          <div class="tp-detail-top"><h3>${esc(tableLabel(f.table))}</h3>${headPill}${dockBtn}<button class="tp-detail-close" data-float-close="${esc(f.table)}" aria-label="Close" title="Close">✕</button></div>
           ${headMeta}
         </div>
         <div class="tp-detail-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div>
@@ -5391,7 +5408,7 @@ function renderTablePanel() {
   const t = state.openSess;
   const parts = tablePanelParts(t);
   const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
-  const wrap = el(`<div class="sx-modal-overlay tbl-modal-overlay"><div class="tbl-modal sx-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Table ${esc(t)}</h3>${headPill}<button class="tbl-modal-close" aria-label="Close">✕</button></div>${headMeta}</div><div class="tbl-modal-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div><div class="tbl-modal-foot">${foot}</div></div></div>`);
+  const wrap = el(`<div class="sx-modal-overlay tbl-modal-overlay"><div class="tbl-modal sx-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(tableLabel(t))}</h3>${headPill}<button class="tbl-modal-close" aria-label="Close">✕</button></div>${headMeta}</div><div class="tbl-modal-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div><div class="tbl-modal-foot">${foot}</div></div></div>`);
   document.body.appendChild(wrap);
   const newModal = wrap.querySelector(".tbl-modal"); if (newModal) newModal.scrollTop = savedScroll;
   wrap.querySelector(".tbl-modal-close").onclick = closeTablePanel;
