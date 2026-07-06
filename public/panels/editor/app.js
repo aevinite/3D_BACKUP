@@ -1490,13 +1490,18 @@ function mergedOrderCardHtml(g) {
   const invoiced = !!sid && invNo != null && !invVoided;
   let billBtns;
   if (sid && !invoiced) {
-    billBtns = anyUnpaid ? `<button class="ord-btn invoice" data-gen-invoice="${esc(sid)}">🧾 Generate invoice</button>` : "";
+    // Running tab: Generate-invoice AND a plain Print, so staff can print the CURRENT
+    // bill for the guest without having to generate a tax invoice first (owner 2026-07-06).
+    billBtns = (anyUnpaid ? `<button class="ord-btn invoice" data-gen-invoice="${esc(sid)}">🧾 Generate invoice</button>` : "")
+      + `<button class="ord-btn ghost" data-print-group="${esc(sessKey)}">🖨 Print</button>`;
   } else if (sid && invoiced) {
     const pay = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "";
     billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">🖨 Print</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button>`;
   } else {
-    // legacy non-session order — keep the direct pay
-    billBtns = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "";
+    // legacy non-session order — keep the direct pay, plus Print (solo key so the handler
+    // resolves the single order).
+    billBtns = (anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "")
+      + `<button class="ord-btn ghost" data-print-group="${esc("solo:" + o0.id)}">🖨 Print</button>`;
   }
   const tableDue = live.filter((o) => o.payment_status !== "paid").reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
   const freeBtn = (tnum && paid)
