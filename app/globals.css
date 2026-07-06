@@ -3584,6 +3584,16 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm-toggle.on .pill::after { transform: translateX(20px); }
 .adm-toggle.off .pill { background: var(--muted2, rgba(120,120,120,0.32)); }
 .adm-togglegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 9px; }
+/* Staff-feature help cards: a tiny real screenshot beside each entitlement toggle so
+   the admin remembers what the feature IS (owner, 2026-07-06). Tap the shot to zoom. */
+.adm-featgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
+.adm-featcard { display: flex; gap: 12px; align-items: flex-start; padding: 10px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 4%, transparent); border: var(--border); }
+.adm-featcard > img { width: 108px; height: 68px; object-fit: cover; object-position: top left; border-radius: 8px; border: var(--border); cursor: zoom-in; flex-shrink: 0; background: #111; }
+.adm-featcard-body { flex: 1; min-width: 0; }
+.adm-featcard-body .adm-toggle { width: 100%; }
+.adm-featcard-body p { margin: 7px 0 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
+.adm-imgzoom { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.78); display: flex; align-items: center; justify-content: center; padding: 4vh 4vw; cursor: zoom-out; }
+.adm-imgzoom img { max-width: 100%; max-height: 100%; border-radius: 12px; box-shadow: 0 24px 80px rgba(0,0,0,.6); }
 /* ── tabs (logs) ─────────────────────────────────────────────────────────── */
 .adm-tabs { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--card); border: var(--border); margin-bottom: 16px; }
 .adm-tabs button { padding: 8px 16px; border-radius: 9px; border: 0; background: transparent; color: var(--muted); font-weight: 700; font-size: 13.5px; cursor: pointer; }

@@ -291,17 +291,21 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (a === "banquet" && b === "place") {
       const gate2 = await tabletPerm("tablet_banquet", req, body, rid, actor);
       if (!gate2.allow) return gate2.resp;
+      // Table is OPTIONAL (mig 132): blank → a standalone walk-in-style bill the
+      // manager settles from the Bills tab; given → lands on that table as before.
       const t = String(body?.table || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
-      const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
-      const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
-      if (tableCount > 0 && (Number(t) < 1 || Number(t) > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
+      if (t) {
+        if (!/^\d+$/.test(t)) return err("valid table required");
+        const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+        const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
+        if (tableCount > 0 && (Number(t) < 1 || Number(t) > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
+      }
       const lines = Array.isArray(body?.lines) ? body.lines : [];
       if (!lines.length) return err("lines required");
-      const { data, error } = await sb.rpc("lfh_banquet_place_order", { p_table: t, p_lines: lines, p_restaurant_id: rid });
+      const { data, error } = await sb.rpc("lfh_banquet_place_order", { p_table: t || null, p_lines: lines, p_restaurant_id: rid });
       if (error) throw new Error(error.message);
       if (!(data as any)?.ok) return err(banquetErrMsg((data as any)?.reason), 400);
-      await logAction("tablet", "banquet_place", { table_number: t, device_id: dev, detail: `total ${(data as any)?.total}${byNote(gate2)}` });
+      await logAction("tablet", "banquet_place", { table_number: t || null, device_id: dev, detail: `total ${(data as any)?.total}${byNote(gate2)}` });
       return ok(data);
     }
 

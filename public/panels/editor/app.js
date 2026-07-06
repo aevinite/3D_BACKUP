@@ -6376,12 +6376,13 @@ function banquetHtml() {
     <div class="card">
       <h3>Generate a banquet bill</h3>
       <p style="color:var(--muted);font-size:13px;margin:0 0 12px;line-height:1.5">
-        Set the plate counts, pick the table, and the bill lands there like a normal
-        order (no kitchen ticket) — then invoice / discount / mark paid from Tables as usual.</p>
+        Set the plate counts and create — the bill appears under <b>Bills</b> (no kitchen
+        ticket) for invoice / discount / mark paid. A table is optional: set one only if
+        the party actually occupies a floor table.</p>
       ${activeItems.length ? lines : `<div class="sx-empty">Turn on at least one banquet item first.</div>`}
       <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;border-top:1px solid var(--line);padding-top:12px;margin-top:6px">
-        <div class="field" style="margin:0"><label style="font-size:11px">Table</label>
-          <input class="sx-input" id="bqTable" type="number" min="1" ${tableCount ? `max="${tableCount}"` : ""} value="${esc(bq.table)}" placeholder="e.g. 11" style="width:90px" /></div>
+        <div class="field" style="margin:0"><label style="font-size:11px">Table (optional)</label>
+          <input class="sx-input" id="bqTable" type="number" min="1" ${tableCount ? `max="${tableCount}"` : ""} value="${esc(bq.table)}" placeholder="none" style="width:90px" /></div>
         <div style="text-align:right;font-size:13px">
           <div>Subtotal <b>${inr(sub)}</b></div>
           <div style="color:var(--muted)">${esc(taxLabel())} ${tm.pct}% · ${inr(tax)}</div>
@@ -6450,13 +6451,15 @@ function bindBanquet() {
       .map((i) => ({ id: i.id, qty: Math.round(Number(bq.qty[i.id])) }));
     const t = String((tableInp && tableInp.value) || "").trim();
     if (!linesOut.length) { toast("Set a plate count on at least one item.", "err"); return; }
-    if (!/^\d+$/.test(t)) { toast("Pick the table the bill should land on.", "err"); return; }
+    if (t && !/^\d+$/.test(t)) { toast("That table number doesn't look right — or leave it blank.", "err"); return; }
     place.disabled = true;
     try {
       const r = await api("POST", "/banquet/place", { table: t, lines: linesOut });
       bq.qty = {}; bq.table = t;
-      toast(`Banquet bill created on table ${t} — total ${inr(r.total)}.`, "ok");
-      setTab("tables"); // the bill is now a normal open table — settle it there
+      toast(`Banquet bill created${t ? ` on table ${t}` : ""} — total ${inr(r.total)}.`, "ok");
+      // With a table it's a normal open table (settle from Tables); without, it's a
+      // standalone bill — send the manager straight to where it now lives.
+      setTab(t ? "tables" : "orders");
     } catch (e) {
       toast("Couldn't create the bill: " + e.message, "err");
       place.disabled = false;
