@@ -12,6 +12,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
+import { mergeOwnerEntitlements, powerEntitlementKey } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -47,8 +48,18 @@ export async function PATCH(req: NextRequest) {
   if (!Object.keys(patch).length) return bad("No valid permission flags given.");
 
   // Merge onto the existing JSONB (don't clobber flags the caller didn't send).
-  const cur = (await sb.from("restaurants").select("manager_permissions, name").eq("id", rid).limit(1)).data?.[0];
+  const cur = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, name").eq("id", rid).limit(1)).data?.[0];
   if (!cur) return bad("Restaurant not found.", 404);
+
+  // Mig 133 (the ladder): an OWNER can only grant a power the ADMIN still entitles —
+  // the toggle is hidden from their panel, so a request naming it is hand-crafted.
+  // The admin console writes through /api/admin/restaurants/access, so isAdmin here
+  // means the act-as owner view — keep it able to flip only what the owner could.
+  const ents = mergeOwnerEntitlements(cur.owner_entitlements);
+  for (const k of Object.keys(patch)) {
+    if (patch[k] && ents[powerEntitlementKey(k)] === false)
+      return bad(`"${k}" isn't available for this restaurant — the admin has removed it.`, 403);
+  }
   const merged = { ...(cur.manager_permissions || {}), ...patch };
   const { error } = await sb.from("restaurants").update({ manager_permissions: merged }).eq("id", rid);
   if (error) return bad(error.message, 500);

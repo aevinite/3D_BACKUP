@@ -19,6 +19,11 @@ const MANAGER_POWERS: [string, string][] = [
   ["manage_staff", "Manage staff"], ["edit_menu", "Edit menu"], ["give_discounts", "Give discounts"],
   ["view_dashboard", "View dashboard"], ["void_bills", "Void bills"],
 ];
+// Owner-panel SECTIONS the admin can remove per restaurant (mig 133). Off = the
+// section disappears from the real owner's panel (admin act-as still sees it, tinted).
+const OWNER_SECTIONS: [string, string][] = [
+  ["reports", "Reports"], ["staff", "Staff & powers"], ["issues", "Feedback & issues"],
+];
 const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"]];
 const TRI: [string, string][] = [["off", "Off"], ["on", "On"], ["pin", "On · PIN"]];
 
@@ -38,8 +43,8 @@ const Tri = ({ val, onChange, withDefault }: { val: string; onChange: (v: string
     {TRI.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
   </select>
 );
-const Card = ({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) => (
-  <section style={{ background: "var(--ac-card,#fff)", border: "1px solid var(--ac-line,#e6dcc9)", borderRadius: 10, padding: "16px 18px", marginBottom: 12 }}>
+const Card = ({ title, hint, children, id }: { title: string; hint?: string; children: React.ReactNode; id?: string }) => (
+  <section id={id} style={{ background: "var(--ac-card,#fff)", border: "1px solid var(--ac-line,#e6dcc9)", borderRadius: 10, padding: "16px 18px", marginBottom: 12 }}>
     <h3 style={{ margin: "0 0 4px", fontSize: 14.5 }}>{title}</h3>
     {hint && <p style={{ margin: "0 0 12px", color: "var(--ac-muted,#857655)", fontSize: 12.5, lineHeight: 1.5 }}>{hint}</p>}
     {children}
@@ -53,10 +58,16 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
 
 export default function AccessPage() {
   const [rests, setRests] = useState<Rest[]>([]);
+  // Deep-link support (X-ray "open setting" jumps land here): ?rid=<id> preselects
+  // the restaurant, ?focus=<card-id> scrolls to + pulses that card after load.
+  const [linked] = useState<{ rid: string | null; focus: string | null }>(() =>
+    typeof window === "undefined" ? { rid: null, focus: null }
+    : { rid: new URLSearchParams(window.location.search).get("rid"), focus: new URLSearchParams(window.location.search).get("focus") });
   const [rid, setRid] = useState<string>("");
   const [panels, setPanels] = useState<Record<string, boolean>>({});
   const [features, setFeatures] = useState<Record<string, boolean>>({});
   const [manager, setManager] = useState<Record<string, boolean>>({});
+  const [owner, setOwner] = useState<Record<string, boolean>>({});
   const [tablet, setTablet] = useState<Record<string, string>>({});
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
@@ -69,7 +80,8 @@ export default function AccessPage() {
     fetch("/api/admin/restaurants").then((r) => r.json()).then((d) => {
       const list: Rest[] = d.restaurants || [];
       setRests(list);
-      if (list.length && !rid) setRid(list[0].id);
+      const wanted = linked.rid && list.some((r) => r.id === linked.rid) ? linked.rid : "";
+      if (list.length && !rid) setRid(wanted || list[0].id);
     }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -87,11 +99,24 @@ export default function AccessPage() {
       setPanels(p.panels || {});
       setFeatures(f.features || {});
       setManager(a.manager || {});
+      setOwner(a.owner || {});
       setTablet(a.tablet || {});
       setStaff((s.staff || []).filter((u: Staff) => u.restaurant_id === id && u.role !== "owner"));
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { if (rid) loadRestaurant(rid); }, [rid, loadRestaurant]);
+
+  // After a deep-linked load, scroll to the named card and pulse it once.
+  useEffect(() => {
+    if (loading || !linked.focus || !rid) return;
+    const el = document.getElementById(`ac-${linked.focus}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.style.transition = "box-shadow .3s";
+    el.style.boxShadow = "0 0 0 4px rgba(217,119,6,.55)";
+    const t = setTimeout(() => { el.style.boxShadow = ""; }, 2200);
+    return () => clearTimeout(t);
+  }, [loading, rid, linked.focus]);
 
   // Savers — each optimistic, then persist. On failure we reload the truth.
   const savePanel = async (panel: string, enabled: boolean) => {
@@ -107,6 +132,11 @@ export default function AccessPage() {
   const saveManager = async (key: string, value: boolean) => {
     setManager((x) => ({ ...x, [key]: value }));
     const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, manager: { [key]: value } }) });
+    if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
+  };
+  const saveOwner = async (key: string, value: boolean) => {
+    setOwner((x) => ({ ...x, [key]: value }));
+    const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, owner: { [key]: value } }) });
     if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
   };
   const saveTablet = async (key: string, value: string) => {
@@ -141,13 +171,31 @@ export default function AccessPage() {
       {loading && <div style={{ color: "var(--ac-muted,#857655)", padding: 20 }}>Loading…</div>}
       {!loading && rid && (
         <>
-          <Card title="Panels" hint="Which staff apps this restaurant can use. Turning one off blocks that role's login.">
+          <Card id="ac-panels" title="Panels" hint="Which staff apps this restaurant can use. Turning one off blocks that role's login.">
             {PANELS.map(([k, l]) => <Row key={k} label={l}><Toggle on={panels[k] !== false} onChange={(v) => savePanel(k, v)} /></Row>)}
           </Card>
-          <Card title="Manager powers" hint="What this restaurant's managers are allowed to do (server-enforced).">
-            {MANAGER_POWERS.map(([k, l]) => <Row key={k} label={l}><Toggle on={manager[k] === true} onChange={(v) => saveManager(k, v)} /></Row>)}
+          <Card id="ac-owner-panel" title="Owner panel sections" hint="Which sections exist in this restaurant's OWNER panel. Off = the section disappears for the real owner (you still see it, tinted, when viewing as admin).">
+            {OWNER_SECTIONS.map(([k, l]) => <Row key={k} label={l}><Toggle on={owner[k] !== false} onChange={(v) => saveOwner(k, v)} /></Row>)}
           </Card>
-          <Card title="Tablet (waiter) billing" hint="What the waiter tablet may do to a bill. 'On · PIN' requires a manager PIN each time.">
+          <Card id="ac-manager-powers" title="Manager powers" hint="The ladder, per power: 'exists' = you allow this restaurant the power AT ALL (off = the toggle disappears from the owner's panel and the power dies for managers). 'granted' = what the owner has currently given their managers.">
+            {MANAGER_POWERS.map(([k, l]) => {
+              const exists = owner[`power_${k}`] !== false;
+              return (
+                <Row key={k} label={l}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ac-muted,#857655)" }}>
+                      exists <Toggle on={exists} onChange={(v) => saveOwner(`power_${k}`, v)} />
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ac-muted,#857655)", opacity: exists ? 1 : 0.45 }}
+                      title={exists ? "What the owner granted their managers" : "Removed by admin — the owner can't see or grant this power"}>
+                      granted <Toggle on={manager[k] === true} onChange={(v) => saveManager(k, v)} />
+                    </label>
+                  </span>
+                </Row>
+              );
+            })}
+          </Card>
+          <Card id="ac-tablet" title="Tablet (waiter) billing" hint="What the waiter tablet may do to a bill. 'On · PIN' requires a manager PIN each time.">
             {TABLET_CAPS.map(([k, l]) => <Row key={k} label={l}><Tri val={tablet[k] || "off"} onChange={(v) => saveTablet(k, v)} /></Row>)}
           </Card>
           <Card title="Guest menu features" hint="Which features guests see on this restaurant's menu.">

@@ -346,6 +346,17 @@ function tileIsOpen(i) {
 // 'off' (hidden — default) | 'on' (waiter can do it) | 'pin' (needs a manager PIN).
 const tperm = (k) => ((state.data.settings || {})[k] || "off");
 
+// HIERARCHY X-RAY (Phase 3, 2026-07-06) — same rule as the manager panel: a billing
+// capability that's OFF is HIDDEN from the real waiter, but the ADMIN act-as view
+// sees the button TINTED amber and fully usable (the server's tabletPerm lets the
+// admin through; higherView is admin-only for exactly that reason — an owner would
+// get a button that 403s). tshow() replaces the raw !== "off" checks in the
+// templates; txray() adds the tint class when it's off-for-waiters.
+let TABLET_WHO = null;
+const tHigher = () => !!(TABLET_WHO && TABLET_WHO.higherView);
+const tshow = (k) => tperm(k) !== "off" || tHigher();
+const txray = (k) => (tperm(k) === "off" && tHigher() ? " xray-off" : "");
+
 // selectTable(t): open table t's DETAIL. The grid only had the slim summary, so we pull table t's
 // FULL slice (orders/items/members/calls/…) before the detail can show real rows. Render once
 // immediately for instant feedback (the panel shows what's cached — often a quick skeleton), then
@@ -421,7 +432,7 @@ function tileHtml(i) {
     let quick = "";
     if (a.nw > 0) quick = `<span class="tacc" data-quick="accept" data-qt="${i}">✓ Accept</span>`;
     else if (called || joiners) quick = `<span class="tatt" data-quick="attend" data-qt="${i}">Attend</span>`;
-    else if (st.cls === "bill" && tperm("tablet_mark_paid") !== "off") quick = `<span class="tpay" data-quick="pay" data-qt="${i}">💳 Mark paid</span>`;
+    else if (st.cls === "bill" && tshow("tablet_mark_paid")) quick = `<span class="tpay${txray("tablet_mark_paid")}" data-quick="pay" data-qt="${i}">💳 Mark paid</span>`;
     body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${esc(sub)}</span>${strip}${pills}${quick}`;
   }
   return `<button class="tile t-${st.cls} ${payCls} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
@@ -754,7 +765,7 @@ function renderPanel() {
       <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}</div>
       <div class="ordctl-row">
         <button class="btn small" data-add-dish="${esc(o.id)}">＋ Add dish</button>
-        ${tperm("tablet_discount") !== "off" ? `<button class="btn small" data-discount="${esc(o.id)}">− Discount${Number(o.discount) > 0 ? ` (${inr(o.discount)})` : ""}</button>` : ""}
+        ${tshow("tablet_discount") ? `<button class="btn small${txray("tablet_discount")}" data-discount="${esc(o.id)}">− Discount${Number(o.discount) > 0 ? ` (${inr(o.discount)})` : ""}</button>` : ""}
         <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
         <button class="btn small primary" data-done-order="${esc(o.id)}">✓ Done editing</button>
       </div>
@@ -817,8 +828,8 @@ function renderPanel() {
       <button class="btn primary big" id="takeOrder">＋ Take order</button>
       ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
       ${s && os.length ? `<button class="btn" id="restartTable">↻ Restart</button>` : ""}
-      ${s && os.length && !invoiced && tperm("tablet_invoice") !== "off" ? `<button class="btn" id="genInvoiceBtn">🧾 Generate invoice</button>` : ""}
-      ${s && os.length && a.unpaid && tperm("tablet_mark_paid") !== "off" ? `<button class="btn pay" id="payBill"${os.some((o) => o.status === "received") ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
+      ${s && os.length && !invoiced && tshow("tablet_invoice") ? `<button class="btn${txray("tablet_invoice")}" id="genInvoiceBtn">🧾 Generate invoice</button>` : ""}
+      ${s && os.length && a.unpaid && tshow("tablet_mark_paid") ? `<button class="btn pay${txray("tablet_mark_paid")}" id="payBill"${os.some((o) => o.status === "received") ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
     </div>
     ${foot}
@@ -1957,6 +1968,7 @@ async function load() {
   // — NOT in renderFloor()/renderPanel() — because they're skipped when the board
   // signature is unchanged, and the name must still appear on the very first load.
   setRestName(restaurant);
+  renderXrayRibbon(); // admin view marker — self-skips when nothing changed (or not admin)
   const sig = boardSig(state);
   if (sig === lastSig) return;
   lastSig = sig;
@@ -1965,6 +1977,98 @@ async function load() {
 }
 setInterval(() => ($("#clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })), 1000);
 load().catch((e) => toast("Can't reach the database: " + e.message, false));
+
+// ── HIERARCHY X-RAY ribbon (Phase 3) ─────────────────────────────────────────
+// Marks the admin act-as view and counts the billing controls that are off for
+// waiters (the tinted ones). body is a flex column, so the ribbon simply takes the
+// top row — no viewport math needed. Server still enforces everything (tabletPerm).
+const XRAY_CAPS = [
+  { key: "tablet_discount", label: "Apply discount" },
+  { key: "tablet_mark_paid", label: "Mark bill paid" },
+  { key: "tablet_invoice", label: "Generate invoice" },
+  { key: "tablet_banquet", label: "Banquet billing" },
+];
+(function injectXrayStyles() {
+  const css = `
+  .xray-off { color: #d97706 !important; border-color: color-mix(in srgb, #d97706 45%, transparent) !important; opacity: .78; }
+  #xrayRibbon { display: flex; align-items: center; gap: 12px; padding: 6px 14px; flex: none;
+    background: color-mix(in srgb, #d97706 14%, var(--panel, #101826)); border-bottom: 1px solid color-mix(in srgb, #d97706 40%, transparent);
+    font-size: 12px; color: var(--text, #e8eefc); position: relative; z-index: 40; }
+  #xrayRibbon .rb-tag { font-weight: 800; letter-spacing: .04em; color: #f59e0b; text-transform: uppercase; font-size: 11px; }
+  #xrayRibbon .rb-rest { color: var(--muted, #9fb0cc); font-weight: 600; }
+  #xrayRibbon .rb-spacer { margin-left: auto; }
+  #xrayRibbon button { font: inherit; cursor: pointer; border-radius: 999px; border: 1px solid color-mix(in srgb, #d97706 45%, transparent);
+    background: transparent; color: #f59e0b; font-weight: 700; padding: 4px 12px; }
+  #xrayRibbon button.rb-exit { border-color: var(--line, #26324a); color: var(--muted, #9fb0cc); }
+  #xrayZones { position: absolute; top: calc(100% + 4px); right: 12px; z-index: 60; min-width: 250px;
+    background: var(--panel, #101826); border: 1px solid var(--line, #26324a); border-radius: 12px; padding: 6px;
+    box-shadow: 0 12px 32px rgba(0,0,0,.4); }
+  #xrayZones .zh { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted,#9fb0cc); padding: 6px 8px 4px; }
+  #xrayZones .zrow { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent;
+    border: 0; border-radius: 8px; padding: 8px; font: inherit; font-size: 12.5px; color: inherit; cursor: pointer; }
+  #xrayZones .zrow:hover { background: color-mix(in srgb, #d97706 14%, transparent); }
+  #xrayZones .zrow .dot { width: 7px; height: 7px; border-radius: 50%; background: #d97706; flex-shrink: 0; }
+  #xrayZones .zrow small { color: var(--muted,#9fb0cc); margin-left: auto; }`;
+  const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
+})();
+
+let xrayZonesBackOff = null;
+function closeXrayZones() {
+  const zp = document.getElementById("xrayZones");
+  if (zp) zp.remove();
+  if (xrayZonesBackOff) { xrayZonesBackOff(); xrayZonesBackOff = null; }
+}
+function renderXrayRibbon() {
+  let rb = document.getElementById("xrayRibbon");
+  if (!tHigher()) { if (rb) rb.remove(); return; }
+  const zones = XRAY_CAPS.filter((c) => (c.key === "tablet_banquet" ? !!(state.data.settings || {}).banquet_allowed : true) && tperm(c.key) === "off");
+  const rest = (state.data.restaurant && state.data.restaurant.name) || "";
+  const sig = `${rest}|${zones.map((z) => z.key).join(",")}`; // skip identical rebuilds
+  if (rb && rb.dataset.sig === sig) return;
+  if (!rb) { rb = document.createElement("div"); rb.id = "xrayRibbon"; document.body.insertBefore(rb, document.body.firstChild); }
+  rb.dataset.sig = sig;
+  const n = zones.length;
+  rb.innerHTML =
+    `<span class="rb-tag">Admin view</span>` +
+    (rest ? `<span class="rb-rest">${esc(rest)}</span>` : "") +
+    `<span class="rb-spacer"></span>` +
+    `<button id="xrayZonesBtn">${n} control${n === 1 ? "" : "s"} off for waiters ▾</button>` +
+    `<button class="rb-exit" id="xrayExit">Exit view</button>`;
+  document.getElementById("xrayExit").onclick = async () => {
+    try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
+    try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+  };
+  document.getElementById("xrayZonesBtn").onclick = () => {
+    if (document.getElementById("xrayZones")) { closeXrayZones(); return; }
+    const zp = document.createElement("div"); zp.id = "xrayZones";
+    zp.innerHTML = `<div class="zh">Off for waiters here</div>` + (zones.length
+      ? zones.map((z) => `<button class="zrow" data-zk="${z.key}"><span class="dot"></span>${z.label}<small>⚙ change in Access</small></button>`).join("")
+      : `<div class="zrow" style="cursor:default">Nothing is off — waiters see everything you see.</div>`);
+    rb.appendChild(zp);
+    // Hardware BACK closes the popout (not the panel) — panels' backstack manager.
+    xrayZonesBackOff = window.LFH_BACK ? LFH_BACK.layer("xray-zones", () => { const z = document.getElementById("xrayZones"); if (z) z.remove(); xrayZonesBackOff = null; }) : null;
+    // A zone row jumps to the admin Access hub, pinned to this restaurant's tablet card.
+    zp.querySelectorAll(".zrow[data-zk]").forEach((row) => {
+      row.onclick = () => {
+        closeXrayZones();
+        const url = `/aevinite/access${PANEL_RID ? `?rid=${encodeURIComponent(PANEL_RID)}&` : "?"}focus=tablet`;
+        try { window.top.location.href = url; } catch { window.location.href = url; }
+      };
+    });
+  };
+}
+document.addEventListener("click", (e) => {
+  if (document.getElementById("xrayZones") && !e.target.closest("#xrayZones") && !e.target.closest("#xrayZonesBtn")) closeXrayZones();
+});
+// Boot: learn WHO is viewing, then repaint so the templates' tshow()/txray() see it.
+// One tiny request, once per page load — no polling.
+api("GET", "/whoami").then((w) => {
+  TABLET_WHO = w;
+  if (!tHigher()) return;
+  renderXrayRibbon();
+  lastSig = ""; // force one repaint — buttons may need to appear tinted
+  renderFloor(); if (!state.ordering) renderPanel();
+}).catch(() => {});
 // Realtime: refetch only when something on the floor actually changes (instant),
 // instead of polling every second. A slow 60s timer is the backup if the
 // WebSocket drops; if realtime didn't load, fall back to a gentle 2s poll.
@@ -2034,7 +2138,14 @@ if (window.LFH_RT) {
     backdrop.classList.add("open"); drawer.classList.add("open");
     drawer.querySelector("#dwRest").textContent = (document.getElementById("restName")?.textContent || "").trim() || "—";
     const bqBtn = drawer.querySelector("#dwBanquet");
-    if (bqBtn) bqBtn.hidden = !((state.data.settings || {}).banquet_allowed && tperm("tablet_banquet") !== "off");
+    if (bqBtn) {
+      // Ladder rule for the banquet entry too: hidden from the real waiter when its
+      // tri-state is off, tinted for the admin view. banquet_allowed (the admin
+      // entitlement) still hides it for EVERYONE when the restaurant lacks the module.
+      const allowed = !!(state.data.settings || {}).banquet_allowed;
+      bqBtn.hidden = !(allowed && tshow("tablet_banquet"));
+      bqBtn.classList.toggle("xray-off", allowed && !!txray("tablet_banquet"));
+    }
     loadProfile();
     if (window.LFH_BACK && !drawerOff) drawerOff = LFH_BACK.layer("tablet-drawer", closeDrawer);
   };

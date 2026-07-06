@@ -6,13 +6,30 @@
 // Manager/kitchen/tablet raise issues via /api/editor/issue instead (panel-scoped).
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, inScope } from "@/lib/ownerScope";
+import { ownerScope, inScope, type OwnerScope } from "@/lib/ownerScope";
+import { entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
 
+// Mig 133: a REAL owner loses restaurants whose "issues" section the admin removed
+// (null = section fully off for them). The admin's own session (scope.admin — set on
+// every admin branch, incl. an act-as pin that borrows the real owner's id) is never
+// gated — admin = top power, the X-ray shows removed sections tinted-but-working.
+async function gateIssuesScope(scope: OwnerScope): Promise<OwnerScope | null> {
+  if (scope.all || scope.admin) return scope;
+  const allowed = await entitledSubset(scope.ids, "issues");
+  if (!allowed.length) return null;
+  return { ...scope, ids: allowed };
+}
+const disabledResp = () =>
+  NextResponse.json({ error: "Feedback & issues aren't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
+
 export async function GET(req: NextRequest) {
-  const scope = await ownerScope(req);
+  let scope = await ownerScope(req);
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gated = await gateIssuesScope(scope);
+  if (!gated) return disabledResp();
+  scope = gated;
 
   let q = sb.from("issues").select("*").order("status", { ascending: true }).order("created_at", { ascending: false }).limit(300);
   if (!scope.all) {
@@ -35,8 +52,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const scope = await ownerScope(req);
+  let scope = await ownerScope(req);
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gatedP = await gateIssuesScope(scope);
+  if (!gatedP) return disabledResp();
+  scope = gatedP;
   const body = await req.json().catch(() => ({}));
   const id = String(body?.id || "");
   const status = body?.status === "open" ? "open" : "resolved";
@@ -56,8 +76,11 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const scope = await ownerScope(req);
+  let scope = await ownerScope(req);
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const gatedC = await gateIssuesScope(scope);
+  if (!gatedC) return disabledResp();
+  scope = gatedC;
   const body = await req.json().catch(() => ({}));
   const rid = String(body?.restaurant_id || "");
   const subject = String(body?.subject || "").trim();

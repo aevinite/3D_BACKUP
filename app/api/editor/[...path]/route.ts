@@ -21,6 +21,7 @@ import { closeSession } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
+import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -43,12 +44,17 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 // Whether the acting staff may perform an owner-gated MANAGER action. The admin
 // super-user (g.user===null) and the OWNER always may; a plain manager only if the
 // owner switched that capability flag ON for this restaurant (mig 091 + the owner's
-// "Staff & powers" page). Enforces give_discounts / void_bills / edit_menu /
-// view_dashboard server-side so hiding a button is never the only guard.
+// "Staff & powers" page) AND the admin still entitles that power at all (mig 133 —
+// power_<flag> in owner_entitlements; absent = entitled). Both columns come back in
+// ONE select, so the ladder check adds no extra round trip. Enforces give_discounts /
+// void_bills / edit_menu / view_dashboard server-side so hiding a button is never
+// the only guard.
 async function managerCan(g: { user: StaffUser | null }, rid: string, flag: string): Promise<boolean> {
   const u = g.user;
   if (!u || u.role === "owner") return true;
-  const r = (await sb.from("restaurants").select("manager_permissions").eq("id", rid).maybeSingle()).data as { manager_permissions?: Record<string, boolean> } | null;
+  const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
+    { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
+  if (r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
   return !!r?.manager_permissions?.[flag];
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
@@ -155,14 +161,28 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // server still enforces every capability (managerCan) regardless of what the UI shows.
     if (p === "whoami") {
       const actor = g.user ? g.user.role : "admin"; // no staff user cookie = admin super-user
-      const r = (await sb.from("restaurants").select("manager_permissions").eq("id", rid).maybeSingle()).data as { manager_permissions?: Record<string, boolean> } | null;
+      const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
+        { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
+      // The ladder, resolved per power (mig 133): effective = admin entitles it AND the
+      // owner granted it. The X-ray tints on !effective and can say WHO turned it off.
+      const perms = r?.manager_permissions || {};
+      const ents = r?.owner_entitlements || {};
+      const effectivePowers: Record<string, boolean> = {};
+      const offByAdmin: Record<string, boolean> = {};
+      for (const flag of MANAGER_POWER_FLAGS) {
+        const entitled = ents[powerEntitlementKey(flag)] !== false;
+        effectivePowers[flag] = entitled && perms[flag] === true;
+        offByAdmin[flag] = !entitled;
+      }
       return ok({
         actor,
         role: actor,
         // A higher role is "viewing" a lower panel when it's the admin super-user or an
         // owner opening the manager panel — those see greyed (not hidden) disabled items.
         higherView: actor === "admin" || actor === "owner",
-        managerPermissions: r?.manager_permissions || {},
+        managerPermissions: perms,
+        effectivePowers,
+        offByAdmin,
       });
     }
 
@@ -750,7 +770,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         return ok({ ok: true });
       }
       // banquet/place — { table?, lines:[{id, qty}] }. With a table the bill lands on
-      // it like a normal order; WITHOUT one (mig 132) it lands as a standalone
+      // it like a normal order; WITHOUT one (mig 133) it lands as a standalone
       // "Walk-in / no table" bill in the Bills tab — no phantom table needed.
       if (b === "place") {
         const t = String(body?.table || "").trim();

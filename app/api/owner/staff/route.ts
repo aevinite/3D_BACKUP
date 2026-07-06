@@ -20,6 +20,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
+import { mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -41,14 +42,15 @@ function genPassword(): string {
   return s;
 }
 
-type Restaurant = { id: string; name: string; slug: string; accent_color: string | null; manager_permissions: Record<string, boolean>; owner_user_id: string | null };
+type Restaurant = { id: string; name: string; slug: string; accent_color: string | null; manager_permissions: Record<string, boolean>; owner_entitlements: Record<string, boolean> | null; owner_user_id: string | null };
 type Scope =
   | { ok: true; actor: "admin" | "owner" | "manager"; actorId: string | null; restaurants: Restaurant[] }
   | { ok: false; resp: NextResponse };
 
 // Resolve which restaurants this caller may manage staff for (see header).
 async function scope(req: NextRequest): Promise<Scope> {
-  const cols = "id, name, slug, accent_color, manager_permissions, owner_user_id";
+  // owner_entitlements rides along for the mig-133 ladder checks below.
+  const cols = "id, name, slug, accent_color, manager_permissions, owner_entitlements, owner_user_id";
   // Prefer a logged-in OWNER/MANAGER over a stray admin cookie in the SAME browser —
   // this mirrors lib/ownerScope + app/owner/layout (owner cookie → owner chrome). Before,
   // this checked the admin cookie FIRST, so a browser holding BOTH cookies rendered owner
@@ -58,16 +60,23 @@ async function scope(req: NextRequest): Promise<Scope> {
     // Multi-owner (migration 097): the restaurants an owner may staff are EVERY
     // restaurant they're a member of in restaurant_owners — not just the one where
     // they're the primary owner. Resolve the ids first, then fetch those rows.
+    // Mig 133: a restaurant whose "staff" section the admin removed drops out here,
+    // so the section dies server-side too, not just in the nav.
     const memb = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", u.id)).data;
     const ownedIds = (memb || []).map((m) => m.restaurant_id as string);
     if (!ownedIds.length) return { ok: true, actor: "owner", actorId: u.id, restaurants: [] };
     const { data } = await sb.from("restaurants").select(cols).in("id", ownedIds).order("name");
-    return { ok: true, actor: "owner", actorId: u.id, restaurants: (data || []) as Restaurant[] };
+    const rows = ((data || []) as Restaurant[]).filter((r) => mergeOwnerEntitlements(r.owner_entitlements).staff !== false);
+    if (!rows.length)
+      return { ok: false, resp: bad("Staff management isn't enabled for your restaurant — contact Aevidine.", 403) };
+    return { ok: true, actor: "owner", actorId: u.id, restaurants: rows };
   }
   if (u?.role === "manager") {
     const { data } = await sb.from("restaurants").select(cols).eq("id", u.restaurant_id).limit(1);
     const r = (data || [])[0] as Restaurant | undefined;
-    if (!r || !r.manager_permissions?.manage_staff)
+    // The full ladder: the admin must still entitle the power (mig 133) AND the
+    // owner must have granted it — same rule as managerCan() in the editor route.
+    if (!r || mergeOwnerEntitlements(r.owner_entitlements).power_manage_staff === false || !r.manager_permissions?.manage_staff)
       return { ok: false, resp: bad("Your owner hasn't given you staff management.", 403) };
     return { ok: true, actor: "manager", actorId: u.id, restaurants: [r] };
   }
@@ -92,7 +101,9 @@ async function scope(req: NextRequest): Promise<Scope> {
   return { ok: false, resp: bad("Not authorised.", 403) };
 }
 
-const slim = (r: Restaurant) => ({ id: r.id, name: r.name, slug: r.slug, accentColor: r.accent_color || "#e3c06f", managerPermissions: r.manager_permissions || {} });
+// ownerEntitlements rides along so the Staff & powers page can HIDE an unentitled
+// power toggle from the real owner and TINT it for the admin (mig 133).
+const slim = (r: Restaurant) => ({ id: r.id, name: r.name, slug: r.slug, accentColor: r.accent_color || "#e3c06f", managerPermissions: r.manager_permissions || {}, ownerEntitlements: mergeOwnerEntitlements(r.owner_entitlements) });
 
 export async function GET(req: NextRequest) {
   const s = await scope(req); if (!s.ok) return s.resp;

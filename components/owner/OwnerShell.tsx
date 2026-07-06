@@ -8,8 +8,9 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { inr } from "@/components/admin/shared";
+import { useBackClose } from "@/lib/backStack";
 
-type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean };
+type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean; ent?: string };
 type NavGroup = { label: string; quiet?: boolean; items: NavItem[] };
 
 // Grouped nav: the real, working sections up top; future modules live in ONE
@@ -23,9 +24,11 @@ const GROUPS: NavGroup[] = [
   {
     label: "Business",
     items: [
-      { href: "/owner/reports", label: "Reports", icon: "fa-file-invoice" },
-      { href: "/owner/staff", label: "Staff & powers", icon: "fa-users-gear" },
-      { href: "/owner/issues", label: "Feedback & issues", icon: "fa-triangle-exclamation" },
+      // `ent` = the owner-entitlement key (mig 133) that must be ON for this section
+      // to exist. Hidden from the real owner when off; tinted for the admin act-as.
+      { href: "/owner/reports", label: "Reports", icon: "fa-file-invoice", ent: "reports" },
+      { href: "/owner/staff", label: "Staff & powers", icon: "fa-users-gear", ent: "staff" },
+      { href: "/owner/issues", label: "Feedback & issues", icon: "fa-triangle-exclamation", ent: "issues" },
     ],
   },
   {
@@ -42,9 +45,21 @@ const GROUPS: NavGroup[] = [
   },
 ];
 
-export default function OwnerShell({ children, adminViewing, restaurantName, initialSkin }: { children: React.ReactNode; adminViewing?: boolean; restaurantName?: string; initialSkin?: "light" | "dark" }) {
+export default function OwnerShell({ children, adminViewing, restaurantName, initialSkin, entitlements }: {
+  children: React.ReactNode; adminViewing?: boolean; restaurantName?: string; initialSkin?: "light" | "dark";
+  // Owner-panel section entitlements (mig 133), resolved server-side by the layout.
+  // Absent map (never happens in practice) = everything on.
+  entitlements?: Record<string, boolean>;
+}) {
   const path = usePathname();
   const router = useRouter();
+  const [zonesOpen, setZonesOpen] = useState(false);
+  // Hardware BACK closes the zones popout instead of leaving the page (project rule:
+  // every popup registers). Self-noops while closed.
+  useBackClose("owner-xray-zones", zonesOpen, () => setZonesOpen(false));
+  const sectionOn = (it: NavItem) => !it.ent || !entitlements || entitlements[it.ent] !== false;
+  // What the admin sees tinted (the X-ray zones): sections off for the real owner.
+  const offSections = GROUPS.flatMap((g) => g.items).filter((it) => it.ent && !sectionOn(it));
   // Admin scope pin (bug C1, 2026-07-05): when the admin drills into ONE restaurant
   // the URL carries ?rid=<id>. Carry it across EVERY sidebar link so navigating
   // dashboard→reports→staff keeps this tab pinned to that restaurant instead of
@@ -94,6 +109,17 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
       router.push(`/owner${q ? `?${q}` : ""}`);
     }
   };
+
+  // Close the X-ray zones popout on an outside click (same rule as the manager panel's).
+  useEffect(() => {
+    if (!zonesOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest?.(".xray-zpop, .xray-zbtn")) setZonesOpen(false);
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [zonesOpen]);
+
   const toggleSkin = () => {
     setSkin((cur) => {
       const next = cur === "dark" ? "light" : "dark";
@@ -124,14 +150,21 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
           {GROUPS.map((g) => (
             <div key={g.label} className={`owx-group${g.quiet ? " quiet" : ""}`}>
               <div className="owx-group-lbl">{g.label}</div>
-              {g.items.map((it) => (
-                <Link key={it.href} href={withRid(it.href)} className={`owx-navlink${isActive(it) ? " active" : ""}`}
-                  aria-current={isActive(it) ? "page" : undefined}>
-                  <i className={`fas ${it.icon}`} aria-hidden="true" />
-                  {it.label}
-                  {it.soon && <span className="navsoon">Soon</span>}
-                </Link>
-              ))}
+              {g.items.map((it) => {
+                const on = sectionOn(it);
+                // Hidden below, tinted above: a section the admin removed disappears
+                // for the real owner, but the admin act-as sees it amber-tinted (X-ray).
+                if (!on && !adminViewing) return null;
+                return (
+                  <Link key={it.href} href={withRid(it.href)} className={`owx-navlink${isActive(it) ? " active" : ""}${on ? "" : " xray-off"}`}
+                    aria-current={isActive(it) ? "page" : undefined}
+                    title={on ? undefined : `${it.label} is off for this owner — you can still open it (admin view)`}>
+                    <i className={`fas ${it.icon}`} aria-hidden="true" />
+                    {it.label}
+                    {it.soon && <span className="navsoon">Soon</span>}
+                  </Link>
+                );
+              })}
             </div>
           ))}
         </nav>
@@ -174,6 +207,28 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
               <span className="cur">Owner panel</span>
             </nav>
             <span className="adm-adminbar-tag"><i className="fas fa-user-shield" aria-hidden="true" /> Admin view</span>
+            {/* X-ray zone counter: which sections the real owner can't see. */}
+            <span style={{ position: "relative" }}>
+              <button className="adm-btn xray-zbtn" onClick={() => setZonesOpen((o) => !o)}
+                title="Sections hidden from the real owner">
+                {offSections.length} section{offSections.length === 1 ? "" : "s"} off for owner <i className="fas fa-chevron-down" style={{ fontSize: 9 }} aria-hidden="true" />
+              </button>
+              {zonesOpen && (
+                <div className="xray-zpop" role="menu">
+                  <div className="zh">Off for the real owner</div>
+                  {offSections.length === 0 && <div className="zrow" style={{ cursor: "default" }}>Nothing is off.</div>}
+                  {offSections.map((it) => (
+                    <button key={it.href} className="zrow" onClick={() => {
+                      setZonesOpen(false);
+                      // Jump straight to the admin setting that controls this section.
+                      router.push(`/aevinite/access${ridPin ? `?rid=${ridPin}&` : "?"}focus=owner-panel`);
+                    }}>
+                      <span className="dot" aria-hidden="true" />{it.label}<small>change in Access</small>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </span>
             <button className="adm-btn" onClick={exitAdminView} title="Stop viewing this owner panel">
               <i className="fas fa-arrow-rotate-left" style={{ marginRight: 6 }} aria-hidden="true" /> Exit view
             </button>
@@ -201,6 +256,23 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
 
         <main className="adm-main"><div className="owx-wrap">{children}</div></main>
       </div>
+
+      {/* Hierarchy X-ray styles (same amber language as the manager panel's ribbon). */}
+      <style jsx global>{`
+        .adm.owx .owx-navlink.xray-off { color: #d97706 !important; opacity: .72; }
+        .adm.owx .owx-navlink.xray-off::after { content: ""; width: 6px; height: 6px; border-radius: 50%;
+          background: #d97706; margin-left: 6px; display: inline-block; vertical-align: middle; }
+        .adm.owx .xray-zbtn { color: #b45309; border-color: color-mix(in srgb, #d97706 45%, transparent); }
+        .adm.owx .xray-zpop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; min-width: 250px;
+          background: var(--adm-card, #fff); border: 1px solid var(--adm-line, #ddd); border-radius: 12px; padding: 6px;
+          box-shadow: 0 12px 32px rgba(0,0,0,.28); }
+        .adm.owx .xray-zpop .zh { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--adm-muted,#888); padding: 6px 8px 4px; }
+        .adm.owx .xray-zpop .zrow { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent;
+          border: 0; border-radius: 8px; padding: 8px; font: inherit; font-size: 12.5px; color: inherit; cursor: pointer; }
+        .adm.owx .xray-zpop .zrow:hover { background: color-mix(in srgb, #d97706 12%, transparent); }
+        .adm.owx .xray-zpop .zrow .dot { width: 7px; height: 7px; border-radius: 50%; background: #d97706; flex-shrink: 0; }
+        .adm.owx .xray-zpop .zrow small { color: var(--adm-muted,#888); margin-left: auto; }
+      `}</style>
     </div>
   );
 }

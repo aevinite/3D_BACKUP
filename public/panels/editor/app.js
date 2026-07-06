@@ -6483,18 +6483,35 @@ function syncBanquetTab() {
 // ══════════════════════════════════════════════════════════════════════════════
 const XRAY_TABS = [
   { tab: "dash", flag: "view_dashboard", label: "Dashboard" },
-  // (Bills discount/void live inside the Bills tab as actions, not whole tabs — a
-  //  later vertical tints those controls the same way via this same WHO signal.)
+  { tab: "items", flag: "edit_menu", label: "Menu editor" },
 ];
-// Manager powers all live on the OWNER panel's "Staff & powers" (Access) page.
-const XRAY_SETTING_URL = "/owner/staff";
+// Phase 2 (the ladder, 2026-07-06): permission-gated CONTROLS inside tabs. Matched by
+// CSS selector on every repaint (MutationObserver below), so a live-poll re-render can
+// never resurrect a hidden button. Same rule as tabs: hidden for the real manager,
+// tinted for a higher role. The server enforces each flag regardless (managerCan).
+const XRAY_CONTROLS = [
+  { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
+  { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
+  { selector: '.list-item[data-settings-section="users"]', flag: "manage_staff", label: "User settings" },
+  { selector: '.list-item[data-settings-section="access"]', flag: "manage_staff", label: "Access settings" },
+];
 let XRAY_WHO = null;
+
+// Where "change this" points: the admin jumps to the Access hub (deep-linked to the
+// manager-powers card, pinned to this tab's restaurant); an owner jumps to their own
+// Staff & powers page focused on the exact toggle (Phase 5 deep-link).
+function xraySettingUrl(flag) {
+  return XRAY_WHO && XRAY_WHO.actor === "admin"
+    ? `/aevinite/access${PANEL_RID ? `?rid=${encodeURIComponent(PANEL_RID)}&` : "?"}focus=manager-powers`
+    : `/owner/staff?focus=${encodeURIComponent(flag)}`;
+}
 
 (function injectXrayStyles() {
   const css = `
-  /* Tinted (off-for-staff) — colour cue only; stays fully clickable for the higher role. */
-  .tab.xray-off { position: relative; color: var(--gold-strong, #b8860b) !important; opacity: .72; }
-  .tab.xray-off::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  /* Tinted (off-for-staff) — colour cue only; stays fully clickable for the higher role.
+     Generic since Phase 2: applies to tabs AND in-tab controls/list rows alike. */
+  .xray-off { position: relative; color: var(--gold-strong, #b8860b) !important; opacity: .72; }
+  .xray-off::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
     background: #d97706; margin-left: 6px; vertical-align: middle; }
   .xray-pulse { animation: xrayPulse 1.1s ease-out 2; border-radius: 8px; }
   @keyframes xrayPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217,119,6,0); } 50% { box-shadow: 0 0 0 4px rgba(217,119,6,.55); } }
@@ -6517,11 +6534,32 @@ let XRAY_WHO = null;
     border: 0; border-radius: 8px; padding: 8px; font: inherit; font-size: 12.5px; color: var(--text,#222); cursor: pointer; }
   #xrayZones .zrow:hover { background: color-mix(in srgb, #d97706 12%, transparent); }
   #xrayZones .zrow .dot { width: 7px; height: 7px; border-radius: 50%; background: #d97706; flex-shrink: 0; }
-  #xrayZones .zrow small { color: var(--muted,#888); margin-left: auto; }`;
+  #xrayZones .zrow small { color: var(--muted,#888); margin-left: auto; }
+  #xrayZones .zrow small.zgo { margin-left: 8px; color: #b45309; font-weight: 700; }
+  #xrayZones .zrow small.zgo:hover { text-decoration: underline; }`;
   const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
 })();
 
-function xrayGrantedForManager(flag) { return XRAY_WHO && XRAY_WHO.managerPermissions && XRAY_WHO.managerPermissions[flag] === true; }
+// The LADDER rule (mig 133): a power is granted only when the admin still entitles it
+// AND the owner switched it on — the server resolves that into whoami.effectivePowers.
+// (managerPermissions kept as the fallback for a stale cached app.js talking to an
+// older server response.)
+function xrayGrantedForManager(flag) {
+  if (!XRAY_WHO) return true;
+  if (XRAY_WHO.effectivePowers) return XRAY_WHO.effectivePowers[flag] === true;
+  return !!(XRAY_WHO.managerPermissions && XRAY_WHO.managerPermissions[flag] === true);
+}
+// Who turned it off — names the right rung in the zone list + toast.
+function xrayOffBy(flag) { return XRAY_WHO && XRAY_WHO.offByAdmin && XRAY_WHO.offByAdmin[flag] ? "admin" : "owner"; }
+
+// Conditional DOM writes: only touch what actually changes, so the steady-state pass
+// is mutation-free and the MutationObserver below can never loop on its own writes.
+function xraySetHidden(el, hide) { if (el.hidden !== hide) el.hidden = hide; }
+function xraySetTint(el, on, title) {
+  if (el.classList.contains("xray-off") !== on) el.classList.toggle("xray-off", on);
+  const want = on ? title : null;
+  if ((el.getAttribute("title") || null) !== want) { if (want) el.setAttribute("title", want); else el.removeAttribute("title"); }
+}
 
 function applyHierarchyView() {
   if (!XRAY_WHO) return;
@@ -6531,16 +6569,50 @@ function applyHierarchyView() {
     const btn = document.querySelector(`.tabs .tab[data-tab="${entry.tab}"]`);
     if (!btn) continue;
     const granted = xrayGrantedForManager(entry.flag);
-    btn.hidden = false; btn.classList.remove("xray-off"); btn.removeAttribute("title");
-    if (granted) continue;                               // manager has it → normal for everyone
-    if (!higher) { btn.hidden = true; continue; }        // real manager → hide entirely
+    if (granted) { xraySetHidden(btn, false); xraySetTint(btn, false); continue; } // manager has it → normal for everyone
+    if (!higher) { xraySetHidden(btn, true); xraySetTint(btn, false); continue; }  // real manager → hide entirely
     // higher role → TINT (colour only), still fully usable. Record it as a zone.
-    btn.classList.add("xray-off");
-    btn.title = `${entry.label} is off for staff — you can still use it (admin view)`;
+    xraySetHidden(btn, false);
+    xraySetTint(btn, true, `${entry.label} is off for staff — you can still use it (admin view)`);
     zones.push({ ...entry, el: btn });
+  }
+  // A real manager must never be LEFT ON a tab that just got hidden (e.g. the default
+  // "items" tab with edit_menu off) — hop to the first visible tab instead.
+  if (!higher) {
+    const active = document.querySelector(".tabs .tab.active");
+    if (active && active.hidden) {
+      const first = document.querySelector(".tabs .tab:not([hidden])");
+      if (first) setTab(first.dataset.tab);
+    }
+  }
+  // Phase 2: in-tab controls (discount / void / staff-settings rows). Fresh query per
+  // pass — repaints recreate these nodes, the observer re-runs us, we re-apply.
+  for (const entry of XRAY_CONTROLS) {
+    const els = document.querySelectorAll(entry.selector);
+    if (!els.length) continue;
+    const granted = xrayGrantedForManager(entry.flag);
+    let counted = false;
+    els.forEach((el) => {
+      if (granted) { xraySetHidden(el, false); xraySetTint(el, false); return; }
+      if (!higher) { xraySetHidden(el, true); xraySetTint(el, false); return; }
+      xraySetHidden(el, false);
+      xraySetTint(el, true, `${entry.label}: off for staff (by the ${xrayOffBy(entry.flag)}) — you can still use it`);
+      if (!counted) { zones.push({ ...entry, el }); counted = true; } // one zone per control type
+    });
   }
   renderXrayRibbon(higher, zones);
 }
+
+// Re-apply on every repaint. The panel redraws lists/orders/tables in place on live
+// polls; without this, a redraw would resurrect a hidden discount/void button. The
+// conditional writes above make steady-state passes mutation-free (no self-loop);
+// rAF coalesces bursts of mutations into one pass.
+let xrayPassQueued = false;
+new MutationObserver(() => {
+  if (xrayPassQueued || !XRAY_WHO) return;
+  xrayPassQueued = true;
+  requestAnimationFrame(() => { xrayPassQueued = false; applyHierarchyView(); });
+}).observe(document.body, { childList: true, subtree: true });
 
 function renderXrayRibbon(higher, zones) {
   let rb = document.getElementById("xrayRibbon");
@@ -6551,6 +6623,11 @@ function renderXrayRibbon(higher, zones) {
   const restEl = document.getElementById("brandRest");
   const restName = restEl ? restEl.textContent.replace(/^·\s*/, "") : "";
   const n = zones.length;
+  // Skip identical rebuilds: the MutationObserver re-runs applyHierarchyView on every
+  // repaint, and rewriting our own innerHTML would itself be a mutation → a loop.
+  const sig = `${who}|${restName}|${zones.map((z) => z.label).join(",")}`;
+  if (rb.dataset.sig === sig) return;
+  rb.dataset.sig = sig;
   rb.innerHTML =
     `<span class="rb-tag"><i class="fas fa-user-shield"></i> ${who} view</span>` +
     (restName ? `<span class="rb-rest">${restName}</span>` : "") +
@@ -6576,20 +6653,34 @@ function syncRibbonHeight() {
 
 function toggleXrayZones(zones) {
   let zp = document.getElementById("xrayZones");
-  if (zp) { zp.remove(); return; }
+  if (zp) { (zp._xrayClose || (() => zp.remove()))(); return; }
   zp = document.createElement("div"); zp.id = "xrayZones";
   zp.innerHTML = `<div class="zh">Off for staff on this page</div>` + (zones.length
-    ? zones.map((z, i) => `<button class="zrow" data-zi="${i}"><span class="dot"></span>${z.label}<small>tap to locate</small></button>`).join("")
+    ? zones.map((z, i) => `<button class="zrow" data-zi="${i}"><span class="dot"></span>${z.label} <small>by ${xrayOffBy(z.flag)}</small><small class="zgo" data-zgo="${i}" title="Open the setting that controls this">⚙ change</small></button>`).join("")
     : `<div class="zrow" style="cursor:default">Nothing is off here.</div>`);
   document.getElementById("xrayRibbon").appendChild(zp);
+  // Hardware BACK closes the popout (not the site) — the panels' backstack manager.
+  const backOff = window.LFH_BACK ? LFH_BACK.layer("xray-zones", () => zp.remove()) : null;
+  const closeZp = () => { zp.remove(); if (backOff) backOff(); };
+  zp._xrayClose = closeZp;
   zp.querySelectorAll(".zrow[data-zi]").forEach((row) => {
-    row.onclick = () => {
+    row.onclick = (e) => {
       const z = zones[+row.dataset.zi];
-      zp.remove();
-      if (z && z.el) {
-        z.el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-        z.el.classList.remove("xray-pulse"); void z.el.offsetWidth; z.el.classList.add("xray-pulse");
-        toast(`${z.label}: off for staff. Change it in the owner's Access settings.`, "ok");
+      closeZp();
+      if (!z) return;
+      // "⚙ change" → jump straight to the setting that controls this (Phase 5).
+      if (e.target.closest("[data-zgo]")) {
+        try { window.top.location.href = xraySettingUrl(z.flag); } catch { window.location.href = xraySettingUrl(z.flag); }
+        return;
+      }
+      // Locate: re-resolve NOW — live repaints replace nodes, so a captured el may be stale.
+      const el = z.tab ? document.querySelector(`.tabs .tab[data-tab="${z.tab}"]`) : document.querySelector(z.selector);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        el.classList.remove("xray-pulse"); void el.offsetWidth; el.classList.add("xray-pulse");
+        toast(`${z.label}: off for staff (by the ${xrayOffBy(z.flag)}). Tap ⚙ change to open its setting.`, "ok");
+      } else {
+        toast(`${z.label} isn't on this screen right now — tap ⚙ change to open its setting.`, "ok");
       }
     };
   });
@@ -6597,7 +6688,7 @@ function toggleXrayZones(zones) {
 // Close the zones popout on an outside click.
 document.addEventListener("click", (e) => {
   const zp = document.getElementById("xrayZones");
-  if (zp && !e.target.closest("#xrayZones") && !e.target.closest("#xrayZonesBtn")) zp.remove();
+  if (zp && !e.target.closest("#xrayZones") && !e.target.closest("#xrayZonesBtn")) (zp._xrayClose || (() => zp.remove()))();
 });
 
 api("GET", "/whoami").then((w) => { XRAY_WHO = w; applyHierarchyView(); }).catch(() => {});

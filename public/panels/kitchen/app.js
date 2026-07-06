@@ -647,3 +647,44 @@ if (window.LFH_RT) {
 } else {
   setInterval(() => load().catch(() => {}), 2000); // fallback poll
 }
+
+// ── HIERARCHY X-RAY ribbon (Phase 4, 2026-07-06) ─────────────────────────────
+// The kitchen has no permission-gated actions (yet), so this is the "viewed by a
+// higher role" marker only: an amber ribbon naming the admin view + Exit. Same
+// language as the manager/tablet ribbons; add zones here when kitchen gets gated
+// controls. One whoami request at boot — no polling.
+(function kitchenXray() {
+  const css = `
+  #xrayRibbon { display: flex; align-items: center; gap: 12px; padding: 6px 14px;
+    background: color-mix(in srgb, #d97706 14%, var(--panel, #101826)); border-bottom: 1px solid color-mix(in srgb, #d97706 40%, transparent);
+    font-size: 12px; color: var(--text, #e8eefc); position: relative; z-index: 40; }
+  #xrayRibbon .rb-tag { font-weight: 800; letter-spacing: .04em; color: #f59e0b; text-transform: uppercase; font-size: 11px; }
+  #xrayRibbon .rb-rest { color: var(--muted, #9fb0cc); font-weight: 600; }
+  #xrayRibbon .rb-spacer { margin-left: auto; }
+  #xrayRibbon button { font: inherit; cursor: pointer; border-radius: 999px; border: 1px solid var(--line, #26324a);
+    background: transparent; color: var(--muted, #9fb0cc); font-weight: 700; padding: 4px 12px; }`;
+  const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
+
+  api("GET", "/whoami").then((w) => {
+    if (!w || !w.higherView) return;
+    const rb = document.createElement("div"); rb.id = "xrayRibbon";
+    const who = w.actor === "admin" ? "Admin" : w.actor.charAt(0).toUpperCase() + w.actor.slice(1);
+    rb.innerHTML =
+      `<span class="rb-tag">${who} view</span>` +
+      `<span class="rb-rest" id="xrayRest"></span>` +
+      `<span class="rb-spacer"></span>` +
+      `<button id="xrayExit">Exit view</button>`;
+    document.body.insertBefore(rb, document.body.firstChild);
+    // The restaurant name lands with the first /board load — mirror it when it does.
+    const restEl = document.getElementById("restName");
+    if (restEl) {
+      const mirror = () => { const t = restEl.textContent || ""; const me = document.getElementById("xrayRest"); if (me && me.textContent !== t) me.textContent = t; };
+      mirror();
+      new MutationObserver(mirror).observe(restEl, { childList: true, characterData: true, subtree: true });
+    }
+    document.getElementById("xrayExit").onclick = async () => {
+      try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
+      try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+    };
+  }).catch(() => {});
+})();

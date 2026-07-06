@@ -17,6 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
+import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct } from "@/lib/tax";
 
 export const dynamic = "force-dynamic";
@@ -77,6 +78,16 @@ export async function GET(req: NextRequest) {
   const range = sp.get("range") || "30d";
   const rid = sp.get("rid") || null;
   if (rid && !scope.all && !scope.ids.includes(rid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  // Mig 133: a REAL owner only reads reports for restaurants whose "reports" section
+  // the admin still allows. The admin's own session (scope.admin — set on every admin
+  // branch, incl. an act-as pin that borrows the real owner's id) is never gated:
+  // admin = top power, and the X-ray shows removed sections tinted-but-working.
+  if (!scope.all && !scope.admin) {
+    const allowed = await entitledSubset(scope.ids, "reports");
+    if (rid && !allowed.includes(rid)) return NextResponse.json({ error: "Reports aren't enabled for this restaurant — contact Aevidine.", disabled: true }, { status: 403 });
+    if (!allowed.length) return NextResponse.json({ error: "Reports aren't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
+    scope.ids = allowed;
+  }
   const { from, to, bucket } = windowFor(range);
 
   // The restaurants this call may touch (for the merged all-restaurants shapes).

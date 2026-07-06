@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 type Perms = Record<string, boolean>;
-type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms };
+type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms };
 type Staff = { id: string; username: string; role: string; name: string | null; phone: string | null; active: boolean; restaurant_id: string; hasPin: boolean; last_seen_at?: string | null };
 
 const PERMS: [string, string, string][] = [
@@ -40,6 +40,11 @@ export default function OwnerStaffPage() {
   const withScope = useCallback(
     (p: string) => (scopePin ? `${p}${p.includes("?") ? "&" : "?"}scope=${scopePin}` : p),
     [scopePin]);
+  // Deep-link from an X-ray zone ("open the setting that controls this"): ?focus=<flag>
+  // scrolls to that power toggle and pulses it.
+  const [linked] = useState<{ focus: string | null; rid: string | null }>(() =>
+    typeof window === "undefined" ? { focus: null, rid: null }
+    : { focus: new URLSearchParams(window.location.search).get("focus"), rid: new URLSearchParams(window.location.search).get("rid") });
 
   const load = useCallback(async () => {
     try {
@@ -50,6 +55,18 @@ export default function OwnerStaffPage() {
     finally { setLoading(false); }
   }, [withScope]);
   useEffect(() => { load(); }, [load]);
+
+  // After a deep-linked load, locate the named power toggle and pulse it once.
+  useEffect(() => {
+    if (loading || !linked.focus) return;
+    const el = document.querySelector<HTMLElement>(`[data-perm-key="${CSS.escape(linked.focus)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.style.transition = "box-shadow .3s";
+    el.style.boxShadow = "0 0 0 4px rgba(217,119,6,.55)";
+    const t = setTimeout(() => { el.style.boxShadow = ""; }, 2200);
+    return () => clearTimeout(t);
+  }, [loading, linked.focus]);
 
   const canEditPowers = actor === "owner" || actor === "admin";
 
@@ -139,9 +156,23 @@ export default function OwnerStaffPage() {
             <div className="ost-section-t">Manager powers <span className="adm-muted" style={{ fontWeight: 500 }}>· what a manager here may do</span></div>
             <div className="ost-perms">
               {PERMS.map(([key, label, hint]) => {
+                // The ladder (mig 133): a power the ADMIN removed doesn't exist here.
+                // Hidden from the real owner; the admin act-as sees it amber-tinted,
+                // and clicking it jumps to the admin Access hub instead of toggling.
+                const exists = r.ownerEntitlements?.[`power_${key}`] !== false;
+                if (!exists && actor !== "admin") return null;
                 const on = !!r.managerPermissions?.[key];
+                if (!exists) {
+                  return (
+                    <button key={key} type="button" className="ost-perm xray-off" data-perm-key={key}
+                      onClick={() => { window.location.href = `/aevinite/access?rid=${linked.rid || r.id}&focus=manager-powers`; }}
+                      title="Removed by admin — the owner can't see this. Tap to change it in Access control.">
+                      <i className="fas fa-lock" /> <span>{label}</span>
+                    </button>
+                  );
+                }
                 return (
-                  <button key={key} type="button" className={`ost-perm ${on ? "on" : ""}`} disabled={!canEditPowers || busy}
+                  <button key={key} type="button" className={`ost-perm ${on ? "on" : ""}`} data-perm-key={key} disabled={!canEditPowers || busy}
                     onClick={() => togglePerm(r.id, key, !on)} title={canEditPowers ? hint : "Only the owner can change this"}>
                     <i className={`fas ${on ? "fa-toggle-on" : "fa-toggle-off"}`} /> <span>{label}</span>
                   </button>
@@ -196,6 +227,7 @@ export default function OwnerStaffPage() {
         .ost-perm.on { color: var(--rcol, var(--accent)); border-color: color-mix(in srgb, var(--rcol, var(--accent)) 55%, transparent); background: color-mix(in srgb, var(--rcol, var(--accent)) 9%, transparent); }
         .ost-perm i { font-size: 16px; }
         .ost-perm:disabled { opacity: .75; cursor: default; }
+        .ost-perm.xray-off { color: #b45309; border-color: color-mix(in srgb, #d97706 45%, transparent); opacity: .8; }
         .ost-team { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
         .ost-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 9px 10px; border-radius: 9px; background: color-mix(in srgb, var(--fg, #888) 4%, transparent); }
         .ost-row.off { opacity: .6; }
