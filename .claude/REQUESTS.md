@@ -331,3 +331,10 @@ Computer crashed mid-flight on ~8 parallel sessions. Everything half-done was fo
 - [x] **Tablet Phase 3** — whoami + admin-view ribbon + mark-paid/discount/invoice/banquet tinted (not hidden) for the admin when off-for-waiters; server `tabletPerm` lets the admin through an 'off' tri-state (X-ray invariant). app.js `?v=20260706c`.
 - [x] **Kitchen Phase 4** — whoami + admin-view ribbon (no gated actions yet); app.js got its FIRST cache-bust `?v=20260706a` (was version-less = stale-cache gotcha).
 - [x] Shipped via PR #173 (merged). Server-side behaviour fully verified via API twice (incl. work-checker round: admin act-as 200 / real owner 403, restore clean). ⚠️ Browser click-through of the tint VISUALS never happened — Chrome MCP kept hanging; owner said push live anyway. If a tint/ribbon looks off at ~390px, it is presentation-only (server enforcement is proven).
+
+## 2026-07-06 — Admin Live Floor: platform stats strip + sort + click-only refresh
+- [x] **Top "whole platform" strip on /aevinite/floor** — 6 cards (restaurants live, tables busy, orders today, cooking now, unpaid bills, waiter calls); counts pre-summed in Postgres (mig 134 `lfh_admin_floor_stats`, indexed, one tiny row per restaurant, NO revenue per the admin no-earnings rule); numbers count up when a fresh snapshot lands.
+- [x] **Sort control for the restaurant blocks** — Busiest / Most cooking / Most orders today / Needs attention / A–Z, remembered in localStorage; per-restaurant "N today · M cooking (· unpaid/calling)" row under each block name.
+- [x] **Click-only refresh (owner's optimization ask)** — fetches ONLY on page open + Refresh button; the old 45s auto-timer removed; "Updated Xs ago" chip goes amber after 2 min so stale is visible; latest-wins seq guard on responses.
+- [x] **Skeleton shimmer on first load + "Calculating live totals…" pulse while fetching** (prefers-reduced-motion respected).
+- Verified headless (Playwright, 15/15 PASS): skeleton, totals (4/3/3 from seeded QA orders), sort reorder + persistence, ZERO background fetches in 65s idle, exactly one fetch per Refresh click, 390px mobile.
