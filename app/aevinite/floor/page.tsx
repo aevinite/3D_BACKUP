@@ -19,8 +19,11 @@ import { openRestaurantPanel } from "@/components/admin/shared";
 type MiniTable = { n: string; s: string; p: string; c: boolean };
 type RestFloor = {
   id: string; name: string; slug: string; active: boolean; tables: MiniTable[];
-  ordersToday: number; activeOrders: number; unpaidOrders: number; error: string | null;
+  ordersToday: number; activeOrders: number; unpaidOrders: number;
+  paidToday: number; cancelledToday: number; error: string | null;
 };
+// A cancelled order, for the Today tab's expandable list (counts/labels only, NO money).
+type CancelledRow = { id: string; restaurantName: string; table: string | number | null; kot: number | null; at: string };
 
 // Same palette the manager/tablet legends use, so colours mean ONE thing everywhere.
 const STATE_COLOR: Record<string, string> = {
@@ -119,6 +122,12 @@ export default function AdminFloor() {
   const [fetching, setFetching] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState("busy");
+  const [tab, setTab] = useState<"live" | "today">("live");
+  // Cancelled-today list is lazy — fetched only when the section is first opened.
+  const [cancelledOpen, setCancelledOpen] = useState(false);
+  const [cancelledList, setCancelledList] = useState<CancelledRow[] | null>(null);
+  const [cancelledLoading, setCancelledLoading] = useState(false);
+  const [cancelledErr, setCancelledErr] = useState<string | null>(null);
   const seq = useRef(0); // latest-wins: a slow old response must never overwrite a newer one
 
   const load = useCallback(() => {
@@ -142,12 +151,34 @@ export default function AdminFloor() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // When a fresh snapshot lands (Refresh) and the cancelled list is open, reload it too so
+  // the drill-down list can't show stale rows next to a freshly-counted "Cancelled today".
+  useEffect(() => {
+    if (updatedAt !== null && cancelledOpen) loadCancelled();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [updatedAt]);
+
   // Read the saved sort AFTER mount (not in the initializer) so the server and
   // first client paint agree — avoids a hydration mismatch.
   useEffect(() => {
     try { const s = localStorage.getItem(SORT_KEY); if (s && SORTS.some((o) => o.value === s)) setSortBy(s); } catch {}
   }, []);
   const changeSort = (v: string) => { setSortBy(v); try { localStorage.setItem(SORT_KEY, v); } catch {} };
+
+  // Lazy-load the cancelled-today list (only when the section is opened, or re-opened
+  // after a Refresh). Keeps the normal floor snapshot free of this extra read.
+  const loadCancelled = useCallback(() => {
+    setCancelledLoading(true); setCancelledErr(null);
+    fetch("/api/admin/cancelled-today", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+      if (j.error) setCancelledErr(j.error);
+      else setCancelledList((j.orders as CancelledRow[]) || []);
+    }).catch((e) => setCancelledErr(e instanceof Error ? e.message : String(e))).finally(() => setCancelledLoading(false));
+  }, []);
+  const toggleCancelled = () => {
+    const next = !cancelledOpen;
+    setCancelledOpen(next);
+    if (next && cancelledList === null && !cancelledLoading) loadCancelled();
+  };
 
   const firstLoad = rests === null;
   const sorted = rests ? sortRests(rests, sortBy) : [];
@@ -160,6 +191,8 @@ export default function AdminFloor() {
   const cookingNow = sorted.reduce((s, r) => s + r.activeOrders, 0);
   const unpaidBills = sorted.reduce((s, r) => s + r.unpaidOrders, 0);
   const waiterCalls = sorted.reduce((s, r) => s + callCount(r.tables), 0);
+  const paidTodayTotal = sorted.reduce((s, r) => s + r.paidToday, 0);
+  const cancelledTotal = sorted.reduce((s, r) => s + r.cancelledToday, 0);
 
   return (
     <>
@@ -179,6 +212,16 @@ export default function AdminFloor() {
           </button>
         </div>
       </div>
+      {/* Two views on ONE snapshot: Live (the real-time floor) and Today (day totals,
+          bills settled/unpaid, and cancelled orders). Both read the same fetch — the
+          Today tab adds no extra load. */}
+      <div className="adm-tabs" role="tablist" aria-label="Floor view">
+        <button role="tab" aria-selected={tab === "live"} className={tab === "live" ? "active" : ""} onClick={() => setTab("live")}>Live</button>
+        <button role="tab" aria-selected={tab === "today"} className={tab === "today" ? "active" : ""} onClick={() => setTab("today")}>Today</button>
+      </div>
+
+      {tab === "live" && (
+      <>
       <p className="adm-page-sub">
         Every table of every restaurant — colour is the kitchen state, a red ring is an unpaid bill, a dot is a waiter call.
         Numbers are counted fresh each time you press Refresh.
@@ -288,6 +331,97 @@ export default function AdminFloor() {
           })}
         </div>
       ) : null}
+      </>
+      )}
+
+      {tab === "today" && (
+        <>
+          <p className="adm-page-sub">
+            Today so far (since 5am, the business day). Order counts exclude cancelled orders;
+            cancelled ones are listed on their own below so nothing is hidden.
+          </p>
+          {firstLoad && !err ? (
+            <div className="adm-stats">
+              {Array.from({ length: 4 }, (_, i) => (
+                <div key={i} className="adm-stat">
+                  <div className="adm-skel" style={{ width: 38, height: 38, borderRadius: 11, marginBottom: 12 }} />
+                  <div className="adm-skel" style={{ width: "62%", height: 11, marginBottom: 8 }} />
+                  <div className="adm-skel" style={{ width: "40%", height: 22 }} />
+                </div>
+              ))}
+            </div>
+          ) : rests ? (
+            <>
+              <div className="adm-stats">
+                <Stat icon="fa-receipt" label="Orders today" value={ordersToday} calculating={fetching} />
+                <Stat icon="fa-circle-check" label="Bills settled today" value={paidTodayTotal} calculating={fetching} />
+                <Stat icon="fa-file-invoice" label="Unpaid bills now" value={unpaidBills} calculating={fetching} />
+                <Stat icon="fa-ban" label="Cancelled today" value={cancelledTotal} calculating={fetching} />
+              </div>
+
+              {/* Per-restaurant breakdown — reuses the same snapshot, no extra fetch. */}
+              <div className="adm-card" style={{ marginBottom: 14 }}>
+                <h2>By restaurant</h2>
+                <div className="adm-logwrap">
+                  <div className="adm-logrow head" style={{ gridTemplateColumns: "1fr 64px 60px 66px 76px" }}>
+                    <span>Restaurant</span>
+                    <span style={{ textAlign: "right" }}>Orders</span>
+                    <span style={{ textAlign: "right" }}>Paid</span>
+                    <span style={{ textAlign: "right" }}>Unpaid</span>
+                    <span style={{ textAlign: "right" }}>Cancelled</span>
+                  </div>
+                  {sorted.map((r) => (
+                    <div key={r.id} className="adm-logrow" style={{ gridTemplateColumns: "1fr 64px 60px 66px 76px" }}>
+                      <span>
+                        <button className="adm-floormonth-name" style={{ fontSize: 13 }} onClick={() => openRestaurantPanel(r.id, "/manager")}
+                          title={`Open ${r.name}'s manager panel (new tab, no password)`}>{r.name}</button>
+                        {!r.active && <span style={{ color: "var(--adm-danger)", fontWeight: 700, fontSize: 11 }}> · suspended</span>}
+                      </span>
+                      <span style={{ textAlign: "right", fontWeight: 700 }}>{r.ordersToday}</span>
+                      <span style={{ textAlign: "right" }}>{r.paidToday}</span>
+                      <span style={{ textAlign: "right", color: r.unpaidOrders > 0 ? "var(--adm-danger)" : undefined, fontWeight: r.unpaidOrders > 0 ? 700 : 400 }}>{r.unpaidOrders}</span>
+                      <span style={{ textAlign: "right", color: r.cancelledToday > 0 ? "#d97706" : undefined, fontWeight: r.cancelledToday > 0 ? 700 : 400 }}>{r.cancelledToday}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Cancelled today — lazy, expandable. The list is only fetched when opened. */}
+              <div className="adm-card">
+                <button className="adm-btn" onClick={toggleCancelled} aria-expanded={cancelledOpen} style={{ width: "100%", justifyContent: "space-between", display: "flex" }}>
+                  <span><i className="fas fa-ban" style={{ marginRight: 8, color: "#d97706" }} aria-hidden="true" />Cancelled today ({cancelledTotal})</span>
+                  <i className={`fas fa-chevron-${cancelledOpen ? "up" : "down"}`} aria-hidden="true" />
+                </button>
+                {cancelledOpen && (
+                  <div style={{ marginTop: 12 }}>
+                    {cancelledLoading ? (
+                      <div className="adm-empty">Loading…</div>
+                    ) : cancelledErr ? (
+                      <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>Couldn&apos;t load: {cancelledErr}</p>
+                    ) : cancelledList && cancelledList.length > 0 ? (
+                      <div className="adm-logwrap">
+                        <div className="adm-logrow head" style={{ gridTemplateColumns: "1fr 80px 80px 110px" }}>
+                          <span>Restaurant</span><span>Table</span><span>KOT</span><span style={{ textAlign: "right" }}>Cancelled at</span>
+                        </div>
+                        {cancelledList.map((c) => (
+                          <div key={c.id} className="adm-logrow" style={{ gridTemplateColumns: "1fr 80px 80px 110px" }}>
+                            <span>{c.restaurantName}</span>
+                            <span className="adm-muted">{c.table != null ? `#${c.table}` : "—"}</span>
+                            <span className="adm-muted">{c.kot != null ? `#${c.kot}` : "—"}</span>
+                            <span style={{ textAlign: "right" }} className="adm-muted">{new Date(c.at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="adm-empty">No orders were cancelled today.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
+        </>
+      )}
     </>
   );
 }

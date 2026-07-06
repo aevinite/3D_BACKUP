@@ -38,6 +38,11 @@ export async function POST(req: NextRequest) {
   const ext = EXT[file.type];
   if (!ext) return bad("Logo must be a PNG, JPG or WEBP image.");
   if (file.size > 1048576) return bad("Logo must be 1 MB or smaller.");
+  // Confirm the restaurant exists BEFORE touching Storage — otherwise a valid-looking but
+  // unknown id would upload/keep an orphan file and return a URL no restaurant references
+  // (audit 2026-07-06).
+  const exists = (await sb.from("restaurants").select("id").eq("id", rid).maybeSingle()).data;
+  if (!exists) return bad("Restaurant not found.", 404);
   await purgeLogos(rid); // drop any previous logo so Storage keeps just the current one
   const path = `${rid}/logo-${Date.now()}.${ext}`;
   const buf = new Uint8Array(await file.arrayBuffer());

@@ -67,6 +67,17 @@ export default function AdminHealth() {
 
       {h === null ? (
         <div className="adm-empty">Checking…</div>
+      ) : !h.dbOk ? (
+        // Database ping failed → the API omits every summary field, so we must NOT
+        // fall through to the normal render (it reads h.restaurants.* and would crash
+        // the whole page exactly when the DB is down — the one moment this page matters).
+        <div className="adm-card" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+          <span className="adx-pill bad"><span className="dot" />Database unreachable</span>
+          <span className="adm-muted" style={{ fontSize: 13 }}>
+            The health check couldn&apos;t reach the database{h.latencyMs ? ` (after ${h.latencyMs}ms)` : ""}.
+            {h.error ? <> Details: <span className="mono">{h.error}</span></> : null} Press Refresh to retry.
+          </span>
+        </div>
       ) : (
         <>
           <div className="adm-card" style={{ marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>

@@ -36,5 +36,16 @@ export function cleanClonedSettings(
   base.geo_radius_m = 250;
   // A new restaurant shouldn't inherit #1's floor size.
   base.table_count = 10;
+  // NOT-NULL tenant-specific columns can't be nulled — reset them to their safe "blank"
+  // default instead, so a new restaurant does NOT inherit #1's current values.
+  // Waiter-tablet billing capabilities: NEW restaurants must start with these OFF, never
+  // copy whatever #1 has switched on (audit 2026-07-06 — #1 had mark-paid + invoice ON, so
+  // every new tenant's waiters could settle bills / issue invoices with no admin grant).
+  base.tablet_discount = "off";
+  base.tablet_mark_paid = "off";
+  base.tablet_invoice = "off";
+  // Guest feature flags: start empty so the new restaurant uses the code defaults
+  // (lib/features.ts), not #1's current on/off choices.
+  base.features = {};
   return base;
 }

@@ -62,8 +62,11 @@ function zeroFill(range: string, from: Date, to: Date, rows: { bucket: string; o
 
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const range = new URL(req.url).searchParams.get("range") || "7d";
-  const { from, to } = rangeBounds(["today", "7d", "30d"].includes(range) ? range : "7d");
+  // Normalize ONCE up front so an unexpected ?range=<junk> can't leak back out in the
+  // response or into zeroFill/bucket (it used to echo the raw string — audit 2026-07-06).
+  const rawRange = new URL(req.url).searchParams.get("range") || "7d";
+  const range = ["today", "7d", "30d"].includes(rawRange) ? rawRange : "7d";
+  const { from, to } = rangeBounds(range);
   const fromIso = from.toISOString();
   const toIso = to.toISOString();
 
@@ -71,7 +74,9 @@ export async function GET(req: NextRequest) {
     // Live restaurants only (bug H4, 2026-07-06): binned restaurants must not inflate
     // total/active counts. The busiest-restaurants RPC gets the same guard in mig 130.
     sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null),
-    sb.from("staff_users").select("id", { count: "exact", head: true }).eq("active", true),
+    // Fetch active staff's restaurant_id (bounded) so we can DROP staff that belong to a
+    // binned restaurant — a head count included them and over-stated "Active staff".
+    sb.from("staff_users").select("restaurant_id").eq("active", true).limit(5000),
     sb.from("sessions").select("restaurant_id").eq("status", "open"),
     sb.from("settings").select("restaurant_id, table_count"),
     sb.from("orders").select("id", { count: "exact", head: true }).neq("status", "cancelled").gte("created_at", fromIso).lt("created_at", toIso),
@@ -87,11 +92,20 @@ export async function GET(req: NextRequest) {
 
   const restaurants = restQ.data || [];
   const activeRestaurants = restaurants.filter((r) => r.active).length;
-  const totalTables = (tableCountQ.data || []).reduce((s, r) => s + (Number(r.table_count) || 0), 0);
+  // Only count tables/staff belonging to a LIVE (non-binned) restaurant, so the occupancy
+  // denominator and "Active staff" match the restaurant counts beside them (audit 2026-07-06 —
+  // a binned restaurant's settings row + staff used to inflate both).
+  const liveIds = new Set(restaurants.map((r) => r.id));
+  const totalTables = (tableCountQ.data || [])
+    .filter((r) => r.restaurant_id && liveIds.has(r.restaurant_id))
+    .reduce((s, r) => s + (Number(r.table_count) || 0), 0);
+  const totalStaff = (staffCountQ.data || []).filter((u) => u.restaurant_id && liveIds.has(u.restaurant_id)).length;
   const openByRid = new Map<string, number>();
+  let activeTablesNow = 0;
   for (const s of openSessionsQ.data || []) {
-    if (!s.restaurant_id) continue;
+    if (!s.restaurant_id || !liveIds.has(s.restaurant_id)) continue; // ignore binned restaurants
     openByRid.set(s.restaurant_id, (openByRid.get(s.restaurant_id) || 0) + 1);
+    activeTablesNow++;
   }
 
   const busiest = (busiestQ.data || []).map((r: { restaurant_id: string; slug: string; name: string; orders: number }) => ({
@@ -104,10 +118,10 @@ export async function GET(req: NextRequest) {
     range,
     totals: {
       totalOrders: ordersCountQ.count || 0,
-      activeTablesNow: openSessionsQ.data?.length || 0,
+      activeTablesNow,
       activeRestaurants,
       totalRestaurants: restaurants.length,
-      totalStaff: staffCountQ.count || 0,
+      totalStaff,
       totalTables,
     },
     bucket: range === "today" ? "hour" : "day",

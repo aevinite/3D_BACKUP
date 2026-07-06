@@ -42,6 +42,11 @@ export async function GET(req: NextRequest) {
   const [usersQ, restsQ] = await Promise.all([
     sb.from("staff_users")
       .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset, can_self_set_pin, restaurant_id")
+      // Owners are a DIFFERENT lifecycle (multi-restaurant, primary/co-owner handoff)
+      // and are managed ONLY on the Owners page. Never surface or touch them here —
+      // editing/deleting an owner from this page was a side door that could orphan a
+      // restaurant's ownership (admin audit 2026-07-06).
+      .neq("role", "owner")
       .order("created_at", { ascending: true }),
     sb.from("restaurants").select("id, name"),
   ]);
@@ -95,6 +100,9 @@ export async function PATCH(req: NextRequest) {
   if (!id) return bad("Missing user id.");
   const u = (await sb.from("staff_users").select("*").eq("id", id).limit(1)).data?.[0];
   if (!u) return bad("User not found.", 404);
+  // Owners are off-limits here — the only place they can be changed is the Owners
+  // page, which keeps primary/co-owner state consistent. Block every write action.
+  if (u.role === "owner") return bad("Owners are managed on the Owners page, not here.", 403);
 
   if (action === "reset_password") {
     const password = String(body?.password || "").trim() || genPassword();
@@ -178,7 +186,10 @@ export async function DELETE(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!id) return bad("Missing user id.");
-  const u = (await sb.from("staff_users").select("username").eq("id", id).limit(1)).data?.[0];
+  const u = (await sb.from("staff_users").select("username, role").eq("id", id).limit(1)).data?.[0];
+  // Never delete an owner from here — deleting a PRIMARY owner would skip the
+  // co-owner handoff and orphan the restaurant. Owners page only.
+  if (u?.role === "owner") return bad("Owners are managed on the Owners page, not here.", 403);
   await sb.from("staff_users").delete().eq("id", id);
   await logAction("admin", "user_delete", { actor: "admin", detail: `deleted "${u?.username || "?"}" · id ${id}` });
   return ok({ ok: true });
