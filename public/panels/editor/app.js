@@ -6638,9 +6638,9 @@ function renderXrayRibbon(higher, zones) {
   // crumb back to, so they keep the plain restaurant-name label.
   const crumbs = who === "Admin"
     ? `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
-      `<i class="fas fa-chevron-right rb-sep"></i><span>${restName || "…"}</span>` +
+      `<i class="fas fa-chevron-right rb-sep"></i><span>${esc(restName) || "…"}</span>` +
       `<i class="fas fa-chevron-right rb-sep"></i><span>Manager panel</span></nav>`
-    : (restName ? `<span class="rb-rest">${restName}</span>` : "");
+    : (restName ? `<span class="rb-rest">${esc(restName)}</span>` : "");
   rb.innerHTML =
     `<span class="rb-tag"><i class="fas fa-user-shield"></i> ${who} view</span>` +
     crumbs +
