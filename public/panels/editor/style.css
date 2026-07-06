@@ -849,6 +849,25 @@ body {
    stops making sense once the panel is stacked BELOW the grid instead of beside
    it, so it reverts to a normal flowed block here. */
 @media (max-width: 1040px) { .floor-wrap { flex-direction: column; margin-right: 0; } .floor-side { width: 100% !important; flex: none !important; margin-top: 0; position: static; max-height: none; overflow-y: visible; } }
+
+/* TRUE TWO-PANE SCROLL (desktop side-by-side only, ≥1041px) — owner 2026-07-06.
+   Before: the tile grid (.floor-main) and the right panel (.floor-side) shared ONE
+   page scroll on .editor, and the side was faked-in-place with position:sticky — so
+   wheeling over the tables dragged the side panel around ("both scroll together").
+   Fix: on the Tables tab (the ONLY tab whose .editor contains a .floor-wrap) stop the
+   .editor page-scroll and let EACH pane own its scroll. .editor already has a bounded
+   height from .layout's grid (calc(100vh-60px-ribbon)), so the panes fill it and each
+   scrolls independently — the left grid never moves the right panel and vice-versa.
+   Scoped to ≥1041px because below that the floor STACKS into one column and must keep
+   the normal single page-scroll (handled by the max-width:1040px rule above). */
+@media (min-width: 1041px) {
+  .editor:has(.floor-wrap) { overflow: hidden; display: flex; flex-direction: column; padding-bottom: 14px; }
+  .floor-wrap { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+  .floor-main { overflow-y: auto; min-height: 0; padding-bottom: 24px; }
+  /* Drop the sticky trick: the panel now stretches to full pane height and scrolls
+     its OWN content, fully decoupled from the grid's scroll. */
+  .floor-side { position: static; top: auto; margin-top: 0; max-height: none; }
+}
 /* F1: collapse / expand the right floor panel. Chevron sits top-right of the panel
    when open; floats on the floor's right edge when collapsed. Hover-grows (owner:
    "everything dynamic"). When collapsed, tapping a tile opens the full-screen popup. */
