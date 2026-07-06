@@ -314,7 +314,29 @@ export interface Settings {
 }
 // Reads the single site-wide settings row and returns it with safe defaults,
 // so the app still works even if settings haven't been configured yet.
+// Per-restaurant settings cache + in-flight dedup. A guest menu load mounts ~9
+// components that EACH called getSettings independently → 9 identical single-row
+// reads per page view (egress waste, seen 2026-07-06). `inflight` collapses those
+// simultaneous calls into ONE network request; `cache` (short TTL) serves repeat
+// calls within a page's lifetime. TTL is deliberately short so a realtime
+// feature/tax toggle is picked up within seconds on the next read.
+const SETTINGS_TTL_MS = 8000;
+const settingsCache = new Map<string, { at: number; val: Settings }>();
+const settingsInflight = new Map<string, Promise<Settings>>();
+
 export async function getSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Settings> {
+  const hit = settingsCache.get(restaurantId);
+  if (hit && Date.now() - hit.at < SETTINGS_TTL_MS) return hit.val; // fresh enough
+  const pending = settingsInflight.get(restaurantId);
+  if (pending) return pending; // another caller is already fetching — share it
+  const p = fetchSettings(restaurantId)
+    .then((val) => { settingsCache.set(restaurantId, { at: Date.now(), val }); return val; })
+    .finally(() => { settingsInflight.delete(restaurantId); });
+  settingsInflight.set(restaurantId, p);
+  return p;
+}
+
+async function fetchSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Settings> {
   // Explicit column list = exactly what this function maps below (egress rule) —
   // and the guest no longer receives staff-only fields (gstin, tax, invoice
   // prefix, phone…) that `*` was silently shipping to every menu visitor.
