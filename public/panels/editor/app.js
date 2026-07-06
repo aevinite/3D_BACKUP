@@ -24,7 +24,11 @@ const ALLERGENS = [
 const TAB_LABEL = { items: "Dish", categories: "Category", filters: "Tag", general: "Settings" };
 
 // The tabs across the top of the editor. Anything not in this list is ignored.
-const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "features", "general", "banquet"];
+// NOTE: "features" is intentionally OMITTED — that tab was moved to the admin panel
+// (/aevinite). Leaving it here let a browser whose last-used tab was "features" boot
+// straight into the removed guest-feature toggle grid (owner could flip admin-controlled
+// flags from the manager panel). A stale saved "features" now falls back to "items".
+const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "general", "banquet"];
 // Remember which tab you were on so a refresh keeps you there (e.g. stay on
 // Orders during a busy service instead of snapping back to Dishes).
 const savedTab = (() => { try { return localStorage.getItem("lfh_editor_tab"); } catch { return null; } })();
@@ -488,8 +492,14 @@ function renderList() {
   records()
     // keep only dishes in the chosen category (Dishes tab; "" = All)
     .filter((r) => !catF || r.category === catF)
-    // keep only rows that match the search box (search across the whole row's text)
-    .filter((r) => !q || JSON.stringify(r).toLowerCase().includes(q))
+    // keep only rows that match the search box — search the VISIBLE fields (name, slug, id,
+    // category, tags), NOT the raw JSON (which matched hidden image/GLB URLs and surfaced
+    // unrelated rows — fixed 2026-07-06).
+    .filter((r) => {
+      if (!q) return true;
+      const hay = [recLabel(r), r.slug, r.id, r.category, Array.isArray(r.tags) ? r.tags.join(" ") : ""].filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(q);
+    })
     .forEach((r) => {
       const active = state.sel && !state.isNew && recKey(r) === recKey(state.sel); // is this the row being edited?
       const hidden = state.tab !== "items" && r.active === false; // greyed-out "hidden from menu" rows
@@ -2248,13 +2258,16 @@ async function loadDashboard() {
   const pctOf = (n, total) => { const p = (n / total) * 100; return p > 0 && p < 1 ? "<1" : String(Math.round(p)); };
   const CMP_LABEL = { today: "vs yesterday till this time", "30d": "vs the 30 days before (same point)", year: "vs last year (same point)" };
   const cmpLabel = CMP_LABEL[dashRange] || "vs the period before";
-  const deltaChip = (nowV, prevV) => {
+  // lowerIsBetter: for a "bad" metric (e.g. cancellations) a RISE should read as bad (red),
+  // not green — so the COLOUR reflects good/bad while the ARROW still shows the real
+  // direction. (Was direction-agnostic: more cancellations showed a green up chip — 2026-07-06.)
+  const deltaChip = (nowV, prevV, lowerIsBetter) => {
     if (prevV == null || (!nowV && !prevV)) return "";
-    if (!prevV) return `<span class="kchip up" title="${cmpLabel}"><i class="fa-solid fa-arrow-up"></i>new</span>`;
+    if (!prevV) return `<span class="kchip ${lowerIsBetter ? "dn" : "up"}" title="${cmpLabel}"><i class="fa-solid fa-arrow-up"></i>new</span>`;
     const p = Math.round(((nowV - prevV) / prevV) * 100);
     if (Math.abs(p) < 1) return `<span class="kchip flat" title="${cmpLabel}">±0%</span>`;
-    const up = p > 0, label = p >= 300 ? `${Math.round(nowV / prevV)}×` : `${Math.abs(p)}%`;
-    return `<span class="kchip ${up ? "up" : "dn"}" title="${cmpLabel}"><i class="fa-solid fa-arrow-${up ? "up" : "down"}"></i>${label}</span>`;
+    const rising = p > 0, good = lowerIsBetter ? !rising : rising, label = p >= 300 ? `${Math.round(nowV / prevV)}×` : `${Math.abs(p)}%`;
+    return `<span class="kchip ${good ? "up" : "dn"}" title="${cmpLabel}"><i class="fa-solid fa-arrow-${rising ? "up" : "down"}"></i>${label}</span>`;
   };
   const sparkSvg = (pts, color) => {
     if (!Array.isArray(pts) || pts.length < 2 || !pts.some((v) => v > 0)) return "";
@@ -2302,7 +2315,7 @@ async function loadDashboard() {
       ${kpi("orders", "fa-utensils", "#2a78d6", "Orders", `<span data-cu="${s.orderCount}">${s.orderCount}</span>${deltaChip(s.orderCount, prev.orders)}`, ordSub)}
       ${kpi("peak", "fa-clock", "#168e5d", `Busiest hour${dashRange === "today" ? " so far" : ""}`, peakHour < 0 ? "—" : `${peakHour}:00`, peakHour < 0 ? "no orders yet" : `<b>${s.hours[peakHour]}</b> order${s.hours[peakHour] === 1 ? "" : "s"} in that hour`)}
       ${kpi("given", "fa-tag", "#a86e00", "Given away", `<span data-cu="${disc.total}" data-cu-fmt="inr">${inr(disc.total)}</span>`, disc.count ? `discounts on <b>${disc.count}</b> bill${disc.count === 1 ? "" : "s"}${s.revenue > 0 ? ` (${pctOf(disc.total, s.revenue + disc.total)}% given up)` : ""}${disc.max ? `<br>largest <b>${inr(disc.max.amt)}</b>${disc.max.table ? ` on T${esc(disc.max.table)}` : ""}` : ""}` : "no discounts — full price all round")}
-      ${kpi("cancelled", "fa-ban", "#b34a4a", "Lost to cancellations", `<span data-cu="${s.cancelledValue || 0}" data-cu-fmt="inr">${inr(s.cancelledValue || 0)}</span>${deltaChip(s.cancelled, prev.cancelled)}`, s.cancelled ? `<b>${s.cancelled}</b> cancelled order${s.cancelled === 1 ? "" : "s"} — tap to inspect` : "none — clean sheet", { alert: s.cancelled > 0 })}
+      ${kpi("cancelled", "fa-ban", "#b34a4a", "Lost to cancellations", `<span data-cu="${s.cancelledValue || 0}" data-cu-fmt="inr">${inr(s.cancelledValue || 0)}</span>${deltaChip(s.cancelled, prev.cancelled, true)}`, s.cancelled ? `<b>${s.cancelled}</b> cancelled order${s.cancelled === 1 ? "" : "s"} — tap to inspect` : "none — clean sheet", { alert: s.cancelled > 0 })}
     </div>
     <div class="dash-grid">
       <div class="dash-chart wide"><h4>Sales <span>· ${rangeLabel} — click a point to open those bills</span></h4><div class="chart-wrap tall"><canvas id="chSales"></canvas></div>${narrate}</div>
@@ -3265,9 +3278,9 @@ async function save() {
   const payload = { ...it };
   delete payload.created_at;
   delete payload.updated_at;
-  // Tell the server whether this is a brand-new dish (mint a fresh unique id, never
-  // overwrite an existing row) or an edit (update the existing id in place).
-  if (state.tab === "items") payload.__create = !!state.isNew;
+  // Tell the server whether this is a brand-new row (mint a fresh unique id / refuse to
+  // clobber an existing category/filter with the same slug) or an edit (update in place).
+  if (state.tab === "items" || state.tab === "categories" || state.tab === "filters") payload.__create = !!state.isNew;
   const wasNew = state.tab === "items" && state.isNew;
   try {
     const key = recKey(it);
@@ -3770,7 +3783,7 @@ async function closeSession(id, force) {
   if (!force && !(await confirmDialog("Close this session? Guests at this table can no longer order or call until it's reopened.", "Close session"))) return;
   try {
     await api("POST", "/sessions/" + id + "/close", force ? { force: true } : undefined);
-    state.openSess = null; state.selectedTable = null; document.querySelector(".sx-modal-overlay")?.remove(); // close modal AND the in-panel detail
+    state.openSess = null; state.selectedTable = null; document.querySelector(".tbl-modal-overlay")?.remove(); // close modal AND the in-panel detail
     await loadSessions();
     toast("Table closed — bill moved to Previous", "ok");
   } catch (e) {
@@ -4859,7 +4872,7 @@ async function saveGeo() {
 // flicker — just the dish list filling in. (owner report, 2026-07-02: the modal took 1-2s
 // to appear at all; this is the stale-while-revalidate fix.)
 function openTablePanel(table) { state.openSess = String(table); renderTablePanel(); loadSessions(); }
-function closeTablePanel() { state.openSess = null; document.querySelector(".sx-modal-overlay")?.remove(); }
+function closeTablePanel() { state.openSess = null; document.querySelector(".tbl-modal-overlay")?.remove(); }
 
 // selectTable / deselectTable — the NEW master-detail (Tables tab). Selecting a
 // table shows its full detail IN the right side panel (not a pop-up); deselecting
@@ -5504,9 +5517,9 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
 function renderTablePanel() {
   if (state.openSess == null) return;
   // keep the scroll position so serving an item doesn't fling the panel back to the top
-  const prevModal = document.querySelector(".sx-modal-overlay .tbl-modal");
+  const prevModal = document.querySelector(".tbl-modal-overlay .tbl-modal");
   const savedScroll = prevModal ? prevModal.scrollTop : 0;
-  document.querySelector(".sx-modal-overlay")?.remove();
+  document.querySelector(".tbl-modal-overlay")?.remove();
   const t = state.openSess;
   const parts = tablePanelParts(t);
   const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
@@ -5691,7 +5704,7 @@ async function freeTableAll(t, sess) {
   if (!(await confirmDialog(`Free Table ${t}? Settled orders leave the floor${sess ? " and the session closes" : ""} (kept in records).`, "Free table"))) return;
   (state.data.orders || []).forEach((o) => { if (ids.includes(o.id)) { o.archived = true; opBegin(o.id); } });
   if (sess) sess.status = "closed";
-  state.openSess = null; state.selectedTable = null; document.querySelector(".sx-modal-overlay")?.remove(); // close modal AND the in-panel detail
+  state.openSess = null; state.selectedTable = null; document.querySelector(".tbl-modal-overlay")?.remove(); // close modal AND the in-panel detail
   floorOpsInFlight++;
   loadSessions(true); // instant redraw from local state
   // release first, then refresh — see restartTable for why this order matters.

@@ -238,7 +238,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (type === "inv" || type === "bill") {
           // invoice_no / bill_no live on the SESSION → find matching sessions, then their orders.
           const col = type === "inv" ? "invoice_no" : "bill_no";
-          const n = parseInt(histQ.replace(/\D/g, ""), 10);
+          // Match the LAST run of digits so a full formatted invoice pasted in
+          // ("INV/2025-26/000042") resolves to its sequence number (42) — the old
+          // strip-ALL-non-digits turned that into 2025260000042 and found nothing (2026-07-06).
+          const m = histQ.match(/(\d+)(?!.*\d)/);
+          const n = m ? parseInt(m[1], 10) : NaN;
           if (!Number.isFinite(n)) return ok([]);
           const sess = must(await sb.from("sessions").select("id").eq("restaurant_id", rid).eq(col, n).limit(200));
           const ids = (sess as any[]).map((s) => s.id);
@@ -1181,6 +1185,18 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       const t = TABLES[a];
       if (!t) return err("unknown kind", 404);
       if ((a === "items" || a === "categories" || a === "filters") && !(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the menu");
+      // Is the client CREATING a brand-new row vs EDITING an existing one? Read + strip the
+      // transient hint once for every kind (it's never a real column). Lets a create refuse
+      // to silently overwrite an existing row via the upsert's DO UPDATE arm.
+      const isCreate = !!(body && typeof body === "object" && (body as Record<string, unknown>).__create === true);
+      if (body && typeof body === "object") delete (body as Record<string, unknown>).__create;
+      // A new category/filter must not clobber an existing one with the same slug (the upsert
+      // keys on (restaurant_id,slug), so a dup-slug create would DO UPDATE over it — silent
+      // data loss, 2026-07-06). Tell the user instead.
+      if (isCreate && (a === "categories" || a === "filters") && body && typeof body === "object" && body.slug) {
+        const clash = (await sb.from(t.name).select("slug").eq("restaurant_id", rid).eq("slug", String(body.slug)).maybeSingle()).data;
+        if (clash) return err(`A ${a === "categories" ? "category" : "filter"} with that name already exists.`, 409);
+      }
       // Settings save is owner-only unless the owner has granted a manager the power
       // (owner role always passes managerCan). Previously this endpoint had NO gate — any
       // authenticated staff could PATCH the settings row. (2026-07-04 audit #4)
@@ -1286,10 +1302,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         }
       }
       if (a === "items" && body && typeof body === "object") {
-        // Whether the client is CREATING a brand-new dish vs EDITING an existing one.
-        // (The `__create` hint is transient — never a real column, so strip it.)
-        const isCreate = (body as Record<string, unknown>).__create === true;
-        delete (body as Record<string, unknown>).__create;
+        // isCreate (create vs edit) was resolved + stripped above, shared across kinds.
         const slugify = (s: string) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
         if (!body.slug && body.title) body.slug = slugify(body.title);
         // menu_items.id is the GLOBAL primary key. A bare slug-as-id would let a save
@@ -1473,6 +1486,19 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
       // slug is unique only PER restaurant now (categories/filters), so a delete by
       // key MUST also pin the restaurant or it would wipe that slug everywhere.
       must(await sb.from(t.name).delete().eq(t.key, id).eq("restaurant_id", rid));
+      // Reconcile dishes that still referenced the deleted category/filter, else they'd
+      // keep a dead slug (a category chip that no longer exists / an orphan tag) — 2026-07-06.
+      // Best-effort (the delete already succeeded): never fail the request on cleanup.
+      try {
+        if (a === "categories") {
+          await sb.from("menu_items").update({ category: null }).eq("restaurant_id", rid).eq("category", id);
+        } else if (a === "filters") {
+          const { data: tagged } = await sb.from("menu_items").select("id,tags").eq("restaurant_id", rid).contains("tags", [id]);
+          for (const d of ((tagged || []) as { id: string; tags: string[] | null }[])) {
+            await sb.from("menu_items").update({ tags: (d.tags || []).filter((x) => x !== id) }).eq("id", d.id).eq("restaurant_id", rid);
+          }
+        }
+      } catch { /* orphan cleanup is best-effort */ }
       // Deleting a dish/category/filter changes the SHARED guest menu → bust cache.
       bustMenuCache(rid);
       return ok({ ok: true });
