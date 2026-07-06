@@ -44,6 +44,10 @@ export default function AdminOwners() {
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
   // Which owner's attach-picker is open (chips + a small inline list, no modal).
   const [attachFor, setAttachFor] = useState<string | null>(null);
+  // Which owner's DETAIL view is open (click anywhere on a card): profile,
+  // full activity trail, "their screen" jump, and the permanent-delete zone.
+  const [detailFor, setDetailFor] = useState<string | null>(null);
+  const detailOwner = owners.find((o) => o.id === detailFor) || null;
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -130,7 +134,11 @@ export default function AdminOwners() {
             const openAttach = attachFor === o.id;
             const attachable = rests.filter((r) => !o.restaurants.some((x) => x.id === r.id));
             return (
-              <div key={o.id} style={{ ...card, opacity: o.active ? 1 : 0.55, display: "flex", flexDirection: "column", gap: 11 }}>
+              /* The WHOLE card is clickable → owner detail (activity, created-when,
+                 delete zone). Inner buttons stopPropagation so they keep working. */
+              <div key={o.id} role="button" tabIndex={0} onClick={() => setDetailFor(o.id)}
+                onKeyDown={(e) => { if (e.key === "Enter") setDetailFor(o.id); }}
+                style={{ ...card, opacity: o.active ? 1 : 0.55, display: "flex", flexDirection: "column", gap: 11, cursor: "pointer" }}>
                 <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
                   <div aria-hidden style={{ width: 40, height: 40, borderRadius: 11, background: `${chipColor(o.id)}33`, color: chipColor(o.id), display: "grid", placeItems: "center", fontWeight: 800, fontSize: 15 }}>
                     {o.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
@@ -151,13 +159,13 @@ export default function AdminOwners() {
                     <span key={r.id} style={chip} title={r.primary ? "Primary owner of this restaurant" : undefined}>
                       <span style={{ ...dot, background: chipColor(r.id) }} />{r.name}
                       <button aria-label={`Detach ${r.name}`} disabled={busy} style={xBtn}
-                        onClick={() => { if (confirm(`Detach "${r.name}" from ${o.name}? They immediately stop seeing its numbers.`)) act(async () => { await patch({ owner_id: o.id, action: "detach", restaurant_id: r.id }); }); }}>×</button>
+                        onClick={(e) => { e.stopPropagation(); if (confirm(`Detach "${r.name}" from ${o.name}? They immediately stop seeing its numbers.`)) act(async () => { await patch({ owner_id: o.id, action: "detach", restaurant_id: r.id }); }); }}>×</button>
                     </span>
                   ))}
                   {o.restaurants.length === 0 && <span style={{ fontSize: 12, color: "var(--muted)" }}>no restaurants yet</span>}
                   {o.active && (
                     <button style={{ ...chip, borderStyle: "dashed", color: "#60a5fa", cursor: "pointer", background: "transparent" }} disabled={busy}
-                      onClick={() => setAttachFor(openAttach ? null : o.id)}>+ Attach</button>
+                      onClick={(e) => { e.stopPropagation(); setAttachFor(openAttach ? null : o.id); }}>+ Attach</button>
                   )}
                 </div>
 
@@ -167,7 +175,7 @@ export default function AdminOwners() {
                     {attachable.length === 0 && <div style={{ padding: 10, fontSize: 12.5, color: "var(--muted)" }}>They already own every restaurant.</div>}
                     {attachable.map((r) => (
                       <button key={r.id} disabled={busy} style={{ display: "flex", gap: 9, alignItems: "center", width: "100%", padding: "9px 12px", background: "transparent", border: 0, borderTop: "var(--border)", color: "var(--text)", fontSize: 13, cursor: "pointer", textAlign: "left" }}
-                        onClick={() => { setAttachFor(null); act(async () => { await patch({ owner_id: o.id, action: "attach", restaurant_id: r.id }); }); }}>
+                        onClick={(e) => { e.stopPropagation(); setAttachFor(null); act(async () => { await patch({ owner_id: o.id, action: "attach", restaurant_id: r.id }); }); }}>
                         <span style={{ ...dot, background: chipColor(r.id) }} />
                         <span style={{ flex: 1 }}>{r.name}</span>
                         <span style={{ fontSize: 11, color: r.hasOwner ? "var(--muted)" : "#fcd34d" }}>{r.hasOwner ? "co-own" : "no owner yet"}</span>
@@ -180,12 +188,12 @@ export default function AdminOwners() {
                 <div style={{ display: "flex", gap: 7, borderTop: "var(--border)", paddingTop: 11, flexWrap: "wrap" }}>
                   {o.restaurants.length > 0 && (
                     <a style={{ ...actBtn, textDecoration: "none" }} title="Open their owner panel exactly as they see it (no password, invisible to them)"
-                      href={`/api/admin/act-as/go?rid=${encodeURIComponent(o.restaurants[0].id)}&to=/owner`} target="_blank" rel="noreferrer">👁 View their panel</a>
+                      href={`/api/admin/act-as/go?rid=${encodeURIComponent(o.restaurants[0].id)}&to=/owner`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>👁 View their panel</a>
                   )}
                   <button style={actBtn} disabled={busy}
-                    onClick={() => { if (confirm(`Set a NEW password for ${o.name}? They'll be logged out everywhere.`)) act(async () => { const j = await patch({ owner_id: o.id, action: "reset_password" }); setReveal({ name: o.name, password: j.password }); }); }}>🔑 Reset password</button>
+                    onClick={(e) => { e.stopPropagation(); if (confirm(`Set a NEW password for ${o.name}? They'll be logged out everywhere.`)) act(async () => { const j = await patch({ owner_id: o.id, action: "reset_password" }); setReveal({ name: o.name, password: j.password }); }); }}>🔑 Reset password</button>
                   <button style={{ ...actBtn, color: o.active ? "#fca5a5" : "#86efac" }} disabled={busy}
-                    onClick={() => { if (confirm(o.active ? `Suspend ${o.name}? They're logged out immediately and can't sign in.` : `Restore ${o.name}'s access?`)) act(async () => { await patch({ owner_id: o.id, action: "set_active", active: !o.active }); }); }}>
+                    onClick={(e) => { e.stopPropagation(); if (confirm(o.active ? `Suspend ${o.name}? They're logged out immediately and can't sign in.` : `Restore ${o.name}'s access?`)) act(async () => { await patch({ owner_id: o.id, action: "set_active", active: !o.active }); }); }}>
                     {o.active ? "⛔ Suspend" : "↩ Restore"}</button>
                 </div>
               </div>
@@ -198,6 +206,15 @@ export default function AdminOwners() {
         <CreateOwnerModal rests={rests}
           onClose={() => setShowCreate(false)}
           onCreated={(name, password) => { setShowCreate(false); setReveal({ name, password }); load(); }} />
+      )}
+
+      {detailOwner && (
+        <OwnerDetailModal owner={detailOwner}
+          onClose={() => setDetailFor(null)}
+          onChanged={load}
+          onDeleted={() => { setDetailFor(null); load(); }}
+          onPatch={patch}
+          onReveal={(name, password) => setReveal({ name, password })} />
       )}
     </>
   );
@@ -279,6 +296,160 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
             <button type="button" style={btn("#374151")} onClick={onClose}>Cancel</button>
           </div>
         </form>
+      </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Owner DETAIL modal (owner rule 2026-07-06: "the owner thing should be
+// clickable"). One focused place per owner: who they are + when the account was
+// created, their full activity trail (their logins/actions AND what the admin
+// did to them), a jump to "their screen" (act-as), and the permanent-delete
+// zone — which only unlocks AFTER the account is suspended, and can't be undone.
+// Activity is fetched ONCE per open (no polling).
+// ─────────────────────────────────────────────────────────────────────────────
+type ActivityRow = { id: string; panel: string; action: string; actor: string | null; detail: string | null; restaurant: string | null; at: string };
+
+const PANEL_COLOR: Record<string, string> = { owner: "#34d399", admin: "#60a5fa", manager: "#d4a574", kitchen: "#7ec88a", tablet: "#a78bfa", editor: "#d4a574" };
+
+function OwnerDetailModal({ owner, onClose, onChanged, onDeleted, onPatch, onReveal }: {
+  owner: Owner; onClose: () => void; onChanged: () => void; onDeleted: () => void;
+  onPatch: (payload: object) => Promise<any>; onReveal: (name: string, password: string) => void;
+}) {
+  const [activity, setActivity] = useState<ActivityRow[] | null>(null);
+  const [created, setCreated] = useState<string | null>(owner.createdAt || null);
+  const [mErr, setMErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/admin/owners?id=${encodeURIComponent(owner.id)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (dead) return; setActivity(j.activity || []); if (j.owner?.createdAt) setCreated(j.owner.createdAt); })
+      .catch(() => { if (!dead) setActivity([]); });
+    return () => { dead = true; };
+  }, [owner.id]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+
+  const run = async (fn: () => Promise<void>) => {
+    setMErr(""); setBusy(true);
+    try { await fn(); onChanged(); } catch (e: any) { setMErr(e.message || "Action failed."); }
+    finally { setBusy(false); }
+  };
+
+  // Permanent delete: suspend-first is enforced server-side too; the typed-name
+  // confirm makes "gone forever" a deliberate act, not a slip.
+  async function deleteForever() {
+    if (!confirm(`Delete ${owner.name} FOREVER?\n\nThis cannot be undone — no restore, no recycle bin. Their restaurants fall back to a co-owner or to "no owner". The activity log is kept.`)) return;
+    const typed = prompt(`Type their login name (${owner.username}) to confirm the permanent delete:`);
+    if (typed === null) return;
+    if (typed.trim().toLowerCase() !== owner.username.toLowerCase()) { setMErr("Name didn't match — nothing was deleted."); return; }
+    setMErr(""); setBusy(true);
+    try {
+      const r = await fetch(`/api/admin/owners?id=${encodeURIComponent(owner.id)}`, { method: "DELETE" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "Delete failed.");
+      onDeleted();
+    } catch (e: any) { setMErr(e.message || "Delete failed."); setBusy(false); }
+  }
+
+  const when = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
+      <div role="dialog" aria-modal="true" aria-label={`Owner ${owner.name}`} style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+        <div style={{ ...card, pointerEvents: "auto", width: "min(96vw, 560px)", maxHeight: "92vh", overflowY: "auto", padding: 0 }}>
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 18px", borderBottom: "var(--border)", position: "sticky", top: 0, background: "var(--card)", borderRadius: "14px 14px 0 0", zIndex: 1 }}>
+            <div aria-hidden style={{ width: 42, height: 42, borderRadius: 11, background: `${chipColor(owner.id)}33`, color: chipColor(owner.id), display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }}>
+              {owner.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {owner.name}{!owner.active && <span style={{ fontSize: 11, color: "#fca5a5", fontWeight: 600 }}> · suspended</span>}
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                signs in as &ldquo;{owner.username}&rdquo; · created {created ? new Date(created).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"} · seen {seen(owner.lastSeenAt)}
+              </div>
+            </div>
+            <button onClick={onClose} aria-label="Close" style={{ background: "transparent", border: 0, color: "var(--muted)", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: 6 }}>×</button>
+          </div>
+
+          <div style={{ padding: 18, display: "grid", gap: 14 }}>
+            {mErr ? <div style={{ ...card, padding: 12, borderColor: "#7f1d1d", color: "#fca5a5" }}>{mErr}</div> : null}
+
+            {/* Quick actions — "their screen" first, that's the owner's ask */}
+            <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+              {owner.restaurants.length > 0 && (
+                <a style={{ ...actBtn, textDecoration: "none", color: "#60a5fa" }} title="Open their owner panel exactly as they see it (no password, invisible to them)"
+                  href={`/api/admin/act-as/go?rid=${encodeURIComponent(owner.restaurants[0].id)}&to=/owner`} target="_blank" rel="noreferrer">👁 Open their screen</a>
+              )}
+              <button style={actBtn} disabled={busy}
+                onClick={() => { if (confirm(`Set a NEW password for ${owner.name}? They'll be logged out everywhere.`)) run(async () => { const j = await onPatch({ owner_id: owner.id, action: "reset_password" }); onReveal(owner.name, j.password); }); }}>🔑 Reset password</button>
+              <button style={{ ...actBtn, color: owner.active ? "#fca5a5" : "#86efac" }} disabled={busy}
+                onClick={() => { if (confirm(owner.active ? `Suspend ${owner.name}? They're logged out immediately and can't sign in.` : `Restore ${owner.name}'s access?`)) run(async () => { await onPatch({ owner_id: owner.id, action: "set_active", active: !owner.active }); }); }}>
+                {owner.active ? "⛔ Suspend" : "↩ Restore"}</button>
+            </div>
+
+            {/* Their restaurants (managed on the card; shown here for context) */}
+            <div>
+              <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 7 }}>Owns {owner.restaurants.length} restaurant{owner.restaurants.length === 1 ? "" : "s"}</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {owner.restaurants.map((r) => (
+                  <span key={r.id} style={chip}><span style={{ ...dot, background: chipColor(r.id) }} />{r.name}{r.primary ? " ★" : ""}</span>
+                ))}
+                {owner.restaurants.length === 0 && <span style={{ fontSize: 12, color: "var(--muted)" }}>none</span>}
+              </div>
+            </div>
+
+            {/* Activity trail */}
+            <div>
+              <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 7 }}>Activity — what they did &amp; what was done to them</div>
+              <div style={{ border: "var(--border)", borderRadius: 10, maxHeight: 300, overflowY: "auto" }}>
+                {activity === null && <div style={{ padding: 12, fontSize: 12.5, color: "var(--muted)" }}>Loading activity…</div>}
+                {activity?.length === 0 && <div style={{ padding: 12, fontSize: 12.5, color: "var(--muted)" }}>No recorded activity yet.</div>}
+                {activity?.map((a) => (
+                  <div key={a.id} style={{ display: "flex", gap: 9, alignItems: "flex-start", padding: "8px 12px", borderTop: "var(--border)", fontSize: 12.5 }}>
+                    <span style={{ flexShrink: 0, marginTop: 3, width: 7, height: 7, borderRadius: "50%", background: PANEL_COLOR[a.panel] || "#9ca3af" }} title={a.panel} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <span style={{ fontWeight: 700 }}>{a.action.replace(/_/g, " ")}</span>
+                      {a.actor ? <span style={{ color: "var(--muted)" }}> · by {a.actor}</span> : null}
+                      {a.restaurant ? <span style={{ color: "var(--muted)" }}> · {a.restaurant}</span> : null}
+                      {a.detail ? <div style={{ color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.detail}>{a.detail}</div> : null}
+                    </div>
+                    <span style={{ flexShrink: 0, color: "var(--muted)", fontSize: 11 }} title={a.at}>{when(a.at)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Danger zone — delete unlocks ONLY after suspension, and is forever. */}
+            <div style={{ ...card, padding: 14, borderColor: "#7f1d1d", background: "rgba(127,29,29,.06)" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#fca5a5", marginBottom: 6 }}>Danger zone</div>
+              {owner.active ? (
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  To delete this owner forever, <b>suspend them first</b> (the reversible step). Once deleted there is NO restore.
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
+                    This owner is suspended. Deleting is <b>permanent</b> — no restore, ever. Their restaurants fall to a co-owner or become &ldquo;no owner&rdquo;; the activity log above is kept for the record.
+                  </div>
+                  <button style={btn("#991b1b")} disabled={busy} onClick={deleteForever}>🗑 Delete forever</button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </>
   );

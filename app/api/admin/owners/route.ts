@@ -7,6 +7,11 @@
 //           login ONCE (password shown once) and attach any number of restaurants.
 //   PATCH → { owner_id, action: "attach"|"detach" (+restaurant_id) |
 //             "reset_password" (+password?) | "set_active" (+active) | "rename" (+name) }
+//   GET ?id=<owner_id>  → one owner's ACTIVITY feed (staff_actions rows that name
+//           them — their own logins/actions + admin actions done TO them).
+//   DELETE ?id=<owner_id> → PERMANENT erase (owner rule 2026-07-06: suspend FIRST,
+//           then delete; a deleted owner can never be restored). Restaurants they
+//           owned fall back to a co-owner or to "no owner" (warning strip).
 // Admin-gated (same cookie as the rest of /aevinite), service-role.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
@@ -36,6 +41,38 @@ async function ownerNameTaken(key: string): Promise<boolean> {
 
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
+
+  // ── ?id=<owner> → that owner's ACTIVITY (admin clicked into an owner card).
+  // One-shot on open, never polled. Two match rules: rows THEY caused (actor =
+  // their name/username — logins + owner-panel actions) and rows ABOUT them
+  // (detail carries their uuid — owner_create/reset/suspend/attach…). Capped.
+  const ownerId = new URL(req.url).searchParams.get("id");
+  if (ownerId) {
+    const o = (await sb.from("staff_users")
+      .select("id, username, name, active, last_seen_at, created_at")
+      .eq("id", ownerId).eq("role", "owner").limit(1)).data?.[0];
+    if (!o) return bad("Owner not found.", 404);
+    const who = (o.name || o.username).replace(/[%,()]/g, ""); // keep the .or() filter parseable
+    const actQ = await sb.from("staff_actions")
+      .select("id, panel, action, actor, detail, restaurant_id, created_at")
+      .or(`actor.eq.${who},detail.ilike.%${ownerId}%`)
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (actQ.error) return bad(actQ.error.message, 500);
+    // Restaurant names for the rows' restaurant_id chips (one scoped lookup).
+    const rids = Array.from(new Set((actQ.data || []).map((a) => a.restaurant_id).filter(Boolean)));
+    const restNames = rids.length
+      ? new Map(((await sb.from("restaurants").select("id, name").in("id", rids)).data || []).map((r) => [r.id, r.name]))
+      : new Map();
+    return ok({
+      owner: { id: o.id, username: o.username, name: o.name || o.username, active: o.active === true, lastSeenAt: o.last_seen_at, createdAt: o.created_at },
+      activity: (actQ.data || []).map((a) => ({
+        id: a.id, panel: a.panel, action: a.action, actor: a.actor, detail: a.detail,
+        restaurant: a.restaurant_id ? (restNames.get(a.restaurant_id) || null) : null, at: a.created_at,
+      })),
+    });
+  }
+
   const [ownersQ, linksQ, restQ] = await Promise.all([
     sb.from("staff_users")
       .select("id, username, name, active, last_seen_at, created_at")
@@ -181,6 +218,12 @@ export async function PATCH(req: NextRequest) {
     return ok({ ok: true, active });
   }
 
+  if (action === "delete_forever") {
+    // Kept for API symmetry, but the real handler is DELETE below — reject here so
+    // no one wires a PATCH to a destructive action by accident.
+    return bad("Use DELETE /api/admin/owners?id=… for permanent deletion.", 405);
+  }
+
   if (action === "rename") {
     const display = String(body?.name ?? "").trim().slice(0, 80);
     const key = normalizeLoginName(display);
@@ -193,4 +236,44 @@ export async function PATCH(req: NextRequest) {
   }
 
   return bad("Unknown action.");
+}
+
+// ── DELETE ?id=<owner_id> — PERMANENT, irreversible owner erase. ─────────────
+// Owner's rule (2026-07-06): deletion is a TWO-STEP flow — the account must be
+// SUSPENDED first (that's the reversible step), then delete forever. There is no
+// restore: the staff_users row is gone, every live session dies with it, and the
+// restaurants they owned hand primary to a co-owner or become "no owner" (the
+// Owners page warning strip picks those up). Their activity rows in
+// staff_actions are kept on purpose — the audit trail must outlive the account.
+export async function DELETE(req: NextRequest) {
+  if (!(await admin(req))) return bad("unauthorized", 401);
+  const ownerId = new URL(req.url).searchParams.get("id") || "";
+  if (!ownerId) return bad("Missing id.");
+  const o = (await sb.from("staff_users").select("id, username, name, role, active").eq("id", ownerId).limit(1)).data?.[0];
+  if (!o || o.role !== "owner") return bad("That user isn't an owner.", 404);
+  if (o.active) return bad("Suspend this owner first — deletion is permanent and only allowed on a suspended account.", 409);
+  const who = o.name || o.username;
+
+  // Hand off / clear the PRIMARY pointer on every restaurant they owned, then
+  // revoke the memberships. Same rule as detach: owner_user_id must never point
+  // at someone without a membership row.
+  const links = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId)).data || [];
+  for (const l of links) {
+    const rid = l.restaurant_id as string;
+    const r = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];
+    if (r?.owner_user_id === ownerId) {
+      const next = (await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).neq("user_id", ownerId).limit(1)).data?.[0];
+      const set = await sb.from("restaurants").update({ owner_user_id: next?.user_id ?? null }).eq("id", rid);
+      if (set.error) return bad(set.error.message, 500);
+    }
+  }
+  const delLinks = await sb.from("restaurant_owners").delete().eq("user_id", ownerId);
+  if (delLinks.error) return bad(delLinks.error.message, 500);
+  const delUser = await sb.from("staff_users").delete().eq("id", ownerId);
+  if (delUser.error) return bad(delUser.error.message, 500);
+  await logAction("admin", "owner_delete_forever", {
+    actor: "admin",
+    detail: `PERMANENTLY deleted owner "${who}" (${ownerId}) · ${links.length} restaurant(s) released`,
+  });
+  return ok({ ok: true, deleted: true });
 }
