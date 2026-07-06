@@ -284,15 +284,30 @@ const tableCountKey = () => { const r = panelRid(); return r ? "lfh_editor_table
 // ("GET"/"POST"/"PATCH"/"DELETE"), the path (e.g. "/orders"), and optionally a
 // body object. It sends the request to our local server, reads back the JSON,
 // and throws a clear error if the server reported a problem.
+const _inflightGET = new Map(); // coalesce concurrent identical GETs into ONE network hit
 async function api(method, path, body) {
-  const res = await fetch("/api/editor" + ridQ(path), {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined, // turn the body object into JSON text to send
-  });
-  const json = await res.json().catch(() => ({})); // read the reply; if it isn't JSON, fall back to {}
-  if (!res.ok) throw new Error(json.error || res.statusText); // not OK? surface the server's error message
-  return json;
+  const url = "/api/editor" + ridQ(path);
+  // On boot the page's initial load AND the realtime connect BOTH kick off the same reads
+  // (/summary, /all, /platform), so a single load fired each 3–4× — ~470 KB of duplicate
+  // JSON. Share one in-flight promise per identical GET url; it's cleared the instant it
+  // settles, so every real poll tick afterwards still fetches fresh. (dedupe 2026-07-06)
+  if (method === "GET" && _inflightGET.has(url)) return _inflightGET.get(url);
+  const run = (async () => {
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined, // turn the body object into JSON text to send
+    });
+    const json = await res.json().catch(() => ({})); // read the reply; if it isn't JSON, fall back to {}
+    if (!res.ok) throw new Error(json.error || res.statusText); // not OK? surface the server's error message
+    return json;
+  })();
+  if (method === "GET") {
+    _inflightGET.set(url, run);
+    const cleanup = () => { if (_inflightGET.get(url) === run) _inflightGET.delete(url); };
+    run.then(cleanup, cleanup); // drop the entry once settled (both fulfil + reject), no unhandled rejection
+  }
+  return run;
 }
 
 // ---------- data + list ----------
