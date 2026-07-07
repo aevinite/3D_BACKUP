@@ -259,6 +259,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   // The logged-in waiter, for per-user permission checks. Bound here because the
   // tabletPerm call sites below shadow `g` with their own gate result.
   const actor = g.user;
+  // Scope EVERY tablet action-log row to the acting restaurant. staff_actions.restaurant_id
+  // is NOT NULL DEFAULT #1 (mig 078), so a bare logAction("tablet", …) wrote the row under
+  // restaurant #1 — a non-#1 restaurant's Log missed its own tablet actions and #1's Log
+  // showed other restaurants'. This wrapper carries `rid` on all of them. (2026-07-07)
+  const tabletPanel = "tablet" as const;
+  const log = (action: string, fields: Record<string, unknown> = {}) => logAction(tabletPanel, action, { ...fields, restaurant_id: rid });
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
@@ -341,7 +347,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", placedId).eq("restaurant_id", rid);
         await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("restaurant_id", rid).eq("status", "received");
       }
-      await logAction("tablet", "order_place", { table_number: t, device_id: dev });
+      await log("order_place", { table_number: t, device_id: dev });
       return ok(data);
     }
 
@@ -366,7 +372,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_banquet_place_order", { p_table: t || null, p_lines: lines, p_restaurant_id: rid });
       if (error) throw new Error(error.message);
       if (!(data as any)?.ok) return err(banquetErrMsg((data as any)?.reason), 400);
-      await logAction("tablet", "banquet_place", { table_number: t || null, device_id: dev, detail: `total ${(data as any)?.total}${byNote(gate2)}` });
+      await log("banquet_place", { table_number: t || null, device_id: dev, detail: `total ${(data as any)?.total}${byNote(gate2)}` });
       return ok(data);
     }
 
@@ -387,7 +393,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // calls/:id/attend
     if (a === "calls" && c === "attend") {
       const row = must(await sb.from("waiter_calls").update({ resolved: true }).eq("id", b).eq("restaurant_id", rid).select());
-      await logAction("tablet", "call_attend", { table_number: row[0]?.table_number ?? null, device_id: dev });
+      await log("call_attend", { table_number: row[0]?.table_number ?? null, device_id: dev });
       return ok(row[0] || null);
     }
 
@@ -415,7 +421,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // table stays open). Mirrors the editor's remove. (owner, 2026-06-17 — parity)
     if (a === "members" && c === "remove") {
       const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).eq("restaurant_id", rid).select());
-      await logAction("tablet", "member_remove", { detail: "kicked", device_id: dev });
+      await log("member_remove", { detail: "kicked", device_id: dev });
       return ok(row[0] || null);
     }
 
@@ -438,7 +444,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       must(await sb.from("blocklist").insert({ member_id: b, phone, device_id: device, reason: "banned from tablet", restaurant_id: rid }).select());
       if (phone) await sb.from("customers").upsert({ phone, blocked: true, restaurant_id: rid }, { onConflict: "restaurant_id,phone" });
       const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).eq("restaurant_id", rid).select());
-      await logAction("tablet", "member_ban", { detail: (phone ? `banned ${phone}` : "banned") + byNote(g), device_id: dev });
+      await log("member_ban", { detail: (phone ? `banned ${phone}` : "banned") + byNote(g), device_id: dev });
       return ok(row[0] || null);
     }
 
@@ -447,7 +453,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && c === "auto-approve") {
       const value = !!(body && body.value === true);
       const row = must(await sb.from("sessions").update({ auto_approve: value }).eq("id", b).eq("restaurant_id", rid).select());
-      await logAction("tablet", "auto_approve", { detail: value ? "on" : "off", device_id: dev });
+      await log("auto_approve", { detail: value ? "on" : "off", device_id: dev });
       return ok(row[0] || null);
     }
 
@@ -474,7 +480,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), base) : 0;
       const note = String((body && body.note) || "").slice(0, 200) || null;
       const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid).select());
-      await logAction("tablet", "order_discount", { order_id: b, detail: `₹${amount}` + byNote(g), device_id: dev });
+      await log("order_discount", { order_id: b, detail: `₹${amount}` + byNote(g), device_id: dev });
       return ok(row[0] || null);
     }
 
@@ -495,7 +501,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const note = String((body && body.note) || "").slice(0, 200) || null;
       const { data, error } = await sb.rpc("lfh_staff_bill_discount", { p_session: b, p_amount: amount, p_note: note });
       if (error) throw new Error(error.message);
-      await logAction("tablet", "bill_discount", { detail: `whole bill ₹${amount} (session ${b})` + byNote(g), device_id: dev });
+      await log("bill_discount", { detail: `whole bill ₹${amount} (session ${b})` + byNote(g), device_id: dev });
       return ok(data);
     }
 
@@ -507,7 +513,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const g = await tabletPerm("tablet_invoice", req, body, rid, actor); if (!g.allow) return g.resp;
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
       if (error) throw new Error(error.message);
-      await logAction("tablet", "invoice_generate", { detail: `session ${b}` + byNote(g), device_id: dev });
+      await log("invoice_generate", { detail: `session ${b}` + byNote(g), device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
     }
 
@@ -546,7 +552,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // old party left a ghost 🔔 badge + ATTEND on the now-empty table. Shared helper so the
       // manual + auto (lib/autoSettle) restart paths can't drift apart.
       await clearTableSignals(rid, t);
-      await logAction("tablet", "table_restart", { table_number: t, detail: `${rows.length} order(s) cleared${owed > 0 ? `, ≈₹${Math.round(owed)} was unpaid` : ""}` + by, device_id: dev });
+      await log("table_restart", { table_number: t, detail: `${rows.length} order(s) cleared${owed > 0 ? `, ≈₹${Math.round(owed)} was unpaid` : ""}` + by, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
 
@@ -589,7 +595,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
         await sb.from("orders").update({ status: overall }).eq("id", item.order_id).eq("restaurant_id", rid);
       }
-      await logAction("tablet", "item_status", { detail: status, device_id: dev });
+      await log("item_status", { detail: status, device_id: dev });
       if (status === "served") await maybeAutoSettle(item?.session_id, { panel: "tablet", deviceId: dev }); // last dish served may complete the table
       return ok({ ok: true });
     }
@@ -603,7 +609,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // return=minimal: client re-fetches → skip both the .select() and the full-row re-read.
       must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
-      await logAction("tablet", "order_accept", { order_id: b, device_id: dev });
+      await log("order_accept", { order_id: b, device_id: dev });
       return ok({ ok: true });
     }
 
@@ -615,7 +621,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
-      await logAction("tablet", "order_serve", { order_id: b, device_id: dev });
+      await log("order_serve", { order_id: b, device_id: dev });
       // Only session_id needed (for auto-settle); client discards the body → not the full row.
       const served = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       await maybeAutoSettle((served as any)?.session_id, { panel: "tablet", deviceId: dev }); // serving the order may complete the table
@@ -629,7 +635,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const raw = Array.isArray(body?.allergies) ? body.allergies : [];
       const allergies = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
       must(await sb.from("orders").update({ allergies }).eq("id", b).eq("restaurant_id", rid));
-      await logAction("tablet", "order_allergies", { order_id: b, detail: allergies.join(", ") || "(none)", device_id: dev });
+      await log("order_allergies", { order_id: b, detail: allergies.join(", ") || "(none)", device_id: dev });
       return ok({ ok: true });
     }
 
@@ -645,7 +651,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           : reason === "item_not_found" ? "That dish was already removed." : reason;
         return err(msg, reason === "order_paid" ? 409 : 400);
       }
-      await logAction("tablet", "order_item_delete", { order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
+      await log("order_item_delete", { order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
       return ok(data);
     }
 
@@ -657,7 +663,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
-      await logAction("tablet", "order_item_qty", { order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
+      await log("order_item_qty", { order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
       await stampEdited(data?.order_id, rid);
       return ok(data);
     }
@@ -667,7 +673,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
-      await logAction("tablet", "order_item_note", { order_id: data?.order_id, device_id: dev });
+      await log("order_item_note", { order_id: data?.order_id, device_id: dev });
       await stampEdited(data?.order_id, rid);
       return ok(data);
     }
@@ -699,7 +705,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const added_allergens = [...addedMark].filter((s) => removed.includes(s));
       const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).eq("restaurant_id", rid).select());
       const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : ""].filter(Boolean).join("; ") || "no change";
-      await logAction("tablet", "order_item_removed", { order_id: item.order_id, detail, device_id: dev });
+      await log("order_item_removed", { order_id: item.order_id, detail, device_id: dev });
       await stampEdited(item.order_id, rid);
       return ok(rowU[0] || { ok: true });
     }
@@ -730,7 +736,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         await sb.from("orders").update({ items: its }).eq("id", b).eq("restaurant_id", rid);
         await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
       }
-      await logAction("tablet", "order_add_item", { order_id: b, detail: dishId, device_id: dev });
+      await log("order_add_item", { order_id: b, detail: dishId, device_id: dev });
       await stampEdited(b, rid);
       return ok(data);
     }
@@ -745,7 +751,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (cur && cur.payment_status === "paid") return err("Won't delete a PAID order — mark it unpaid first.", 409);
       await sb.from("order_items").delete().eq("order_id", b).eq("restaurant_id", rid);
       must(await sb.from("orders").delete().eq("id", b).eq("restaurant_id", rid).select());
-      await logAction("tablet", "order_delete", { order_id: b, device_id: dev });
+      await log("order_delete", { order_id: b, device_id: dev });
       return ok({ ok: true });
     }
 
@@ -791,7 +797,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (tb && tb.bill_no == null) {
         try { const { data: bn } = await sb.rpc("lfh_next_counter", { p_rid: rid, p_key: "bill" }); if (bn != null) await sb.from("sessions").update({ bill_no: bn }).eq("id", target.id).eq("restaurant_id", rid).is("bill_no", null); } catch { /* bill stays lazy if the counter isn't callable */ }
       }
-      await logAction("tablet", "order_move", { order_id: b, table_number: to, device_id: dev });
+      await log("order_move", { order_id: b, table_number: to, device_id: dev });
       return ok(moved[0] || null);
     }
 
@@ -830,7 +836,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t).eq("archived", false);
       const rows = must(await q.select());
-      await logAction("tablet", "bill_paid", { table_number: t, device_id: dev, detail: body?.payment_method ? `via ${body.payment_method}` : undefined });
+      await log("bill_paid", { table_number: t, device_id: dev, detail: body?.payment_method ? `via ${body.payment_method}` : undefined });
       await maybeAutoSettle(openSess?.id, { panel: "tablet", deviceId: dev }); // auto close/restart if paid + all served
       return ok({ ok: true, count: rows.length });
     }
@@ -863,7 +869,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const existing = must(await sb.from("sessions").select("id").eq("table_number", t).eq("restaurant_id", rid).neq("status", "closed").limit(1));
       if (existing.length) return ok(existing[0]);
       const row = must(await sb.from("sessions").insert({ table_number: t, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select());
-      await logAction("tablet", "table_open", { table_number: t, device_id: dev });
+      await log("table_open", { table_number: t, device_id: dev });
       return ok(row[0] || null);
     }
 
