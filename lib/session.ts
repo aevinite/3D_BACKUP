@@ -199,6 +199,11 @@ export const verifyOtp = (token: string, phone: string, code: string) =>
 // writes it (approved members only — the RPC enforces that).
 export const getSessionCart = (token: string) => rpc("lfh_get_cart", { p_token: token });
 export const setSessionCart = (token: string, cart: unknown[]) => rpc("lfh_set_cart", { p_token: token, p_cart: cart });
+// mergeSessionCart (migration 144): apply just THIS device's change (a delta) to
+// the shared cart on the server, so a co-diner adding a dish at the same moment
+// isn't clobbered. Returns the merged cart to adopt. See SessionCartSync.
+export const mergeSessionCart = (token: string, added: unknown[], removed: unknown[], qty: unknown[]) =>
+  rpc("lfh_merge_cart", { p_token: token, p_added: added, p_removed: removed, p_qty: qty });
 // Place the whole table's order. We send ONLY the item lines (id + qty + chosen
 // options) and any allergy notes — NEVER prices. The server looks up every price
 // from menu_items and decides the bill itself, so the totals can't be tampered with.
