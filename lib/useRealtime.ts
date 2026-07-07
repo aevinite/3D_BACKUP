@@ -57,29 +57,31 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
     let sb: SupabaseClient | null = null;
     // Build (or REBUILD) the per-topic channels. Tears down any existing ones first
     // so calling it again on wake replaces a possibly-dead socket with a live one.
+    const onStatus = (status: string) => {
+      // Feed the top-right connection light. Only genuine faults downgrade it;
+      // "CLOSED" is skipped (it also fires on our own idle/resubscribe teardown).
+      if (status === "SUBSCRIBED") reportRealtime("online");
+      else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") reportRealtime("weak");
+    };
     const subscribe = () => {
       if (!sb || disposed) return;
       channels.forEach((c) => { try { sb!.removeChannel(c); } catch {} });
-      channels = topics.map((topic) =>
-        sb!.channel("rt:" + topic)
+      const rid = ridRef.current;
+      channels = topics.map((topic) => {
+        // GUEST (rid set): filter the socket to THIS restaurant's THIS-topic events
+        // via the combined `topic_rid` column (migration 145), so the guest never
+        // receives other restaurants' breadcrumbs over the wire — no cross-restaurant
+        // chatter and no order firehose. ADMIN/STAFF (no rid) intentionally watch
+        // every restaurant, so they keep the topic-only filter.
+        const filter = rid ? "topic_rid=eq." + topic + ":" + rid : "topic=eq." + topic;
+        return sb!.channel(rid ? `rt:${topic}:${rid}` : "rt:" + topic)
           .on(
             "postgres_changes" as never,
-            { event: "INSERT", schema: "public", table: "realtime_events", filter: "topic=eq." + topic } as never,
-            (payload: { new?: Record<string, unknown> }) => {
-              // Per-restaurant scoping: ignore breadcrumbs from other restaurants.
-              const rid = ridRef.current;
-              const evRid = payload?.new?.restaurant_id as string | undefined;
-              if (rid && evRid && evRid !== rid) return;
-              fire(topic);
-            }
+            { event: "INSERT", schema: "public", table: "realtime_events", filter } as never,
+            () => fire(topic) // filter already scoped it; no client-side rid check needed
           )
-          .subscribe((status: string) => {
-            // Feed the top-right connection light. Only genuine faults downgrade it;
-            // "CLOSED" is skipped (it also fires on our own idle/resubscribe teardown).
-            if (status === "SUBSCRIBED") reportRealtime("online");
-            else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") reportRealtime("weak");
-          })
-      );
+          .subscribe(onStatus);
+      });
     };
     getClient().then((client) => {
       if (disposed) return;

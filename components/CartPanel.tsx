@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
-import { getMenuItems, getSettings, createOrder, type MenuItem } from "@/lib/menu";
+import { getSettings, createOrder, type MenuItem } from "@/lib/menu";
 import { enqueueGuestOrder } from "@/lib/guestOutbox"; // offline: save order, send on reconnect
 import { useRestaurantId } from "@/lib/restaurant-context";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
@@ -11,7 +11,7 @@ import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 import { useFeatures } from "@/lib/features";
 import { validateTable, flagTableInput, getScannedTable } from "@/lib/table";
 import { getStoredSession } from "@/lib/session";
-import { tget, tset, isTKey } from "@/lib/tenantStorage";
+import { tget, tset, isTKey, tenantSlug } from "@/lib/tenantStorage";
 import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
 import { useBackClose } from "@/lib/backStack"; // phone back button closes the panel
 import SessionTableBill from "@/components/SessionTableBill";
@@ -163,8 +163,14 @@ export default function CartPanel() {
     const loadMenuOnce = () => {
       if (menuLoadedRef.current) return;
       menuLoadedRef.current = true;
-      getMenuItems(restaurantId)
-        .then((items) => {
+      // Reuse the SAME server-cached bundle the menu page already loaded
+      // (/api/r/<slug>/menu-data) instead of a fresh Supabase `select *` on every
+      // cart open — zero extra DB egress, and only the columns we need (audit
+      // cost tidy-up). Falls back to letting a later open retry on failure.
+      fetch(`/api/r/${tenantSlug()}/menu-data`, { cache: "no-store" })
+        .then((r) => { if (!r.ok) throw new Error("menu-data " + r.status); return r.json(); })
+        .then((bundle: { items?: MenuItem[] }) => {
+          const items = Array.isArray(bundle.items) ? bundle.items : [];
           const m: Record<string, string[]> = {};
           items.forEach((i) => (m[i.id] = i.allergens || []));
           setAllergenMap(m);
