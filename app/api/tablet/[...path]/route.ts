@@ -449,8 +449,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const g = await tabletPerm("tablet_discount", req, body, rid, actor); if (!g.allow) return g.resp; // off/pin/on per settings
       // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS); the perm
       // gate above is a FEATURE gate, not a tenant one, so a foreign ?rid= must still be blocked.
-      const cur = must(await sb.from("orders").select("total, subtotal").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("orders").select("total, subtotal, session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't there anymore — refresh.", 404);
+      // Per-ticket and whole-bill discount are mutually exclusive (the whole-bill discount
+      // owns every ticket's discount via the split) — so block a single-ticket discount while
+      // a bill discount is active, or the two would fight / double-count. (mig 143)
+      if (cur.session_id) {
+        const sd = (await sb.from("sessions").select("discount").eq("id", cur.session_id).eq("restaurant_id", rid).maybeSingle()).data as { discount?: number } | null;
+        if (sd && Number(sd.discount) > 0) return err("Clear the whole-bill discount first, then discount a single ticket.", 409);
+      }
       const raw = Number(body && body.amount);
       // Clamp to the PRE-TAX food base (subtotal), NOT the tax-inclusive total: the bill drops
       // by discount×(1+rate), so a discount above the pre-tax base would drive the due negative.
@@ -461,6 +468,27 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid).select());
       await logAction("tablet", "order_discount", { order_id: b, detail: `₹${amount}` + byNote(g), device_id: dev });
       return ok(row[0] || null);
+    }
+
+    // sessions/:id/bill-discount — WHOLE-BILL discount: one discount applied to the entire
+    // table at once. Stored on the session; the RPC splits it proportionally across the
+    // table's unpaid tickets' orders.discount, so every money view stays correct. Gated the
+    // same as the per-ticket discount (off/on/pin). (mig 143)
+    if (a === "sessions" && c === "bill-discount") {
+      const g = await tabletPerm("tablet_discount", req, body, rid, actor); if (!g.allow) return g.resp;
+      const sess = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!sess) return err("That table isn't there anymore — refresh.", 404);
+      // Clamp to the table's Σ pre-tax subtotal of UNPAID, non-cancelled orders (defense in
+      // depth — the modal already caps the UI; this guards a replay / hand-formed body).
+      const subs = must(await sb.from("orders").select("subtotal").eq("session_id", b).eq("restaurant_id", rid).neq("status", "cancelled").neq("payment_status", "paid"));
+      const maxBase = subs.reduce((s: number, o: any) => s + (Number(o.subtotal) || 0), 0);
+      const raw = Number(body && body.amount);
+      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), maxBase) : 0;
+      const note = String((body && body.note) || "").slice(0, 200) || null;
+      const { data, error } = await sb.rpc("lfh_staff_bill_discount", { p_session: b, p_amount: amount, p_note: note });
+      if (error) throw new Error(error.message);
+      await logAction("tablet", "bill_discount", { detail: `whole bill ₹${amount} (session ${b})` + byNote(g), device_id: dev });
+      return ok(data);
     }
 
     // sessions/:id/invoice — waiter-side invoice generation, gated by tablet_invoice

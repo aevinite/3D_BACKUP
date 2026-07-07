@@ -834,7 +834,7 @@ function renderPanel() {
       <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}</div>
       <div class="ordctl-row">
         <button class="btn small" data-add-dish="${esc(o.id)}">＋ Add dish</button>
-        ${tshow("tablet_discount") ? `<button class="btn small${txray("tablet_discount")}" data-discount="${esc(o.id)}">− Discount${Number(o.discount) > 0 ? ` (${inr(o.discount)})` : ""}</button>` : ""}
+        ${tshow("tablet_discount") && !(Number(s && s.discount) > 0) ? `<button class="btn small${txray("tablet_discount")}" data-discount="${esc(o.id)}">− Discount${Number(o.discount) > 0 ? ` (${inr(o.discount)})` : ""}</button>` : ""}
         <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
         <button class="btn small primary" data-done-order="${esc(o.id)}">✓ Done editing</button>
       </div>
@@ -889,7 +889,7 @@ function renderPanel() {
       ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
       ${callRows ? `<div class="sec"><h3>Calls</h3>${calls.length > 1 ? `<button class="btn small primary" data-attend-all-calls="${esc(t)}">Attend all (${calls.length})</button>` : ""}${callRows}</div>` : ""}
       ${s ? `<div class="sec"><h3>Party</h3>${partyRows || `<div class="muted small">No guests joined yet.</div>`}</div>` : ""}
-      <div class="sec"><h3>Orders</h3>${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}</div>
+      <div class="sec"><h3>Orders</h3>${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}${Number(s && s.discount) > 0 ? `<div class="bill-disc-note" style="margin-top:8px;font-size:13px;font-weight:700;color:#f0b232">🏷️ Whole-bill discount − ${inr(s.discount)}${s.discount_note ? ` · ${esc(s.discount_note)}` : ""}</div>` : ""}</div>
     </div>
     <div class="dacts">
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
@@ -897,6 +897,7 @@ function renderPanel() {
       ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
       ${s && os.length ? `<button class="btn" id="moveOrderBtn">⇄ Move an order</button>` : ""}
       ${s && os.length ? `<button class="btn" id="restartTable">↻ Restart</button>` : ""}
+      ${s && os.length && tshow("tablet_discount") ? `<button class="btn${txray("tablet_discount")}" id="billDiscountBtn">${Number(s.discount) > 0 ? `− Edit bill discount (${inr(s.discount)})` : "− Discount whole bill"}</button>` : ""}
       ${s && os.length && !invoiced && tshow("tablet_invoice") ? `<button class="btn${txray("tablet_invoice")}" id="genInvoiceBtn">🧾 Generate invoice</button>` : ""}
       ${s && os.length && a.unpaid && tshow("tablet_mark_paid") ? `<button class="btn pay${txray("tablet_mark_paid")}" id="payBill"${os.some((o) => o.status === "received") ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
@@ -1005,6 +1006,7 @@ function renderPanel() {
   };
   const pb = $("#payBill"); if (pb) pb.onclick = () => payBillWithMethod(t, a);
   const gib = $("#genInvoiceBtn"); if (gib && s) gib.onclick = () => genInvoice(s.id);
+  const bdb = $("#billDiscountBtn"); if (bdb && s) bdb.onclick = () => tabletBillDiscount(t);
   const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
     const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
     if (!(await confirmDialog(`Close table ${t} and free it?${warn}`, "Close table"))) return;
@@ -1436,7 +1438,7 @@ function genInvoice(sid) {
 // save() below still respects tablet_discount (off/on/pin) exactly like before — only the
 // INPUT changed. Mirrors the manager panel's version, styled inline like this file's other
 // self-contained modals (openDishEditModal, pinPrompt).
-function openDiscountModal(order) {
+function openDiscountModal(order, opts = {}) {
   document.querySelector(".disc-overlay")?.remove();
   const round2 = (n) => Math.round(n * 100) / 100;
   const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
@@ -1458,7 +1460,7 @@ function openDiscountModal(order) {
   ov.className = "disc-overlay";
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   ov.innerHTML = `<div class="disc-box" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:#0f1830;color:#e7eefc;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
-    <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #1d2944"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Apply discount</h3><button class="disc-close" aria-label="Close" style="background:#243049;border:0;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #1d2944"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${opts.bill ? "Discount whole bill" : "Apply discount"}</h3><button class="disc-close" aria-label="Close" style="background:#243049;border:0;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
     <div style="padding:16px 18px">
       <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:#9fb2d8;margin-bottom:12px"><span>Bill total</span><b style="color:#e7eefc;font-size:15px">${inr(total)}</b></div>
       <div style="display:flex;gap:8px;margin-bottom:14px">
@@ -1546,6 +1548,13 @@ function openDiscountModal(order) {
     const note = ov.querySelector(".disc-note-input").value.trim();
     close();
     const body = { amount, note: amount > 0 ? note : "" };
+    // Whole-bill discount: one call to the session endpoint; the server splits it across the
+    // table's tickets, so there's no single order to update optimistically — just persist +
+    // reconcile. actGated handles the on/pin rule. (mig 143)
+    if (opts.bill) {
+      actGated("POST", `/sessions/${order.id}/bill-discount`, body, { message: "Enter a manager PIN to apply this discount.", toast: amount > 0 ? `Bill discount ${inr(amount)} applied` : "Bill discount removed" });
+      return;
+    }
     if (tperm("tablet_discount") === "pin") {
       // PIN entry already masks the round-trip; skip the optimistic write so a cancelled PIN
       // can't leave a discount showing that never saved.
@@ -1570,6 +1579,19 @@ function tabletDiscount(orderId) {
   const o = (state.data.orders || []).find((x) => x.id === orderId);
   if (!o) { toast("That order is no longer on the board.", false); return; }
   openDiscountModal(o);
+}
+
+// tabletBillDiscount: whole-bill discount for a table — opens the SAME modal but scoped to the
+// session. Base = Σ of the table's UNPAID, non-cancelled order totals; the server splits the
+// discount across those tickets (mig 143). Mutually exclusive with per-ticket discount.
+function tabletBillDiscount(t) {
+  const s = sessionOf(t);
+  if (!s || String(s.id).startsWith("pending-")) { toast("Open the table first.", false); return; }
+  const os = ordersOf(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  if (!os.length) { toast("No unpaid orders to discount yet.", false); return; }
+  const billTotal = os.reduce((sum, o) => sum + (Number(o.total) || 0), 0); // gross, tax-incl
+  // Synthetic "order-like" object the modal understands; id = session id, target = session.
+  openDiscountModal({ id: s.id, table_number: t, total: billTotal, discount: Number(s.discount) || 0, discount_note: s.discount_note || "" }, { bill: true });
 }
 
 // ── order-taking mode ────────────────────────────────────────────────────────
