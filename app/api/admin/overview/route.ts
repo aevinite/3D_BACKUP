@@ -57,6 +57,10 @@ export async function GET(req: NextRequest) {
     maintenance: maintenanceNames.length > 0,
     maintenanceCount: maintenanceNames.length,
     maintenanceNames,
+    // The FLAGSHIP's own service_mode — the Settings maintenance toggle must reflect THIS,
+    // not the platform-wide "any restaurant offline" flag above (else the button showed the
+    // wrong state and looked stuck whenever a different tenant was in maintenance).
+    flagshipMaintenance: settings.service_mode === true,
     sessionsEnabled: settings.sessions_enabled === true,
     tableCount: Number(settings.table_count) || 0,
     features: settings.features || {},

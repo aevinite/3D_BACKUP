@@ -72,41 +72,56 @@ export default function AccessPage() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // Error flags so a failed load NEVER silently falls back to defaults (every toggle would
+  // read ON because `{}` means "no overrides = default on"), showing a fake all-configured
+  // screen; and so a failed restaurant-list fetch shows a retry instead of a blank page
+  // (audit 2026-07-07).
+  const [listErr, setListErr] = useState(false);
+  const [loadErr, setLoadErr] = useState(false);
 
   const toast = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 1800); };
 
   // Load the restaurant list once.
-  useEffect(() => {
-    fetch("/api/admin/restaurants").then((r) => r.json()).then((d) => {
+  const loadList = useCallback(() => {
+    setListErr(false);
+    fetch("/api/admin/restaurants").then((r) => { if (!r.ok) throw new Error(); return r.json(); }).then((d) => {
+      if (d.error) { setListErr(true); return; }
       const list: Rest[] = d.restaurants || [];
       setRests(list);
       const wanted = linked.rid && list.some((r) => r.id === linked.rid) ? linked.rid : "";
       if (list.length && !rid) setRid(wanted || list[0].id);
-    }).catch(() => {});
+    }).catch(() => setListErr(true));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadList(); }, [loadList]);
 
   // Load everything for the selected restaurant.
   const loadRestaurant = useCallback(async (id: string) => {
     if (!id) return;
-    setLoading(true);
+    setLoading(true); setLoadErr(false);
     try {
-      const [p, f, a, s] = await Promise.all([
-        fetch(`/api/admin/restaurants/panels?restaurant_id=${id}`).then((r) => r.json()).catch(() => ({})),
-        fetch(`/api/admin/restaurants/features?restaurant_id=${id}`).then((r) => r.json()).catch(() => ({})),
-        fetch(`/api/admin/restaurants/access?restaurant_id=${id}`).then((r) => r.json()).catch(() => ({})),
+      const responses = await Promise.all([
+        fetch(`/api/admin/restaurants/panels?restaurant_id=${id}`),
+        fetch(`/api/admin/restaurants/features?restaurant_id=${id}`),
+        fetch(`/api/admin/restaurants/access?restaurant_id=${id}`),
         // ?rid= scopes the fetch server-side to this restaurant's OWNER portfolio (a few
         // restaurants) instead of ALL tenants — the admin branch ignored ?restaurant_id=
         // and returned every restaurant's staff just to render one restaurant's overrides
         // (egress; audit 2026-07-06). The client filter below narrows to this exact id.
-        fetch(`/api/owner/staff?rid=${id}`).then((r) => r.json()).catch(() => ({})),
+        fetch(`/api/owner/staff?rid=${id}`),
       ]);
+      // If ANY control-state fetch failed, surface an error rather than rendering defaults
+      // (which would look like every panel/feature is ON when we simply couldn't load them).
+      if (responses.slice(0, 3).some((r) => !r.ok)) { setLoadErr(true); return; }
+      const [p, f, a, s] = await Promise.all(responses.map((r) => r.json().catch(() => ({}))));
+      if (p.error || f.error || a.error) { setLoadErr(true); return; }
       setPanels(p.panels || {});
       setFeatures(f.features || {});
       setManager(a.manager || {});
       setOwner(a.owner || {});
       setTablet(a.tablet || {});
       setStaff((s.staff || []).filter((u: Staff) => u.restaurant_id === id && u.role !== "owner"));
-    } finally { setLoading(false); }
+    } catch { setLoadErr(true); }
+    finally { setLoading(false); }
   }, []);
   useEffect(() => { if (rid) loadRestaurant(rid); }, [rid, loadRestaurant]);
 
@@ -172,8 +187,14 @@ export default function AccessPage() {
         </select>
       </div>
 
+      {listErr && rests.length === 0 && (
+        <div style={{ color: "var(--ac-muted,#857655)", padding: 20 }}>Couldn&rsquo;t load restaurants. <button onClick={loadList} style={{ marginLeft: 8, padding: "6px 12px", borderRadius: 8, border: "1px solid var(--ac-line,#d8cdb8)", background: "var(--ac-card,#fff)", color: "inherit", cursor: "pointer" }}>Retry</button></div>
+      )}
       {loading && <div style={{ color: "var(--ac-muted,#857655)", padding: 20 }}>Loading…</div>}
-      {!loading && rid && (
+      {!loading && loadErr && rid && (
+        <div style={{ color: "var(--ac-muted,#857655)", padding: 20 }}>Couldn&rsquo;t load this restaurant&rsquo;s settings — the switches below are hidden so you don&rsquo;t see a wrong state. <button onClick={() => loadRestaurant(rid)} style={{ marginLeft: 8, padding: "6px 12px", borderRadius: 8, border: "1px solid var(--ac-line,#d8cdb8)", background: "var(--ac-card,#fff)", color: "inherit", cursor: "pointer" }}>Retry</button></div>
+      )}
+      {!loading && !loadErr && rid && (
         <>
           <Card id="ac-panels" title="Panels" hint="Which staff apps this restaurant can use. Turning one off blocks that role's login.">
             {PANELS.map(([k, l]) => <Row key={k} label={l}><Toggle on={panels[k] !== false} onChange={(v) => savePanel(k, v)} /></Row>)}

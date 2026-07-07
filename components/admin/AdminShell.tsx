@@ -132,14 +132,19 @@ function RestaurantSwitcher() {
 
   useEffect(() => {
     if (!open) return;
-    if (list === null) loadList();
+    // Reload every time the switcher opens (not just once) so a restaurant created/renamed/
+    // suspended elsewhere shows its latest state instead of a stale cached list (audit
+    // 2026-07-07). The old list stays visible until the refresh lands, so there's no flash.
+    loadList();
     inputRef.current?.focus();
     const onDoc = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false); };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
-  }, [open, list]);
+    // Only depend on `open` — depending on `list` would re-run when loadList() sets it,
+    // causing an infinite refetch loop.
+  }, [open]);
 
   const needle = q.trim().toLowerCase();
   const rows = (list || []).filter((r) => !needle || r.name.toLowerCase().includes(needle) || r.slug.toLowerCase().includes(needle)).slice(0, 12);

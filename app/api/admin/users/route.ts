@@ -71,7 +71,9 @@ export async function POST(req: NextRequest) {
   const restaurantId = String(body?.restaurant_id || "").trim() || DEFAULT_RESTAURANT_ID;
   if (key.length < 2) return bad("Name must be at least 2 characters.");
   if (!ROLES.includes(role)) return bad("Pick a valid role.");
-  const rest = (await sb.from("restaurants").select("id").eq("id", restaurantId).limit(1)).data?.[0];
+  // Exclude binned restaurants — creating staff on a soft-deleted restaurant just makes
+  // orphan rows the admin can never reach (login is blocked for binned restaurants).
+  const rest = (await sb.from("restaurants").select("id").eq("id", restaurantId).is("deleted_at", null).limit(1)).data?.[0];
   if (!rest) return bad("Pick a valid restaurant.");
   // Names are unique PER restaurant (mig 091) — clash-check within this one only.
   const dup = (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", restaurantId).limit(1)).data?.[0];
@@ -187,9 +189,12 @@ export async function DELETE(req: NextRequest) {
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!id) return bad("Missing user id.");
   const u = (await sb.from("staff_users").select("username, role").eq("id", id).limit(1)).data?.[0];
+  // 404 on an unknown id instead of silently "succeeding" (deleting nothing but logging a
+  // bogus 'deleted "?"' row and returning ok — audit 2026-07-07).
+  if (!u) return bad("User not found.", 404);
   // Never delete an owner from here — deleting a PRIMARY owner would skip the
   // co-owner handoff and orphan the restaurant. Owners page only.
-  if (u?.role === "owner") return bad("Owners are managed on the Owners page, not here.", 403);
+  if (u.role === "owner") return bad("Owners are managed on the Owners page, not here.", 403);
   await sb.from("staff_users").delete().eq("id", id);
   await logAction("admin", "user_delete", { actor: "admin", detail: `deleted "${u?.username || "?"}" · id ${id}` });
   return ok({ ok: true });

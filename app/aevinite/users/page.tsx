@@ -7,7 +7,8 @@
 // via the /aevinite layout. All data comes from /api/admin/users (service-role,
 // admin-cookie protected). Passwords are stored HASHED — the only time one is
 // ever visible is the one-time "copy it now" reveal right after you set it.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useBackClose } from "@/lib/backStack";
 
 type User = {
   id: string; username: string; role: string; name: string | null; phone: string | null;
@@ -38,6 +39,9 @@ export default function AdminUsers() {
   const [nu, setNu] = useState({ role: "manager", restaurant_id: "", name: "", phone: "", password: "" });
   const [showNewPw, setShowNewPw] = useState(false);
   const [creating, setCreating] = useState(false);
+  // Synchronous re-entry guard so a fast double-click can't create the same user twice
+  // before the async `creating` state disables the button (audit 2026-07-07).
+  const creatingRef = useRef(false);
   // The password to reveal once after a CREATE (shown at the top until dismissed).
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
 
@@ -68,6 +72,8 @@ export default function AdminUsers() {
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setErr(""); setCreating(true);
     try {
       const r = await fetch("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(nu) });
@@ -78,7 +84,7 @@ export default function AdminUsers() {
       setShowNewPw(false);
       load();
     } catch { setErr("Network error."); }
-    finally { setCreating(false); }
+    finally { setCreating(false); creatingRef.current = false; }
   }
 
   return (
@@ -113,7 +119,7 @@ export default function AdminUsers() {
           <label style={label}>
             Restaurant
             <select value={nu.restaurant_id} onChange={(e) => setNu({ ...nu, restaurant_id: e.target.value })} style={field} required>
-              {restaurants.length === 0 && <option value="">Loading…</option>}
+              {restaurants.length === 0 && <option value="">{loading ? "Loading…" : "No restaurants yet — create one first"}</option>}
               {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </label>
@@ -216,6 +222,8 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
   const [pin, setPin] = useState("");
   const [pinBusy, setPinBusy] = useState(false);
   const [pinMsg, setPinMsg] = useState("");
+  // Phone hardware Back closes the edit modal instead of leaving the admin page (CLAUDE.md rule).
+  useBackClose("admin-edit-user", true, onClose);
 
   async function setManagerPin() {
     setPinMsg(""); setMErr("");
@@ -388,8 +396,8 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
                 </div>
               ) : (
                 /* In-app confirmation (no browser popup from the top). */
-                <div style={{ marginTop: 10, padding: 12, borderRadius: 10, background: "#1a1407", border: "1px solid #b45309" }}>
-                  <div style={{ fontSize: 12.5, color: "#fcd34d", display: "flex", gap: 8, alignItems: "flex-start", lineHeight: 1.45 }}>
+                <div style={{ marginTop: 10, padding: 12, borderRadius: 10, background: "color-mix(in srgb, #b45309 12%, var(--card))", border: "1px solid color-mix(in srgb, #b45309 55%, transparent)" }}>
+                  <div style={{ fontSize: 12.5, color: "var(--text)", display: "flex", gap: 8, alignItems: "flex-start", lineHeight: 1.45 }}>
                     <span aria-hidden>⚠️</span>
                     <span>This sets a {pendingGen ? "new random" : "new"} password for <b>{user.name || user.username}</b> and <b>logs them out on every device</b>. They&apos;ll need the new password to sign back in.</span>
                   </div>
@@ -417,8 +425,8 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
             ) : null}
 
             {/* Danger zone — visually + spatially separated from everything else. */}
-            <div style={{ ...card, padding: 14, borderColor: "#7f1d1d", background: "#1a0f14" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#fca5a5", marginBottom: 6 }}>Danger zone</div>
+            <div style={{ ...card, padding: 14, borderColor: "var(--adm-danger)", background: "color-mix(in srgb, var(--adm-danger) 9%, var(--card))" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--adm-danger)", marginBottom: 6 }}>Danger zone</div>
               <div style={{ fontSize: 12, color: "#caa", marginBottom: 10 }}>Deleting removes this login permanently — it can&apos;t be undone.</div>
               <button style={btn("#991b1b")} onClick={remove}>Delete user</button>
             </div>

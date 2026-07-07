@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { splitBrandSegments, stripBrandMarkers } from "@/lib/brandText";
 import { openRestaurantPanel } from "@/components/admin/shared";
 import RestaurantReport from "@/components/admin/RestaurantReport";
+import { useBackClose } from "@/lib/backStack";
 
 // Render brand text in the live preview: *marked* parts use the accent colour,
 // the rest the mode's text colour — exactly how the guest menu renders it.
@@ -332,6 +333,20 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   const [toast, setToast] = useState<string | null>(null);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); };
 
+  // Phone hardware Back peels one layer at a time instead of leaving the admin page
+  // (CLAUDE.md back-button rule): the image zoom → the full report → the detail view → list.
+  // Registered top-down; the back-stack pops whichever is on top first.
+  useBackClose("admin-rest-detail", true, onBack);
+  useBackClose("admin-rest-report", showReport, () => setShowReport(false));
+  useBackClose("admin-rest-zoom", !!zoomImg, () => setZoomImg(null));
+  // Escape also closes the image zoom (it had no keyboard way out before — audit 2026-07-07).
+  useEffect(() => {
+    if (!zoomImg) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setZoomImg(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomImg]);
+
   const load = useCallback(async () => {
     try {
       const j = await (await fetch(`/api/admin/restaurants/features?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
@@ -607,6 +622,9 @@ const PALETTE_FIELDS: { key: "bg" | "card" | "text" | "accent"; label: string }[
   { key: "text", label: "Text" }, { key: "accent", label: "Accent" },
 ];
 const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+// <input type="color"> only accepts 6-digit hex; expand #abc → #aabbcc so a valid 3-digit
+// value doesn't make the swatch snap to black (audit 2026-07-07).
+const toColorInput = (v: string) => /^#[0-9a-fA-F]{3}$/.test(v) ? "#" + v.slice(1).split("").map((c) => c + c).join("") : v;
 
 function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
   const [mode, setMode] = useState<"dark" | "light">("dark");
@@ -698,7 +716,7 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
           {PALETTE_FIELDS.map((f) => (
             <div key={f.key} style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <label style={{ width: 110, flex: "0 0 auto", fontSize: 13 }}>{f.label}</label>
-              <input type="color" value={(cur[f.key] && HEX_RE.test(cur[f.key])) ? cur[f.key] : pv[f.key]} disabled={busy}
+              <input type="color" value={toColorInput((cur[f.key] && HEX_RE.test(cur[f.key])) ? cur[f.key] : pv[f.key])} disabled={busy}
                 onChange={(e) => setColor(f.key, e.target.value)} style={{ width: 38, flex: "0 0 auto", height: 30, border: "none", background: "none", cursor: "pointer" }} />
               <input value={cur[f.key] || ""} placeholder={pv[f.key]} disabled={busy} onChange={(e) => setColor(f.key, e.target.value.trim())} style={{ ...inputStyle, width: 110, minWidth: 0, flex: "0 1 110px", fontFamily: "ui-monospace, monospace" }} />
               {cur[f.key] && <button className="adm-btn" disabled={busy} onClick={() => clearColor(f.key)} title="Reset to default" style={{ padding: "4px 8px" }}>↺</button>}
