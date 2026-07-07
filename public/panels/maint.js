@@ -258,6 +258,12 @@
   function buildSettingsButton() {
     const bar = topbar();
     if (!bar || document.getElementById("staffSettingsBtn")) return;
+    // #9: a panel with its OWN profile menu (the tablet's ☰ hamburger) sets
+    // window.LFH_SUPPRESS_SETTINGS_BTN so we don't ALSO inject this "👤 Profile" button
+    // (two overlapping profile menus crowded the phone top bar). We STILL show the button
+    // for the one-time "👋 Finish setup" capture, since that flow lives here, not in the
+    // hamburger — once profile is confirmed the everyday button stays hidden on those panels.
+    if (window.LFH_SUPPRESS_SETTINGS_BTN && !(profile && profile.needsProfile)) return;
     const btn = el("button", { id: "staffSettingsBtn", class: "btn", style: { marginLeft: "auto" }, onClick: openDrawer },
       [profile && profile.needsProfile ? "👋 Finish setup" : "👤 Profile"]);
     bar.appendChild(btn);

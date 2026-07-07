@@ -122,6 +122,11 @@
   }
 
   function openDrawer() {
+    // #12: onChange re-calls openDrawer on every outbox change while the drawer is open
+    // (rows re-render). Each open used to register ANOTHER "outbox-sync" back-layer without
+    // releasing the previous one, so after a few syncs the hardware Back button did nothing
+    // for a press or two. Track whether we're already open and only register ONE layer.
+    const wasOpen = !!overlay;
     if (overlay) overlay.remove();
     const dw = el("div", "lfh-sync-dw");
 
@@ -186,8 +191,9 @@
     overlay.addEventListener("click", (e) => { if (e.target === overlay) closeDrawer(); });
     overlay.appendChild(dw);
     document.body.appendChild(overlay);
-    // Hardware BACK closes the drawer instead of leaving the panel.
-    if (window.LFH_BACK && window.LFH_BACK.layer) backOff = window.LFH_BACK.layer("outbox-sync", closeDrawer);
+    // Hardware BACK closes the drawer instead of leaving the panel. Register the layer ONLY
+    // on the first open — a re-render (wasOpen) reuses the existing one so it can't pile up.
+    if (!wasOpen && window.LFH_BACK && window.LFH_BACK.layer) backOff = window.LFH_BACK.layer("outbox-sync", closeDrawer);
   }
 
   function boot() {

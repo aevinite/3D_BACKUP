@@ -137,6 +137,12 @@
     // Known offline → don't even try; queue straight away.
     if (navigator.onLine === false) { await enqueue(item); return { ok: true, queued: true, action_id: item.id }; }
 
+    // FIFO GUARD (#6): if earlier actions are STILL waiting to sync, this new write must
+    // NOT be sent directly ahead of them — that let a fresh "Mark paid" commit before a
+    // queued discount, settling the bill at the wrong amount. Append to the queue and kick
+    // a flush so it replays in order behind the pending ones.
+    if (queued.length) { await enqueue(item); flush(); return { ok: true, queued: true, action_id: item.id }; }
+
     let res;
     try {
       res = await doFetch(item);
@@ -148,7 +154,9 @@
     // We got a response → behave exactly like the old api() helper.
     if (res.status === 401) { location.href = "/login"; throw new Error("login"); }
     const j = await res.json().catch(() => null);
-    if (!res.ok) throw new Error((j && j.error) || res.statusText);
+    // Carry the parsed body + status on the error so callers can read server flags
+    // (e.g. duplicateWarning) that a bare message string would drop.
+    if (!res.ok) { const e = new Error((j && j.error) || res.statusText); e.status = res.status; e.data = j; throw e; }
     return j;
   }
 
