@@ -154,6 +154,12 @@ function BinRow({ r, onChanged }: { r: Trashed; onChanged: () => void }) {
             <input type="checkbox" checked={wantBackup} onChange={(e) => setWantBackup(e.target.checked)} disabled={busy} />
             Download a backup file of this restaurant&apos;s data first (recommended)
           </label>
+          {wantBackup && (
+            <p className="hint" style={{ margin: "-4px 0 0 26px", fontSize: 11.5, color: "var(--muted)" }}>
+              <i className="fas fa-circle-info" style={{ marginRight: 6 }} aria-hidden="true" />
+              This file includes customer names &amp; phone numbers (staff passwords are removed). Keep it private and delete it once the restaurant is rebuilt.
+            </p>
+          )}
           <label style={{ fontSize: 12.5 }}>
             Type <b style={{ fontFamily: "ui-monospace, monospace" }}>{r.name}</b> to confirm
             <input value={confirmName} onChange={(e) => setConfirmName(e.target.value)} disabled={busy} autoFocus placeholder={r.name}

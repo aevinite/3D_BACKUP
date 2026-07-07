@@ -50,6 +50,9 @@ export default function AdminOwners() {
   const [detailFor, setDetailFor] = useState<string | null>(null);
   const detailOwner = owners.find((o) => o.id === detailFor) || null;
   const [busy, setBusy] = useState(false);
+  // Search filters owner cards by owner name, their login, or any restaurant they own
+  // (helpful once there are many owners — admin audit 2026-07-07).
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     setErr("");
@@ -77,6 +80,14 @@ export default function AdminOwners() {
   };
 
   const unowned = useMemo(() => rests.filter((r) => !r.hasOwner && r.active), [rests]);
+  const filteredOwners = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return owners;
+    return owners.filter((o) =>
+      o.name.toLowerCase().includes(q) ||
+      o.username.toLowerCase().includes(q) ||
+      o.restaurants.some((r) => r.name.toLowerCase().includes(q)));
+  }, [owners, query]);
   const kpis = useMemo(() => ({
     owners: owners.filter((o) => o.active).length,
     covered: rests.filter((r) => r.hasOwner).length,
@@ -94,6 +105,14 @@ export default function AdminOwners() {
         </div>
         <button style={btn("#3b82f6")} onClick={() => setShowCreate(true)}>+ New owner</button>
       </div>
+
+      {owners.length > 6 && (
+        <div style={{ position: "relative", margin: "12px 0 4px" }}>
+          <i className="fas fa-magnifying-glass" aria-hidden="true" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 13 }} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search owners by name, login, or restaurant…"
+            aria-label="Search owners" style={{ ...field, paddingLeft: 34 }} />
+        </div>
+      )}
 
       {err ? <div style={{ ...card, borderColor: "#7f1d1d", color: "#fca5a5", marginBottom: 14, padding: 12 }}>{err}</div> : null}
 
@@ -129,9 +148,11 @@ export default function AdminOwners() {
       {/* Owner cards */}
       {loading ? <div style={{ color: "var(--muted)" }}>Loading…</div> : owners.length === 0 ? (
         <div style={{ ...card, color: "var(--muted)" }}>No owners yet — create your first one.</div>
+      ) : filteredOwners.length === 0 ? (
+        <div style={{ ...card, color: "var(--muted)" }}>No owners match “{query}”.</div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(330px, 1fr))", gap: 12 }}>
-          {owners.map((o) => {
+          {filteredOwners.map((o) => {
             const openAttach = attachFor === o.id;
             const attachable = rests.filter((r) => !o.restaurants.some((x) => x.id === r.id));
             return (
@@ -165,7 +186,7 @@ export default function AdminOwners() {
                   ))}
                   {o.restaurants.length === 0 && <span style={{ fontSize: 12, color: "var(--muted)" }}>no restaurants yet</span>}
                   {o.active && (
-                    <button style={{ ...chip, borderStyle: "dashed", color: "#60a5fa", cursor: "pointer", background: "transparent" }} disabled={busy}
+                    <button style={{ ...chip, borderStyle: "dashed", color: "#60a5fa", cursor: "pointer", background: "transparent", padding: "7px 11px" }} disabled={busy}
                       onClick={(e) => { e.stopPropagation(); setAttachFor(openAttach ? null : o.id); }}><i className="fas fa-plus" style={{ marginRight: 5, fontSize: 10 }} aria-hidden="true" />Attach</button>
                   )}
                 </div>
@@ -225,7 +246,10 @@ const kLb: React.CSSProperties = { fontSize: 10.5, letterSpacing: ".08em", textT
 const kV: React.CSSProperties = { fontSize: 22, fontWeight: 800, marginTop: 4 };
 const chip: React.CSSProperties = { display: "inline-flex", gap: 6, alignItems: "center", border: "var(--border)", borderRadius: 999, padding: "3.5px 10px", fontSize: 12, color: "var(--text)", fontWeight: 600 };
 const dot: React.CSSProperties = { width: 7, height: 7, borderRadius: "50%", flexShrink: 0 };
-const xBtn: React.CSSProperties = { background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", fontSize: 13, padding: "0 0 0 2px", lineHeight: 1 };
+// Detach/remove (×) — padded to a ~29px finger-friendly hit area (was ~12px, too
+// small to tap on a phone; admin mobile audit 2026-07-07). marginRight offsets the
+// padding so the chip doesn't grow much on the trailing edge.
+const xBtn: React.CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", fontSize: 13, padding: 8, marginRight: -6, borderRadius: 8, lineHeight: 1 };
 const actBtn: React.CSSProperties = { flex: "1 1 auto", border: "var(--border)", background: "var(--bg)", borderRadius: 9, padding: "7px 8px", fontSize: 12, fontWeight: 700, color: "var(--text)", cursor: "pointer", textAlign: "center" };
 // Leading-icon spacing for the action buttons (icons replace the old emojis).
 const ic: React.CSSProperties = { marginRight: 6, fontSize: 11 };
@@ -420,7 +444,7 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
                 <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", flex: 1 }}>Owns {owner.restaurants.length} restaurant{owner.restaurants.length === 1 ? "" : "s"}</div>
-                <button style={{ ...chip, borderStyle: "dashed", color: "#60a5fa", cursor: "pointer", background: "transparent" }} disabled={busy}
+                <button style={{ ...chip, borderStyle: "dashed", color: "#60a5fa", cursor: "pointer", background: "transparent", padding: "7px 11px" }} disabled={busy}
                   onClick={() => setShowAttach((s) => !s)}>
                   <i className={`fas ${showAttach ? "fa-xmark" : "fa-plus"}`} style={{ fontSize: 10 }} aria-hidden="true" />{showAttach ? "Close" : "Add restaurant"}</button>
               </div>

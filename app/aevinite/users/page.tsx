@@ -49,6 +49,19 @@ export default function AdminUsers() {
   const [editId, setEditId] = useState<string | null>(null);
   const editing = users.find((u) => u.id === editId) || null;
 
+  // Search filters the list by name/login, role, restaurant or phone (admin audit
+  // 2026-07-07 — the list has no filter and grows long across many restaurants).
+  const [query, setQuery] = useState("");
+  const shown = (() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((u) =>
+      (u.name || u.username).toLowerCase().includes(q) ||
+      (ROLE_LABEL[u.role] || u.role).toLowerCase().includes(q) ||
+      (u.restaurantName || "").toLowerCase().includes(q) ||
+      (u.phone || "").toLowerCase().includes(q));
+  })();
+
   const load = useCallback(async () => {
     setErr("");
     try {
@@ -155,11 +168,20 @@ export default function AdminUsers() {
       {/* User list — compact rows, ONE button (Edit) each. Everything else lives in the modal. */}
       <section style={{ ...card }}>
         <h2 style={{ fontSize: 15, margin: "0 0 12px" }}>All users {loading ? "" : `(${users.length})`}</h2>
+        {users.length > 6 && (
+          <div style={{ position: "relative", marginBottom: 12 }}>
+            <i className="fas fa-magnifying-glass" aria-hidden="true" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 13 }} />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name, role, restaurant or phone…"
+              aria-label="Search users" style={{ ...field, paddingLeft: 34 }} />
+          </div>
+        )}
         {loading ? <div style={{ color: "var(--muted)" }}>Loading…</div> : users.length === 0 ? (
           <div style={{ color: "var(--muted)" }}>No users yet — add your first one above.</div>
+        ) : shown.length === 0 ? (
+          <div style={{ color: "var(--muted)" }}>No users match “{query}”.</div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
-            {users.map((u) => (
+            {shown.map((u) => (
               <div key={u.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, alignItems: "center", padding: 12, borderRadius: 10, background: "var(--bg)", border: "var(--border)", opacity: u.active ? 1 : 0.55 }}>
                 {/* Initial badge */}
                 <div aria-hidden style={{ width: 38, height: 38, borderRadius: 999, background: ROLE_COLOR[u.role] || "#9ca3af", color: "var(--bg)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }}>

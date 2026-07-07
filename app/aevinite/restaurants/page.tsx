@@ -24,6 +24,27 @@ const stripMarkers = (s: string) => stripBrandMarkers(s);
 
 type Restaurant = { id: string; slug: string; name: string; active: boolean; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null };
 type Owner = { id: string; name: string };
+// Activity health per restaurant (from /api/admin/restaurants/health, mig 146). Signals
+// only, no money — the admin panel never shows earnings.
+type Health = { last_order_at: string | null; orders_24h: number; open_issues: number; staff_online: number };
+
+// Turn the raw signals into a one-word status + colour. "Healthy" = busy now (staff online
+// or an order in the last 24h); "Quiet" = ordered within a week; "Dormant" = nothing for 7+
+// days (or never); "Suspended" = the restaurant is turned off.
+function healthStatus(active: boolean, h: Health | undefined): { label: string; color: string; note: string } {
+  if (!active) return { label: "Suspended", color: "var(--muted)", note: "turned off" };
+  if (!h) return { label: "—", color: "var(--muted)", note: "" };
+  if (h.staff_online > 0 || h.orders_24h > 0) {
+    const bits = [h.orders_24h > 0 ? `${h.orders_24h} order${h.orders_24h === 1 ? "" : "s"}/24h` : "", h.staff_online > 0 ? `${h.staff_online} online` : ""].filter(Boolean);
+    return { label: "Healthy", color: "var(--adm-ok)", note: bits.join(" · ") };
+  }
+  const last = h.last_order_at ? Date.now() - new Date(h.last_order_at).getTime() : Infinity;
+  if (last <= 7 * 86400000) {
+    const days = Math.floor(last / 86400000);
+    return { label: "Quiet", color: "#d4a574", note: days <= 0 ? "ordered today" : `last order ${days}d ago` };
+  }
+  return { label: "Dormant", color: "var(--adm-danger)", note: h.last_order_at ? "no orders in 7+ days" : "no orders yet" };
+}
 
 // The seeded default restaurant (#1) — can never be deleted (matches the API + SQL guards).
 const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
@@ -49,6 +70,8 @@ export default function AdminRestaurants() {
   const toast = useToast();
   const [list, setList] = useState<Restaurant[] | null>(null);
   const [owners, setOwners] = useState<Owner[]>([]);
+  const [health, setHealth] = useState<Record<string, Health>>({});
+  const [healthFilter, setHealthFilter] = useState<"all" | "Healthy" | "Quiet" | "Dormant" | "Suspended">("all");
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Restaurant | null>(null);
   // ?focus=<slug> (set by the Command page's Manage→ + the topbar quick-switcher):
@@ -85,6 +108,18 @@ export default function AdminRestaurants() {
   }, [toast]);
   useEffect(() => { loadList(); }, [loadList]);
 
+  // Health signals for all restaurants — one aggregated call (mig 146). Loaded once
+  // alongside the list; a failure just leaves the badges as "—" (never blocks the list).
+  const loadHealth = useCallback(async () => {
+    const res = await adminFetch<{ health?: (Health & { restaurant_id: string })[] }>("/api/admin/restaurants/health");
+    if (res.ok) {
+      const map: Record<string, Health> = {};
+      for (const h of res.data.health || []) map[h.restaurant_id] = h;
+      setHealth(map);
+    }
+  }, []);
+  useEffect(() => { loadHealth(); }, [loadHealth]);
+
   if (selected) {
     // Re-read the freshest copy from the list so the owner shows correctly after a round-trip.
     const fresh = (list || []).find((r) => r.id === selected.id) || selected;
@@ -92,7 +127,17 @@ export default function AdminRestaurants() {
   }
 
   const needle = q.trim().toLowerCase();
-  const rows = (list || []).filter((r) => !needle || r.name.toLowerCase().includes(needle) || r.slug.toLowerCase().includes(needle));
+  const rows = (list || []).filter((r) => {
+    if (needle && !(r.name.toLowerCase().includes(needle) || r.slug.toLowerCase().includes(needle))) return false;
+    if (healthFilter !== "all" && healthStatus(r.active, health[r.id]).label !== healthFilter) return false;
+    return true;
+  });
+  // Counts per health bucket for the filter chips (so the admin sees at a glance how many
+  // restaurants are dormant, etc.).
+  const healthCounts = (list || []).reduce((acc, r) => {
+    const l = healthStatus(r.active, health[r.id]).label;
+    acc[l] = (acc[l] || 0) + 1; return acc;
+  }, {} as Record<string, number>);
 
   return (
     <>
@@ -121,14 +166,37 @@ export default function AdminRestaurants() {
           <span className="adm-muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>{rows.length} of {list?.length ?? 0}</span>
         </div>
 
+        {/* Health filter chips — one tap to see e.g. only the dormant restaurants. */}
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 14 }}>
+          {([
+            ["all", "All", "var(--text)"],
+            ["Healthy", "Healthy", "var(--adm-ok)"],
+            ["Quiet", "Quiet", "#d4a574"],
+            ["Dormant", "Dormant", "var(--adm-danger)"],
+            ["Suspended", "Suspended", "var(--muted)"],
+          ] as const).map(([key, lbl, col]) => {
+            const on = healthFilter === key;
+            const count = key === "all" ? (list?.length ?? 0) : (healthCounts[key] || 0);
+            return (
+              <button key={key} onClick={() => setHealthFilter(key)} className="adm-chip"
+                style={{ cursor: "pointer", padding: "7px 12px", border: on ? `1px solid ${col}` : "var(--border)",
+                  background: on ? `color-mix(in srgb, ${col} 18%, transparent)` : "transparent",
+                  color: on ? col : "var(--muted)", fontWeight: on ? 700 : 500 }}>
+                {key !== "all" && <span style={{ width: 7, height: 7, borderRadius: "50%", background: col, display: "inline-block", marginRight: 6 }} />}
+                {lbl} <span style={{ opacity: 0.7 }}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+
         {list === null ? (
           <div className="adm-empty">Loading restaurants…</div>
         ) : rows.length === 0 ? (
-          <div className="adm-empty">No restaurants match “{q}”.</div>
+          <div className="adm-empty">{needle || healthFilter !== "all" ? "No restaurants match this filter." : "No restaurants yet."}</div>
         ) : (
           <div className="adm-logwrap">
-            <div className="adm-logrow head" style={{ gridTemplateColumns: "1.2fr 1fr 1fr 80px 80px" }}>
-              <span>Name</span><span>Slug</span><span>Owner</span><span>Status</span><span style={{ textAlign: "right" }}>Open</span>
+            <div className="adm-logrow head" style={{ gridTemplateColumns: "1.2fr 0.9fr 1fr 96px 80px 80px" }}>
+              <span>Name</span><span>Slug</span><span>Owner</span><span>Health</span><span>Status</span><span style={{ textAlign: "right" }}>Open</span>
             </div>
             {rows.map((r) => (
               <button
@@ -137,7 +205,7 @@ export default function AdminRestaurants() {
                 className="adm-logrow"
                 onClick={() => setSelected(r)}
                 style={{
-                  gridTemplateColumns: "1.2fr 1fr 1fr 80px 80px", width: "100%", border: 0, color: "var(--text)", cursor: "pointer", textAlign: "left", font: "inherit",
+                  gridTemplateColumns: "1.2fr 0.9fr 1fr 96px 80px 80px", width: "100%", border: 0, color: "var(--text)", cursor: "pointer", textAlign: "left", font: "inherit",
                   // The ?focus= row gets a quiet accent highlight so the eye lands on it.
                   background: focusSlug === r.slug ? "color-mix(in srgb, var(--accent) 10%, transparent)" : "transparent",
                   boxShadow: focusSlug === r.slug ? "inset 2px 0 0 var(--accent)" : undefined,
@@ -147,6 +215,16 @@ export default function AdminRestaurants() {
                 <span style={{ fontWeight: 700 }}>{r.name}</span>
                 <span className="adm-muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{r.slug}</span>
                 <span className="adm-muted" style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ownerName || "—"}</span>
+                {(() => {
+                  const hs = healthStatus(r.active, health[r.id]);
+                  return (
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }} title={hs.note}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: hs.color, flexShrink: 0 }} />
+                      <span style={{ fontSize: 12.5, color: hs.color, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hs.label}</span>
+                      {health[r.id]?.open_issues ? <span className="adm-chip" title={`${health[r.id].open_issues} open issue(s)`} style={{ background: "color-mix(in srgb, var(--adm-danger) 18%, transparent)", color: "var(--adm-danger)", fontSize: 10, padding: "1px 6px" }}>{health[r.id].open_issues}</span> : null}
+                    </span>
+                  );
+                })()}
                 <span>
                   <span className="adm-chip" style={r.active
                     ? { background: "color-mix(in srgb, var(--adm-ok) 22%, transparent)", color: "var(--adm-ok)" }
