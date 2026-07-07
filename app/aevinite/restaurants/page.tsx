@@ -632,6 +632,7 @@ const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 const toColorInput = (v: string) => /^#[0-9a-fA-F]{3}$/.test(v) ? "#" + v.slice(1).split("").map((c) => c + c).join("") : v;
 
 function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
+  const toast = useToast();
   const [mode, setMode] = useState<"dark" | "light">("dark");
   const [theme, setTheme] = useState<{ dark: Record<string, string>; light: Record<string, string> }>({ dark: {}, light: {} });
   const [hero, setHero] = useState(""); const [tagline, setTagline] = useState(""); const [logoText, setLogoText] = useState("");
@@ -642,16 +643,21 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
 
   useEffect(() => {
     (async () => {
+      // Announces a failure via the shared toast instead of swallowing it — a failed load left
+      // the branding fields blank with no explanation (audit 2026-07-07).
       try {
-        const j = await (await fetch(`/api/admin/restaurants/branding?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
-        if (!j.error) {
+        const r = await fetch(`/api/admin/restaurants/branding?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && !j.error) {
           const t = j.theme || {};
           setTheme({ dark: { ...(t.dark || {}) }, light: { ...(t.light || {}) } });
           setHero(j.hero_title || ""); setTagline(j.tagline || ""); setLogoText(j.logo_text || ""); setAccent(j.accent_color || ""); setLogoUrl(j.logo_url || null);
+        } else {
+          toast("Couldn't load branding — " + (j.error || "try reopening."), "err");
         }
-      } catch {}
+      } catch { toast("Couldn't load branding — network error.", "err"); }
     })();
-  }, [restaurant.id]);
+  }, [restaurant.id, toast]);
 
   // Logo IMAGE upload (separate from the text fields — it streams a file to Storage).
   const uploadLogo = async (file: File) => {
