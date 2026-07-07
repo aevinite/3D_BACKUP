@@ -893,17 +893,30 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return err("unknown banquet action", 404);
     }
 
-    // orders/delete (bulk/clear) — keep settled bills.
+    // orders/delete (bulk/clear) — keep settled bills. Permanently removing bill
+    // records is destructive + owner-gated (least-privilege): a plain manager needs the
+    // void_bills power. Managers can always CANCEL an order (routine, ungated) — only a
+    // permanent DELETE needs the power. Every clear is written to the Log so cleared
+    // records leave a trace (accountability — same rule as the payment-revert audit trail).
     if (a === "orders" && b === "delete") {
+      if (!(await managerCan(g, rid, "void_bills"))) return permDenied("delete or clear bills");
       const { ids, all } = body || {};
-       
-      let candidates: any[];
-      if (all) candidates = must(await sb.from("orders").select("id,payment_status,status").eq("restaurant_id", rid));
-      else if (Array.isArray(ids) && ids.length) candidates = must(await sb.from("orders").select("id,payment_status,status").eq("restaurant_id", rid).in("id", ids));
-      else return err("no ids");
-      const deletable = candidates.filter((o) => !(o.payment_status === "paid" && o.status !== "cancelled")).map((o) => o.id);
-      const kept = candidates.length - deletable.length;
-      if (deletable.length) must(await sb.from("orders").delete().in("id", deletable));
+      let deletable: string[]; let kept: number;
+      if (all) {
+        // Scoped read: fetch ONLY the deletable rows (unpaid OR cancelled) so a "clear all"
+        // never scans the whole orders table; cap at 5000 as a safety bound. The count of
+        // KEPT paid bills comes from a rows-free head count (no row egress).
+        const del = must(await sb.from("orders").select("id").eq("restaurant_id", rid).or("payment_status.neq.paid,status.eq.cancelled").limit(5000)) as { id: string }[];
+        deletable = del.map((o) => o.id);
+        const keptQ = await sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("payment_status", "paid").neq("status", "cancelled");
+        kept = keptQ.count || 0;
+      } else if (Array.isArray(ids) && ids.length) {
+        const candidates = must(await sb.from("orders").select("id,payment_status,status").eq("restaurant_id", rid).in("id", ids)) as { id: string; payment_status: string; status: string }[];
+        deletable = candidates.filter((o) => !(o.payment_status === "paid" && o.status !== "cancelled")).map((o) => o.id);
+        kept = candidates.length - deletable.length;
+      } else return err("no ids");
+      if (deletable.length) must(await sb.from("orders").delete().eq("restaurant_id", rid).in("id", deletable));
+      await logAction("editor", "orders_delete", { detail: all ? `cleared all freed records (${deletable.length})` : `deleted ${deletable.length} bill(s)`, device_id: dev });
       return ok({ ok: true, deleted: deletable.length, kept });
     }
 
@@ -1283,6 +1296,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       const row = must(await sb.from("blocklist").insert({ phone, table_number: table, device_id: device, member_id: memberId, reason: body.reason || "banned", restaurant_id: rid }).select())[0];
       if (phone) await sb.from("customers").upsert({ phone, blocked: true, restaurant_id: rid }, { onConflict: "restaurant_id,phone" });
+      // Record WHO banned WHAT in the Log (accountability). Describe the target type only —
+      // never write the raw phone number into the log (no PII in the audit trail).
+      const banTarget = [table ? `table ${table}` : "", phone ? "a phone" : "", device ? "a device" : "", memberId ? "a guest" : ""].filter(Boolean).join(", ") || "a guest";
+      await logAction("editor", "blocklist_add", { detail: `banned ${banTarget}${body.reason ? ` · ${String(body.reason).slice(0, 60)}` : ""}`, device_id: dev });
       return ok(row || null);
     }
 
@@ -1563,10 +1580,14 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
     const [a, id] = path;
 
     if (a === "orders" && id) {
+      // Permanent bill deletion is owner-gated (least-privilege) + always logged — same
+      // rule as the bulk clear above. A manager can still CANCEL an order without this power.
+      if (!(await managerCan(g, rid, "void_bills"))) return permDenied("delete bills");
       const cur = must(await sb.from("orders").select("payment_status,status").eq("id", id).eq("restaurant_id", rid).single());
       if (cur && cur.payment_status === "paid" && cur.status !== "cancelled")
         return err("Won't delete a PAID bill — it's a financial record. Mark it unpaid or void it first.", 409);
       must(await sb.from("orders").delete().eq("id", id).eq("restaurant_id", rid));
+      await logAction("editor", "order_delete", { order_id: id, device_id: deviceIdFrom(req) });
       return ok({ ok: true });
     }
 
@@ -1583,6 +1604,8 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
         const others = must(await sb.from("blocklist").select("id").eq("phone", phone).eq("restaurant_id", rid).limit(1));
         if (!others.length) await sb.from("customers").update({ blocked: false }).eq("phone", phone).eq("restaurant_id", rid);
       }
+      // Unbanning is recorded too, so a ban that's quietly lifted still leaves a trace.
+      await logAction("editor", "blocklist_remove", { detail: "unbanned", device_id: deviceIdFrom(req) });
       return ok({ ok: true });
     }
 

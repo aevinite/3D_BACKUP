@@ -6,8 +6,10 @@
   <title>Manager — Little French House</title>
   <!-- Inline emoji favicon (an SVG data URI) so the browser stops 404-ing on /favicon.ico — no extra file needed. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>" />
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <!-- Font Awesome is SELF-HOSTED (was a cdnjs link) so the panel's icons never break
+       when an external CDN is slow/down — same reliability rule the guest menu follows
+       (it self-hosts supabase-js). Files live in /panels/vendor/fa/. -->
+  <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
   <link rel="stylesheet" href="/panels/editor/style.css?v=20260707mgr1" />
@@ -69,9 +71,9 @@
   </main>
 
   <div id="toast" class="toast" hidden></div>
-  <!-- Chart.js (CDN) powers the Dashboard tab's graphs. The editor is a private,
-       password-locked tool, so a CDN script here is fine (unlike the guest menu). -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <!-- Chart.js powers the Dashboard graphs. SELF-HOSTED (was a jsdelivr CDN link) so the
+       Dashboard still draws when an external CDN hiccups. File in /panels/vendor/. -->
+  <script src="/panels/vendor/chart.umd.min.js?v=4.4.7"></script>
   <script src="/panels/maint.js"></script>
   <script src="/panels/realtime.js"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
