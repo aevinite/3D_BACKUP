@@ -145,13 +145,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     if (wasSearching) setSearchQuery("");
     setCurrentCategory("all");
     // Highlight the tapped chip right away and lock the spy so it can't override
-    // it while the smooth-scroll settles (bug #11).
+    // it while the smooth-scroll + the shrink-correction below settle (bug #11).
     setSpyCat(slug);
-    spyLockUntil.current = Date.now() + 800;
+    spyLockUntil.current = Date.now() + 1300;
     const doScroll = () => {
       const sc = document.getElementById("main-scroll");
       const sec = sc?.querySelector(`.cat-group[data-cat="${slug}"]`);
-      const stickyEl = document.getElementById("menu-sticky");
       // If a filter has emptied this category (its section isn't in the grouped
       // view), don't leave the guest with a dead tap — clear the filters so the
       // full grouped menu is back, then scroll to it on the next paint (bug #12).
@@ -163,11 +162,29 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         return;
       }
       if (!sc || !sec) return;
-      // Land the section just below the pinned bar, measured live so it stays
-      // correct whatever the bar's current (shrunk/expanded) height is.
-      const barBottom = stickyEl ? stickyEl.getBoundingClientRect().bottom : 220;
-      const delta = sec.getBoundingClientRect().top - (barBottom + 12);
-      sc.scrollTo({ top: sc.scrollTop + delta, behavior: "smooth" });
+      // Where the section should sit: just below the pinned bar, measured LIVE
+      // each time (the bar height changes as it shrinks).
+      const wantTop = () => {
+        const bb = document.getElementById("menu-sticky")?.getBoundingClientRect().bottom ?? 220;
+        return sc.scrollTop + (sec.getBoundingClientRect().top - (bb + 12));
+      };
+      sc.scrollTo({ top: wantTop(), behavior: "smooth" });
+      // ROOT-CAUSE FIX (bug #11): the pinned header shrinks ~140px WHILE this
+      // smooth-scroll runs, so a first tap from the top landed the section ~140px
+      // too low and the spy highlighted the category above it (it only self-fixed
+      // on a 2nd tap). After the shrink settles, re-measure and snap-correct until
+      // the section is within a few px of the bar — so the FIRST tap lands right.
+      let tries = 0;
+      const correct = () => {
+        if (tries >= 8) return;
+        const want = wantTop();
+        if (Math.abs(want - sc.scrollTop) > 4) {
+          sc.scrollTo({ top: want, behavior: "auto" });
+          tries++;
+          setTimeout(correct, 70);
+        }
+      };
+      setTimeout(correct, 360);
     };
     // If we just cleared a search, the grouped view needs a paint first.
     if (wasSearching) setTimeout(doScroll, 80);
@@ -613,7 +630,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         {/* "Categories" heading + "slide →" hint — also hidden when a filter has
             emptied EVERY category, so the label doesn't hover over an empty bar
             (regression fix). Still shown while categories are loading. */}
-        {(dbCategories.length === 0 || visibleCategories.length > 0) && (
+        {!q && (dbCategories.length === 0 || visibleCategories.length > 0) && (
         <div className="section-header">
           <span className="section-title">{t.categories}</span>
           <span className="browse-hint" aria-hidden="true">
@@ -629,7 +646,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         {/* The horizontal row of category tabs — hidden (leaving just the search
             box) when a filter has emptied every category, so there's no empty bar
             (regression fix). Shown while loading (skeletons). */}
-        {(dbCategories.length === 0 || visibleCategories.length > 0) && (
+        {!q && (dbCategories.length === 0 || visibleCategories.length > 0) && (
         <div className="cat-scroller" id="cat-scroller" role="tablist" aria-label="Menu categories">
           {/* If categories haven't loaded yet, maybe show placeholders;
               otherwise draw a tab button for each category. */}

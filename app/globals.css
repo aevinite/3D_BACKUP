@@ -10,18 +10,6 @@
 [data-theme="dark"] .nav-btn .theme-icon-sun { display: none; }
 [data-theme="dark"] .nav-btn .theme-icon-moon { display: inline-block; }
 
-/* Arabic (RTL) safety (audit fix — regression from the RTL toggle): the hero
-   greeting + title are split into ONE <span> per letter, so a document-wide
-   dir=rtl laid a Latin tagline out right-to-left ("Wood-Fired Pizzeria" became
-   "airezziP deriF-dooW"). `unicode-bidi: plaintext` makes each hero line pick its
-   OWN direction from its content — Latin flows LTR, Arabic flows RTL — so #1's
-   Arabic hero stays correct AND other tenants' Latin heroes read normally. The
-   brand wordmark is always a proper name, so force it LTR to stop the RTL
-   ellipsis clipping it ("...tle French house"). Scoped to RTL only. */
-[dir="rtl"] .greet-badge,
-[dir="rtl"] .hero-title { unicode-bidi: plaintext; }
-[dir="rtl"] .brand { direction: ltr; }
-
 :root {
   /* THEME-TRIAL: WHOLE dark palette coordinated together. Currently: Espresso & Gold (brand brown) */
   --bg: #1a0f09;            /* deep espresso-brown background (logo brown family) */

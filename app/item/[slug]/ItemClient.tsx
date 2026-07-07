@@ -893,8 +893,10 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           const prev = idx > 0 ? siblings[idx - 1] : null;
           const next = idx < siblings.length - 1 ? siblings[idx + 1] : null;
           if (!prev && !next) return null;  // only one dish — no arrows
-          // Carry the category in the link so the next page keeps the same nav list.
-          const catParam = navCat !== item.category ? `?cat=${navCat}` : "";
+          // Always carry the category in the link so the next page keeps the SAME
+          // nav list (previously omitted when navCat === the dish's own category,
+          // which relied on a fallback and lost the context the viewer preserves).
+          const catParam = `?cat=${encodeURIComponent(navCat)}`;
           return (
             <>
               {/* Left strip: go to the previous dish (only if there is one). */}

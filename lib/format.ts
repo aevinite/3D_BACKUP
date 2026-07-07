@@ -101,15 +101,20 @@ export const getLanguage = (): LanguageMeta => {
   return LANGUAGES.find((l) => l.code === code) || LANGUAGES[0];
 };
 
-// Point the whole page in the right reading direction for the chosen language:
-// Arabic reads RIGHT-to-LEFT, every other supported language left-to-right. This
-// flips the layout, control alignment and scroll direction — not just the glyphs
-// (audit fix bug #7). Also keeps the <html lang> attribute honest for
-// screen-readers. Safe to call on the server (guards on document).
+// Keep the <html lang> attribute honest for screen-readers / hyphenation.
+//
+// NOTE (Arabic RTL, deliberately deferred): we intentionally do NOT flip the
+// document to dir=rtl. The UI is only partly translated to Arabic, so a full RTL
+// flip actually looked MORE broken — the brand name reversed on the splash,
+// English strings put their punctuation on the wrong side, arrows didn't mirror,
+// and half the screens (cart, waiter-call, name box, order strip) stayed English.
+// True RTL is its own project (translate every string + mirror directional icons
+// + fix per-letter-span components); until then Arabic renders as left-aligned
+// Arabic text, which is clean. So we pin dir=ltr. Safe to call on the server.
 export const applyDirection = (code: LanguageCode) => {
   if (typeof document === "undefined") return;
   const el = document.documentElement;
-  el.setAttribute("dir", code === "ar" ? "rtl" : "ltr");
+  el.setAttribute("dir", "ltr");
   el.setAttribute("lang", code);
 };
 
