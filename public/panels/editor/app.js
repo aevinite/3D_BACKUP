@@ -2304,7 +2304,7 @@ function dashTodayBox(s) {
     </div>
   </div>`;
 }
-// ── Guest ratings (mig 138): the manager's view of diner star-ratings, gated by
+// ── Guest ratings (mig 140): the manager's view of diner star-ratings, gated by
 // the view_ratings power. Fetch + acknowledge/note; scoped to this restaurant server-side.
 const RCHIP = "display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(127,127,127,.12)";
 function ratingStars(n) {
