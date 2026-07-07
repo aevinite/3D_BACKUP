@@ -46,7 +46,10 @@ const inr = (n) => "₹" + Math.round((parseFloat(n) || 0) * INR_RATE).toLocaleS
 // owns "ready"; if they're too busy to mark it, the waiter who carries the food
 // just serves it directly). A dish already marked "ready" by the kitchen also
 // serves in one tap. (owner, 2026-06-14)
-const NEXT_STATUS = { received: "preparing", preparing: "served", ready: "served", served: "received" };
+// Forward-only status flow. 'served' is deliberately NOT mapped back to 'received' here (#3):
+// a served dish is un-served via the explicit "↩ Send back to kitchen" action in the edit
+// modal, not by tapping the tiny pill backwards (which caused silent mis-tap un-serves).
+const NEXT_STATUS = { received: "preparing", preparing: "served", ready: "served" };
 const STATUS_WORD = { received: "new", preparing: "cooking", ready: "ready", served: "served" };
 // The standard allergens staff can toggle per order (keep in sync with lib/allergens.ts).
 const ALLERGENS = [
@@ -644,7 +647,7 @@ function openDishEditModal(itemId) {
       <div style="font-size:13px;font-weight:700;margin:15px 0 6px">✎ Note for the kitchen</div>
       <textarea class="dish-edit-note" rows="2" maxlength="200" placeholder="e.g. less ice, extra chocolate" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;resize:vertical"></textarea>
     </div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid #1d2944"><button class="btn dish-edit-cancel">Cancel</button><button class="btn primary dish-edit-save">Save</button></div>
+    <div style="display:flex;gap:10px;align-items:center;padding:14px 18px;border-top:1px solid #1d2944">${(item.status === "served") ? `<button class="btn dish-edit-unserve" style="margin-right:auto;border-color:#7f5f1d;color:#f0b232" title="Mark this dish not-served so the kitchen can remake/re-serve it">↩ Send back to kitchen</button>` : ""}<button class="btn dish-edit-cancel"${(item.status === "served") ? "" : ' style="margin-left:auto"'}>Cancel</button><button class="btn primary dish-edit-save">Save</button></div>
   </div>`;
   document.body.appendChild(ov);
   ov.querySelector(".dish-edit-note").value = item.note || "";
@@ -669,6 +672,14 @@ function openDishEditModal(itemId) {
   ov.querySelector(".dish-edit-close").onclick = close;
   ov.querySelector(".dish-edit-cancel").onclick = close;
   ov.onclick = (e) => { if (e.target === ov) close(); };
+  // #3: the intentional, discoverable way to un-serve a dish — sends it back to "preparing"
+  // so the kitchen can remake / re-serve it. Replaces the old reverse-tap on the status pill.
+  const unserveBtn = ov.querySelector(".dish-edit-unserve");
+  if (unserveBtn) unserveBtn.onclick = async () => {
+    if (!(await confirmDialog(`Send "${item.title}" back to the kitchen? It'll show as "preparing" again so the kitchen can remake or re-serve it.`, "Send back"))) return;
+    close();
+    advanceDish(itemId, "served", "preparing");
+  };
   const same = (a, b) => JSON.stringify(a.slice().sort()) === JSON.stringify(b.slice().sort());
   ov.querySelector(".dish-edit-save").onclick = async () => {
     const note = ov.querySelector(".dish-edit-note").value.trim();
@@ -789,13 +800,13 @@ function renderPanel() {
     const remMark = r.removed_flag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : "";
     const note = r.note ? `<div class="iopt">“${esc(r.note)}”</div>` : "";
     const priceTag = r.price > 0 ? `<span class="iprice">${inr(r.price * r.qty)}</span>` : "";
-    // The status pill is TAPPABLE for real saved dishes that are past 'received' — one tap
-    // advances it (preparing→served / ready→served) or UNDOES a mis-tap (served→received).
-    // 'received' dishes stay a plain badge so they go through the order-level Accept flow,
-    // not a per-dish flip. (Was dead: the handler bound `.ist.tap[data-item]` but the markup
-    // never emitted the tap class / data-item, so tapping did nothing — fixed 2026-07-06.)
-    const statusBadge = (r.fromDb && r.status !== "received")
-      ? `<span class="ist tap ${r.status}" data-item="${esc(r.id)}" data-cur="${esc(r.status)}" title="Tap to change status">${STATUS_WORD[r.status] || r.status}</span>`
+    // The status pill is TAPPABLE for real saved dishes that are between 'received' and
+    // 'served' — one FORWARD tap advances it (preparing→served / ready→served). A 'served'
+    // dish is NOT tappable (#3): reverse-tapping used to silently un-serve on a mis-tap; the
+    // intentional undo now lives as "↩ Send back to kitchen" in the dish edit modal.
+    // 'received' dishes stay a plain badge so they go through the order-level Accept flow.
+    const statusBadge = (r.fromDb && r.status !== "received" && r.status !== "served")
+      ? `<span class="ist tap ${r.status}" data-item="${esc(r.id)}" data-cur="${esc(r.status)}" title="Tap to mark served">${STATUS_WORD[r.status] || r.status}</span>`
       : `<span class="ist ${r.status}">${STATUS_WORD[r.status] || r.status}</span>`;
     const serveBtn = (r.fromDb && (r.status === "preparing" || r.status === "ready"))
       ? `<button class="ist-serve" data-serve="${esc(r.id)}" data-cur="${esc(r.status)}">✓ Serve</button>` : "";
@@ -1041,15 +1052,10 @@ function scheduleServeReconcile() {
   if (serveReconcileTimer) clearTimeout(serveReconcileTimer);
   serveReconcileTimer = setTimeout(() => { serveReconcileTimer = null; load().catch(() => {}); }, 2500);
 }
-async function advanceDish(id, cur) {
-  const next = NEXT_STATUS[cur] || "preparing";
-  // #U3: the pill cycle wraps served→received, and a "served" pill stays tappable — so a stray or
-  // double tap silently bounces a served dish back to brand-new (un-accepted), confusing the
-  // kitchen board + floor tile. Require a confirm for that one destructive step; forward taps
-  // (new→cooking→served) stay instant.
-  if (cur === "served" && next === "received") {
-    if (!(await confirmDialog('Move this SERVED dish back to "new" (un-accepted)? The kitchen will treat it as a fresh order again.', "Move back"))) return;
-  }
+async function advanceDish(id, cur, forceNext) {
+  // forceNext lets a caller set an explicit target (e.g. the "↩ Send back to kitchen" undo in
+  // the edit modal passes "preparing" to un-serve a dish); otherwise follow the forward flow.
+  const next = forceNext || NEXT_STATUS[cur] || "preparing";
   const it = (state.data.items || []).find((x) => x.id === id);
   if (it) it.status = next;            // optimistic — the pill flips instantly
   // #8: re-sync THIS table's slim summary tile from the slice so the floor counts + the tile's
@@ -2270,7 +2276,13 @@ async function load() {
   renderFloor();
   if (!state.ordering && !state.pickerOpen) renderPanel();   // #U1: don't wipe an open Move picker on a live update
 }
-setInterval(() => ($("#clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })), 1000);
+// #5: tick BOTH the top-bar clock (desktop) and the drawer clock (#dwClock, phones).
+const tickClock = () => {
+  const t = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const c = $("#clock"); if (c) c.textContent = t;
+  const dc = document.getElementById("dwClock"); if (dc) dc.textContent = t;
+};
+tickClock(); setInterval(tickClock, 1000);
 load().catch((e) => toast("Can't reach the database: " + e.message, false));
 
 // ── HIERARCHY X-RAY ribbon (Phase 3) ─────────────────────────────────────────
@@ -2442,6 +2454,8 @@ window.addEventListener("online", () => load().catch(() => {}));
     '<div><div class="dw-prof">Signed in as</div><div class="dw-name" id="dwName">…</div><div class="dw-prof" id="dwRole"></div></div>' +
     '<div class="dw-row"><span>Restaurant</span><span class="dw-prof" id="dwRest"></span></div>' +
     '<div class="dw-row"><span>Theme</span><button class="btn small" id="dwTheme" type="button">Light / Dark</button></div>' +
+    // #5: clock lives here on phones (moved off the cramped top bar; desktop keeps it on the bar).
+    '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
     // Banquet module (mig 130): shown only when the admin entitlement AND the
     // waiter's tablet_banquet capability allow it (openDrawer re-checks each open).
     '<button class="dw-btn" id="dwBanquet" type="button" hidden style="margin-top:auto;margin-bottom:10px">🎪 Banquet billing</button>' +
