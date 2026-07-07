@@ -43,9 +43,13 @@ export default function AdminCommand() {
   const [q, setQ] = useState("");
   const [busyRow, setBusyRow] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Load-error flag for the PRIMARY restaurants fetch, so a backend hiccup shows a Retry
+  // instead of leaving the home screen stuck on "Loading restaurants…" forever (audit
+  // 2026-07-07 — the other pages got this in #206; the dashboard was missed).
+  const [loadErr, setLoadErr] = useState(false);
 
   const load = useCallback(() => {
-    fetch("/api/admin/restaurants", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setRests(j.restaurants || []); }).catch(() => {});
+    fetch("/api/admin/restaurants", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (j.error) { setLoadErr(true); } else { setRests(j.restaurants || []); setLoadErr(false); } }).catch(() => setLoadErr(true));
     fetch("/api/admin/overview", { cache: "no-store" }).then((r) => r.json()).then((j) => {
       if (!j.error) { setMaintenance(!!j.maintenance); setMaintenanceNames(Array.isArray(j.maintenanceNames) ? j.maintenanceNames : []); setOrdersToday(Number(j.ordersToday) || 0); setOpenTablesNow(Number(j.openTables) || 0); }
     }).catch(() => {});
@@ -107,7 +111,7 @@ export default function AdminCommand() {
             <b>{maintenanceNames.length === 1 ? "1 guest menu is in maintenance" : `${maintenanceNames.length} guest menus are in maintenance`}.</b>
             {maintenanceNames.length > 0 && <span className="adm-muted"> — {maintenanceNames.join(", ")}</span>}
           </div>
-          <Link href="/aevinite/settings" className="adm-btn">Settings</Link>
+          <Link href="/aevinite/restaurants" className="adm-btn">Manage</Link>
         </div>
       )}
 
@@ -133,7 +137,11 @@ export default function AdminCommand() {
           <span>Restaurant</span><span>Status</span><span>Panels</span><span className="num">Open</span><span>Quick open</span><span />
         </div>
         {rests === null ? (
-          <div className="adm-empty">Loading restaurants…</div>
+          loadErr ? (
+            <div className="adm-empty">Couldn&rsquo;t load restaurants. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={() => { setLoadErr(false); load(); }}>Retry</button></div>
+          ) : (
+            <div className="adm-empty">Loading restaurants…</div>
+          )
         ) : rows.length === 0 ? (
           <div className="adm-empty">No restaurants match &ldquo;{q}&rdquo;.</div>
         ) : (
@@ -180,8 +188,8 @@ export default function AdminCommand() {
             <div style={{ color: "var(--muted)", fontSize: 13, padding: "6px 0" }}>No staff active right now.</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column" }}>
-              {online.map((u, i) => (
-                <div key={i} className="cmd-staff">
+              {online.map((u) => (
+                <div key={`${u.username}-${u.role}`} className="cmd-staff">
                   <span className="dot" aria-hidden="true" />
                   <b>{u.name || u.username}</b>
                   <span style={{ color: "var(--accent)", fontWeight: 600, fontSize: 12 }}>{PANEL_NAME(u.role)}</span>
@@ -271,6 +279,8 @@ export default function AdminCommand() {
           .cmd-row.head { display: none; }
           .cmd-row > span { text-align: left !important; }
           .cmd-row .num { display: none; }
+          /* Bigger tap targets for the quick-open buttons on phones (audit 2026-07-07). */
+          .obtn { min-height: 40px; padding: 0 12px; }
         }
       `}</style>
     </>

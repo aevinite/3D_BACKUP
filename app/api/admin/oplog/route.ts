@@ -18,6 +18,10 @@ export async function GET(req: NextRequest) {
   // ?restaurant_id scopes to ONE restaurant — used by the per-restaurant Report's
   // "recent activity" panel so it doesn't drag in every other tenant's rows.
   const restaurantId = url.searchParams.get("restaurant_id");
+  // Reject a malformed id before it hits a uuid column (else Postgres returns a raw
+  // "invalid input syntax for type uuid" in the 500 body — every sibling route validates).
+  if (restaurantId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(restaurantId))
+    return NextResponse.json({ error: "invalid restaurant_id" }, { status: 400 });
   let q = sb.from("staff_actions").select("*").order("created_at", { ascending: false }).limit(limit);
   if (restaurantId) q = q.eq("restaurant_id", restaurantId);
   const r = await q;

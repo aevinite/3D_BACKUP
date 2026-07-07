@@ -17,7 +17,10 @@ export default function AdminSettings() {
   const [retErr, setRetErr] = useState(false);
 
   const loadMaint = useCallback(async () => {
-    try { const j = await (await fetch("/api/admin/overview", { cache: "no-store" })).json(); if (j.error) setMaintErr(true); else { setMaint(!!j.maintenance); setMaintErr(false); } } catch { setMaintErr(true); }
+    // flagshipMaintenance = the flagship's OWN service_mode. The old `maintenance` field is
+    // platform-wide ("any restaurant offline"), which made this flagship toggle show the
+    // wrong state / look stuck whenever a different tenant was in maintenance (audit 2026-07-07).
+    try { const j = await (await fetch("/api/admin/overview", { cache: "no-store" })).json(); if (j.error) setMaintErr(true); else { setMaint(!!j.flagshipMaintenance); setMaintErr(false); } } catch { setMaintErr(true); }
   }, []);
   const loadRet = useCallback(async () => {
     try { const j = await (await fetch("/api/admin/settings", { cache: "no-store" })).json(); if (j.error) setRetErr(true); else { setRet(j); setRetErr(false); } } catch { setRetErr(true); }

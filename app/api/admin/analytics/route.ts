@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic";
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
@@ -17,9 +18,14 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 // matches the bucketing the RPCs use (date_trunc('day', … AT TIME ZONE 'Asia/Kolkata')).
 function rangeBounds(range: string): { from: Date; to: Date } {
   const now = new Date();
+  // "today" starts at the 05:00-IST business-day rollover — the SAME boundary the Dashboard
+  // (/api/admin/overview) and the Live-floor RPC use, so "Orders today" can't disagree
+  // between screens for orders placed 00:00–05:00 IST (audit 2026-07-07). Multi-day ranges
+  // stay day-aligned (their buckets are whole IST days anyway).
+  if (range === "today") return { from: new Date(businessDayStartIso(now)), to: now };
   const istNow = new Date(now.getTime() + IST_OFFSET_MS);
   const istMidnight = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate());
-  const days = range === "30d" ? 29 : range === "7d" ? 6 : 0;
+  const days = range === "30d" ? 29 : 6;
   const fromIst = istMidnight - days * 86400000;
   return { from: new Date(fromIst - IST_OFFSET_MS), to: now };
 }

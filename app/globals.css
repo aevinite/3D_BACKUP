@@ -3845,6 +3845,12 @@ a:focus:not(:focus-visible) { outline: none; }
   .adx-side-foot { display: none; }
   .adx-top { padding: 8px 12px; }
   .adx .adm-main { padding: 14px; }
+  /* Touch: every primary admin control gets a ≥40px hit area on phones (audit 2026-07-07 —
+     the desktop 30–32px buttons were too small to tap reliably at ~390px). */
+  .adx .adm-btn, .adx a.adm-btn { min-height: 40px; }
+  .adx .adm-icnbtn { width: 40px; height: 40px; }
+  .adx-switch-trig { height: 40px; }
+  .adx-navlink { min-height: 40px; display: inline-flex; align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   .adx-navlink, .adx-switch-trig, .adx-switch-opt, .adx .adm-btn { transition: none; }

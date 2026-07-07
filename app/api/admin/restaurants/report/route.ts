@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic";
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
@@ -15,9 +16,12 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 function rangeBounds(range: string): { from: Date; to: Date } {
   const now = new Date();
+  // "today" = the 05:00-IST business day (same boundary as the Dashboard/Live-floor "orders
+  // today"), so this per-restaurant report can't disagree with them for 00:00–05:00 orders.
+  if (range === "today") return { from: new Date(businessDayStartIso(now)), to: now };
   const istNow = new Date(now.getTime() + IST_OFFSET_MS);
   const istMidnight = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate());
-  const days = range === "30d" ? 29 : range === "7d" ? 6 : 0;
+  const days = range === "30d" ? 29 : 6;
   const fromIst = istMidnight - days * 86400000;
   return { from: new Date(fromIst - IST_OFFSET_MS), to: now };
 }

@@ -4,7 +4,8 @@
 // chips (the old way — a dropdown buried inside each restaurant card — still
 // works and stays in sync; both write the restaurant_owners join table).
 // Data + writes: /api/admin/owners (admin-cookie gated, service-role).
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useBackClose } from "@/lib/backStack";
 
 type OwnedRest = { id: string; slug: string; name: string; active: boolean; primary: boolean };
 type Owner = {
@@ -239,6 +240,12 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // Synchronous re-entry guard — a fast double-click (or Enter-hold) fires create() twice
+  // before the async `busy` state disables the button, which minted TWO owners / raced the
+  // name-taken check (audit 2026-07-07). A ref flips instantly, in the same tick.
+  const creatingRef = useRef(false);
+  // Phone hardware Back closes the modal instead of leaving the admin page (CLAUDE.md rule).
+  useBackClose("admin-new-owner", true, onClose);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -250,6 +257,8 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setErr(""); setBusy(true);
     try {
       const r = await fetch("/api/admin/owners", {
@@ -260,7 +269,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
       if (!r.ok) { setErr(j.error || "Could not create owner."); return; }
       onCreated(j.name, j.password);
     } catch { setErr("Network error."); }
-    finally { setBusy(false); }
+    finally { setBusy(false); creatingRef.current = false; }
   }
 
   return (
@@ -333,6 +342,8 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
   // live `owner` prop, so after attach/detach → onChanged reloads → this recomputes.
   const [showAttach, setShowAttach] = useState(false);
   const attachable = rests.filter((r) => !owner.restaurants.some((x) => x.id === r.id));
+  // Phone hardware Back closes this detail instead of leaving the admin page (CLAUDE.md rule).
+  useBackClose("admin-owner-detail", true, onClose);
 
   useEffect(() => {
     let dead = false;

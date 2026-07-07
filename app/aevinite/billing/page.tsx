@@ -4,8 +4,9 @@
 // keeps those separate; food GMV never appears here). The owner enters payments
 // manually (no payment gateway yet). Backed by /api/admin/billing
 // (migration 118: restaurant_billing + restaurant_payments, additive-only).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useActiveAutoRefresh } from "@/components/admin/shared";
+import { useBackClose } from "@/lib/backStack";
 
 type Row = {
   id: string; name: string; slug: string; active: boolean;
@@ -130,15 +131,25 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   const [payMsg, setPayMsg] = useState<string | null>(null);
 
   const [payments, setPayments] = useState<Payment[] | null>(null);
+  // Synchronous guard so a double-click can't record the same payment twice (audit 2026-07-07).
+  const payingRef = useRef(false);
 
   const loadHistory = useCallback(async () => {
     try {
       const j = await (await fetch(`/api/admin/billing?restaurant_id=${encodeURIComponent(row.id)}`, { cache: "no-store" })).json();
-      if (!j.error) setPayments(j.payments || []);
+      if (!j.error) {
+        setPayments(j.payments || []);
+        // Keep the "Next due on" field in sync — recording a payment with "roll due" advances
+        // it server-side, and the open editor used to keep showing the OLD date until reopened
+        // (audit 2026-07-07). j.billing.next_due_on is the fresh value.
+        if (j.billing && typeof j.billing.next_due_on !== "undefined") setNextDueOn(j.billing.next_due_on || "");
+      }
     } catch {}
   }, [row.id]);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
+  // Phone hardware Back closes the editor instead of leaving the admin page (CLAUDE.md rule).
+  useBackClose("admin-billing-editor", true, onClose);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -163,6 +174,8 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
     const amt = Number(payAmount);
     if (!(amt > 0)) { setPayMsg("Enter an amount greater than 0."); return; }
     if (!payDate) { setPayMsg("Pick a payment date."); return; }
+    if (payingRef.current) return;
+    payingRef.current = true;
     setPayBusy(true); setPayMsg(null);
     try {
       const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
@@ -171,9 +184,9 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't record payment.");
       setPayAmount(""); setPayMethod(""); setPayLabel(""); setPayNote("");
       setPayMsg("Payment recorded.");
-      if (rollDue) { /* reload plan fields' next_due_on picks up on next full refresh */ }
+      // loadHistory() re-reads billing and refreshes the "Next due on" field (rolled server-side).
       await loadHistory(); onChanged();
-    } catch (e) { setPayMsg(e instanceof Error ? e.message : String(e)); } finally { setPayBusy(false); }
+    } catch (e) { setPayMsg(e instanceof Error ? e.message : String(e)); } finally { setPayBusy(false); payingRef.current = false; }
   };
 
   const deletePayment = async (id: string) => {
@@ -263,7 +276,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
                       <span className="adm-muted">{p.method || "—"}</span>
                       <span className="adm-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.period_label || p.note || "—"}</span>
                       <span style={{ textAlign: "right" }}>
-                        <button className="adm-btn danger" style={{ padding: "4px 8px" }} onClick={() => deletePayment(p.id)} title="Delete this payment"><i className="fas fa-trash" aria-hidden="true" /></button>
+                        <button className="adm-btn danger" style={{ padding: "4px 8px" }} onClick={() => deletePayment(p.id)} aria-label="Delete this payment" title="Delete this payment"><i className="fas fa-trash" aria-hidden="true" /></button>
                       </span>
                     </div>
                   ))}
