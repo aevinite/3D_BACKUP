@@ -160,7 +160,20 @@ export const checkBan = (restaurantId?: string) => rpc("lfh_check_ban", { p_devi
 export const requestUnban = (phone: string) =>
   rpc("lfh_request_unban", { p_device: getGuestDeviceId(), p_phone: phone });
 // Fetch the current state of a session (who's in it, status, etc.) by token.
-export const getSessionState = (token: string) => rpc("lfh_session_state", { p_token: token });
+// SINGLE-FLIGHT: several widgets (status card, shared bill, owner-approve) each
+// refetch on the same realtime tick, firing 2–3 identical lfh_session_state calls
+// (each runs ~6 sub-selects) for the same token at once. Share ONE in-flight request
+// per token so the tick makes a single round-trip; cleared as soon as it settles, so
+// there's no staleness — the next tick still gets fresh data. (egress fix 2026-07-07)
+const sessionStateInFlight = new Map<string, Promise<RpcResult>>();
+export const getSessionState = (token: string): Promise<RpcResult> => {
+  const existing = sessionStateInFlight.get(token);
+  if (existing) return existing;
+  const p = rpc("lfh_session_state", { p_token: token })
+    .finally(() => { sessionStateInFlight.delete(token); });
+  sessionStateInFlight.set(token, p);
+  return p;
+};
 // Presence heartbeat: while the guest's menu tab is VISIBLE, bump this open
 // session's last_activity_at so "someone is actively viewing this table" keeps
 // it from being auto-closed. The server only touches an ALREADY-open session

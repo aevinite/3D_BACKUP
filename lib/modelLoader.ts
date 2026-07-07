@@ -30,6 +30,13 @@ class ModelLoader {
   private static MAX_ATTEMPTS = 2;
   // Wait 6 seconds (6000 ms) before retrying a failed download.
   private static RETRY_DELAY_MS = 6000;
+  // Keep at most this many downloaded models in memory. Each GLB is ~2–9 MB, so
+  // without a cap a guest browsing many 3D dishes in one session piles up blobs
+  // until a cheaper phone kills the tab. The `loaded` Map keeps insertion/most-
+  // recent-use order, so the OLDEST entry is evicted first (a proper LRU). The
+  // dish currently on screen is safe: the viewer re-reads it via getCachedUrl on
+  // every loader update, which moves it back to the most-recent position.
+  private static MAX_CACHED = 10;
 
   // Has this model already finished downloading? (true/false)
   isLoaded(url: string | null | undefined): boolean {
@@ -41,7 +48,26 @@ class ModelLoader {
   // have it yet. The viewer uses this instead of re-downloading the big file.
   getCachedUrl(url: string | null | undefined): string | null {
     if (!url) return null;
-    return this.loaded.get(url) ?? null; // ?? means "or null if not found"
+    const blob = this.loaded.get(url);
+    if (blob === undefined) return null; // not downloaded yet
+    // Mark as most-recently-used (delete + re-add moves it to the end of the Map)
+    // so the model on screen is never the one the LRU evicts.
+    this.loaded.delete(url);
+    this.loaded.set(url, blob);
+    return blob;
+  }
+
+  // Drop the least-recently-used models once we're over the cap, freeing their
+  // blob memory (revokeObjectURL) so long browsing sessions don't grow forever.
+  private evictIfNeeded() {
+    while (this.loaded.size > ModelLoader.MAX_CACHED) {
+      const oldest = this.loaded.keys().next().value as string | undefined; // first = LRU
+      if (!oldest) break;
+      const blobUrl = this.loaded.get(oldest);
+      this.loaded.delete(oldest);
+      this.attempts.delete(oldest);
+      if (blobUrl) { try { URL.revokeObjectURL(blobUrl); } catch {} }
+    }
   }
 
   // Have we permanently given up on this model (out of retries)? The viewer uses
@@ -176,6 +202,7 @@ class ModelLoader {
           const blob = await res.blob();
           const blobUrl = URL.createObjectURL(blob);
           this.loaded.set(url, blobUrl);
+          this.evictIfNeeded(); // keep memory bounded on long browsing sessions
           ok = true;
         } else {
           // Server answered, but with an error code (e.g. 404). Log a gentle warning.

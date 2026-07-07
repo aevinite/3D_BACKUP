@@ -232,20 +232,32 @@ export async function getOrderStatus(
 
 // All menu items, in the order set by `sort_order`.
 // This is the main "fetch the whole menu from the database" function.
-export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<MenuItem[]> {
+// The columns the CARD GRID actually needs. Omits the heavy detail-only JSON
+// (long_description, nutrition, ingredients, reviews, related_slugs, time) — those
+// are only read on the dish page, which fetches the full row separately. Trimming
+// them off the grid read (and its realtime refetch) cuts egress on the hot path;
+// mapRow fills any omitted field with a safe default, so nothing breaks.
+export const CARD_COLUMNS =
+  "id, slug, title, price, image, category, veg, is4d, model_folder, model_small_url, model_optimized_url, description, tags, allergens, search_alias, options, sort_order, restaurant_id";
+
+export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID, columns: string = "*"): Promise<MenuItem[]> {
   // Fetch the dishes AND the real-review aggregates at the same time (parallel
   // requests — no extra waiting). Ratings failing must never hide the menu, so
   // its error is swallowed and dishes just show as unrated.
   // item_ratings exposes restaurant_id since migration 116 — read ONLY this
   // restaurant's aggregates, with an explicit column list (egress rule).
+  // `columns` defaults to everything (the dish page needs the full row); the grid
+  // passes CARD_COLUMNS to skip heavy detail-only fields.
   const [items, ratings] = await Promise.all([
-    supabase.from("menu_items").select("*").eq("restaurant_id", restaurantId).order("sort_order"),
+    supabase.from("menu_items").select(columns).eq("restaurant_id", restaurantId).order("sort_order"),
     supabase.from("item_ratings").select("item_slug, avg_rating, review_count").eq("restaurant_id", restaurantId),
   ]);
   if (items.error) throw new Error(`Failed to load menu: ${items.error.message}`);
   // Index the aggregates by slug for a quick lookup while mapping each dish.
   const aggBySlug = new Map<string, RatingAgg>(((ratings.data as RatingAgg[] | null) ?? []).map((r) => [r.item_slug, r]));
-  return (items.data ?? []).map((row) => mapRow(row, aggBySlug.get(row.slug)));
+  // Cast: a dynamic column string makes supabase-js widen the row type; mapRow reads
+  // fields defensively (every one has a default), so treating rows as any is safe here.
+  return ((items.data ?? []) as any[]).map((row) => mapRow(row, aggBySlug.get(row.slug)));
 }
 
 // A single item by slug, or null if it doesn't exist.

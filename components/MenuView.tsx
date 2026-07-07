@@ -21,6 +21,7 @@ import { modelLoader } from "@/lib/modelLoader";
 // helper to pick the right-language label, and the data "shapes" (types).
 import {
   getMenuItems,
+  CARD_COLUMNS,
   getCategories,
   localized,
   type MenuItem,
@@ -229,7 +230,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   const refreshMenu = () => {
     const seq = ++menuReqRef.current; // tag this refresh; only the latest may apply
     const applyDirect = () => {
-      getMenuItems(restaurantId)
+      getMenuItems(restaurantId, CARD_COLUMNS) // grid fallback needs only card fields (egress)
         .then((items) => { if (seq === menuReqRef.current) { setMenuData(items); setLoaded(true); } }) // drop stale replies
         .catch((err) => { console.error("Error loading menu data:", err); if (seq === menuReqRef.current) setLoaded(true); });
       // The menu is ALWAYS the full "all" view now — tapping a category just scrolls
