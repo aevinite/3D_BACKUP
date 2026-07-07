@@ -172,6 +172,9 @@ html[data-theme="light"]{
 }
 html[data-theme="light"] .done.rdy{ color:#be185d; }
 html[data-theme="light"] .line-ready .ltitle{ color:#9d174d; }
+/* Deepen the "new — waiting for the waiter" footer text in light mode: the dark-theme
+   pink (#f9a8d4) is too faint on the pale-pink pill against a white board (audit 2026-07-07). */
+html[data-theme="light"] .awaiting{ color:#9d174d; }
 html[data-theme="light"] .alg-removed, html[data-theme="light"] .ltitle .alg-removed{ color:#b45309; }
 html[data-theme="light"] .alg-add{ color:#15803d; }
 

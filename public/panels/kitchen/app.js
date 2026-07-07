@@ -479,44 +479,58 @@ function markOrderReady(orderId) {
 function renderDishes() {
   const q = ($("#dishSearch").value || "").toLowerCase();
   const list = state.dishes.filter((d) => !q || (d.title || "").toLowerCase().includes(q));
-  $("#dishList").innerHTML = list.map((d) => {
+  const html = list.map((d) => {
     const out = (d.tags || []).includes("sold-out");
     return `<div class="dish-row ${out ? "is-out" : ""}">
       <span class="dtitle">${esc(d.title)}<small>${esc(d.category || "")}</small></span>
       <button class="btn ${out ? "danger" : ""}" data-86="${esc(d.id)}" data-out="${out ? "1" : "0"}">${out ? "SOLD OUT" : "available"}</button>
     </div>`;
   }).join("");
+  // Skip the rebuild when nothing changed (audit 2026-07-07): a poll while the drawer is
+  // open used to blow away #dishList on EVERY refresh, which (a) lost the search box's focus/
+  // caret mid-type and (b) orphaned the button node the optimistic toggle + UNDO closure hold,
+  // so an UNDO landed on a detached node and the on-screen button kept showing the wrong label.
+  if ($("#dishList").__kdsHtml === html) return;
+  $("#dishList").innerHTML = html;
+  $("#dishList").__kdsHtml = html;
   // OPTIMISTIC sold-out toggle (audit polish 2026-07-07): flip the button + the local
   // dish tag INSTANTLY (no ~1.5s dead window), disable to swallow a rapid double-tap, and
   // roll back on failure. No full load() per tap — the server POST fires the guest 86-sync
   // breadcrumb itself, and the kitchen tickets don't render sold-out, so a whole-board
   // refetch was pure waste. Mirrors the ticket-✓ optimistic+surgical pattern.
-  const set86 = (btn, out) => {
+  // set86 works by dish ID and RE-QUERIES the on-screen button every time (audit 2026-07-07):
+  // renderDishes can rebuild #dishList between the tap and the UNDO, so a captured button node
+  // may be detached. Updating the local dish tag is independent of the DOM, so it still happens
+  // even if the button isn't currently visible (e.g. filtered out by the search box).
+  const set86 = (id, out) => {
+    const dish = state.dishes.find((d) => d.id === id);
+    if (dish) { const tags = new Set(dish.tags || []); out ? tags.add("sold-out") : tags.delete("sold-out"); dish.tags = [...tags]; }
+    const btn = document.querySelector(`[data-86="${window.CSS && CSS.escape ? CSS.escape(id) : id}"]`);
+    if (!btn) return;
     btn.dataset.out = out ? "1" : "0";
     btn.textContent = out ? "SOLD OUT" : "available";
     btn.classList.toggle("danger", out);
     btn.closest(".dish-row")?.classList.toggle("is-out", out);
-    const dish = state.dishes.find((d) => d.id === btn.dataset["86"]);
-    if (dish) { const tags = new Set(dish.tags || []); out ? tags.add("sold-out") : tags.delete("sold-out"); dish.tags = [...tags]; }
   };
   document.querySelectorAll("[data-86]").forEach((b) => (b.onclick = async () => {
     if (b.disabled) return;
     const id = b.dataset["86"], wasOut = b.dataset.out === "1", nowOut = !wasOut;
-    b.disabled = true; set86(b, nowOut);
+    b.disabled = true; set86(id, nowOut);
     try {
       await api("POST", `/dishes/${id}/sold-out`, { value: nowOut });
       const dish = state.dishes.find((d) => d.id === id);
-      // No confirm — kitchens move fast — but always an UNDO escape hatch.
+      // No confirm — kitchens move fast — but always an UNDO escape hatch. The UNDO
+      // targets the dish by ID (re-querying the live button), so it works even after a
+      // background refresh rebuilt the list. The server toggle is an explicit set, so a
+      // double-tap is harmless — no disabled-guard needed on the undo path.
       toast(`${dish ? dish.title : "Dish"} ${wasOut ? "back on the menu" : "marked SOLD OUT"}`,
         async () => {
-          if (b.disabled) return;
-          b.disabled = true; set86(b, wasOut);
+          set86(id, wasOut);
           try { await api("POST", `/dishes/${id}/sold-out`, { value: wasOut }); }
-          catch (e) { set86(b, nowOut); toast("Undo failed: " + e.message); }
-          finally { b.disabled = false; }
+          catch (e) { set86(id, nowOut); toast("Undo failed: " + e.message); }
         });
     } catch (e) {
-      set86(b, wasOut); // roll back the optimistic flip
+      set86(id, wasOut); // roll back the optimistic flip
       toast("Failed: " + e.message);
     } finally { b.disabled = false; }
   }));
@@ -856,7 +870,10 @@ if (window.LFH_RT) {
     ops: (detail) => (detail && !detail.full && detail.tables && detail.tables.length) ? loadTables(detail.tables) : fullSoon(),
     menu: () => fullSoon(),
   }});
-  setInterval(() => load().catch(() => {}), 60000); // backup sync
+  // Backup sync — but NOT while the tab is hidden: a backgrounded wall display kept
+  // firing a full-board read every 60s forever (egress waste). realtime.js already does
+  // a fresh full reload via wake() on re-show, so a hidden tab needs no backstop.
+  setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 60000);
   // If realtime NEVER actually connects (blocked/flaky WebSocket), LFH_RT.start() swallows
   // the subscribe error and only the 60s backstop runs — a new KOT could sit unseen up to
   // 60s (bug M9, 2026-07-05). Engage a 5s catch-up poll UNTIL a subscription lands. Gated on
