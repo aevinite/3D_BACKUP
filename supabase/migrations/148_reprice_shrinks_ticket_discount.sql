@@ -1,4 +1,6 @@
--- 146_reprice_shrinks_ticket_discount.sql
+-- 148_reprice_shrinks_ticket_discount.sql
+-- (Renumbered from 146 → 148: a parallel session's guest-menu PR also took 146/147.
+--  Already applied to the live DB as an idempotent CREATE OR REPLACE; re-running is a no-op.)
 -- Keep a PER-TICKET discount honest when the order is later re-priced.
 --
 -- Bug (2026-07-07 tablet audit): a per-order discount is stored as an absolute ₹ amount on
