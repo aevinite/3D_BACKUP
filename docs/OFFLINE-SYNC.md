@@ -64,7 +64,9 @@ new panel/endpoint, read this first so the offline behaviour stays correct.
 
 ## Migration numbering gotcha (2026-07-07)
 
-`138` was used by BOTH this feature (`138_action_idempotency.sql`) and, in another parallel
-session, a "ratings" tab that referenced "mig 138". Only `138_action_idempotency.sql` is on
-`main`. **Always use the next FREE migration number** (`ls supabase/migrations | sort | tail`)
-— parallel sessions collide on numbers easily.
+`138_action_idempotency.sql` (this feature) is the only migration 138 on `main`. A parallel
+session's guest-ratings code briefly had comments *mislabelling* its migration as "mig 138" —
+its real backing is **migration 140** (`140_owner_audit_fixes.sql`, present + applied); the
+comments were corrected. No functional collision occurred, but it's a near-miss: **always use
+the next FREE migration number** (`ls supabase/migrations | sort | tail`) — parallel sessions
+collide on numbers easily.

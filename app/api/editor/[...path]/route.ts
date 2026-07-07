@@ -223,7 +223,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       });
     }
 
-    // ── Guest ratings (mig 138) — manager view, gated by the view_ratings power ──
+    // ── Guest ratings (mig 140) — manager view, gated by the view_ratings power ──
     // The owner grants a manager the ability to see + handle guest star-ratings.
     // Scoped to THIS restaurant; explicit columns + limit (egress-safe).
     if (p === "ratings") {
@@ -759,7 +759,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
 
-    // ── Handle a guest rating (mig 138) — mark handled / add an internal note ──
+    // ── Handle a guest rating (mig 140) — mark handled / add an internal note ──
     // Gated by the view_ratings power; the feedback row must belong to THIS restaurant.
     if (a === "ratings" && b === "ack") {
       if (!(await managerCan(g, rid, "view_ratings"))) return permDenied("handle guest ratings");
