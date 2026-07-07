@@ -55,6 +55,12 @@ export default function AdminRestaurants() {
   const [focusSlug, setFocusSlug] = useState<string | null>(null);
   useEffect(() => {
     try { setFocusSlug(new URLSearchParams(window.location.search).get("focus")); } catch {}
+    // The topbar switcher fires this when it targets a restaurant. Needed for the case where
+    // we're ALREADY on this page: router.push only changes ?focus and doesn't remount, so the
+    // mount read above never re-runs — without this, picking a restaurant did nothing.
+    const onFocus = (e: Event) => { const slug = (e as CustomEvent<string>).detail; if (slug) setFocusSlug(slug); };
+    window.addEventListener("adm:focus-restaurant", onFocus);
+    return () => window.removeEventListener("adm:focus-restaurant", onFocus);
   }, []);
   useEffect(() => {
     if (!focusSlug || !list) return;
@@ -321,6 +327,10 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // whole detail view for its own report — its own component, own data load —
   // instead of cramming another card into an already-long page.
   const [showReport, setShowReport] = useState(false);
+  // A tiny toast so a failed toggle tells the admin instead of silently snapping back
+  // (or, worse, getting stuck showing the wrong ON/OFF state). Mirrors the Access page.
+  const [toast, setToast] = useState<string | null>(null);
+  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); };
 
   const load = useCallback(async () => {
     try {
@@ -354,13 +364,15 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     // Optimistic flip so the pill responds instantly; reconciled by load().
     setFeatures((f) => ({ ...(f || {}), [key]: !current }));
     try {
-      await fetch("/api/admin/restaurants/features", {
+      const r = await fetch("/api/admin/restaurants/features", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ restaurant_id: restaurant.id, key, value: !current }),
       });
+      if (!r.ok) throw new Error();
       await load();
-    } finally { setBusy(false); }
+    } catch { flash("Couldn't save that change — reverted."); await load(); }
+    finally { setBusy(false); }
   };
 
   const Toggle = ({ k, label }: { k: string; label: string }) => {
@@ -379,12 +391,14 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     setBusy(true);
     setPanels((p) => ({ ...(p || {}), [key]: !current })); // optimistic; reconciled by loadPanels()
     try {
-      await fetch("/api/admin/restaurants/panels", {
+      const r = await fetch("/api/admin/restaurants/panels", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ restaurant_id: restaurant.id, panel: key, enabled: !current }),
       });
+      if (!r.ok) throw new Error();
       await loadPanels();
-    } finally { setBusy(false); }
+    } catch { flash("Couldn't save that change — reverted."); await loadPanels(); }
+    finally { setBusy(false); }
   };
   // Plain render helper, NOT a component — defining a component inside render remounts
   // it on every parent render (and the lint rule rightly errors on it).
@@ -405,12 +419,14 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     setBusy(true);
     setStaffFeat((s) => ({ ...(s || {}), [key]: !current }));
     try {
-      await fetch("/api/admin/restaurants/staff-features", {
+      const r = await fetch("/api/admin/restaurants/staff-features", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ restaurant_id: restaurant.id, key, value: !current }),
       });
+      if (!r.ok) throw new Error();
       await loadStaffFeat();
-    } finally { setBusy(false); }
+    } catch { flash("Couldn't save that change — reverted."); await loadStaffFeat(); }
+    finally { setBusy(false); }
   };
   const staffToggle = (k: string, label: string) => {
     const isOn = onS(k);
@@ -442,6 +458,9 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
   return (
     <>
+      {toast && (
+        <div role="status" style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 1002, background: "var(--adm-danger, #e5484d)", color: "#fff", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, boxShadow: "0 6px 24px rgba(0,0,0,0.25)" }}>{toast}</div>
+      )}
       {/* Breadcrumb: Restaurants › <name> — matches the owner-view breadcrumb (.adm-crumbs)
           so stepping back up is consistent everywhere inside a restaurant (owner request). */}
       <nav className="adm-crumbs" aria-label="Breadcrumb" style={{ marginBottom: 14 }}>

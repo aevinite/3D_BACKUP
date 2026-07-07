@@ -224,7 +224,13 @@ export async function POST(req: NextRequest) {
     const seedMenu = body?.seedMenu !== false;
     // 1) the restaurant row (id auto-uuid, active).
     const rest = await sb.from("restaurants").insert({ slug, name, active: true }).select("id, slug, name").single();
-    if (rest.error) return bad(rest.error.message, 500);
+    if (rest.error) {
+      // Slug uniqueness is a read-then-insert (not atomic), so two admins creating the same
+      // name at the same instant can both pass the while-loop and collide on the UNIQUE
+      // constraint. Turn Postgres's raw 23505 into a friendly "try again" instead of a 500.
+      if (rest.error.code === "23505") return bad("That name was just taken — please try a slightly different name.", 409);
+      return bad(rest.error.message, 500);
+    }
     const rid = rest.data.id as string;
     // 2) its settings row — clone #1 as a template, then override id/restaurant_id/enabled_panels
     //    and start with a modest table_count (a new restaurant shouldn't inherit #1's big floor).

@@ -17,10 +17,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { hashSecret, normalizeLoginName } from "@/lib/userAuth";
-import { logAction } from "@/lib/oplog";
+import { logAction, redactMoney } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
+const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 const ok = (d: unknown, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
@@ -48,11 +49,17 @@ export async function GET(req: NextRequest) {
   // (detail carries their uuid — owner_create/reset/suspend/attach…). Capped.
   const ownerId = new URL(req.url).searchParams.get("id");
   if (ownerId) {
+    // Validate the id is a real UUID BEFORE it touches any query — stops a crafted value
+    // from injecting PostgREST filter syntax into the .or() below, and returns a clean 400
+    // instead of leaking a raw "invalid input syntax for type uuid" Postgres error.
+    if (!isUuid(ownerId)) return bad("Invalid owner id.", 400);
     const o = (await sb.from("staff_users")
       .select("id, username, name, active, last_seen_at, created_at")
       .eq("id", ownerId).eq("role", "owner").limit(1)).data?.[0];
     if (!o) return bad("Owner not found.", 404);
-    const who = (o.name || o.username).replace(/[%,()]/g, ""); // keep the .or() filter parseable
+    // Strip every char PostgREST's .or() grammar uses as a delimiter (, . ( ) %) so the
+    // owner's display name can't break or alter the filter expression.
+    const who = (o.name || o.username).replace(/[%,().]/g, "");
     const actQ = await sb.from("staff_actions")
       .select("id, panel, action, actor, detail, restaurant_id, created_at")
       .or(`actor.eq.${who},detail.ilike.%${ownerId}%`)
@@ -67,7 +74,7 @@ export async function GET(req: NextRequest) {
     return ok({
       owner: { id: o.id, username: o.username, name: o.name || o.username, active: o.active === true, lastSeenAt: o.last_seen_at, createdAt: o.created_at },
       activity: (actQ.data || []).map((a) => ({
-        id: a.id, panel: a.panel, action: a.action, actor: a.actor, detail: a.detail,
+        id: a.id, panel: a.panel, action: a.action, actor: a.actor, detail: redactMoney(a.detail),
         restaurant: a.restaurant_id ? (restNames.get(a.restaurant_id) || null) : null, at: a.created_at,
       })),
     });

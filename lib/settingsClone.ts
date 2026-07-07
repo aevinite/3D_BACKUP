@@ -44,6 +44,16 @@ export function cleanClonedSettings(
   base.tablet_discount = "off";
   base.tablet_mark_paid = "off";
   base.tablet_invoice = "off";
+  // Admin ENTITLEMENTS must default OFF for a new restaurant (NEW-FEATURE-CHECKLIST: "new
+  // modules default OFF"). A raw clone copied #1's values, so if the flagship had banquet
+  // billing or auto-print-KOT switched on, a brand-new restaurant was born with them enabled
+  // (e.g. the manager panel showed the 🎪 Banquet tab) with no admin grant. (migs 130/107.)
+  base.banquet_allowed = false;
+  base.auto_print_kot_allowed = false;
+  // service_mode = maintenance switch (true = closed). A new restaurant must open LIVE, never
+  // inherit the flagship's maintenance state — else creating a restaurant while #1 is in
+  // maintenance would silently ship the new one offline. (mig 004.)
+  base.service_mode = false;
   // Guest feature flags: start empty so the new restaurant uses the code defaults
   // (lib/features.ts), not #1's current on/off choices.
   base.features = {};

@@ -3,6 +3,19 @@
 // must never break the actual action, so it's wrapped in try/catch.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 
+// Redact currency from a free-text `detail` string for ADMIN-facing feeds only. The admin
+// must never see food money (hard rule: "admin sees NO earnings"), but some staff actions
+// embed amounts in `detail` — a discount ("₹500"), a closed-unpaid table ("…₹1800 owed"),
+// a banquet order ("total 2450"), an edited dish ('"Paneer Tikka" ₹350'). We mask ₹-amounts
+// and "total <n>"; plain counts like "2 unpaid orders" are left alone. (The manager's own
+// log keeps the money — it's that restaurant's own data.)
+export function redactMoney<T>(detail: T): T | string {
+  if (typeof detail !== "string") return detail;
+  return detail
+    .replace(/₹\s?\d[\d,]*(?:\.\d+)?/g, "₹•••")
+    .replace(/\btotal\s+\d[\d,]*(?:\.\d+)?/gi, "total •••");
+}
+
 // "manager" is the new name for the old "editor" panel (rename is a later task);
 // both are accepted so login/audit rows tag correctly during the transition.
 type Panel = "editor" | "manager" | "kitchen" | "tablet" | "admin" | "owner";

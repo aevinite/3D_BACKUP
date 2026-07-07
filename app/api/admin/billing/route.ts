@@ -19,6 +19,7 @@ export const dynamic = "force-dynamic";
 const ok = (d: unknown, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
+const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 type Billing = {
   restaurant_id: string; plan: string | null; status: string; amount: number | null;
@@ -29,6 +30,9 @@ export async function GET(req: NextRequest) {
   const rid = new URL(req.url).searchParams.get("restaurant_id");
 
   if (rid) {
+    // Reject a malformed id up front — else Postgres returns a raw "invalid input syntax
+    // for type uuid" that leaks straight into the 500 body.
+    if (!isUuid(rid)) return bad("Invalid restaurant_id.");
     const [billingQ, paymentsQ] = await Promise.all([
       sb.from("restaurant_billing").select("*").eq("restaurant_id", rid).maybeSingle(),
       sb.from("restaurant_payments").select("id, restaurant_id, amount, paid_on, method, period_label, note, created_at").eq("restaurant_id", rid).order("paid_on", { ascending: false }).limit(200),
@@ -100,7 +104,7 @@ export async function POST(req: NextRequest) {
 
   if (action === "set_plan") {
     const rid = String(body.restaurant_id || "");
-    if (!rid) return bad("restaurant_id required");
+    if (!isUuid(rid)) return bad("valid restaurant_id required");
     const status = ["trial", "active", "paused", "cancelled"].includes(String(body.status)) ? String(body.status) : "trial";
     const cycle = body.cycle === "monthly" ? "monthly" : "yearly";
     const patch = {
@@ -125,7 +129,7 @@ export async function POST(req: NextRequest) {
     const rid = String(body.restaurant_id || "");
     const amount = Number(body.amount);
     const paidOn = String(body.paid_on || "");
-    if (!rid) return bad("restaurant_id required");
+    if (!isUuid(rid)) return bad("valid restaurant_id required");
     if (!(amount > 0)) return bad("amount must be greater than 0");
     if (!paidOn) return bad("paid_on required");
     const row = {
