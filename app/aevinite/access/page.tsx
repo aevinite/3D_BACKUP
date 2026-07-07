@@ -30,15 +30,17 @@ const TRI: [string, string][] = [["off", "Off"], ["on", "On"], ["pin", "On · PI
 // Small pure UI atoms — hoisted to module scope (defining them inside the page
 // body recreated them every render; the react-hooks/static-components lint
 // rightly errors on that).
+// Switch sized closer to the iOS 51×31 standard so it's comfortable to tap on a
+// phone (was 44×26 — a touch short; admin mobile audit 2026-07-07).
 const Toggle = ({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) => (
   <button type="button" role="switch" aria-checked={on} onClick={() => onChange(!on)}
-    style={{ width: 44, height: 26, borderRadius: 999, border: "1px solid var(--ac-line, #d8cdb8)", background: on ? "var(--ac-accent, #c98f3f)" : "var(--ac-off, #e6dcc9)", position: "relative", cursor: "pointer", transition: "background .15s", flex: "none" }}>
-    <span style={{ position: "absolute", top: 2, left: on ? 20 : 2, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,.3)" }} />
+    style={{ width: 50, height: 30, borderRadius: 999, border: "1px solid var(--ac-line, #d8cdb8)", background: on ? "var(--ac-accent, #c98f3f)" : "var(--ac-off, #e6dcc9)", position: "relative", cursor: "pointer", transition: "background .15s", flex: "none" }}>
+    <span style={{ position: "absolute", top: 3, left: on ? 23 : 3, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: "left .15s", boxShadow: "0 1px 2px rgba(0,0,0,.3)" }} />
   </button>
 );
 const Tri = ({ val, onChange, withDefault }: { val: string; onChange: (v: string) => void; withDefault?: boolean }) => (
   <select value={val} onChange={(e) => onChange(e.target.value)}
-    style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--ac-line,#d8cdb8)", background: "var(--ac-card,#fff)", color: "inherit", fontSize: 13.5, cursor: "pointer" }}>
+    style={{ padding: "9px 10px", borderRadius: 8, border: "1px solid var(--ac-line,#d8cdb8)", background: "var(--ac-card,#fff)", color: "inherit", fontSize: 13.5, cursor: "pointer" }}>
     {withDefault && <option value="default">Default</option>}
     {TRI.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
   </select>
