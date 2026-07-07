@@ -8,7 +8,7 @@
 // admin-cookie protected). Passwords are stored HASHED — the only time one is
 // ever visible is the one-time "copy it now" reveal right after you set it.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useBackClose } from "@/lib/backStack";
+import { useAdminModal } from "@/components/admin/useAdminModal";
 
 type User = {
   id: string; username: string; role: string; name: string | null; phone: string | null;
@@ -222,8 +222,9 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
   const [pin, setPin] = useState("");
   const [pinBusy, setPinBusy] = useState(false);
   const [pinMsg, setPinMsg] = useState("");
-  // Phone hardware Back closes the edit modal instead of leaving the admin page (CLAUDE.md rule).
-  useBackClose("admin-edit-user", true, onClose);
+  // One line: phone Back + Escape close it, focus trapped inside, page behind frozen.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useAdminModal(dialogRef, "admin-edit-user", onClose);
 
   async function setManagerPin() {
     setPinMsg(""); setMErr("");
@@ -241,14 +242,6 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
     finally { setPinBusy(false); }
   }
 
-  // Escape closes; lock background scroll while open.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
-  }, [onClose]);
 
   // Low-level PATCH helper that returns the parsed JSON (or throws a friendly error).
   async function apiPatch(payload: object): Promise<any> {
@@ -316,7 +309,7 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
     <>
       {/* Scrim — strong enough to isolate the dialog; click to dismiss. */}
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000, animation: "lfhFade 160ms ease-out" }} />
-      <div role="dialog" aria-modal="true" aria-label={`Edit ${user.name || user.username}`} style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Edit ${user.name || user.username}`} style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
         <div style={{ ...card, pointerEvents: "auto", width: "min(96vw, 460px)", maxHeight: "90vh", overflowY: "auto", padding: 0, animation: "lfhPop 180ms cubic-bezier(0.16,1,0.3,1)" }}>
           {/* Header */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: "var(--border)", position: "sticky", top: 0, background: "var(--card)", borderRadius: "14px 14px 0 0" }}>

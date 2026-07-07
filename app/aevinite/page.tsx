@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { openRestaurantPanel, useActiveAutoRefresh, ActivityFeed, timeAgo, type Action } from "@/components/admin/shared";
+import { useToast } from "@/components/admin/toast";
 
 type Rest = {
   id: string; slug: string; name: string; active: boolean;
@@ -31,6 +32,7 @@ const PANEL_DEFS: { key: string; letter: string; label: string; path: string }[]
 const panelOn = (r: Rest, key: string) => !r.panels || r.panels[key] !== false;
 
 export default function AdminCommand() {
+  const toast = useToast();
   const [rests, setRests] = useState<Rest[] | null>(null);
   const [ovRows, setOvRows] = useState<OvRow[]>([]);
   const [ordersToday, setOrdersToday] = useState<number | null>(null);
@@ -38,32 +40,32 @@ export default function AdminCommand() {
   const [maintenance, setMaintenance] = useState(false);
   const [maintenanceNames, setMaintenanceNames] = useState<string[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
-  const [staff, setStaff] = useState<Staff[]>([]);
+  const [online, setOnline] = useState<Staff[]>([]);
   const [activity, setActivity] = useState<Action[]>([]);
   const [q, setQ] = useState("");
   const [busyRow, setBusyRow] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  // Load-error flag for the PRIMARY restaurants fetch, so a backend hiccup shows a Retry
-  // instead of leaving the home screen stuck on "Loading restaurants…" forever (audit
-  // 2026-07-07 — the other pages got this in #206; the dashboard was missed).
+  // Load-error flag so a backend hiccup shows a Retry instead of leaving the home screen
+  // stuck on "Loading…" forever (audit 2026-07-07).
   const [loadErr, setLoadErr] = useState(false);
 
   const load = useCallback(() => {
-    fetch("/api/admin/restaurants", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (j.error) { setLoadErr(true); } else { setRests(j.restaurants || []); setLoadErr(false); } }).catch(() => setLoadErr(true));
-    fetch("/api/admin/overview", { cache: "no-store" }).then((r) => r.json()).then((j) => {
-      if (!j.error) { setMaintenance(!!j.maintenance); setMaintenanceNames(Array.isArray(j.maintenanceNames) ? j.maintenanceNames : []); setOrdersToday(Number(j.ordersToday) || 0); setOpenTablesNow(Number(j.openTables) || 0); }
-    }).catch(() => {});
-    // Per-restaurant live open-table counts (one pre-aggregated RPC round-trip —
-    // for the admin cookie it returns every restaurant). We read ONLY openTables.
-    // scope=all pins the /api/owner/* calls to the WHOLE platform. Without it, if
-    // the admin has drilled into a restaurant (which sets the 6h act-as cookie),
-    // these calls silently collapse to just that restaurant (bug H2, 2026-07-05).
-    fetch("/api/owner/overview?scope=all", { cache: "no-store" }).then((r) => r.json()).then((j) => {
-      if (!j.error) setOvRows((j.restaurants || []).map((r: { id: string; openTables: number }) => ({ id: r.id, openTables: Number(r.openTables) || 0 })));
-    }).catch(() => {});
-    fetch("/api/owner/issues?scope=all", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setIssues(j.issues || []); }).catch(() => {});
-    fetch("/api/admin/users", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setStaff(j.users || []); }).catch(() => {});
-    fetch("/api/admin/oplog?limit=18", { cache: "no-store" }).then((r) => r.json()).then((j) => { if (!j.error) setActivity(j.actions || []); }).catch(() => {});
+    // ONE combined call instead of six separate ones (egress: fewer round-trips on the 60s
+    // refresh, and it returns only the CURRENTLY-online staff + counts instead of hauling the
+    // whole staff/order/session tables to the client — improvement 2026-07-07).
+    fetch("/api/admin/dashboard", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+      if (j.error) { setLoadErr(true); return; }
+      setLoadErr(false);
+      setRests(j.restaurants || []);
+      setOvRows((j.openByRid || []).map((r: { id: string; openTables: number }) => ({ id: r.id, openTables: Number(r.openTables) || 0 })));
+      setMaintenance(!!j.maintenance);
+      setMaintenanceNames(Array.isArray(j.maintenanceNames) ? j.maintenanceNames : []);
+      setOrdersToday(Number(j.ordersToday) || 0);
+      setOpenTablesNow(Number(j.openTables) || 0);
+      setIssues(j.issues || []);
+      setOnline(j.online || []);
+      setActivity(j.activity || []);
+    }).catch(() => setLoadErr(true));
   }, []);
   useEffect(() => { load(); }, [load]);
   useActiveAutoRefresh(load, 60000);
@@ -72,7 +74,7 @@ export default function AdminCommand() {
 
   const ovById = useMemo(() => new Map(ovRows.map((r) => [r.id, r.openTables])), [ovRows]);
   const openIssues = useMemo(() => issues.filter((i) => i.status === "open"), [issues]);
-  const online = useMemo(() => staff.filter((u) => u.last_seen_at && Date.now() - new Date(u.last_seen_at).getTime() < 180_000), [staff]);
+  // `online` now arrives already filtered to currently-online staff from the combined endpoint.
   const PANEL_NAME = (role: string) => (({ owner: "Owner", manager: "Manager", kitchen: "Kitchen", tablet: "Tablet" } as Record<string, string>)[role] || role);
 
   const needle = q.trim().toLowerCase();
@@ -82,7 +84,7 @@ export default function AdminCommand() {
   const openPanel = async (r: Rest, path: string) => {
     setBusyRow(r.id); setErr(null);
     try { await openRestaurantPanel(r.id, path); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { const m = e instanceof Error ? e.message : String(e); setErr(m); toast(m, "err"); }
     finally { setBusyRow(null); }
   };
 

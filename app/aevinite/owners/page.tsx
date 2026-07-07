@@ -5,7 +5,7 @@
 // works and stays in sync; both write the restaurant_owners join table).
 // Data + writes: /api/admin/owners (admin-cookie gated, service-role).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useBackClose } from "@/lib/backStack";
+import { useAdminModal } from "@/components/admin/useAdminModal";
 
 type OwnedRest = { id: string; slug: string; name: string; active: boolean; primary: boolean };
 type Owner = {
@@ -244,16 +244,10 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
   // before the async `busy` state disables the button, which minted TWO owners / raced the
   // name-taken check (audit 2026-07-07). A ref flips instantly, in the same tick.
   const creatingRef = useRef(false);
-  // Phone hardware Back closes the modal instead of leaving the admin page (CLAUDE.md rule).
-  useBackClose("admin-new-owner", true, onClose);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
-  }, [onClose]);
+  // One line: phone Back + Escape close it, focus is trapped inside, and the page behind
+  // is frozen while it's open.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useAdminModal(dialogRef, "admin-new-owner", onClose);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -275,7 +269,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
-      <div role="dialog" aria-modal="true" aria-label="New owner" style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="New owner" style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
         <form onSubmit={create} style={{ ...card, pointerEvents: "auto", width: "min(96vw, 440px)", maxHeight: "90vh", overflowY: "auto", display: "grid", gap: 13 }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>New owner</div>
           {err ? <div style={{ fontSize: 12.5, color: "#fca5a5" }}>{err}</div> : null}
@@ -342,8 +336,8 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
   // live `owner` prop, so after attach/detach → onChanged reloads → this recomputes.
   const [showAttach, setShowAttach] = useState(false);
   const attachable = rests.filter((r) => !owner.restaurants.some((x) => x.id === r.id));
-  // Phone hardware Back closes this detail instead of leaving the admin page (CLAUDE.md rule).
-  useBackClose("admin-owner-detail", true, onClose);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useAdminModal(dialogRef, "admin-owner-detail", onClose);
 
   useEffect(() => {
     let dead = false;
@@ -353,14 +347,6 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
       .catch(() => { if (!dead) setActivity([]); });
     return () => { dead = true; };
   }, [owner.id]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
-  }, [onClose]);
 
   const run = async (fn: () => Promise<void>) => {
     setMErr(""); setBusy(true);
@@ -395,7 +381,7 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
-      <div role="dialog" aria-modal="true" aria-label={`Owner ${owner.name}`} style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Owner ${owner.name}`} style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
         <div style={{ ...card, pointerEvents: "auto", width: "min(96vw, 560px)", maxHeight: "92vh", overflowY: "auto", padding: 0 }}>
           {/* Header */}
           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 18px", borderBottom: "var(--border)", position: "sticky", top: 0, background: "var(--card)", borderRadius: "14px 14px 0 0", zIndex: 1 }}>
