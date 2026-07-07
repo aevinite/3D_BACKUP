@@ -120,7 +120,10 @@ export default function SessionTableBill() {
     })();
     // Cleanup when the component disappears: stop the timer, listener; ignore late replies.
     return () => { alive = false; if (iv) clearInterval(iv); if (onTick) window.removeEventListener("lfh:rt-tick", onTick); };
-  }, []);
+    // Depend on restaurantId: it starts as the #1 default and resolves from the
+    // URL a beat later, so an empty dep array froze the wrong tenant's
+    // sessionsEnabled (matches the fix already in CartPanel/ChefPopup). (audit)
+  }, [restaurantId]);
 
   // If we're not in a live session, show nothing at all.
   if (!active) return null;

@@ -615,11 +615,11 @@ export default function SessionGate() {
     // taps "Call a waiter instead" (once, or twice) should send ONE request, not a
     // fresh one each time — otherwise the same person can appear repeatedly in the
     // staff's list (audit fix bug #18). "open" requests are unaffected.
-    if (type === "access") {
-      if (accessReqRef.current) { setStep("request_sent"); return; }
-      accessReqRef.current = true;
-    }
+    if (type === "access" && accessReqRef.current) { setStep("request_sent"); return; }
     await requestAccess(p.table, type, name.trim() || null, null, ridRef.current);
+    // Only mark the waiter-call as sent AFTER it actually succeeded, so a failed
+    // request can still be retried (bug #18 fix must not swallow a real retry).
+    if (type === "access") accessReqRef.current = true;
     setStep("request_sent");
   };
   // From the "not open" screen: tell staff, then keep waiting — proceedWhenOpen

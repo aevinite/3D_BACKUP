@@ -231,7 +231,9 @@ export default function OrderTracker() {
       window.addEventListener("lfh:rt-tick", onTick);
     })();
     return () => { alive = false; if (iv) clearInterval(iv); if (onTick) window.removeEventListener("lfh:rt-tick", onTick); };
-  }, []);
+    // restaurantId resolves from the URL a beat after the #1 default; depend on it
+    // so a non-#1 guest reads THIS tenant's sessionsEnabled, not #1's (audit).
+  }, [restaurantId]);
 
   // Auto-hide a served/cancelled strip one minute after it finishes.
   // We set a single timer for whichever finished order is due to disappear soonest.

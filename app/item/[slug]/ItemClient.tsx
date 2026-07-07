@@ -83,6 +83,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   const [reviewText, setReviewText] = useState("");          // reviewer's typed comment
   const [localReviews, setLocalReviews] = useState<{name: string; rating: number; text: string; deviceId?: string}[]>([]); // reviews shown (incl. ones just added)
   const [reviewTab, setReviewTab] = useState<"rate" | "reviews">("reviews"); // which review tab is open
+  const reviewSubmittingRef = useRef(false); // blocks a double-tap from firing two review saves (audit)
   const [imgZoom, setImgZoom] = useState(false);             // is the full-screen photo open?
   const [lbScale, setLbScale] = useState(1);                 // zoom level in the lightbox (1 = normal)
   const [lbPos, setLbPos] = useState({ x: 0, y: 0 });        // pan offset while zoomed in
@@ -444,10 +445,16 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       return;
     }
     if (!item) return; // no dish loaded -> nothing to review
+    if (reviewSubmittingRef.current) return; // in-flight guard: a fast double-tap should fire ONE save, not two (audit)
+    reviewSubmittingRef.current = true;
     // Server-side save: validates stars/device/dish, upserts on repeat ratings.
     const myDevice = getDeviceId();
-    const res = await submitReviewRpc(item.slug, myDevice, selectedRating, reviewName.trim(), reviewText.trim(), restaurantId);
-    if (!res.ok) {
+    let res;
+    try {
+      res = await submitReviewRpc(item.slug, myDevice, selectedRating, reviewName.trim(), reviewText.trim(), restaurantId);
+    } catch { res = { ok: false }; }
+    finally { reviewSubmittingRef.current = false; }
+    if (!res || !res.ok) {
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't save review", subtitle: "please try again", kicker: "review", variant: "error" } }));
       return;
     }
@@ -886,8 +893,10 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           const prev = idx > 0 ? siblings[idx - 1] : null;
           const next = idx < siblings.length - 1 ? siblings[idx + 1] : null;
           if (!prev && !next) return null;  // only one dish — no arrows
-          // Carry the category in the link so the next page keeps the same nav list.
-          const catParam = navCat !== item.category ? `?cat=${navCat}` : "";
+          // Always carry the category in the link so the next page keeps the SAME
+          // nav list (previously omitted when navCat === the dish's own category,
+          // which relied on a fallback and lost the context the viewer preserves).
+          const catParam = `?cat=${encodeURIComponent(navCat)}`;
           return (
             <>
               {/* Left strip: go to the previous dish (only if there is one). */}
