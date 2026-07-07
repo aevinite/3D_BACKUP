@@ -44,6 +44,14 @@ class ModelLoader {
     return this.loaded.get(url) ?? null; // ?? means "or null if not found"
   }
 
+  // Have we permanently given up on this model (out of retries)? The viewer uses
+  // this to swap its "still preparing…" overlay for a real "3D unavailable"
+  // message instead of promising a load that will never come (audit fix bug #10).
+  hasFailed(url: string | null | undefined): boolean {
+    if (!url) return false;
+    return this.failed.has(url);
+  }
+
   // Fire a browser-wide announcement (a CustomEvent) about a model. The "name"
   // is the event others listen for: "lfh:model-loaded" or "lfh:model-failed".
   private dispatch(name: string, url: string) {

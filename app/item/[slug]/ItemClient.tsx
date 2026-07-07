@@ -249,7 +249,10 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       // viewer defaulted to restaurant #1, showing the wrong dish/price the moment
       // any non-#1 restaurant enabled a 3D dish (audit fix 2026-07-06).
       const r = restaurantSlug ? `&r=${encodeURIComponent(restaurantSlug)}` : "";
-      router.push(`/view/${item.modelFolder}?from=${encodeURIComponent(item.slug)}${r}`);
+      // Carry the browsing category too, so the viewer's Back link returns to the
+      // SAME list the guest came from (audit fix bug #17).
+      const c = fromCat ? `&cat=${encodeURIComponent(fromCat)}` : "";
+      router.push(`/view/${item.modelFolder}?from=${encodeURIComponent(item.slug)}${r}${c}`);
     }
   };
 

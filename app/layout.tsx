@@ -46,7 +46,7 @@ export const viewport: Viewport = {
 // always opens light for new visitors (owner, 2026-06-17). Falls back to light on error.
 // (Leave the text inside the backticks exactly as-is — it's a script string.)
 const themeBootScript = `
-(function(){try{var saved=localStorage.getItem('lfh_theme');document.documentElement.setAttribute('data-theme',saved==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}})();
+(function(){try{var saved=localStorage.getItem('lfh_theme');document.documentElement.setAttribute('data-theme',saved==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}try{var lang=localStorage.getItem('lfh_language')||'en';document.documentElement.setAttribute('lang',lang);document.documentElement.setAttribute('dir',lang==='ar'?'rtl':'ltr');}catch(e){}})();
 `.trim();
 
 // The main layout function. "children" is whatever page is currently showing —

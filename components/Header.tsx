@@ -120,9 +120,11 @@ export default function Header({ logoText }: { logoText?: string }) {
     window.dispatchEvent(new Event("lfh:theme-changed"));
   };
 
-  // Pick the icon: a moon for dark mode, a sun for light mode. We wait for
-  // "mounted" so the server and browser agree on the first paint.
-  const iconClass = mounted && theme === "dark" ? "moon" : "sun";
+  // The sun/moon icon is chosen by CSS from the <html data-theme> attribute (set
+  // before first paint by the boot script), not by JS — so it never flashes the
+  // wrong glyph for a frame on a dark reload while React catches up (audit fix
+  // bug #16). We still keep `mounted` for other client-only bits below.
+  void mounted;
 
   return (
     <div className="nav">
@@ -193,8 +195,10 @@ export default function Header({ logoText }: { logoText?: string }) {
           aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
           title="Toggle Theme"
         >
-          {/* Shows a sun or moon depending on the current theme. */}
-          <i id="theme-icon" className={`fas fa-${iconClass}`}></i>
+          {/* Both icons are rendered; CSS shows the right one for the current
+              [data-theme] with no first-paint flash (see bug #16 fix above). */}
+          <i className="fas fa-sun theme-icon-sun" aria-hidden="true"></i>
+          <i className="fas fa-moon theme-icon-moon" aria-hidden="true"></i>
         </button>
         {/* The cart button. Tapping it broadcasts "lfh:open-cart" so the cart
             panel opens. */}

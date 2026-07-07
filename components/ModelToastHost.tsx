@@ -26,6 +26,17 @@ export default function ModelToastHost() {
       // Find which dish this model belongs to (only those the guest tried to view).
       const entry = modelWatchlist.findByUrl(url);
       if (!entry) return;
+      // Don't invite the guest to "tap to view in 3D" the dish they're ALREADY
+      // viewing in 3D (audit fix bug #9): the download-complete event fires just
+      // before the model paints, so without this the guest gets a pop-up for the
+      // very page they're on. If we're on that folder's /view page, skip the toast.
+      try {
+        const path = decodeURIComponent(window.location.pathname);
+        if (path === `/view/${entry.folder}`) {
+          modelWatchlist.unwatchByFolder(entry.folder);
+          return;
+        }
+      } catch {}
       // Build a unique key and bail out if we've already announced this one.
       const key = `loaded:${entry.folder}`;
       if (announcedRef.current.has(key)) return;

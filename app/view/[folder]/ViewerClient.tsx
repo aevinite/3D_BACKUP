@@ -11,6 +11,7 @@ import { modelLoader } from "@/lib/modelLoader";     // 3D model download manage
 import { modelWatchlist } from "@/lib/modelWatchlist"; // tracks who's waiting on a model (for toasts)
 import { getMenuItem, type MenuItem } from "@/lib/menu"; // fetch one dish's details
 import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant"; // resolve the restaurant this viewer belongs to
+import { accentPaletteCss } from "@/lib/accent"; // restaurant colour for the viewer chrome
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
 import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // money formatting
 import { useBackClose } from "@/lib/backStack"; // phone back button closes overlays first
@@ -79,6 +80,8 @@ export default function ViewerClient({ folder }: { folder: string }) {
   const [showTryAgain, setShowTryAgain] = useState(false); // show the "taking longer" overlay?
   const [menuItem, setMenuItem] = useState<MenuItem | null>(null); // the dish's menu details
   const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // currency for prices
+  const [accentCss, setAccentCss] = useState<string>(""); // this restaurant's colour for the viewer chrome
+  const [loadFailed, setLoadFailed] = useState(false); // did the 3D model give up loading for good?
   const [showInfo, setShowInfo] = useState(false);       // is the details sheet open?
   // Phone back button closes the details sheet first, not the whole viewer page
   // (every overlay must register with the back manager — audit fix 2026-07-06).
@@ -97,9 +100,14 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // wrong restaurant's dish for any non-#1 tenant (audit fix 2026-07-06).
   const fromRestaurant = searchParams.get("r") || "";
   const itemBase = fromRestaurant ? `/r/${fromRestaurant}` : "";
+  // Which category the guest was browsing (carried from the dish page). Preserve
+  // it on the Back link so the item page's prev/next arrows keep walking the SAME
+  // list the guest came from, not the dish's own category (audit fix bug #17).
+  const fromCat = searchParams.get("cat") || "";
+  const catQs = fromCat ? `?cat=${encodeURIComponent(fromCat)}` : "";
   // Where the Back button goes: to that dish (in THIS restaurant) if we know it,
   // else that restaurant's menu.
-  const backHref = fromSlug ? `${itemBase}/item/${fromSlug}` : `${itemBase}/menu`;
+  const backHref = fromSlug ? `${itemBase}/item/${fromSlug}${catQs}` : `${itemBase}/menu`;
 
   // The bar's name/stats/price come from the actual MENU item, not config.json
   // (config is only the hotspots/tags). Falls back to config if the item is missing.
@@ -113,7 +121,20 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // so a non-#1 restaurant's viewer shows ITS dish + price, not #1's.
     (async () => {
       let rid = DEFAULT_RESTAURANT_ID;
-      if (fromRestaurant) { const r = await getRestaurantBySlug(fromRestaurant); if (r) rid = r.id; }
+      if (fromRestaurant) {
+        const r = await getRestaurantBySlug(fromRestaurant);
+        if (r) {
+          rid = r.id;
+          // WHITE-LABEL COLOUR (audit fix bug #2): the /view route lives outside
+          // the menu's AppShell, so its BACK / AR / Add-to-Order buttons defaulted
+          // to French House gold for every restaurant. Emit this restaurant's
+          // accent palette at :root here too. Only non-#1 restaurants carry an
+          // accent_color, so #1 keeps its gold.
+          if (r.id !== DEFAULT_RESTAURANT_ID && r.accentColor && !cancelled) {
+            setAccentCss(`:root{${accentPaletteCss(r.accentColor)}}`);
+          }
+        }
+      }
       if (cancelled || !fromSlug) return;
       try { const m = await getMenuItem(fromSlug, rid); if (!cancelled) setMenuItem(m); } catch {}
     })();
@@ -241,6 +262,14 @@ export default function ViewerClient({ folder }: { folder: string }) {
     const apply = () => {
       const best = pick();
       if (best) setActiveUrl((prev) => (prev === best ? prev : best));
+      // FAILED-FOR-GOOD detection (audit fix bug #10): if the loader has given up
+      // on every model file for this dish (and none loaded), flip the "failed"
+      // flag so the overlay shows a real "3D unavailable" message instead of a
+      // "still preparing, we'll let you know" promise that will never come true.
+      const candidates = [small, opt, config.modelUrl].filter(Boolean) as string[];
+      const anyLoaded = candidates.some((u) => modelLoader.isLoaded(u));
+      const allFailed = candidates.length > 0 && candidates.every((u) => modelLoader.hasFailed(u));
+      if (!anyLoaded && allFailed) setLoadFailed(true);
     };
 
     apply();  // try once now
@@ -585,24 +614,30 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // The main viewer screen.
   return (
     <div className="viewer-wrapper">
+      {/* This restaurant's colour for the viewer chrome (Back/AR/Add buttons). */}
+      {accentCss && <style dangerouslySetInnerHTML={{ __html: accentCss }} />}
       {/* The spinner stays up until the model appears (and not while showing
-          the "taking longer" overlay). */}
-      {loaderVisible && !showTryAgain && (
+          the "taking longer" / failed overlay). */}
+      {loaderVisible && !showTryAgain && !loadFailed && (
         <div id="load">
           <InfinityLoader label="Loading 3D Model" size={110} />
         </div>
       )}
 
-      {/* The friendly "still preparing" overlay (only after the long wait,
-          and only if the model still hasn't shown). */}
-      {showTryAgain && !modelSeenRef.current && (
+      {/* The overlay shown when the model is slow OR has failed for good. When it
+          genuinely failed we say so honestly (audit fix bug #10) instead of
+          promising a load that will never come. */}
+      {(showTryAgain || loadFailed) && !modelSeenRef.current && (
         <div id="try-again-overlay">
           <div className="try-again-card">
-            <div className="try-again-emoji">⏳</div>
-            <div className="try-again-title">Still preparing your 3D view</div>
+            <div className="try-again-emoji">{loadFailed ? "😔" : "⏳"}</div>
+            <div className="try-again-title">
+              {loadFailed ? "3D view unavailable" : "Still preparing your 3D view"}
+            </div>
             <div className="try-again-sub">
-              The model is taking longer than usual. We&apos;ll let you know
-              as soon as it&apos;s ready.
+              {loadFailed
+                ? "We couldn't load this dish in 3D right now. You can still see its photo and details on the menu."
+                : "The model is taking longer than usual. We'll let you know as soon as it's ready."}
             </div>
             <Link href={backHref} className="try-again-btn">
               <i className="fas fa-arrow-left"></i> Go back

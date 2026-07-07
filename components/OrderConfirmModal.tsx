@@ -209,9 +209,12 @@ export default function OrderConfirmModal() {
       if (editSig) cart = cart.filter((it) => !(it.id === item.id && (it.sig || "[]") === editSig));
       // Same dish + same options/allergy/note = one line; otherwise a new line.
       const existing = cart.find((it) => it.id === item.id && (it.sig || "[]") === sig);
-      if (existing) existing.qty += qty; // already there -> just bump the quantity
+      // CLAMP to 99 per line to match the server cap — otherwise adding the same
+      // dish twice via this popup (99 + 99) quoted 198 while the kitchen makes 99
+      // (audit fix bug #6).
+      if (existing) existing.qty = Math.min(99, existing.qty + qty); // already there -> bump, capped
       else cart.push({ // otherwise add a brand-new line
-        id: item.id, title: item.title, price: unit.toFixed(2), image: item.image, qty,
+        id: item.id, title: item.title, price: unit.toFixed(2), image: item.image, qty: Math.min(99, qty),
         options: chosen.length ? chosen : undefined,
         removed: lineRemoved.length ? lineRemoved : undefined,
         note: note.trim() || undefined,

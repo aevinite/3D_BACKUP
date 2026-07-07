@@ -16,6 +16,10 @@ export interface Translations {
   filterAll: string;
   filterVeg: string;
   filterNonVeg: string;
+  filterChef: string;      // "Chef's Special" filter chip
+  filterFav: string;       // "Favorites" filter chip
+  sortTopRated: string;    // "Top Rated" sort chip
+  sortLowPrice: string;    // "Low Price" sort chip
   catAll: string;
   catBurgers: string;
   catPizza: string;
@@ -67,6 +71,10 @@ const translations: Record<LanguageCode, Translations> = {
     filterAll: "All",
     filterVeg: "🌿 Veg",
     filterNonVeg: "🍖 Non-Veg",
+    filterChef: "⭐ Chef's Special",
+    filterFav: "❤️ Favorites",
+    sortTopRated: "⭐ Top Rated",
+    sortLowPrice: "💲 Low Price",
     catAll: "All",
     catBurgers: "Burgers",
     catPizza: "Pizza",
@@ -114,6 +122,10 @@ const translations: Record<LanguageCode, Translations> = {
     filterAll: "Alle",
     filterVeg: "🌿 Veg",
     filterNonVeg: "🍖 Nicht-Veg",
+    filterChef: "⭐ Chef-Empfehlung",
+    filterFav: "❤️ Favoriten",
+    sortTopRated: "⭐ Top bewertet",
+    sortLowPrice: "💲 Günstigster Preis",
     catAll: "Alle",
     catBurgers: "Burger",
     catPizza: "Pizza",
@@ -161,6 +173,10 @@ const translations: Record<LanguageCode, Translations> = {
     filterAll: "Tout",
     filterVeg: "🌿 Végé",
     filterNonVeg: "🍖 Non-Végé",
+    filterChef: "⭐ Spécialité du chef",
+    filterFav: "❤️ Favoris",
+    sortTopRated: "⭐ Les mieux notés",
+    sortLowPrice: "💲 Prix bas",
     catAll: "Tout",
     catBurgers: "Burgers",
     catPizza: "Pizza",
@@ -208,6 +224,10 @@ const translations: Record<LanguageCode, Translations> = {
     filterAll: "الكل",
     filterVeg: "🌿 نباتي",
     filterNonVeg: "🍖 غير نباتي",
+    filterChef: "⭐ اختيار الشيف",
+    filterFav: "❤️ المفضلة",
+    sortTopRated: "⭐ الأعلى تقييماً",
+    sortLowPrice: "💲 السعر الأقل",
     catAll: "الكل",
     catBurgers: "برجر",
     catPizza: "بيتزا",
@@ -255,6 +275,10 @@ const translations: Record<LanguageCode, Translations> = {
     filterAll: "सभी",
     filterVeg: "🌿 शाकाहारी",
     filterNonVeg: "🍖 मांसाहारी",
+    filterChef: "⭐ शेफ स्पेशल",
+    filterFav: "❤️ पसंदीदा",
+    sortTopRated: "⭐ टॉप रेटेड",
+    sortLowPrice: "💲 कम कीमत",
     catAll: "सभी",
     catBurgers: "बर्गर",
     catPizza: "पिज्जा",
@@ -302,6 +326,10 @@ const translations: Record<LanguageCode, Translations> = {
     filterAll: "전체",
     filterVeg: "🌿 채식",
     filterNonVeg: "🍖 비채식",
+    filterChef: "⭐ 셰프 추천",
+    filterFav: "❤️ 즐겨찾기",
+    sortTopRated: "⭐ 최고 평점",
+    sortLowPrice: "💲 낮은 가격",
     catAll: "전체",
     catBurgers: "버거",
     catPizza: "피자",

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { tenantSlug } from "@/lib/tenantStorage";
+import { DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
 
 // The ONE notification for the whole app — a little café "order ticket" with
 // torn top/bottom edges. Every notice (dish added, waiter called, order placed,
@@ -106,6 +108,9 @@ export default function ToastHost() {
   // If there are no toasts right now, draw nothing.
   if (!toasts.length) return null;
 
+  // Sign-off line: French only for French House (#1); neutral everywhere else.
+  const signOff = tenantSlug() === DEFAULT_RESTAURANT_SLUG ? "· merci ·" : "· thank you ·";
+
   return (
     // The stacked list of tickets. aria-live="polite" lets screen readers
     // announce new toasts without interrupting.
@@ -136,8 +141,11 @@ export default function ToastHost() {
           {/* The small subtitle line, only if we have one */}
           {t.subtitle && <div className="toast-sub">{t.subtitle}</div>}
           <div className="toast-rule" aria-hidden="true" />
-          {/* The footer: a "tap to view" hint for tappable tickets, else "merci" */}
-          <div className="toast-foot">{t.href || t.event ? "tap to view →" : "· merci ·"}</div>
+          {/* The footer: a "tap to view" hint for tappable tickets, else a sign-off.
+              Only French House (#1) signs off in French; other restaurants get a
+              neutral "thank you" so a sushi/taco/Indian brand doesn't say "merci"
+              (audit fix bug #5). */}
+          <div className="toast-foot">{t.href || t.event ? "tap to view →" : signOff}</div>
         </button>
       ))}
     </div>

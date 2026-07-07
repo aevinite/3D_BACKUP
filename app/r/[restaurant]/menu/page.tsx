@@ -8,11 +8,34 @@ import { notFound } from "next/navigation";
 import MenuView from "@/components/MenuView";
 import { getRestaurantBySlug } from "@/lib/tenant";
 
-// White-label: a guest's browser tab shows THIS restaurant's name, not the SaaS brand.
+// White-label: a guest's browser tab, its shared-link preview, AND its tab icon
+// all show THIS restaurant — not the SaaS platform (audit fix bugs #8, #14). Any
+// non-#1 tenant used to inherit the platform's "Aevidine — the all-in-one…"
+// description and had no OpenGraph tags, so a shared menu link showed the SaaS
+// pitch with no restaurant name/image.
 export async function generateMetadata({ params }: { params: Promise<{ restaurant: string }> }) {
   const { restaurant } = await params;
   const r = await getRestaurantBySlug(restaurant);
-  return { title: r?.name ? `${r.name} — Menu` : "Menu" };
+  if (!r) return { title: "Menu" };
+  const title = r.name ? `${r.name} — Menu` : "Menu";
+  // A friendly, restaurant-specific description (its own tagline when it has one).
+  const description = r.tagline
+    ? `${r.tagline} — view the menu and order at ${r.name}.`
+    : `View the menu and order at ${r.name}.`;
+  // Give the restaurant its own browser-tab icon when it has uploaded a logo,
+  // instead of the one shared platform favicon.
+  const icons = r.logoUrl ? { icon: r.logoUrl } : undefined;
+  return {
+    title,
+    description,
+    icons,
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      ...(r.logoUrl ? { images: [{ url: r.logoUrl }] } : {}),
+    },
+  };
 }
 
 export default async function RestaurantMenuPage({

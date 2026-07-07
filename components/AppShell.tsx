@@ -11,52 +11,13 @@ import { getSettings } from "@/lib/menu";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { supabase } from "@/lib/supabase";
 import { sanitizeBrandTheme, buildModeBlock } from "@/lib/brandTheme";
+import { accentPaletteCss, accentBackground } from "@/lib/accent";
 
-// Turn a brand hex (e.g. "#c0392b") into "r, g, b" so we can build rgba() glows
-// at any opacity. Accepts #rgb or #rrggbb; returns null for anything we can't
-// parse so the caller can fall back to leaving the gold defaults alone.
-function hexToRgbTriplet(hex: string): string | null {
-  let h = hex.trim().replace(/^#/, "");
-  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
-  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
-  const n = parseInt(h, 16);
-  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
-}
-
-// Build the FULL accent palette from ONE brand colour, so the gradient pills,
-// glows and dim tints all follow the restaurant — not just the flat --accent.
-// CLAUDE.md gotcha note: this only ever runs for NON-default restaurants (the
-// caller passes accentColor only when it's not the French House default), so
-// restaurant #1 keeps its hand-tuned gold variables untouched.
-//   - --accent / --gold : the brand colour itself.
-//   - --accent-grad     : a 135deg gradient from the brand colour to a slightly
-//                         darker shade (color-mix with black — no hex math, and
-//                         it's already used elsewhere in this codebase).
-//   - --accent-dim/-glow / --gold-glow : rgba() of the brand colour at the same
-//                         opacities the gold defaults used (0.6 / 0.34 / 0.42).
-function accentVars(accentColor: string): React.CSSProperties {
-  const rgb = hexToRgbTriplet(accentColor);
-  const grad = `linear-gradient(135deg, ${accentColor} 0%, color-mix(in srgb, ${accentColor} 82%, #000) 100%)`;
-  const base: Record<string, string> = {
-    "--accent": accentColor,
-    "--gold": accentColor,
-    "--accent-grad": grad,
-    "--gold-grad": grad,
-    "--brand-highlight": accentColor, // brand name in the header follows the restaurant
-  };
-  if (rgb) {
-    base["--accent-dim"] = `rgba(${rgb}, 0.6)`;
-    base["--accent-glow"] = `rgba(${rgb}, 0.34)`;
-    base["--gold-glow"] = `rgba(${rgb}, 0.42)`;
-    // Per-restaurant ATMOSPHERE: a soft brand-coloured glow at the top + a faint
-    // brand wash over the whole menu, so each restaurant feels distinctly its own
-    // (not just a different accent). Subtle enough that cards/text stay readable.
-    // Only NON-#1 restaurants pass accentColor, so the live French House (#1) is
-    // never washed — it keeps its exact warm theme.
-    base["background"] = `radial-gradient(1200px 620px at 50% -240px, rgba(${rgb}, 0.16), transparent 68%), color-mix(in srgb, ${accentColor} 6%, var(--bg))`;
-  }
-  return base as React.CSSProperties;
-}
+// The accent palette now lives in lib/accent.ts so the 3D viewer (a separate
+// route outside this shell) can emit the SAME variables. See that file for the
+// colour maths. This only ever runs for NON-default restaurants (the caller
+// passes accentColor only when it's not the French House default), so #1 keeps
+// its hand-tuned gold from globals.css untouched.
 
 // The outer "frame" wrapped around every page: it shows the intro animation,
 // the background bubbles, the header, the chef-call button, and finally the
@@ -168,8 +129,21 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
       `${lightBody ? `[data-theme="light"] #app.brand-themed{${lightBody}}` : ""}`
     : "";
 
+  // WHITE-LABEL COLOUR (audit fix 2026-07-07, bug #1): emit the restaurant's
+  // accent palette at :root so it reaches EVERYTHING — not only the menu body,
+  // but the floating waiter button + popup (siblings of #menu-page) AND the
+  // body-level GuestChrome widgets (cart, toasts, session) mounted in layout.tsx,
+  // which previously fell back to French House gold. A :root rule applies
+  // document-wide no matter where this <style> sits. Only non-#1 restaurants pass
+  // accentColor, so #1's gold is never overridden. The menu-page background wash
+  // stays a page backdrop (below), not a :root variable.
+  const rootAccentCss = accentColor ? `:root{${accentPaletteCss(accentColor)}}` : "";
+  const pageBg = accentColor ? accentBackground(accentColor) : null;
+
   return (
     <>
+      {/* Restaurant colour for the WHOLE document (widgets included). */}
+      {rootAccentCss && <style dangerouslySetInnerHTML={{ __html: rootAccentCss }} />}
       {/* Per-restaurant theme (mode-scoped) — only when this restaurant set a palette. */}
       {themed && <style dangerouslySetInnerHTML={{ __html: themedCss }} />}
       {/* The one-time opening logo animation */}
@@ -177,7 +151,7 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
       {/* Floating background bubbles — only if the toggle is on */}
       {bubbles && <Particles />}
       <div id="app" className={themed ? "brand-themed" : undefined}>
-        <div id="menu-page" className="page active" style={!themed && accentColor ? accentVars(accentColor) : undefined}>
+        <div id="menu-page" className="page active" style={!themed && pageBg ? { background: pageBg } : undefined}>
           {/* The top bar (logo, language/currency, theme toggle, cart) */}
           <Header logoText={logoText} />
           {/* Whatever page is currently being shown goes here */}
