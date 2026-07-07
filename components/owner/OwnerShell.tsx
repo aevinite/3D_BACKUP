@@ -30,7 +30,14 @@ const GROUPS: NavGroup[] = [
       // to exist. Hidden from the real owner when off; tinted for the admin act-as.
       { href: "/owner/reports", label: "Reports", icon: "fa-file-invoice", ent: "reports" },
       { href: "/owner/staff", label: "Staff & powers", icon: "fa-users-gear", ent: "staff" },
+      { href: "/owner/customers", label: "Customers", icon: "fa-user-group", ent: "customers" },
       { href: "/owner/issues", label: "Feedback & issues", icon: "fa-triangle-exclamation", ent: "issues" },
+    ],
+  },
+  {
+    label: "Account",
+    items: [
+      { href: "/owner/settings", label: "Settings", icon: "fa-gear", ent: "settings" },
     ],
   },
   {
@@ -39,10 +46,8 @@ const GROUPS: NavGroup[] = [
     items: [
       { href: "/owner/menu", label: "Menu", icon: "fa-book-open", soon: true },
       { href: "/owner/inventory", label: "Inventory", icon: "fa-boxes-stacked", soon: true },
-      { href: "/owner/customers", label: "Customers", icon: "fa-user-group", soon: true },
       { href: "/owner/marketing", label: "Marketing", icon: "fa-bullhorn", soon: true },
       { href: "/owner/online", label: "Online & apps", icon: "fa-truck-fast", soon: true },
-      { href: "/owner/settings", label: "Settings", icon: "fa-gear", soon: true },
     ],
   },
 ];
