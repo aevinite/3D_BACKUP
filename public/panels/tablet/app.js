@@ -979,8 +979,8 @@ function renderPanel() {
   }));
   document.querySelectorAll("[data-done-order]").forEach((b) => (b.onclick = () => { state.editOrders.delete(b.dataset.doneOrder); renderPanel(); }));
   // Quantity −/＋ on one dish (re-prices the bill server-side, clamped 1..99).
-  document.querySelectorAll("[data-qty-inc]").forEach((b) => (b.onclick = () => act(() => api("POST", `/items/${b.dataset.qtyInc}/qty`, { qty: Math.min(99, (parseInt(b.dataset.qty, 10) || 1) + 1) }))));
-  document.querySelectorAll("[data-qty-dec]").forEach((b) => (b.onclick = () => { const q = (parseInt(b.dataset.qty, 10) || 1) - 1; if (q < 1) { toast("Use 🗑 to remove the dish", false); return; } act(() => api("POST", `/items/${b.dataset.qtyDec}/qty`, { qty: q })); }));
+  document.querySelectorAll("[data-qty-inc]").forEach((b) => (b.onclick = () => bumpItemQty(b.dataset.qtyInc, +1)));
+  document.querySelectorAll("[data-qty-dec]").forEach((b) => (b.onclick = () => bumpItemQty(b.dataset.qtyDec, -1)));
   // "✎ Edit" one dish → the unified modal (allergens incl. custom + kitchen note),
   // IDENTICAL to the manager panel's openDishEditModal.
   document.querySelectorAll("[data-edit-dish]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.editDish)));
@@ -1266,6 +1266,28 @@ const act = async (fn) => {
   } catch (e) { toast("Failed: " + e.message, false); }
 };
 
+// Staff qty stepper on an ALREADY-PLACED dish. Reads the LIVE qty from state (never the
+// button's data-qty attribute) and bumps OPTIMISTICALLY, so rapid taps accumulate correctly.
+// The old handlers read the stale DOM attribute + did a full load() per tap, so two fast taps
+// both saw the same old number and one increment was silently lost (2026-07-07). The server
+// reconcile is DEBOUNCED — one refresh after the taps settle, not one per tap (fewer reloads,
+// no per-tap flicker). The qty endpoint sets an ABSOLUTE quantity, so the last tap wins.
+let qtyReconcileTimer = null;
+function bumpItemQty(itemId, delta) {
+  const it = (state.data.items || []).find((x) => x.id === itemId);
+  if (!it) return;
+  const cur = Number(it.qty) || 1;
+  let next = cur + delta;
+  if (next < 1) { toast("Use 🗑 to remove the dish", false); return; }
+  if (next > 99) next = 99;
+  if (next === cur) return;
+  it.qty = next;                 // optimistic: local state + the re-rendered buttons now agree
+  renderPanel();
+  api("POST", `/items/${itemId}/qty`, { qty: next }).catch((e) => { toast("Failed: " + e.message, false); load().catch(() => {}); });
+  clearTimeout(qtyReconcileTimer);
+  qtyReconcileTimer = setTimeout(() => load().catch(() => {}), 700);
+}
+
 // ensureTableSlice(t): make sure table t's FULL slice (sessions/orders/items/calls/…) is in the
 // local cache before a tile QUICK-ACTION on a NON-selected table runs. The grid renders from the
 // slim summary, so an unselected table has NO order rows cached — and Accept/Mark-paid need them
@@ -1335,7 +1357,11 @@ function optimisticOpen(table) {
 function optimisticPay(t, method, note) {
   runOptimistic(
     () => {
-      state.data.orders.forEach((o) => { if (String(o.table_number) === String(t)) o.payment_status = "paid"; });
+      // Only flip orders the server will actually settle: a 'received' (not-yet-accepted) or
+      // cancelled order is NOT paid by /tables/:t/pay, so optimistically showing it paid made
+      // the tile briefly read "Cleared/₹0" before the server reverted it (2026-07-07). Match
+      // the server's set exactly so the optimistic view is always truthful.
+      state.data.orders.forEach((o) => { if (String(o.table_number) === String(t) && o.status !== "received" && o.status !== "cancelled") o.payment_status = "paid"; });
       patchTileFromSlice(t);   // flip the UN-selected floor tile to paid/no-due now, not after reconcile
     },
     () => api("POST", `/tables/${t}/pay`, method ? { payment_method: method, payment_note: note || "" } : null),
@@ -1605,7 +1631,14 @@ const dishPrice = (d) => Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
 
 // Add ONE dish to an already-placed order (staff edit). Server prices + re-prices.
 // Stays in add mode so the waiter can add several, then taps "✓ Done".
+const addingDishKeys = new Set();
 async function addDishToOrder(orderId, payload) {
+  // Ignore a double-tap of the SAME dish while its add is still in flight (add mode has no
+  // visible cart, so a fat-fingered second tap silently added the dish twice — 2026-07-07).
+  // A DIFFERENT dish is keyed separately, so quick adds of several dishes still all go through.
+  const key = orderId + "|" + (payload && (payload.dishId || payload.id));
+  if (addingDishKeys.has(key)) return;
+  addingDishKeys.add(key);
   try {
     const r = await api("POST", `/orders/${orderId}/add-item`, payload);
     if (r && r.ok === false) { toast("Couldn't add: " + (r.reason || "rejected"), false); return; }
@@ -1617,6 +1650,7 @@ async function addDishToOrder(orderId, payload) {
     await load();  // offline → no-ops; the tally + toast are the feedback until reconnect
     if (state.addToOrderId) renderOrderMode(); else if (!state.ordering) renderPanel();
   } catch (e) { toast("Failed: " + e.message, false); }
+  finally { addingDishKeys.delete(key); }
 }
 
 // Menu-style browse (owner, 2026-07-03): ALL categories are laid out as sections in ONE
@@ -2549,8 +2583,8 @@ function renderBanquetBody() {
   }
   const row = (it) =>
     `<div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);margin-bottom:10px">
-      <div><b style="font-size:14.5px">${it.title.replace(/</g, "&lt;")}</b>
-        <small style="display:block;color:var(--muted)">${inr(it.price)} ${(it.unit || "per plate").replace(/</g, "&lt;")}</small></div>
+      <div><b style="font-size:14.5px">${esc(it.title)}</b>
+        <small style="display:block;color:var(--muted)">${inr(it.price)} ${esc(it.unit || "per plate")}</small></div>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="btn small" data-bq-step="-1" data-bq-id="${it.id}" type="button">−</button>
         <input data-bq-qty="${it.id}" type="number" min="0" max="5000" value="0" inputmode="numeric"

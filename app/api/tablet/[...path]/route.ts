@@ -298,7 +298,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const optSig = (opts: any) => (Array.isArray(opts) && opts.length)
         ? opts.map((o: any) => ({ group: o?.group ?? null, label: o?.label ?? null }))
         : null;
-      const lineSig = (i: any) => ({ id: i.id, qty: Number(i.qty) || 1, options: optSig(i.options) });
+      // Fold each line's own allergen/avoid list (`removed`) into the signature too, so a
+      // genuine second order that differs ONLY by a per-dish allergy ("Pasta no-nuts" vs a
+      // plain "Pasta") is NOT flagged as a duplicate. (2026-07-07)
+      const remSig = (r: any) => (Array.isArray(r) ? r.map((x: any) => String(x).toLowerCase()).sort() : []);
+      const lineSig = (i: any) => ({ id: i.id, qty: Number(i.qty) || 1, options: optSig(i.options), removed: remSig(i.removed) });
       const sig = JSON.stringify({
         items: items.map(lineSig),
         allergies: Array.isArray(allergies) ? allergies : [],
@@ -427,7 +431,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Capture the guest's DEVICE id too, so the ban targets their device (and the
       // guest "you're blocked" wall sticks), not just a phone they may not have. (077)
       const device = m.device_id ? String(m.device_id).trim() : null;
-      must(await sb.from("blocklist").insert({ member_id: b, phone, device_id: device, reason: "banned from tablet" }).select());
+      // restaurant_id MUST be set: blocklist.restaurant_id defaults to restaurant #1, so
+      // omitting it stamped every tablet ban onto #1 — the ban did nothing at the acting
+      // restaurant (guest could re-scan and rejoin) and put a phantom ban on #1. The editor
+      // path was fixed in mig 142; this is the matching tablet fix. (2026-07-07)
+      must(await sb.from("blocklist").insert({ member_id: b, phone, device_id: device, reason: "banned from tablet", restaurant_id: rid }).select());
       if (phone) await sb.from("customers").upsert({ phone, blocked: true, restaurant_id: rid }, { onConflict: "restaurant_id,phone" });
       const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).eq("restaurant_id", rid).select());
       await logAction("tablet", "member_ban", { detail: (phone ? `banned ${phone}` : "banned") + byNote(g), device_id: dev });
@@ -515,10 +523,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
       // A restart needs a manager PIN only when there's an order GOING ON or an
       // UNPAID bill to clear — an empty table can be restarted freely.
-      let peek = sb.from("orders").select("status,payment_status").neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
+      let peek = sb.from("orders").select("status,payment_status,total,discount").neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
       peek = openSess ? peek.eq("session_id", openSess.id) : peek.eq("table_number", t);
       const pending = must(await peek);
       const needsPin = pending.some((o: any) => o.status === "received" || o.status === "preparing" || o.payment_status !== "paid");
+      // Audit trail: a restart archives the round even if money was still owed. Record how much
+      // was outstanding so a cleared-unpaid bill isn't invisible in the log (unlike a close,
+      // which logs close_unpaid). Gross total minus stored (pre-tax) discount — an "≈" figure.
+      const owed = pending
+        .filter((o: any) => o.payment_status !== "paid")
+        .reduce((s: number, o: any) => s + ((Number(o.total) || 0) - (Number(o.discount) || 0)), 0);
       let by = "";
       if (needsPin) { const g = await managerPinGate(req, body, rid); if (!g.allow) return g.resp; by = byNote(g); }
       let q = sb.from("orders").update({ status: "served", archived: true, archived_at: new Date().toISOString() }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
@@ -532,7 +546,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // old party left a ghost 🔔 badge + ATTEND on the now-empty table. Shared helper so the
       // manual + auto (lib/autoSettle) restart paths can't drift apart.
       await clearTableSignals(rid, t);
-      await logAction("tablet", "table_restart", { table_number: t, detail: `${rows.length} order(s) cleared` + by, device_id: dev });
+      await logAction("tablet", "table_restart", { table_number: t, detail: `${rows.length} order(s) cleared${owed > 0 ? `, ≈₹${Math.round(owed)} was unpaid` : ""}` + by, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
 
@@ -841,6 +855,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const otc = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
       const oTableCount = Number((otc.data as { table_count?: number } | null)?.table_count) || 0;
       if (oTableCount > 0 && (Number(t) < 1 || Number(t) > oTableCount)) return err(`Table ${t} doesn't exist (this place has ${oTableCount} tables).`, 400);
+      // Clear any still-pending "asked to open" request for this table (the editor's open RPC
+      // does this via lfh_staff_open_table). Without it, opening a table with the quick "Open"
+      // button left the guest's open-request pending — so after the table later closed, the tile
+      // wrongly showed "Wants in / Asked to open" again from that old guest. (2026-07-07)
+      await sb.from("requests").update({ status: "approved" }).eq("restaurant_id", rid).eq("table_number", t).eq("status", "pending").eq("type", "open");
       const existing = must(await sb.from("sessions").select("id").eq("table_number", t).eq("restaurant_id", rid).neq("status", "closed").limit(1));
       if (existing.length) return ok(existing[0]);
       const row = must(await sb.from("sessions").insert({ table_number: t, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select());
