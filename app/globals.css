@@ -1,11 +1,26 @@
 
 /* Theme-toggle icon: pick sun (light) or moon (dark) purely from the
    <html data-theme> attribute, which the boot script sets before first paint.
-   No JS, so no wrong-glyph flash on a dark reload (audit fix bug #16). */
-.theme-icon-sun { display: inline-block; }
-.theme-icon-moon { display: none; }
-[data-theme="dark"] .theme-icon-sun { display: none; }
-[data-theme="dark"] .theme-icon-moon { display: inline-block; }
+   No JS, so no wrong-glyph flash on a dark reload (audit fix bug #16).
+   Scoped under .nav-btn so these beat Font Awesome's own `.fas{display:...}`
+   rule (same specificity, but FA's stylesheet loads AFTER globals.css — without
+   the extra `.nav-btn` class it would win and show BOTH icons in light mode). */
+.nav-btn .theme-icon-sun { display: inline-block; }
+.nav-btn .theme-icon-moon { display: none; }
+[data-theme="dark"] .nav-btn .theme-icon-sun { display: none; }
+[data-theme="dark"] .nav-btn .theme-icon-moon { display: inline-block; }
+
+/* Arabic (RTL) safety (audit fix — regression from the RTL toggle): the hero
+   greeting + title are split into ONE <span> per letter, so a document-wide
+   dir=rtl laid a Latin tagline out right-to-left ("Wood-Fired Pizzeria" became
+   "airezziP deriF-dooW"). `unicode-bidi: plaintext` makes each hero line pick its
+   OWN direction from its content — Latin flows LTR, Arabic flows RTL — so #1's
+   Arabic hero stays correct AND other tenants' Latin heroes read normally. The
+   brand wordmark is always a proper name, so force it LTR to stop the RTL
+   ellipsis clipping it ("...tle French house"). Scoped to RTL only. */
+[dir="rtl"] .greet-badge,
+[dir="rtl"] .hero-title { unicode-bidi: plaintext; }
+[dir="rtl"] .brand { direction: ltr; }
 
 :root {
   /* THEME-TRIAL: WHOLE dark palette coordinated together. Currently: Espresso & Gold (brand brown) */

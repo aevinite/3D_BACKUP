@@ -610,19 +610,26 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
             tappable category chips above "No dishes yet" that scrolled nowhere
             (audit fix 2026-07-06). While still loading we keep showing them. */}
         {!(loaded && menuData.length === 0) && (<>
-        {/* "Categories" heading plus a small "slide →" hint. */}
+        {/* "Categories" heading + "slide →" hint — also hidden when a filter has
+            emptied EVERY category, so the label doesn't hover over an empty bar
+            (regression fix). Still shown while categories are loading. */}
+        {(dbCategories.length === 0 || visibleCategories.length > 0) && (
         <div className="section-header">
           <span className="section-title">{t.categories}</span>
           <span className="browse-hint" aria-hidden="true">
             {t.slide} <i className="fas fa-arrow-right"></i>
           </span>
         </div>
+        )}
         {/* PINNED block — ONLY the category bar + the search box stay pinned at the
             top while dishes scroll (owner's layout). The filter/grid controls live
             BELOW this block and scroll away with the page. Order: categories, then
             search. This block wears the SAME frosted glass as the brand bar. */}
         <div className="menu-sticky" id="menu-sticky">
-        {/* The horizontal row of category tabs. */}
+        {/* The horizontal row of category tabs — hidden (leaving just the search
+            box) when a filter has emptied every category, so there's no empty bar
+            (regression fix). Shown while loading (skeletons). */}
+        {(dbCategories.length === 0 || visibleCategories.length > 0) && (
         <div className="cat-scroller" id="cat-scroller" role="tablist" aria-label="Menu categories">
           {/* If categories haven't loaded yet, maybe show placeholders;
               otherwise draw a tab button for each category. */}
@@ -663,6 +670,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                 </button>
               ))}
         </div>
+        )}
         {/* SEARCH BOX — sits right under the categories, still INSIDE the pinned
             block, so categories + search stay glued to the top together. Hidden
             when the search feature is switched off. */}

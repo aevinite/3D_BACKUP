@@ -411,7 +411,7 @@ export default function CartPanel() {
     gateAddToCart(() => {
       const next = [...cart];
       const idx = next.findIndex((c) => c.id === it.id);
-      if (idx >= 0) next[idx] = { ...next[idx], qty: next[idx].qty + 1 };
+      if (idx >= 0) next[idx] = { ...next[idx], qty: Math.min(99, next[idx].qty + 1) }; // 99 cap, same as every add path (bug #6)
       // Stored price is the CONFIDENT unit (prettyUsd) — the same convention as
       // the quick "+" and the customize popup, so the bill never re-rounds it.
       // sig "[]" marks it as a plain line so the menu card's +/- can manage it.
@@ -834,6 +834,7 @@ export default function CartPanel() {
                   style={{ marginTop: "10px", marginBottom: 0 }}
                   placeholder="Type an allergy, then press Enter…"
                   aria-label="Other allergy"
+                  maxLength={80}
                   value={otherAllergy}
                   onChange={(e) => setOtherAllergy(e.target.value)}
                   onKeyDown={(e) => {

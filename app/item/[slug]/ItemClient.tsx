@@ -83,6 +83,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   const [reviewText, setReviewText] = useState("");          // reviewer's typed comment
   const [localReviews, setLocalReviews] = useState<{name: string; rating: number; text: string; deviceId?: string}[]>([]); // reviews shown (incl. ones just added)
   const [reviewTab, setReviewTab] = useState<"rate" | "reviews">("reviews"); // which review tab is open
+  const reviewSubmittingRef = useRef(false); // blocks a double-tap from firing two review saves (audit)
   const [imgZoom, setImgZoom] = useState(false);             // is the full-screen photo open?
   const [lbScale, setLbScale] = useState(1);                 // zoom level in the lightbox (1 = normal)
   const [lbPos, setLbPos] = useState({ x: 0, y: 0 });        // pan offset while zoomed in
@@ -444,10 +445,16 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       return;
     }
     if (!item) return; // no dish loaded -> nothing to review
+    if (reviewSubmittingRef.current) return; // in-flight guard: a fast double-tap should fire ONE save, not two (audit)
+    reviewSubmittingRef.current = true;
     // Server-side save: validates stars/device/dish, upserts on repeat ratings.
     const myDevice = getDeviceId();
-    const res = await submitReviewRpc(item.slug, myDevice, selectedRating, reviewName.trim(), reviewText.trim(), restaurantId);
-    if (!res.ok) {
+    let res;
+    try {
+      res = await submitReviewRpc(item.slug, myDevice, selectedRating, reviewName.trim(), reviewText.trim(), restaurantId);
+    } catch { res = { ok: false }; }
+    finally { reviewSubmittingRef.current = false; }
+    if (!res || !res.ok) {
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't save review", subtitle: "please try again", kicker: "review", variant: "error" } }));
       return;
     }

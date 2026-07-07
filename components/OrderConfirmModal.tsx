@@ -326,6 +326,7 @@ export default function OrderConfirmModal() {
                 className="oc-other-input"
                 placeholder="Describe it (e.g. peanuts, shellfish)"
                 value={otherText}
+                maxLength={80}
                 onChange={(e) => setOtherText(e.target.value)}
               />
             )}
@@ -346,6 +347,7 @@ export default function OrderConfirmModal() {
             className="oc-note"
             placeholder="Anything else? (e.g. less ice, no sugar)"
             value={note}
+            maxLength={200}
             onChange={(e) => setNote(e.target.value)}
           />
         </div>
