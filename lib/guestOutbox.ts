@@ -11,13 +11,13 @@
 // place the order ONCE — never a duplicate. On a successful send we record the order
 // into the guest's active-orders list so the normal tracker follows it from then on.
 import { useSyncExternalStore } from "react";
-import { tget, tset } from "@/lib/tenantStorage";
+import { tgetFor, tsetFor, tenantSlug } from "@/lib/tenantStorage";
 
 export type GuestTrack = { tableNumber?: string; total?: number; itemCount?: number; items?: { title: string; qty: number }[] };
 export type GuestOrder = {
   id: string;                       // action_id (uuid) — the at-most-once key
   mode: "session" | "public";
-  token?: string; table?: string; restaurantId?: string;
+  token?: string; table?: string; restaurantId?: string; restaurantSlug?: string;
   items: unknown[]; allergies: string[];
   track?: GuestTrack;
   at: number; status: "queued" | "failed"; error?: string;
@@ -96,10 +96,16 @@ function reasonMsg(reason?: string): string {
 // Record a successfully-sent order into the guest's active-orders list so the normal
 // OrderTracker follows its status (exactly what the online cart flow does).
 function recordActive(item: GuestOrder, orderId: string) {
+  if (!orderId) return; // a duplicate reply with no id → nothing to track (already recorded on the first send)
   try {
-    const raw = tget("lfh_active_orders");
+    // Scope the tracker entry to the order's OWN restaurant, not whatever page the
+    // tab happens to be on when the outbox flushes (fixes an offline order showing
+    // under the wrong restaurant on the same device).
+    const slug = item.restaurantSlug || tenantSlug();
+    const raw = tgetFor("lfh_active_orders", slug);
     const list = raw ? JSON.parse(raw) : [];
     const arr = Array.isArray(list) ? list : [];
+    if (arr.some((o: { id?: string }) => o?.id === orderId)) return; // already tracked — don't double-add
     arr.push({
       id: orderId,
       tableNumber: item.track?.tableNumber ?? item.table ?? "",
@@ -109,7 +115,7 @@ function recordActive(item: GuestOrder, orderId: string) {
       status: "received",
       placedAt: Date.now(),
     });
-    tset("lfh_active_orders", JSON.stringify(arr));
+    tsetFor("lfh_active_orders", slug, JSON.stringify(arr));
     window.dispatchEvent(new Event("lfh:order-placed"));
   } catch { /* tracker record is best-effort */ }
 }
@@ -129,11 +135,15 @@ async function moveToFailed(item: GuestOrder, reason: string) {
 
 // ── the public enqueue: called by the cart when offline ─────────────────────────
 export async function enqueueGuestOrder(p: {
-  mode: "session" | "public"; token?: string; table?: string; restaurantId?: string;
+  mode: "session" | "public"; token?: string; table?: string; restaurantId?: string; restaurantSlug?: string;
   items: unknown[]; allergies: string[]; track?: GuestTrack;
 }): Promise<{ ok: true; queued: true; action_id: string }> {
   ensureStarted();
-  const item: GuestOrder = { id: uuid(), status: "queued", at: Date.now(), ...p, items: p.items || [], allergies: p.allergies || [] };
+  // Remember which restaurant this order belongs to NOW (we're on its page), so the
+  // tracker entry lands under the right restaurant even if the tab moves on before the
+  // outbox flushes.
+  const restaurantSlug = p.restaurantSlug || tenantSlug();
+  const item: GuestOrder = { id: uuid(), status: "queued", at: Date.now(), ...p, restaurantSlug, items: p.items || [], allergies: p.allergies || [] };
   queued.push(item);
   await persist(item);
   notify();
@@ -163,7 +173,10 @@ export async function flushGuestOutbox() {
       }
       const j = await res.json().catch(() => null);
       if (res.ok && j?.ok && j.order_id) { recordActive(item, j.order_id as string); await removeItem(item.id); notify(); continue; }
-      if (res.ok && j?.duplicate) { await removeItem(item.id); notify(); continue; } // already placed on a prior sync
+      // Already placed on a prior sync whose reply we lost. The server now echoes the
+      // original order_id back with the duplicate, so we can still show it to the guest
+      // (previously this silently dropped the order and the guest thought it failed).
+      if (res.ok && j?.duplicate) { if (j.order_id) recordActive(item, j.order_id as string); await removeItem(item.id); notify(); continue; }
       // Server accepted the call but rejected the order (state changed while offline),
       // or a hard error → surface it instead of losing it.
       await moveToFailed(item, reasonMsg(j?.reason)); notify(); continue;

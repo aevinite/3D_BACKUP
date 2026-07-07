@@ -118,7 +118,15 @@ export default function RealtimeProvider() {
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", onWake);
     window.addEventListener("pageshow", onWake); // bfcache restore (phone wake)
-    const onOnline = () => { metrics.reconnects++; forceReconnect(); };
+    // A network flap (wifi↔cellular) fires "online". If the tab is HIDDEN we must NOT
+    // reopen a live socket — that's exactly the phantom-connection leak the idle-drop
+    // prevents. Only reconnect when visible; if hidden, (re)arm the idle drop instead
+    // so we never hold a background connection. Mirrors onWake's hidden guard.
+    const onOnline = () => {
+      metrics.reconnects++;
+      if (document.hidden) { clearTimeout(idleTimer); idleTimer = setTimeout(teardown, IDLE_MS); return; }
+      forceReconnect();
+    };
     window.addEventListener("online", onOnline);
 
     return () => {

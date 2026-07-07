@@ -70,7 +70,7 @@ const LANGUAGE_KEY = "lfh_language";
 // explicitly picks another from the currency switcher. setCurrency only ever
 // writes on an explicit pick, so a guest who never chose (new OR existing) gets
 // INR; one who deliberately chose another currency keeps their choice.
-const DEFAULT_CURRENCY: CurrencyMeta = CURRENCIES.find((c) => c.code === "INR") || CURRENCIES[0];
+export const DEFAULT_CURRENCY: CurrencyMeta = CURRENCIES.find((c) => c.code === "INR") || CURRENCIES[0];
 
 // Read back which currency the guest picked last time (defaults to INR).
 // localStorage only exists in the browser, so if it's missing we just return

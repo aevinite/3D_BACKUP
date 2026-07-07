@@ -22,33 +22,39 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 const STALE_MS = 30_000;
 
 type ClaimState = "fresh" | "done" | "processing";
+// `result` is the stored JSON body of a completed action, so a later duplicate can be
+// answered with the SAME payload (e.g. the original order_id) instead of an empty
+// "duplicate". Returned per-call (never a shared module var) so concurrent requests
+// can't read each other's result.
+type Claim = { state: ClaimState; result?: unknown };
 
-async function begin(actionId: string, panel: string): Promise<ClaimState> {
+async function begin(actionId: string, panel: string): Promise<Claim> {
   try {
     const ins = await sb.from("action_idempotency").insert({ action_id: actionId, panel }).select("action_id");
-    if (!ins.error) return "fresh"; // we claimed it first → run the write
+    if (!ins.error) return { state: "fresh" }; // we claimed it first → run the write
     // Unique-violation → someone already claimed this action_id.
     if ((ins.error as { code?: string }).code === "23505") {
-      const row = await sb.from("action_idempotency").select("done, created_at").eq("action_id", actionId).single();
-      if (row.error || !row.data) return "fresh"; // can't read it → fail open
-      if (row.data.done) return "done"; // already completed successfully → duplicate
+      const row = await sb.from("action_idempotency").select("done, created_at, result").eq("action_id", actionId).single();
+      if (row.error || !row.data) return { state: "fresh" }; // can't read it → fail open
+      if (row.data.done) return { state: "done", result: (row.data as { result?: unknown }).result ?? null }; // completed → duplicate (echo stored result)
       const age = Date.now() - new Date(row.data.created_at as string).getTime();
       if (age > STALE_MS) {
         // Stale in-flight claim (likely a crashed attempt) → take it over.
         await sb.from("action_idempotency").update({ created_at: new Date().toISOString() }).eq("action_id", actionId);
-        return "fresh";
+        return { state: "fresh" };
       }
-      return "processing"; // a concurrent request is handling it right now → tell client to retry
+      return { state: "processing" }; // a concurrent request is handling it right now → tell client to retry
     }
-    return "fresh"; // any other DB error (e.g. table not migrated yet) → fail open
+    return { state: "fresh" }; // any other DB error (e.g. table not migrated yet) → fail open
   } catch {
-    return "fresh"; // network/other → fail open
+    return { state: "fresh" }; // network/other → fail open
   }
 }
 
-async function finish(actionId: string, ok: boolean): Promise<void> {
+async function finish(actionId: string, ok: boolean, result?: unknown): Promise<void> {
   try {
-    if (ok) await sb.from("action_idempotency").update({ done: true }).eq("action_id", actionId);
+    // Store the successful result so a later duplicate echoes the same order_id.
+    if (ok) await sb.from("action_idempotency").update({ done: true, result: result ?? null }).eq("action_id", actionId);
     // Failed write → release the claim so the client's next replay can genuinely retry.
     else await sb.from("action_idempotency").delete().eq("action_id", actionId);
   } catch {
@@ -67,9 +73,14 @@ export function withIdempotency<C>(
     const actionId = req.headers.get("x-lfh-action-id");
     if (!actionId) return fn(req, ctx);
 
-    const state = await begin(actionId, panel);
-    if (state === "done") return NextResponse.json({ ok: true, duplicate: true });
-    if (state === "processing") return NextResponse.json({ error: "sync_in_progress", retry: true }, { status: 409 });
+    const claim = await begin(actionId, panel);
+    if (claim.state === "done") {
+      // Echo the original result (order_id etc.) alongside the duplicate flag so the
+      // client can still track an order whose first reply was lost.
+      const stored = (claim.result && typeof claim.result === "object") ? claim.result as Record<string, unknown> : {};
+      return NextResponse.json({ ok: true, ...stored, duplicate: true });
+    }
+    if (claim.state === "processing") return NextResponse.json({ error: "sync_in_progress", retry: true }, { status: 409 });
 
     let res: Response;
     try {
@@ -78,7 +89,11 @@ export function withIdempotency<C>(
       await finish(actionId, false);
       throw e;
     }
-    await finish(actionId, res.status < 400);
+    // Capture the JSON body (cloned, so the original response is still readable by the
+    // caller) to store for future duplicates.
+    let body: unknown = null;
+    try { body = await res.clone().json(); } catch { /* non-JSON response → store nothing */ }
+    await finish(actionId, res.status < 400, body);
     return res;
   };
 }

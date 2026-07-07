@@ -10,6 +10,7 @@
 import { useState } from "react";
 import { useConnectionStatus, type ConnLevel } from "@/lib/connectionStatus";
 import { useGuestOutbox, dismissGuestFailed, type GuestOrder } from "@/lib/guestOutbox";
+import { useBackClose } from "@/lib/backStack"; // phone back button closes the popover first
 
 const STATES: Record<ConnLevel, { dot: string; label: string; title: string }> = {
   online:  { dot: "#22c55e", label: "Live",         title: "Connected — live updates are flowing." },
@@ -36,6 +37,10 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
   const level = useConnectionStatus();
   const box = useGuestOutbox();
   const [open, setOpen] = useState(false);
+  // Register the popover with the phone back-button manager so pressing Back closes
+  // THIS popover first instead of falling through to another layer / the exit dialog.
+  // (self-noops while closed.)
+  useBackClose("conn-badge", open, () => setOpen(false));
   const st = (pollMode ? POLL_STATES : STATES)[level];
   const extra = box.failed.length ? `${box.failed.length} failed` : box.queued.length ? `${box.queued.length} waiting` : "";
   const clickable = box.count > 0;

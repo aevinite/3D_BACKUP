@@ -144,6 +144,9 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     const wasSearching = !!q;
     if (wasSearching) setSearchQuery("");
     setCurrentCategory("all");
+    // If the guest had folded this category, expand it — otherwise the tap scrolls
+    // to a collapsed header showing no dishes and looks like it "did nothing".
+    setClosedCats((cur) => cur.filter((s) => s !== slug));
     // Highlight the tapped chip right away and lock the spy so it can't override
     // it while the smooth-scroll + the shrink-correction below settle (bug #11).
     setSpyCat(slug);
@@ -557,9 +560,18 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
 
   // The search dropdown — top matches across all categories. Name-starts-with
   // first, then by rating. (Only built when there's something typed.)
+  // It must honour the SAME active filters as the grid (Veg / Chef / Favourites),
+  // otherwise the dropdown could list dishes the grid hides — two answers to one
+  // query on screen at once (e.g. Veg on + "chicken").
   const searchResults = q
     ? menuData
-        .filter(matchesSearch)
+        .filter((i) =>
+          matchesSearch(i) &&
+          !(chefOnly && !i.tags.includes("chef-special")) &&
+          !(favOnly && !favorites.includes(i.id)) &&
+          !(currentDiet === "veg" && !i.veg) &&
+          !(currentDiet === "non-veg" && i.veg)
+        )
         .sort((a, b) => {
           const aStarts = fold(a.title).startsWith(q) ? 0 : 1;
           const bStarts = fold(b.title).startsWith(q) ? 0 : 1;

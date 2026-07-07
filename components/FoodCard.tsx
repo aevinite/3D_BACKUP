@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
-import { formatPrice, prettyUsd, getCurrency, type CurrencyMeta } from "@/lib/format";
+import { formatPrice, prettyUsd, getCurrency, DEFAULT_CURRENCY, type CurrencyMeta } from "@/lib/format";
 import type { OptionGroup } from "@/lib/menu";
 import VegIcon from "./VegIcon";
 // The "must be at a table to order" gate. When dining-sessions are on and the
@@ -257,7 +257,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
             ) : null}{item.time || "25-30 min"}
           </div>
           {/* Price, formatted to the chosen currency (falls back to a $ amount) */}
-          <div className="dish-price">{currency ? formatPrice(item.price, currency) : `$${item.price}`}</div>
+          <div className="dish-price">{formatPrice(item.price, currency || DEFAULT_CURRENCY)}</div>
         </div>
 
         {/* The veg / non-veg marker in the corner */}

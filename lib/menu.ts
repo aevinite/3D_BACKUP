@@ -162,7 +162,24 @@ export type OrderStatus = "received" | "preparing" | "served" | "cancelled";
 // Returns the new order's id. We generate the id on the client so the guest's
 // device can follow ONLY its own order later (the table is insert-only for the
 // public, so we can't read the id back via .select()).
-export async function createOrder(o: OrderInput, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<string> {
+export async function createOrder(o: OrderInput, restaurantId: string = DEFAULT_RESTAURANT_ID, actionId?: string): Promise<string> {
+  // When an actionId is given, route through our server endpoint so the at-most-once
+  // guard applies to the ONLINE order too: if the reply is lost on a flaky connection
+  // and the guest taps again, the SAME actionId makes the server place it ONCE and
+  // echo the original order_id back — no more double order / double charge.
+  if (actionId) {
+    const res = await fetch("/api/guest/place-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": actionId },
+      body: JSON.stringify({ mode: "public", table: o.tableNumber || "", restaurantId, items: o.items, allergies: o.allergies }),
+    });
+    const j = (await res.json().catch(() => null)) as { ok?: boolean; reason?: string; item?: string; order_id?: string; retry?: boolean } | null;
+    if (res.status === 409 && j?.retry) throw new Error("Order failed: sync_in_progress");
+    if (!res.ok || !j?.ok || !j.order_id) {
+      throw new Error(`Order failed: ${j?.reason || "unknown"}${j?.item ? ` (${j.item})` : ""}`);
+    }
+    return j.order_id;
+  }
   // Call the server function that prices and stores the order. It returns the
   // new order's id (the SERVER generates it) so the device can poll its status.
   const { data, error } = await supabase.rpc("lfh_place_order_public", {
