@@ -61,7 +61,9 @@ const normalize = (raw: unknown): CartItem[] => {
       title: it.title,
       price: it.price,
       image: it.image,
-      qty: typeof it.qty === "number" && it.qty > 0 ? it.qty : 1,
+      // Clamp to a whole 1..99 so corrupt/legacy saved data (fractions, huge counts)
+      // can never quote more than the server will ever make (it caps each line at 99).
+      qty: Math.min(99, Math.max(1, Math.floor(typeof it.qty === "number" && it.qty > 0 ? it.qty : 1))),
       options: Array.isArray(it.options) ? it.options : undefined,
       removed: Array.isArray(it.removed) ? it.removed : undefined,
       note: typeof it.note === "string" ? it.note : undefined,
@@ -97,6 +99,10 @@ export default function CartPanel() {
   const [otherOpen, setOtherOpen] = useState(false); // reveal the free-text field
   const [placing, setPlacing] = useState(false); // true while an order is being sent, to block double taps
   const placingRef = useRef(false); // synchronous lock so a fast double-tap can't fire two orders before React disables the button
+  // A STABLE at-most-once key for the current cart. Generated once per distinct
+  // cart+table, reused if the guest retries after a failed/lost send (so the server
+  // dedups and never double-charges), and regenerated the moment the cart changes.
+  const orderKeyRef = useRef<{ sig: string; id: string } | null>(null);
   const declaredHydrated = useRef(false); // skip the first persist so restore can't be clobbered
   const menuLoadedRef = useRef(false); // fetch the full menu (pairings/edit/allergens) only ONCE, on first open
 
@@ -517,18 +523,27 @@ export default function CartPanel() {
       // OFFLINE: save the order on-device and send it automatically on reconnect
       // (at-most-once via the guest outbox). The online path below is unchanged.
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, items: itemsS, allergies, track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) } });
+        await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: itemsS, allergies, track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) } });
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Saved — will send when you're back online", subtitle: "we'll send it automatically", kicker: "offline", icon: "📴", variant: "success" } }));
+        orderKeyRef.current = null; // a fresh order next time
         setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
         window.dispatchEvent(new Event("lfh:cart-updated"));
         window.dispatchEvent(new Event("lfh:close-all"));
         return;
       }
+      // Stable at-most-once key: same cart+table on a retry → same key → server places
+      // the order once. Any edit to the cart makes a new key (a genuinely new order).
+      const sig = JSON.stringify({ t: tableTrim, i: itemsS });
+      if (!orderKeyRef.current || orderKeyRef.current.sig !== sig) {
+        const rid = (globalThis.crypto?.randomUUID?.() as string) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        orderKeyRef.current = { sig, id: rid };
+      }
       const orderId = await createOrder({
         tableNumber: tableTrim,
         items: itemsS,
         allergies,
-      }, restaurantId);
+      }, restaurantId, orderKeyRef.current.id);
+      orderKeyRef.current = null; // placed OK → next tap is a new order
       // Remember this order on THIS device so the guest can follow its status.
       try {
         const raw = tget("lfh_active_orders");

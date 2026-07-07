@@ -93,6 +93,21 @@ export function tremove(base: string) {
   try { localStorage.removeItem(tkey(base)); } catch {}
 }
 
+// Explicit-slug variants: read/write a scoped key for a SPECIFIC restaurant,
+// not "whichever page this tab is on right now". Needed by the offline outbox,
+// which flushes an order that may belong to restaurant A while the tab has moved
+// on to restaurant B — the order's tracker entry must land under A, not B.
+export function tgetFor(base: string, slug: string): string | null {
+  if (typeof window === "undefined") return null;
+  migrateLegacyOnce();
+  try { return localStorage.getItem(`${base}:${slug || DEFAULT_RESTAURANT_SLUG}`); } catch { return null; }
+}
+export function tsetFor(base: string, slug: string, value: string) {
+  if (typeof window === "undefined") return;
+  migrateLegacyOnce();
+  try { localStorage.setItem(`${base}:${slug || DEFAULT_RESTAURANT_SLUG}`, value); } catch {}
+}
+
 // For cross-tab "storage" event listeners: does this event belong to the given
 // base key IN THIS TAB'S restaurant? (Another restaurant's tab writing its own
 // scoped copy must not wake us up.)

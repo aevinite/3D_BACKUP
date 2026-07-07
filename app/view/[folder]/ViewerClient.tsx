@@ -311,8 +311,14 @@ export default function ViewerClient({ folder }: { folder: string }) {
       }
     };
 
-    // Start listening for those two events on the model element.
+    // A model file that downloads but can't be parsed (corrupt/partial GLB) makes
+    // <model-viewer> fire "error", NOT "load" — without this the spinner would spin
+    // forever. Treat it as a definitive failure so the guest gets a real message.
+    const handleError = () => { if (!modelSeenRef.current) setLoadFailed(true); };
+
+    // Start listening for those events on the model element.
     mv.addEventListener("load", handleLoad);
+    mv.addEventListener("error", handleError);
     mv.addEventListener("ar-status", handleARStatus);
 
     // Safety net: if "load" never fires within 4s, play the reveal anyway.
@@ -326,6 +332,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // Cleanup: stop listening and cancel timers/animation when leaving.
     return () => {
       mv.removeEventListener("load", handleLoad);
+      mv.removeEventListener("error", handleError);
       mv.removeEventListener("ar-status", handleARStatus);
       clearTimeout(startTimeout);
       if (requestRef.current) {
@@ -351,7 +358,14 @@ export default function ViewerClient({ folder }: { folder: string }) {
         setShowTryAgain(true);
       }
     }, 15000);
-    return () => clearTimeout(t);
+    // Escalation: if the model STILL hasn't shown much later, stop promising "still
+    // preparing" (which would hang forever when the model-viewer script is blocked or
+    // the file never arrives) and switch to a definitive "unavailable" + retry. If a
+    // slow model does eventually load, handleLoad hides this overlay, so it self-heals.
+    const t2 = setTimeout(() => {
+      if (!modelSeenRef.current) setLoadFailed(true);
+    }, 32000);
+    return () => { clearTimeout(t); clearTimeout(t2); };
   }, [loading, error]);
 
   // Redraws the thin connector line from a hotspot dot to its floating label
@@ -670,6 +684,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
         <PublicModelViewer
           config={{ ...config, modelUrl: activeUrl }}
           mvRef={mvRef}
+          onScriptError={() => { if (!modelSeenRef.current) setLoadFailed(true); }}
         />
       )}
 

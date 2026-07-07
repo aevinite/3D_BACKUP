@@ -37,9 +37,14 @@ interface PublicConfig {
 export default function PublicModelViewer({
   config,
   mvRef,
+  onScriptError,
 }: {
   config: PublicConfig;
   mvRef: React.RefObject<any>;
+  // Called if the <model-viewer> web-component script can't load (e.g. a network
+  // that blocks Google's CDN). Lets the parent show a real "unavailable" message
+  // instead of an endless spinner.
+  onScriptError?: () => void;
 }) {
   // Safety check: if no real model URL was set up yet, show a friendly
   // "not configured" placeholder instead of a broken viewer.
@@ -68,6 +73,7 @@ export default function PublicModelViewer({
         type="module"
         src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"
         strategy="afterInteractive"
+        onError={() => onScriptError?.()}
       />
       {/* <model-viewer> isn't a normal React tag, so we create it manually with
           React.createElement and pass all its settings as an object. */}

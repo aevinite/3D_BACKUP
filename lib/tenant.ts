@@ -66,6 +66,7 @@ export async function getRestaurantBySlug(slug: string): Promise<Restaurant | nu
  * Legacy helper for callers that only have a slug and want an id. Prefer
  * getRestaurantBySlug() where you need the full row / active check.
  */
-export function resolveRestaurantId(_slug?: string | null): string {
-  return DEFAULT_RESTAURANT_ID;
-}
+// (resolveRestaurantId was removed 2026-07-07: it always returned restaurant #1
+// regardless of the slug, so any caller would silently treat every restaurant as
+// #1. It had no callers — deleted so it can't become a trap. Use
+// getRestaurantBySlug() to resolve a slug to its real id.)
