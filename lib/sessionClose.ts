@@ -22,6 +22,24 @@ export type CloseResult =
 
 export type OrderLite = { status?: string | null; payment_status?: string | null };
 
+// Clear a table's live guest signals — resolve open waiter-calls + deny pending join/open
+// requests — scoped to ONE restaurant + table. Used by BOTH the manual /tables/:t/restart
+// endpoint AND the auto-restart path (lib/autoSettle) so the two can't drift. A restart keeps
+// the session OPEN, so the mig-020 close trigger never fires — this MUST be done explicitly,
+// or an unanswered call from the old party leaves a ghost 🔔 badge + ATTEND on the emptied
+// table (#7 fixed the manual path; the auto path had the same gap). Best-effort; never throws.
+export async function clearTableSignals(
+  rid: string | null | undefined,
+  tableNumber: string | number | null | undefined,
+): Promise<void> {
+  if (!rid || tableNumber == null) return;
+  const t = String(tableNumber);
+  try {
+    await sb.from("waiter_calls").update({ resolved: true }).eq("resolved", false).eq("restaurant_id", rid).eq("table_number", t);
+    await sb.from("requests").update({ status: "denied" }).eq("status", "pending").eq("restaurant_id", rid).eq("table_number", t);
+  } catch { /* best-effort — cleanup must never break the restart that triggered it */ }
+}
+
 // Pure decision: given the session's live (non-archived, non-cancelled) orders,
 // can it be closed? Blocked when any order is still COOKING (received/preparing)
 // OR UNPAID — unless force=true. Exported so the rule can be unit-tested directly.
@@ -59,11 +77,18 @@ export async function closeSession(
   if (sess) {
     // Scope cleanup to THIS session (not the bare table number, which could hit a
     // different party that later sat at the same table).
-    const owedRows = must(await sb.from("orders").select("total,discount")
+    const owedRows = must(await sb.from("orders").select("total,discount,subtotal,tax")
       .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid"));
     if (owedRows.length) {
-      const owed = owedRows.reduce((s: number, o: any) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
-      await logAction(ctx.panel, "close_unpaid", { table_number: sess.table_number ?? null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${owed} owed`, device_id: ctx.deviceId ?? undefined });
+      // Discount is stored PRE-TAX, so the amount actually owed drops by discount×(1+rate),
+      // not by the bare discount (matching the bill math everywhere else). Derive each order's
+      // rate from its own stored tax/subtotal — no RPC needed, and correct per-restaurant. (#6)
+      const owed = owedRows.reduce((s: number, o: any) => {
+        const sub = Number(o.subtotal) || 0, tax = Number(o.tax) || 0;
+        const rate = sub > 0 ? tax / sub : 0;
+        return s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate);
+      }, 0);
+      await logAction(ctx.panel, "close_unpaid", { table_number: sess.table_number ?? null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${Math.round(owed * 100) / 100} owed`, device_id: ctx.deviceId ?? undefined });
     }
     // archived_at/cancelled_at start the 30-min "restore to floor" grace window
     // (migration 112) — every path that archives/cancels an order stamps it.
