@@ -17,7 +17,7 @@ export default function ComingSoon({
           ))}
         </ul>
       )}
-      <div className="adm-coming-foot">We&apos;ll switch this on for your restaurant the moment it&apos;s ready.</div>
+      <div className="adm-coming-foot">This one&apos;s on our roadmap — it&apos;ll appear here once it&apos;s built.</div>
     </div>
   );
 }

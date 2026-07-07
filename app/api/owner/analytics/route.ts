@@ -80,6 +80,11 @@ export async function GET(req: NextRequest) {
   const range = sp.get("range") || "today";
   const rid = sp.get("rid");
   const compare = sp.get("compare") === "1";
+  // All-time "records" (lfh_owner_records) is an UNBOUNDED scan of the restaurant's whole
+  // order history — cheap to run once, wasteful every 60s. The client asks for it only on
+  // first load / range change (&records=1) and keeps its last value across auto-refreshes,
+  // so the polled path no longer re-scans all-time bests each minute (audit 2026-07-07).
+  const wantRecords = sp.get("records") === "1";
   const { from, to, bucket } = windowFor(range);
   const prevWin = compare ? prevWindowFor(range, from, to) : null;
 
@@ -160,7 +165,9 @@ export async function GET(req: NextRequest) {
         ? sb.rpc("lfh_owner_samehour_compare", { p_restaurant_id: rid, p_starts: sameHourStarts, p_elapsed: `${Math.round(elapsedMs / 1000)} seconds` })
         : Promise.resolve({ data: [], error: null }),
       sb.rpc("lfh_owner_payment_trend", { p_restaurant_id: rid, p_from: new Date(Date.now() - 14 * DAY).toISOString(), p_to: to }),
-      sb.rpc("lfh_owner_records", { p_restaurant_id: rid }),
+      wantRecords
+        ? sb.rpc("lfh_owner_records", { p_restaurant_id: rid })
+        : Promise.resolve({ data: null, error: null }),
     ]);
     if (meta.error) throw meta.error;
     if (!meta.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });

@@ -17,17 +17,26 @@ const STATES: Record<ConnLevel, { dot: string; label: string; title: string }> =
   offline: { dot: "#ef4444", label: "Offline",      title: "No internet. Anything you order is saved on this device and sent when you're back online." },
 };
 
+// The owner panel has no live socket — it refreshes on a timer. In `pollMode` the badge
+// tells that honest story (and turns amber when a refresh actually fails) instead of
+// claiming a websocket is "flowing" (audit 2026-07-07).
+const POLL_STATES: Record<ConnLevel, { dot: string; label: string; title: string }> = {
+  online:  { dot: "#22c55e", label: "Connected", title: "Connected — the numbers refresh every minute." },
+  weak:    { dot: "#f59e0b", label: "Retrying",  title: "Couldn't reach the server on the last refresh — retrying every minute." },
+  offline: { dot: "#ef4444", label: "Offline",   title: "No internet — the numbers can't refresh until you're back online." },
+};
+
 function orderLabel(o: GuestOrder): string {
   const t = o.track?.tableNumber || o.table;
   return "Order" + (t ? ` · Table ${t}` : "");
 }
 const fmtAgo = (ts: number) => { const m = Math.floor((Date.now() - ts) / 60000); return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`; };
 
-export default function ConnectionBadge({ className = "" }: { className?: string }) {
+export default function ConnectionBadge({ className = "", pollMode = false }: { className?: string; pollMode?: boolean }) {
   const level = useConnectionStatus();
   const box = useGuestOutbox();
   const [open, setOpen] = useState(false);
-  const st = STATES[level];
+  const st = (pollMode ? POLL_STATES : STATES)[level];
   const extra = box.failed.length ? `${box.failed.length} failed` : box.queued.length ? `${box.queued.length} waiting` : "";
   const clickable = box.count > 0;
 

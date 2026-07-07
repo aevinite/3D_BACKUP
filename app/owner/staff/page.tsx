@@ -5,8 +5,9 @@
 // /api/owner/manager-permissions, which are scoped server-side to exactly the
 // restaurants this caller owns — the UI never has to police that itself.
 //
-// A manager who was granted "manage_staff" lands here too (same API), but sees only
-// their one restaurant and can't change the power toggles (those stay owner-only).
+// This /owner/staff route is OWNER/ADMIN-only — the owner layout bounces anyone else to
+// /login. A manager granted "manage_staff" manages staff from the EDITOR panel, which
+// reuses this same API (they can't change the power toggles — those stay owner-only).
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Perms = Record<string, boolean>;
@@ -34,7 +35,9 @@ export default function OwnerStaffPage() {
   const [loading, setLoading] = useState(true);
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [notEnabled, setNotEnabled] = useState<string | null>(null); // calm "section off" state, not an error
   const pwRef = useRef<HTMLInputElement>(null);
+  const revealRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   // Inline rename / edit-phone editor: which row is open + its draft values.
   const [editing, setEditing] = useState<{ id: string; name: string; phone: string } | null>(null);
@@ -60,12 +63,26 @@ export default function OwnerStaffPage() {
   const load = useCallback(async () => {
     try {
       const r = await fetch(withScope("/api/owner/staff"), { cache: "no-store" }).then((x) => x.json());
+      // A 403 "not enabled" is a legitimate state, NOT an error — show a calm card, not the
+      // red "Something went wrong" banner (audit 2026-07-07).
+      if (r.disabled) { setNotEnabled(r.error || "Staff management isn't enabled for your restaurant — contact Aevidine."); return; }
       if (r.error) throw new Error(r.error);
+      setNotEnabled(null);
       setRestaurants(r.restaurants || []); setStaff(r.staff || []); setActor(r.actor || ""); setErr(null);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setLoading(false); }
   }, [withScope]);
   useEffect(() => { load(); }, [load]);
+
+  // When a new one-time password appears, bring the reveal card into view (it renders at the
+  // TOP of a possibly-long page) and select it — an owner low on the page used to never see
+  // it, and it can't be shown again (audit 2026-07-07).
+  useEffect(() => {
+    if (!reveal) return;
+    revealRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const t = setTimeout(() => { pwRef.current?.focus(); pwRef.current?.select(); }, 250);
+    return () => clearTimeout(t);
+  }, [reveal]);
 
   // After a deep-linked load, locate the named power toggle and pulse it once.
   useEffect(() => {
@@ -173,7 +190,7 @@ export default function OwnerStaffPage() {
       {err && <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 14 }}><b>Something went wrong.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span> <button className="ost-x" onClick={() => setErr(null)}>dismiss</button></div>}
 
       {reveal && (
-        <div className="adm-card ost-reveal">
+        <div className="adm-card ost-reveal" ref={revealRef}>
           <div><b>New password for {reveal.name}</b><div className="adm-muted" style={{ fontSize: 12.5 }}>Copy it now — it can&apos;t be shown again.</div></div>
           <input ref={pwRef} className="ost-pw" readOnly value={reveal.password} onFocus={(e) => e.currentTarget.select()} aria-label="One-time password" />
           <button className="ost-btn" onClick={() => copyPw(reveal.password)}>{copied ? "Copied!" : "Copy"}</button>
@@ -182,9 +199,10 @@ export default function OwnerStaffPage() {
       )}
 
       {loading && <div className="adm-empty">Loading…</div>}
-      {!loading && restaurants.length === 0 && <div className="adm-empty">No restaurants are assigned to you yet. Ask the admin to assign one.</div>}
+      {!loading && notEnabled && <div className="adm-card"><div className="adm-empty">{notEnabled}</div></div>}
+      {!loading && !notEnabled && restaurants.length === 0 && <div className="adm-empty">No restaurants are assigned to you yet. Ask the admin to assign one.</div>}
 
-      {restaurants.map((r) => {
+      {!notEnabled && restaurants.map((r) => {
         const team = staff.filter((s) => s.restaurant_id === r.id);
         return (
           <div key={r.id} className="adm-card ost-card" style={{ ["--rcol" as string]: r.accentColor }}>

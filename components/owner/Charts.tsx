@@ -285,7 +285,7 @@ export function PayTrendStack({ data }: { data: { day: string; method: string; r
     byDay.set(d, row);
   }
   const rows = [...byDay.values()].sort((a, b) => String(a.day).localeCompare(String(b.day)))
-    .map((r) => ({ ...r, label: new Date(String(r.day)).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) }));
+    .map((r) => ({ ...r, label: new Date(String(r.day)).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" }) }));
   if (!rows.length || !methods.length) return <Empty />;
   return (
     <div style={{ width: "100%", height: 200 }}>

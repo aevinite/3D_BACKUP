@@ -6,10 +6,11 @@
 // link to /aevinite — admin is a higher, password-gated privilege.
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { inr } from "@/components/admin/shared";
+import { useCallback, useEffect, useState } from "react";
+import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import { useBackClose } from "@/lib/backStack";
 import ConnectionBadge from "@/components/ConnectionBadge";
+import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 
 type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean; ent?: string };
 type NavGroup = { label: string; quiet?: boolean; items: NavItem[] };
@@ -92,24 +93,28 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   }, [path]);
 
   // "My restaurants" — the full list the owner owns, ALWAYS visible in the sidebar
-  // (owner request 2026-07-06). ONE fetch of the already-pre-aggregated overview per
-  // hard page load (the layout survives client-side navigation, so this doesn't
-  // re-fetch when hopping Dashboard→Reports); the dashboard keeps its own live copy.
+  // (owner request 2026-07-06). The shared overview cache collapses this with the
+  // dashboard's own overview fetch on a hard load (no duplicate read). It refreshes on
+  // the same activity-gated 60s cadence as the dashboard so the sidebar's "revenue today"
+  // no longer drifts stale against the live cards (audit 2026-07-07).
   const [myRests, setMyRests] = useState<{ id: string; name: string; accentColor: string; revenueToday: number }[]>([]);
-  useEffect(() => {
-    let dead = false;
+  const refreshMyRests = useCallback(() => {
     const scp = ridPin ? `&scope=${ridPin}` : "";
-    fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" })
-      .then((r) => r.json())
+    return fetchOwnerOverview(scp)
       .then((j) => {
-        if (dead || !Array.isArray(j?.restaurants)) return;
-        setMyRests(j.restaurants.map((r: { id: string; name: string; accentColor?: string; revenueToday?: number }) => ({
+        const list = (j as { restaurants?: unknown })?.restaurants;
+        if (!Array.isArray(list)) return;
+        setMyRests(list.map((r: { id: string; name: string; accentColor?: string; revenueToday?: number }) => ({
           id: r.id, name: r.name, accentColor: r.accentColor || "#34d399", revenueToday: r.revenueToday || 0,
         })));
       })
       .catch(() => {});
-    return () => { dead = true; };
   }, [ridPin]);
+  useEffect(() => { refreshMyRests(); }, [refreshMyRests]);
+  useActiveAutoRefresh(() => refreshMyRests(), 60000);
+  // The owner panel rendered = the auth/DB lookup SUCCEEDED, so reset the reconnect
+  // backoff counter — the next outage starts fresh at 3s (see OwnerReconnecting).
+  useEffect(() => { try { sessionStorage.removeItem("owner_reconnect_attempts"); } catch { /* ignore */ } }, []);
 
   // Banner name must match THIS tab, not the browser-wide act-as cookie (bug #10,
   // 2026-07-06): with two admin owner-tabs open, the cookie holds the last-opened
@@ -259,7 +264,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
             <span className="dot" aria-hidden="true" /> {adminViewing ? shownName : "Owner overview"}
           </span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            <ConnectionBadge />
+            <ConnectionBadge pollMode />
             <button className="adm-icnbtn" onClick={toggleSkin} title={skin === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">
               <i className={`fas ${skin === "dark" ? "fa-sun" : "fa-moon"}`} aria-hidden="true" />
             </button>

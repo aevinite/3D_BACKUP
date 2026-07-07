@@ -23,6 +23,7 @@ type Rating = {
 type Summary = { total: number; avg: number; dist: number[]; unhandled: number };
 
 const wrap: React.CSSProperties = { overflowWrap: "anywhere", wordBreak: "break-word" };
+const IST = "Asia/Kolkata"; // every date shown here is in India time, like the rest of the panel
 const Stars = ({ n }: { n: number }) => (
   <span aria-label={`${n} out of 5`} style={{ color: "#f5a623", letterSpacing: 1 }}>
     {"★".repeat(n)}<span style={{ color: "var(--border, #ccc)" }}>{"★".repeat(5 - n)}</span>
@@ -36,17 +37,18 @@ export default function OwnerFeedback() {
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
   const scp = scopePin ? `?scope=${scopePin}` : "";
-  const q = (extra?: string) => `${scp}${scp ? (extra ? `&${extra}` : "") : extra ? `?${extra}` : ""}`;
 
   // ── Ratings ──
   const [ratings, setRatings] = useState<Rating[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [rFilter, setRFilter] = useState<"all" | "unhandled">("all");
   const [ratingsOff, setRatingsOff] = useState(false);
+  const [rErr, setRErr] = useState<string | null>(null); // ratings load failed (vs genuinely empty)
   // ── Issues ──
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const [iFilter, setIFilter] = useState<"open" | "all">("open");
   const [issuesOff, setIssuesOff] = useState(false);
+  const [iErr, setIErr] = useState<string | null>(null); // issues load failed (vs genuinely empty)
 
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -56,20 +58,23 @@ export default function OwnerFeedback() {
 
   const loadRatings = useCallback(async () => {
     try {
-      const j = await (await fetch(`/api/owner/ratings${scp}`, { cache: "no-store" })).json();
+      // On the "To handle" filter, ask the SERVER for unhandled rows so any older than the
+      // newest 200 stay reachable + actionable (they were invisible before; audit 2026-07-07).
+      const suffix = rFilter === "unhandled" ? (scp ? `${scp}&filter=unhandled` : "?filter=unhandled") : scp;
+      const j = await (await fetch(`/api/owner/ratings${suffix}`, { cache: "no-store" })).json();
       if (j.disabled) { setRatingsOff(true); return; }
       if (j.error) throw new Error(j.error);
-      setRatings(j.ratings || []); setSummary(j.summary || null); setErr(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setRatings((c) => c ?? []); }
-  }, [scp]);
+      setRatings(j.ratings || []); setSummary(j.summary || null); setRErr(null); setErr(null);
+    } catch (e) { const m = e instanceof Error ? e.message : String(e); setErr(m); setRErr(m); }
+  }, [scp, rFilter]);
 
   const loadIssues = useCallback(async () => {
     try {
       const j = await (await fetch(`/api/owner/issues${scp}`, { cache: "no-store" })).json();
       if (j.disabled) { setIssuesOff(true); return; }
       if (j.error) throw new Error(j.error);
-      setIssues(j.issues || []); setErr(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setIssues((c) => c ?? []); }
+      setIssues(j.issues || []); setIErr(null); setErr(null);
+    } catch (e) { const m = e instanceof Error ? e.message : String(e); setErr(m); setIErr(m); }
   }, [scp]);
 
   const loadAll = useCallback(async () => { await Promise.all([loadRatings(), loadIssues()]); }, [loadRatings, loadIssues]);
@@ -146,7 +151,12 @@ export default function OwnerFeedback() {
 
         {/* ───────── RATINGS TAB ───────── */}
         {tab === "ratings" && !ratingsOff && (
-          summary === null && ratings === null ? (
+          rErr && ratings === null ? (
+            <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>
+              Couldn&apos;t load your ratings — this is a loading error, not &ldquo;no ratings.&rdquo;{" "}
+              <button className="adm-btn" style={{ marginLeft: 6 }} onClick={loadRatings}>Try again</button>
+            </div>
+          ) : summary === null && ratings === null ? (
             <div className="adm-empty">Loading ratings…</div>
           ) : (summary?.total || 0) === 0 ? (
             <div className="adm-empty">No guest ratings yet. They appear here after diners rate a bill.</div>
@@ -205,7 +215,7 @@ export default function OwnerFeedback() {
                         </div>
                         {r.comment && <p style={{ margin: "8px 0 0", color: "var(--text)", fontSize: 13, lineHeight: 1.5, ...wrap }}>“{r.comment}”</p>}
                         <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)", ...wrap }}>
-                          {r.name ? <b>{r.name}</b> : <span>Guest</span>} · {new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                          {r.name ? <b>{r.name}</b> : <span>Guest</span>} · {new Date(r.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST })}
                           {r.acknowledged && r.acknowledged_by ? ` · handled by ${r.acknowledged_by}` : ""}
                         </div>
                         {r.staff_note && noteFor !== r.id && (
@@ -236,7 +246,12 @@ export default function OwnerFeedback() {
               <button className={iFilter === "open" ? "on" : ""} onClick={() => setIFilter("open")}>Open · {openCount}</button>
               <button className={iFilter === "all" ? "on" : ""} onClick={() => setIFilter("all")}>All</button>
             </div>
-            {issues === null ? (
+            {iErr && issues === null ? (
+              <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>
+                Couldn&apos;t load issues — this is a loading error, not &ldquo;all clear.&rdquo;{" "}
+                <button className="adm-btn" style={{ marginLeft: 6 }} onClick={loadIssues}>Try again</button>
+              </div>
+            ) : issues === null ? (
               <div className="adm-empty">Loading issues…</div>
             ) : issueRows.length === 0 ? (
               <div className="adm-empty">{iFilter === "open" ? "No open issues — all clear. 🎉" : "No issues raised yet."}</div>
@@ -259,8 +274,8 @@ export default function OwnerFeedback() {
                       </div>
                       {i.body && <p style={{ margin: "8px 0 0", color: "var(--muted)", fontSize: 13, lineHeight: 1.5, ...wrap }}>{i.body}</p>}
                       <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)" }}>
-                        Raised by <b>{i.raised_by || "—"}</b> ({i.raised_role || "staff"}) · {new Date(i.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-                        {i.resolved_at ? ` · resolved ${new Date(i.resolved_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}
+                        Raised by <b>{i.raised_by || "—"}</b> ({i.raised_role || "staff"}) · {new Date(i.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST })}
+                        {i.resolved_at ? ` · resolved ${new Date(i.resolved_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST })}` : ""}
                       </div>
                     </div>
                   );
