@@ -180,8 +180,14 @@ function ticketHtml(o, rows) {
     : (!allCooked
       ? `<button class="big ready" data-ready="${esc(o.id)}">ALL READY</button>`
       : `<div class="awaiting">✓ ready — waiter serving</div>`);
+  // Manual REPRINT button — only shown when KOT auto-print is enabled for this restaurant
+  // (state.autoPrintKot), so restaurants that don't print see no clutter. A print-first
+  // kitchen needs this: if the printer jammed / ran out of paper when the KOT auto-printed,
+  // the cook can reprint that exact ticket on demand. Independent of the auto-print tracking
+  // (printedIds) — it just re-runs printKot for this order's current dishes. (owner 2026-07-07)
+  const reprintBtn = state.autoPrintKot ? `<button class="reprint" data-reprint="${esc(o.id)}" title="Reprint this kitchen ticket" aria-label="Reprint kitchen ticket">🖨</button>` : "";
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span></div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${lines}${action}</div>`;
 }
 
@@ -208,6 +214,8 @@ function bindDelegation() {
   if (clickDelegationBound) return;
   clickDelegationBound = true;
   document.body.addEventListener("click", (e) => {
+    const reprint = e.target.closest("[data-reprint]");
+    if (reprint) { reprintOrder(reprint.dataset.reprint); return; }
     const ready = e.target.closest("[data-ready]");
     if (ready) { markOrderReady(ready.dataset.ready); return; }
     // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
@@ -475,6 +483,18 @@ function markOrderReady(orderId) {
   api("POST", `/orders/${orderId}/ready`).then(scheduleReadyReconcile).catch((e) => { toast("Failed: " + e.message); load(); });
 }
 
+// Manual REPRINT (owner 2026-07-07): re-run the KOT print for ONE order's current dishes on
+// demand — the safety net for a print-first kitchen when the printer jammed / ran out of paper
+// during the automatic print. It calls printKot directly (a local, no-network action), so it
+// does NOT touch the auto-print tracking (printedIds) and can be tapped as many times as needed.
+function reprintOrder(id) {
+  const o = (state.orders || []).find((x) => x.id === id);
+  if (!o) { toast("That order isn't on the board any more."); return; }
+  const rows = (state.items || []).filter((it) => it.order_id === id); // empty for legacy orders → printKot falls back to o.items
+  printKot(o, rows, state.restaurant);
+  toast(`Reprinting KOT #${o.kot_no ?? "—"} · Table ${o.table_number}`);
+}
+
 // ── the 86 board (sold-out toggles) ──────────────────────────────────────────
 function renderDishes() {
   const q = ($("#dishSearch").value || "").toLowerCase();
@@ -557,6 +577,9 @@ function boardSig(d) {
     (d.dishes || []).map(stableRow),
     (d.platform || []).map(stableRow),
     d.platformAccept,
+    // autoPrintKot drives whether the per-ticket 🖨 reprint button renders, so a change to it
+    // must flip the signature and force a repaint (read from state — it's not on every caller's d).
+    state.autoPrintKot,
   ]);
 }
 let lastSig = null;
