@@ -12,7 +12,9 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 // Owner-panel SECTIONS the admin can switch off (nav + API both honour these).
 // "ratings" (mig 138) gates the guest star-ratings view/management the owner + manager
 // get on the Feedback & issues page.
-export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings"] as const;
+// "customers" (guest list from the customers table) + "settings" (owner appearance /
+// password / what's-enabled) added 2026-07-07; absent = ON, so every restaurant gets them.
+export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings", "customers", "settings"] as const;
 export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 
 // The manager powers (mig 091). The admin's availability switch for each lives under
