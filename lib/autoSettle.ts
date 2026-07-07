@@ -7,7 +7,7 @@
 // a failure here can't break the underlying action.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction } from "@/lib/oplog";
-import { closeSession } from "@/lib/sessionClose";
+import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 
 export async function maybeAutoSettle(
   sessionId: string | null | undefined,
@@ -21,9 +21,9 @@ export async function maybeAutoSettle(
     // order row, then scope the settings lookup to THAT restaurant (multi-tenant:
     // settings has one row per restaurant_id; the legacy `id='site'` row only ever
     // matched restaurant #1, so other tenants used to read #1's auto-settle mode).
-    const res = await sb.from("orders").select("payment_status,status,restaurant_id")
+    const res = await sb.from("orders").select("payment_status,status,restaurant_id,table_number")
       .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled");
-    const orders = (res.data || []) as { payment_status?: string; status?: string; restaurant_id?: string | null }[];
+    const orders = (res.data || []) as { payment_status?: string; status?: string; restaurant_id?: string | null; table_number?: string | number | null }[];
     if (!orders.length) return;                                          // nothing to settle
     const rid = orders[0]?.restaurant_id;
     if (!rid) return;                                                    // can't scope settings without it → bail safely
@@ -48,7 +48,13 @@ export async function maybeAutoSettle(
       // party still "connected" — a parity gap vs /tables/:t/restart. (owner, 2026-06-18)
       await sb.from("session_members").update({ removed: true })
         .eq("session_id", sessionId).eq("removed", false);
-      await logAction(ctx.panel, "table_auto_restart", { detail: "auto-restarted: bill paid + all served", device_id: ctx.deviceId ?? undefined });
+      // …and clear the old party's live signals (open waiter-calls + pending requests), the
+      // SAME cleanup the manual /tables/:t/restart does. The session stays open so the close
+      // trigger never fires — without this, auto-restart left a ghost 🔔 badge on the emptied
+      // table (the manual path was fixed in #7; this is the auto-path parity). (shared helper)
+      const restartTbl = orders[0]?.table_number != null ? String(orders[0].table_number) : null;
+      await clearTableSignals(rid, restartTbl);
+      await logAction(ctx.panel, "table_auto_restart", { table_number: restartTbl, detail: "auto-restarted: bill paid + all served", device_id: ctx.deviceId ?? undefined });
     }
   } catch { /* best-effort — auto-settle must never break the pay/serve that triggered it */ }
 }

@@ -689,8 +689,17 @@ function openDishEditModal(itemId) {
 }
 
 // ── the table detail panel (view mode) ───────────────────────────────────────
+let lastPanelTable = null;   // #U2: which table the current .detail-pop belongs to (for scroll restore)
 function renderPanel() {
   const p = $("#panel");
+  // #U1: if a Move picker is open and some path forced a full renderPanel, tear its back layer
+  // down first so it can't orphan into a dead Back press. (Normal picker close already did this.)
+  if (state.pickerOpen && activePickerDrop) activePickerDrop();
+  // #U2: preserve the detail popup's scroll across a live-update rebuild — only when it's the
+  // SAME table still open (switching tables should start at the top). Restored after innerHTML.
+  const existingPop = p.querySelector(".detail-pop");
+  const prevScrollTop = (existingPop && lastPanelTable != null && String(lastPanelTable) === String(state.table)) ? existingPop.scrollTop : 0;
+  const restoreScroll = () => { if (prevScrollTop) { const np = p.querySelector(".detail-pop"); if (np) np.scrollTop = prevScrollTop; } lastPanelTable = state.table; };
   // #10: a picker (renderPickerShell) sets p.onclick to a "go back" handler; if we don't
   // clear it here, that handler LEAKS onto the rebuilt detail — so after using "Move an
   // order" a stray tap on the dim margin re-opened the picker. Reset it every rebuild; the
@@ -750,6 +759,7 @@ function renderPanel() {
     // #10: tap the dimmed area around the card to close, like every other tablet popup.
     p.onclick = (e) => { if (e.target === p) { state.table = null; renderPanel(); renderFloor(); } };
     $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
+    restoreScroll();   // #U2: keep the popup scroll across a live-update rebuild (same table)
     return;
   }
 
@@ -1017,6 +1027,7 @@ function renderPanel() {
     }
   };
   $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
+  restoreScroll();   // #U2: keep the popup scroll across a live-update rebuild (same table)
 }
 
 // Advance one dish new→cooking→served (wrapping). Optimistic so it feels instant.
@@ -1028,8 +1039,15 @@ function scheduleServeReconcile() {
   if (serveReconcileTimer) clearTimeout(serveReconcileTimer);
   serveReconcileTimer = setTimeout(() => { serveReconcileTimer = null; load().catch(() => {}); }, 2500);
 }
-function advanceDish(id, cur) {
+async function advanceDish(id, cur) {
   const next = NEXT_STATUS[cur] || "preparing";
+  // #U3: the pill cycle wraps served→received, and a "served" pill stays tappable — so a stray or
+  // double tap silently bounces a served dish back to brand-new (un-accepted), confusing the
+  // kitchen board + floor tile. Require a confirm for that one destructive step; forward taps
+  // (new→cooking→served) stay instant.
+  if (cur === "served" && next === "received") {
+    if (!(await confirmDialog('Move this SERVED dish back to "new" (un-accepted)? The kitchen will treat it as a fresh order again.', "Move back"))) return;
+  }
   const it = (state.data.items || []).find((x) => x.id === id);
   if (it) it.status = next;            // optimistic — the pill flips instantly
   // #8: re-sync THIS table's slim summary tile from the slice so the floor counts + the tile's
@@ -1144,10 +1162,19 @@ function optimisticServeAll(orderIds) {
 // never falls out below the floor on desktop — 2026-07-06) and registers its OWN back-stack
 // layer so the hardware/browser Back button steps back to the table detail, not out to the
 // floor. `onBack` is where ← / ✕ / Back / backdrop go.
+let activePickerDrop = null;   // #U1: lets a forced renderPanel drop an open picker's back layer
 function renderPickerShell(titleHtml, bodyHtml, layerId, onBack) {
   const p = $("#panel"); p.classList.add("has-detail");
   let backOff = window.LFH_BACK ? LFH_BACK.layer(layerId, () => go()) : null;
-  const go = () => { if (backOff) { backOff(); backOff = null; } onBack(); };
+  // Full teardown: drop the back layer + clear the "picker open" flag so normal repaints resume.
+  const drop = () => { if (backOff) { backOff(); backOff = null; } activePickerDrop = null; state.pickerOpen = false; };
+  const go = () => { drop(); onBack(); };
+  // #U1: the picker lives inside #panel, but a realtime breadcrumb / 60s poll calls renderPanel()
+  // which would wipe the picker out mid-selection AND orphan its back layer (a dead Back press).
+  // Flag it open so those auto-repaints skip renderPanel (see load/loadTables/poll), and record
+  // its teardown so a FORCED renderPanel (user navigation) still cleans the layer instead of leaking.
+  state.pickerOpen = true;
+  activePickerDrop = drop;
   p.innerHTML = `
    <div class="detail-pop">
     <button class="detail-x picker-back" type="button" aria-label="Back">✕</button>
@@ -1157,8 +1184,8 @@ function renderPickerShell(titleHtml, bodyHtml, layerId, onBack) {
   p.querySelector(".picker-back").onclick = go;
   // Tap the dimmed area outside the card → back (consistent with every other tablet popup).
   p.onclick = (e) => { if (e.target === p) go(); };
-  // Fire an action AND drop this picker's back layer first (renderPanel will replace the DOM).
-  return { dropLayer: () => { if (backOff) { backOff(); backOff = null; } } };
+  // Fire an action AND drop this picker's back layer + flag first (renderPanel replaces the DOM).
+  return { dropLayer: drop };
 }
 
 function renderShiftPicker(t, s) {
@@ -2179,7 +2206,7 @@ async function loadTables(tables) {
   // filter membership flipped or the grid isn't present. The detail panel (#panel) is a separate
   // container, so patching tiles never disturbs an open detail — keep its same guard below.
   patchTabletTiles(tables);
-  if (!state.ordering) renderPanel();   // never repaint the detail under a mid-order waiter
+  if (!state.ordering && !state.pickerOpen) renderPanel();   // never repaint under a mid-order waiter OR an open Move picker (#U1)
 }
 
 async function load() {
@@ -2219,7 +2246,7 @@ async function load() {
   if (sig === lastSig) return;
   lastSig = sig;
   renderFloor();
-  if (!state.ordering) renderPanel();
+  if (!state.ordering && !state.pickerOpen) renderPanel();   // #U1: don't wipe an open Move picker on a live update
 }
 setInterval(() => ($("#clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })), 1000);
 load().catch((e) => toast("Can't reach the database: " + e.message, false));
@@ -2325,7 +2352,7 @@ api("GET", "/whoami").then((w) => {
   if (!tHigher()) return;
   renderXrayRibbon();
   lastSig = ""; // force one repaint — buttons may need to appear tinted
-  renderFloor(); if (!state.ordering) renderPanel();
+  renderFloor(); if (!state.ordering && !state.pickerOpen) renderPanel();   // #U1: don't clobber an open Move picker
 }).catch(() => {});
 // Realtime: refetch only when something on the floor actually changes (instant),
 // instead of polling every second. A slow 60s timer is the backup if the

@@ -11,7 +11,7 @@ import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
-import { closeSession } from "@/lib/sessionClose";
+import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { PAYMENT_METHODS } from "@/lib/payments";
@@ -290,12 +290,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // differs only by its allergy/avoid list is no longer wrongly treated as a dupe.
       // (There is no orders.note column — the note rides on each order_item — so it isn't
       // part of this order-level signature.)
-      // Normalise each line to {id, qty, options} with options coerced to null. The
-      // INCOMING order omits options entirely (→ undefined, dropped by JSON.stringify),
-      // but the STORED row keeps options:null — so without this coercion the two
-      // signatures never matched and the guard silently never fired (pre-existing bug
-      // found 2026-07-06). Coercing both to null makes identical orders compare equal.
-      const lineSig = (i: any) => ({ id: i.id, qty: Number(i.qty) || 1, options: i.options ?? null });
+      // Normalise each line to {id, qty, options}. The INCOMING order sends options as
+      // [{group,label}] while the STORED row keeps [{group,label,PRICE}] — so a naive compare
+      // never matched for any dish with add-ons and the guard silently never fired for them
+      // (found 2026-07-06 for the null case, 2026-07-07 for the option-shape case). Fold both
+      // sides to {group,label} (drop price + coerce empty→null) so identical orders compare equal.
+      const optSig = (opts: any) => (Array.isArray(opts) && opts.length)
+        ? opts.map((o: any) => ({ group: o?.group ?? null, label: o?.label ?? null }))
+        : null;
+      const lineSig = (i: any) => ({ id: i.id, qty: Number(i.qty) || 1, options: optSig(i.options) });
       const sig = JSON.stringify({
         items: items.map(lineSig),
         allergies: Array.isArray(allergies) ? allergies : [],
@@ -446,9 +449,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const g = await tabletPerm("tablet_discount", req, body, rid, actor); if (!g.allow) return g.resp; // off/pin/on per settings
       // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS); the perm
       // gate above is a FEATURE gate, not a tenant one, so a foreign ?rid= must still be blocked.
-      const cur = must(await sb.from("orders").select("total").eq("id", b).eq("restaurant_id", rid).single());
+      const cur = must(await sb.from("orders").select("total, subtotal").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!cur) return err("That order isn't there anymore — refresh.", 404);
       const raw = Number(body && body.amount);
-      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), Number(cur.total) || 0) : 0;
+      // Clamp to the PRE-TAX food base (subtotal), NOT the tax-inclusive total: the bill drops
+      // by discount×(1+rate), so a discount above the pre-tax base would drive the due negative.
+      // Defense-in-depth — the modal already caps the UI, this guards a replay / hand-formed body.
+      const base = Number(cur.subtotal) || 0;
+      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), base) : 0;
       const note = String((body && body.note) || "").slice(0, 200) || null;
       const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid).select());
       await logAction("tablet", "order_discount", { order_id: b, detail: `₹${amount}` + byNote(g), device_id: dev });
@@ -493,9 +501,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("removed", false).select());
       // ...and resolve this table's open waiter-calls + deny its pending requests (#7), the
       // same cleanup a close does (mig 020 trigger). Without this, an unanswered call from the
-      // old party left a ghost 🔔 badge + ATTEND on the now-empty table. Scope by rid + table.
-      await sb.from("waiter_calls").update({ resolved: true }).eq("resolved", false).eq("restaurant_id", rid).eq("table_number", t);
-      await sb.from("requests").update({ status: "denied" }).eq("status", "pending").eq("restaurant_id", rid).eq("table_number", t);
+      // old party left a ghost 🔔 badge + ATTEND on the now-empty table. Shared helper so the
+      // manual + auto (lib/autoSettle) restart paths can't drift apart.
+      await clearTableSignals(rid, t);
       await logAction("tablet", "table_restart", { table_number: t, detail: `${rows.length} order(s) cleared` + by, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
@@ -547,7 +555,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // orders/:id/accept — accept a (often phone/online) order: everything not yet
     // served → preparing, so it shows up on the kitchen pass. Mirrors the kitchen.
     if (a === "orders" && c === "accept") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!cur) return err("That order isn't there anymore — refresh.", 404);
       const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: client re-fetches → skip both the .select() and the full-row re-read.
       must(await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
@@ -559,13 +568,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // orders/:id/serve-all — mark EVERY dish on one order served in a single call
     // (the table-wide "Serve all" fans these out, one per order). Mirrors the editor.
     if (a === "orders" && c === "serve-all") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!cur) return err("That order isn't there anymore — refresh.", 404);
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
       await logAction("tablet", "order_serve", { order_id: b, device_id: dev });
       // Only session_id needed (for auto-settle); client discards the body → not the full row.
-      const served = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).single());
+      const served = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       await maybeAutoSettle((served as any)?.session_id, { panel: "tablet", deviceId: dev }); // serving the order may complete the table
       return ok({ ok: true });
     }
@@ -708,10 +718,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (mTableCount > 0 && (Number(to) < 1 || Number(to) > mTableCount)) return err(`Table ${to} doesn't exist (this place has ${mTableCount} tables).`, 400);
       // Never re-home a PAID order — it's settled revenue on a closed bill; moving it onto
       // another party's live bill would double-count / corrupt the money trail. (rid-scoped.)
-      const src = must(await sb.from("orders").select("payment_status, table_number").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const src = must(await sb.from("orders").select("payment_status, table_number, session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!src) return err("That order isn't for this restaurant.", 404);
       if (src.payment_status === "paid") return err("Won't move a PAID order — mark it unpaid first.", 409);
       if (String(src.table_number) === to) return err("That order is already on that table.", 400);
+      // Don't pull an order OFF a bill whose invoice is already generated (and unpaid): the guest
+      // holds a printed invoice that would now OVERSTATE the total (#5, source side — the target
+      // side is guarded below). A voided invoice doesn't block (it's being re-billed anyway).
+      if (src.session_id) {
+        const ss = (await sb.from("sessions").select("invoice_no, invoice_voided").eq("id", src.session_id).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean } | null;
+        if (ss && ss.invoice_no != null && !ss.invoice_voided) return err(`Table ${src.table_number}'s bill is already invoiced — void or regenerate its invoice before moving an order off it.`, 409);
+      }
       // Find (or open) the target table's session, then re-home the order onto it.
       let target = (must(await sb.from("sessions").select("id, invoice_no, invoice_voided").eq("table_number", to).eq("restaurant_id", rid).neq("status", "closed").limit(1)))[0];
       // Don't add an order onto a bill whose invoice has ALREADY been generated/printed (#5):
@@ -791,6 +808,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && b === "open") {
       const t = String((body && body.table) || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
+      // Reject an out-of-range table (1..table_count) so a bad QR / hand-formed body can't
+      // open a phantom session on a table that doesn't exist — same guard as place-order/move.
+      const otc = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const oTableCount = Number((otc.data as { table_count?: number } | null)?.table_count) || 0;
+      if (oTableCount > 0 && (Number(t) < 1 || Number(t) > oTableCount)) return err(`Table ${t} doesn't exist (this place has ${oTableCount} tables).`, 400);
       const existing = must(await sb.from("sessions").select("id").eq("table_number", t).eq("restaurant_id", rid).neq("status", "closed").limit(1));
       if (existing.length) return ok(existing[0]);
       const row = must(await sb.from("sessions").insert({ table_number: t, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select());
@@ -800,6 +822,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     return err("unknown POST endpoint", 404);
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e), 500);
+    // Known, user-actionable failures already returned via err(...) with a friendly message +
+    // proper status ABOVE. Anything reaching here is an UNEXPECTED throw (e.g. a raw PostgREST
+    // error from a since-deleted row) — don't leak the internal message to the waiter's toast;
+    // log it server-side and return a generic 500. (NB2)
+    console.error("[tablet POST]", e instanceof Error ? e.message : e);
+    return err("Something went wrong — try again.", 500);
   }
 }
