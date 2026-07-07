@@ -27,7 +27,7 @@ import { useEffect, useRef } from "react";
 // Reads the restaurant's on/off settings (e.g. is the session system turned on).
 import { getSettings } from "@/lib/menu";
 // Helpers: read the saved session, and read/write the table's shared server cart.
-import { getStoredSession, getSessionCart, setSessionCart } from "@/lib/session";
+import { getStoredSession, getSessionCart, setSessionCart, mergeSessionCart } from "@/lib/session";
 import { RT_BACKUP_MS } from "@/lib/orderStatus"; // realtime backup-poll interval (60s)
 
 // The localStorage key where the cart is saved on this device (tenant-scoped).
@@ -139,8 +139,41 @@ export default function SessionCartSync() {
         const local = readLocal();
         const json = JSON.stringify(local);
         if (json === lastJson.current) return; // nothing actually changed
-        const res = await setSessionCart(token, local);
-        if (res.ok) lastJson.current = json;
+
+        // DELTA PUSH (migration 144): instead of overwriting the whole server
+        // cart (which dropped a co-diner's dish on a concurrent add), send only
+        // what THIS device changed since the last sync — added / removed lines and
+        // quantity sets — and let the server merge it into the current cart under a
+        // row lock. Then adopt the merged result so we also pick up anyone else's
+        // concurrent changes.
+        let baseline: Line[] = [];
+        try { baseline = JSON.parse(lastJson.current || "[]"); } catch {}
+        const bMap = new Map(baseline.map((l) => [lineKey(l), l]));
+        const lMap = new Map(local.map((l) => [lineKey(l), l]));
+        const added: Line[] = [];
+        const qty: Line[] = [];
+        for (const [k, l] of lMap) {
+          const b = bMap.get(k);
+          if (!b) added.push(l);                                   // a line we newly added
+          else if ((l.qty ?? 0) !== (b.qty ?? 0))                  // a quantity we changed
+            qty.push({ id: l.id, sig: l.sig, qty: l.qty } as Line);
+        }
+        const removed: Line[] = [];
+        for (const [k, b] of bMap) if (!lMap.has(k)) removed.push({ id: b.id, sig: b.sig } as Line);
+        if (!added.length && !removed.length && !qty.length) { lastJson.current = json; return; }
+
+        const res = await mergeSessionCart(token, added, removed, qty);
+        if (activeToken.current !== token) return; // session changed while awaiting
+        const merged = res.ok ? (res.cart as Line[] | undefined) : undefined;
+        if (res.ok && Array.isArray(merged)) {
+          const mergedJson = JSON.stringify(merged);
+          // Adopt the merged cart (it may now contain another diner's dish too).
+          if (mergedJson !== json) writeLocalGuarded(merged);
+          lastJson.current = mergedJson;
+        } else if (res.ok) {
+          lastJson.current = json; // server accepted but returned no cart — keep ours
+        }
+        // On failure we simply keep the local cart and retry on the next edit/pull.
       }, 500);
     };
 
