@@ -6,9 +6,9 @@
 export default async function StaffLogin({
   searchParams,
 }: {
-  searchParams: Promise<{ bad?: string; next?: string }>;
+  searchParams: Promise<{ bad?: string; locked?: string; next?: string }>;
 }) {
-  const { bad, next = "/aevinite" } = await searchParams;
+  const { bad, locked, next = "/aevinite" } = await searchParams;
   return (
     <main style={{ margin: 0, minHeight: "100vh", display: "grid", placeItems: "center", background: "#0b1220", color: "#dbe7ff", fontFamily: "system-ui, sans-serif" }}>
       <form
@@ -26,7 +26,8 @@ export default async function StaffLogin({
           autoComplete="current-password"
           style={{ width: "100%", boxSizing: "border-box", padding: 12, borderRadius: 10, border: "1px solid #2a3a5f", background: "#0b1220", color: "#dbe7ff", fontSize: 16 }}
         />
-        {bad ? <div style={{ color: "#f87171", fontSize: 13, marginTop: 8 }}>Wrong password — try again.</div> : null}
+        {locked ? <div style={{ color: "#f87171", fontSize: 13, marginTop: 8 }}>Too many wrong tries — wait a few minutes and try again.</div>
+          : bad ? <div style={{ color: "#f87171", fontSize: 13, marginTop: 8 }}>Wrong password — try again.</div> : null}
         <button
           type="submit"
           style={{ marginTop: 12, width: "100%", padding: 12, borderRadius: 10, border: 0, background: "#3b82f6", color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}

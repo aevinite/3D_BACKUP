@@ -42,8 +42,14 @@ type PinGate = { allow: true; managerName?: string } | { allow: false; resp: Nex
 async function managerPinGate(req: NextRequest, body: any, rid: string): Promise<PinGate> {
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { allow: true, managerName: "admin" };
   if (!(await anyManagerHasPin(rid))) return { allow: true }; // no manager PIN set yet for THIS restaurant → open
-  const check = await verifyManagerPin(body?.managerPin || "", rid);
-  if (!check.ok) return { allow: false, resp: NextResponse.json({ error: "A manager PIN is required for this.", needPin: true }, { status: 403 }) };
+  // Lock a device out after too many wrong PINs (a 4-digit PIN is otherwise guessable).
+  const throttleKey = `pin:${rid}:${deviceIdFrom(req) || "nodev"}`;
+  const check = await verifyManagerPin(body?.managerPin || "", rid, throttleKey);
+  if (!check.ok) {
+    return check.locked
+      ? { allow: false, resp: NextResponse.json({ error: "Too many wrong PINs — wait a minute and try again.", locked: true }, { status: 429 }) }
+      : { allow: false, resp: NextResponse.json({ error: "A manager PIN is required for this.", needPin: true }, { status: 403 }) };
+  }
   return { allow: true, managerName: check.managerName };
 }
 const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName !== "admin" ? ` (by ${g.managerName})` : "");
