@@ -127,7 +127,12 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   // ?rid-scoped) numbers. When this tab is pinned (?rid), prefer the name of the
   // pinned restaurant from the already-fetched list; fall back to the server prop.
   const pinnedName = ridPin ? myRests.find((r) => r.id === ridPin)?.name : undefined;
-  const shownName = pinnedName || restaurantName;
+  // In a PINNED tab never fall back to the server prop: restaurantName is derived from the
+  // browser-wide act-as cookie, which a second tab may have repointed to a DIFFERENT
+  // restaurant, so the banner would name the wrong one over this tab's (correctly ?rid-scoped)
+  // numbers. Show the pinned restaurant's name once resolved, else a neutral placeholder
+  // (until myRests loads / if that fetch fails) — never the cookie name (audit 2026-07-07).
+  const shownName = ridPin ? (pinnedName || "this restaurant") : restaurantName;
 
   // Open one restaurant's dashboard from anywhere: on /owner the dashboard listens
   // for this event (no reload); from any other page we navigate home with ?focus=.
