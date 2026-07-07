@@ -119,6 +119,9 @@ export default function AdminFloor() {
   const [rests, setRests] = useState<RestFloor[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [statsErr, setStatsErr] = useState<string | null>(null);
+  // If the all-restaurants tiles call fails, say so — otherwise every restaurant would render
+  // "no tables" with no warning (the tiles now come from ONE call, migration 145).
+  const [tilesErr, setTilesErr] = useState<string | null>(null);
   const [fetching, setFetching] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState("busy");
@@ -140,6 +143,7 @@ export default function AdminFloor() {
       else {
         setErr(null);
         setStatsErr(j.statsError || null);
+        setTilesErr(j.tilesError || null);
         setRests(j.restaurants as RestFloor[]);
         setUpdatedAt(j.generatedAt ? new Date(j.generatedAt).getTime() : Date.now());
       }
@@ -268,6 +272,12 @@ export default function AdminFloor() {
         <p style={{ color: "#d97706", fontSize: 12.5, fontWeight: 600 }}>
           <i className="fas fa-triangle-exclamation" style={{ marginRight: 6 }} aria-hidden="true" />
           Order counts unavailable ({statsErr}) — the coloured floor below is still live.
+        </p>
+      )}
+      {tilesErr && (
+        <p style={{ color: "var(--adm-danger)", fontSize: 12.5, fontWeight: 600 }}>
+          <i className="fas fa-triangle-exclamation" style={{ marginRight: 6 }} aria-hidden="true" />
+          Live tables unavailable ({tilesErr}) — the floors below may show empty. <button className="adm-btn" style={{ marginLeft: 8, padding: "2px 10px" }} onClick={load}>Retry</button>
         </p>
       )}
       {firstLoad && !err ? (

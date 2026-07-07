@@ -28,41 +28,44 @@ export async function GET(req: NextRequest) {
     // migration 134) — one tiny row per restaurant, never today's order rows
     // themselves. Counts only, NO revenue (owner 2026-07-03: the admin panel
     // shows no earnings anywhere).
-    const [restsQ, statsQ] = await Promise.all([
-      // Exclude recycle-bin restaurants (bug H4, 2026-07-06): a soft-deleted restaurant
-      // must not render a live floor tile — the deleted_at filter matches the Restaurants
-      // list, which was the only read that had it. Also trims the per-restaurant floor
-      // fan-out (egress #4) to live tenants only.
+    // ONE round-trip for the whole platform's tiles (lfh_admin_floor_all, migration 145)
+    // instead of one lfh_floor_state call PER restaurant — the per-restaurant fan-out grew
+    // linearly with tenant count (100 restaurants = 100 requests every refresh). The RPC
+    // already trims each tile to {n,s,p,c} and drops money, and excludes recycle-bin
+    // restaurants. Counts still come pre-summed from lfh_admin_floor_stats (one tiny row per
+    // restaurant, counts only, NO revenue).
+    const [restsQ, statsQ, tilesQ] = await Promise.all([
       supabaseAdmin.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name"),
       supabaseAdmin.rpc("lfh_admin_floor_stats"),
+      supabaseAdmin.rpc("lfh_admin_floor_all"),
     ]);
     if (restsQ.error) return NextResponse.json({ error: restsQ.error.message }, { status: 500 });
     const rests = restsQ.data ?? [];
     type StatRow = { restaurant_id: string; orders_today: number; active_orders: number; unpaid_orders: number; paid_today: number; cancelled_today: number };
     const statsBy = new Map(((statsQ.data as StatRow[] | null) ?? []).map((s) => [s.restaurant_id, s]));
-    const floors = await Promise.all(rests.map(async (r) => {
-      const { data, error } = await supabaseAdmin.rpc("lfh_floor_state", { p_restaurant_id: r.id });
-      type Row = { table_number: string; state: string; pay: string; has_call: boolean };
-      const tables = error ? [] : ((data as Row[] | null) ?? []).map((t) => ({
-        n: t.table_number, s: t.state, p: t.pay || "", c: !!t.has_call,
-      }));
+    type Tile = { n: string; s: string; p: string; c: boolean };
+    type FloorRow = { restaurant_id: string; tables: Tile[] };
+    const tilesBy = new Map(((tilesQ.data as FloorRow[] | null) ?? []).map((f) => [f.restaurant_id, f.tables || []]));
+    const floors = rests.map((r) => {
       const st = statsBy.get(r.id);
       return {
-        id: r.id, name: r.name, slug: r.slug, active: !!r.active, tables,
+        id: r.id, name: r.name, slug: r.slug, active: !!r.active,
+        tables: tilesBy.get(r.id) ?? [],
         ordersToday: Number(st?.orders_today) || 0,
         activeOrders: Number(st?.active_orders) || 0,
         unpaidOrders: Number(st?.unpaid_orders) || 0,
         paidToday: Number(st?.paid_today) || 0,
         cancelledToday: Number(st?.cancelled_today) || 0,
-        error: error?.message || null,
+        error: null as string | null,
       };
-    }));
-    // Never fake zeros: if the stats RPC failed (e.g. a DB missing migration
-    // 129), say so instead of silently rendering 0 orders everywhere.
+    });
+    // Never fake zeros: if a stats/tiles RPC failed (e.g. a DB missing a migration), say so
+    // instead of silently rendering 0 orders / empty floors everywhere.
     return NextResponse.json({
       restaurants: floors,
       generatedAt: new Date().toISOString(),
       statsError: statsQ.error?.message || null,
+      tilesError: tilesQ.error?.message || null,
     });
   }
 

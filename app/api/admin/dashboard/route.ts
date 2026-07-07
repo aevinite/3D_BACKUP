@@ -37,7 +37,8 @@ export async function GET(req: NextRequest) {
       // Per-restaurant open-table counts from the pre-aggregated RPC (p_ids=null → all). We read
       // ONLY open_tables from it; its revenue columns are ignored (no money to admin).
       sb.rpc("lfh_owner_overview", { p_ids: null }),
-      sb.from("staff_actions").select("*").order("created_at", { ascending: false }).limit(18),
+      // Only the columns the activity feed renders (not select("*")) — trims wire size.
+      sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, created_at").order("created_at", { ascending: false }).limit(18),
     ]);
 
   if (restQ.error) return NextResponse.json({ error: restQ.error.message }, { status: 500 });

@@ -10,6 +10,8 @@ import { splitBrandSegments, stripBrandMarkers } from "@/lib/brandText";
 import { openRestaurantPanel } from "@/components/admin/shared";
 import RestaurantReport from "@/components/admin/RestaurantReport";
 import { useBackClose } from "@/lib/backStack";
+import { useToast } from "@/components/admin/toast";
+import { adminFetch } from "@/lib/adminFetch";
 
 // Render brand text in the live preview: *marked* parts use the accent colour,
 // the rest the mode's text colour — exactly how the guest menu renders it.
@@ -44,6 +46,7 @@ const PANEL_OPTS = [
 ];
 
 export default function AdminRestaurants() {
+  const toast = useToast();
   const [list, setList] = useState<Restaurant[] | null>(null);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [q, setQ] = useState("");
@@ -74,11 +77,12 @@ export default function AdminRestaurants() {
   // Load the restaurant list once (and again when we come back from a detail view
   // so a freshly-created settings row + owner assignment show their latest state).
   const loadList = useCallback(async () => {
-    try {
-      const j = await (await fetch("/api/admin/restaurants", { cache: "no-store" })).json();
-      if (!j.error) { setList(j.restaurants || []); setOwners(j.owners || []); }
-    } catch {}
-  }, []);
+    // Shared helper: never fails silently — a load error pops a toast instead of leaving the
+    // list stuck/blank with no explanation.
+    const res = await adminFetch<{ restaurants?: Restaurant[]; owners?: Owner[] }>("/api/admin/restaurants");
+    if (res.ok) { setList(res.data.restaurants || []); setOwners(res.data.owners || []); }
+    else toast("Couldn't load restaurants — " + res.error, "err");
+  }, [toast]);
   useEffect(() => { loadList(); }, [loadList]);
 
   if (selected) {
@@ -331,7 +335,8 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // A tiny toast so a failed toggle tells the admin instead of silently snapping back
   // (or, worse, getting stuck showing the wrong ON/OFF state). Mirrors the Access page.
   const [toast, setToast] = useState<string | null>(null);
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); };
+  // Stable (useCallback) so the loaders below can list it as a dep without refetching every render.
+  const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); }, []);
 
   // Phone hardware Back peels one layer at a time instead of leaving the admin page
   // (CLAUDE.md back-button rule): the image zoom → the full report → the detail view → list.
@@ -347,28 +352,28 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     return () => window.removeEventListener("keydown", onKey);
   }, [zoomImg]);
 
+  // These loaders now announce a failure (flash) instead of silently swallowing it — a failed
+  // load leaves the switches disabled, so without a message you couldn't tell why (audit 2026-07-07).
   const load = useCallback(async () => {
     try {
       const j = await (await fetch(`/api/admin/restaurants/features?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
-      if (!j.error) setFeatures(j.features || {});
-    } catch {}
-  }, [restaurant.id]);
+      if (!j.error) setFeatures(j.features || {}); else flash("Couldn't load guest features."); } catch { flash("Couldn't load guest features."); } }, [restaurant.id, flash]);
   useEffect(() => { load(); }, [load]);
 
   const loadPanels = useCallback(async () => {
     try {
       const j = await (await fetch(`/api/admin/restaurants/panels?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
-      if (!j.error) setPanels(j.panels || {});
-    } catch {}
-  }, [restaurant.id]);
+      if (!j.error) setPanels(j.panels || {}); else flash("Couldn't load panels.");
+    } catch { flash("Couldn't load panels."); }
+  }, [restaurant.id, flash]);
   useEffect(() => { loadPanels(); }, [loadPanels]);
 
   const loadStaffFeat = useCallback(async () => {
     try {
       const j = await (await fetch(`/api/admin/restaurants/staff-features?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
-      if (!j.error) setStaffFeat(j.flags || {});
-    } catch {}
-  }, [restaurant.id]);
+      if (!j.error) setStaffFeat(j.flags || {}); else flash("Couldn't load staff features.");
+    } catch { flash("Couldn't load staff features."); }
+  }, [restaurant.id, flash]);
   useEffect(() => { loadStaffFeat(); }, [loadStaffFeat]);
 
   // Each switch defaults ON unless this restaurant explicitly turned it off
