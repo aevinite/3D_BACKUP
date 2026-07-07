@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useActiveAutoRefresh } from "@/components/admin/shared";
 import { useAdminModal } from "@/components/admin/useAdminModal";
+import { useToast } from "@/components/admin/toast";
 
 type Row = {
   id: string; name: string; slug: string; active: boolean;
@@ -130,22 +131,28 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   const [payBusy, setPayBusy] = useState(false);
   const [payMsg, setPayMsg] = useState<string | null>(null);
 
+  const toast = useToast();
   const [payments, setPayments] = useState<Payment[] | null>(null);
   // Synchronous guard so a double-click can't record the same payment twice (audit 2026-07-07).
   const payingRef = useRef(false);
 
   const loadHistory = useCallback(async () => {
+    // Now announces a failure via the shared toast instead of swallowing it — a failed load
+    // left the payment history blank with no explanation (audit 2026-07-07).
     try {
-      const j = await (await fetch(`/api/admin/billing?restaurant_id=${encodeURIComponent(row.id)}`, { cache: "no-store" })).json();
-      if (!j.error) {
+      const r = await fetch(`/api/admin/billing?restaurant_id=${encodeURIComponent(row.id)}`, { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && !j.error) {
         setPayments(j.payments || []);
         // Keep the "Next due on" field in sync — recording a payment with "roll due" advances
         // it server-side, and the open editor used to keep showing the OLD date until reopened
         // (audit 2026-07-07). j.billing.next_due_on is the fresh value.
         if (j.billing && typeof j.billing.next_due_on !== "undefined") setNextDueOn(j.billing.next_due_on || "");
+      } else {
+        toast("Couldn't load payment history — " + (j.error || "try reopening."), "err");
       }
-    } catch {}
-  }, [row.id]);
+    } catch { toast("Couldn't load payment history — network error.", "err"); }
+  }, [row.id, toast]);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
   // One line: phone Back + Escape close it, focus trapped inside, page behind frozen.
