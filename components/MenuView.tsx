@@ -92,6 +92,11 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
   const [closedCats, setClosedCats] = useState<string[]>([]); // "All" view: which dropdowns the guest manually FOLDED (default: none — everything starts open)
   const [spyCat, setSpyCat] = useState(""); // scroll-spy: which category's section is under the header right now (drives the auto-shifting chips)
+  // When the guest TAPS a category we lock the scroll-spy briefly so its live
+  // reading during the smooth-scroll (the bar shrinks mid-scroll, nudging the
+  // section below the spy line) can't repaint a DIFFERENT chip than the one
+  // tapped — the highlight now always matches the tap (audit fix bug #11).
+  const spyLockUntil = useRef(0);
   const restoredRef = useRef(false); // skip persisting UI state until after the restore
   // Monotonic request counter so an OLDER refreshMenu() response can never overwrite
   // a NEWER one. realtime nudges can fire refreshMenu() while a previous fetch is
@@ -139,10 +144,24 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     const wasSearching = !!q;
     if (wasSearching) setSearchQuery("");
     setCurrentCategory("all");
+    // Highlight the tapped chip right away and lock the spy so it can't override
+    // it while the smooth-scroll settles (bug #11).
+    setSpyCat(slug);
+    spyLockUntil.current = Date.now() + 800;
     const doScroll = () => {
       const sc = document.getElementById("main-scroll");
       const sec = sc?.querySelector(`.cat-group[data-cat="${slug}"]`);
       const stickyEl = document.getElementById("menu-sticky");
+      // If a filter has emptied this category (its section isn't in the grouped
+      // view), don't leave the guest with a dead tap — clear the filters so the
+      // full grouped menu is back, then scroll to it on the next paint (bug #12).
+      if (sc && !sec) {
+        if (chefOnly || favOnly || currentDiet || currentSort) {
+          setChefOnly(false); setFavOnly(false); setCurrentDiet(""); setCurrentSort("");
+          setTimeout(() => scrollToCategory(slug), 80);
+        }
+        return;
+      }
       if (!sc || !sec) return;
       // Land the section just below the pinned bar, measured live so it stays
       // correct whatever the bar's current (shrunk/expanded) height is.
@@ -325,6 +344,9 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     const computeSpy = () => {
       const sections = el.querySelectorAll<HTMLElement>(".cat-group[data-cat]");
       if (!sections.length) return;
+      // A category tap just set the highlight explicitly — don't let the spy
+      // fight it while the smooth-scroll is still settling (bug #11).
+      if (Date.now() < spyLockUntil.current) return;
       // The "line" is the bottom of the PINNED category+search block, measured
       // live — so it stays correct if it grows (longer translated labels, bigger
       // font, wrapped chips) instead of a hardcoded pixel guess.
@@ -557,6 +579,14 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
           .filter((g) => g.items.length > 0)
       : [];
 
+  // The category BAR should only show chips for categories that actually have
+  // dishes under the CURRENT filter (Veg / Chef's Special / Favorites…). Before,
+  // the bar always showed every category, so tapping one a filter had emptied did
+  // nothing — a dead tap (audit fix bug #12). When no filter is active this is
+  // every category with dishes, i.e. unchanged.
+  const nonEmptyCatSlugs = new Set(filteredItems.map((it) => it.category));
+  const visibleCategories = categories.filter((c) => nonEmptyCatSlugs.has(c.slug));
+
   // Everything below is the actual on-screen layout (JSX = HTML-like markup).
   // Curly braces { } drop a value or a bit of logic into the markup.
   return (
@@ -607,8 +637,9 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                     </div>
                   ))
                 : null)
-            : // .map turns each category into a tab button on screen.
-              categories.map((cat) => (
+            : // .map turns each category into a tab button on screen (only ones
+              // with dishes under the current filter — no dead taps, bug #12).
+              visibleCategories.map((cat) => (
                 <button
                   key={cat.slug}
                   type="button"
@@ -696,7 +727,11 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
 
         {/* The filter/sort chips + the list/gallery toggle. These now live OUTSIDE
             the pinned block, so they scroll away with the dishes (owner's call:
-            keep only categories + search glued to the top). */}
+            keep only categories + search glued to the top). Hidden while a search
+            is active: search overrides the filters, and this stops the search
+            suggestions dropdown from covering (and stealing taps from) the chips
+            underneath it (audit fix bug #13). */}
+        {!q && (
         <div className="items-header" id="sticky-header">
           {/* The row of sort chips, diet chips, and the list/gallery toggle. */}
           <div className="header-controls">
@@ -715,7 +750,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                     aria-pressed={chefOnly}
                     onClick={() => setChefOnly((v) => !v)}
                   >
-                    ⭐ Chef&apos;s Special
+                    {t.filterChef}
                   </button>
                 )}
                 {/* Favorites — the dishes this guest hearted (local). Only when
@@ -727,7 +762,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                     aria-pressed={favOnly}
                     onClick={() => setFavOnly((v) => !v)}
                   >
-                    ❤️ Favorites
+                    {t.filterFav}
                   </button>
                 )}
                 {/* "Popular" group — Chef's Special + Favorites (above) round out with the two
@@ -741,7 +776,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                     aria-pressed={currentSort === s.slug}
                     onClick={() => toggleSort(s.slug)}
                   >
-                    {s.label}
+                    {s.slug === "top-rated" ? t.sortTopRated : s.slug === "price" ? t.sortLowPrice : s.label}
                   </button>
                 ))}
                 {/* SEPARATE diet group — Veg / Non-Veg, sitting next to the layout toggle. The whole
@@ -758,7 +793,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                         aria-pressed={currentDiet === d.slug}
                         onClick={() => toggleDiet(d.slug)}
                       >
-                        {d.label}
+                        {d.slug === "veg" ? t.filterVeg : d.slug === "non-veg" ? t.filterNonVeg : d.label}
                       </button>
                     ))}
                   </>
@@ -790,6 +825,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
             </div>
           </div>
         </div>
+        )}
         {/* /items-header — filter/grid controls (these scroll away, not pinned). */}
 
         {/* The dishes. Three shapes:

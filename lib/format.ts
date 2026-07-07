@@ -101,11 +101,24 @@ export const getLanguage = (): LanguageMeta => {
   return LANGUAGES.find((l) => l.code === code) || LANGUAGES[0];
 };
 
+// Point the whole page in the right reading direction for the chosen language:
+// Arabic reads RIGHT-to-LEFT, every other supported language left-to-right. This
+// flips the layout, control alignment and scroll direction — not just the glyphs
+// (audit fix bug #7). Also keeps the <html lang> attribute honest for
+// screen-readers. Safe to call on the server (guards on document).
+export const applyDirection = (code: LanguageCode) => {
+  if (typeof document === "undefined") return;
+  const el = document.documentElement;
+  el.setAttribute("dir", code === "ar" ? "rtl" : "ltr");
+  el.setAttribute("lang", code);
+};
+
 // Save the guest's chosen language and announce it so on-screen text re-renders.
 export const setLanguage = (code: LanguageCode) => {
   try {
     localStorage.setItem(LANGUAGE_KEY, code);
   } catch {}
+  applyDirection(code); // flip RTL/LTR to match the new language
   if (typeof window !== "undefined") {
     // "lfh:language-changed" is the event name the useLanguage() hook listens for.
     window.dispatchEvent(new Event("lfh:language-changed"));

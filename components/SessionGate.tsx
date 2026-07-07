@@ -139,6 +139,9 @@ export default function SessionGate() {
   const coords = useRef<{ lat: number | null; lng: number | null }>({ lat: null, lng: null }); // the guest's location
   const sess = useRef<{ table: string; token: string; memberId: string; role: "owner" | "guest" } | null>(null); // our session once we have one
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null); // the active repeating timer, if any
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null); // the self-scheduling backoff timer (bug #4)
+  const pollAlive = useRef(false); // is a backoff poll currently running?
+  const accessReqRef = useRef(false); // guards against stacking duplicate waiter-call requests (bug #18)
   const settled = useRef(false); // whether we've already reported how this action ended
   const joining = useRef(false); // blocks DOUBLE-TAPS on the join buttons (a second tap while one join is in flight would create a duplicate membership)
   const videoRef = useRef<HTMLVideoElement | null>(null); // the camera preview on the scan screen
@@ -156,7 +159,41 @@ export default function SessionGate() {
   const joinGuestRef = useRef<(n?: string) => Promise<void> | void>(() => {});
 
   // Stops whatever repeating check is currently running.
-  const stopPoll = () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  const stopPoll = () => {
+    pollAlive.current = false;
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; }
+  };
+
+  // A gentle, self-slowing poll for the two "waiting" screens (table to open, or
+  // the head to let you in). Instead of hammering the database at a fixed 1.2–1.5s
+  // FOREVER — ~40 requests/minute per waiting guest, which piled up at a busy venue
+  // (audit fix bug #4) — this checks quickly at first (when the table is most
+  // likely to open/approve soon) then BACKS OFF toward a slow cap, and PAUSES
+  // entirely while the tab is hidden so a backgrounded phone does no work. `tick`
+  // returns false when the wait is over (so we stop). (Guest waits use RPCs, not
+  // direct table reads, so Supabase realtime isn't available here — this is the
+  // egress-safe middle ground.)
+  const runPoll = (tick: () => Promise<boolean>) => {
+    stopPoll();
+    pollAlive.current = true;
+    const FAST = 1500, MAX = 15000, HIDDEN = 8000;
+    let delay = FAST;
+    const loop = async () => {
+      if (!pollAlive.current) return;
+      // Backgrounded tab → don't poll, just re-check later cheaply.
+      if (typeof document !== "undefined" && document.hidden) {
+        pollTimer.current = setTimeout(loop, HIDDEN);
+        return;
+      }
+      let keepGoing = true;
+      try { keepGoing = await tick(); } catch { keepGoing = true; }
+      if (!pollAlive.current || keepGoing === false) return;
+      delay = Math.min(MAX, Math.round(delay * 1.4)); // slow down the longer they wait
+      pollTimer.current = setTimeout(loop, delay);
+    };
+    pollTimer.current = setTimeout(loop, 400); // first check almost immediately
+  };
   // Turns the camera off and stops looking for QR codes (safe to call any time).
   const stopScan = () => {
     if (scanTimer.current) { clearInterval(scanTimer.current); scanTimer.current = null; }
@@ -180,6 +217,7 @@ export default function SessionGate() {
     // the abandoned item, adding it later on the next successful connect.
     fireDone({ ok: false, reason: "cancelled", action: pending.current?.action });
     stopPoll(); stopScan(); setOpen(false); setStep("idle"); setName(""); setNote(""); pending.current = null;
+    accessReqRef.current = false; // fresh gate -> waiter-call guard resets (bug #18)
   }, []);
 
   // Phone back button closes the sheet (and reports the action cancelled, exactly
@@ -295,16 +333,16 @@ export default function SessionGate() {
   // continue automatically (become head & place the queued order, or ask to join).
   // We keep checking the table every 1.5 seconds until a waiter opens it.
   const proceedWhenOpen = useCallback(() => {
-    stopPoll();
-    pollRef.current = setInterval(async () => {
-      const p = pending.current; if (!p) return stopPoll();
+    runPoll(async () => {
+      const p = pending.current; if (!p) return false; // nothing pending -> stop
       const st = await tableStatus(p.table, ridRef.current);
       if (st.ok && st.open) {
-        stopPoll();
         if ((st.members as number) === 0) joinAsHead(); // first one in -> head -> acts
         else setStep("guest_name");                     // others already there -> ask to join
+        return false; // table opened -> stop polling
       }
-    }, 1500); // staff just opened it -> guest moves on within ~1.5s
+      return true; // keep waiting
+    });
   }, [joinAsHead]);
 
   // ── after location: tables are opened by STAFF, not by guests ──────────────
@@ -376,9 +414,8 @@ export default function SessionGate() {
   // While waiting for the host's OK, we re-check about once a second; the moment
   // we're approved, we carry out the queued action.
   const startApprovalPoll = useCallback(() => {
-    stopPoll();
-    pollRef.current = setInterval(async () => {
-      const s = sess.current; if (!s) return stopPoll();
+    runPoll(async () => {
+      const s = sess.current; if (!s) return false; // no session -> stop
       const state = await getSessionState(s.token);
       // Three definitive ends while waiting (anything else = network blip, retry):
       //  • 'removed'        — the head said NO: show the declined screen.
@@ -389,16 +426,17 @@ export default function SessionGate() {
       if (!state.ok) {
         const reason = (state as { reason?: string }).reason;
         if (reason === "removed" || reason === "session_closed" || reason === "invalid_token") {
-          stopPoll();
           clearStoredSession(); sess.current = null;
           fireDone({ ok: false, reason: reason === "removed" ? "denied" : "table_closed", action: pending.current?.action });
           setStep(reason === "removed" ? "denied" : "table_closed");
+          return false; // terminal -> stop polling
         }
-        return;
+        return true; // a network blip -> keep trying
       }
       const member = state.member as { approved?: boolean } | undefined;
-      if (state.ok && member?.approved) { stopPoll(); act(); }
-    }, 1200); // move on within ~1s of the head approving
+      if (state.ok && member?.approved) { act(); return false; } // approved -> act and stop
+      return true; // still waiting for the head
+    });
   }, [act]);
 
   // ── given a stored token, make sure it's still good + approved, then act ───
@@ -572,7 +610,16 @@ export default function SessionGate() {
   // Formal "request a waiter to your table" — used when location can't be
   // confirmed, or as the escape hatch on a table someone else holds.
   const doRequest = async (type: "open" | "access") => {
-    const p = pending.current!; await requestAccess(p.table, type, name.trim() || null, null, ridRef.current);
+    const p = pending.current!;
+    // Don't stack duplicate waiter calls: a guest already waiting to be let in who
+    // taps "Call a waiter instead" (once, or twice) should send ONE request, not a
+    // fresh one each time — otherwise the same person can appear repeatedly in the
+    // staff's list (audit fix bug #18). "open" requests are unaffected.
+    if (type === "access") {
+      if (accessReqRef.current) { setStep("request_sent"); return; }
+      accessReqRef.current = true;
+    }
+    await requestAccess(p.table, type, name.trim() || null, null, ridRef.current);
     setStep("request_sent");
   };
   // From the "not open" screen: tell staff, then keep waiting — proceedWhenOpen

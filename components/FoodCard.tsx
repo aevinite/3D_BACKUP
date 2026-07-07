@@ -162,8 +162,16 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
     const cart = readCart();
     // Find this dish's plain line in the cart (if it's already there).
     const idx = cart.findIndex(i => i.id === item.id && isPlainLine(i));
-    // Work out the new quantity after applying delta.
-    const newQty = (idx >= 0 ? cart[idx].qty : 0) + delta;
+    // Work out the new quantity after applying delta, CLAMPED to 99 to match the
+    // server's per-line LEAST(99, …) cap — otherwise the cart quoted more items
+    // (and a higher price) than the kitchen would actually make/charge (audit fix
+    // bug #6; the cart-panel "+" already clamped, these menu-card taps didn't).
+    const rawQty = (idx >= 0 ? cart[idx].qty : 0) + delta;
+    const newQty = Math.min(99, rawQty);
+    // Tell the guest why the "+" stopped adding, so it doesn't feel broken.
+    if (delta > 0 && rawQty > 99) {
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Maximum 99 per dish", subtitle: "that's the most we can add to one line", kicker: "your order", duration: 1400 } }));
+    }
     if (newQty <= 0) {
       // Dropped to zero or below: remove the line entirely.
       writeCart(cart.filter((i, k) => k !== idx));
