@@ -21,6 +21,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
 import { mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
+import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -67,8 +68,9 @@ async function scope(req: NextRequest): Promise<Scope> {
     // they're the primary owner. Resolve the ids first, then fetch those rows.
     // Mig 133: a restaurant whose "staff" section the admin removed drops out here,
     // so the section dies server-side too, not just in the nav.
-    const memb = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", u.id)).data;
-    const ownedIds = (memb || []).map((m) => m.restaurant_id as string);
+    // Only LIVE restaurants whose owner panel the admin still allows (audit 2026-07-07) —
+    // a binned or owner-panel-disabled restaurant drops out here, matching lib/ownerScope.
+    const ownedIds = await enabledOwnedRestaurantIds(u.id);
     if (!ownedIds.length) return { ok: true, actor: "owner", actorId: u.id, restaurants: [] };
     // A pinned context — e.g. the manager panel viewing ONE restaurant via ?rid= — narrows
     // to just that restaurant (if the owner actually owns it), so a multi-restaurant owner
@@ -163,6 +165,7 @@ export async function POST(req: NextRequest) {
   if (dup) return bad("That name is taken at this restaurant — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
+  if (password.length > 128) return bad("Password is too long (max 128 characters).");
   const row = { username: key, role, restaurant_id: rid, password_hash: await hashSecret(password), name: display, phone: String(body?.phone || "").trim().slice(0, 20) || null };
   const { data, error } = await sb.from("staff_users").insert(row).select("id, username, role, name, restaurant_id").single();
   if (error) {
@@ -193,7 +196,12 @@ export async function PATCH(req: NextRequest) {
   if (action === "reset_password") {
     const password = String(body?.password || "").trim() || genPassword();
     if (password.length < 6) return bad("Password must be at least 6 characters.");
-    await sb.from("staff_users").update({ password_hash: await hashSecret(password), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);
+    if (password.length > 128) return bad("Password is too long (max 128 characters).");
+    // Capture the write error: without this, a failed UPDATE (row lock / timeout) still
+    // returned {ok:true, password} — the owner read out a password the DB never saved, so
+    // the staffer couldn't log in and the OLD password still worked (audit 2026-07-07).
+    const { error } = await sb.from("staff_users").update({ password_hash: await hashSecret(password), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);
+    if (error) return bad("Couldn't reset the password — please try again.", 500);
     await logAction("owner", "staff_reset_password", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `reset "${u.username}"` });
     return ok({ ok: true, password });
   }
@@ -202,7 +210,8 @@ export async function PATCH(req: NextRequest) {
     // active:"false" is a truthy string → enabled), flipping state the wrong way.
     if (typeof body?.active !== "boolean") return bad("`active` must be true or false.");
     const active = body.active;
-    await sb.from("staff_users").update({ active, token_version: active ? u.token_version : (u.token_version || 0) + 1 }).eq("id", id);
+    const { error } = await sb.from("staff_users").update({ active, token_version: active ? u.token_version : (u.token_version || 0) + 1 }).eq("id", id);
+    if (error) return bad("Couldn't update that account — please try again.", 500);
     await logAction("owner", active ? "staff_enable" : "staff_disable", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `${active ? "enabled" : "disabled"} "${u.username}"` });
     return ok({ ok: true });
   }
@@ -211,7 +220,8 @@ export async function PATCH(req: NextRequest) {
     // Hierarchy: the NEW role must also stay below the actor (a manager can't
     // promote someone up to manager).
     if (!assignableFor(s.actor).includes(role)) return bad("Pick a valid role.");
-    await sb.from("staff_users").update({ role, token_version: (u.token_version || 0) + 1 }).eq("id", id);
+    const { error } = await sb.from("staff_users").update({ role, token_version: (u.token_version || 0) + 1 }).eq("id", id);
+    if (error) return bad("Couldn't change the role — please try again.", 500);
     await logAction("owner", "staff_set_role", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `set "${u.username}" → ${role}` });
     return ok({ ok: true });
   }
@@ -231,10 +241,17 @@ export async function PATCH(req: NextRequest) {
       if (!PERM_KEYS.includes(k)) return bad(`Unknown permission "${k}".`);
       if (v === null || v === "" || v === "default") { delete merged[k]; noted.push(`${k}→default`); continue; }
       if (!PERM_MODES.includes(String(v))) return bad(`Bad value for "${k}" — use on, pin, off, or null.`);
+      // Least-privilege (audit 2026-07-07): a MANAGER may REDUCE a junior's power (off) or
+      // reset it to default, but may NOT GRANT (on/pin) a capability — otherwise a manager
+      // given only "manage staff" could quietly hand a waiter discount/void/mark-paid powers
+      // the owner deliberately withheld from the manager. Only the owner/admin grants powers.
+      if (s.actor === "manager" && (v === "on" || v === "pin"))
+        return bad("Only the owner can grant extra powers to staff.", 403);
       merged[k] = String(v); noted.push(`${k}→${v}`);
     }
     if (!noted.length) return bad("Nothing to change.");
-    await sb.from("staff_users").update({ permissions: merged }).eq("id", id);
+    const { error } = await sb.from("staff_users").update({ permissions: merged }).eq("id", id);
+    if (error) return bad("Couldn't update permissions — please try again.", 500);
     await logAction("owner", "staff_set_permissions", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `"${u.username}": ${noted.join(", ")}` });
     return ok({ ok: true, permissions: merged });
   }
@@ -250,7 +267,8 @@ export async function PATCH(req: NextRequest) {
     }
     if (body?.phone !== undefined) patch.phone = String(body.phone || "").trim().slice(0, 20) || null;
     if (!Object.keys(patch).length) return bad("Nothing to change.");
-    await sb.from("staff_users").update(patch).eq("id", id);
+    const { error } = await sb.from("staff_users").update(patch).eq("id", id);
+    if (error) return bad("Couldn't save those changes — please try again.", 500);
     return ok({ ok: true });
   }
   return bad("Unknown action.");
@@ -265,7 +283,8 @@ export async function DELETE(req: NextRequest) {
   if (!u) return bad("That person isn't on your staff.", 404);
   // Hierarchy: can only delete accounts BELOW your level (see assignableFor).
   if (!assignableFor(s.actor).includes(u.role as Role)) return bad("You can't manage accounts at or above your own level.", 403);
-  await sb.from("staff_users").delete().eq("id", id);
+  const { error } = await sb.from("staff_users").delete().eq("id", id);
+  if (error) return bad("Couldn't remove that account — please try again.", 500);
   await logAction("owner", "staff_delete", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `deleted "${u.username}"` });
   return ok({ ok: true });
 }

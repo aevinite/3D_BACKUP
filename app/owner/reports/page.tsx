@@ -38,6 +38,9 @@ type Report = { type: RType; range: Range; rows: Row[]; totals?: Record<string, 
 type Rest = { id: string; name: string };
 
 const PAY_LABEL: Record<string, string> = { upi: "UPI", cash: "Cash", card: "Card", other: "Other" };
+// Look the friendly label up case-INsensitively — a stored "UPI"/"Cash" would otherwise
+// miss the lowercase keys and render raw (audit 2026-07-07).
+const payLabel = (m: string) => PAY_LABEL[String(m || "").toLowerCase()] || m || "Unknown";
 
 function bucketLabel(iso: string, range: Range): string {
   const d = new Date(iso);
@@ -53,7 +56,12 @@ function bucketLabel(iso: string, range: Range): string {
 // CSV download — plain client-side blob, no server round-trip.
 function downloadCsv(filename: string, header: string[], rows: (string | number)[][]) {
   const esc = (v: string | number) => {
-    const s = String(v);
+    let s = String(v);
+    // Neutralise spreadsheet formula injection: a TEXT cell starting with = + - @ (or a
+    // tab/CR) is run as a formula by Excel/Sheets, so a dish named "=HYPERLINK(...)" would
+    // execute on open. Prefix a single quote to keep it literal text. Only for strings —
+    // numeric cells (orders/revenue) stay numeric so a value like -50 isn't corrupted.
+    if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const csv = [header, ...rows].map((r) => r.map(esc).join(",")).join("\n");
@@ -199,7 +207,7 @@ export default function OwnerReports() {
     } else if (rep.type === "categories") {
       downloadCsv(name, ["Category", "Qty", LIST_PRICE_LABEL], (rep.rows as { category: string; qty: number; revenue: number }[]).map((r) => [r.category, r.qty, r.revenue]));
     } else if (rep.type === "payments") {
-      downloadCsv(name, ["Method", "Orders", "Revenue"], (rep.rows as { method: string; orders: number; revenue: number }[]).map((r) => [PAY_LABEL[r.method] || r.method || "Unknown", r.orders, r.revenue]));
+      downloadCsv(name, ["Method", "Orders", "Revenue"], (rep.rows as { method: string; orders: number; revenue: number }[]).map((r) => [payLabel(r.method), r.orders, r.revenue]));
     } else if (rep.type === "hourly") {
       downloadCsv(name, ["Hour", "Orders", "Revenue"], (rep.rows as { hour: number; orders: number; revenue: number }[]).map((r) => [`${r.hour}:00`, r.orders, r.revenue]));
     }
@@ -279,7 +287,9 @@ export default function OwnerReports() {
               {rep.type === "tax" && (<>
                 <div className="adm-stat"><div className="k">Tax collected</div><div className="v">{inr(t.tax)}</div></div>
                 {rep.tax && <div className="adm-stat"><div className="k">Tax rate</div><div className="v">{rep.tax.effectivePct}%</div></div>}
-                <div className="adm-stat"><div className="k">Taxable sales</div><div className="v">{inr(t.subtotal)}</div></div>
+                {/* Taxable base = subtotal MINUS discount (this app taxes after discount, mig 126),
+                    so tax ÷ taxable equals the stated rate on the filing document (audit 2026-07-07). */}
+                <div className="adm-stat"><div className="k">Taxable sales</div><div className="v">{inr(t.subtotal - t.discount)}</div></div>
                 <div className="adm-stat"><div className="k">Paid orders</div><div className="v">{t.paidOrders}</div></div>
               </>)}
               {rep.type === "discounts" && (<>
@@ -340,7 +350,7 @@ export default function OwnerReports() {
           {rep.type === "payments" && (
             <div className="adm-card" style={{ marginTop: 10 }}>
               <div className="rp-ct">Payment methods</div>
-              <LeaderBar data={(rep.rows as { method: string; orders: number; revenue: number }[]).map((d) => ({ id: d.method || "unknown", name: PAY_LABEL[d.method] || d.method || "Unknown", revenue: d.revenue, orders: d.orders, accentColor: "var(--accent)" }))} />
+              <LeaderBar data={(rep.rows as { method: string; orders: number; revenue: number }[]).map((d) => ({ id: d.method || "unknown", name: payLabel(d.method), revenue: d.revenue, orders: d.orders, accentColor: "var(--accent)" }))} />
             </div>
           )}
 
@@ -383,7 +393,7 @@ export default function OwnerReports() {
               {rep.type === "payments" && (<>
                 <thead><tr><th>Method</th><th>Orders</th><th>Revenue</th></tr></thead>
                 <tbody>{(rep.rows as { method: string; orders: number; revenue: number }[]).map((r) => (
-                  <tr key={r.method || "unknown"}><td>{PAY_LABEL[r.method] || r.method || "Unknown"}</td><td>{r.orders}</td><td><b>{inr(r.revenue)}</b></td></tr>
+                  <tr key={r.method || "unknown"}><td>{payLabel(r.method)}</td><td>{r.orders}</td><td><b>{inr(r.revenue)}</b></td></tr>
                 ))}</tbody>
               </>)}
               {rep.type === "hourly" && (<>

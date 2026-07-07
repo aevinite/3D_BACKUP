@@ -88,14 +88,16 @@ export async function POST(req: NextRequest) {
   scope = gatedC;
   const body = await req.json().catch(() => ({}));
   const rid = String(body?.restaurant_id || "");
-  const subject = String(body?.subject || "").trim();
+  // Cap subject/body server-side — a direct API call could otherwise store huge blobs that
+  // then re-load on every issues list fetch (.limit(300)) inflating egress (audit 2026-07-07).
+  const subject = String(body?.subject || "").trim().slice(0, 200);
   if (!rid || !subject) return NextResponse.json({ error: "restaurant and subject required" }, { status: 400 });
   if (!inScope(scope, rid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   // An admin raising an issue (all-view OR act-as) is stamped "admin", not the borrowed
   // owner — the act-as branch has scope.all=false, so key off scope.admin too (audit 2026-07-07).
   const { error } = await sb.from("issues").insert({
-    restaurant_id: rid, subject, body: String(body?.body || "").trim(),
+    restaurant_id: rid, subject, body: String(body?.body || "").trim().slice(0, 4000),
     raised_by: (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner"),
     raised_role: (scope.all || scope.admin) ? "admin" : "owner",
   });

@@ -406,7 +406,12 @@ export default function OwnerDashboard() {
     if (!group) return null;
     return {
       revenue: group.restaurantRevenue.reduce((a, r) => a + r.revenue, 0),
+      // `orders` counts ALL non-cancelled orders (incl. open/unpaid); `paidOrders` comes from
+      // the payment breakdown (paid-only), so the tile can say "N paid · rest still open" like
+      // the single-restaurant view — otherwise Revenue (paid-only) ÷ Orders looked wrong on the
+      // group home with open tables and no explanation (audit 2026-07-07).
       orders: group.restaurantRevenue.reduce((a, r) => a + r.orders, 0),
+      paidOrders: group.paymentMethods.reduce((a, p) => a + (p.orders || 0), 0),
     };
   }, [group]);
 
@@ -472,6 +477,7 @@ export default function OwnerDashboard() {
               delta={group?.prev ? { now: groupTotals?.revenue ?? 0, prev: group.prev.revenue } : undefined}
               prevTitle={PREV_LABEL[range]} spark={groupSpark} />
             <Kpi k="Orders" v={groupTotals?.orders ?? 0} loading={!group}
+              sub={groupTotals && groupTotals.paidOrders !== groupTotals.orders ? `${groupTotals.paidOrders} paid · rest still open` : undefined}
               delta={group?.prev ? { now: groupTotals?.orders ?? 0, prev: group.prev.orders } : undefined}
               prevTitle={PREV_LABEL[range]} />
             <Kpi k="Open tables now" v={ov?.totals.openTables ?? 0} />

@@ -100,6 +100,15 @@ export default function OwnerFeedback() {
   const ackRating = async (id: string, acknowledged: boolean) => {
     setBusy(id);
     setRatings((cur) => (cur || []).map((r) => (r.id === id ? { ...r, acknowledged } : r)));
+    // Keep the "To handle · N" badge in step with the optimistic row change, so the count
+    // doesn't lag a beat behind until loadRatings() returns (audit 2026-07-07). Only when the
+    // handled state actually flips, and never below zero.
+    setSummary((s) => {
+      if (!s) return s;
+      const was = (ratings || []).find((r) => r.id === id)?.acknowledged;
+      if (was === acknowledged) return s;
+      return { ...s, unhandled: Math.max(0, s.unhandled + (acknowledged ? -1 : 1)) };
+    });
     try {
       await fetch(`/api/owner/ratings${scp}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, acknowledged }) });
       await loadRatings();

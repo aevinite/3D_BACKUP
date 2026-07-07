@@ -319,6 +319,14 @@ export default function OwnerStaffPage() {
         .ost-reveal { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; border-color: var(--adm-ok, #2e7d32); }
         .ost-pw { font-family: ui-monospace, monospace; font-size: 15px; font-weight: 700; padding: 6px 12px; border-radius: 8px; border: none; color: var(--fg, inherit); background: color-mix(in srgb, var(--accent) 12%, transparent); letter-spacing: .04em; min-width: 130px; }
         .ost-x { margin-left: auto; background: none; border: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; }
+        /* On a phone the 5-control action cluster was wrapping messily mid-row. Drop the
+           actions onto their own full-width line under the name and let each button grow to
+           share the width evenly — cleaner + bigger tap targets (audit 2026-07-07). */
+        @media (max-width: 560px) {
+          .ost-row { align-items: flex-start; }
+          .ost-actions { flex-basis: 100%; margin-top: 8px; }
+          .ost-actions .ost-mini, .ost-actions select { flex: 1 1 auto; text-align: center; }
+        }
       `}</style>
     </>
   );

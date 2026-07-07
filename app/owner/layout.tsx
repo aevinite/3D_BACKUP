@@ -16,6 +16,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { getOwnerEntitlements, getOwnerEntitlementsUnion } from "@/lib/ownerEntitlements";
+import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import OwnerShell from "@/components/owner/OwnerShell";
 import OwnerReconnecting from "@/components/owner/OwnerReconnecting";
 
@@ -34,20 +35,29 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
   // catching that here would silently break the redirect.
   let u: Awaited<ReturnType<typeof userFromCookie>> = null;
   let actingValid = false;
+  let ownedIds: string[] = [];
   try {
     u = await userFromCookie(store.get(USER_COOKIE)?.value);
     if (acting) actingValid = await tokenIsValid(store.get(AUTH_COOKIE)?.value);
+    // Resolve the owner's LIVE + owner-panel-enabled restaurants. (This helper swallows a
+    // read error into an empty list rather than throwing, so a rare DB blip sends the owner
+    // to /login below — no worse, and safer, than the old code which fell back to restaurant
+    // #1's nav and mis-rendered a real owner as owning nothing; audit 2026-07-07.)
+    if (u && u.role === "owner") ownedIds = await enabledOwnedRestaurantIds(u.id);
   } catch (e) {
     if (e instanceof AuthDbError) return <OwnerReconnecting />;
     throw e;
   }
 
-  // 1) OWNER role → their own cockpit. Sections the ADMIN removed for their
-  // restaurant(s) (mig 133) are HIDDEN here — union across a multi-restaurant
-  // owner's estate, so a section survives if ANY of their restaurants still has it.
+  // 1) OWNER role → their own cockpit. Access requires at least one LIVE restaurant whose
+  // owner panel the admin still allows: if the admin turned the owner panel off for every
+  // restaurant they own (or binned them all), send them to login instead of a full cockpit
+  // (matches the API-layer gate in lib/ownerScope — audit 2026-07-07). Sections the ADMIN
+  // removed (mig 133) are HIDDEN here — union across the estate, so a section survives if
+  // ANY of their restaurants still has it.
   if (u && u.role === "owner") {
-    const owned = ((await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", u.id)).data || []).map((r) => r.restaurant_id as string);
-    const ents = await getOwnerEntitlementsUnion(owned.length ? owned : [u.restaurant_id]);
+    if (!ownedIds.length) redirect("/login?next=/owner");
+    const ents = await getOwnerEntitlementsUnion(ownedIds);
     return <OwnerShell initialSkin={initialSkin} entitlements={ents}>{children}</OwnerShell>;
   }
 

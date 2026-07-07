@@ -64,31 +64,46 @@ export async function isPanelEnabledCached(role: Role, restaurantId: string): Pr
 // real rule: an owner may use the owner panel if ANY live (non-binned) restaurant
 // they own (restaurant_owners, mig 097) has the owner panel enabled. Cached like
 // the per-restaurant map — requireRole runs on every polled owner request.
-const _ownerCache = new Map<string, { at: number; on: boolean }>();
-export async function ownerPanelEnabled(userId: string, cached = true): Promise<boolean> {
-  if (!userId) return false;
+const _ownerCache = new Map<string, { at: number; ids: string[] }>();
+
+// The exact set of restaurants an owner may use the owner panel FOR: those they own
+// (restaurant_owners, mig 097) that are LIVE (not binned) AND still have the owner panel
+// switched on by the admin. This is the single source of truth for owner-panel access —
+// lib/ownerScope (every /api/owner/* call) and app/owner/layout (the page gate) both scope
+// to it, so when the admin turns the owner panel off or bins a restaurant, an already-open
+// owner tab loses that restaurant within the 30s cache TTL instead of keeping full access
+// for the 7-day cookie life (audit 2026-07-07 — the parallel M3/H2 fix for the other panels
+// was never carried over to the owner layer). Cached (30s) so the hot path adds no read.
+export async function enabledOwnedRestaurantIds(userId: string, cached = true): Promise<string[]> {
+  if (!userId) return [];
   const hit = cached ? _ownerCache.get(userId) : undefined;
-  if (hit && Date.now() - hit.at < PANEL_TTL_MS) return hit.on;
+  if (hit && Date.now() - hit.at < PANEL_TTL_MS) return hit.ids;
   const links = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", userId).limit(50);
-  const ids = (links.data || []).map((r) => r.restaurant_id as string);
-  let on = false;
-  if (ids.length) {
+  const owned = (links.data || []).map((r) => r.restaurant_id as string);
+  let ids: string[] = [];
+  if (owned.length) {
     // One scoped read: live restaurants ∩ owned ids, joined against their settings.
     const [restQ, setQ] = await Promise.all([
-      sb.from("restaurants").select("id").in("id", ids).is("deleted_at", null),
-      sb.from("settings").select("restaurant_id, enabled_panels").in("restaurant_id", ids),
+      sb.from("restaurants").select("id").in("id", owned).is("deleted_at", null),
+      sb.from("settings").select("restaurant_id, enabled_panels").in("restaurant_id", owned),
     ]);
     const live = new Set((restQ.data || []).map((r) => r.id as string));
     const panelsByRid = new Map((setQ.data || []).map((r) => [r.restaurant_id as string, r.enabled_panels as Record<string, unknown> | null]));
-    on = ids.some((rid) => {
+    ids = owned.filter((rid) => {
       if (!live.has(rid)) return false;
       const p = panelsByRid.get(rid);
       // Missing row / key defaults ON (same backward-compat rule as getEnabledPanels).
       return !(p && typeof p === "object" && (p as Record<string, unknown>).owner === false);
     });
   }
-  _ownerCache.set(userId, { at: Date.now(), on });
-  return on;
+  _ownerCache.set(userId, { at: Date.now(), ids });
+  return ids;
+}
+
+// OWNER-panel entitlement for a specific OWNER USER — true if ANY live (non-binned)
+// restaurant they own still has the owner panel on. Derived from the id list above.
+export async function ownerPanelEnabled(userId: string, cached = true): Promise<boolean> {
+  return (await enabledOwnedRestaurantIds(userId, cached)).length > 0;
 }
 
 // Is this restaurant in the RECYCLE BIN (soft-deleted, migration 128)? A binned

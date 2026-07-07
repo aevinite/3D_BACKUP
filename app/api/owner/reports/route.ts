@@ -97,6 +97,24 @@ async function allRestaurantIds(): Promise<string[]> {
   return ids;
 }
 
+// Run an async op over a list with a CONCURRENCY CAP. The admin "all restaurants" reports
+// fan one RPC out per restaurant; a bare Promise.all over hundreds of restaurants fires them
+// all at once and can saturate the DB pool / time out (audit 2026-07-07). 8 in flight keeps
+// it bounded while staying fast for the common few-restaurant case. Order is preserved.
+async function mapLimit<I, O>(items: I[], limit: number, fn: (item: I, i: number) => PromiseLike<O> | O): Promise<O[]> {
+  const out = new Array<O>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) break;
+      out[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 // Sum one numeric key across per-restaurant RPC result sets (small rows).
 function mergeBy<T extends Row>(rowsets: T[][], key: keyof T, numeric: (keyof T)[]): T[] {
   const out = new Map<unknown, T>();
@@ -145,8 +163,8 @@ export async function GET(req: NextRequest) {
       // sum each owned restaurant separately and merge the tiny bucket rows.
       let raw = (res.data ?? []) as Row[];
       if (!rid && !scope.all) {
-        const per = await Promise.all(scope.ids.map((id) =>
-          sb.rpc("lfh_owner_sales_report", { p_restaurant_id: id, p_from: from, p_to: to, p_bucket: bucket })));
+        const per = await mapLimit(scope.ids, 8, (id) =>
+          sb.rpc("lfh_owner_sales_report", { p_restaurant_id: id, p_from: from, p_to: to, p_bucket: bucket }));
         for (const p of per) if (p.error) throw p.error;
         raw = mergeBy(per.map((p) => (p.data ?? []) as Row[]), "bucket",
           ["orders", "paid_orders", "subtotal", "tax", "discount", "revenue", "cancelled_orders", "cancelled_value"]);
@@ -208,7 +226,7 @@ export async function GET(req: NextRequest) {
       if (rid) ids = [rid];
       else if (!scope.all) ids = scope.ids;
       else ids = await allRestaurantIds();
-      const per = await Promise.all(ids.map((id) => sb.rpc(fn, { p_restaurant_id: id, p_from: from, p_to: to })));
+      const per = await mapLimit(ids, 8, (id) => sb.rpc(fn, { p_restaurant_id: id, p_from: from, p_to: to }));
       for (const p of per) if (p.error) throw p.error;
       const keyCol = type === "dishes" ? "title" : type === "categories" ? "category" : "hour";
       const numeric = type === "hourly" ? ["orders", "revenue"] : ["qty", "revenue"];
@@ -231,8 +249,8 @@ export async function GET(req: NextRequest) {
     }
 
     if (type === "payments") {
-      const per = await Promise.all(ridList.map((id) =>
-        sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      const per = await mapLimit(ridList, 8, (id) =>
+        sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
       for (const p of per) if (p.error) throw p.error;
       const rows = mergeBy(per.map((p) => (p.data ?? []) as Row[]), "method", ["revenue", "orders"])
         .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))

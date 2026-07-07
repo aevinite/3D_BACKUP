@@ -14,6 +14,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
+import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 
 // `admin: true` marks the ADMIN's session (all-view OR act-as pin) — set on every
 // admin branch below. Gates that restrict a REAL owner (e.g. the mig 132 owner
@@ -31,11 +32,14 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
   // (surfaced 2026-07-04 verifying the redesign on a shared browser profile).
   const owner = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   if (owner && owner.role === "owner") {
-    // Multi-owner: resolve EVERY restaurant this owner is a member of via the
-    // restaurant_owners join table (migration 097) — widens to all restaurants
-    // they co-own AND never leaks one they aren't a member of.
-    const { data } = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", owner.id);
-    return { all: false, ids: (data || []).map((r) => r.restaurant_id as string), ownerId: owner.id };
+    // Multi-owner: resolve every restaurant this owner is a member of (restaurant_owners,
+    // mig 097) — but ONLY the ones that are LIVE and still have the owner panel switched on.
+    // enabledOwnedRestaurantIds drops a binned or admin-disabled restaurant, so revoking the
+    // owner panel (or binning the restaurant) cuts off an already-open owner tab within the
+    // 30s cache TTL instead of the 7-day cookie life (audit 2026-07-07). Empty set → no access.
+    const ids = await enabledOwnedRestaurantIds(owner.id);
+    if (!ids.length) return null;
+    return { all: false, ids, ownerId: owner.id };
   }
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) {
     // Admin who has DELIBERATELY entered one restaurant is scoped to JUST that

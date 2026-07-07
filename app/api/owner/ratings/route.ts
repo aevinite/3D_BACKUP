@@ -102,7 +102,9 @@ export async function PATCH(req: NextRequest) {
     patch.acknowledged_at = body.acknowledged ? new Date().toISOString() : null;
     patch.acknowledged_by = body.acknowledged ? who : null;
   }
-  if (hasNote) patch.staff_note = body.note.trim() || null;
+  // Cap server-side too — the client limits to 500, but a direct API call could store a
+  // multi-MB note that then re-loads on every list fetch (egress). (audit 2026-07-07)
+  if (hasNote) patch.staff_note = body.note.trim().slice(0, 1000) || null;
   const { error } = await sb.from("feedback").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });

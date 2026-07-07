@@ -42,7 +42,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ restaurant:
   }
 
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) {
-    const res = NextResponse.redirect(new URL("/owner", req.url));
+    // The redirect carries ?rid= so THIS tab stays pinned to the restaurant even if the
+    // browser-wide act-as cookie later changes (a second admin tab opening another
+    // restaurant overwrites the shared cookie). Without the pin, tab 1 silently repointed
+    // to tab 2's restaurant — data AND writes on the wrong tenant. This matches the fix
+    // already in /api/admin/act-as/go; this entry door was missed (audit 2026-07-07).
+    const res = NextResponse.redirect(new URL(`/owner?rid=${encodeURIComponent(r.id)}`, req.url));
     // Same cookie shape as /api/admin/act-as (6h, HttpOnly).
     res.cookies.set(ADMIN_ACT_COOKIE, r.id, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 6 });
     return res;
