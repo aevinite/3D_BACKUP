@@ -6,10 +6,11 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import AdminShell from "@/components/admin/AdminShell";
+import { AdminToastProvider } from "@/components/admin/toast";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const store = await cookies();
   const ok = await tokenIsValid(store.get(AUTH_COOKIE)?.value);
   if (!ok) redirect("/staff-login?next=/aevinite");
-  return <AdminShell>{children}</AdminShell>;
+  return <AdminShell><AdminToastProvider>{children}</AdminToastProvider></AdminShell>;
 }

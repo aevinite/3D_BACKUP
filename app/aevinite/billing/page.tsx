@@ -6,7 +6,7 @@
 // (migration 118: restaurant_billing + restaurant_payments, additive-only).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useActiveAutoRefresh } from "@/components/admin/shared";
-import { useBackClose } from "@/lib/backStack";
+import { useAdminModal } from "@/components/admin/useAdminModal";
 
 type Row = {
   id: string; name: string; slug: string; active: boolean;
@@ -148,15 +148,9 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   }, [row.id]);
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  // Phone hardware Back closes the editor instead of leaving the admin page (CLAUDE.md rule).
-  useBackClose("admin-billing-editor", true, onClose);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
-  }, [onClose]);
+  // One line: phone Back + Escape close it, focus trapped inside, page behind frozen.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useAdminModal(dialogRef, "admin-billing-editor", onClose);
 
   const savePlan = async () => {
     setSaving(true); setMsg(null);
@@ -204,7 +198,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   return (
     <>
       <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
-      <div role="dialog" aria-modal="true" aria-label={`Billing for ${row.name}`} style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Billing for ${row.name}`} style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
         <div style={{ ...cardStyle, pointerEvents: "auto" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: "var(--border)", position: "sticky", top: 0, background: "var(--card)", borderRadius: "14px 14px 0 0" }}>
             <div style={{ minWidth: 0 }}>
