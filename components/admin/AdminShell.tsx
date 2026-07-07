@@ -147,6 +147,11 @@ function RestaurantSwitcher() {
   const pick = (r: Rest) => {
     setOpen(false); setQ("");
     router.push(`/aevinite/restaurants?focus=${encodeURIComponent(r.slug)}`);
+    // If we're ALREADY on the Restaurants page, router.push only changes the query — the
+    // page doesn't remount, so its mount-only `focus` read never re-fires and the jump did
+    // nothing. Fire an event the page listens for so it opens the picked restaurant either
+    // way (fresh mount reads the URL; already-mounted page reacts to this).
+    window.dispatchEvent(new CustomEvent("adm:focus-restaurant", { detail: r.slug }));
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setHi((i) => Math.min(rows.length - 1, i + 1)); }

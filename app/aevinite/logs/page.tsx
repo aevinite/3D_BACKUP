@@ -7,10 +7,10 @@ import { ACT_LABEL, PANEL_COLOR, timeAgo, type Action } from "@/components/admin
 
 type Member = {
   id: string; name: string | null; phone: string | null; role: string;
-  approved: boolean; removed: boolean; joined_at: string;
+  approved: boolean; removed: boolean; joined_at: string; restaurant_name?: string | null;
   session?: { table_number?: string; status?: string } | null;
 };
-type Block = { id: string; device_id?: string | null; phone?: string | null; table_number?: string | null; reason?: string | null; blocked_at: string };
+type Block = { id: string; device_id?: string | null; phone?: string | null; table_number?: string | null; reason?: string | null; blocked_at: string; restaurant_name?: string | null };
 type CustData = { members: Member[]; blocklist: Block[]; orders: { member_id: string }[]; calls: { member_id: string }[] };
 
 export default function AdminLogs() {
@@ -91,7 +91,10 @@ function CustTable({ data, err, onRetry }: { data: CustData | null; err: boolean
           const did = byMember.get(m.id) || { n: 0, calls: 0 };
           return (
             <div key={m.id} className="adm-logrow" style={{ gridTemplateColumns: cols, opacity: m.removed ? 0.55 : 1 }}>
-              <div><b>{m.name || "Guest"}</b>{m.phone ? <span className="adm-muted"> · {m.phone}</span> : ""}</div>
+              <div style={{ minWidth: 0 }}>
+                <div><b>{m.name || "Guest"}</b>{m.phone ? <span className="adm-muted"> · {m.phone}</span> : ""}</div>
+                {m.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{m.restaurant_name}</span> : null}
+              </div>
               <div>{m.session?.table_number ? `#${m.session.table_number}` : "—"}</div>
               <div className="adm-muted">{m.role === "owner" ? "Head" : "Guest"}</div>
               <div className="adm-muted">{did.n} order{did.n !== 1 ? "s" : ""}{did.calls ? ` · ${did.calls} call${did.calls !== 1 ? "s" : ""}` : ""}</div>
@@ -108,7 +111,7 @@ function CustTable({ data, err, onRetry }: { data: CustData | null; err: boolean
             {blocklist.map((b) => (
               <div key={b.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "var(--border)", fontSize: 13 }}>
                 <i className="fas fa-ban" style={{ color: "var(--adm-danger)" }} aria-hidden="true" />
-                <span>{b.phone || b.device_id || b.table_number || "unknown"}{b.reason ? <span className="adm-muted"> · {b.reason}</span> : ""}</span>
+                <span>{b.phone || b.device_id || b.table_number || "unknown"}{b.reason ? <span className="adm-muted"> · {b.reason}</span> : ""}{b.restaurant_name ? <span className="adm-muted"> · <i className="fas fa-store" style={{ fontSize: 9, marginRight: 3, opacity: 0.7 }} aria-hidden="true" />{b.restaurant_name}</span> : ""}</span>
                 <span className="adm-when" style={{ marginLeft: "auto" }}>{timeAgo(b.blocked_at)}</span>
               </div>
             ))}

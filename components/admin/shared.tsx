@@ -111,8 +111,8 @@ export function useActiveAutoRefresh(fn: () => void, intervalMs = 60000, idleMs 
   }, [intervalMs, idleMs]);
 }
 
-// NO revenue here (owner 2026-07-03: the admin panel shows no earnings anywhere;
-// the only ₹ allowed is a live table's unpaid "due" on the floor grid below).
+// NO revenue anywhere in the admin panel (owner 2026-07-03: the admin sees no earnings —
+// no ₹ at all, including table "due" amounts).
 export function StatCards({ ov }: { ov: Overview | null }) {
   const cells: [string, string | number][] = [
     ["Open tables", ov ? ov.openTables : "…"],
@@ -146,7 +146,7 @@ export function FloorGrid({ tiles, err }: { tiles: Tile[]; err: string | null })
             <span style={{ fontSize: 16 }}>{t.has_call ? "🔔" : ""}{t.has_new ? "🆕" : ""}</span>
           </div>
           <div className="tstate">{STATE_LABEL[t.state]}</div>
-          <div className="tsub">{t.open ? `${t.members} seated` : "—"}{Number(t.due) > 0 ? ` · ${inr(Number(t.due))} due` : ""}</div>
+          <div className="tsub">{t.open ? `${t.members} seated` : "—"}</div>
         </div>
       ))}
     </div>

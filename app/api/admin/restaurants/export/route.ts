@@ -9,9 +9,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 const CAP = 100_000; // per-table row cap for the backup
+const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 // Tenant tables to include (staff_users handled separately to drop secrets).
 const TABLES = [
@@ -28,14 +30,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const rid = new URL(req.url).searchParams.get("rid") || "";
-  if (!rid) return NextResponse.json({ error: "Missing rid." }, { status: 400 });
+  if (!isUuid(rid)) return NextResponse.json({ error: "Missing or invalid rid." }, { status: 400 });
 
   const restQ = await sb.from("restaurants").select("*").eq("id", rid).maybeSingle();
   if (restQ.error) return NextResponse.json({ error: restQ.error.message }, { status: 500 });
   if (!restQ.data) return NextResponse.json({ error: "Restaurant not found." }, { status: 404 });
 
+  // This recovery file DELIBERATELY contains financial records (order totals, payment
+  // amounts) so a mistaken purge can be fully rebuilt — the one admin path where money is
+  // present by design (owner-approved 2026-07-07). It is a disaster-recovery download, not a
+  // browsable earnings view; `containsFinancials` flags that, and we log every export below.
   const backup: Record<string, unknown> = {
-    _meta: { kind: "aevidine-restaurant-backup", version: 1, exportedAt: new Date().toISOString(), restaurantId: rid },
+    _meta: {
+      kind: "aevidine-restaurant-recovery-backup", version: 1,
+      exportedAt: new Date().toISOString(), restaurantId: rid,
+      containsFinancials: true,
+      note: "Data-recovery backup. Contains financial records — store securely.",
+    },
     restaurant: restQ.data,
   };
   const truncated: string[] = [];
@@ -57,6 +68,8 @@ export async function GET(req: NextRequest) {
 
   const slug = (restQ.data as { slug?: string }).slug || rid;
   const stamp = new Date().toISOString().slice(0, 10);
+  // Audit trail: record that a full recovery backup (with financials) was downloaded.
+  await logAction("admin", "restaurant_export", { detail: "recovery backup downloaded (contains financials)", restaurant_id: rid });
   return new NextResponse(JSON.stringify(backup, null, 2), {
     status: 200,
     headers: {

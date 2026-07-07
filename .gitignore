@@ -65,3 +65,9 @@ reference/code-snapshot/
 
 # Playwright MCP scratch output
 .playwright-mcp/
+
+# Throwaway admin dashboard prototypes (local scratch). They render real per-restaurant
+# food revenue and their local server pulls the earnings API with an admin cookie — the
+# admin panel must show NO money, so these must NEVER be committed or wired into the app.
+temp-admin-analytics/
+temp-admin-console/

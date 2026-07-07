@@ -12,11 +12,12 @@ export const dynamic = "force-dynamic";
 const ok = (d: any, s = 200) => NextResponse.json(d, { status: s });
 const bad = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
+const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const rid = req.nextUrl.searchParams.get("restaurant_id") || "";
-  if (!rid) return bad("Missing restaurant_id.");
+  if (!isUuid(rid)) return bad("Missing or invalid restaurant_id.");
   const { data, error } = await sb.from("restaurants")
     .select("accent_color, theme, hero_title, tagline, logo_text, logo_url").eq("id", rid).maybeSingle();
   if (error) return bad(error.message, 500);
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {}; try { body = await req.json(); } catch {}
   const rid = String(body?.restaurant_id || "");
-  if (!rid) return bad("Missing restaurant_id.");
+  if (!isUuid(rid)) return bad("Missing or invalid restaurant_id.");
   const patch: Record<string, unknown> = {};
   if ("accent_color" in body) {
     const a = body.accent_color;

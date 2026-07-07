@@ -31,7 +31,11 @@ export default function AdminIssues() {
   const [err, setErr] = useState(false);
 
   const load = useCallback(() => {
-    fetch("/api/owner/issues", { cache: "no-store" })
+    // ?scope=all — force the platform-wide view. Without it, ownerScope() honours the
+    // 6-hour act-as cookie set when the admin peeks into a restaurant, silently collapsing
+    // this list to just that one restaurant while the header still claims "every restaurant"
+    // (real complaints vanished for up to 6h). Same fix the dashboard already uses.
+    fetch("/api/owner/issues?scope=all", { cache: "no-store" })
       .then((r) => r.json())
       .then((j) => { if (j.error) setErr(true); else { setIssues(j.issues || []); setErr(false); } })
       .catch(() => setErr(true))
@@ -45,7 +49,7 @@ export default function AdminIssues() {
     // Optimistic: flip locally so the click feels instant, then confirm with the server.
     setIssues((prev) => prev.map((i) => (i.id === id ? { ...i, status } : i)));
     try {
-      const r = await fetch("/api/owner/issues", {
+      const r = await fetch("/api/owner/issues?scope=all", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, status }),
       });

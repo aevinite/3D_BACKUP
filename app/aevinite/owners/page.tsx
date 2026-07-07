@@ -235,6 +235,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
 }) {
   const [name, setName] = useState("");
   const [pw, setPw] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -273,7 +274,12 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rakesh Patel" style={field} autoFocus required />
           </label>
           <label style={label}>Password (blank = auto-generated, shown once)
-            <input type="text" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="leave blank to generate" autoComplete="new-password" style={field} />
+            <div style={{ position: "relative" }}>
+              <input type={showPw ? "text" : "password"} value={pw} onChange={(e) => setPw(e.target.value)} placeholder="leave blank to generate" autoComplete="new-password" style={{ ...field, paddingRight: 44 }} />
+              <button type="button" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? "Hide password" : "Show password"} style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", fontSize: 16, padding: 6 }}>
+                {showPw ? "🙈" : "👁️"}
+              </button>
+            </div>
           </label>
           <div style={label as React.CSSProperties}>
             Assign restaurants (pick 1 or many — you can change this any time)

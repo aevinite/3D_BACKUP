@@ -2,7 +2,9 @@
 // Aggregated server-side (service role) so the admin downloads one small summary:
 // maintenance state, sessions on/off, table count, feature flags, and today's
 // open tables / active orders / unpaid bills / order count.
-// Behind the admin gate (middleware protects /api/admin/*).
+// Behind the admin gate: there is NO middleware — every /api/admin/* handler checks the
+// admin cookie itself (tokenIsValid on each method). A NEW admin route MUST call it too;
+// don't assume a matcher covers you.
 //
 // NO MONEY here (bug H3, 2026-07-06): the admin panel must never receive per-restaurant
 // or platform revenue (owner rule — admin gets counts + access, not earnings). The old

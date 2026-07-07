@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { redactMoney } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,7 @@ export async function GET(req: NextRequest) {
   }
   const actions = rows.map((a) => {
     const meta = a.restaurant_id ? nameById.get(a.restaurant_id) : undefined;
-    return { ...a, restaurant_name: meta?.name ?? null, restaurant_slug: meta?.slug ?? null };
+    return { ...a, detail: redactMoney(a.detail), restaurant_name: meta?.name ?? null, restaurant_slug: meta?.slug ?? null };
   });
   return NextResponse.json({ actions });
 }
