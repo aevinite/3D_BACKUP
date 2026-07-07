@@ -79,6 +79,12 @@ export default function ViewerClient({ folder }: { folder: string }) {
   const [activeUrl, setActiveUrl] = useState<string | null>(null); // which model file to actually show
   const [showTryAgain, setShowTryAgain] = useState(false); // show the "taking longer" overlay?
   const [menuItem, setMenuItem] = useState<MenuItem | null>(null); // the dish's menu details
+  // For NON-#1 restaurants, the model to show comes from THAT restaurant's own DB
+  // record (its uploaded GLB), not the shared static /content config — otherwise two
+  // restaurants sharing a folder name would see the same model. #1 keeps using its
+  // static config unchanged (this stays null for #1), so the gold-standard viewer is
+  // untouched. (audit fix 2026-07-07)
+  const [dbModel, setDbModel] = useState<{ small?: string; opt?: string } | null>(null);
   const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // currency for prices
   const [accentCss, setAccentCss] = useState<string>(""); // this restaurant's colour for the viewer chrome
   const [loadFailed, setLoadFailed] = useState(false); // did the 3D model give up loading for good?
@@ -136,7 +142,18 @@ export default function ViewerClient({ folder }: { folder: string }) {
         }
       }
       if (cancelled || !fromSlug) return;
-      try { const m = await getMenuItem(fromSlug, rid); if (!cancelled) setMenuItem(m); } catch {}
+      try {
+        const m = await getMenuItem(fromSlug, rid);
+        if (cancelled) return;
+        setMenuItem(m);
+        // Non-#1 restaurant with its own uploaded model → use it as the source of
+        // truth. #1 (or a dish with no DB model) leaves this null → static config.
+        if (rid !== DEFAULT_RESTAURANT_ID && (m?.modelSmallUrl || m?.modelOptimizedUrl)) {
+          setDbModel({ small: m.modelSmallUrl, opt: m.modelOptimizedUrl });
+        } else {
+          setDbModel(null);
+        }
+      } catch {}
     })();
     return () => { cancelled = true; };
   }, [fromSlug, fromRestaurant]);
@@ -218,8 +235,10 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // that's what's ready, and upgrade when the better one finishes loading.
   useEffect(() => {
     if (!config) return;  // wait for the config
-    const small = config.smallUrl;       // the fast ~2MB model
-    const opt = config.optimizedUrl;     // the high-quality ~9MB model
+    // Model files: a non-#1 restaurant's OWN uploaded model wins; otherwise the
+    // static config's. The config still supplies the hotspots/framing either way.
+    const small = dbModel?.small || config.smallUrl;   // the fast ~2MB model
+    const opt = dbModel?.opt || config.optimizedUrl;   // the high-quality ~9MB model
     // Old-style config with a single URL? Just use it and stop.
     if (!small && !opt) {
       if (config.modelUrl) setActiveUrl(config.modelUrl);
@@ -278,7 +297,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // function, which we return so React stops listening when we leave.
     const unsub = modelLoader.subscribe(apply);
     return unsub;
-  }, [config, folder, fromSlug]);
+  }, [config, folder, fromSlug, dbModel]);
 
   // Wire up what happens once the 3D model element is on the page: when it
   // finishes loading, hide the spinner, slide in the bar, and play the reveal.

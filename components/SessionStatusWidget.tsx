@@ -126,6 +126,12 @@ export default function SessionStatusWidget() {
       try { on = (await getSettings(restaurantId)).sessionsEnabled; } catch {}
       if (!alive) return;
       setEnabled(on);
+      // Publish the sessions-on truth IMMEDIATELY (before the first session poll) so an
+      // early "add to cart" tap on a sessions-ON restaurant can't slip past the connect
+      // gate during the load window. Optimistically treat a device that already has a
+      // stored session as connected (returning guest → don't gate them); the poll below
+      // corrects `connected` a moment later, and the server re-checks at order time.
+      setTableConnection({ sessionsEnabled: on, connected: on ? !!getStoredSession() : false });
       if (!on) return;
       // Asks the server for the latest table state and copies it into our screen values.
       const poll = async () => {

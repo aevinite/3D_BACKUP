@@ -25,7 +25,7 @@
 // guests must only ever see what the public policy allows, identical to before.
 
 import { unstable_cache } from "next/cache";
-import { getMenuItems, getCategories, type MenuItem, type Category } from "./menu";
+import { getMenuItems, getCategories, CARD_COLUMNS, type MenuItem, type Category } from "./menu";
 
 // The guest menu (<MenuView>) consumes exactly the dishes + categories, so that's
 // all we cache. Settings (bubbles / maintenance / features) are deliberately NOT
@@ -48,7 +48,7 @@ function cachedBundleFor(restaurantId: string) {
       // browser used to make — but ONCE per 24h per restaurant (or until an edit busts
       // guests, instead of once per guest view.
       const [items, categories] = await Promise.all([
-        getMenuItems(restaurantId),
+        getMenuItems(restaurantId, CARD_COLUMNS), // grid needs only card fields
         getCategories(restaurantId),
       ]);
       return { items, categories };
