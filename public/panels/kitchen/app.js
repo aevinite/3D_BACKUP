@@ -724,6 +724,11 @@ function printKot(order, itemRows, restaurant) {
 //  • Prints are SERIALIZED (spaced) so a burst doesn't stack N blocking dialogs at once
 //    in a non-kiosk browser (partially mitigates M7; kiosk mode prints silently anyway).
 const printedIds = new Set();
+// When this panel booted. Used so a brand-new order that arrives DURING the first /board
+// fetch (the ~1s boot window) is recognised as genuinely new and still auto-prints — the
+// old code seeded EVERY order on first load as "already printed", so a KOT placed in that
+// window was silently never printed. KOT print is the kitchen's main use, so this matters.
+const BOOT_TS = Date.now();
 // Serialized (spaced) printer for a queue of orders — the ONE place that actually prints,
 // so print-tracking (printedIds) stays consistent and a burst can't stack N blocking
 // dialogs at once in a non-kiosk browser. Paused while the tab is hidden mid-burst.
@@ -775,16 +780,29 @@ async function load() {
     // never double-prints (printedIds).
     autoPrintNew(!!data.autoPrintKot, data.orders, data.items, data.restaurant);
   } else {
-    // FIRST load (no baseline yet): treat EVERY order already on the board as already
-    // handled so we never retro-print the existing board (bug H7's sibling — printedIds is
-    // separate from knownIds, so it needs its own baseline). Baseline ALL statuses, not just
-    // 'received': otherwise the visibility-flush (which now also prints 'preparing') would
-    // retroactively print orders that were already cooking before this panel even opened.
-    for (const o of data.orders) printedIds.add(o.id);
+    // FIRST load (no baseline yet): treat orders that already existed BEFORE this panel
+    // opened as already handled, so we never retro-print the existing board. But an order
+    // that arrived DURING the boot fetch (created at/after BOOT_TS) is genuinely new and, as
+    // KOT print is the main use, it MUST still print — the old code seeded EVERY order as
+    // printed, so an order placed in the ~1s boot window was silently never printed.
+    // Invalid/missing created_at is treated as pre-existing (seeded) so a bad timestamp can
+    // never spew an old ticket. (audit 2026-07-07)
+    for (const o of data.orders) {
+      const t = new Date(o.created_at).getTime();
+      if (!Number.isFinite(t) || t < BOOT_TS) printedIds.add(o.id);
+    }
+    // Print any order that landed during boot (created after BOOT_TS, still 'received' and
+    // not seeded above). Safe: printedIds guards against a double-print on the next pass.
+    autoPrintNew(!!data.autoPrintKot, data.orders, data.items, data.restaurant);
   }
   state.autoPrintKot = !!data.autoPrintKot;
   state.restaurant = data.restaurant || null;
   state.knownIds = ids;
+  // Bound printedIds on a long (24/7 wall-display) service: an order that has LEFT the board
+  // (served/cancelled) can never reappear as a new 'received', so forgetting it can't cause a
+  // reprint — this stops the Set growing forever. Only prune the ones no longer on the board.
+  // (knownIds is already replaced with the current board `ids` each full load, so it's bounded.)
+  if (printedIds.size > 500) { for (const id of printedIds) if (!ids.has(id)) printedIds.delete(id); }
   state.dishes = data.dishes;
   // Re-apply the LEGACY-order optimistic overlay so a just-ALL-READY'd legacy order (dishes
   // in orders[].items, no order_items rows) doesn't revert to cooking when this refetch

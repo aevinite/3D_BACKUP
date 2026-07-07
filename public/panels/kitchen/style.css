@@ -185,4 +185,7 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
   .top-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
   .top-actions .btn { padding: 9px 11px; min-height: 44px; display: inline-flex; align-items: center; }
   .theme-toggle { width: 44px; height: 44px; }
+  /* Leave room at the bottom so the last ticket / "Nothing here" isn't hidden behind the
+     fixed "Tap to enable sound" nudge + toasts on a phone (audit 2026-07-07). */
+  .cols, .wall { padding-bottom: 104px; }
 }

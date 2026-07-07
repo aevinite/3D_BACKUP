@@ -194,16 +194,22 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "platform" && c === "status") {
       const status = body && body.status;
       if (!["accepted", "preparing", "ready", "handed_over"].includes(status)) return err("invalid status");
-      if (status === "accepted") {
+      // lfh_platform_set_status updates by id with NO tenant scope (mig 071), so confirm
+      // this platform order belongs to THIS restaurant first (service-role bypasses RLS).
+      // Also read its CURRENT status for the accept-gate below.
+      const owns = must(await sb.from("aggregator_orders").select("id, status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!owns) return err("That platform order isn't for this restaurant.", 404);
+      // The MANAGER owns ACCEPTING (moving a still-'new' order forward). If the kitchen isn't
+      // allowed to accept platform orders, it may not advance a 'new' one by ANY status — not
+      // just the literal "accepted" (audit 2026-07-07: the old gate only checked
+      // status==='accepted', and the RPC has no from-state guard). Once past 'new', cooking it
+      // through is the kitchen's job. The UI already hides the button; this is belt-and-braces.
+      if (owns.status === "new") {
         const s = await sb.from("settings").select("kitchen_can_accept_platform").eq("restaurant_id", rid).maybeSingle();
         if (!(s.data && s.data.kitchen_can_accept_platform)) {
           return err("The kitchen isn't allowed to accept platform orders — the manager accepts them.", 403);
         }
       }
-      // lfh_platform_set_status updates by id with NO tenant scope (mig 071), so confirm
-      // this platform order belongs to THIS restaurant first (service-role bypasses RLS).
-      const owns = must(await sb.from("aggregator_orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
-      if (!owns) return err("That platform order isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "kitchen" });
       if (error) throw new Error(error.message);
       const row = Array.isArray(data) ? data[0] : data;
