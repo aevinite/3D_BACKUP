@@ -110,6 +110,15 @@ const banquetErrMsg = (reason?: string) =>
   : reason === "bad_table" ? "Pick a valid table."
   : (reason || "Couldn't create the banquet bill.");
 
+// Friendly message for the shift-table RPC's { ok:false, reason } (#1 — used to be
+// swallowed as a 200, so a failed "Move table" looked like it worked then snapped back).
+const shiftErrMsg = (reason?: string) =>
+  reason === "target_occupied" ? "That table is already taken — pick a free one."
+  : reason === "session_closed" ? "This table was just closed or settled — reopen it and try again."
+  : reason === "bad_table" ? "Pick a valid table to move to."
+  : reason === "same_table" ? "That party is already on that table."
+  : (reason || "Couldn't move the table — try again.");
+
 // Friendly message for a staff-edit RPC's { ok:false, reason } (edit-qty/note/add).
 const editErrMsg = (reason?: string) =>
   reason === "order_paid" ? "Won't change a PAID bill — mark it unpaid first."
@@ -291,13 +300,21 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         items: items.map(lineSig),
         allergies: Array.isArray(allergies) ? allergies : [],
       });
-      const recent = must(await sb.from("orders").select("items, allergies")
-        .eq("table_number", t).eq("restaurant_id", rid).gte("created_at", new Date(Date.now() - 3000).toISOString()).limit(5));
-      if (recent.some((o: any) => JSON.stringify({
-        items: (o.items || []).map(lineSig),
-        allergies: Array.isArray(o.allergies) ? o.allergies : [],
-      }) === sig)) {
-        return err("That order was just sent — check the ticket before re-sending.", 409);
+      // #15: this guard can also block a GENUINE second identical order (two guests at one
+      // table order the same drink seconds apart). So it's now an OVERRIDABLE warning, not a
+      // hard wall: on the first hit we return duplicateWarning:true and the client asks "send
+      // anyway?"; when the waiter confirms it re-sends with confirmDuplicate:true and we skip
+      // the check. The at-most-once idempotency (X-LFH-Action-Id) still dedupes an auto-replay
+      // of the SAME queued action, so only the human "yes, really send again" path bypasses.
+      if (!(body && body.confirmDuplicate === true)) {
+        const recent = must(await sb.from("orders").select("items, allergies")
+          .eq("table_number", t).eq("restaurant_id", rid).gte("created_at", new Date(Date.now() - 3000).toISOString()).limit(5));
+        if (recent.some((o: any) => JSON.stringify({
+          items: (o.items || []).map(lineSig),
+          allergies: Array.isArray(o.allergies) ? o.allergies : [],
+        }) === sig)) {
+          return NextResponse.json({ error: "This looks identical to an order you just sent.", duplicateWarning: true }, { status: 409 });
+        }
       }
       const { data, error } = await sb.rpc("lfh_staff_place_order", {
         p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
@@ -474,6 +491,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // A restart ends the round (fresh round, fresh party) — release the head +
       // partners from this session, same as a close. (owner, 2026-06-18)
       if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("removed", false).select());
+      // ...and resolve this table's open waiter-calls + deny its pending requests (#7), the
+      // same cleanup a close does (mig 020 trigger). Without this, an unanswered call from the
+      // old party left a ghost 🔔 badge + ATTEND on the now-empty table. Scope by rid + table.
+      await sb.from("waiter_calls").update({ resolved: true }).eq("resolved", false).eq("restaurant_id", rid).eq("table_number", t);
+      await sb.from("requests").update({ status: "denied" }).eq("status", "pending").eq("restaurant_id", rid).eq("table_number", t);
       await logAction("tablet", "table_restart", { table_number: t, detail: `${rows.length} order(s) cleared` + by, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
@@ -486,6 +508,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // checks the target table within that same restaurant — no rid needed here.
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
+      // The RPC signals a refused move (target occupied / session closed / bad table) as
+      // { ok:false, reason } with HTTP 200 — DON'T pass that through as success, or the
+      // client's optimistic move sticks visually then silently snaps back (#1). Surface a
+      // real 4xx so the client reverts AND shows a toast (matches orders/:id/move).
+      if (data && (data as any).ok === false) return err(shiftErrMsg((data as any).reason), 409);
       return ok(data);
     }
 
@@ -686,7 +713,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (src.payment_status === "paid") return err("Won't move a PAID order — mark it unpaid first.", 409);
       if (String(src.table_number) === to) return err("That order is already on that table.", 400);
       // Find (or open) the target table's session, then re-home the order onto it.
-      let target = (must(await sb.from("sessions").select("id").eq("table_number", to).eq("restaurant_id", rid).neq("status", "closed").limit(1)))[0];
+      let target = (must(await sb.from("sessions").select("id, invoice_no, invoice_voided").eq("table_number", to).eq("restaurant_id", rid).neq("status", "closed").limit(1)))[0];
+      // Don't add an order onto a bill whose invoice has ALREADY been generated/printed (#5):
+      // the guest holds a printed invoice that would no longer match the new total. Block it —
+      // staff should void/regenerate that invoice first. "Invoiced/locked" = invoice_no set AND
+      // NOT voided (mig 073), so a voided invoice does NOT block (it's being re-billed anyway).
+      if (target && target.invoice_no != null && !target.invoice_voided) return err(`Table ${to}'s bill is already invoiced — void or regenerate its invoice before moving an order onto it.`, 409);
       if (!target) target = (must(await sb.from("sessions").insert({ table_number: to, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select()))[0];
       // Scope the SOURCE order by rid (target session is already rid-scoped above): without
       // it a foreign order id could be re-homed onto this restaurant's table (service-role

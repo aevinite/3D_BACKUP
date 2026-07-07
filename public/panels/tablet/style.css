@@ -89,7 +89,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 /* A waiter call / a join-or-open request is shown by the corner BADGES + the tile's
    state colour (e.g. amber "Wants in") — NOT a ring. Red is reserved for an UNPAID
    bill (.pay-unpaid), so ringing a free/requested table red was confusing. (2026-06-18) */
-.tnum { font-size: 24px; font-weight: 900; line-height: 1; }
+/* #20: a custom table NAME (mig 131) can be long — keep it on one line and ellipsize so it
+   never overflows the small tile at ~390px (the number stays in the tile's title attr). */
+.tnum { font-size: 24px; font-weight: 900; line-height: 1.05; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tlabel { font-size: 12px; font-weight: 800; }
 .t-free .tlabel { color: var(--muted); }
 .t-seated .tlabel { color: #2dd4bf; }

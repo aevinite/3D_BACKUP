@@ -12,6 +12,15 @@
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// #9: the tablet has its OWN ☰ hamburger profile menu, so tell the shared maint.js NOT to
+// also inject its "👤 Profile" button (two overlapping menus crowded the phone top bar). Set
+// before maint.js's async init runs. The one-time "👋 Finish setup" capture still shows.
+window.LFH_SUPPRESS_SETTINGS_BTN = true;
+
+// #11: fold diacritics so waiter dish-search matches accented names ("caffe"→"Caffè").
+// Same NFD + strip-combining-marks trick the guest menu uses.
+const foldAccents = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
 // __lfhPerf: cheap, always-on perf counters so the floor's render cost can be measured at
 // scale (300 tables) — IDENTICAL to the manager's. fullRenders = full floor rebuilds
 // (renderFloor); patches = incremental tile patches (patchTabletTiles); tilesPatched = how
@@ -85,9 +94,17 @@ const api = async (method, path, body) => {
   const r = await fetch("/api/tablet" + ridQ(path), { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
   const j = await r.json().catch(() => null);
-  if (!r.ok) throw new Error((j && j.error) || r.statusText);
+  // Attach the parsed body + status to the error so callers can read server flags like
+  // duplicateWarning (#15) / needPin, which a bare message string would have dropped.
+  if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.data = j; throw e; }
   return j;
 };
+// #2: a write that returned { queued:true } was saved on THIS device (offline) and will
+// sync on reconnect — it did NOT fail. Callers show a friendly "saved" note instead of a
+// success/failure toast, and skip the post-write GET (which would reject offline).
+const isQueued = (r) => !!(r && r.queued === true);
+// Accurate whether offline (syncs on reconnect) or online-with-a-pending-queue (syncs now).
+const OFFLINE_SAVED_MSG = "Saved ✓ — syncing automatically.";
 const toast = (msg, ok = true) => {
   const t = document.createElement("div");
   t.className = "toast" + (ok ? "" : " bad");
@@ -160,13 +177,14 @@ const pinPrompt = (message, errText) => new Promise((resolve) => {
 // success; a cancelled PIN aborts silently; real errors toast.
 async function actGated(method, path, body, opts = {}) {
   try {
+    let r;
     try {
-      await api(method, path, body);
+      r = await api(method, path, body);
     } catch (e) {
       if (!/manager pin/i.test(String(e && e.message))) throw e;
       let pin = await pinPrompt(opts.message);
       while (pin) {
-        try { await api(method, path, { ...(body || {}), managerPin: pin }); break; }
+        try { r = await api(method, path, { ...(body || {}), managerPin: pin }); break; }
         catch (e2) {
           if (/manager pin/i.test(String(e2 && e2.message))) { pin = await pinPrompt(opts.message, "That PIN didn't match — try again."); continue; }
           throw e2;
@@ -174,6 +192,7 @@ async function actGated(method, path, body, opts = {}) {
       }
       if (!pin) return; // cancelled
     }
+    if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: saved offline — skip the offline GET + the success toast
     await load();
     if (opts.toast) toast(opts.toast);
   } catch (e) {
@@ -600,12 +619,17 @@ function openDishEditModal(itemId) {
   const orderAllergies = (Array.isArray(order.allergies) ? order.allergies : []).map(norm).filter(Boolean);
   const initial = new Set([...itemRemoved, ...orderAllergies]); // what the dish avoids now
   const working = new Set(initial);                             // live working copy until Save
+  // #4: which of these are ORDER-WIDE avoids (apply to every dish), so we can tag them and
+  // warn before one is turned off (removing it here clears it from the whole order, not just
+  // this dish). Prevents a waiter silently stripping an allergy warning off the other dishes.
+  const orderWide = new Set(orderAllergies);
   const STD = ALLERGENS.map((a) => a.slug);
   const labelFor = (slug) => { const a = ALLERGENS.find((x) => x.slug === slug); return a ? a.label : "🚫 " + slug; };
+  const owTag = (slug) => orderWide.has(slug) ? ` <sup class="alg-ow" title="Set for the whole order — removing it affects every dish">all</sup>` : "";
   const chipsHtml = () => {
-    const std = ALLERGENS.map((a) => `<span class="chip talg ${working.has(a.slug) ? "on" : ""}" data-slug="${esc(a.slug)}">${esc(a.label)}</span>`).join("");
+    const std = ALLERGENS.map((a) => `<span class="chip talg ${working.has(a.slug) ? "on" : ""}" data-slug="${esc(a.slug)}"${orderWide.has(a.slug) ? ' data-orderwide="1"' : ""}>${esc(a.label)}${owTag(a.slug)}</span>`).join("");
     // Custom allergens are their own chips — tap one to REMOVE it (same as a standard chip).
-    const cust = [...working].filter((s) => !STD.includes(s)).map((s) => `<span class="chip talg on" data-slug="${esc(s)}">${esc(labelFor(s))}</span>`).join("");
+    const cust = [...working].filter((s) => !STD.includes(s)).map((s) => `<span class="chip talg on" data-slug="${esc(s)}"${orderWide.has(s) ? ' data-orderwide="1"' : ""}>${esc(labelFor(s))}${owTag(s)}</span>`).join("");
     return std + cust;
   };
   const ov = document.createElement("div");
@@ -626,7 +650,15 @@ function openDishEditModal(itemId) {
   ov.querySelector(".dish-edit-note").value = item.note || "";
   const listEl = ov.querySelector(".dish-alg-list");
   const input = ov.querySelector(".dish-edit-custominput");
-  const bindChips = () => listEl.querySelectorAll("[data-slug]").forEach((c) => (c.onclick = () => { const s = c.dataset.slug; working.has(s) ? working.delete(s) : working.add(s); redraw(); }));
+  const bindChips = () => listEl.querySelectorAll("[data-slug]").forEach((c) => (c.onclick = async () => {
+    const s = c.dataset.slug;
+    if (working.has(s)) {
+      // #4: turning OFF an order-wide avoid clears it from EVERY dish — confirm first.
+      if (orderWide.has(s) && !(await confirmDialog(`"${s}" is set for the WHOLE order. Removing it here takes it off EVERY dish on this order, not just this one. Remove it from all?`, "Remove from all"))) return;
+      working.delete(s);
+    } else working.add(s);
+    redraw();
+  }));
   const redraw = () => { listEl.innerHTML = chipsHtml(); bindChips(); };
   redraw();
   const addCustom = () => { const v = norm(input.value); if (v) working.add(v); input.value = ""; redraw(); input.focus(); };
@@ -659,6 +691,11 @@ function openDishEditModal(itemId) {
 // ── the table detail panel (view mode) ───────────────────────────────────────
 function renderPanel() {
   const p = $("#panel");
+  // #10: a picker (renderPickerShell) sets p.onclick to a "go back" handler; if we don't
+  // clear it here, that handler LEAKS onto the rebuilt detail — so after using "Move an
+  // order" a stray tap on the dim margin re-opened the picker. Reset it every rebuild; the
+  // detail branches below re-assign a proper backdrop-close.
+  p.onclick = null;
   p.classList.remove("has-detail");
   // Not ordering → make sure the order-mode takeover + its back-stack layer are gone,
   // whatever path ended the ordering (send, ← back, ✓ Done, hardware back, drawer close).
@@ -710,6 +747,8 @@ function renderPanel() {
       ${billBox}
      </div>`;
     { const dc = $("#detailClose"); if (dc) dc.onclick = () => { state.table = null; renderPanel(); renderFloor(); }; }
+    // #10: tap the dimmed area around the card to close, like every other tablet popup.
+    p.onclick = (e) => { if (e.target === p) { state.table = null; renderPanel(); renderFloor(); } };
     $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
     return;
   }
@@ -833,7 +872,6 @@ function renderPanel() {
     <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
     <div class="phead">
       <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"}` : "closed"}</div></div>
-      <button class="btn small backtop" id="backTop">↑ Tables</button>
       ${s ? `<span class="live">● open</span>` : `<span class="off">closed</span>`}
     </div>
     <div class="detail-body">
@@ -856,6 +894,8 @@ function renderPanel() {
     ${foot}
    </div>`;
   { const dc = $("#detailClose"); if (dc) dc.onclick = () => { state.table = null; renderPanel(); renderFloor(); }; }
+  // #10: backdrop tap closes the detail popup, consistent with every other tablet popup.
+  p.onclick = (e) => { if (e.target === p) { state.table = null; renderPanel(); renderFloor(); } };
 
   // wire it up
   document.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqApprove}/resolve`, { status: "approved" }))));
@@ -923,7 +963,7 @@ function renderPanel() {
   // IDENTICAL to the manager panel's openDishEditModal.
   document.querySelectorAll("[data-edit-dish]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.editDish)));
   // Add a dish to THIS already-placed order: reuse the dish browser in add mode.
-  document.querySelectorAll("[data-add-dish]").forEach((b) => (b.onclick = () => { state.ordering = true; state.viewOrder = false; state.addToOrderId = b.dataset.addDish; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); }));
+  document.querySelectorAll("[data-add-dish]").forEach((b) => (b.onclick = () => { state.ordering = true; state.viewOrder = false; state.addToOrderId = b.dataset.addDish; state.cat = ""; state.dishSearch = ""; state._omTop = 0; state._addedThisVisit = 0; renderPanel(); }));
   // Per-order allergen chips: toggle an allergen on/off for the whole order.
   document.querySelectorAll(".talg[data-alg]").forEach((chip) => (chip.onclick = () => {
     const id = chip.dataset.alg, slug = chip.dataset.slug;
@@ -976,7 +1016,6 @@ function renderPanel() {
       toast("Failed: " + e.message, false);
     }
   };
-  const bt = $("#backTop"); if (bt) bt.onclick = () => document.querySelector(".floor")?.scrollIntoView({ behavior: "smooth", block: "start" });
   $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
 }
 
@@ -993,6 +1032,10 @@ function advanceDish(id, cur) {
   const next = NEXT_STATUS[cur] || "preparing";
   const it = (state.data.items || []).find((x) => x.id === id);
   if (it) it.status = next;            // optimistic — the pill flips instantly
+  // #8: re-sync THIS table's slim summary tile from the slice so the floor counts + the tile's
+  // "x/y served · ₹z due" meta update instantly too — before this, serving the last dish left
+  // the "Needs/Active" chips and the tile text stale for ~2.5s until the reconcile.
+  if (it) { const o = (state.data.orders || []).find((x) => x.id === it.order_id); if (o) patchTileFromSlice(o.table_number); }
   // Adopt this state as the baseline so a poll that arrives with the SAME
   // (server-confirmed) data won't repaint the panel under the waiter's finger.
   lastSig = boardSig(state);
@@ -1036,20 +1079,32 @@ function patchTileFromSlice(t) {
   const unpaid = accepted.some((o) => o.payment_status !== "paid");
   const paid = !unpaid && accepted.some((o) => o.payment_status === "paid");
   const hasOrders = os.length > 0;
-  let st, label;
-  if (nw > 0) { st = "new"; label = "New order"; }
-  else if (rd > 0) { st = "ready"; label = "Ready to serve"; }
-  else if (ck > 0) { st = "prep"; label = "Preparing"; }
-  else if (hasOrders && sv > 0) { st = unpaid ? "bill" : "done"; label = unpaid ? "Served" : "Cleared"; }
-  else if (s) { const g = membersOf(t).length; st = g ? "seated" : "waiting"; label = g ? "Seated" : "Open"; }
-  else if (reqsOf(t).length) { st = "req"; label = "Wants in"; }
-  else { st = "free"; label = "Free"; }
+  const members = s ? membersOf(t).length : 0;
+  const dishTot = nw + ck + rd + sv;
+  // Mirror the server summary RPC (mig 136) EXACTLY — state precedence, label AND meta text —
+  // so an optimistic tile equals what load() reconciles to (no flicker), and #8: the meta
+  // sub-line ("x/y served · ₹z due") is now recomputed instead of left stale.
+  let st, label, meta;
+  if (hasOrders) {
+    if (nw > 0) { st = "new"; label = "New order"; }
+    else if (rd > 0) { st = "ready"; label = "Ready to serve"; }
+    else if (ck > 0) { st = "prep"; label = "Preparing"; }
+    else if (unpaid) { st = "bill"; label = "Served"; }
+    else { st = "done"; label = "Cleared"; }
+    meta = dishTot > 0
+      ? `${sv}/${dishTot} served${due > 0 ? " · " + inr(due) + " due" : ""}`
+      : `${os.length} order${os.length === 1 ? "" : "s"}`;
+  } else if (s) {
+    if (members > 0) { st = "seated"; label = "Seated · " + members; meta = "no orders yet"; }
+    else { st = "waiting"; label = "Open"; meta = "waiting for guests"; }
+  } else if (reqsOf(t).length) { st = "req"; label = "Wants in"; meta = "asked for access"; }
+  else { st = "free"; label = "Free"; meta = "tap to open"; }
   const tiles = Object.assign({}, state.summary.tiles || {});
   tiles[tk] = Object.assign({}, tiles[tk] || {}, {
-    state: st, label,
+    state: st, label, meta,
     counts: { nw, ck, rd, sv }, due,
     pay: unpaid ? "red" : (paid ? "green" : ""),
-    hasNew: nw > 0,
+    hasNew: nw > 0, members,
   });
   state.summary = Object.assign({}, state.summary, { tiles });
 }
@@ -1159,12 +1214,22 @@ function renderMoveOrderTarget(t, orderId) {
 // Apply a local change, repaint instantly, then persist and reconcile from the
 // server. On failure we toast and reload so the screen can't lie.
 async function runOptimistic(mutate, fn) {
-  try { mutate(); renderFloor(); renderPanel(); await fn(); }
+  try {
+    mutate(); renderFloor(); renderPanel();
+    const r = await fn();
+    if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: saved offline — not a failure, and load() would no-op
+  }
   catch (e) { toast("Failed: " + e.message, false); }
   await load();   // load() already repaints if anything changed — no second render (that was the extra flash)
 }
 
-const act = async (fn) => { try { await fn(); await load(); } catch (e) { toast("Failed: " + e.message, false); } };
+const act = async (fn) => {
+  try {
+    const r = await fn();
+    if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: offline queue — friendly note, skip the offline GET
+    await load();
+  } catch (e) { toast("Failed: " + e.message, false); }
+};
 
 // ensureTableSlice(t): make sure table t's FULL slice (sessions/orders/items/calls/…) is in the
 // local cache before a tile QUICK-ACTION on a NON-selected table runs. The grid renders from the
@@ -1259,7 +1324,13 @@ function payBill(t, method, note) {
 // if cancelled. Mirrors the manager panel's version, styled inline like this file's
 // other self-contained modals (openDishEditModal, openDiscountModal, pinPrompt).
 // (owner, 2026-07-01)
+let payModalOpen = false;
 function openPaymentMethodModal(due, label) {
+  // #18: a fast double-tap on "💳 Mark paid" used to build a SECOND modal — the first's DOM
+  // was removed but its back-stack layer + promise leaked (one dead Back press). Re-entrancy
+  // guard: while one is open, a second call resolves null (treated as "cancelled") instead.
+  if (payModalOpen) return Promise.resolve(null);
+  payModalOpen = true;
   return new Promise((resolve) => {
     document.querySelector(".pay-overlay")?.remove();
     const ov = document.createElement("div");
@@ -1287,7 +1358,7 @@ function openPaymentMethodModal(due, label) {
     document.body.appendChild(ov);
     let resolved = false;
     let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-pay", () => cancel()) : null;
-    const close = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); };
+    const close = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); payModalOpen = false; };
     const finish = (method, note) => { resolved = true; close(); resolve({ method, note }); };
     const cancel = () => { close(); if (!resolved) resolve(null); };
     ov.querySelector(".pay-close").onclick = cancel;
@@ -1399,19 +1470,29 @@ function openDiscountModal(order) {
 
   let discAmount = clamp(current, 0, maxDisc);
   const updatePreview = () => {
+    // #14: a BLANK amount is "no change" — NOT "they pay ₹0" (which used to comp the whole
+    // order). Keep the current discount and disable Apply so an empty field can't zero the bill.
+    let blank = false;
     if (mode === "pay") {
-      // "They pay P" (tax-incl) → discount d = base − P/(1+rate), clamped to the food base.
-      const p = clamp(parseFloat(payInput.value), 0, payFor(0));
-      discAmount = clamp(round2(base - p / (1 + rate)), 0, maxDisc);
+      const raw = payInput.value.trim();
+      if (raw === "") { blank = true; discAmount = clamp(current, 0, maxDisc); }
+      else {
+        // "They pay P" (tax-incl) → discount d = base − P/(1+rate), clamped to the food base.
+        const p = clamp(parseFloat(raw), 0, payFor(0));
+        discAmount = clamp(round2(base - p / (1 + rate)), 0, maxDisc);
+      }
     } else {
-      const pct = clamp(parseFloat(pctInput.value), 0, 100);
-      discAmount = round2((base * pct) / 100);
+      const raw = pctInput.value.trim();
+      if (raw === "") { blank = true; discAmount = clamp(current, 0, maxDisc); }
+      else { const pct = clamp(parseFloat(raw), 0, 100); discAmount = round2((base * pct) / 100); }
     }
     payVal = payFor(discAmount);
     pctVal = base > 0 ? Math.round((discAmount / base) * 1000) / 10 : 0;
     ov.querySelector(".disc-prev-amt").textContent = "− " + inr(discAmount);
     ov.querySelector(".disc-prev-pct").textContent = pctVal + "% off";
     ov.querySelector(".disc-prev-pay").textContent = inr(payVal);
+    const applyBtn = ov.querySelector(".disc-apply-btn");
+    if (applyBtn) { applyBtn.disabled = blank; applyBtn.style.opacity = blank ? ".5" : ""; }
   };
   updatePreview();
 
@@ -1439,8 +1520,15 @@ function openDiscountModal(order) {
     close();
     const body = { amount, note: amount > 0 ? note : "" };
     if (tperm("tablet_discount") === "pin") {
+      // PIN entry already masks the round-trip; skip the optimistic write so a cancelled PIN
+      // can't leave a discount showing that never saved.
       actGated("POST", `/orders/${order.id}/discount`, body, { message: "Enter a manager PIN to apply this discount.", toast: amount > 0 ? `Discount ${inr(amount)} applied` : "Discount removed" });
     } else {
+      // #13: reflect the discount locally NOW (label + due) so the tap feels instant instead of
+      // lagging a ~1s server round-trip; act()'s load() reconciles to server truth right after.
+      order.discount = amount; order.discount_note = amount > 0 ? note : null;
+      patchTileFromSlice(order.table_number);
+      if (!state.ordering) renderPanel();
       act(() => api("POST", `/orders/${order.id}/discount`, body));
     }
   };
@@ -1466,8 +1554,12 @@ async function addDishToOrder(orderId, payload) {
   try {
     const r = await api("POST", `/orders/${orderId}/add-item`, payload);
     if (r && r.ok === false) { toast("Couldn't add: " + (r.reason || "rejected"), false); return; }
-    toast("Dish added ✓");
-    await load();
+    // #16: keep a running "added this visit" tally so the waiter can see what they've piled on
+    // (the cart badges aren't used in add mode). Rendered on the "✓ Done" button.
+    state._addedThisVisit = (state._addedThisVisit || 0) + (Math.max(1, Math.round(Number(payload && payload.qty) || 1)));
+    // #2: offline → the add is queued; say so honestly instead of "Dish added ✓".
+    toast(isQueued(r) ? "Dish saved ✓ — adds when you're back online" : "Dish added ✓");
+    await load();  // offline → no-ops; the tally + toast are the feedback until reconnect
     if (state.addToOrderId) renderOrderMode(); else if (!state.ordering) renderPanel();
   } catch (e) { toast("Failed: " + e.message, false); }
 }
@@ -1477,9 +1569,11 @@ async function addDishToOrder(orderId, payload) {
 // scroll (scroll-spy, same trick as the guest menu's computeSpy). Searching collapses the
 // sections into a single flat result list, exactly like before.
 function orderSections() {
-  const q = state.dishSearch.trim().toLowerCase();
+  // #11: fold accents on BOTH sides so "caffe latte" finds "Caffè Latte" (waiter search
+  // used to be plain toLowerCase, so accented dishes looked missing from the menu).
+  const q = foldAccents(state.dishSearch.trim());
   if (q) {
-    const dishes = state.data.dishes.filter((d) => (d.title || "").toLowerCase().includes(q));
+    const dishes = state.data.dishes.filter((d) => foldAccents(d.title || "").includes(q));
     return dishes.length ? [{ slug: "__search", label: "Search results", dishes }] : [];
   }
   const cats = (state.data.categories || []).filter((c) => c.active !== false);
@@ -1575,6 +1669,31 @@ function updateDishBadges() {
     btn.classList.toggle("in", qty > 0);
     const slot = btn.querySelector(".dbadge");
     if (slot && !btn.disabled) slot.innerHTML = qty ? `<span class="dqty">×${qty}</span>` : `<span class="dadd" aria-hidden="true">＋</span>`;
+  });
+}
+// #17: patch each visible dish button's SOLD-OUT state in place — called when a menu realtime
+// event lands while the waiter is mid-order (the grid isn't rebuilt then, so a dish that just
+// sold out would otherwise stay tappable until the waiter learns on send). No full re-render,
+// so the browse scroll + cart are untouched.
+function updateDishAvailability() {
+  document.querySelectorAll("#omScroll .dish[data-dish]").forEach((btn) => {
+    const d = state.data.dishes.find((x) => x.id === btn.dataset.dish);
+    if (!d) return;
+    const out = (d.tags || []).includes("sold-out");
+    btn.classList.toggle("out", out);
+    btn.disabled = out;
+    const priceEl = btn.querySelector(".dprice");
+    if (priceEl) priceEl.textContent = out ? "SOLD OUT" : inr(dishPrice(d));
+    const editEl = btn.querySelector(".dedit");
+    if (editEl) editEl.style.display = out ? "none" : "";
+    const slot = btn.querySelector(".dbadge");
+    if (slot) {
+      if (out) slot.innerHTML = "";
+      else {
+        const qty = state.cart.filter((l) => l.id === d.id).reduce((s, l) => s + l.qty, 0);
+        slot.innerHTML = qty ? `<span class="dqty">×${qty}</span>` : `<span class="dadd" aria-hidden="true">＋</span>`;
+      }
+    }
   });
 }
 function bindDishButtons() {
@@ -1809,7 +1928,7 @@ function renderOrderMode() {
       <div class="om-head">
         <h2>${addMode ? "Add · " : ""}${esc(tableLabel(state.table))}</h2>
         <input type="search" id="dishSearch" class="order-search om-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">
-        <button class="btn small ${addMode ? "primary" : ""}" id="omExit">${addMode ? "✓ Done" : "← back"}</button>
+        <button class="btn small ${addMode ? "primary" : ""}" id="omExit">${addMode ? `✓ Done${state._addedThisVisit ? ` (${state._addedThisVisit} added)` : ""}` : "← back"}</button>
       </div>
       <div class="om-body ${addMode ? "no-cart" : ""}">
         <nav class="om-nav" id="omNav">${orderNavHtml()}</nav>
@@ -1860,7 +1979,7 @@ async function sendOrder() {
     // dish on the ticket — that's the bug this fixes (2026-06-17).
     const splitCsv = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
     const orderAllergies = splitCsv(state.allergies);
-    const r = await api("POST", "/order", {
+    const buildBody = (extra) => Object.assign({
       table: state.table,
       items: state.cart.map((l) => {
         const removed = splitCsv(l.allergy);
@@ -1873,12 +1992,31 @@ async function sendOrder() {
       }),
       allergies: [...new Set(orderAllergies)],
       note: state.note.trim() || null,
-    });
+    }, extra || {});
+    const place = (extra) => api("POST", "/order", buildBody(extra));
+    // A finished send (real ticket OR safely queued offline): drop the back steps + reset.
+    const finishSent = () => {
+      if (voBackOff) { voBackOff(); voBackOff = null; }
+      if (omBackOff) { omBackOff(); omBackOff = null; }
+      state.ordering = false; state.cart = []; state.viewOrder = false; state.note = ""; state.allergies = ""; state._omTop = 0;
+    };
+    let r;
+    try {
+      r = await place();
+    } catch (e) {
+      // #15: the server flagged this as looking identical to one just sent — don't hard-refuse,
+      // let the waiter decide (two guests can genuinely order the same drink seconds apart).
+      if (e && e.data && e.data.duplicateWarning) {
+        if (!(await confirmDialog("This looks just like an order you sent seconds ago for this table. Send it AGAIN anyway?", "Send anyway"))) return;
+        r = await place({ confirmDuplicate: true });
+      } else { throw e; }
+    }
+    // #2: offline → the order is saved on this device (at-most-once) and will send on reconnect.
+    // Treat it as a clean success with an honest "saved" note, NOT the old "#undefined" + "Failed".
+    if (isQueued(r)) { toast("Order saved ✓ — it'll go to the kitchen the moment you're back online."); finishSent(); renderPanel(); return; }
     if (!r || r.ok !== true) { toast("Rejected: " + ((r && r.reason) || "unknown") + (r && r.item ? ` (${r.item})` : ""), false); return; }
     toast(`Sent! Kitchen ticket #${r.kot_no}`);
-    if (voBackOff) { voBackOff(); voBackOff = null; }   // drop the order's back steps on send
-    if (omBackOff) { omBackOff(); omBackOff = null; }
-    state.ordering = false; state.cart = []; state.viewOrder = false; state.note = ""; state.allergies = ""; state._omTop = 0;
+    finishSent();
     await load(); renderPanel();
   } catch (e) { toast("Failed: " + e.message, false); }
   finally {
@@ -1997,6 +2135,11 @@ function mergeSelectedSlice(t, slice) {
 // correct. This replaces the old "re-read the whole floor on every breadcrumb" — mirrors the
 // manager's pollTables. ANY surprise → full load() (safe fallback). (owner 2026-06-27 — two-tier)
 async function loadTables(tables) {
+  // #2/#19: offline → skip the network GET entirely. The optimistic local state is already
+  // on screen and the outbox will replay + a full refetch fires on reconnect, so there's
+  // nothing to fetch now — and NOT throwing here is what stops a queued action from being
+  // reported as "Failed".
+  if (navigator.onLine === false) return;
   if (!tables || !tables.length) return load();
   const seq = ++loadSeq;
   const sel = state.table != null ? String(state.table) : null;
@@ -2040,6 +2183,10 @@ async function loadTables(tables) {
 }
 
 async function load() {
+  // #2/#19: offline → don't fire the GET (it would reject and surface as "Failed: Failed to
+  // fetch" from every caller that awaits load() after a queued write). The reconnect flush
+  // (lfh:outbox-flushed) + the 'online' event both trigger a fresh load() once we're back.
+  if (navigator.onLine === false) return;
   const seq = ++loadSeq;
   const sel = state.table != null ? String(state.table) : null;
   // TIER 1: the slim summary drives the GRID + side aggregates + the table-agnostic bundle
@@ -2189,12 +2336,20 @@ if (window.LFH_RT) {
   // (dish/price/category changes) always do a full load() so the dish browser refreshes.
   LFH_RT.start({ handlers: {
     ops: (detail) => (detail && !detail.full && detail.tables && detail.tables.length) ? loadTables(detail.tables) : load(),
-    menu: () => load(),
+    // #17: after a menu change lands, if the waiter is mid-order patch the open dish grid in
+    // place so a just-sold-out dish becomes untappable immediately (load() skips renderPanel
+    // while ordering, so without this the grid stayed stale).
+    menu: () => load().then(() => { if (state.ordering) updateDishAvailability(); }).catch(() => {}),
   }});
   setInterval(() => load().catch(() => {}), 60000); // backup sync
 } else {
   setInterval(() => load().catch(() => {}), 2000); // fallback poll
 }
+// #2: once the offline queue drains (or the connection returns), pull true server state so
+// the optimistic screen reconciles with what actually synced. load() self-guards (seq +
+// offline), so these are safe no-ops when nothing changed / we're still offline.
+window.addEventListener("lfh:outbox-flushed", () => load().catch(() => {}));
+window.addEventListener("online", () => load().catch(() => {}));
 
 /* ════════════════════════════════════════════════════════════════════════════
    PHONE RESPONSIVE (2026-06-30): a hamburger drawer (profile + settings + logout)
