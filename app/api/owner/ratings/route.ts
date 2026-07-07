@@ -92,7 +92,10 @@ export async function PATCH(req: NextRequest) {
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!inScope(scope, row.restaurant_id)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-  const who = scope.all ? "admin" : "owner";
+  // Record WHO handled it: "admin" for the super-user OR an admin act-as session, else the
+  // concrete owner id (traceable when several co-own a restaurant) — matches issues.route,
+  // and no longer logs the generic "owner" for a specific co-owner (audit 2026-07-07).
+  const who = (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner");
   const patch: Record<string, unknown> = {};
   if (hasAck) {
     patch.acknowledged = body.acknowledged;

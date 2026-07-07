@@ -21,6 +21,8 @@ import {
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
 import RangeSlider from "@/components/owner/RangeSlider";
+import { reportRealtime } from "@/lib/connectionStatus";
+import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 
 const DAY_MS = 86400000;
 type Range = "today" | "yesterday" | "7d" | "30d" | "all";
@@ -165,19 +167,22 @@ function useCountUp(target: number, ms = 420): number {
   return val;
 }
 
-function Kpi({ k, v, money, delta, prevTitle, spark, color, sub }: {
+function Kpi({ k, v, money, delta, prevTitle, spark, color, sub, loading }: {
   k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };
-  prevTitle?: string; spark?: number[]; color?: string; sub?: string;
+  prevTitle?: string; spark?: number[]; color?: string; sub?: string; loading?: boolean;
 }) {
-  const n = useCountUp(typeof v === "number" ? v : 0);
+  // While the underlying data is still loading (e.g. just after a range change cleared it),
+  // show a calm "…" instead of animating from ₹0 — the ₹0-flash looked like a real zero
+  // for a moment (audit 2026-07-07). The count-up runs only once the real value arrives.
+  const n = useCountUp(typeof v === "number" && !loading ? v : 0);
   return (
     <div className="adm-stat owx-kpi">
       <div className="k">{k}</div>
       <div className="row">
-        <div className="v">{typeof v === "number" ? (money ? inr(n) : Math.round(n).toLocaleString("en-US")) : v}</div>
-        {delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
+        <div className="v">{loading ? <span style={{ opacity: 0.4 }}>…</span> : typeof v === "number" ? (money ? inr(n) : Math.round(n).toLocaleString("en-US")) : v}</div>
+        {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
       </div>
-      {sub && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{sub}</div>}
+      {sub && !loading && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{sub}</div>}
       {spark && spark.length > 1 && <Spark points={spark} color={color || "#34d399"} />}
     </div>
   );
@@ -230,12 +235,16 @@ export default function OwnerDashboard() {
   // any response that lands after a newer one started — so a slow earlier fetch can't
   // overwrite the range you just switched to (owner audit 2026-07-06).
   const loadSeq = useRef(0);
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { withRecords?: boolean }) => {
     const myGen = ++loadSeq.current;
     const fresh = () => myGen === loadSeq.current;
     try {
       const rg = range;
       const j = (r: Response) => r.json();
+      // All-time "records" (an unbounded scan) is fetched only on first load / range change /
+      // manual refresh — NOT on the 60s auto-refresh, which keeps the last records value
+      // (audit 2026-07-07). The flag rides on the restaurant-scope analytics calls only.
+      const recQ = opts?.withRecords ? "&records=1" : "";
       // The tab's scope pin (admin-in-one-restaurant) rides on EVERY call so the
       // shared act-as cookie can't hijack this tab (C1). Null for a real owner.
       const scp = scopePin ? `&scope=${scopePin}` : "";
@@ -244,19 +253,19 @@ export default function OwnerDashboard() {
       const moneyUrl = (rid: string | null) =>
         `/api/owner/reports?type=sales&range=${rg}${rid ? `&rid=${rid}` : ""}${scp}`;
       if (view.level === "home") {
-        const o: Overview = await fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then(j);
+        const o: Overview = await fetchOwnerOverview(scp) as Overview;
         if ((o as unknown as { error?: string }).error) throw new Error((o as unknown as { error: string }).error);
         if (!fresh()) return;
         setOv(o);
         if (o.restaurants.length === 1) {
           const rid = o.restaurants[0].id;
           const [a, m] = await Promise.all([
-            fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${scp}`, { cache: "no-store" }).then(j),
+            fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}`, { cache: "no-store" }).then(j),
             fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
           ]);
           if (a.error) throw new Error(a.error);
           if (!fresh()) return;
-          setRest(a); setMoney(m.error ? null : m.totals); setGroup(null);
+          setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null })); setMoney(m.error ? null : m.totals); setGroup(null);
         } else {
           const [g, m] = await Promise.all([
             fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}`, { cache: "no-store" }).then(j),
@@ -269,15 +278,23 @@ export default function OwnerDashboard() {
       } else {
         const rid = (view as { rid: string }).rid;
         const [a, m] = await Promise.all([
-          fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${scp}`, { cache: "no-store" }).then(j),
+          fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}`, { cache: "no-store" }).then(j),
           fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
         ]);
         if (a.error) throw new Error(a.error);
         if (!fresh()) return;
-        setRest(a); setMoney(m.error ? null : m.totals);
+        setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null })); setMoney(m.error ? null : m.totals);
       }
       if (fresh()) setErr(null);
-    } catch (e) { if (fresh()) setErr(e instanceof Error ? e.message : String(e)); }
+      // The owner panel has NO realtime socket — it polls. So IT drives the connection
+      // light: a successful load = healthy (green), a failed one = amber. Without this the
+      // badge was hard-stuck on green "Live" even while the dashboard showed "Couldn't load"
+      // (audit 2026-07-07).
+      reportRealtime("online");
+    } catch (e) {
+      if (fresh()) setErr(e instanceof Error ? e.message : String(e));
+      reportRealtime("weak");
+    }
   }, [view, range]);
 
   // Clear stale analytics the moment the range or drilled restaurant changes, so the
@@ -287,10 +304,12 @@ export default function OwnerDashboard() {
   useEffect(() => { setRest(null); setGroup(null); setMoney(null); }, [range, view]);
 
   const loadRef = useRef(load); loadRef.current = load;
-  useEffect(() => { load(); }, [load]);
+  // First load + every range/restaurant change fetches the all-time records; the 60s
+  // auto-refresh below deliberately does NOT (it keeps the last records value).
+  useEffect(() => { load({ withRecords: true }); }, [load]);
   const [refreshing, setRefreshing] = useState(false);
   useActiveAutoRefresh(() => loadRef.current(), 60000);
-  const manualRefresh = () => { setRefreshing(true); loadRef.current(); setTimeout(() => setRefreshing(false), 600); };
+  const manualRefresh = () => { setRefreshing(true); loadRef.current({ withRecords: true }); setTimeout(() => setRefreshing(false), 600); };
   const goHome = () => { setView({ level: "home" }); if (!single) setRest(null); };
 
   // ── shape group timeseries → multi-line rows {label,[name]:rev} ──
@@ -449,14 +468,14 @@ export default function OwnerDashboard() {
       {view.level === "home" && !single && (
         <>
           <div className="adm-stats">
-            <Kpi k={`Revenue (${RANGE_LABEL[range]})`} v={groupTotals?.revenue ?? 0} money
+            <Kpi k={`Revenue (${RANGE_LABEL[range]})`} v={groupTotals?.revenue ?? 0} money loading={!group}
               delta={group?.prev ? { now: groupTotals?.revenue ?? 0, prev: group.prev.revenue } : undefined}
               prevTitle={PREV_LABEL[range]} spark={groupSpark} />
-            <Kpi k="Orders" v={groupTotals?.orders ?? 0}
+            <Kpi k="Orders" v={groupTotals?.orders ?? 0} loading={!group}
               delta={group?.prev ? { now: groupTotals?.orders ?? 0, prev: group.prev.orders } : undefined}
               prevTitle={PREV_LABEL[range]} />
             <Kpi k="Open tables now" v={ov?.totals.openTables ?? 0} />
-            <Kpi k="Lost to cancellations" v={money?.cancelledValue ?? 0} money sub={money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great"} />
+            <Kpi k="Lost to cancellations" v={money?.cancelledValue ?? 0} money loading={!money} sub={money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great"} />
           </div>
 
           {hq ? (
@@ -701,7 +720,7 @@ export default function OwnerDashboard() {
         .hq-table .mut { color: var(--muted); }
         .hq-table .go i { color: var(--muted); font-size: 11px; }
         .hq-empty { text-align: center !important; color: var(--muted); padding: 26px 12px !important; }
-        @media (max-width: 760px) { .own-charts { grid-template-columns: 1fr; } .hq-meter { display: none; } .hq-table .mut { display: none; } .hq-table th:nth-child(4), .hq-table th:nth-child(5), .hq-table th:nth-child(6) { display: none; } .own-hero-links { width: 100%; } :global(.own-hero-link) { flex: 1; justify-content: center; } }
+        @media (max-width: 760px) { .own-charts { grid-template-columns: 1fr; } .own-h2h { grid-template-columns: 1fr; } .hq-meter { display: none; } .hq-table .mut { display: none; } .hq-table th:nth-child(4), .hq-table th:nth-child(5), .hq-table th:nth-child(6) { display: none; } .own-hero-links { width: 100%; } :global(.own-hero-link) { flex: 1; justify-content: center; } }
       `}</style>
     </>
   );
@@ -735,7 +754,7 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
           delta={rest.prev ? { now: k.orders, prev: rest.prev.orders } : undefined} prevTitle={PREV_LABEL[range]} />
         <Kpi k="Avg order" v={k.avgOrder} money sub="per paid order" />
         <Kpi k="Open tables now" v={k.openTables} />
-        <Kpi k="Lost to cancellations" v={money?.cancelledValue ?? 0} money sub={money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great"} />
+        <Kpi k="Lost to cancellations" v={money?.cancelledValue ?? 0} money loading={!money} sub={money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great"} />
       </div>
       <div className="rv-charts">
         <div className="adm-card" style={{ gridColumn: "1 / -1" }}>

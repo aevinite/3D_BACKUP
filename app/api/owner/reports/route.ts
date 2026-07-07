@@ -30,14 +30,29 @@ function windowFor(range: string): { from: string; to: string; bucket: string } 
   // tiles (cancellations/discounts) cover the SAME span as its revenue/order KPIs — before,
   // the dashboard mapped range=all → 12m here and undercounted everything >1yr old (bug M11).
   if (range === "all") return { from: "2020-01-01T00:00:00Z", to, bucket: "month" };
-  if (range === "12m") return { from: new Date(now - 365 * DAY).toISOString(), to, bucket: "month" };
-  if (range === "30d") return { from: new Date(now - 30 * DAY).toISOString(), to, bucket: "day" };
-  if (range === "7d") return { from: new Date(now - 7 * DAY).toISOString(), to, bucket: "day" };
+  // IST "now" and today's 00:00-IST boundary — used to align 7d/30d/12m to the SAME
+  // whole-IST-day/month windows /api/owner/analytics uses.
+  const istNow = new Date(now + 5.5 * 3600_000);
+  const istMidnightToday = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate()) - 5.5 * 3600_000;
+  // 7d / 30d: EXACTLY N whole IST calendar days ending today (inclusive), aligned to
+  // 00:00 IST — the SAME window analytics uses, so the dashboard's revenue KPI (analytics)
+  // and its discount/cancellation tiles (this route) cover the identical span, and a
+  // "7 days" report lists 7 dated rows, not 8. A rolling now−N×24h window spilled into an
+  // extra partial (N+1)th IST day so the two dashboard numbers didn't reconcile (audit 2026-07-07).
+  if (range === "7d" || range === "30d") {
+    const n = range === "7d" ? 7 : 30;
+    return { from: new Date(istMidnightToday - (n - 1) * DAY).toISOString(), to, bucket: "day" };
+  }
+  // 12m: the 12 whole IST calendar months ending this month (inclusive), aligned to 00:00
+  // IST on the 1st — matches the month buckets the client plots (no rolling extra 13th month).
+  if (range === "12m") {
+    const from = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth() - 11, 1) - 5.5 * 3600_000).toISOString();
+    return { from, to, bucket: "month" };
+  }
   // GST filing periods — proper IST calendar boundaries (a rolling 30d/12m window is NOT
   // a filing period). "month"/"lastmonth" = a calendar month for GSTR; "fy" = the Indian
   // financial year Apr 1 → Mar 31. 00:00 IST on the 1st, shifted back to UTC.
   if (range === "month" || range === "lastmonth" || range === "fy") {
-    const istNow = new Date(now + 5.5 * 3600_000);
     const y = istNow.getUTCFullYear(), m = istNow.getUTCMonth();
     const istMonthStart = (yy: number, mm: number) => new Date(Date.UTC(yy, mm, 1) - 5.5 * 3600_000).toISOString();
     if (range === "month") return { from: istMonthStart(y, m), to, bucket: "day" };
@@ -197,7 +212,19 @@ export async function GET(req: NextRequest) {
       for (const p of per) if (p.error) throw p.error;
       const keyCol = type === "dishes" ? "title" : type === "categories" ? "category" : "hour";
       const numeric = type === "hourly" ? ["orders", "revenue"] : ["qty", "revenue"];
-      const rows: Row[] = mergeBy(per.map((p) => (p.data ?? []) as Row[]), keyCol, numeric)
+      // Multi-restaurant dishes/categories: the SAME title in two brands is a DIFFERENT
+      // product, so DON'T sum "Water"/"Margherita" across brands into one misleading row.
+      // Label each row with its restaurant ("Water · Green Bowl") so identical names stay
+      // distinct in the existing list (audit 2026-07-07). Hourly stays a pure cross-restaurant
+      // aggregate — an hour-of-day is the same everywhere.
+      let rowsets = per.map((p) => (p.data ?? []) as Row[]);
+      if (type !== "hourly" && ids.length > 1) {
+        const nameById: Record<string, string> = {};
+        const nq = await sb.from("restaurants").select("id, name").in("id", ids);
+        for (const x of (nq.data || []) as { id: string; name: string }[]) nameById[x.id] = x.name;
+        rowsets = rowsets.map((rows, i) => rows.map((r) => ({ ...r, [keyCol]: `${String(r[keyCol])} · ${nameById[ids[i]] || "—"}` })));
+      }
+      const rows: Row[] = mergeBy(rowsets, keyCol, numeric)
         .map((r) => ({ ...r, revenue: num(r.revenue) }));
       rows.sort((a, b) => (type === "hourly" ? Number(a.hour) - Number(b.hour) : Number(b.revenue) - Number(a.revenue)));
       return NextResponse.json({ type, range, rows });

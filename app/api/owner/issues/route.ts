@@ -68,9 +68,10 @@ export async function PATCH(req: NextRequest) {
   if (!issue) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!inScope(scope, issue.restaurant_id)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
-  // Record WHO resolved it: the concrete owner id (traceable when several co-own a
-  // restaurant), or "admin" for the super-user (audit 2026-07-06).
-  const who = scope.all ? "admin" : (scope.ownerId || "owner");
+  // Record WHO resolved it: "admin" for the super-user OR an admin act-as session, else the
+  // concrete owner id (traceable when several co-own a restaurant). Keying off scope.admin
+  // (not just scope.all) stops an admin act-as being logged as the borrowed owner (audit 2026-07-07).
+  const who = (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner");
   const patch = status === "resolved"
     ? { status, resolved_at: new Date().toISOString(), resolved_by: who }
     : { status, resolved_at: null, resolved_by: null };
@@ -91,9 +92,12 @@ export async function POST(req: NextRequest) {
   if (!rid || !subject) return NextResponse.json({ error: "restaurant and subject required" }, { status: 400 });
   if (!inScope(scope, rid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
+  // An admin raising an issue (all-view OR act-as) is stamped "admin", not the borrowed
+  // owner — the act-as branch has scope.all=false, so key off scope.admin too (audit 2026-07-07).
   const { error } = await sb.from("issues").insert({
     restaurant_id: rid, subject, body: String(body?.body || "").trim(),
-    raised_by: scope.all ? "admin" : "owner", raised_role: scope.all ? "admin" : "owner",
+    raised_by: (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner"),
+    raised_role: (scope.all || scope.admin) ? "admin" : "owner",
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });

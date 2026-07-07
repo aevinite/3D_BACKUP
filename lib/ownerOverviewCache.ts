@@ -1,0 +1,22 @@
+// Tiny shared fetch for /api/owner/overview so the owner SHELL sidebar and the
+// DASHBOARD page — which mount together on a hard load — don't each fire the same
+// request (they used to, a duplicate read on every load; audit 2026-07-07). An
+// in-flight/just-finished promise is shared for a few seconds, keyed by scope string;
+// after the short TTL a fresh call goes out, so the 60s refreshes still get live data.
+// A failed fetch is evicted immediately so we never cache an error.
+type Entry = { at: number; p: Promise<unknown> };
+const cache = new Map<string, Entry>();
+const TTL_MS = 8000;
+
+// `scp` is the caller's scope suffix (e.g. "" or "&scope=<rid>") — the SAME string both
+// the shell and the dashboard already build, so identical scopes share one request.
+export function fetchOwnerOverview(scp: string): Promise<unknown> {
+  const key = scp || "_";
+  const now = Date.now();
+  const hit = cache.get(key);
+  if (hit && now - hit.at < TTL_MS) return hit.p;
+  const p = fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then((r) => r.json());
+  cache.set(key, { at: now, p });
+  p.catch(() => { if (cache.get(key)?.p === p) cache.delete(key); });
+  return p;
+}

@@ -80,7 +80,9 @@ async function scope(req: NextRequest): Promise<Scope> {
     const { data } = await sb.from("restaurants").select(cols).in("id", scopeIds).order("name");
     const rows = ((data || []) as Restaurant[]).filter((r) => mergeOwnerEntitlements(r.owner_entitlements).staff !== false);
     if (!rows.length)
-      return { ok: false, resp: bad("Staff management isn't enabled for your restaurant — contact Aevidine.", 403) };
+      // `disabled` = a legitimate "not turned on" state → the page shows a calm info card,
+      // not the scary red "Something went wrong" error (audit 2026-07-07).
+      return { ok: false, resp: NextResponse.json({ error: "Staff management isn't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 }) };
     return { ok: true, actor: "owner", actorId: u.id, restaurants: rows };
   }
   if (u?.role === "manager") {
@@ -99,11 +101,22 @@ async function scope(req: NextRequest): Promise<Scope> {
     const sp = req.nextUrl?.searchParams;
     const pin = sp?.get("scope") || sp?.get("rid");
     if (pin && pin !== "all") {
-      const owner = (await sb.from("restaurants").select("owner_user_id").eq("id", pin).maybeSingle()).data;
-      const ids = owner?.owner_user_id
-        ? ((await sb.from("restaurants").select("id").eq("owner_user_id", owner.owner_user_id)).data || []).map((x) => x.id as string)
-        : [];
-      const { data } = await sb.from("restaurants").select(cols).in("id", ids.length ? ids : [pin]).order("name");
+      // Resolve the pinned restaurant's OWNER via the restaurant_owners JOIN (the scoping
+      // source of truth, mig 097) — prefer the primary owner_user_id when it's a member,
+      // else any co-owner — then widen to every restaurant that owner owns. Keying off
+      // owner_user_id alone (the old code) missed hand-attached co-ownerships and could
+      // list a stale set for a reassigned restaurant (audit 2026-07-07). Mirrors lib/ownerScope.
+      const [primaryQ, membersQ] = await Promise.all([
+        sb.from("restaurants").select("owner_user_id").eq("id", pin).maybeSingle(),
+        sb.from("restaurant_owners").select("user_id").eq("restaurant_id", pin),
+      ]);
+      const members = (membersQ.data || []).map((m) => m.user_id as string);
+      const primary = primaryQ.data?.owner_user_id as string | null | undefined;
+      const ownerId = primary && members.includes(primary) ? primary : (members[0] ?? null);
+      let ids: string[] = [];
+      if (ownerId) ids = ((await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId)).data || []).map((x) => x.restaurant_id as string);
+      if (!ids.includes(pin)) ids.push(pin); // never lose the entered restaurant
+      const { data } = await sb.from("restaurants").select(cols).in("id", ids).order("name");
       return { ok: true, actor: "admin", actorId: null, restaurants: (data || []) as Restaurant[] };
     }
     const { data } = await sb.from("restaurants").select(cols).order("name");
