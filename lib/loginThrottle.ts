@@ -3,7 +3,7 @@
 // already self-lock via staff_users.failed_count/locked_until (migration 055); this
 // is the same idea for the two surfaces that had no row to count against.
 //
-// Backed by the `login_throttle` table (migration 143). A `key` names what+where is
+// Backed by the `login_throttle` table (migration 151). A `key` names what+where is
 // being guessed, e.g. "admin:<ip>" or "pin:<restaurant_id>:<device>". This is the
 // LOGIN path (rare, never polled) so the extra read+write is negligible and stays
 // off every hot/realtime path.

@@ -5,7 +5,7 @@
 //
 // The admin password is a SINGLE shared secret (not a staff_users row), so it can't
 // use the per-account lockout in lib/userAuth. Instead it gets an IP-keyed lockout
-// via lib/loginThrottle (migration 143): too many wrong tries locks that IP out for
+// via lib/loginThrottle (migration 151): too many wrong tries locks that IP out for
 // a few minutes. Every attempt (ok / wrong / blocked) is written to the ADMIN
 // operation log so the admin can see who tried what on the most-targeted screen.
 
