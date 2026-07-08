@@ -152,7 +152,7 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
 
           {(waiting > 0 || failed > 0) && (
             <span className="lfh-conn-pop-sync">
-              <span className="lfh-conn-pop-sub">{level === "offline" ? "Saved on this device" : "Sending…"}</span>
+              <span className="lfh-conn-pop-sub">{failed > 0 ? "Couldn't send" : level === "offline" ? "Saved on this device" : "Sending…"}</span>
               {box.failed.map((o) => (
                 <span key={o.id} className="lfh-conn-row">
                   <span className="lfh-conn-row-t"><b>{orderLabel(o)}</b><small className="err">{o.error} · {fmtAgo(o.at)}</small></span>

@@ -217,7 +217,7 @@
     var off = navigator.onLine === false;
     if (outbox.failed.length || outbox.queued.length) {
       var sync = el("span", "lfh-conn-pop-sync");
-      sync.appendChild(el("span", "lfh-conn-pop-sub", off ? "Saved on this device" : "Sending…"));
+      sync.appendChild(el("span", "lfh-conn-pop-sub", outbox.failed.length ? "Couldn't send" : off ? "Saved on this device" : "Sending…"));
       outbox.failed.forEach(function (it) {
         var row = el("span", "lfh-conn-row");
         var t = el("span", "lfh-conn-row-t");
