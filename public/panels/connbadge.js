@@ -1,210 +1,287 @@
-// connbadge.js — the shared "connection status" light + "waiting to sync" list for
-// the staff panels (manager/kitchen/tablet). Injects a small pill into the top bar,
-// top-right:
+// connbadge.js — the shared connection readout for the staff panels
+// (manager/kitchen/tablet). Injects a small pill into the top bar, top-right, that
+// shows SIGNAL BARS + a live latency number ("42 ms") coloured by speed
+// (green → yellow → orange → red) instead of a vague pulsing "Reconnecting" dot that
+// people mistook for a button (owner 2026-07-08). The whole pill is ALWAYS tappable
+// and opens one small "Connection" panel that MERGES the live status, the ms with a
+// quality label, a tiny recent-latency sparkline, whether live updates are flowing,
+// and anything saved on-device waiting to sync — so a tap always does something clear.
 //
-//   🟢 Live         — websocket subscribed, updates flowing.
-//   🟡 Reconnecting — the device has internet but the live socket dropped.
-//   🔴 Offline      — the device has NO internet (navigator.onLine === false).
-//
-// When there are actions saved on-device that haven't reached the server yet (the
-// panel was offline), the pill shows a count ("🔴 Offline · 3 waiting" /
-// "🟡 2 syncing") and becomes clickable: tapping it opens a drawer listing exactly
-// what's still waiting to upload and anything that couldn't sync. State comes from
-// LFH_RT (realtime.js) + navigator online/offline, and LFH_OUTBOX (outbox.js).
+// The ms comes only from the delivery time of breadcrumbs the panel ALREADY receives
+// (LFH_RT.getLatency, from realtime.js) — no extra request, zero egress. Twin of the
+// React components/ConnectionBadge.tsx; both read the same model & tiers.
 (function () {
-  const STATES = {
-    online:  { dot: "#22c55e", label: "Live",         title: "Connected — live updates are flowing." },
-    weak:    { dot: "#f59e0b", label: "Reconnecting", title: "You're online, but the live connection dropped — reconnecting…" },
-    offline: { dot: "#ef4444", label: "Offline",      title: "No internet. Changes you make are saved on this device and will sync when you're back online." },
-  };
+  var LATENCY_FRESH_MS = 90000; // a reading older than this → fall back to a calm "Live"
+
+  // latency (ms) → quality tier. Mirrors latencyTier() in lib/connectionStatus.ts.
+  // `bars` (0–3) carries the same meaning as colour so it's never colour-only (a11y).
+  function latencyTier(ms) {
+    if (ms == null) return null;
+    if (ms <= 700)  return { color: "#22c55e", text: "#16a34a", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
+    if (ms <= 1500) return { color: "#eab308", text: "#ca8a04", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
+    if (ms <= 3000) return { color: "#f97316", text: "#ea580c", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
+    return              { color: "#ef4444", text: "#dc2626", tint: "rgba(239,68,68,.16)",  bars: 1, label: "Poor" };
+  }
+
+  function connLevel() {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return "offline";
+    var s = (window.LFH_RT && window.LFH_RT.getStatus && window.LFH_RT.getStatus()) || "weak";
+    return s === "online" ? "online" : (s === "offline" ? "offline" : "weak");
+  }
+
+  // Build the view (colour/bars/label/ms) exactly like the React computeView().
+  function computeView() {
+    var level = connLevel();
+    if (level === "offline") return { level: level, color: "#ef4444", text: "#dc2626", tint: "rgba(239,68,68,.16)", bars: 0, label: "Offline", ms: null, pulse: false };
+    if (level === "weak") {
+      // First connect not made yet → calm neutral "Connecting…" (NOT the alarming amber
+      // "Reconnecting", which is reserved for a drop after we WERE connected).
+      var ever = window.LFH_RT && window.LFH_RT.everConnected && window.LFH_RT.everConnected();
+      if (!ever) return { level: level, connecting: true, color: "#94a3b8", text: "inherit", tint: "rgba(100,116,139,.14)", bars: 2, label: "Connecting…", ms: null, pulse: true };
+      return { level: level, color: "#f59e0b", text: "#d97706", tint: "rgba(245,158,11,.16)", bars: 1, label: "Reconnecting", ms: null, pulse: true };
+    }
+    var lat = (window.LFH_RT && window.LFH_RT.getLatency && window.LFH_RT.getLatency()) || { ms: null, at: 0 };
+    var fresh = lat.at > 0 && (Date.now() - lat.at) < LATENCY_FRESH_MS;
+    var tier = fresh ? latencyTier(lat.ms) : null;
+    if (tier) return { level: level, color: tier.color, text: tier.text, tint: tier.tint, bars: tier.bars, label: tier.label, ms: lat.ms, pulse: false };
+    return { level: level, color: "#22c55e", text: "#16a34a", tint: "rgba(34,197,94,.16)", bars: 3, label: "Live", ms: null, pulse: false };
+  }
+  function statusLine(v) {
+    if (v.level === "offline") return "No internet connection";
+    if (v.connecting) return "Connecting to live updates…";
+    if (v.level === "weak") return "Live connection dropped — reconnecting…";
+    return "Connected — live updates are flowing";
+  }
 
   function injectStyles() {
     if (document.getElementById("lfh-conn-style")) return;
-    const css = `
-    .lfh-conn{display:inline-flex;align-items:center;gap:7px;padding:5px 11px 5px 9px;border-radius:999px;
-      font:600 12px/1 system-ui,sans-serif;white-space:nowrap;user-select:none;
-      background:var(--panel-2,rgba(127,127,127,.12));border:1px solid var(--line,rgba(127,127,127,.25));
-      color:var(--text,#334155);transition:background .2s,border-color .2s,color .2s}
-    .lfh-conn.is-click{cursor:pointer}
-    .lfh-conn.is-click:hover{filter:brightness(1.06)}
-    .lfh-conn .lfh-conn-dot{width:9px;height:9px;border-radius:999px;flex:0 0 auto;position:relative}
-    .lfh-conn .lfh-conn-dot::after{content:"";position:absolute;inset:-3px;border-radius:999px;
-      background:inherit;opacity:.35;animation:lfhConnPulse 1.8s ease-out infinite}
-    .lfh-conn.is-offline .lfh-conn-dot::after{animation:none;opacity:0}
-    .lfh-conn .lfh-conn-n{font-weight:800;opacity:.9}
-    .lfh-conn .lfh-conn-warn{color:#ef4444;font-weight:800}
-    @keyframes lfhConnPulse{0%{transform:scale(.7);opacity:.5}70%{transform:scale(1.9);opacity:0}100%{opacity:0}}
-    @media (max-width:560px){.lfh-conn .lfh-conn-txt{display:none}.lfh-conn{padding:6px 9px}}
-    @media (prefers-reduced-motion:reduce){.lfh-conn .lfh-conn-dot::after{animation:none}}
-    /* drawer */
-    .lfh-sync-ov{position:fixed;inset:0;background:rgba(4,8,18,.55);backdrop-filter:blur(4px);z-index:99997;display:flex;justify-content:flex-end}
-    .lfh-sync-dw{width:min(92vw,420px);height:100%;overflow:auto;background:var(--panel,#0f1830);color:var(--text,#e7eefc);
-      box-shadow:-20px 0 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif;animation:lfhSyncSlide .2s cubic-bezier(.16,1,.3,1)}
-    @keyframes lfhSyncSlide{from{transform:translateX(40px);opacity:.2}to{transform:none;opacity:1}}
-    .lfh-sync-hd{position:sticky;top:0;background:var(--panel,#0f1830);padding:16px 18px;border-bottom:1px solid var(--line,#1d2944);display:flex;align-items:center;gap:10px}
-    .lfh-sync-hd h2{font-size:15px;margin:0;font-weight:800;flex:1}
-    .lfh-sync-x{margin-left:auto;padding:7px 11px;border:0;border-radius:9px;background:var(--line,#243049);color:var(--text,#e7eefc);font-weight:700;cursor:pointer}
-    .lfh-sync-sec{padding:14px 18px;border-bottom:1px solid var(--line,#1d2944)}
-    .lfh-sync-sec h3{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted,#7e93bd);margin:0 0 10px}
-    .lfh-sync-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line,#1d2944)}
-    .lfh-sync-row:last-child{border-bottom:0}
-    .lfh-sync-row .t{flex:1;min-width:0}
-    .lfh-sync-row .t b{display:block;font-size:13.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .lfh-sync-row .t small{font-size:11.5px;color:var(--muted,#8aa0c9)}
-    .lfh-sync-row .t .e{color:#fca5a5}
-    .lfh-sync-pill{font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:999px;flex:0 0 auto}
-    .lfh-sync-btn{padding:6px 10px;border:0;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;color:#0b1220}
-    .lfh-sync-empty{padding:26px 18px;text-align:center;color:var(--muted,#8aa0c9);font-size:13px}`;
-    const s = document.createElement("style"); s.id = "lfh-conn-style"; s.textContent = css;
+    var css = [
+      ".lfh-conn{position:relative;display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border-radius:999px;",
+      "  font:700 12.5px/1 system-ui,sans-serif;white-space:nowrap;user-select:none;cursor:pointer;",
+      "  border:1px solid var(--line,rgba(127,127,127,.22));color:var(--text,#334155);",
+      "  transition:background .2s,border-color .2s,filter .15s}",
+      ".lfh-conn:hover{filter:brightness(1.05)}",
+      ".lfh-conn:focus-visible{outline:2px solid var(--accent,#6366f1);outline-offset:2px}",
+      ".lfh-bars{display:inline-flex;align-items:flex-end;gap:2px;height:12px;flex:0 0 auto}",
+      ".lfh-bars.big{height:20px;gap:3px}",
+      ".lfh-bar{width:3px;border-radius:1.5px}",
+      ".lfh-bars.big .lfh-bar{width:4px;border-radius:2px}",
+      ".lfh-conn.is-pulse .lfh-bar{animation:lfhBarPulse 1.1s ease-in-out infinite}",
+      "@keyframes lfhBarPulse{0%,100%{opacity:1}50%{opacity:.35}}",
+      ".lfh-conn-ms{font-variant-numeric:tabular-nums;font-weight:800}",
+      ".lfh-conn-unit{font-weight:600;opacity:.7;font-size:10px}",
+      ".lfh-conn-txt{font-weight:700}",
+      ".lfh-conn-n{font-weight:800;opacity:.9}",
+      ".lfh-conn-n.warn{color:#ef4444}",
+      ".lfh-conn-chev{opacity:.5;flex:0 0 auto}",
+      /* popover */
+      ".lfh-conn-pop{position:absolute;top:calc(100% + 8px);right:0;z-index:99997;width:min(86vw,288px);",
+      "  display:flex;flex-direction:column;gap:12px;padding:14px;background:var(--panel,#0f1830);color:var(--text,#e7eefc);",
+      "  border:1px solid var(--line,rgba(127,127,127,.28));border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.4);",
+      "  font:500 12.5px/1.35 system-ui,sans-serif;animation:lfhConnPop .16s cubic-bezier(.16,1,.3,1)}",
+      "@keyframes lfhConnPop{from{transform:translateY(-4px);opacity:0}to{transform:none;opacity:1}}",
+      ".lfh-conn-pop-hd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:12.5px}",
+      ".lfh-conn-pop-dot{width:9px;height:9px;border-radius:999px;flex:0 0 auto}",
+      ".lfh-conn-pop-main{display:flex;align-items:center;gap:12px;padding:4px 2px}",
+      ".lfh-conn-pop-figs{display:flex;flex-direction:column;gap:2px}",
+      ".lfh-conn-pop-figs b{font-size:24px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}",
+      ".lfh-conn-pop-unit{font-size:13px;font-weight:600;opacity:.7}",
+      ".lfh-conn-pop-figs small{font-size:11px;opacity:.7}",
+      ".lfh-spark{display:flex;align-items:flex-end;gap:2px;height:30px;padding:4px 2px 0;border-top:1px solid var(--line,rgba(127,127,127,.14))}",
+      ".lfh-spark-bar{flex:1;min-width:2px;border-radius:2px 2px 0 0;opacity:.85}",
+      ".lfh-conn-pop-sync{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line,rgba(127,127,127,.14));padding-top:10px}",
+      ".lfh-conn-pop-sub{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;opacity:.6}",
+      ".lfh-conn-row{display:flex;align-items:center;gap:8px}",
+      ".lfh-conn-row-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}",
+      ".lfh-conn-row-t b{font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+      ".lfh-conn-row-t small{font-size:11px;opacity:.7}",
+      ".lfh-conn-row-t small.e{color:#fca5a5;opacity:1}",
+      ".lfh-conn-pill{font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:999px;flex:0 0 auto}",
+      ".lfh-conn-x{border:0;border-radius:8px;padding:6px 10px;font-size:11.5px;font-weight:700;cursor:pointer;color:#fff;flex:0 0 auto}",
+      ".lfh-conn-pop-ok{font-size:11.5px;opacity:.6;border-top:1px solid var(--line,rgba(127,127,127,.14));padding-top:10px}",
+      "@media (prefers-reduced-motion:reduce){.lfh-conn.is-pulse .lfh-bar{animation:none}.lfh-conn-pop{animation:none}}"
+    ].join("\n");
+    var s = document.createElement("style"); s.id = "lfh-conn-style"; s.textContent = css;
     document.head.appendChild(s);
   }
 
-  let badge = null, dotEl = null, txtEl = null, nEl = null;
-  let outbox = { queued: [], failed: [], count: 0 };
+  var badge = null, barsEl = null, msEl = null, nEl = null, pop = null, backOff = null;
+  var outbox = { queued: [], failed: [], count: 0 };
+
+  function el(tag, cls, txt) { var n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
+  function fmtAgo(ts) { var m = Math.floor((Date.now() - ts) / 60000); return m < 1 ? "just now" : m < 60 ? m + "m ago" : Math.floor(m / 60) + "h ago"; }
+
+  // Three signal bars; `lit` coloured, the rest faint. big = larger (popover).
+  function barsHtml(lit, color, big) {
+    var wrap = el("span", "lfh-bars" + (big ? " big" : ""));
+    var h = big ? [10, 15, 20] : [6, 9, 12];
+    for (var i = 0; i < 3; i++) {
+      var b = el("span", "lfh-bar");
+      b.style.height = h[i] + "px";
+      b.style.background = i < lit ? color : "currentColor";
+      b.style.opacity = i < lit ? "1" : ".22";
+      wrap.appendChild(b);
+    }
+    return wrap;
+  }
 
   function mount() {
     if (badge) return badge;
     injectStyles();
-    const legacy = document.getElementById("conn");
+    var legacy = document.getElementById("conn");
     if (legacy && legacy.classList.contains("conn")) legacy.style.display = "none";
 
-    badge = document.createElement("div");
-    badge.className = "lfh-conn"; badge.id = "lfhConnBadge";
-    dotEl = document.createElement("span"); dotEl.className = "lfh-conn-dot";
-    txtEl = document.createElement("span"); txtEl.className = "lfh-conn-txt";
-    nEl = document.createElement("span"); nEl.className = "lfh-conn-n";
-    badge.appendChild(dotEl); badge.appendChild(txtEl); badge.appendChild(nEl);
-    badge.addEventListener("click", () => { if (badge.classList.contains("is-click")) openDrawer(); });
+    badge = el("button", "lfh-conn"); badge.id = "lfhConnBadge"; badge.type = "button";
+    badge.setAttribute("aria-haspopup", "dialog");
+    barsEl = el("span"); // replaced each render
+    msEl = el("span", "lfh-conn-ms");
+    nEl = el("span", "lfh-conn-n");
+    var chev = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    chev.setAttribute("class", "lfh-conn-chev"); chev.setAttribute("width", "10"); chev.setAttribute("height", "10"); chev.setAttribute("viewBox", "0 0 10 10");
+    var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M2 3.5 5 6.5 8 3.5"); path.setAttribute("fill", "none"); path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "1.4"); path.setAttribute("stroke-linecap", "round"); path.setAttribute("stroke-linejoin", "round");
+    chev.appendChild(path);
+    badge.appendChild(barsEl); badge.appendChild(msEl); badge.appendChild(nEl); badge.appendChild(chev);
+    badge.addEventListener("click", function (e) { e.stopPropagation(); togglePop(); });
 
-    const host = document.querySelector(".topbar .top-actions") || document.querySelector(".topbar");
+    var host = document.querySelector(".topbar .top-actions") || document.querySelector(".topbar");
     if (!host) return null;
     host.insertBefore(badge, host.firstChild);
     return badge;
   }
 
-  function connState() {
-    if (typeof navigator !== "undefined" && navigator.onLine === false) return "offline";
-    const s = (window.LFH_RT && window.LFH_RT.getStatus && window.LFH_RT.getStatus()) || "weak";
-    return STATES[s] ? s : "weak";
-  }
-
   function render() {
     if (!mount()) return;
-    const key = connState();
-    const st = STATES[key];
-    dotEl.style.background = st.dot;
-    txtEl.textContent = st.label;
-    badge.classList.toggle("is-offline", key === "offline");
-
-    const waiting = outbox.queued.length, failedN = outbox.failed.length;
-    let extra = "";
-    if (failedN) extra = failedN + " failed";
-    else if (waiting) extra = waiting + (key === "offline" ? " waiting" : " syncing");
+    var v = computeView();
+    badge.style.background = v.tint;
+    badge.classList.toggle("is-pulse", !!v.pulse);
+    // bars
+    var newBars = barsHtml(v.bars, v.color, false);
+    badge.replaceChild(newBars, barsEl); barsEl = newBars;
+    // ms number or label
+    if (v.ms != null) {
+      msEl.innerHTML = ""; msEl.appendChild(document.createTextNode(String(v.ms)));
+      var u = el("span", "lfh-conn-unit", " ms"); msEl.appendChild(u);
+      msEl.className = "lfh-conn-ms"; msEl.style.color = v.text; msEl.style.display = "";
+    } else {
+      msEl.textContent = v.label; msEl.className = "lfh-conn-txt"; msEl.style.color = v.text; msEl.style.display = "";
+    }
+    // waiting-to-sync count
+    var waiting = outbox.queued.length, failed = outbox.failed.length;
+    var extra = failed ? (failed + " failed") : waiting ? (waiting + " waiting") : "";
     nEl.textContent = extra ? "· " + extra : "";
-    nEl.className = "lfh-conn-n" + (failedN ? " lfh-conn-warn" : "");
-
-    const clickable = (waiting + failedN) > 0;
-    badge.classList.toggle("is-click", clickable);
-    badge.title = extra
-      ? (failedN ? failedN + " change(s) couldn't sync — tap to review." : waiting + " change(s) waiting to sync — tap to see.")
-      : st.title;
-    badge.setAttribute("aria-label", "Connection: " + st.label + (extra ? ", " + extra : ""));
+    nEl.className = "lfh-conn-n" + (failed ? " warn" : "");
+    badge.title = statusLine(v) + (v.ms != null ? " · " + v.ms + " ms" : "") + (extra ? " · " + extra + " to send" : "");
+    badge.setAttribute("aria-label", "Connection: " + v.label + (v.ms != null ? ", " + v.ms + " milliseconds" : "") + (extra ? ", " + extra : "") + ". Tap for details.");
+    badge.setAttribute("aria-expanded", pop ? "true" : "false");
+    if (pop) renderPop(v); // keep the open popover live
   }
 
-  // ── "waiting to sync" drawer ────────────────────────────────────────────────
-  let overlay = null, backOff = null;
-  function fmtAgo(ts) { const m = Math.floor((Date.now() - ts) / 60000); return m < 1 ? "just now" : m < 60 ? m + "m ago" : Math.floor(m / 60) + "h ago"; }
-  function el(tag, cls, txt) { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; }
-
-  function closeDrawer() {
-    if (overlay) { overlay.remove(); overlay = null; }
-    if (backOff) { try { backOff(); } catch (e) {} backOff = null; }
-  }
-
-  function openDrawer() {
-    // #12: onChange re-calls openDrawer on every outbox change while the drawer is open
-    // (rows re-render). Each open used to register ANOTHER "outbox-sync" back-layer without
-    // releasing the previous one, so after a few syncs the hardware Back button did nothing
-    // for a press or two. Track whether we're already open and only register ONE layer.
-    const wasOpen = !!overlay;
-    if (overlay) overlay.remove();
-    const dw = el("div", "lfh-sync-dw");
-
-    const hd = el("div", "lfh-sync-hd");
-    hd.appendChild(el("h2", null, "Waiting to sync"));
-    const x = el("button", "lfh-sync-x", "✕"); x.addEventListener("click", closeDrawer);
-    hd.appendChild(x);
-    dw.appendChild(hd);
-
-    const off = navigator.onLine === false;
-    const status = el("div", "lfh-sync-sec");
-    status.style.color = off ? "#fca5a5" : "#86efac";
-    status.style.fontSize = "13px"; status.style.fontWeight = "700";
-    status.textContent = off
-      ? "📴 You're offline. These changes are safe on this device and will send automatically when you're back online."
-      : "🟢 You're online — anything below is syncing now.";
-    dw.appendChild(status);
-
-    if (outbox.failed.length) {
-      const sec = el("div", "lfh-sync-sec");
-      const h = el("h3", null, "Couldn't sync — needs attention");
-      sec.appendChild(h);
-      outbox.failed.forEach((it) => {
-        const row = el("div", "lfh-sync-row");
-        const t = el("div", "t");
+  function renderPop(v) {
+    pop.innerHTML = "";
+    // header
+    var hd = el("span", "lfh-conn-pop-hd");
+    var dot = el("span", "lfh-conn-pop-dot"); dot.style.background = v.color;
+    hd.appendChild(dot); hd.appendChild(document.createTextNode(statusLine(v)));
+    pop.appendChild(hd);
+    // main: big bars + big ms/label
+    var main = el("span", "lfh-conn-pop-main");
+    main.appendChild(barsHtml(v.bars, v.color, true));
+    var figs = el("span", "lfh-conn-pop-figs");
+    var b = el("b"); b.style.color = v.text;
+    if (v.ms != null) { b.appendChild(document.createTextNode(String(v.ms))); b.appendChild(el("span", "lfh-conn-pop-unit", " ms")); }
+    else { b.textContent = v.label; }
+    figs.appendChild(b);
+    figs.appendChild(el("small", null, v.ms != null ? v.label : (v.level === "online" ? "Speed shows when data flows" : "")));
+    main.appendChild(figs);
+    pop.appendChild(main);
+    // sparkline
+    if (v.level === "online") {
+      var hist = (window.LFH_RT && window.LFH_RT.getLatencyHistory && window.LFH_RT.getLatencyHistory()) || [];
+      hist = hist.slice(-16);
+      if (hist.length >= 2) {
+        var max = Math.max.apply(null, hist.concat([1]));
+        var sp = el("span", "lfh-spark");
+        hist.forEach(function (val) {
+          var t = latencyTier(val);
+          var bar = el("span", "lfh-spark-bar");
+          bar.style.height = Math.max(12, Math.round((val / max) * 100)) + "%";
+          bar.style.background = t ? t.color : "#22c55e";
+          sp.appendChild(bar);
+        });
+        pop.appendChild(sp);
+      }
+    }
+    // waiting-to-sync
+    var off = navigator.onLine === false;
+    if (outbox.failed.length || outbox.queued.length) {
+      var sync = el("span", "lfh-conn-pop-sync");
+      sync.appendChild(el("span", "lfh-conn-pop-sub", off ? "Saved on this device" : "Sending…"));
+      outbox.failed.forEach(function (it) {
+        var row = el("span", "lfh-conn-row");
+        var t = el("span", "lfh-conn-row-t");
         t.appendChild(el("b", null, it.label || "Action"));
         t.appendChild(el("small", "e", (it.error || "Failed") + " · " + fmtAgo(it.at)));
         row.appendChild(t);
-        const retry = el("button", "lfh-sync-btn", "Retry"); retry.style.background = "#f59e0b";
-        retry.addEventListener("click", () => { window.LFH_OUTBOX && window.LFH_OUTBOX.retryFailed(); });
-        const dis = el("button", "lfh-sync-btn", "Dismiss"); dis.style.background = "#64748b"; dis.style.color = "#fff";
-        dis.addEventListener("click", () => { window.LFH_OUTBOX && window.LFH_OUTBOX.dismiss(it.id); });
+        var retry = el("button", "lfh-conn-x", "Retry"); retry.style.background = "#f59e0b";
+        retry.addEventListener("click", function (e) { e.stopPropagation(); if (window.LFH_OUTBOX) window.LFH_OUTBOX.retryFailed(); });
+        var dis = el("button", "lfh-conn-x", "Dismiss"); dis.style.background = "#64748b";
+        dis.addEventListener("click", function (e) { e.stopPropagation(); if (window.LFH_OUTBOX) window.LFH_OUTBOX.dismiss(it.id); });
         row.appendChild(retry); row.appendChild(dis);
-        sec.appendChild(row);
+        sync.appendChild(row);
       });
-      dw.appendChild(sec);
-    }
-
-    if (outbox.queued.length) {
-      const sec = el("div", "lfh-sync-sec");
-      sec.appendChild(el("h3", null, "Waiting to send (" + outbox.queued.length + ")"));
-      outbox.queued.forEach((it) => {
-        const row = el("div", "lfh-sync-row");
-        const t = el("div", "t");
+      outbox.queued.forEach(function (it) {
+        var row = el("span", "lfh-conn-row");
+        var t = el("span", "lfh-conn-row-t");
         t.appendChild(el("b", null, it.label || "Action"));
         t.appendChild(el("small", null, fmtAgo(it.at)));
         row.appendChild(t);
-        const pill = el("span", "lfh-sync-pill", off ? "Waiting" : "Sending…");
+        var pill = el("span", "lfh-conn-pill", off ? "Waiting" : "Sending…");
         pill.style.background = off ? "rgba(239,68,68,.18)" : "rgba(34,197,94,.18)";
         pill.style.color = off ? "#fca5a5" : "#86efac";
         row.appendChild(pill);
-        sec.appendChild(row);
+        sync.appendChild(row);
       });
-      dw.appendChild(sec);
+      pop.appendChild(sync);
+    } else {
+      pop.appendChild(el("span", "lfh-conn-pop-ok", "✓ Everything is synced"));
     }
-
-    if (!outbox.queued.length && !outbox.failed.length) {
-      dw.appendChild(el("div", "lfh-sync-empty", "✓ Everything is synced. Nothing waiting."));
-    }
-
-    overlay = el("div", "lfh-sync-ov");
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeDrawer(); });
-    overlay.appendChild(dw);
-    document.body.appendChild(overlay);
-    // Hardware BACK closes the drawer instead of leaving the panel. Register the layer ONLY
-    // on the first open — a re-render (wasOpen) reuses the existing one so it can't pile up.
-    if (!wasOpen && window.LFH_BACK && window.LFH_BACK.layer) backOff = window.LFH_BACK.layer("outbox-sync", closeDrawer);
   }
+
+  var onDocClick = null;
+  function openPop() {
+    if (pop) return;
+    pop = el("span", "lfh-conn-pop"); pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", "Connection details");
+    pop.addEventListener("click", function (e) { e.stopPropagation(); });
+    badge.appendChild(pop);
+    renderPop(computeView());
+    badge.setAttribute("aria-expanded", "true");
+    // click-away
+    onDocClick = function () { closePop(); };
+    setTimeout(function () { document.addEventListener("click", onDocClick); }, 0);
+    // hardware BACK closes the popover first
+    if (window.LFH_BACK && window.LFH_BACK.layer) backOff = window.LFH_BACK.layer("conn-badge", closePop);
+  }
+  function closePop() {
+    if (!pop) return;
+    pop.remove(); pop = null;
+    badge.setAttribute("aria-expanded", "false");
+    if (onDocClick) { document.removeEventListener("click", onDocClick); onDocClick = null; }
+    if (backOff) { try { backOff(); } catch (e) {} backOff = null; }
+  }
+  function togglePop() { if (pop) closePop(); else openPop(); }
 
   function boot() {
     render();
     if (window.LFH_RT && window.LFH_RT.onStatus) window.LFH_RT.onStatus(render);
+    if (window.LFH_RT && window.LFH_RT.onLatency) window.LFH_RT.onLatency(render);
     window.addEventListener("online", render);
     window.addEventListener("offline", render);
     if (window.LFH_OUTBOX && window.LFH_OUTBOX.onChange) {
-      window.LFH_OUTBOX.onChange((snap) => { outbox = snap; render(); if (overlay) openDrawer(); });
+      window.LFH_OUTBOX.onChange(function (snap) { outbox = snap; render(); });
     }
-    setInterval(render, 10000);
+    setInterval(render, 8000); // refresh "ago" + latency freshness (no network)
   }
 
   if (document.readyState !== "loading") boot();

@@ -27,8 +27,22 @@
     refetch_count: 0, sync_failures: 0,
     avgLatencyMs: 0, lastEventAt: 0, startedAt: Date.now(), topics: [],
     _latSum: 0, _latN: 0,
+    // Live latency for the connection badge: the LAST breadcrumb delivery time (now −
+    // created_at) + when it was read + a short ring of recent readings for the sparkline.
+    // Measured from events the panel ALREADY receives — no extra request (owner 2026-07-08).
+    lastLatencyMs: null, lastLatencyAt: 0, latHist: [],
   };
   window.__lfh_rt = metrics;
+  const LAT_HIST_MAX = 24;
+  const latListeners = new Set();
+  function recordLatency(ms) {
+    if (!(ms >= 0) || ms > 60000) return;
+    ms = Math.round(ms);
+    metrics.lastLatencyMs = ms; metrics.lastLatencyAt = Date.now();
+    metrics.latHist.push(ms); if (metrics.latHist.length > LAT_HIST_MAX) metrics.latHist.shift();
+    metrics._latSum += ms; metrics._latN++; metrics.avgLatencyMs = Math.round(metrics._latSum / metrics._latN);
+    latListeners.forEach((fn) => { try { fn(ms); } catch (e) {} });
+  }
 
   // ── connection status (drives the top-right green/yellow/red badge) ─────────
   // Three human states the badge paints:
@@ -39,8 +53,14 @@
   // Starts pessimistic ("weak") until the first SUBSCRIBED flips it green.
   const statusListeners = new Set();
   let connStatus = (typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : "weak";
+  // Has the socket EVER successfully connected? Lets the badge show a calm "Connecting…"
+  // on first load instead of the alarming amber "Reconnecting" (owner 2026-07-08 — the
+  // startup "weak" window is ~5–8s and looked like it was broken). Only a DROP after a
+  // real connection shows "Reconnecting".
+  let everConnected = false;
   metrics.status = connStatus;
   function setStatus(s) {
+    if (s === "online") everConnected = true;
     if (s === connStatus) return;
     connStatus = s; metrics.status = s;
     statusListeners.forEach((fn) => { try { fn(s); } catch (e) {} });
@@ -147,9 +167,10 @@
           .on("postgres_changes", { event: "INSERT", schema: "public", table: "realtime_events", filter: "topic=eq." + topic },
             (payload) => {
               metrics.events++; metrics.lastEventAt = Date.now();
-              // Delivery latency = now − when the breadcrumb was written.
+              // Delivery latency = now − when the breadcrumb was written. Feeds the
+              // connection badge's live "ms" number + sparkline (free — the event already arrived).
               const ts = payload && payload.new && payload.new.created_at;
-              if (ts) { const lat = Date.now() - Date.parse(ts); if (lat >= 0 && lat < 60000) { metrics._latSum += lat; metrics._latN++; metrics.avgLatencyMs = Math.round(metrics._latSum / metrics._latN); } }
+              if (ts) { const lat = Date.now() - Date.parse(ts); recordLatency(lat); }
               noteEvent(topic, payload && payload.new);
             })
           .subscribe((status) => {
@@ -208,8 +229,17 @@
     start, metrics,
     // Current connection state: "online" | "weak" | "offline".
     getStatus: () => connStatus,
+    // Has the live socket connected at least once this session? (badge: calm
+    // "Connecting…" before the first connect vs amber "Reconnecting" after a drop.)
+    everConnected: () => everConnected,
     // Subscribe to status changes. Fires once immediately with the current state,
     // then on every change. Returns an unsubscribe fn.
     onStatus: (cb) => { statusListeners.add(cb); try { cb(connStatus); } catch (e) {} return () => statusListeners.delete(cb); },
+    // Live latency for the badge: { ms, at } of the last reading (ms null until first),
+    // and the recent-readings ring for the sparkline. From events already received.
+    getLatency: () => ({ ms: metrics.lastLatencyMs, at: metrics.lastLatencyAt }),
+    getLatencyHistory: () => metrics.latHist.slice(),
+    // Subscribe to new latency readings (re-render the badge). Returns an unsubscribe fn.
+    onLatency: (cb) => { latListeners.add(cb); return () => latListeners.delete(cb); },
   };
 })();
