@@ -30,13 +30,17 @@ export async function GET(req: NextRequest) {
   if (ordersQ.error) return NextResponse.json({ error: ordersQ.error.message }, { status: 500 });
 
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
-  const rows = (ordersQ.data || []).map((o) => ({
-    id: o.id,
-    restaurantName: (o.restaurant_id && nameById.get(o.restaurant_id)) || "Unknown restaurant",
-    table: o.table_number ?? null,
-    kot: o.kot_no ?? null,
-    at: o.created_at,
-  }));
+  const rows = (ordersQ.data || [])
+    // Drop orders from binned restaurants so this list matches the non-binned "Cancelled
+    // today" count on the floor (they used to appear as "Unknown restaurant" — audit 2026-07-08).
+    .filter((o) => o.restaurant_id && nameById.has(o.restaurant_id))
+    .map((o) => ({
+      id: o.id,
+      restaurantName: nameById.get(o.restaurant_id) || "—",
+      table: o.table_number ?? null,
+      kot: o.kot_no ?? null,
+      at: o.created_at,
+    }));
 
   return NextResponse.json({ orders: rows, generatedAt: new Date().toISOString() });
 }
