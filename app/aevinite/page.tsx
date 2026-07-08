@@ -88,12 +88,14 @@ export default function AdminCommand() {
     finally { setBusyRow(null); }
   };
 
-  const STATS: [string, string | number][] = [
-    ["Restaurants", rests === null ? "…" : `${activeCount} active / ${rests.length}`],
-    ["Open issues", openIssues.length],
-    ["Open tables now", openTablesNow ?? "…"],
-    ["Staff online now", online.length],
-    ["Orders today", ordersToday ?? "…"],
+  // Every stat now drills into its own detail page (owner 2026-07-08: "everything
+  // should be clickable"). A card with a `href` becomes a link with a → affordance.
+  const STATS: { k: string; v: string | number; href?: string; warn?: boolean }[] = [
+    { k: "Restaurants", v: rests === null ? "…" : `${activeCount} active / ${rests.length}`, href: "/aevinite/restaurants" },
+    { k: "Open issues", v: openIssues.length, href: "/aevinite/issues", warn: openIssues.length > 0 },
+    { k: "Open tables now", v: openTablesNow ?? "…", href: "/aevinite/open-tables" },
+    { k: "Staff online now", v: online.length, href: "/aevinite/staff-online" },
+    { k: "Orders today", v: ordersToday ?? "…", href: "/aevinite/analytics" },
   ];
 
   return (
@@ -117,14 +119,24 @@ export default function AdminCommand() {
         </div>
       )}
 
-      {/* 1 · Compact stat strip — text rows, counts only. */}
+      {/* 1 · Compact stat strip — each cell drills into its detail page. */}
       <div className="cmd-strip adm-card" role="list">
-        {STATS.map(([k, v]) => (
-          <div key={k} className="cell" role="listitem">
-            <span className="k">{k}</span>
-            <span className={`v${k === "Open issues" && Number(v) > 0 ? " warn" : ""}`}>{v}</span>
-          </div>
-        ))}
+        {STATS.map((s) => {
+          const inner = (
+            <>
+              <span className="k">{s.k}</span>
+              <span className={`v${s.warn ? " warn" : ""}`}>{s.v}</span>
+            </>
+          );
+          return s.href ? (
+            <Link key={s.k} href={s.href} className="cell cell-link" role="listitem" title={`Open ${s.k.toLowerCase()}`}>
+              {inner}
+              <i className="fas fa-arrow-right cell-go" aria-hidden="true" />
+            </Link>
+          ) : (
+            <div key={s.k} className="cell" role="listitem">{inner}</div>
+          );
+        })}
       </div>
 
       {/* 2 · Restaurant command table — the heart of the page. */}
@@ -185,7 +197,10 @@ export default function AdminCommand() {
       {/* 3 · Working now + latest activity. */}
       <div className="cmd-grid2">
         <div className="adm-card">
-          <div className="cmd-sec">Working now <span>· {online.length} active</span></div>
+          <div className="cmd-sec">
+            Working now <span>· {online.length} active</span>
+            <Link href="/aevinite/staff-online" style={{ marginLeft: "auto", fontSize: 12, color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>View all →</Link>
+          </div>
           {online.length === 0 ? (
             <div style={{ color: "var(--muted)", fontSize: 13, padding: "6px 0" }}>No staff active right now.</div>
           ) : (
@@ -238,6 +253,11 @@ export default function AdminCommand() {
         .cmd-strip .k { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
         .cmd-strip .v { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
         .cmd-strip .v.warn { color: var(--adm-warn); }
+        /* clickable stat cells: subtle hover + a → that slides in */
+        .cmd-strip .cell-link { position: relative; text-decoration: none; color: inherit; cursor: pointer; transition: background .14s ease; }
+        .cmd-strip .cell-link:hover { background: var(--muted2); }
+        .cmd-strip .cell-go { position: absolute; top: 11px; right: 12px; font-size: 10px; color: var(--accent); opacity: 0; transform: translateX(-3px); transition: opacity .14s ease, transform .14s ease; }
+        .cmd-strip .cell-link:hover .cell-go { opacity: 1; transform: translateX(0); }
         /* command table */
         .cmd-tools { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: var(--border); }
         .cmd-tools input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: var(--text); font-size: 13px; padding: 2px 0; }

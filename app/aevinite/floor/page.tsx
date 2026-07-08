@@ -122,7 +122,12 @@ export default function AdminFloor() {
   // If the all-restaurants tiles call fails, say so — otherwise every restaurant would render
   // "no tables" with no warning (the tiles now come from ONE call, migration 145).
   const [tilesErr, setTilesErr] = useState<string | null>(null);
-  const [fetching, setFetching] = useState(true);
+  const [fetching, setFetching] = useState(false);
+  // Lazy gate: this platform-wide snapshot is heavy, so it does NOT auto-load on
+  // open any more (owner 2026-07-08 — it was fetching every visit and eating load).
+  // Nothing is fetched until the admin presses "Load live floor"; after that it only
+  // updates on the manual Refresh button. `started` flips true on the first load.
+  const [started, setStarted] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [sortBy, setSortBy] = useState("busy");
   const [tab, setTab] = useState<"live" | "today">("live");
@@ -153,7 +158,8 @@ export default function AdminFloor() {
       setErr(e instanceof Error ? e.message : String(e));
     });
   }, []);
-  useEffect(() => { load(); }, [load]);
+  // First load is on-demand only (the "Load live floor" button); no fetch on mount.
+  const start = useCallback(() => { setStarted(true); load(); }, [load]);
 
   // When a fresh snapshot lands (Refresh) and the cancelled list is open, reload it too so
   // the drill-down list can't show stale rows next to a freshly-counted "Cancelled today".
@@ -202,20 +208,42 @@ export default function AdminFloor() {
     <>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Live floor</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          {fetching && (
-            <span className="adm-calcchip" role="status">
-              <i className="fas fa-circle-notch fa-spin" aria-hidden="true" />
-              Calculating live totals<span className="dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
+        {started && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {fetching && (
+              <span className="adm-calcchip" role="status">
+                <i className="fas fa-circle-notch fa-spin" aria-hidden="true" />
+                Calculating live totals<span className="dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
+              </span>
+            )}
+            {/* Always-visible reminder that this is a manual snapshot, not a live feed. */}
+            <span className="adm-snapchip" title="This page does not update on its own — press Refresh to pull a fresh snapshot">
+              <i className="fas fa-hand-pointer" aria-hidden="true" /> Manual — press Refresh to update
             </span>
-          )}
-          {!fetching && updatedAt !== null && <UpdatedAgo at={updatedAt} />}
-          <Dropdown value={sortBy} onChange={changeSort} options={SORTS} ariaLabel="Sort restaurants" minWidth={182} />
-          <button className="adm-btn" onClick={load} disabled={fetching}>
-            <i className={`fas fa-rotate-right${fetching ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
+            {!fetching && updatedAt !== null && <UpdatedAgo at={updatedAt} />}
+            <Dropdown value={sortBy} onChange={changeSort} options={SORTS} ariaLabel="Sort restaurants" minWidth={182} />
+            <button className="adm-btn adm-btn-primary" onClick={load} disabled={fetching}>
+              <i className={`fas fa-rotate-right${fetching ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
+            </button>
+          </div>
+        )}
+      </div>
+      {!started ? (
+        /* On-demand gate: nothing is fetched until the admin asks for it. */
+        <div className="adm-card floor-gate">
+          <div className="floor-gate-ic"><i className="fas fa-chair" aria-hidden="true" /></div>
+          <h2>See every restaurant&rsquo;s floor</h2>
+          <p>
+            This is a big platform-wide snapshot (every table of every restaurant), so it
+            doesn&rsquo;t load on its own — that keeps the database load down. Press below to
+            pull it once. It <b>won&rsquo;t auto-refresh</b>; use the Refresh button to update.
+          </p>
+          <button className="adm-btn adm-btn-primary floor-gate-btn" onClick={start}>
+            <i className="fas fa-bolt" style={{ marginRight: 8 }} aria-hidden="true" />Load live floor
           </button>
         </div>
-      </div>
+      ) : (
+      <>
       {/* Two views on ONE snapshot: Live (the real-time floor) and Today (day totals,
           bills settled/unpaid, and cancelled orders). Both read the same fetch — the
           Today tab adds no extra load. */}
@@ -432,6 +460,19 @@ export default function AdminFloor() {
           ) : null}
         </>
       )}
+      </>
+      )}
+
+      <style jsx>{`
+        .floor-gate { text-align: center; padding: 44px 24px; max-width: 560px; margin: 8px auto; }
+        .floor-gate-ic { width: 56px; height: 56px; border-radius: 16px; margin: 0 auto 16px; display: grid; place-items: center; font-size: 24px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+        .floor-gate h2 { font-size: 18px; font-weight: 800; margin: 0 0 8px; }
+        .floor-gate p { color: var(--muted); font-size: 13.5px; line-height: 1.5; margin: 0 auto 20px; max-width: 440px; }
+        .floor-gate-btn { font-size: 14px; padding: 11px 20px; min-height: 44px; }
+        .adm-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+        .adm-btn-primary:hover:not(:disabled) { filter: brightness(1.07); }
+        .adm-snapchip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--adm-warn, #d97706); background: color-mix(in srgb, var(--adm-warn, #d97706) 13%, transparent); white-space: nowrap; }
+      `}</style>
     </>
   );
 }
