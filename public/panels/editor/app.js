@@ -244,6 +244,47 @@ function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
   });
 }
 
+// promptDialog: a styled text-input dialog — the themed replacement for the raw window.prompt()
+// that was used for revert/void reasons (a native prompt ignores the theme, looks out of place,
+// and on some phones is dismissed by an accidental tap). Resolves the trimmed string, or null on
+// cancel/Escape/backdrop. required:true keeps the OK button from submitting an empty value. Mirrors
+// confirmDialog (fade-in, Escape, hardware-BACK __lfhClose, backdrop dismiss) + focuses the input.
+function promptDialog(message, opts = {}) {
+  const { confirmLabel = "OK", placeholder = "", defaultValue = "", required = false, danger = true } = opts;
+  return new Promise((resolve) => {
+    const wrap = document.createElement("div");
+    wrap.className = "confirm-overlay";
+    wrap.innerHTML = `
+      <div class="confirm-box">
+        <div class="confirm-msg" style="margin-bottom:12px">${esc(message)}</div>
+        <input class="confirm-input" type="text" placeholder="${esc(placeholder)}" value="${esc(defaultValue)}"
+          style="width:100%;padding:10px 12px;border:1px solid var(--line,#ccc);border-radius:8px;font-size:15px;box-sizing:border-box;background:var(--panel,#fff);color:inherit" />
+        <div class="confirm-actions" style="margin-top:14px">
+          <button class="btn confirm-cancel">Cancel</button>
+          <button class="btn ${danger ? "danger" : "primary"} confirm-ok">${esc(confirmLabel)}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const input = wrap.querySelector(".confirm-input");
+    requestAnimationFrame(() => { wrap.classList.add("show"); try { input.focus(); } catch {} });
+    function esc2(e) { if (e.key === "Escape") close(null); else if (e.key === "Enter") submit(); }
+    const close = (val) => {
+      wrap.classList.remove("show");
+      setTimeout(() => wrap.remove(), 200);
+      document.removeEventListener("keydown", esc2);
+      resolve(val);
+    };
+    const submit = () => { const v = input.value.trim(); if (required && !v) { input.focus(); return; } close(v); };
+    wrap.__lfhClose = () => close(null); // hardware BACK cancels cleanly
+    const openedAt = Date.now();
+    const settled = () => Date.now() - openedAt > 350; // same speed-click guard as confirmDialog
+    wrap.querySelector(".confirm-cancel").onclick = () => { if (settled()) close(null); };
+    wrap.querySelector(".confirm-ok").onclick = () => { if (settled()) submit(); };
+    wrap.onclick = (e) => { if (e.target === wrap && settled()) close(null); };
+    document.addEventListener("keydown", esc2);
+  });
+}
+
 // Manager (or any staff) raises an operational issue → the owner sees it on their
 // Issues page and the admin sees it as a platform complaint. The modal (subject +
 // details + optional PHOTO and live VOICE NOTE) is the shared widget in
@@ -2017,7 +2058,7 @@ async function restoreBill(orders) {
   const needsPaymentRevert = orders.some((o) => !o.archived && o.status !== "cancelled" && o.payment_status === "paid");
   let revertReason = null;
   if (needsPaymentRevert) {
-    revertReason = (window.prompt("This bill is PAID. Reason for reverting it to unpaid (refund / wrong entry)?") || "").trim();
+    revertReason = ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true })) || "").trim();
     if (!revertReason) { toast("Restore cancelled — a reason is required.", "err"); return; }
   }
   let okCount = 0, failCount = 0;
@@ -2138,7 +2179,7 @@ async function setOrderPayment(id, paid, opts = {}) {
   // (the server logs it). Routine "mark unpaid" on a never-paid order is free.
   let revertReason = null;
   if (!paid && prev === "paid") {
-    revertReason = (window.prompt("This bill is PAID. Reason for reverting it to unpaid (refund / wrong entry)?") || "").trim();
+    revertReason = ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true })) || "").trim();
     if (!revertReason) { toast("Revert cancelled — a reason is required.", "err"); return false; }
   }
   if (o) o.payment_status = paid ? "paid" : "pending"; // flip the screen NOW
@@ -6665,7 +6706,7 @@ async function generateInvoice(sid) {
 }
 async function voidInvoice(sid) {
   if (!(await confirmDialog("Reopen this bill? Its invoice is voided (kept in records) and the bill unlocks for edits — a new invoice number is issued next time.", "Reopen bill"))) return;
-  const reason = window.prompt("Reason for voiding (optional):", "") || null;
+  const reason = (await promptDialog("Reason for voiding this invoice? (optional)", { confirmLabel: "Void invoice", placeholder: "optional — refund, correction…", required: false })) || null;
   try { await api("POST", `/sessions/${sid}/void-invoice`, { reason }); await loadOrders(); toast("Invoice voided — bill reopened", "ok"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
@@ -7255,7 +7296,7 @@ function bindBanquet() {
     });
     row.querySelector("[data-bq-toggle]").onclick = () => save({ active: !item.active });
     row.querySelector("[data-bq-del]").onclick = async () => {
-      if (!confirm(`Delete "${item.title}" from the banquet menu?`)) return;
+      if (!(await confirmDialog(`Delete "${item.title}" from the banquet menu?`, "Delete"))) return;
       try {
         await api("POST", "/banquet/item-delete", { id });
         bq.items = bq.items.filter((i) => i.id !== id);
