@@ -14,9 +14,9 @@ const ACT: Record<string, { t: string; risk: boolean }> = {
   order_delete: { t: "Bill deleted", risk: true },
   payment_revert: { t: "Payment reverted", risk: true },
   close_unpaid: { t: "Closed unpaid", risk: true },
-  bill_paid: { t: "Bill paid", risk: false },
   order_discount: { t: "Discount applied", risk: false },
   order_move: { t: "Order moved", risk: false },
+  table_shift: { t: "Table moved", risk: false },
 };
 
 export default function AdminBillAudit() {
@@ -46,7 +46,7 @@ export default function AdminBillAudit() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Bill audit</h1>
-          <p className="adm-page-sub" style={{ marginTop: 4 }}>Every change to a bill across all restaurants — paid, deleted, discounted, reverted. Read-only from the activity log; a fully un-editable ledger is a later add.</p>
+          <p className="adm-page-sub" style={{ marginTop: 4 }}>Bill changes across all restaurants — deleted, reverted, closed-unpaid, discounted, moved. Read-only from the activity log (payments live on Revenue &amp; Billing); a fully un-editable ledger is a later add.</p>
         </div>
         <button className="adm-btn" disabled={loading} onClick={load}>
           <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh

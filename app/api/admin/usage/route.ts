@@ -16,7 +16,8 @@ export async function GET(req: NextRequest) {
     sb.rpc("lfh_admin_usage"),
     sb.from("restaurants").select("id, name, slug").is("deleted_at", null),
   ]);
-  if (usageQ.error) return NextResponse.json({ error: usageQ.error.message }, { status: 500 });
+  const anyErr = usageQ.error || restsQ.error;
+  if (anyErr) return NextResponse.json({ error: anyErr.message }, { status: 500 });
 
   const meta = new Map<string, { name: string; slug: string }>((restsQ.data || []).map((r) => [r.id, { name: r.name, slug: r.slug }]));
   const rows = ((usageQ.data as { restaurant_id: string; orders_7d: number; orders_30d: number; staff_total: number; table_count: number }[]) || []).map((u) => ({
