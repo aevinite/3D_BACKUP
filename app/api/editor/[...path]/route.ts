@@ -362,7 +362,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // stays complete even if PostgREST's db-max-rows is configured below 1000 (a fixed +1000
       // step would break early and undercount there). Hard cap the loop as a safety belt.
       for (let from = 0, guard = 0; guard < 500; guard++) {
-        const page = (must(await sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status")
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status,tip")
           .eq("restaurant_id", rid).gte("created_at", since)
           .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null) || [];
         orders.push(...page);
@@ -411,10 +411,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // dashboard's "today" box instead of counting money that hasn't been accepted yet.
       const platActive = plat.filter((p2) => p2.status !== "cancelled" && p2.status !== "new");
       const platRevenue = r2(platActive.reduce((a, p2) => a + (Number(p2.total) || 0), 0));
+      // Tips collected today = SUM(orders.tip) over PAID, non-cancelled orders. Tips are EXTRA staff
+      // money on top of the bill (never part of revenue/tax), so reported as their own figure.
+      const tips = r2(orders.filter((o) => o.status !== "cancelled" && o.payment_status === "paid").reduce((a, o) => a + (Number(o.tip) || 0), 0));
       return ok({
         date: new Date().toLocaleDateString(), since,
         dineIn: { orderCount, bills: groups.size, gross: r2(gross), discount: r2(disc), taxable: r2(taxable), tax: r2(tax), net: r2(net),
-          paidCount, paidNet: r2(paidNet), unpaidCount, unpaidNet: r2(unpaidNet), cancelled },
+          paidCount, paidNet: r2(paidNet), unpaidCount, unpaidNet: r2(unpaidNet), cancelled, tips },
         platform: { count: platActive.length, revenue: platRevenue },
         invoicesGenerated: (must(invQ) || []).length,
         invoicesVoided: (must(voidQ) || []).length,
@@ -1008,6 +1011,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
 
     // orders/:id/discount | accept | serve-all | item
+    // orders/:id/tip — record an optional TIP (extra staff money on top of a bill), captured at
+    // payment. Stored on this one order (a table bill puts its whole tip on the first paid order);
+    // completely separate from subtotal/tax/discount/total, so it never affects the bill math.
+    if (a === "orders" && c === "tip") {
+      const amt = Math.max(0, Number(body?.amount) || 0);
+      must(await sb.from("orders").update({ tip: amt }).eq("id", b).eq("restaurant_id", rid));
+      await logAction("manager", "order_tip", { restaurant_id: rid, order_id: b, detail: `tip ₹${amt}`, device_id: dev });
+      return ok({ ok: true });
+    }
     if (a === "orders" && c === "discount") {
       if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
       if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
