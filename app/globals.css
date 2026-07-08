@@ -3847,7 +3847,11 @@ a:focus:not(:focus-visible) { outline: none; }
   .adx-side.open { transform: translateX(0); }
   .adx-backdrop { position: fixed; inset: 0; z-index: 1001; background: rgba(2,6,16,.55); }
   .adx-burger { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; border: var(--border); background: transparent; color: var(--text); cursor: pointer; flex: 0 0 auto; }
-  .adx-top { padding: 8px 12px; }
+  .adx-top { padding: 8px 10px; gap: 6px; }
+  /* Icon-only restaurant switcher on phones so the topbar (now with a hamburger) fits and the
+     theme/logout buttons don't get clipped off the right edge (audit 2026-07-08). */
+  .adx-switch-trig .t { display: none; }
+  .adx-switch-trig { padding-left: 8px; padding-right: 8px; }
   .adx .adm-main { padding: 14px; }
   /* Touch: every primary admin control gets a ≥40px hit area on phones (audit 2026-07-07 —
      the desktop 30–32px buttons were too small to tap reliably at ~390px). */
