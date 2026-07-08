@@ -211,15 +211,20 @@ export default function ViewerClient({ folder }: { folder: string }) {
     const normalizedFolder = (folder || "");
     fetch(`/content/items/${normalizedFolder}/config.json`)
       .then((res) => {
-        // If the file isn't there, treat it as an error.
-        if (!res.ok) {
-          throw new Error("Failed to load config");
-        }
+        // No static config.json for this folder (only #1's flagship dishes ship one; every
+        // OTHER restaurant serves its model + name/stats from the DB) → fall back to an EMPTY
+        // config so the dish's own model still renders, instead of the "Failed to load" screen.
+        // A real server error (5xx) is still treated as a failure. (white-label fix 2026-07-09)
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error("Failed to load config");
         return res.json();  // turn the response into a usable object
       })
       .then((data) => {
         if (cancelled) return; // a newer folder superseded this fetch
-        setConfig(data);     // store the config
+        // Empty config = no hotspots/framing; the model comes from the DB (dbModel) and the
+        // name/stats from the menu item. A dish with no model at all still degrades to the
+        // 32s "3D unavailable" overlay (the patience timers run once loading/error clear).
+        setConfig(data || {}); // store the config (or an empty one when none is published)
         setLoading(false);   // done loading
       })
       .catch((err) => {
