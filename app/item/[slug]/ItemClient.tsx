@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation"; // lets us send the user to another
 import StarRating from "@/components/StarRating";   // the tappable star picker
 import InfinityLoader from "@/components/InfinityLoader"; // the loading spinner
 import { modelLoader } from "@/lib/modelLoader";     // 3D model download manager
-import { getMenuItems, getItemReviews, submitReview as submitReviewRpc } from "@/lib/menu"; // dishes + reviews + the review-saving RPC
+import { getMenuItems, getMenuItem, CARD_COLUMNS, getItemReviews, submitReview as submitReviewRpc } from "@/lib/menu"; // dishes + reviews + the review-saving RPC
 import { getDeviceId } from "@/lib/device";          // stable per-browser id (one rating per dish per device)
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
 import { useFeatures } from "@/lib/features"; // per-restaurant feature switches
@@ -267,20 +267,22 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     // previous one resolves; without this flag a slow earlier response could land
     // last and show the WRONG dish (older response clobbering the newer slug).
     let cancelled = false;
-    getMenuItems(restaurantId)
-      .then((items) => {
+    // EGRESS (audit fix 2026-07-08): fetch the CURRENT dish FULL (getMenuItem = one row
+    // with the heavy detail fields) and the REST LIGHT (CARD_COLUMNS — only what the
+    // "You might like" cards + prev/next nav need). Before, this pulled the WHOLE menu
+    // with every heavy column (long_description, nutrition, ingredients, reviews…) on
+    // every single dish open — the "SELECT * on a hot path" the egress rules warn about.
+    Promise.all([
+      getMenuItem(slug, restaurantId).catch(() => null),        // this dish, full detail
+      getMenuItems(restaurantId, CARD_COLUMNS).catch(() => []), // the rest, light (related/nav)
+    ])
+      .then(([dish, items]) => {
         if (cancelled) return; // a newer slug's fetch superseded this one
-        // Compare ignoring upper/lowercase so "Croissant" and "croissant" match.
-        const normalizedSlug = (slug || "").toLowerCase();
-        const found = items.find(
-          (it) => it.slug?.toLowerCase() === normalizedSlug
-        );
-
-        setAllItems(items);                 // keep the full list for related/nav
-        setItem(found || null);             // this dish (or null if not found)
-        // Real reviews load separately (getMenuItems carries only the rating
-        // average); a failure here just leaves the list empty.
-        if (found) getItemReviews(found.slug, restaurantId).then((r) => { if (!cancelled) setLocalReviews(r); }).catch(() => {});
+        setAllItems(items);                 // light list for related/nav
+        setItem(dish || null);              // this dish (or null if not found)
+        // Real reviews load separately (the aggregate carries only the average);
+        // a failure here just leaves the list empty.
+        if (dish) getItemReviews(dish.slug, restaurantId).then((r) => { if (!cancelled) setLocalReviews(r); }).catch(() => {});
         setLoading(false);                  // done loading
         setTimeout(() => { if (!cancelled) setImageLoaded(true); }, 50); // trigger the photo fade-in
 
@@ -289,7 +291,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           const savedFavorites = tget('lfh-favorites');
           if (savedFavorites) {
             const favorites = JSON.parse(savedFavorites);  // text back into a list
-            setFavorited(favorites.includes(found?.id));    // is this dish in it?
+            setFavorited(favorites.includes(dish?.id));    // is this dish in it?
           }
         } catch (e) {
           console.error('Failed to load favorites', e);

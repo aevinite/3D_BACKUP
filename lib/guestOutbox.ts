@@ -136,14 +136,20 @@ async function moveToFailed(item: GuestOrder, reason: string) {
 // ── the public enqueue: called by the cart when offline ─────────────────────────
 export async function enqueueGuestOrder(p: {
   mode: "session" | "public"; token?: string; table?: string; restaurantId?: string; restaurantSlug?: string;
-  items: unknown[]; allergies: string[]; track?: GuestTrack;
+  items: unknown[]; allergies: string[]; track?: GuestTrack; actionId?: string;
 }): Promise<{ ok: true; queued: true; action_id: string }> {
   ensureStarted();
   // Remember which restaurant this order belongs to NOW (we're on its page), so the
   // tracker entry lands under the right restaurant even if the tab moves on before the
   // outbox flushes.
   const restaurantSlug = p.restaurantSlug || tenantSlug();
-  const item: GuestOrder = { id: uuid(), status: "queued", at: Date.now(), ...p, restaurantSlug, items: p.items || [], allergies: p.allergies || [] };
+  // Reuse the SAME at-most-once id the ONLINE attempt already used, when the caller
+  // passes one. Without this, an order that COMMITTED online but whose reply was lost,
+  // then retried after the phone dropped offline, was queued under a brand-new id and
+  // placed a SECOND time on reconnect (the server's dedup couldn't tie the retry to the
+  // original). A shared id makes it place exactly once (audit fix 2026-07-08).
+  const { actionId, ...rest } = p;
+  const item: GuestOrder = { id: actionId || uuid(), status: "queued", at: Date.now(), ...rest, restaurantSlug, items: p.items || [], allergies: p.allergies || [] };
   queued.push(item);
   await persist(item);
   notify();

@@ -83,7 +83,14 @@ export default function SessionTableBill() {
         const token = tokenRef.current; if (!token) return;
         const st = await getSessionState(token);
         if (!alive) return;
-        if (!st.ok) { setActive(false); return; } // token gone / session ended
+        // Only a DEFINITIVE ending hides the bill; a transient network blip keeps it on
+        // screen and retries next tick — otherwise the whole live bill vanished for up
+        // to 60s on a single failed poll (audit fix 2026-07-08). Mirror SessionStatusWidget.
+        if (!st.ok) {
+          const reason = (st as { reason?: string }).reason;
+          if (reason === "session_closed" || reason === "removed" || reason === "invalid_token") setActive(false);
+          return;
+        }
         const sess = st.session as { table_number?: string; status?: string } | undefined;
         if (sess?.status !== "open") { setActive(false); return; }
         // PENDING members must NOT see the live table. The server already withholds

@@ -520,23 +520,26 @@ export default function CartPanel() {
       // Send ONLY id + qty + options (group/label) + removed + note — no prices.
       // The server prices and stores the order, then hands back its id to track.
       const itemsS = cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note }));
+      // Stable at-most-once key for this cart+table, shared by BOTH the online and the
+      // offline paths. Computed BEFORE the offline branch on purpose: an online attempt
+      // that committed but lost its reply, then retried after the phone dropped offline,
+      // now replays under the SAME id instead of a fresh one — so the server places it
+      // ONCE, never twice (audit fix 2026-07-08). Any edit to the cart makes a new key.
+      const sig = JSON.stringify({ t: tableTrim, i: itemsS });
+      if (!orderKeyRef.current || orderKeyRef.current.sig !== sig) {
+        const rid = (globalThis.crypto?.randomUUID?.() as string) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        orderKeyRef.current = { sig, id: rid };
+      }
       // OFFLINE: save the order on-device and send it automatically on reconnect
-      // (at-most-once via the guest outbox). The online path below is unchanged.
+      // (at-most-once via the guest outbox, using the SAME key as the online path).
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: itemsS, allergies, track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) } });
+        await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: itemsS, allergies, track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id });
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Saved — will send when you're back online", subtitle: "we'll send it automatically", kicker: "offline", icon: "📴", variant: "success" } }));
         orderKeyRef.current = null; // a fresh order next time
         setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
         window.dispatchEvent(new Event("lfh:cart-updated"));
         window.dispatchEvent(new Event("lfh:close-all"));
         return;
-      }
-      // Stable at-most-once key: same cart+table on a retry → same key → server places
-      // the order once. Any edit to the cart makes a new key (a genuinely new order).
-      const sig = JSON.stringify({ t: tableTrim, i: itemsS });
-      if (!orderKeyRef.current || orderKeyRef.current.sig !== sig) {
-        const rid = (globalThis.crypto?.randomUUID?.() as string) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        orderKeyRef.current = { sig, id: rid };
       }
       const orderId = await createOrder({
         tableNumber: tableTrim,

@@ -292,6 +292,11 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       if (sd !== null) setCurrentDiet(sd);
       const sq = sessionStorage.getItem(sk("lfh_menu_search"));
       if (sq) setSearchQuery(sq);
+      // Chef's Special / Favorites filters are remembered too. They were dropped on
+      // Back before, so a filtered guest returned to the FULL list and the saved
+      // scroll then landed on the wrong dish (audit fix 2026-07-08).
+      if (sessionStorage.getItem(sk("lfh_menu_chef")) === "1") setChefOnly(true);
+      if (sessionStorage.getItem(sk("lfh_menu_fav")) === "1") setFavOnly(true);
       // Which "All view" dropdowns the guest had manually folded — restored only
       // if saved less than 10 minutes ago. Any older and it's likely a NEW guest
       // at the table, so they get the default everything-open view instead.
@@ -331,12 +336,14 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       sessionStorage.setItem(sk("lfh_menu_sort"), currentSort);
       sessionStorage.setItem(sk("lfh_menu_diet"), currentDiet);
       sessionStorage.setItem(sk("lfh_menu_search"), searchQuery);
+      sessionStorage.setItem(sk("lfh_menu_chef"), chefOnly ? "1" : "0");
+      sessionStorage.setItem(sk("lfh_menu_fav"), favOnly ? "1" : "0");
       // The manually-folded "All view" dropdowns, stamped with the time. The
       // restore above only trusts this for 10 minutes — after that it's ignored,
       // so a later guest starts with everything open again.
       sessionStorage.setItem(sk("lfh_menu_closed_cats"), JSON.stringify({ cats: closedCats, ts: Date.now() }));
     } catch {}
-  }, [layout, currentSort, currentDiet, searchQuery, closedCats]);
+  }, [layout, currentSort, currentDiet, searchQuery, closedCats, chefOnly, favOnly]);
 
   // If the data hasn't arrived within a moment, reveal the skeleton.
   // (Wait 200ms first; if it's still loading, show the grey placeholder boxes.
@@ -735,6 +742,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
               placeholder={t.searchPlaceholder}
               aria-label={t.searchPlaceholder}
               value={searchQuery}
+              maxLength={60}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
             {/* When there are matches, show the dropdown of quick results. */}
@@ -747,7 +755,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                     className="search-result"
                     onClick={() => setSearchQuery("")}
                   >
-                    <img className="search-result-img" src={r.image} alt="" loading="lazy" decoding="async" />
+                    <img className="search-result-img" src={r.image} alt="" loading="lazy" decoding="async" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
                     <span className="search-result-name">{r.title}</span>
                     <span className="search-result-cat">
                       {localized(dbCategories.find((c) => c.slug === r.category)?.name, lang) || r.category}

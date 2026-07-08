@@ -248,9 +248,13 @@ export default function SessionGate() {
       return;
     }
     const r = await placeSessionOrder(s.token, pl.items, pl.allergies || []);
-    if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked" }); setStep("blocked"); return; } // table was blocked by staff
+    // Every completion below MUST carry action:"order" so the cart's onDone listener
+    // recognises it and re-enables the "Place Order" button. Omitting it on the
+    // blocked/failed paths left the button stuck on "Placing…" until a page reload,
+    // and left a stale listener that duplicated the next order (audit fix 2026-07-08).
+    if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked", action: "order" }); setStep("blocked"); return; } // table was blocked by staff
     if (r.ok) { fireDone({ ok: true, action: "order", orderId: r.order_id }); toast("Order placed", "to the kitchen"); close(); } // success
-    else { toast("Couldn't place order", "order", "error"); fireDone({ ok: false, reason: r.reason }); close(); } // failed
+    else { toast("Couldn't place order", "order", "error"); fireDone({ ok: false, reason: r.reason, action: "order" }); close(); } // failed
   }, [close]);
 
   const act = useCallback(async () => {
@@ -273,7 +277,8 @@ export default function SessionGate() {
     // The action was "call a waiter" — send that for this table.
     setStep("working"); // show the "One moment…" screen
     const r = await callWaiterSession(s.token, (p.payload?.reason as string) || "");
-    if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked" }); setStep("blocked"); return; }
+    // action:"call" so anything waiting on this action's completion isn't stranded (audit fix).
+    if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked", action: "call" }); setStep("blocked"); return; }
     if (r.ok) { fireDone({ ok: true, action: "call" }); toast("On our way!", "service"); close(); }
     else { toast("Couldn't reach staff", "service", "error"); close(); }
   }, [close, placeOrderNow]);

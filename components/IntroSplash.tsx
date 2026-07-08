@@ -61,9 +61,15 @@ export default function IntroSplash({ wordmark, accentColor, logoUrl, scopeKey }
       // grow a ring around it, fade the ring away, pop the wordmark letters in
       // one by one, then slide the whole splash up off the screen.
       // (The "<", "-=", "+=" bits just say "start relative to the step before".)
-      tl.set(root.current, { autoAlpha: 1 })
-        .from(".intro-logo", { scale: 0.35, autoAlpha: 0, filter: "blur(16px)", duration: 1.0, ease: "back.out(1.7)" })
-        .from(".intro-ring", { scale: 0, autoAlpha: 0, duration: 0.9, ease: "power3.out" }, "<")
+      tl.set(root.current, { autoAlpha: 1 });
+      // Only animate the logo when this restaurant actually renders one. A non-#1
+      // tenant with no uploaded logo has NO .intro-logo element, and animating a
+      // missing target logged a GSAP "target not found" warning on every load while
+      // doing nothing (audit fix 2026-07-08). The ring + wordmark still play.
+      if (root.current?.querySelector(".intro-logo")) {
+        tl.from(".intro-logo", { scale: 0.35, autoAlpha: 0, filter: "blur(16px)", duration: 1.0, ease: "back.out(1.7)" });
+      }
+      tl.from(".intro-ring", { scale: 0, autoAlpha: 0, duration: 0.9, ease: "power3.out" }, "<")
         .to(".intro-ring", { autoAlpha: 0, scale: 1.25, duration: 0.7, ease: "power1.out" }, "-=0.3")
         .from(".intro-word span", { y: 26, autoAlpha: 0, stagger: 0.035, duration: 0.5, ease: "power3.out" }, "-=0.6")
         // brief hold once formed, then slide straight up (no heartbeat pause)

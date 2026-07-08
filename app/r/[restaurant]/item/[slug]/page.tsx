@@ -4,8 +4,9 @@
 // the dish, its reviews, its features and every in-page link stay scoped to this
 // restaurant (a guest browsing /r/pizza-palace never falls back to restaurant #1).
 import { notFound } from "next/navigation";
-import { getRestaurantBySlug } from "@/lib/tenant";
+import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { getMenuItem } from "@/lib/menu";
+import { accentPaletteCss } from "@/lib/accent";
 import ItemClient from "@/app/item/[slug]/ItemClient";
 
 // White-label: a dish link's tab title + share preview must read as THIS
@@ -31,5 +32,17 @@ export default async function RestaurantItemPage({
   const { cat } = await searchParams;
   const r = await getRestaurantBySlug(restaurant);
   if (!r || !r.active) notFound();
-  return <ItemClient slug={slug} fromCat={cat} restaurantId={r.id} restaurantSlug={restaurant} />;
+  // WHITE-LABEL (audit fix 2026-07-08): this page renders ItemClient WITHOUT the
+  // AppShell that themes the menu, so its price + "Add to Cart" button fell back to
+  // restaurant #1's GOLD accent for every OTHER restaurant. Emit this restaurant's
+  // accent palette at :root here (non-#1 only) so the dish page matches its own menu.
+  // #1 passes nothing and keeps its hand-tuned gold from globals.css.
+  const accentCss =
+    r.id !== DEFAULT_RESTAURANT_ID && r.accentColor ? `:root{${accentPaletteCss(r.accentColor)}}` : "";
+  return (
+    <>
+      {accentCss && <style dangerouslySetInnerHTML={{ __html: accentCss }} />}
+      <ItemClient slug={slug} fromCat={cat} restaurantId={r.id} restaurantSlug={restaurant} />
+    </>
+  );
 }

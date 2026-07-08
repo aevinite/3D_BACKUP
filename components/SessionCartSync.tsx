@@ -103,8 +103,19 @@ export default function SessionCartSync() {
       // Ask the server for this table's shared cart.
       const r = await getSessionCart(s.token);
       if (!alive) return;
-      // Only sync if we're an approved member of a still-open session.
-      if (!r.ok || !r.open || !r.approved) { activeToken.current = null; reconciledToken.current = null; return; }
+      // Only sync if we're an approved member of a still-open session. A transient
+      // network blip (r.ok false with a NON-definitive reason) must NOT reset our sync
+      // state: clearing reconciledToken re-runs the first-join merge on the next good
+      // pull and can RESURRECT a dish the guest just removed (audit fix 2026-07-08).
+      // Mirror SessionStatusWidget — only a definitive ending clears the token.
+      if (!r.ok) {
+        const reason = (r as { reason?: string }).reason;
+        if (reason === "session_closed" || reason === "removed" || reason === "invalid_token") {
+          activeToken.current = null; reconciledToken.current = null;
+        }
+        return; // blip → keep state, retry next tick (don't re-merge)
+      }
+      if (!r.open || !r.approved) { activeToken.current = null; reconciledToken.current = null; return; }
       activeToken.current = s.token;
       const serverCart = (r.cart as Line[]) || [];
 

@@ -267,7 +267,7 @@ const translations: Record<LanguageCode, Translations> = {
     prepTime: "وقت",
   },
   hi: {
-    greeting: "सुप्रभात",
+    greeting: "शुभ संध्या",
     heroTitle: "ऑल-डे कैफ़े और बेकरी",
     categories: "श्रेणियां",
     slide: "स्लाइड करें",

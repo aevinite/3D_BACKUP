@@ -47,6 +47,7 @@ export default function OrderTracker() {
   const [dishProg, setDishProg] = useState<{ served: number; segs: string[] }>({ served: 0, segs: [] });
   // useRef boxes (remembered values that DON'T trigger a re-draw):
   const lastStatus = useRef<Record<string, OrderStatus>>({}); // last status we toasted, per order, to avoid repeat toasts
+  const nullCounts = useRef<Record<string, number>>({}); // consecutive "order not found" polls per id, to finalize a deleted order
   // Drag-to-dismiss: hold the strip, drag it onto the cross target to hide it.
   const stripRef = useRef<HTMLButtonElement | null>(null); // points at the strip's DOM element
   const dragRef = useRef<{ sx: number; sy: number; pid: number; moved: boolean } | null>(null); // live drag bookkeeping (start point, pointer id, whether it actually moved)
@@ -109,7 +110,27 @@ export default function OrderTracker() {
       let changed = false;
       for (const o of live) {
         const res = await getOrderStatus(o.id); // ask the server for this order's status
-        if (!res || cancelled) continue;
+        if (cancelled) continue;
+        if (!res) {
+          // getOrderStatus returns null when the order no longer exists on the server
+          // (staff deleted/voided it). Count this only while ONLINE (an offline stretch
+          // returns null too, but the order isn't actually gone). After a few consecutive
+          // online misses, finalize the strip as cancelled so it auto-clears — instead of
+          // a "preparing" ghost lingering up to 3h (audit fix 2026-07-08).
+          if (typeof navigator !== "undefined" && navigator.onLine === false) continue;
+          nullCounts.current[o.id] = (nullCounts.current[o.id] || 0) + 1;
+          if (nullCounts.current[o.id] >= 3 && !isFinal(o.status)) {
+            o.status = "cancelled";
+            o.finalizedAt = Date.now();
+            changed = true;
+            if (lastStatus.current[o.id] !== "cancelled") {
+              lastStatus.current[o.id] = "cancelled";
+              window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Order no longer active", subtitle: o.tableNumber ? `table ${o.tableNumber}` : "your order", kicker: "order update", variant: "error", icon: "✕" } }));
+            }
+          }
+          continue;
+        }
+        nullCounts.current[o.id] = 0; // a real answer — reset the miss counter
         if (res.status !== o.status) {
           o.status = res.status; // status moved forward — update our copy
           if (isFinal(res.status) && !o.finalizedAt) o.finalizedAt = Date.now(); // stamp the finish time
