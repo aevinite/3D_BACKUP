@@ -3015,16 +3015,17 @@ function bindFeatures() {
   }));
 }
 
-// Save ONE switch: merge it into the current overrides and store the whole
-// features object (the server replaces the JSON bag as a unit).
+// Save ONE switch: optimistically merge it locally, then send ONLY the changed key to the server,
+// which merges it into the current bag — so two people toggling different switches don't clobber
+// each other (last-writer-wins used to revert the other's change). (B17)
 async function saveFeature(key, value) {
   const prev = (state.data.settings || {}).features || {};
   const next = { ...prev, [key]: value };
-  state.data.settings = { ...(state.data.settings || {}), features: next }; // optimistic
+  state.data.settings = { ...(state.data.settings || {}), features: next }; // optimistic (full local view)
   // When offline, api() returns the outbox STUB ({ok,queued,action_id}), not the settings row —
   // overwriting state.data.settings with it would wipe table_count/features/tax etc. Keep the
   // optimistic value in that case (the queued write replays on reconnect).
-  try { const r = await api("POST", "/settings", { features: next }); if (!(r && r.queued)) state.data.settings = r; toast(r && r.queued ? "Saved (will sync)" : "Saved", "ok"); }
+  try { const r = await api("POST", "/settings", { features: { [key]: value } }); if (!(r && r.queued)) state.data.settings = r; toast(r && r.queued ? "Saved (will sync)" : "Saved", "ok"); }
   catch (e) {
     state.data.settings = { ...(state.data.settings || {}), features: prev }; // undo
     renderEditor();
@@ -4139,8 +4140,7 @@ async function makeHead(id) {
 async function banMember(id, phone) {
   if (!(await confirmDialog("Ban this guest? They're kicked now and added to the blocklist.", "Ban"))) return;
   try {
-    await api("POST", "/blocklist", { member_id: id, phone: phone || undefined });
-    await api("POST", "/members/" + id + "/remove");
+    await api("POST", "/blocklist", { member_id: id, phone: phone || undefined }); // server also kicks them from their seat in the same call now (B23)
     await loadSessions(); toast("Banned", "ok");
   } catch (e) { toast("Failed: " + e.message, "err"); }
 }
@@ -6059,13 +6059,10 @@ async function restartTable(t) {
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; ids.forEach((id) => opEnd(id)); } };
   try {
-    for (const id of ids) await api("PATCH", "/orders/" + id, { archived: true, status: "served" });
-    // End the round → RELEASE the head + partners from this session (same as a close),
-    // so the next round is a fresh party. (owner, 2026-06-18)
-    const rsess = openSessionForTable(t);
-    if (rsess) { for (const m of membersOf(rsess.id)) { try { await api("POST", "/members/" + m.id + "/remove"); } catch { /* keep clearing the rest */ } } }
-    // keep the table OPEN for the next round — open a fresh session if it doesn't have one
-    if ((state.data.settings || {}).sessions_enabled && !openSessionForTable(t)) await api("POST", "/sessions/open", { table: String(t) });
+    // ONE atomic server call: archive the round + release members + CLEAR the table's live signals
+    // (so no ghost waiter-call bell lingers on the emptied table) + reopen if sessions are on.
+    // (B12 — was a client PATCH loop that never cleared the signals.)
+    await api("POST", "/tables/" + t + "/restart", {});
     release();
     await pollTables([String(t)]); // refresh this tile's summary (cheap, single-table)
     toast(`Table ${t} restarted — still open`, "ok");

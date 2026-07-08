@@ -19,7 +19,7 @@ import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { effectiveTaxRate, taxComponents } from "@/lib/tax";
-import { closeSession } from "@/lib/sessionClose";
+import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
@@ -1375,6 +1375,26 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
 
     // blocklist (add)
+    // tables/:t/restart — clear the round off the floor but KEEP the table open (fresh party). ONE
+    // atomic server call: archive the round (served + archived, NOT cancelled), release the party's
+    // members, CLEAR the table's live signals (open waiter-calls + pending requests) so no ghost 🔔
+    // remains, and reopen a session if sessions are on. The manager panel used to do this as a
+    // client loop that never cleared the signals → a stuck bell on the emptied table. (B12)
+    if (a === "tables" && c === "restart") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      const openSess = (await sb.from("sessions").select("id").eq("table_number", t).eq("status", "open").eq("restaurant_id", rid).order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
+      let q = sb.from("orders").update({ status: "served", archived: true, archived_at: nowIso() }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
+      q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
+      const rows = must(await q.select());
+      if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("removed", false).select());
+      await clearTableSignals(rid, t); // the B12 fix — no ghost waiter-call bell on the emptied table
+      const setg = (await sb.from("settings").select("sessions_enabled").eq("restaurant_id", rid).maybeSingle()).data as { sessions_enabled?: boolean } | null;
+      if (setg?.sessions_enabled && !openSess) await sb.from("sessions").insert({ table_number: t, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid });
+      await logAction("manager", "table_restart", { restaurant_id: rid, table_number: t, detail: `${rows.length} order(s) cleared`, device_id: dev });
+      return ok({ ok: true, count: rows.length });
+    }
+
     if (a === "blocklist" && path.length === 1) {
       const table = body.table ? String(body.table).trim() : null;
       let phone = body.phone ? String(body.phone).trim() : null;
@@ -1390,6 +1410,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (!phone && m?.phone) phone = m.phone;
       }
       const row = must(await sb.from("blocklist").insert({ phone, table_number: table, device_id: device, member_id: memberId, reason: body.reason || "banned", restaurant_id: rid }).select())[0];
+      // Kick the banned guest from their seat in the SAME request (B23) — the manager panel used to
+      // do this as a separate client call, so a network blip could leave them banned-but-still-seated.
+      if (memberId) await sb.from("session_members").update({ removed: true }).eq("id", memberId).eq("restaurant_id", rid);
       if (phone) await sb.from("customers").upsert({ phone, blocked: true, restaurant_id: rid }, { onConflict: "restaurant_id,phone" });
       // Record WHO banned WHAT in the Log (accountability). Describe the target type only —
       // never write the raw phone number into the log (no PII in the audit trail).
@@ -1460,9 +1483,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         }
         if ("features" in body) {
           const f = body.features;
-          body.features = f && typeof f === "object" && !Array.isArray(f)
+          const incoming = f && typeof f === "object" && !Array.isArray(f)
             ? Object.fromEntries(Object.entries(f).filter(([, v]) => typeof v === "boolean"))
             : {};
+          // MERGE the incoming switch(es) into the CURRENT features (read-modify-write) instead of
+          // replacing the whole bag — so the client can send just the ONE changed key and two people
+          // toggling DIFFERENT switches don't clobber each other. (B17)
+          const curF = ((await sb.from("settings").select("features").eq("restaurant_id", rid).maybeSingle()).data?.features) as Record<string, unknown> | null;
+          body.features = { ...(curF && typeof curF === "object" && !Array.isArray(curF) ? curF : {}), ...incoming };
         }
         // "Table setting" — per-table seat counts, keyed by table number ("1", "2", …).
         // Rebuild from scratch rather than trust the client shape: drops non-numeric
