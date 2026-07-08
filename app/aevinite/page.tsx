@@ -246,18 +246,8 @@ export default function AdminCommand() {
       </div>
 
       <style jsx>{`
-        /* stat strip: label+value text cells with hairline dividers */
-        .cmd-strip { display: flex; flex-wrap: wrap; padding: 0; margin-bottom: 12px; }
-        .cmd-strip .cell { display: flex; flex-direction: column; gap: 2px; padding: 10px 16px; border-right: var(--border); flex: 1 1 auto; min-width: 130px; }
-        .cmd-strip .cell:last-child { border-right: 0; }
-        .cmd-strip .k { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
-        .cmd-strip .v { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
-        .cmd-strip .v.warn { color: var(--adm-warn); }
-        /* clickable stat cells: subtle hover + a → that slides in */
-        .cmd-strip .cell-link { position: relative; text-decoration: none; color: inherit; cursor: pointer; transition: background .14s ease; }
-        .cmd-strip .cell-link:hover { background: var(--muted2); }
-        .cmd-strip .cell-go { position: absolute; top: 11px; right: 12px; font-size: 10px; color: var(--accent); opacity: 0; transform: translateX(-3px); transition: opacity .14s ease, transform .14s ease; }
-        .cmd-strip .cell-link:hover .cell-go { opacity: 1; transform: translateX(0); }
+        /* stat-strip styles live in globals.css now — its cells are <Link>s, which styled-jsx
+           can't scope (the scoped rules never matched, so labels+values ran together). */
         /* command table */
         .cmd-tools { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: var(--border); }
         .cmd-tools input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: var(--text); font-size: 13px; padding: 2px 0; }
@@ -280,8 +270,7 @@ export default function AdminCommand() {
         .obtn:hover:not(:disabled) { background: var(--muted2); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
         .obtn:disabled { opacity: .32; cursor: default; }
         a.obtn { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
-        .cmd-manage { color: var(--accent); font-size: 12.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
-        .cmd-manage:hover { text-decoration: underline; }
+        /* .cmd-manage lives in globals.css now (it's a <Link>). */
         /* two-column bottom grid */
         .cmd-grid2 { display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; }
         .cmd-sec { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text); margin-bottom: 8px; }

@@ -3833,19 +3833,20 @@ a:focus:not(:focus-visible) { outline: none; }
 .adx .adm-teaser { box-shadow: var(--elev); }
 .adx .adm-empty { padding: 28px 14px; font-size: 13px; }
 .adx .adm-rest { font-size: 12.5px; padding: 5px 11px; }
-/* ── responsive: sidebar → horizontally scrollable nav pills row (≤900px) ── */
+/* ── responsive (≤900px): sidebar → off-canvas LEFT DRAWER opened by a ☰ hamburger.
+   Replaced the old horizontally-scrolling top-nav pill row (owner 2026-07-08 — the sideways
+   scroll felt bad; a tap-to-open drawer is the standard phone pattern). The drawer keeps the
+   normal vertical grouped nav (same as desktop), just slides in from the left. ── */
+.adx-burger { display: none; }
 @media (max-width: 900px) {
-  .adx-side { width: 100%; flex-direction: row; align-items: center; gap: 8px; padding: 8px 10px; border-right: 0; border-bottom: var(--border); overflow: visible; }
-  .adx-brand { padding: 0 6px 0 0; margin: 0; border-bottom: 0; border-right: var(--border); flex-shrink: 0; }
-  .adx-brand .who { display: none; }
-  .adx-nav { flex-direction: row; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 4px; scrollbar-width: none; }
-  .adx-nav::-webkit-scrollbar { display: none; }
-  .adx-group { display: contents; }
-  .adx-group-lbl { display: none; }
-  .adx-navlink { flex: none; white-space: nowrap; padding: 6px 10px; font-size: 12.5px; border: var(--border); border-radius: 999px; }
-  .adx-navlink.active { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-  .adx-navlink .navsoon { display: none; }
-  .adx-side-foot { display: none; }
+  .adx-side {
+    position: fixed; top: 0; left: 0; height: 100dvh; width: min(82vw, 300px); z-index: 1002;
+    transform: translateX(-100%); transition: transform .22s ease; overflow-y: auto;
+    box-shadow: 18px 0 50px rgba(0,0,0,.55); border-right: var(--border);
+  }
+  .adx-side.open { transform: translateX(0); }
+  .adx-backdrop { position: fixed; inset: 0; z-index: 1001; background: rgba(2,6,16,.55); }
+  .adx-burger { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; border: var(--border); background: transparent; color: var(--text); cursor: pointer; flex: 0 0 auto; }
   .adx-top { padding: 8px 12px; }
   .adx .adm-main { padding: 14px; }
   /* Touch: every primary admin control gets a ≥40px hit area on phones (audit 2026-07-07 —
@@ -3904,6 +3905,24 @@ a:focus:not(:focus-visible) { outline: none; }
    table with min-width) scrolls inside its own box instead of forcing the column past
    the phone's screen edge (audit 2026-07-08). */
 .adx-grid2col > * { min-width: 0; }
+
+/* Dashboard KPI stat strip — GLOBAL (not styled-jsx): its cells are <Link>s, and styled-jsx
+   can't scope a component's rendered <a>, so the scoped rules never applied and the label+value
+   ran together ("RESTAURANTS9 active…"). These global rules give clean, separated stat tiles
+   that read correctly in light AND dark (owner 2026-07-08). */
+.cmd-strip { display: flex; flex-wrap: wrap; padding: 0; margin-bottom: 12px; }
+.cmd-strip .cell { display: flex; flex-direction: column; gap: 3px; padding: 12px 18px; border-right: var(--border); flex: 1 1 auto; min-width: 150px; }
+.cmd-strip .cell:last-child { border-right: 0; }
+.cmd-strip .cell .k { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+.cmd-strip .cell .v { font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; color: var(--text); }
+.cmd-strip .cell .v.warn { color: var(--adm-warn); }
+.cmd-strip .cell-link { position: relative; text-decoration: none; color: inherit; cursor: pointer; transition: background .14s ease; }
+.cmd-strip .cell-link:hover { background: var(--muted2); }
+.cmd-strip .cell-go { position: absolute; top: 12px; right: 12px; font-size: 10px; color: var(--accent); opacity: 0; transform: translateX(-3px); transition: opacity .14s ease, transform .14s ease; }
+.cmd-strip .cell-link:hover .cell-go { opacity: 1; transform: translateX(0); }
+.cmd-manage { color: var(--accent); font-size: 12.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.cmd-manage:hover { text-decoration: underline; }
+@media (max-width: 640px) { .cmd-strip .cell { flex-basis: 45%; } }
 
 /* Health page's status pills (latency / db / realtime). */
 .adx-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }

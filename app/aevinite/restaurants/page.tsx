@@ -375,6 +375,17 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
 function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Per-restaurant "we'll be right back" maintenance (settings.service_mode). Moved here from
+  // the platform Settings page so it works for EVERY restaurant, not just the flagship #1
+  // (audit 2026-07-08). The guest menu honours each restaurant's own service_mode (lib/menu.ts).
+  const [maint, setMaint] = useState<boolean | null>(null);
+  const [mBusy, setMBusy] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/admin/maintenance?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
+      .then((r) => r.json()).then((j) => { if (!dead && typeof j.maintenance === "boolean") setMaint(j.maintenance); }).catch(() => {});
+    return () => { dead = true; };
+  }, [restaurant.id]);
   const setActive = async (active: boolean) => {
     if (!active && !window.confirm(`Suspend ${restaurant.name}?\n\nIts guest menu goes OFFLINE immediately (staff panels stay reachable to you via act-as). You can reactivate any time.`)) return;
     setBusy(true); setErr(null);
@@ -387,22 +398,48 @@ function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChang
       onChanged();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
+  const toggleMaint = async () => {
+    if (maint === null) return;
+    const on = !maint;
+    if (on && !window.confirm(`Put ${restaurant.name}'s guest menu into "we'll be right back" maintenance?\n\nGuests can't browse or order until you turn it back on. Staff panels keep working.`)) return;
+    setMBusy(true); setErr(null);
+    try {
+      const r = await fetch("/api/admin/maintenance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on, restaurant_id: restaurant.id }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't change maintenance.");
+      setMaint(d.maintenance === true);
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setMBusy(false); }
+  };
+  const statusLabel = !restaurant.active ? "Suspended" : maint ? "In maintenance" : "Live";
+  const statusStyle = !restaurant.active
+    ? { background: "color-mix(in srgb, var(--adm-danger) 22%, transparent)", color: "var(--adm-danger)" }
+    : maint
+      ? { background: "color-mix(in srgb, var(--adm-warn) 22%, transparent)", color: "var(--adm-warn)" }
+      : { background: "color-mix(in srgb, var(--adm-ok) 22%, transparent)", color: "var(--adm-ok)" };
   return (
-    <div className="adm-card" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", ...(restaurant.active ? {} : { borderColor: "var(--adm-danger)" }) }}>
-      <span className="adm-chip" style={restaurant.active
-        ? { background: "color-mix(in srgb, var(--adm-ok) 22%, transparent)", color: "var(--adm-ok)" }
-        : { background: "color-mix(in srgb, var(--adm-danger) 22%, transparent)", color: "var(--adm-danger)" }}>
-        {restaurant.active ? "Live" : "Suspended"}
-      </span>
-      <span style={{ flex: 1, fontSize: 13 }} className="adm-muted">
+    <div className="adm-card" style={{ marginBottom: 14, ...(restaurant.active ? {} : { borderColor: "var(--adm-danger)" }) }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <span className="adm-chip" style={statusStyle}>{statusLabel}</span>
+        <span style={{ flex: 1, fontSize: 13 }} className="adm-muted">
+          {!restaurant.active
+            ? "Suspended — the guest menu is offline. Staff panels stay reachable to you via the buttons below."
+            : maint
+              ? "In maintenance — guests see a “we’ll be right back” screen. Staff panels keep working."
+              : "Guests can open this restaurant's menu."}
+        </span>
+        {err && <span style={{ color: "var(--adm-danger)", fontSize: 12.5 }}>{err}</span>}
         {restaurant.active
-          ? "Guests can open this restaurant's menu."
-          : "Suspended — the guest menu is offline. Staff panels stay reachable to you via the buttons below."}
-      </span>
-      {err && <span style={{ color: "var(--adm-danger)", fontSize: 12.5 }}>{err}</span>}
-      {restaurant.active
-        ? <button className="adm-btn danger" disabled={busy} onClick={() => setActive(false)}><i className="fas fa-power-off" style={{ marginRight: 7 }} aria-hidden="true" />Suspend…</button>
-        : <button className="adm-btn primary" disabled={busy} onClick={() => setActive(true)}><i className="fas fa-play" style={{ marginRight: 7 }} aria-hidden="true" />Reactivate</button>}
+          ? <button className="adm-btn danger" disabled={busy} onClick={() => setActive(false)}><i className="fas fa-power-off" style={{ marginRight: 7 }} aria-hidden="true" />Suspend…</button>
+          : <button className="adm-btn primary" disabled={busy} onClick={() => setActive(true)}><i className="fas fa-play" style={{ marginRight: 7 }} aria-hidden="true" />Reactivate</button>}
+      </div>
+      {restaurant.active && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
+          <span className="adm-muted" style={{ flex: 1, fontSize: 12.5, minWidth: 180 }}>Maintenance — a soft &ldquo;we&rsquo;ll be right back&rdquo; pause (staff panels keep working), lighter than Suspend.</span>
+          <button className={maint ? "adm-btn primary" : "adm-btn"} disabled={mBusy || maint === null} onClick={toggleMaint}>
+            <i className={`fas ${maint ? "fa-play" : "fa-pause"}`} style={{ marginRight: 7 }} aria-hidden="true" />
+            {maint === null ? "…" : maint ? "Bring menu back online" : "Take menu offline"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
