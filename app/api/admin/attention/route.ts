@@ -19,7 +19,10 @@ export async function GET(req: NextRequest) {
     sb.rpc("lfh_admin_usage"),
     sb.from("restaurants").select("id, name, slug, active, created_at").is("deleted_at", null),
   ]);
-  if (restsQ.error) return NextResponse.json({ error: restsQ.error.message }, { status: 500 });
+  // Check ALL three — a partial failure (e.g. the usage RPC times out) would otherwise leave
+  // usage empty and flag EVERY paying restaurant as churn-risk with a confident 200 (audit).
+  const anyErr = restsQ.error || usageQ.error || billingQ.error;
+  if (anyErr) return NextResponse.json({ error: anyErr.message }, { status: 500 });
 
   const billing = new Map<string, { status: string; plan: string | null }>((billingQ.data || []).map((b) => [b.restaurant_id, { status: b.status, plan: b.plan }]));
   const usage = new Map<string, { o7: number; o30: number }>(((usageQ.data as { restaurant_id: string; orders_7d: number; orders_30d: number }[]) || []).map((u) => [u.restaurant_id, { o7: Number(u.orders_7d) || 0, o30: Number(u.orders_30d) || 0 }]));
@@ -35,12 +38,15 @@ export async function GET(req: NextRequest) {
     const paying = b?.status === "active";
     const ageDays = r.created_at ? Math.floor((now - new Date(r.created_at).getTime()) / 86_400_000) : 9999;
 
-    if (paying && u.o30 === 0) {
+    if (ageDays <= 30 && u.o30 === 0) {
+      // A recently-created restaurant that hasn't started yet → onboarding, NOT churn — even
+      // if it's already paying (a day-1 paying customer isn't "about to leave"; audit).
+      onboarding.push({ id: r.id, name: r.name, slug: r.slug, ageDays, reason: ageDays <= 1 ? "Just created — not live yet" : `Created ${ageDays} days ago, no orders yet` });
+    } else if (paying && u.o30 === 0) {
+      // Established (>30d) paying restaurant that's gone idle → real churn risk.
       atRisk.push({ id: r.id, name: r.name, slug: r.slug, plan: b?.plan || null, reason: "Paying but no orders in 30 days" });
     } else if (paying && u.o7 === 0 && u.o30 > 0) {
       atRisk.push({ id: r.id, name: r.name, slug: r.slug, plan: b?.plan || null, reason: "Was active, but no orders this week" });
-    } else if (!paying && ageDays <= 30 && u.o30 === 0) {
-      onboarding.push({ id: r.id, name: r.name, slug: r.slug, ageDays, reason: ageDays <= 1 ? "Just created — not live yet" : `Created ${ageDays} days ago, no orders yet` });
     }
   }
   onboarding.sort((a, b) => a.ageDays - b.ageDays);

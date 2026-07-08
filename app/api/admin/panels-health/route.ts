@@ -19,9 +19,13 @@ export async function GET(req: NextRequest) {
     sb.from("settings").select("restaurant_id, enabled_panels"),
     // Active operational staff only, explicit columns, bounded — we just need the latest
     // last_seen per (restaurant, role); aggregated below in JS.
-    sb.from("staff_users").select("restaurant_id, role, last_seen_at").eq("active", true).in("role", ROLES as unknown as string[]).limit(3000),
+    sb.from("staff_users").select("restaurant_id, role, last_seen_at").eq("active", true).in("role", ROLES as unknown as string[]).order("last_seen_at", { ascending: false, nullsFirst: false }).limit(3000),
   ]);
-  if (restsQ.error) return NextResponse.json({ error: restsQ.error.message }, { status: 500 });
+  // Check ALL three — a failed settings/staff read would otherwise show every panel "Off"/"Never
+  // seen" (false "device down" for everyone) with a confident 200 (audit). Order the staff read
+  // by last_seen so at scale the 3000-row cap keeps the MOST-RECENTLY-ACTIVE staff, not random ones.
+  const anyErr = restsQ.error || setQ.error || staffQ.error;
+  if (anyErr) return NextResponse.json({ error: anyErr.message }, { status: 500 });
 
   const panelsByRid = new Map<string, Record<string, boolean> | null>((setQ.data || []).map((r) => [r.restaurant_id, (r as { enabled_panels?: Record<string, boolean> | null }).enabled_panels || null]));
   // Latest last_seen per "restaurant|role".
@@ -51,8 +55,10 @@ export async function GET(req: NextRequest) {
     return { id: r.id, name: r.name, slug: r.slug, active: r.active, panels };
   });
 
-  // Attention count: enabled panels that are offline or never-seen (a device/login likely down).
-  const attention = rows.reduce((n, r) => n + r.panels.filter((p) => p.status === "offline" || p.status === "never").length, 0);
+  // Attention count = enabled panels that are offline/never-seen. EXCLUDES the OWNER panel (an
+  // owner has ONE cross-restaurant last-seen row, so co-owned restaurants falsely read "never
+  // seen") and SUSPENDED restaurants (their panels are deliberately off) — avoids false alerts (audit).
+  const attention = rows.filter((r) => r.active).reduce((n, r) => n + r.panels.filter((p) => p.role !== "owner" && (p.status === "offline" || p.status === "never")).length, 0);
 
   return NextResponse.json({ rows, roles: ROLES, attention, generatedAt: new Date().toISOString() });
 }

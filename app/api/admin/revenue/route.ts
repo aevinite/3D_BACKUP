@@ -28,7 +28,10 @@ export async function GET(req: NextRequest) {
     sb.from("restaurant_payments").select("restaurant_id, amount, paid_on").order("paid_on", { ascending: false }).limit(10000),
     sb.from("restaurants").select("id, name, slug").is("deleted_at", null),
   ]);
-  if (billingQ.error) return NextResponse.json({ error: billingQ.error.message }, { status: 500 });
+  // Check ALL three — else a failed payments/restaurants read would show confident zeros / "—"
+  // names with a 200 instead of an error the page can retry (audit).
+  const anyErr = billingQ.error || paymentsQ.error || restsQ.error;
+  if (anyErr) return NextResponse.json({ error: anyErr.message }, { status: 500 });
 
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
   const billing = (billingQ.data || []) as Billing[];
@@ -81,7 +84,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     currency: "INR",
     mrr, arr, nonInrActive,
-    activeSubs: activeInr.length,
+    activeSubs: byStatus.active, // count ALL active subs (matches the "Active (paying)" status bar); MRR stays INR-only
     byStatus,
     mrrByPlan,
     collectedThisYear: Math.round(collectedThisYear),

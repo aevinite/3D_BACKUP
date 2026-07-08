@@ -13,7 +13,10 @@ import { redactMoney } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
-const BILL_ACTIONS = ["bill_paid", "close_unpaid", "payment_revert", "order_discount", "order_delete", "order_move"];
+// Bill CHANGES/removals only — NOT "paid". (The manager panel, the main billing surface,
+// doesn't emit bill_paid, so including it would show a misleading partial list; payments live
+// on Revenue/Billing.) table_shift = the manager's move; order_move = the tablet's (audit).
+const BILL_ACTIONS = ["order_delete", "payment_revert", "close_unpaid", "order_discount", "order_move", "table_shift"];
 const RISK = new Set(["order_delete", "payment_revert", "close_unpaid"]); // removals / edits = the tamper-risk signals
 
 export async function GET(req: NextRequest) {
