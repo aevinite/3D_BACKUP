@@ -27,6 +27,12 @@ const card: React.CSSProperties = { background: "var(--card)", border: "var(--bo
 const field: React.CSSProperties = { boxSizing: "border-box", padding: "10px 12px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 14, width: "100%" };
 const btn = (bg: string): React.CSSProperties => ({ padding: "10px 14px", borderRadius: 9, border: 0, background: bg, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", minHeight: 40 });
 const label: React.CSSProperties = { display: "grid", gap: 4, fontSize: 12, color: "var(--muted)" };
+// A small toggleable filter "chip" (role filters). `on` gives it the accent fill.
+const chip = (on: boolean, color?: string): React.CSSProperties => ({
+  padding: "7px 14px", borderRadius: 999, border: on ? "1px solid transparent" : "var(--border)",
+  background: on ? (color || "var(--text)") : "var(--bg)", color: on ? "#fff" : "var(--text)",
+  fontWeight: 600, fontSize: 12.5, cursor: "pointer", minHeight: 34, lineHeight: 1,
+});
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<User[]>([]);
@@ -49,18 +55,38 @@ export default function AdminUsers() {
   const [editId, setEditId] = useState<string | null>(null);
   const editing = users.find((u) => u.id === editId) || null;
 
-  // Search filters the list by name/login, role, restaurant or phone (admin audit
-  // 2026-07-07 — the list has no filter and grows long across many restaurants).
-  const [query, setQuery] = useState("");
-  const shown = (() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter((u) =>
+  // ── List filters (all client-side over the data we already loaded — no extra reads) ──
+  // Merged 2026-07-08: main added a free-text search (admin audit 2026-07-07); this
+  // adds a restaurant SCOPE + combinable role chips on top. Together they keep the
+  // list to just the people you care about across many restaurants.
+  // filterRid = "" means "All restaurants"; otherwise scope to one restaurant.
+  const [filterRid, setFilterRid] = useState("");
+  // Which roles to show. Empty = all roles. Roles combine (e.g. manager + tablet).
+  const [filterRoles, setFilterRoles] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+
+  const scopedName = filterRid ? restaurants.find((r) => r.id === filterRid)?.name : "";
+
+  // When the admin scopes to ONE restaurant, lock the "Add a user" form to it so a
+  // new user can't accidentally be created under the wrong restaurant.
+  useEffect(() => {
+    if (filterRid) setNu((n) => (n.restaurant_id === filterRid ? n : { ...n, restaurant_id: filterRid }));
+  }, [filterRid]);
+
+  const toggleRole = (r: string) =>
+    setFilterRoles((prev) => (prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]));
+
+  const q = search.trim().toLowerCase();
+  const visible = users.filter((u) =>
+    (!filterRid || u.restaurant_id === filterRid) &&
+    (filterRoles.length === 0 || filterRoles.includes(u.role)) &&
+    (!q ||
       (u.name || u.username).toLowerCase().includes(q) ||
       (ROLE_LABEL[u.role] || u.role).toLowerCase().includes(q) ||
       (u.restaurantName || "").toLowerCase().includes(q) ||
-      (u.phone || "").toLowerCase().includes(q));
-  })();
+      (u.phone || "").toLowerCase().includes(q))
+  );
+  const filtered = filterRid !== "" || filterRoles.length > 0 || q !== "";
 
   const load = useCallback(async () => {
     setErr("");
@@ -123,19 +149,33 @@ export default function AdminUsers() {
 
       {/* Create user */}
       <section style={{ ...card, marginBottom: 18 }}>
-        <h2 style={{ fontSize: 15, margin: "0 0 12px" }}>Add a user</h2>
+        <h2 style={{ fontSize: 15, margin: "0 0 12px" }}>
+          Add a user{scopedName ? <> to <span style={{ color: "var(--text)" }}>{scopedName}</span></> : ""}
+        </h2>
         <form onSubmit={create} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, alignItems: "end" }}>
           <label style={label}>
             Name
             <input value={nu.name} onChange={(e) => setNu({ ...nu, name: e.target.value })} placeholder="e.g. Raj" autoCapitalize="words" style={field} required />
           </label>
-          <label style={label}>
-            Restaurant
-            <select value={nu.restaurant_id} onChange={(e) => setNu({ ...nu, restaurant_id: e.target.value })} style={field} required>
-              {restaurants.length === 0 && <option value="">{loading ? "Loading…" : "No restaurants yet — create one first"}</option>}
-              {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          </label>
+          {/* When scoped to one restaurant the target is locked (shown read-only) so a
+              new user can't land in the wrong restaurant. Pick "All restaurants" above
+              to choose freely again. */}
+          {scopedName ? (
+            <label style={label}>
+              Restaurant
+              <div style={{ ...field, display: "flex", alignItems: "center", gap: 6, opacity: 0.85 }} title="Scoped by the filter above — switch to “All restaurants” to change">
+                <span aria-hidden>🔒</span><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{scopedName}</span>
+              </div>
+            </label>
+          ) : (
+            <label style={label}>
+              Restaurant
+              <select value={nu.restaurant_id} onChange={(e) => setNu({ ...nu, restaurant_id: e.target.value })} style={field} required>
+                {restaurants.length === 0 && <option value="">{loading ? "Loading…" : "No restaurants yet — create one first"}</option>}
+                {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </label>
+          )}
           <label style={label}>
             Role
             <select value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value })} style={field}>
@@ -167,21 +207,41 @@ export default function AdminUsers() {
 
       {/* User list — compact rows, ONE button (Edit) each. Everything else lives in the modal. */}
       <section style={{ ...card }}>
-        <h2 style={{ fontSize: 15, margin: "0 0 12px" }}>All users {loading ? "" : `(${users.length})`}</h2>
-        {users.length > 6 && (
-          <div style={{ position: "relative", marginBottom: 12 }}>
-            <i className="fas fa-magnifying-glass" aria-hidden="true" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 13 }} />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name, role, restaurant or phone…"
-              aria-label="Search users" style={{ ...field, paddingLeft: 34 }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <h2 style={{ fontSize: 15, margin: 0 }}>
+            {scopedName ? scopedName : "All"} users {loading ? "" : filtered ? `(${visible.length} of ${users.length})` : `(${users.length})`}
+          </h2>
+        </div>
+
+        {/* Filter toolbar: pick a restaurant, narrow by role (combinable), or search. */}
+        <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <select value={filterRid} onChange={(e) => setFilterRid(e.target.value)} style={{ ...field, width: "auto", minWidth: 190, flex: "0 1 auto" }}>
+              <option value="">All restaurants</option>
+              {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+            <span style={{ position: "relative", flex: "1 1 180px", maxWidth: 320, minWidth: 180 }}>
+              <i className="fas fa-magnifying-glass" aria-hidden="true" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 13 }} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, role, restaurant or phone…" aria-label="Search users" style={{ ...field, paddingLeft: 34 }} />
+            </span>
+            {filtered ? <button type="button" onClick={() => { setFilterRid(""); setFilterRoles([]); setSearch(""); }} style={{ ...chip(false), color: "var(--muted)" }}>Clear filters</button> : null}
           </div>
-        )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>Role:</span>
+            <button type="button" onClick={() => setFilterRoles([])} style={chip(filterRoles.length === 0)}>All</button>
+            {ROLES.map((r) => (
+              <button key={r} type="button" onClick={() => toggleRole(r)} style={chip(filterRoles.includes(r), ROLE_COLOR[r])}>{ROLE_LABEL[r]}</button>
+            ))}
+          </div>
+        </div>
+
         {loading ? <div style={{ color: "var(--muted)" }}>Loading…</div> : users.length === 0 ? (
           <div style={{ color: "var(--muted)" }}>No users yet — add your first one above.</div>
-        ) : shown.length === 0 ? (
-          <div style={{ color: "var(--muted)" }}>No users match “{query}”.</div>
+        ) : visible.length === 0 ? (
+          <div style={{ color: "var(--muted)" }}>No users match these filters.</div>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
-            {shown.map((u) => (
+            {visible.map((u) => (
               <div key={u.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, alignItems: "center", padding: 12, borderRadius: 10, background: "var(--bg)", border: "var(--border)", opacity: u.active ? 1 : 0.55 }}>
                 {/* Initial badge */}
                 <div aria-hidden style={{ width: 38, height: 38, borderRadius: 999, background: ROLE_COLOR[u.role] || "#9ca3af", color: "var(--bg)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }}>
