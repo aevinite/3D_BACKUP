@@ -2848,6 +2848,69 @@ async function printManagerReport() {
   w.document.close();
 }
 
+// Staff watch — who is discounting / voiding / deleting / reverting bills, from the recent activity
+// log. A high count isn't proof of anything (a busy manager legitimately discounts a lot); it's a
+// heads-up to glance at — the "anti-theft" pattern the bigger POS systems use.
+async function openStaffRisk() {
+  document.querySelector(".sr-overlay")?.remove();
+  const wrap = el(`<div class="sx-modal-overlay sr-overlay"><div class="sx-modal" style="max-width:620px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🔍 Staff watch</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">Discounts, voids, deletes &amp; paid-reverts by staff, from the recent activity log. A high count is just worth a glance — not proof of anything.</div><div id="srBody"><div class="empty">Loading…</div></div></div>
+  </div></div>`);
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  try {
+    const rows = await api("GET", "/oplog");
+    const RISK = { order_discount: "disc", void_invoice: "void", order_delete: "del", orders_delete: "del", payment_revert: "rev" };
+    const by = {};
+    for (const r of (rows || [])) { const k = RISK[r.action]; if (!k) continue; const who = r.actor || "— (device only)"; const a = by[who] || (by[who] = { disc: 0, void: 0, del: 0, rev: 0, total: 0 }); a[k]++; a.total++; }
+    const list = Object.entries(by).map(([who, v]) => ({ who, ...v })).sort((a, b) => b.total - a.total);
+    const maxT = list.length ? list[0].total : 0;
+    const flag = (t) => t >= Math.max(8, maxT * 0.8) ? ` <span class="inv-chip voided">watch</span>` : "";
+    wrap.querySelector("#srBody").innerHTML = list.length
+      ? `<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left;padding:4px">Staff</th><th style="text-align:right;padding:4px">Discounts</th><th style="text-align:right;padding:4px">Voids/Deletes</th><th style="text-align:right;padding:4px">Reverts</th><th style="text-align:right;padding:4px">Total</th></tr></thead><tbody>`
+        + list.map((v) => `<tr style="border-top:1px solid var(--line)"><td style="padding:5px 4px"><b>${esc(v.who)}</b>${flag(v.total)}</td><td style="text-align:right">${v.disc}</td><td style="text-align:right">${v.void + v.del}</td><td style="text-align:right">${v.rev}</td><td style="text-align:right"><b>${v.total}</b></td></tr>`).join("")
+        + `</tbody></table>`
+      : `<div class="empty">No discounts, voids, deletes or reverts in the recent log — nothing to flag. 👍</div>`;
+  } catch (e) { wrap.querySelector("#srBody").innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; }
+}
+
+// Menu star/dog matrix — which dishes are winners vs losers, by popularity (units sold) × the
+// revenue they bring. Reuses the Dashboard's /stats data (menuMatrix field). Revenue, NOT profit —
+// dish cost isn't tracked yet (that's the future inventory module), so it's labelled honestly.
+async function openMenuMatrix() {
+  document.querySelector(".mm-overlay")?.remove();
+  const rangeLbl = { today: "today", "30d": "the last 30 days", year: "the last 12 months" }[dashRange] || dashRange;
+  const wrap = el(`<div class="sx-modal-overlay mm-overlay"><div class="sx-modal" style="max-width:820px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>📊 Menu winners &amp; losers</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">By how often each dish sells × the revenue it brings, over ${esc(rangeLbl)}. (Revenue, not profit — cost tracking comes with the inventory module.)</div><div id="mmBody"><div class="empty">Loading…</div></div></div>
+  </div></div>`);
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  const render = (mm) => {
+    if (!mm || !mm.length) return `<div class="empty">No paid dishes in this range yet.</div>`;
+    const QUAD = [
+      { k: "star", icon: "⭐", name: "Stars", tip: "Popular + high revenue — feature & protect these." },
+      { k: "puzzle", icon: "🧩", name: "Puzzles", tip: "High revenue, fewer orders — promote or reposition." },
+      { k: "workhorse", icon: "🐎", name: "Workhorses", tip: "Popular but lower revenue — a small price bump?" },
+      { k: "dog", icon: "🐟", name: "Dogs", tip: "Low on both — rework or drop." },
+    ];
+    return `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">` + QUAD.map((Q) => {
+      const all = mm.filter((d) => d.q === Q.k);
+      const rows = all.slice(0, 12);
+      return `<div class="tp-bill" style="padding:12px"><div style="font-weight:800;margin-bottom:2px">${Q.icon} ${Q.name} <span class="muted">· ${all.length}</span></div><div class="muted small" style="margin-bottom:8px">${Q.tip}</div>${rows.length ? rows.map((d) => `<div class="tp-bl"><span>${esc(d.title)} <span class="muted">×${d.units}</span></span><b>${inr(d.rev)}</b></div>`).join("") + (all.length > rows.length ? `<div class="muted small">+${all.length - rows.length} more</div>` : "") : `<div class="muted small">—</div>`}</div>`;
+    }).join("") + `</div>`;
+  };
+  const paint = (s) => { const b = wrap.querySelector("#mmBody"); if (b) b.innerHTML = render(s && s.menuMatrix); };
+  // Reuse the Dashboard's already-loaded stats for the current range if present (no extra fetch).
+  if (loadDashboard._last && loadDashboard._lastRange === dashRange) paint(loadDashboard._last);
+  else { try { paint(await api("GET", "/stats?range=" + dashRange)); } catch (e) { const b = wrap.querySelector("#mmBody"); if (b) b.innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; } }
+}
+
 // Monthly GST report for THIS restaurant's own dine-in sales (paid bills, discount-before-tax —
 // the same server math as the Z-report). A month picker, the GST breakdown (CGST/SGST lines when the
 // restaurant uses named components, else one GST line), a per-day table, and a CSV for the accountant.
@@ -3055,11 +3118,12 @@ function renderEditor() {
     return;
   }
   if (state.tab === "dash") {
-    ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="mgrReport">📄 Download report</button><button class="btn" id="zReport">📋 Day-close (Z)</button><button class="btn" id="gstReport">🧾 GST report</button><button class="btn" id="dashRefresh">↻ Refresh</button></div></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
+    ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="mgrReport">📄 Download report</button><button class="btn" id="zReport">📋 Day-close (Z)</button><button class="btn" id="gstReport">🧾 GST report</button><button class="btn" id="menuMatrix">📊 Menu winners</button><button class="btn" id="dashRefresh">↻ Refresh</button></div></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
     document.getElementById("dashRefresh").onclick = () => renderEditor();
     document.getElementById("zReport").onclick = () => printZReport();
     document.getElementById("mgrReport").onclick = () => printManagerReport();
     document.getElementById("gstReport").onclick = () => openGstReport();
+    document.getElementById("menuMatrix").onclick = () => openMenuMatrix();
     loadDashboard();
     return;
   }
@@ -6163,7 +6227,7 @@ function logHtml() {
 // panel did what, where, and when). Fed by /oplog (the staff_actions table).
 function oplogHtml() {
   const rows = state.oplog || [];
-  const head = `<div class="ed-head"><h2>Operation log <span class="sub">· staff actions</span></h2><div class="ed-head-actions">${retentionControl("oplog_retention_days")}<button class="btn" id="refreshOplog">↻ Refresh</button></div></div>
+  const head = `<div class="ed-head"><h2>Operation log <span class="sub">· staff actions</span></h2><div class="ed-head-actions">${retentionControl("oplog_retention_days")}<button class="btn" id="staffWatch">🔍 Staff watch</button><button class="btn" id="refreshOplog">↻ Refresh</button></div></div>
     <div class="ord-note">Every staff action across the panels — which panel <b>and which device</b> did it, where, and when. Each device gets an automatic ID (shown as <b>#id</b>) until real staff login lands. <b>Click any row</b> for its full date, time and details.</div>`;
   if (!rows.length) return head + `<div class="sx-empty">No staff actions logged yet — accept/serve an order, open/close a table, etc.</div>`;
   const ACT = OP_ACTION_LABELS;
@@ -6218,6 +6282,7 @@ function bindLog() {
   // Switch between the Customer log and the Operation log.
   ed.querySelectorAll("[data-logview]").forEach((b) => (b.onclick = () => { state.logView = b.dataset.logview; if (state.logView === "operations") loadOplog(); else renderEditor(); }));
   const ro = document.getElementById("refreshOplog"); if (ro) ro.onclick = loadOplog;
+  const sw = document.getElementById("staffWatch"); if (sw) sw.onclick = openStaffRisk;
   // "Keep logs for …" dropdown (both logs) → save the new retention.
   ed.querySelectorAll(".ret-select").forEach((s) => (s.onchange = () => saveRetention(s.dataset.ret, s.value)));
   // Click a row to open its full detail (ignore clicks that landed on a button,

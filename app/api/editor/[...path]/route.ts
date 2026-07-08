@@ -569,6 +569,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const catOf: Record<string, string> = Object.fromEntries(dishes.map((d: { id: string; category?: string }) => [d.id, d.category || "other"]));
       const hours = Array(24).fill(0);
       const topD: Record<string, number> = {}, cats: Record<string, number> = {}, seriesMap: Record<string, number> = {};
+      const dishAgg: Record<string, { units: number; rev: number }> = {}; // per-dish PAID units + gross ₹ → menu star/dog matrix
       // Payment-method breakdown (owner, 2026-07-01): revenue + bill count per method
       // for whatever's ALREADY marked paid in this range — no extra query, same orders array.
       const paymentMethods: Record<string, { rev: number; bills: number }> = {};
@@ -621,11 +622,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         hours[h] += 1;
         dayParts[partOf(h)].orders++;
         if (heatmap.length) heatmap[istDay(dt)][h] += 1;
+        const oPaid = o.payment_status === "paid";
         for (const it of (Array.isArray(o.items) ? o.items : [])) {
           const q = Number(it.qty) || 1;
           if (it.title) topD[it.title] = (topD[it.title] || 0) + q;
           const c = catOf[it.id] || "other";
           cats[c] = (cats[c] || 0) + q;
+          // menu-matrix: gross ₹ per dish on PAID bills (menu price × qty; discounts are bill-level).
+          if (oPaid) { const key = it.title || it.slug || "?"; const dd = dishAgg[key] || (dishAgg[key] = { units: 0, rev: 0 }); dd.units += q; dd.rev += q * (Number(it.price) || 0); }
         }
       }
       // Revenue / series / payment-methods / tax / day-part ₹ / biggest bill are PER BILL
@@ -742,7 +746,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const platformToday = { count: platToday.length, revenue: r2(platToday.reduce((sum, r) => sum + (Number(r.total) || 0), 0)) };
       // Dine-in channel = the collected dine-in figures computed above.
       channels.dinein = { rev: r2(revenue), count: paid };
+      // Menu star/dog matrix (menu engineering): classify each PAID dish by popularity (units) × gross
+      // revenue, split at the medians → star / workhorse / puzzle / dog. Revenue (NOT profit — dish cost
+      // isn't tracked yet; that's the future inventory module), labelled honestly in the UI.
+      const mmArr = Object.entries(dishAgg).map(([title, d]) => ({ title, units: d.units, rev: r2(d.rev) }));
+      const _med = (xs: number[]) => { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+      const medU = _med(mmArr.map((d) => d.units)), medR = _med(mmArr.map((d) => d.rev));
+      const menuMatrix = mmArr.map((d) => ({ ...d, q: d.units >= medU ? (d.rev >= medR ? "star" : "workhorse") : (d.rev >= medR ? "puzzle" : "dog") })).sort((a, b) => b.rev - a.rev);
       return ok({
+        menuMatrix,
         range, series, hours, cats, paid, unpaid, cancelled, revenue: r2(revenue),
         // Non-cancelled only, so it equals paid+unpaid (the card's own sub-line) AND compares
         // like-for-like against prev.orders (also non-cancelled). Counting cancelled here made
