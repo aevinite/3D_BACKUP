@@ -534,6 +534,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // existing invoice), so there's no double-invoice risk.
     if (a === "sessions" && c === "invoice") {
       const g = await tabletPerm("tablet_invoice", req, body, rid, actor); if (!g.allow) return g.resp;
+      // lfh_generate_invoice takes only p_session (no tenant param) — confirm the session is
+      // THIS restaurant's first (service-role bypasses RLS), mirroring the editor invoice guard.
+      const ownsGen = (await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
+      if (!ownsGen) return err("That table isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
       if (error) throw new Error(error.message);
       await log("invoice_generate", { detail: `session ${b}` + byNote(g), device_id: dev });
@@ -870,7 +874,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && c === "close") {
       const force = !!(body && body.force === true);
       if (force) { const g = await managerPinGate(req, body, rid); if (!g.allow) return g.resp; } // override → manager PIN
-      const result = await closeSession(b, { force }, { panel: "tablet", deviceId: dev });
+      const result = await closeSession(b, { force }, { panel: "tablet", deviceId: dev, restaurantId: rid });
       if (!result.ok) return err(result.message, result.status);
       return ok(result.session);
     }

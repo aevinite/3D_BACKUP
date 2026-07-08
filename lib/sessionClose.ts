@@ -17,7 +17,7 @@ const must = (r: { error: { message: string } | null; data: unknown }) => {
 };
 
 export type CloseResult =
-  | { ok: false; status: number; message: string; reason: "unpaid" | "cooking" | "both" }
+  | { ok: false; status: number; message: string; reason: "unpaid" | "cooking" | "both" | "not_found" }
   | { ok: true; session: any };
 
 export type OrderLite = { status?: string | null; payment_status?: string | null };
@@ -61,9 +61,19 @@ export function closeBlock(orders: OrderLite[], force: boolean):
 export async function closeSession(
   sessionId: string,
   opts: { force?: boolean },
-  ctx: { panel: "editor" | "tablet"; deviceId?: string | null },
+  ctx: { panel: "editor" | "tablet"; deviceId?: string | null; restaurantId?: string | null },
 ): Promise<CloseResult> {
   const force = opts.force === true;
+
+  // Confirm the session belongs to the acting restaurant before closing it. The session id
+  // is client-supplied and every query below keys on session_id alone (service-role bypasses
+  // RLS), so without this a panel scoped to one restaurant could close another restaurant's
+  // table. The neighbouring invoice/void/shift actions already do this same pre-check; close
+  // was the gap. (Passed by both callers now; kept optional so an unscoped caller still works.)
+  if (ctx.restaurantId) {
+    const owns = (await sb.from("sessions").select("id").eq("id", sessionId).eq("restaurant_id", ctx.restaurantId).maybeSingle()).data;
+    if (!owns) return { ok: false, status: 404, message: "That table isn't for this restaurant.", reason: "not_found" };
+  }
 
   // Live orders that would block a close: not archived, not cancelled, and either
   // still cooking OR not yet paid. Decision lives in the pure closeBlock() helper.
