@@ -95,6 +95,13 @@ export default function OrderTracker() {
     };
   }, []);
 
+  // Re-read on restaurant change: the tracker's orders are tenant-scoped, so switching
+  // restaurants in the SAME tab (client-side nav — GuestChrome lives in the root layout
+  // and doesn't remount) must re-read against THIS restaurant, else the previous
+  // restaurant's live strip lingered over the new one (audit fix cart-3, 2026-07-08).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { refresh(); }, [restaurantId]);
+
   // Poll the kitchen for each order we're still following.
   // "Polling" = asking the server "any update?" on a repeating timer, because
   // the server can't push to us directly here.
