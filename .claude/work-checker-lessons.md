@@ -1,5 +1,13 @@
 # Work-checker lessons
 
+## Gotchas
+- **Shared folder + parallel sessions: another session can switch the branch out from under you between commands.** `#general`
+  (2026-07-07) I branched `fix/owner-panel-audit` off origin/main, but a parallel session then switched the shared
+  folder to its own `fix/manager-audit-log` branch, so my `git commit` + `git rebase` landed on THEIR branch (and my
+  push sent an empty owner branch). Recovery: reflog to reconstruct, `reset --hard` their branch back to its last
+  commit, then build my PR in a dedicated `git worktree` off origin/main. RULE: for any multi-commit task in this
+  repo, create a worktree FROM THE START; and run `git branch --show-current` immediately before EVERY commit/push.
+
 ## What works
 - **Per-user permission overrides as JSONB + "override ?? restaurant-default ?? off" fallback** `#backend`
   (PR #106): one additive column, keys named identically to the settings tri-states, resolution in ONE
@@ -175,3 +183,43 @@ boxes. I shipped Billing settings with empty fields while the bill printed fallb
 data; owner immediately: "not autofilled like i want". Fix pattern: one shared
 resolver (billIdentity) feeds both the renderer and the form, and the form prefills
 the working copy so Save persists what's shown.
+
+#tooling #env (2026-07-06) — The chrome-devtools MCP browser calls HANG in this
+environment (list_pages/navigate stalled indefinitely; two bug-hunter subagents both
+froze at the "drive in Chrome" step and produced nothing). Two lessons: (1) don't bury
+a browser-driven audit inside a background subagent — when its one Chrome call hangs
+the user just sees "stuck" with no output and gets (rightly) frustrated. (2) For live
+verification here, prefer HTTP (curl login + hit the API routes) + source tracing done
+IN the main session; only reach for the browser for genuinely pixel-level checks, and
+if the first Chrome call stalls, abandon it rather than retrying. Owner: "shut that
+shit down and do by yourself."
+
+## 2026-07-06 — Don't claim an efficiency fix's magnitude without measuring the REAL load
+Shipped a GET in-flight coalescer for "duplicate boot fetches (/summary 4×, /all 3×…)"
+and claimed "~470 KB → ~1×" in the PR. Live on prod it only shaved summary 4→3, platform
+3→2: the duplicates are SEQUENTIAL (boot fires them, then the realtime-connect fires them
+again ~1s later), and coalescing only merges CONCURRENT in-flight calls. Lesson: an
+"in-flight dedupe" only helps truly overlapping calls; staggered re-fetches from distinct
+triggers need a short TTL micro-cache or suppressing the realtime-connect's initial
+reconcile when boot just ran. Measure the actual (staggered) network on a real load before
+stating a reduction figure.
+
+## 2026-07-08 — For a merge-to-live decision, separate "analyze quality" from "merge" — don't bundle them
+Owner asked "is anything left to make live?"; I found 2 stale open PRs and offered an option
+"Rebase + re-check both, then merge", which he picked — so I rebased and merged both. He then
+said he'd wanted me to ANALYZE whether the code was actually good FIRST, then merge only if so.
+My option wording conflated "re-check staleness" with "verify the code is good", and bundled the
+irreversible merge into the same choice. The code turned out fine (work-checker PASS, only a
+cosmetic comment nit), so no harm — but the sequencing was his call to make, not mine. Lesson:
+when the next step is merging to a live/production branch, make the quality gate its OWN explicit
+step and present the verdict BEFORE merging; only merge in the same breath if the user explicitly
+says "merge without review". A revert is cheap, but don't rely on that — get the go on the
+irreversible step. (Faithful-attribution: my miscommunication via ambiguous option wording, not a
+changed mind.)
+
+## 2026-07-06 — Don't declare a feature "dead/unwired" from a scoped grep
+Told the owner the `auto_table_action` (auto close/restart on paid) setting was "never
+wired, does nothing" after grepping only app.js + route.ts for the literal string. It IS
+wired — the enforcement lives in lib/autoSettle.ts (maybeAutoSettle), called from the
+editor+tablet routes after payment/serve. Lesson: before calling a feature dead, grep the
+WHOLE repo (esp. lib/ helpers) for the behaviour, not just the string in the obvious files.
