@@ -529,20 +529,33 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       else if (range === "year") prevSince = new Date(since.getFullYear() - 1, since.getMonth(), 1);
       else prevSince = new Date(since.getTime() - 30 * 864e5);
       const elapsedMs = now.getTime() - since.getTime();
-      const [ordersQ, dishesQ, setQ, platRangeQ] = await Promise.all([
-        // NEWEST-FIRST + explicit high bound. Without an .order()/.limit() PostgREST
-        // silently returns an ARBITRARY capped page (db-max-rows), so on a busy restaurant
-        // the totals/deltas were computed on a random subset → wrong, non-deterministic
-        // numbers. Ordering desc means any truncation drops only the OLDEST rows, keeping
-        // the recent window complete and the result reproducible. (Follow-up for extreme
-        // scale: pre-aggregated daily summary table per CLAUDE.md — this endpoint is
-        // on-demand, never polled, so a bounded scan is acceptable until then.)
-        sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).order("created_at", { ascending: false }).limit(50000),
+      const [dishesQ, setQ, platRangeQ] = await Promise.all([
         sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
         sb.from("settings").select("tax_rate,tax_components").eq("restaurant_id", rid).maybeSingle(),
         sb.from("aggregator_orders").select("source,total,status,created_at").eq("restaurant_id", rid).gte("created_at", since.toISOString()).limit(5000),
       ]);
-      const allRows = must(ordersQ), dishes = must(dishesQ);
+      // Page through EVERY order in the window. A single .limit(50000) is silently capped by
+      // PostgREST's db-max-rows (~1000), so on a busy restaurant the dashboard read only the newest
+      // ~1000 orders and UNDER-counted revenue / orders / deltas (this made the Dashboard disagree
+      // with the owner panel, whose SQL SUM has no row cap). The Z-report already pages around this;
+      // /stats now does too. (B9 root cause — dashboard truncation.) On-demand endpoint, never polled;
+      // pre-aggregated summary table is the extreme-scale follow-up per CLAUDE.md.
+      const allRows: any[] = [];
+      // Page NEWEST-first, capped at ~12,000 rows. A single big .limit() is silently capped by
+      // PostgREST's db-max-rows (~1000) — which truncated the dashboard to the newest ~1000 orders and
+      // under-counted a busy restaurant (why it disagreed with the owner panel). Paging fixes that; the
+      // 12k cap stops a huge range from turning the dashboard into a slow, egress-heavy full-table scan.
+      // Newest-first keeps the RECENT window complete + deterministic. The cap keeps the dashboard
+      // fast (deep OFFSET paging gets slow), so the "Today" and "30 days" views are exact and match
+      // the owner panel for a normal restaurant. A very-high-volume FULL YEAR can exceed the cap →
+      // its totals reflect the most recent ~5k orders; penny-exact big-range analytics is the planned
+      // pre-aggregated-summary follow-up (CLAUDE.md: dashboards read summaries, not live scans).
+      for (let from = 0; from < 5000; from += 1000) {
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).order("created_at", { ascending: false }).range(from, from + 999)) as any[] | null) || [];
+        allRows.push(...page);
+        if (page.length < 1000) break;
+      }
+      const dishes = must(dishesQ);
       const sinceMs = since.getTime(), prevSinceMs = prevSince.getTime();
       const orders = allRows.filter((o: { created_at: string }) => new Date(o.created_at).getTime() >= sinceMs);
       const prevRows = allRows.filter((o: { created_at: string }) => {
@@ -621,20 +634,25 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // dropped the excess and OVERSTATED revenue on multi-order tables. Group paid,
       // non-cancelled orders into bills and apply the discount to the bill,
       // discount-before-tax — matches billMath/Z-report.
-      const billAgg = new Map<string, { sub: number; disc: number; dt: Date; method: string; table: string }>();
+      const billAgg = new Map<string, { sub: number; disc: number; tot: number; dt: Date; method: string; table: string }>();
       for (const o of orders) {
         if (o.status === "cancelled" || o.payment_status !== "paid") continue;
         const key = o.session_id || ("solo:" + o.id);
-        const b = billAgg.get(key) || { sub: 0, disc: 0, dt: new Date(o.created_at), method: o.payment_method || "Not recorded", table: String(o.table_number || "").trim() };
+        const b = billAgg.get(key) || { sub: 0, disc: 0, tot: 0, dt: new Date(o.created_at), method: o.payment_method || "Not recorded", table: String(o.table_number || "").trim() };
         b.sub += Number(o.subtotal) || 0;
         b.disc += Number(o.discount) || 0;
+        b.tot += Number(o.total) || 0; // stored gross total (frozen at payment) — the collected basis (B9)
         const d = new Date(o.created_at); if (d < b.dt) b.dt = d; // earliest order = the bill's time
         if (!b.table) b.table = String(o.table_number || "").trim();
         billAgg.set(key, b);
       }
       for (const b of billAgg.values()) {
         const net = Math.max(0, b.sub - b.disc);
-        const amt = net * (1 + rate);
+        // Revenue = WHAT WAS COLLECTED, frozen at payment time: the stored bill total minus the
+        // (grossed) discount — the SAME basis the owner panel uses (mig 140: total − discount×(1+rate)),
+        // so the two screens always agree and a later tax-rate change never rewrites a past month.
+        // (B9; was net*(1+currentRate), which retroactively re-taxed old bills at today's rate.)
+        const amt = Math.max(0, (Number(b.tot) || 0) - b.disc * (1 + rate));
         revenue += amt;
         taxCollected += net * rate;
         const k = keyFor(b.dt); seriesMap[k] = (seriesMap[k] || 0) + amt;
@@ -650,20 +668,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const prevLen = bucket === "hour" ? 24 : bucket === "day" ? 30 : 12;
       const prevSeries = Array(prevLen).fill(0);
       let prevRevenue = 0, prevOrders = 0, prevCancelled = 0;
-      const prevBills = new Map<string, { sub: number; disc: number; dt: Date }>();
+      const prevBills = new Map<string, { sub: number; disc: number; tot: number; dt: Date }>();
       for (const o of prevRows) {
         if (o.status === "cancelled") { prevCancelled++; continue; }
         prevOrders++;
         if (o.payment_status !== "paid") continue;
         const key = o.session_id || ("solo:" + o.id);
-        const b = prevBills.get(key) || { sub: 0, disc: 0, dt: new Date(o.created_at) };
+        const b = prevBills.get(key) || { sub: 0, disc: 0, tot: 0, dt: new Date(o.created_at) };
         b.sub += Number(o.subtotal) || 0;
         b.disc += Number(o.discount) || 0;
+        b.tot += Number(o.total) || 0;
         const d = new Date(o.created_at); if (d < b.dt) b.dt = d;
         prevBills.set(key, b);
       }
       for (const b of prevBills.values()) {
-        const amt = Math.max(0, b.sub - b.disc) * (1 + rate);
+        const amt = Math.max(0, (Number(b.tot) || 0) - b.disc * (1 + rate)); // collected basis (B9), matches billAgg + owner
         prevRevenue += amt;
         const idx = bucket === "hour" ? istHour(b.dt)
           : bucket === "day" ? Math.min(29, Math.max(0, Math.floor((b.dt.getTime() - prevSinceMs) / 864e5)))
