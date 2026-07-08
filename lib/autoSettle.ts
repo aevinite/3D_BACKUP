@@ -37,7 +37,7 @@ export async function maybeAutoSettle(
 
     if (mode === "close") {
       const r = await closeSession(sessionId, { force: true }, ctx); // paid+served → never blocked
-      if (r.ok) await logAction(ctx.panel, "table_auto_close", { table_number: r.session?.table_number ?? null, detail: "auto-closed: bill paid + all served", device_id: ctx.deviceId ?? undefined });
+      if (r.ok) await logAction(ctx.panel, "table_auto_close", { restaurant_id: rid, table_number: r.session?.table_number ?? null, detail: "auto-closed: bill paid + all served", device_id: ctx.deviceId ?? undefined });
     } else {
       // restart: clear the round but KEEP the session open (mirror /tables/:t/restart) —
       // every live order becomes a served + archived bill record; the table stays open.
@@ -54,7 +54,7 @@ export async function maybeAutoSettle(
       // table (the manual path was fixed in #7; this is the auto-path parity). (shared helper)
       const restartTbl = orders[0]?.table_number != null ? String(orders[0].table_number) : null;
       await clearTableSignals(rid, restartTbl);
-      await logAction(ctx.panel, "table_auto_restart", { table_number: restartTbl, detail: "auto-restarted: bill paid + all served", device_id: ctx.deviceId ?? undefined });
+      await logAction(ctx.panel, "table_auto_restart", { restaurant_id: rid, table_number: restartTbl, detail: "auto-restarted: bill paid + all served", device_id: ctx.deviceId ?? undefined });
     }
   } catch { /* best-effort — auto-settle must never break the pay/serve that triggered it */ }
 }

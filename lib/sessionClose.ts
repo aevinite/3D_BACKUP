@@ -88,7 +88,7 @@ export async function closeSession(
         const rate = sub > 0 ? tax / sub : 0;
         return s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate);
       }, 0);
-      await logAction(ctx.panel, "close_unpaid", { table_number: sess.table_number ?? null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${Math.round(owed * 100) / 100} owed`, device_id: ctx.deviceId ?? undefined });
+      await logAction(ctx.panel, "close_unpaid", { restaurant_id: sess.restaurant_id ?? undefined, table_number: sess.table_number ?? null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${Math.round(owed * 100) / 100} owed`, device_id: ctx.deviceId ?? undefined });
     }
     // archived_at/cancelled_at start the 30-min "restore to floor" grace window
     // (migration 112) — every path that archives/cancels an order stamps it.
@@ -102,6 +102,6 @@ export async function closeSession(
     must(await sb.from("session_members").update({ removed: true })
       .eq("session_id", sessionId).eq("removed", false).select());
   }
-  await logAction(ctx.panel, "table_close", { table_number: sess?.table_number ?? null, device_id: ctx.deviceId ?? undefined });
+  await logAction(ctx.panel, "table_close", { restaurant_id: sess?.restaurant_id ?? undefined, table_number: sess?.table_number ?? null, device_id: ctx.deviceId ?? undefined });
   return { ok: true, session: sess || null };
 }

@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
       .eq("id", u.id);
     // Staff-initiated change → operation log (admin resets are logged separately).
     await logAction(u.role, "password_change", {
-      actor: u.name || u.username, device_id: deviceIdFrom(req),
+      restaurant_id: u.restaurant_id, actor: u.name || u.username, device_id: deviceIdFrom(req),
       detail: `${u.name || u.username} changed their own password`,
     });
     return NextResponse.json({ ok: true, passwordChanged: true });
@@ -112,12 +112,12 @@ export async function POST(req: NextRequest) {
   const who = (patch.name as string) || u.name || u.username;
   const dev = deviceIdFrom(req);
   if (patch.pin_hash !== undefined) {
-    await logAction(u.role, "pin_set", { actor: who, device_id: dev, detail: `${who} ${u.pin_hash ? "changed" : "set"} their PIN` });
+    await logAction(u.role, "pin_set", { restaurant_id: u.restaurant_id, actor: who, device_id: dev, detail: `${who} ${u.pin_hash ? "changed" : "set"} their PIN` });
   }
   if (firstConfirm) {
-    await logAction(u.role, "profile_setup", { actor: who, device_id: dev, detail: `${who} completed their profile${changes.length ? " (" + changes.join(" & ") + ")" : ""}` });
+    await logAction(u.role, "profile_setup", { restaurant_id: u.restaurant_id, actor: who, device_id: dev, detail: `${who} completed their profile${changes.length ? " (" + changes.join(" & ") + ")" : ""}` });
   } else if (changes.length) {
-    await logAction(u.role, "profile_update", { actor: who, device_id: dev, detail: `${who} updated their ${changes.join(" & ")}` });
+    await logAction(u.role, "profile_update", { restaurant_id: u.restaurant_id, actor: who, device_id: dev, detail: `${who} updated their ${changes.join(" & ")}` });
   }
   return NextResponse.json({ ok: true });
 }

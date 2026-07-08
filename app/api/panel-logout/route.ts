@@ -10,6 +10,7 @@ async function clear(req: NextRequest, redirect: boolean) {
   const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   if (u) {
     await logAction(u.role, "logout", {
+      restaurant_id: u.restaurant_id,
       actor: u.name || u.username,
       device_id: deviceIdFrom(req),
       detail: `${u.name || "(no name)"} logged out · user "${u.username}" · id ${u.id}`,
