@@ -12,7 +12,7 @@ import { useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { intendedTable } from "@/lib/tableConnection";
 import { useRestaurantId } from "@/lib/restaurant-context";
-import { reportRealtime } from "@/lib/connectionStatus";
+import { reportRealtime, reportLatency } from "@/lib/connectionStatus";
 
 type GuestMetrics = { events: number; ticks: number; reconnects: number; lastEventAt: number; topic: string | null };
 
@@ -58,8 +58,12 @@ export default function RealtimeProvider() {
             // on another restaurant's activity (mig 086 added realtime_events.restaurant_id
             // for exactly this; mirrors lib/useRealtime.ts). If either id is missing we keep
             // the event (safe: at worst one extra refetch, never a missed update).
-            const evRid = (payload as { new?: { restaurant_id?: string } })?.new?.restaurant_id;
+            const pnew = (payload as { new?: { restaurant_id?: string; created_at?: string } })?.new;
+            const evRid = pnew?.restaurant_id;
             if (rid && evRid && evRid !== rid) return;
+            // FREE latency reading (now − when the breadcrumb was written); no extra request.
+            const ts = pnew?.created_at;
+            if (ts) { const lat = Date.now() - Date.parse(ts); if (lat >= 0 && lat < 60000) reportLatency(lat); }
             metrics.events++; metrics.lastEventAt = Date.now(); tick();
           })
         .subscribe((status) => {
