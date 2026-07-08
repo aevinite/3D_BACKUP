@@ -101,6 +101,13 @@ export async function closeSession(
     // the next open/scan. (owner, 2026-06-18)
     must(await sb.from("session_members").update({ removed: true })
       .eq("session_id", sessionId).eq("removed", false).select());
+    // Also clear any TABLE-scoped guest signals the close trigger misses: a waiter-call
+    // left by a guest who never joined a session (session_id = NULL, from
+    // lfh_call_waiter_table) is keyed to the table only, so the mig-020 close trigger
+    // (WHERE session_id = …) never resolves it — and it then reappears as a phantom 🔔
+    // ATTEND on the NEXT party at this table. Restart already clears these; close now
+    // does too. Best-effort (clearTableSignals never throws). (audit 2026-07-08)
+    await clearTableSignals(sess.restaurant_id, sess.table_number);
   }
   await logAction(ctx.panel, "table_close", { restaurant_id: sess?.restaurant_id ?? undefined, table_number: sess?.table_number ?? null, device_id: ctx.deviceId ?? undefined });
   return { ok: true, session: sess || null };

@@ -641,12 +641,12 @@ body:has(.detail-pop) .layout { grid-template-columns: 1fr; }   /* floor fills; 
   background: rgba(4,8,18,.5); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 .detail-pop { position: relative; z-index: 1; width: min(560px, 94vw); max-height: 88dvh; overflow-y: auto;
   -webkit-overflow-scrolling: touch; background: var(--panel); color: var(--text); border: 1px solid var(--line);
-  border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,.5); padding: 12px 16px calc(18px + env(safe-area-inset-bottom));
+  border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,.5); padding: 12px 16px calc(30px + env(safe-area-inset-bottom));
   display: flex; flex-direction: column; }
 .detail-pop .backtop { display: none; }                          /* "↑ Tables" makes no sense in a popup */
 .detail-pop .detail-body { flex: none; overflow: visible; padding: 12px 0; }
 .detail-pop .dacts { background: transparent; border-top: 1px solid var(--line); padding: 12px 0 0; margin-top: 8px; }
-.detail-pop .phead { padding: 0 44px 10px 0; }   /* right room so the header clears the pinned ✕ */
+.detail-pop .phead { padding: 0 58px 10px 0; }   /* right room so the header clears the pinned ✕ */
 /* ✕ STAYS pinned to the popup's top-right while you scroll the popup (owner 2026-07-05):
    sticky in the scrolling card, right-aligned, above the content. */
 .detail-x { position: sticky; top: 0; align-self: flex-end; flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%;
@@ -660,3 +660,9 @@ body:has(.detail-pop) #tabletClose { display: none; }
    popup (loading state included). The old resting "Tap a table" side hint is dropped. */
 .layout { grid-template-columns: 1fr; }
 #panel:has(> .empty) { display: none; }
+
+/* tap-target polish (audit 2026-07-08) — drawer buttons to a full finger size */
+.tbl-drawer .btn.small{ min-height:44px; display:inline-flex; align-items:center; justify-content:center; }
+
+/* detail popup: open/closed status never collides with the pinned close X (audit 2026-07-08) */
+.detail-pop .phead .live,.detail-pop .phead .off{ white-space:nowrap; }
