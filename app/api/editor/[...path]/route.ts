@@ -927,27 +927,33 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "discount") {
       if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
       if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
-      // .eq(restaurant_id, rid) on every by-id write: sb is service-role (RLS bypassed), so
-      // this is the only tenant boundary — a foreign order id can't be discounted/edited.
+      // .eq(restaurant_id, rid) is the only tenant boundary (sb is service-role, RLS bypassed) —
+      // a foreign order id can't be discounted.
       const cur = must(await sb.from("orders").select("subtotal, session_id").eq("id", b).eq("restaurant_id", rid).single());
-      // The stored discount is a PRE-TAX amount (billMath subtracts it from the SUBTOTAL, then
-      // adds tax). So the cap must be the TABLE's pre-tax subtotal, not the tax-INCLUSIVE total
-      // (capping at `total` let a discount exceed the food value and drive the taxable base
-      // negative). Also subtract any discount already sitting on the table's OTHER orders, so
-      // the combined bill discount can't exceed the food total — matches the client modal.
-      let billCap = Number(cur.subtotal) || 0;
-      if (cur.session_id) {
-        const sessOrders = must(await sb.from("orders").select("id, subtotal, discount, status").eq("restaurant_id", rid).eq("session_id", cur.session_id));
-        const live = sessOrders.filter((o: { status: string }) => o.status !== "cancelled");
-        const subTotal = live.reduce((a: number, o: { subtotal: number | null }) => a + (Number(o.subtotal) || 0), 0);
-        const otherDisc = live.filter((o: { id: string }) => o.id !== b).reduce((a: number, o: { discount: number | null }) => a + (Number(o.discount) || 0), 0);
-        billCap = Math.max(0, subTotal - otherDisc);
-      }
       const raw = Number(body && body.amount);
-      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), billCap) : 0;
       const note = String((body && body.note) || "").slice(0, 200) || null;
-      // return=minimal: client re-fetches the board; no need to pull the full order row back.
+      // WHOLE-BILL (session) discount path — the FIX for the "discount shrinks when marked paid"
+      // bug (2026-07-08). A table's discount is conceptually on the whole BILL, but the manager
+      // panel used to write the entire amount onto ONE order (the first non-cancelled one). When
+      // that order's own subtotal was smaller than the discount, mig 148's re-price trigger clamped
+      // the discount down to that order's subtotal on the next subtotal/payment change (e.g. Mark
+      // paid) — so the recorded + printed total jumped ABOVE what the guest actually paid. Routing
+      // through lfh_staff_bill_discount (mig 143 — the SAME path the tablet uses) stores the amount
+      // on the SESSION and splits it proportionally across the unpaid orders, each clamped to its
+      // OWN subtotal. That is clamp-safe, partial-payment safe, and mutually exclusive with a
+      // tablet-entered bill discount (so a manager discount can no longer be silently reverted — B5).
+      if (cur.session_id) {
+        const amount = Number.isFinite(raw) ? Math.max(raw, 0) : 0;
+        const res = must(await sb.rpc("lfh_staff_bill_discount", { p_session: cur.session_id, p_amount: amount, p_note: note }));
+        await logAction("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `bill discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
+        return ok({ ok: true, discount: (res && (res as { discount?: number }).discount) ?? amount });
+      }
+      // Legacy standalone order (no table session): keep the per-order write, capped at its OWN
+      // pre-tax subtotal (a lone order can't carry more discount than its food value).
+      const billCap = Number(cur.subtotal) || 0;
+      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), billCap) : 0;
       must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid));
+      await logAction("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
       return ok({ ok: true });
     }
     // orders/:id/allergies — staff edit of the order-wide "avoid" list (add a

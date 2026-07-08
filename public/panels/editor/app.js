@@ -5615,7 +5615,7 @@ function openShiftPicker(t, sess) {
 // Both modes just compute the same ₹ discount the server has always accepted — the API
 // call at the bottom (POST .../discount {amount, note}) is byte-identical to before, so
 // the clamp-to-bill-total safety net and the note field behave exactly as they did.
-function openDiscountModal(order, rerender, billTotal, bm) {
+function openDiscountModal(order, rerender, billTotal, bm, wholeBill) {
   document.querySelector(".disc-overlay")?.remove();
   const round2 = (n) => Math.round(n * 100) / 100;
   const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
@@ -5628,7 +5628,10 @@ function openDiscountModal(order, rerender, billTotal, bm) {
   // billTotal is kept only for legacy callers that don't pass bm).
   const rate = bm ? bm.rate : taxModel(state.data.settings).rate;
   const subtotal = bm ? bm.subtotal : ((Number(order.total) || 0) / (1 + rate) + current);
-  const otherDisc = bm ? Math.max(0, bm.disc - current) : 0;
+  // wholeBill (manager bill discount): the amount passed IS the whole-bill discount (stored on the
+  // session, split server-side), so there is no "other orders' discount" to preserve — discount the
+  // full pre-tax bill. Legacy per-order callers keep the old "subtract other orders" behaviour.
+  const otherDisc = wholeBill ? 0 : (bm ? Math.max(0, bm.disc - current) : 0);
   const base = Math.max(0, round2(subtotal - otherDisc)); // pre-tax base THIS modal discounts
   const payFor = (d) => round2(Math.max(0, base - clamp(d, 0, base)) * (1 + rate)); // what the customer pays
   const total = payFor(0); // the table total BEFORE this order's discount (shown as "Bill total")
@@ -5777,7 +5780,14 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   root.querySelectorAll("[data-disc]").forEach((b) => (b.onclick = () => {
     const order = (os || []).find((o) => o.id === b.dataset.disc) || { id: b.dataset.disc, total: parseFloat(b.dataset.discMax) || 0, discount: parseFloat(b.dataset.discCur) || 0 };
     const bm = (os && os.length) ? billMath(os) : null;
-    openDiscountModal(order, rerender, bm ? bm.total : (Number(order.total) || 0), bm);
+    // The manager discount is a WHOLE-BILL discount: the server stores it on the session and splits
+    // it across the orders (so it can't shrink when the bill is marked paid). Show the SESSION's
+    // total discount as "current" — NOT this one order's split share, which would mis-show the amount.
+    const wholeBill = !!sess;
+    const discOrder = wholeBill
+      ? { ...order, discount: Number(sess.discount) || 0, discount_note: sess.discount_note || "" }
+      : order;
+    openDiscountModal(discOrder, rerender, bm ? bm.total : (Number(order.total) || 0), bm, wholeBill);
   }));
   const auto = root.querySelector("#sxAuto"); if (auto && sess) auto.onchange = () => setSessAutoApprove(sess.id, auto.checked);
   root.querySelectorAll("[data-mem-approve]").forEach((b) => (b.onclick = () => memberAction(b.dataset.memApprove, "approve")));
