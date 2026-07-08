@@ -18,7 +18,7 @@ import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
-import { effectiveTaxRate } from "@/lib/tax";
+import { effectiveTaxRate, taxComponents } from "@/lib/tax";
 import { closeSession } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
@@ -424,6 +424,59 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // value of any unpaid bills open at print time (owner-facing till mismatch). (2026-07-03)
         grandTotal: r2(paidNet + platRevenue), rate,
         restaurant: { name: set.restaurant_name || "Little French House", gstin: set.gstin || "" },
+      });
+    }
+
+    // MONTHLY GST REPORT (restaurant's OWN dine-in sales only — excludes aggregators). Paid bills
+    // only, discount BEFORE tax, per-bill tax — the SAME single-source math as the Z-report/printed
+    // bill. GST is filed per CALENDAR month, so the window is [month-01 00:00 IST, next-month-01 IST).
+    if (p === "gst-report") {
+      if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
+      const sp = new URL(req.url).searchParams;
+      const monthStr = /^\d{4}-\d{2}$/.test(sp.get("month") || "") ? sp.get("month")! : new Date().toISOString().slice(0, 7);
+      const [y, m] = monthStr.split("-").map(Number);
+      const startIso = new Date(`${monthStr}-01T00:00:00+05:30`).toISOString();
+      const endIso = new Date(`${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01T00:00:00+05:30`).toISOString();
+      // Complete read (page past PostgREST's ~1000-row cap) so a busy month isn't undercounted.
+      const orders: any[] = [];
+      for (let from = 0, guard = 0; guard < 500; guard++) {
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status,created_at")
+          .eq("restaurant_id", rid).eq("payment_status", "paid").neq("status", "cancelled")
+          .gte("created_at", startIso).lt("created_at", endIso)
+          .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null) || [];
+        orders.push(...page);
+        if (page.length === 0) break;
+        from += page.length;
+      }
+      const set = (must(await sb.from("settings").select("tax_rate,tax_components,restaurant_name,gstin").eq("restaurant_id", rid).maybeSingle()) || {}) as any;
+      const rate = effectiveTaxRate(set);
+      const comps = taxComponents(set);
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      const istDay = (iso: string) => new Date(new Date(iso).getTime() + 5.5 * 3600e3).toISOString().slice(0, 10);
+      // Group orders into BILLS by session (per-bill tax = printed-bill parity), remembering each bill's IST day.
+      const bills = new Map<string, { sub: number; disc: number; day: string }>();
+      for (const o of orders) {
+        const key = o.session_id || ("solo:" + o.id);
+        const b = bills.get(key) || { sub: 0, disc: 0, day: istDay(o.created_at) };
+        b.sub += Number(o.subtotal) || 0; b.disc += Number(o.discount) || 0; b.day = istDay(o.created_at);
+        bills.set(key, b);
+      }
+      const byDay = new Map<string, { taxable: number; tax: number; gross: number; bills: number }>();
+      let taxable = 0, tax = 0, gross = 0;
+      for (const b of bills.values()) {
+        const tx = Math.max(0, b.sub - b.disc), t = r2(tx * rate), tot = r2(tx + t);
+        taxable += tx; tax += t; gross += tot;
+        const d = byDay.get(b.day) || { taxable: 0, tax: 0, gross: 0, bills: 0 };
+        d.taxable += tx; d.tax += t; d.gross += tot; d.bills += 1; byDay.set(b.day, d);
+      }
+      return ok({
+        month: monthStr,
+        restaurant: { name: set.restaurant_name || "Little French House", gstin: set.gstin || "" },
+        ratePct: Math.round(rate * 10000) / 100,
+        components: comps.map((c) => ({ label: c.label, rate: c.rate, amount: r2(taxable * (c.rate / 100)) })),
+        totals: { bills: bills.size, taxable: r2(taxable), tax: r2(tax), gross: r2(gross) },
+        days: [...byDay.entries()].sort().map(([date, v]) => ({ date, taxable: r2(v.taxable), tax: r2(v.tax), gross: r2(v.gross), bills: v.bills })),
+        note: "Paid dine-in bills only (this restaurant's own sales; excludes Zomato/Swiggy). Discount applied before tax.",
       });
     }
 

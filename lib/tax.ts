@@ -22,6 +22,10 @@ function components(raw: TaxSettings): { label: string; rate: number }[] {
     .filter((c) => c.label && c.rate > 0);
 }
 
+/** Named tax components (CGST/SGST/…), each rate a PERCENT — for display + splitting a tax
+ *  total into its parts. Empty when the restaurant uses a single flat rate instead. */
+export function taxComponents(raw: TaxSettings): { label: string; rate: number }[] { return components(raw); }
+
 /** The effective tax rate as a DECIMAL (e.g. 0.05 for 5%). */
 export function effectiveTaxRate(raw: TaxSettings): number {
   const comps = components(raw);

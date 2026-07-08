@@ -2848,6 +2848,76 @@ async function printManagerReport() {
   w.document.close();
 }
 
+// Monthly GST report for THIS restaurant's own dine-in sales (paid bills, discount-before-tax —
+// the same server math as the Z-report). A month picker, the GST breakdown (CGST/SGST lines when the
+// restaurant uses named components, else one GST line), a per-day table, and a CSV for the accountant.
+async function openGstReport() {
+  document.querySelector(".gst-overlay")?.remove();
+  const defMonth = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 7); // current month (IST)
+  const wrap = el(`<div class="sx-modal-overlay gst-overlay"><div class="sx-modal" style="max-width:640px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🧾 GST report</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <label class="dish-edit-lbl" style="margin:0">Month</label>
+        <input type="month" id="gstMonth" value="${defMonth}" max="${defMonth}" class="dish-edit-custominput" style="width:auto"/>
+        <button class="btn" id="gstCsv" title="Download as a spreadsheet">⬇ CSV</button>
+      </div>
+      <div id="gstBody"><div class="empty">Loading…</div></div>
+    </div>
+  </div></div>`);
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  let last = null;
+  const load = async () => {
+    const month = wrap.querySelector("#gstMonth").value || defMonth;
+    wrap.querySelector("#gstBody").innerHTML = `<div class="empty">Loading…</div>`;
+    try {
+      const d = await api("GET", `/gst-report?month=${encodeURIComponent(month)}`);
+      last = d;
+      const t = d.totals || {};
+      const compRows = (d.components && d.components.length)
+        ? d.components.map((c) => `<div class="tp-bl"><span>${esc(c.label)} (${c.rate}%)</span><b>${inr(c.amount)}</b></div>`).join("")
+        : `<div class="tp-bl"><span>GST (${d.ratePct}%)</span><b>${inr(t.tax)}</b></div>`;
+      const dayRows = (d.days || []).map((r) => `<tr><td>${esc(r.date)}</td><td style="text-align:right">${r.bills}</td><td style="text-align:right">${inr(r.taxable)}</td><td style="text-align:right">${inr(r.tax)}</td><td style="text-align:right">${inr(r.gross)}</td></tr>`).join("");
+      wrap.querySelector("#gstBody").innerHTML = `
+        <div class="tp-bill" style="margin-bottom:12px">
+          ${d.restaurant && d.restaurant.gstin ? `<div class="tp-bl"><span>GSTIN</span><b>${esc(d.restaurant.gstin)}</b></div>` : `<div class="tp-bl" style="color:var(--muted)"><span>GSTIN</span><b>not set — add it in Settings</b></div>`}
+          <div class="tp-bl"><span>Bills (paid)</span><b>${t.bills || 0}</b></div>
+          <div class="tp-bl"><span>Taxable sales</span><b>${inr(t.taxable)}</b></div>
+          ${compRows}
+          <div class="tp-bl grand"><span>Total (incl. GST)</span><span class="tp-bl-amt">${inr(t.gross)}</span></div>
+        </div>
+        <div class="muted small" style="margin-bottom:8px">${esc(d.note || "")}</div>
+        ${dayRows ? `<table class="gst-table" style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left">Day</th><th style="text-align:right">Bills</th><th style="text-align:right">Taxable</th><th style="text-align:right">GST</th><th style="text-align:right">Total</th></tr></thead><tbody>${dayRows}</tbody></table>` : `<div class="empty">No paid bills in this month.</div>`}`;
+    } catch (e) { wrap.querySelector("#gstBody").innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; }
+  };
+  wrap.querySelector("#gstMonth").onchange = load;
+  wrap.querySelector("#gstCsv").onclick = () => {
+    if (!last) return;
+    const t = last.totals || {};
+    const rows = [
+      ["GST report", last.restaurant && last.restaurant.name || "", last.month],
+      ["GSTIN", last.restaurant && last.restaurant.gstin || "(not set)"],
+      [],
+      ["Day", "Bills", "Taxable", "GST", "Total"],
+      ...(last.days || []).map((r) => [r.date, r.bills, r.taxable, r.tax, r.gross]),
+      [],
+      ["TOTAL", t.bills || 0, t.taxable || 0, t.tax || 0, t.gross || 0],
+      ...(last.components || []).map((c) => [`${c.label} (${c.rate}%)`, "", "", c.amount, ""]),
+    ];
+    // CSV formula-injection guard: a cell starting with = + - @ is prefixed with ' so a spreadsheet
+    // can't execute it as a formula (same guard the owner exports use).
+    const cell = (v) => { let s = String(v); if (/^[=+\-@]/.test(s)) s = "'" + s; return `"${s.replace(/"/g, '""')}"`; };
+    const csv = rows.map((row) => row.map(cell).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = `gst-${last.month}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  };
+  load();
+}
+
 // Day-close "Z report" — one tap prints the business-day totals (server-computed).
 async function printZReport() {
   let z;
@@ -2984,10 +3054,11 @@ function renderEditor() {
     return;
   }
   if (state.tab === "dash") {
-    ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><div style="display:flex;gap:8px"><button class="btn primary" id="mgrReport">📄 Download report</button><button class="btn" id="zReport">📋 Day-close (Z)</button><button class="btn" id="dashRefresh">↻ Refresh</button></div></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
+    ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="mgrReport">📄 Download report</button><button class="btn" id="zReport">📋 Day-close (Z)</button><button class="btn" id="gstReport">🧾 GST report</button><button class="btn" id="dashRefresh">↻ Refresh</button></div></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
     document.getElementById("dashRefresh").onclick = () => renderEditor();
     document.getElementById("zReport").onclick = () => printZReport();
     document.getElementById("mgrReport").onclick = () => printManagerReport();
+    document.getElementById("gstReport").onclick = () => openGstReport();
     loadDashboard();
     return;
   }
