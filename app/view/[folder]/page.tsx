@@ -32,8 +32,13 @@ export default async function ViewerPage({
     // <>...</> is an empty wrapper (a "fragment") — it groups things without
     // adding any extra box to the page.
     <>
-      {/* Hand the folder name to the browser-side viewer, which does the work. */}
-      <ViewerClient folder={folder} />
+      {/* Hand the folder name to the browser-side viewer, which does the work.
+          key={folder} forces a fresh instance when navigating 3D-view → 3D-view (e.g.
+          tapping another dish's "ready" toast while a viewer is open) — without it the
+          component persisted and kept the previous dish's model, hotspots, spinner and
+          failure state. The GLB blob cache is a global singleton, so remounting does NOT
+          re-download the model. (fix 2026-07-09) */}
+      <ViewerClient key={folder} folder={folder} />
     </>
   );
 }
