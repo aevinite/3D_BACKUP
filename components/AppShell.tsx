@@ -91,9 +91,11 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
 
     // Fallback poll in case the realtime socket can't connect (captive wifi,
     // blocked websockets). Slow on purpose — realtime does the fast path.
-    // This just re-checks every 15 seconds as a safety net — PAUSED while hidden
-    // so a backgrounded tab does zero work.
-    const iv = setInterval(() => { if (!document.hidden) refresh(); }, 15000);
+    // This just re-checks every 60 seconds as a safety net — PAUSED while hidden so a
+    // backgrounded tab does zero work. (Was 15s, below the project's 60s backstop rule;
+    // realtime already handles the fast settings/menu updates, so 60s trims steady-state
+    // guest egress with no visible delay — audit fix 2026-07-08.)
+    const iv = setInterval(() => { if (!document.hidden) refresh(); }, 60000);
 
     // Cleanup: stop the timer and the live subscription when AppShell unmounts.
     return () => {

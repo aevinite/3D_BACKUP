@@ -8,6 +8,9 @@ import { allergenIcon, allergenLabel, ALLERGENS } from "@/lib/allergens";
 // Phone back button: while this popup is open, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
 import { tget, tset } from "@/lib/tenantStorage";
+// Per-restaurant feature switches: the allergy section hides when allergies are OFF.
+import { useFeatures } from "@/lib/features";
+import { useRestaurantId } from "@/lib/restaurant-context";
 
 // The minimal info we keep about the dish being customized.
 interface OrderItem {
@@ -52,6 +55,11 @@ export default function OrderConfirmModal() {
   const [editSig, setEditSig] = useState<string | null>(null); // set when editing an existing line
   const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null); // which currency to show
   const [submitting, setSubmitting] = useState(false); // true briefly while saving, to block double-taps
+  // This restaurant's feature switches. The customize popup is mounted globally
+  // (GuestChrome), so it must read the feature map itself to hide the allergy section
+  // when a restaurant turned allergies OFF — the dish page and cart already gate on
+  // features.allergies; this popup was the one place that still showed it (audit fix).
+  const features = useFeatures(useRestaurantId());
 
   // Phone back button closes this popup instead of leaving the site (or, when
   // editing from the bill, returns to the bill underneath).
@@ -294,7 +302,7 @@ export default function OrderConfirmModal() {
         {/* Allergen section. When the dish lists its own allergens the chips mean
             "tap to remove that ingredient"; when it lists none we show the common
             six so the guest can still flag an allergy to avoid on this dish. */}
-        {pickable.length > 0 && (
+        {features.allergies && pickable.length > 0 && (
           <div className="oc-group">
             <div className="oc-group-name">{hasDeclared ? "Contains — tap to remove" : "Any allergies? Tap what to avoid"}</div>
             <div className="oc-choices">
