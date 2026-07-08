@@ -1434,7 +1434,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // ban targets the device the guest actually uses, not just a phone they may never
       // have given. This is what makes the guest "you're blocked" wall stick. (077)
       if (memberId && !device) {
-        const m = (await sb.from("session_members").select("device_id, phone").eq("id", memberId).maybeSingle()).data as { device_id?: string | null; phone?: string | null } | null;
+        const m = (await sb.from("session_members").select("device_id, phone").eq("id", memberId).eq("restaurant_id", rid).maybeSingle()).data as { device_id?: string | null; phone?: string | null } | null;
         if (m?.device_id) device = m.device_id;
         if (!phone && m?.phone) phone = m.phone;
       }
