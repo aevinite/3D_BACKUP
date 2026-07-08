@@ -2795,14 +2795,27 @@ function printBill(t, sess, os) {
   const billNo = sess && sess.bill_no != null ? esc(sess.bill_no) : "";
   const now = new Date();
   const pct = Math.round(m.rate * 10000) / 100; // e.g. 5
-  const half = Math.round((m.tax / 2) * 100) / 100;
   // Tax rows on the printed bill: if the restaurant configured named components
   // (tax_components → m.taxComponents), itemise EACH (label · its % · its amount, amounts
   // computed from the taxable value so they sum to m.tax). Otherwise keep the historical
   // 50/50 CGST+SGST split. (owner, 2026-07-03 — customisable multi-tax on the customer bill.)
-  const taxRows = (m.taxComponents && m.taxComponents.length)
-    ? m.taxComponents.map((c) => `<div class="t"><span>${esc(c.label)} ${c.rate}%</span><span>${inr(Math.round(m.taxable * (c.rate / 100) * 100) / 100)}</span></div>`).join("")
-    : `<div class="t"><span>CGST ${pct / 2}%</span><span>${inr(half)}</span></div><div class="t"><span>SGST ${pct / 2}%</span><span>${inr(half)}</span></div>`;
+  // The printed tax lines MUST sum EXACTLY to the tax on the total (and match the on-screen
+  // bill). inr() rounds every line to whole rupees, so rounding each component independently
+  // drifts — e.g. ₹380 @ 5% = ₹19 tax, but CGST 2.5% + SGST 2.5% each round(9.5)=₹10 → ₹20 ≠ ₹19,
+  // and the invoice then foots to ₹400 not ₹399. Fix: split the whole-rupee tax across the
+  // components, rounding every line except the LAST and giving the last the remainder — the
+  // same rule the owner GST report already uses. (audit fix 2026-07-09)
+  const taxComps = (m.taxComponents && m.taxComponents.length)
+    ? m.taxComponents
+    : [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
+  const taxWhole = Math.round(m.tax); // whole-rupee tax shown on the total line (INR_RATE = 1)
+  const taxRateSum = taxComps.reduce((a, c) => a + (Number(c.rate) || 0), 0) || 1;
+  let taxRun = 0;
+  const taxRows = taxComps.map((c, i) => {
+    const amt = i === taxComps.length - 1 ? (taxWhole - taxRun) : Math.round(taxWhole * ((Number(c.rate) || 0) / taxRateSum));
+    taxRun += amt;
+    return `<div class="t"><span>${esc(c.label)} ${c.rate}%</span><span>${inr(amt)}</span></div>`;
+  }).join("");
   const w = window.open("", "_blank", "width=380,height=680");
   if (!w) { toast("Allow popups for this site to print the bill", "err"); return; }
   w.document.write(`<!doctype html><title>Tax Invoice — ${name}</title>
