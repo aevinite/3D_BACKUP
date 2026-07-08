@@ -2138,11 +2138,21 @@ async function setOrderPayment(id, paid, opts = {}) {
 // itself — payOrdersWithMethod below does the actual save. (owner, 2026-07-01)
 function openPaymentMethodModal(due, label) {
   return new Promise((resolve) => {
+    const r2 = (n) => Math.round(n * 100) / 100; let tip = 0;
     document.querySelector(".pay-overlay")?.remove();
     const wrap = el(`<div class="sx-modal-overlay pay-overlay"><div class="sx-modal pay-modal">
       <div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(label)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
       <div class="dish-edit-body">
-        <div class="disc-bill-row"><span>Amount collected</span><b>${inr(due)}</b></div>
+        <div class="disc-bill-row"><span>Bill</span><b>${inr(due)}</b></div>
+        <div class="dish-edit-lbl" style="margin-top:6px">Add a tip? <span class="muted small">(optional — extra for staff, on top of the bill)</span></div>
+        <div class="chips pay-tip-chips" style="margin:4px 0 6px">
+          <span class="chip pay-tip-pick" data-tip="0">None</span>
+          <span class="chip pay-tip-pick" data-tip="${r2(due * 0.05)}">5%</span>
+          <span class="chip pay-tip-pick" data-tip="${r2(due * 0.10)}">10%</span>
+          <span class="chip pay-tip-pick" data-tip="${r2(due * 0.15)}">15%</span>
+        </div>
+        <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput" id="payTipInput" placeholder="Custom tip ₹" style="margin-bottom:8px">
+        <div class="disc-bill-row"><span><b>Total collected</b></span><b id="payTotal">${inr(due)}</b></div>
         <div class="dish-edit-lbl">How did they pay? <span class="muted small">— only pick one if the money's actually in hand</span></div>
         <div class="pay-method-grid">
           <button type="button" class="pay-method-btn" data-method="UPI"><span class="pmi">📱</span>UPI</button>
@@ -2161,7 +2171,7 @@ function openPaymentMethodModal(due, label) {
     document.body.appendChild(wrap);
     let resolved = false;
     const close = () => wrap.remove();
-    const finish = (method, note) => { resolved = true; close(); resolve({ method, note }); };
+    const finish = (method, note) => { resolved = true; close(); resolve({ method, note, tip }); };
     const cancel = () => { close(); if (!resolved) resolve(null); };
     // Hardware BACK must cancel THIS sheet via cancel() (resolves the awaited promise as null),
     // not the adapter's bare remove() — else payOrdersWithMethod awaits forever and the bill is
@@ -2180,6 +2190,12 @@ function openPaymentMethodModal(due, label) {
       }
       finish(m, null);
     }));
+    // Optional tip (additive — never touches the bill/tax/discount). Chips or a custom amount; the
+    // "Total collected" figure updates live so staff know how much cash to take.
+    const tipInput = wrap.querySelector("#payTipInput");
+    const updTotal = () => { const el2 = wrap.querySelector("#payTotal"); if (el2) el2.textContent = inr(due + (Number(tip) || 0)); };
+    wrap.querySelectorAll(".pay-tip-pick").forEach((c) => (c.onclick = () => { tip = Number(c.dataset.tip) || 0; tipInput.value = tip ? String(tip) : ""; wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("active", x === c)); updTotal(); }));
+    tipInput.oninput = () => { tip = Math.max(0, Number(tipInput.value) || 0); wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.remove("active")); updTotal(); };
     const otherInput = wrap.querySelector("#payOtherInput");
     const confirmOther = () => finish("Other", otherInput.value.trim());
     wrap.querySelector(".pay-other-confirm").onclick = confirmOther;
@@ -2217,6 +2233,10 @@ async function payOrdersWithMethod(orders, label) {
     const done = await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true, method: picked.method, note: picked.note });
     if (done) okCount++; else failCount++;
   }
+  // Store the optional tip on the first paid order (a bill's tip lives on one order; it's separate
+  // from the bill total, so this never affects the money math). Best-effort — a tip failing to save
+  // must not undo a completed payment.
+  if (okCount && Number(picked.tip) > 0) { try { await api("POST", "/orders/" + payable[0].id + "/tip", { amount: Number(picked.tip) }); } catch { /* tip is non-critical */ } }
   // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
   if (okCount && !failCount) toast(skipped ? `Marked paid via ${picked.method} — ${skipped} new order still needs accepting.` : `Marked paid via ${picked.method} 💳`, "ok");
   else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
@@ -3016,6 +3036,7 @@ ${row("Net sales", inr(di.net), true)}
 ${row("Paid bills", di.paidCount + " · " + inr(di.paidNet))}
 ${row("Unpaid bills", di.unpaidCount + " · " + inr(di.unpaidNet))}
 ${row("Cancelled orders", di.cancelled)}
+${di.tips > 0 ? row("Tips collected (staff)", inr(di.tips), true) : ""}
 <div class="sec">Platform (Zomato / Swiggy / takeaway)</div>
 ${row("Orders", z.platform.count)}
 ${row("Revenue", inr(z.platform.revenue), true)}
@@ -5654,6 +5675,9 @@ function tablePanelParts(t) {
   // total already nets every order's discount, so it shows correctly on the merged bill.
   const discTarget = os.find((o) => o.status !== "cancelled");
   const discBtn = discTarget ? `<button class="btn" data-disc="${esc(discTarget.id)}" data-disc-cur="${esc(Number(discTarget.discount) || 0)}" data-disc-max="${esc(discTarget.total)}" title="Give a discount on the bill">− Discount</button>` : "";
+  // Split-bill helper: tells staff each guest's even share of the bill total. Doesn't change the bill
+  // or payment — the manager still marks the whole bill paid once collected.
+  const splitBtn = os.length ? `<button class="btn" data-split="${esc(mBill.total)}" title="Split the bill evenly between guests">🍴 Split</button>` : "";
   const printBtn = os.length ? `<button class="btn" id="sxPrint">🖨 Print</button>` : "";
   // The bill now shows a full BREAKDOWN (subtotal · discount · GST · total) summed
   // across the table's non-cancelled orders, not just a one-line "Due/Total".
@@ -5686,7 +5710,7 @@ function tablePanelParts(t) {
             : `<button class="btn tp-free" disabled>Settle bill to free</button>`);
   // ONE sticky action bar holds every table-wide action: the primary action + pay +
   // discount on the LEFT, then table-management (shift/print/restart/close) on the RIGHT.
-  const foot = `${primaryBtn}${payAllBtn}${discBtn}<span class="tp-foot-spacer"></span>${sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : ""}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
+  const foot = `${primaryBtn}${payAllBtn}${discBtn}${splitBtn}<span class="tp-foot-spacer"></span>${sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : ""}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
 
   return { sess, os, canFree, headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot };
 }
@@ -5764,6 +5788,45 @@ function openShiftPicker(t, sess) {
 // Both modes just compute the same ₹ discount the server has always accepted — the API
 // call at the bottom (POST .../discount {amount, note}) is byte-identical to before, so
 // the clamp-to-bill-total safety net and the note field behave exactly as they did.
+// Split the bill EVENLY between guests — a helper that shows each person's share (bill total ÷ N,
+// the last share absorbs the rounding so they sum EXACTLY to the total). It does NOT change the bill
+// or the payment: the manager still taps "Mark paid" to settle the whole bill once collected.
+// (Per-item / per-seat splitting with separate payments is a planned bigger step.)
+function openSplitBill(total) {
+  document.querySelector(".split-overlay")?.remove();
+  total = Math.max(0, Number(total) || 0);
+  let n = 2;
+  const wrap = el(`<div class="sx-modal-overlay split-overlay"><div class="sx-modal" style="max-width:420px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍴 Split the bill</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body">
+      <div class="disc-bill-row"><span>Bill total</span><b>${inr(total)}</b></div>
+      <div style="display:flex;align-items:center;gap:12px;margin:14px 0;flex-wrap:wrap">
+        <label class="dish-edit-lbl" style="margin:0">Split between</label>
+        <button class="btn" id="spMinus" type="button" style="min-width:44px">−</button>
+        <b id="spN" style="font-size:18px;min-width:24px;text-align:center">2</b>
+        <button class="btn" id="spPlus" type="button" style="min-width:44px">+</button>
+        <span class="muted">people</span>
+      </div>
+      <div id="spBody"></div>
+      <div class="muted small" style="margin-top:10px">A helper only — collect each share, then tap “Mark paid” to settle the whole bill.</div>
+    </div>
+  </div></div>`);
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  const paint = () => {
+    wrap.querySelector("#spN").textContent = n;
+    const base = Math.floor((total / n) * 100) / 100;        // each share, floored to paise
+    const shares = Array(n).fill(base);
+    shares[n - 1] = Math.round((total - base * (n - 1)) * 100) / 100; // last absorbs the remainder → exact sum
+    wrap.querySelector("#spBody").innerHTML = `<div class="tp-bill">` + shares.map((s, i) => `<div class="tp-bl"><span>Person ${i + 1}</span><b>${inr(s)}</b></div>`).join("") + `</div>`;
+  };
+  wrap.querySelector("#spMinus").onclick = () => { if (n > 2) { n--; paint(); } };
+  wrap.querySelector("#spPlus").onclick = () => { if (n < 20) { n++; paint(); } };
+  paint();
+}
+
 function openDiscountModal(order, rerender, billTotal, bm, wholeBill) {
   document.querySelector(".disc-overlay")?.remove();
   const round2 = (n) => Math.round(n * 100) / 100;
@@ -5880,6 +5943,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   const pr = root.querySelector("#sxPrint");
   if (pr) pr.onclick = () => printBill(t, sess, os);
   const payAll = root.querySelector("#sxPayAll"); if (payAll) payAll.onclick = () => markTablePaid(t);
+  root.querySelectorAll("[data-split]").forEach((b) => (b.onclick = () => openSplitBill(parseFloat(b.dataset.split) || 0)));
   // Per-dish DELETE: confirm, then call the server, which deletes the order_item
   // AND recomputes the order's total from the survivors (lfh_delete_order_item) so
   // the bill can't keep charging for a removed dish. Reloads the live board after.
