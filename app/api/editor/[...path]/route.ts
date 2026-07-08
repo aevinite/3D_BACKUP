@@ -1676,6 +1676,10 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
           }
         }
       } catch { /* orphan cleanup is best-effort */ }
+      // Record the menu deletion in the operation log (B25) — like create/edit above.
+      if (a === "items" || a === "categories" || a === "filters") {
+        await logAction("manager", "menu_delete", { restaurant_id: rid, detail: `deleted ${a === "items" ? "dish" : a === "categories" ? "category" : "tag"}: ${id}`, device_id: deviceIdFrom(req) });
+      }
       // Deleting a dish/category/filter changes the SHARED guest menu → bust cache.
       bustMenuCache(rid);
       return ok({ ok: true });
