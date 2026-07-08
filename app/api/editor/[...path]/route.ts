@@ -1170,7 +1170,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // (blocked on unpaid OR still-cooking unless force). The manager needs no PIN —
     // they're already the manager; force=true is their "close anyway" override.
     if (a === "sessions" && c === "close") {
-      const result = await closeSession(b, { force: !!(body && body.force === true) }, { panel: "editor", deviceId: dev });
+      const result = await closeSession(b, { force: !!(body && body.force === true) }, { panel: "editor", deviceId: dev, restaurantId: rid });
       if (!result.ok) return err(result.message, result.status);
       return ok(result.session);
     }
