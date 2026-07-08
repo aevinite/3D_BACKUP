@@ -9,6 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import ConnectionBadge from "@/components/ConnectionBadge";
+import NotificationBell from "@/components/admin/NotificationBell";
 
 type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean };
 type NavGroup = { label: string; items: NavItem[]; quiet?: boolean };
@@ -26,6 +27,7 @@ const GROUPS: NavGroup[] = [
       { href: "/aevinite", label: "Dashboard", icon: "fa-table-columns", exact: true },
       { href: "/aevinite/floor", label: "Live floor", icon: "fa-chair" },
       { href: "/aevinite/analytics", label: "Analytics", icon: "fa-chart-pie" },
+      { href: "/aevinite/issues", label: "Tickets", icon: "fa-flag" },
       { href: "/aevinite/logs", label: "Activity log", icon: "fa-scroll" },
     ],
   },
@@ -93,6 +95,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <RestaurantSwitcher />
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
             <ConnectionBadge />
+            <NotificationBell />
             <button className="adm-icnbtn" onClick={toggleSkin} title={skin === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">
               <i className={`fas ${skin === "dark" ? "fa-sun" : "fa-moon"}`} aria-hidden="true" />
             </button>

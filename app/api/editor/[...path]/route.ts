@@ -17,6 +17,7 @@ import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { panelRestaurantId } from "@/lib/panelScope";
+import { raiseIssue } from "@/lib/issues";
 import { effectiveTaxRate } from "@/lib/tax";
 import { closeSession } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
@@ -746,16 +747,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // A manager (or any staff) flags an operational problem for THIS restaurant; the
     // owner sees it on their issues page and the admin sees it as a platform complaint.
     if (a === "issue") {
-      const subject = String((body as { subject?: string })?.subject || "").trim();
-      if (!subject) return err("Please add a subject.", 400);
-      const ins = await sb.from("issues").insert({
-        restaurant_id: rid,
-        subject,
-        body: String((body as { body?: string })?.body || "").trim(),
-        raised_by: g.user?.name || g.user?.username || "Manager",
-        raised_role: g.user?.role || "manager",
-      });
-      if (ins.error) throw new Error(ins.error.message);
+      const ib = body as { subject?: string; body?: string; image_url?: string; audio_url?: string };
+      try {
+        await raiseIssue({
+          rid,
+          subject: String(ib?.subject || ""),
+          body: ib?.body,
+          raisedBy: g.user?.name || g.user?.username || "Manager",
+          raisedRole: g.user?.role || "manager",
+          imageUrl: ib?.image_url,
+          audioUrl: ib?.audio_url,
+        });
+      } catch (e) { return err(e instanceof Error ? e.message : "Couldn't raise the issue.", 400); }
       return ok({ ok: true });
     }
 

@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { splitBrandSegments, stripBrandMarkers } from "@/lib/brandText";
 import { openRestaurantPanel } from "@/components/admin/shared";
 import RestaurantReport from "@/components/admin/RestaurantReport";
+import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
 import { useBackClose } from "@/lib/backStack";
 import { useToast } from "@/components/admin/toast";
 import { adminFetch } from "@/lib/adminFetch";
@@ -399,6 +400,72 @@ function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChang
   );
 }
 
+// Tickets card at the TOP of a restaurant's detail view — the issues its staff raised
+// (manager/kitchen/tablet), newest first, resolvable inline. Defaults to OPEN tickets;
+// a toggle reveals resolved history. Scoped read: ?restaurant_id= narrows the admin's
+// all-restaurant issues feed to this one restaurant (the server enforces the scope).
+function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
+  const [tickets, setTickets] = useState<(TicketLike & { status: string })[] | null>(null);
+  const [showResolved, setShowResolved] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState(false);
+
+  const load = useCallback(() => {
+    setErr(false);
+    fetch(`/api/owner/issues?scope=all&restaurant_id=${encodeURIComponent(restaurantId)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (j.error) setErr(true); else setTickets(j.issues || []); })
+      .catch(() => setErr(true));
+  }, [restaurantId]);
+  useEffect(() => { load(); }, [load]);
+
+  const setStatus = async (id: string, status: "resolved" | "open") => {
+    setBusy(id);
+    setTickets((prev) => (prev || []).map((t) => (t.id === id ? { ...t, status } : t))); // optimistic
+    try {
+      const r = await fetch("/api/owner/issues?scope=all", {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }),
+      });
+      if (!r.ok) load();
+    } catch { load(); }
+    finally { setBusy(null); }
+  };
+
+  const open = (tickets || []).filter((t) => t.status === "open");
+  const resolved = (tickets || []).filter((t) => t.status === "resolved");
+  const shown = showResolved ? [...open, ...resolved] : open;
+
+  return (
+    <div className="adm-card" style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0 }}>
+          <i className="fas fa-flag" style={{ marginRight: 8, color: "var(--adm-danger, #e5484d)" }} aria-hidden="true" />
+          Tickets {open.length > 0 && <span className="adm-chip" style={{ marginLeft: 6 }}>{open.length} open</span>}
+        </h2>
+        {resolved.length > 0 && (
+          <button className="adm-btn" style={{ marginLeft: "auto", padding: "6px 11px", fontSize: 12.5 }} onClick={() => setShowResolved((v) => !v)}>
+            {showResolved ? "Hide resolved" : `Show resolved (${resolved.length})`}
+          </button>
+        )}
+      </div>
+      <p className="hint">Problems this restaurant&apos;s staff reported from the manager, kitchen or waiter tablet.</p>
+      {tickets === null ? (
+        <div className="adm-empty">Loading tickets…</div>
+      ) : err ? (
+        <div className="adm-empty">Couldn&rsquo;t load tickets. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>
+      ) : shown.length === 0 ? (
+        <div className="adm-empty">No open tickets for this restaurant. 🎉</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {shown.map((t) => (
+            <TicketCard key={t.id} issue={t} busy={busy === t.id} onSetStatus={(id, status) => setStatus(id, status)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
   const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
   const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
@@ -578,6 +645,8 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
           <i className="fas fa-file-lines" style={{ marginRight: 7 }} aria-hidden="true" />Full report
         </button>
       </div>
+
+      <RestaurantTickets restaurantId={restaurant.id} />
 
       <StatusCard restaurant={restaurant} onChanged={onChanged} />
 

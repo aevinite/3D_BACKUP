@@ -6,14 +6,12 @@
 // the "view & resolve sends me to a login" bug). Admin scope = every restaurant.
 // Resolve/reopen hits the existing PATCH on /api/owner/issues (admin is in scope).
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useActiveAutoRefresh } from "@/components/admin/shared";
 import Dropdown from "@/components/admin/Dropdown";
+import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
 
-type Issue = {
-  id: string; restaurant_id: string; restaurantName: string; subject: string;
-  body?: string | null; status: string; raised_by?: string | null; raised_role?: string | null;
-  created_at: string; resolved_at?: string | null; resolved_by?: string | null;
-};
+type Issue = TicketLike & { restaurantName: string; status: string };
 
 const FILTERS = [
   { value: "open", label: "Open" },
@@ -22,6 +20,7 @@ const FILTERS = [
 ];
 
 export default function AdminIssues() {
+  const router = useRouter();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [filter, setFilter] = useState("open");
   const [busy, setBusy] = useState<string | null>(null);
@@ -83,30 +82,11 @@ export default function AdminIssues() {
         <div className="adm-empty">{filter === "open" ? "No open issues right now. 🎉" : "Nothing here."}</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {shown.map((i) => {
-            const resolved = i.status === "resolved";
-            return (
-              <div key={i.id} className="adm-card" style={{ display: "flex", alignItems: "flex-start", gap: 12, opacity: resolved ? 0.72 : 1 }}>
-                <i className={`fas ${resolved ? "fa-circle-check" : "fa-triangle-exclamation"}`}
-                  style={{ color: resolved ? "var(--adm-ok, #2e9e6b)" : "var(--adm-danger, #e5484d)", fontSize: 17, marginTop: 2 }} aria-hidden="true" />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 800, fontSize: 14.5 }}>{i.subject}</div>
-                  {i.body && <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 3, whiteSpace: "pre-wrap" }}>{i.body}</div>}
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 7, fontSize: 11.5, color: "var(--muted)", alignItems: "center" }}>
-                    <span style={{ color: "var(--accent)", fontWeight: 700 }}><i className="fas fa-store" style={{ marginRight: 4, opacity: 0.8 }} aria-hidden="true" />{i.restaurantName}</span>
-                    <span>· {i.raised_by || i.raised_role || "—"}</span>
-                    <span>· {new Date(i.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-                    {resolved && i.resolved_by && <span>· resolved by {i.resolved_by}</span>}
-                  </div>
-                </div>
-                <button className={`adm-btn ${resolved ? "" : "ok"}`} disabled={busy === i.id}
-                  style={{ flexShrink: 0, padding: "8px 13px", fontSize: 12.5 }}
-                  onClick={() => setStatus(i.id, resolved ? "open" : "resolved")}>
-                  {busy === i.id ? "…" : resolved ? "Reopen" : "Resolve"}
-                </button>
-              </div>
-            );
-          })}
+          {shown.map((i) => (
+            <TicketCard key={i.id} issue={i} showRestaurant busy={busy === i.id}
+              onOpenRestaurant={(slug) => { router.push(`/aevinite/restaurants?focus=${encodeURIComponent(slug)}`); window.dispatchEvent(new CustomEvent("adm:focus-restaurant", { detail: slug })); }}
+              onSetStatus={(id, status) => setStatus(id, status)} />
+          ))}
         </div>
       )}
     </>
