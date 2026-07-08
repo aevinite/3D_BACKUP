@@ -36,7 +36,8 @@ const readTheme = (): Theme => {
 // Header: the top bar with the restaurant name, currency/language pickers, a
 // light/dark toggle, and the cart button (with its item-count badge).
 export default function Header({ logoText }: { logoText?: string }) {
-  const features = useFeatures(useRestaurantId()); // which restaurant features are switched on
+  const restaurantId = useRestaurantId();
+  const features = useFeatures(restaurantId); // which restaurant features are switched on
   // Each useState below is a labelled memory box the header keeps:
   const [mounted, setMounted] = useState(false); // has the header finished loading in the browser yet?
   const [theme, setTheme] = useState<Theme>("light"); // current look: dark or light
@@ -105,7 +106,10 @@ export default function Header({ logoText }: { logoText?: string }) {
       window.removeEventListener("lfh:orders-updated", onOrders);
       window.removeEventListener("storage", onOrders);
     };
-  }, []);
+    // Re-read on a soft same-tab restaurant switch (the header doesn't remount across
+    // /r/A → /r/B), so the cart count + live-order dot reflect the new tenant's own
+    // scoped storage instead of lingering on the previous restaurant's.
+  }, [restaurantId]);
 
   // toggleTheme(): flip between dark and light when the toggle is tapped.
   const toggleTheme = () => {

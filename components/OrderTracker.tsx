@@ -2,7 +2,6 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
-import { usePathname } from "next/navigation";
 import { getOrderStatus, updateOrderTableNumber, getSettings, type OrderStatus } from "@/lib/menu";
 import { useRestaurantId } from "@/lib/restaurant-context";
 import { getStoredSession, getSessionState } from "@/lib/session";
@@ -78,8 +77,11 @@ export default function OrderTracker() {
     setOrders(list);
   };
 
-  // Runs once on mount: load orders + currency, then listen for "order placed"
-  // (refresh) and "currency changed" messages.
+  // Load orders + currency, then listen for "order placed" (refresh) and "currency
+  // changed" messages. Re-runs when the resolved restaurant changes — a soft, same-tab
+  // switch from /r/A to /r/B doesn't remount this widget (same route file), so without
+  // this it kept showing restaurant A's live-order strip over B until an event fired.
+  // read()/getCurrency() are tenant-scoped, so re-reading picks up B's own data.
   useEffect(() => {
     refresh();
     setCurrency(getCurrency());
@@ -93,7 +95,7 @@ export default function OrderTracker() {
       window.removeEventListener("storage", onPlaced);
       window.removeEventListener("lfh:currency-changed", onCur);
     };
-  }, []);
+  }, [restaurantId]);
 
   // Poll the kitchen for each order we're still following.
   // "Polling" = asking the server "any update?" on a repeating timer, because
