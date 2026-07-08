@@ -821,6 +821,8 @@ function closeDrawer() {
   if (drawerOff) { const off = drawerOff; drawerOff = null; off(); }
 }
 $("#boardBtn").onclick = openDrawer;
+// 🚩 Report an issue (subject + optional photo + live voice note) — shared widget.
+{ const _ib = document.getElementById("reportIssueBtn"); if (_ib) _ib.onclick = () => { if (window.LFH_ISSUE) LFH_ISSUE.open({ api, rid: PANEL_RID, notify: (m) => toast(m) }); }; }
 $("#drawerClose").onclick = closeDrawer;
 $("#drawerOverlay").onclick = (e) => { if (e.target.id === "drawerOverlay") closeDrawer(); };
 $("#dishSearch").oninput = renderDishes;

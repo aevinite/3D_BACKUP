@@ -14,6 +14,7 @@ import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
+import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
@@ -272,6 +273,22 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     const dev = deviceIdFrom(req); // which tablet/device is acting
     // A staff-blocked device can't do anything from the tablet.
     if (await deviceBlocked(dev)) return err("This device has been blocked by staff.", 403);
+
+    // ── Raise an issue / complaint (photo + voice note optional) ────────────────
+    // A waiter flags a floor problem for THIS restaurant; owner + admin see it. Media
+    // is uploaded first via /api/issue-media; the URLs arrive on the body here.
+    if (a === "issue") {
+      const ib = body as { subject?: string; body?: string; image_url?: string; audio_url?: string };
+      try {
+        await raiseIssue({
+          rid, subject: String(ib?.subject || ""), body: ib?.body,
+          raisedBy: actor?.name || actor?.username || "Waiter",
+          raisedRole: actor?.role || "tablet",
+          imageUrl: ib?.image_url, audioUrl: ib?.audio_url,
+        });
+      } catch (e) { return err(e instanceof Error ? e.message : "Couldn't raise the issue.", 400); }
+      return ok({ ok: true });
+    }
 
     // order — server-side priced via lfh_staff_place_order (never trusts prices)
     if (a === "order" && path.length === 1) {

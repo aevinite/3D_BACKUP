@@ -32,11 +32,19 @@ export async function GET(req: NextRequest) {
   scope = gated;
 
   let q = sb.from("issues")
-    .select("id, restaurant_id, subject, body, raised_by, raised_role, status, created_at, resolved_at")
+    .select("id, restaurant_id, subject, body, raised_by, raised_role, status, created_at, resolved_at, resolved_by, image_url, audio_url")
     .order("status", { ascending: true }).order("created_at", { ascending: false }).limit(300);
   if (!scope.all) {
     if (!scope.ids.length) return NextResponse.json({ issues: [] });
     q = q.in("restaurant_id", scope.ids);
+  }
+  // Optional ?restaurant_id= filter — the admin restaurant DETAIL view shows just one
+  // restaurant's tickets. Only honoured when that id is already in the caller's scope
+  // (an admin's scope is every restaurant), so it can only NARROW, never widen.
+  const oneRid = req.nextUrl.searchParams.get("restaurant_id");
+  if (oneRid) {
+    if (!inScope(scope, oneRid)) return NextResponse.json({ issues: [], openCount: 0 });
+    q = q.eq("restaurant_id", oneRid);
   }
   const { data, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -45,11 +53,12 @@ export async function GET(req: NextRequest) {
   const list = (data || []) as Array<{ restaurant_id: string; status: string } & Record<string, unknown>>;
   const rids = [...new Set(list.map((i) => i.restaurant_id))];
   const names: Record<string, string> = {};
+  const slugs: Record<string, string> = {};
   if (rids.length) {
-    const r = await sb.from("restaurants").select("id, name").in("id", rids);
-    for (const x of (r.data || []) as { id: string; name: string }[]) names[x.id] = x.name;
+    const r = await sb.from("restaurants").select("id, name, slug").in("id", rids);
+    for (const x of (r.data || []) as { id: string; name: string; slug: string }[]) { names[x.id] = x.name; slugs[x.id] = x.slug; }
   }
-  const issues = list.map((i) => ({ ...i, restaurantName: names[i.restaurant_id] || "—" }));
+  const issues = list.map((i) => ({ ...i, restaurantName: names[i.restaurant_id] || "—", restaurantSlug: slugs[i.restaurant_id] || "" }));
   return NextResponse.json({ issues, openCount: issues.filter((i) => i.status === "open").length });
 }
 

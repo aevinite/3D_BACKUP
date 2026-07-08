@@ -11,6 +11,7 @@ import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { notifyAggregator } from "@/lib/aggregators";
 import { panelRestaurantId } from "@/lib/panelScope";
+import { raiseIssue } from "@/lib/issues";
 
 export const dynamic = "force-dynamic";
 
@@ -116,6 +117,22 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     const dev = deviceIdFrom(req); // which device (kitchen screen) is acting
     // A staff-blocked device can't do anything from the kitchen screen.
     if (await deviceBlocked(dev)) return err("This device has been blocked by staff.", 403);
+
+    // ── Raise an issue / complaint (photo + voice note optional) ────────────────
+    // The kitchen flags a problem (equipment, stock…) for THIS restaurant; owner +
+    // admin see it. Media is uploaded first via /api/issue-media; the URLs arrive here.
+    if (a === "issue") {
+      const ib = body as { subject?: string; body?: string; image_url?: string; audio_url?: string };
+      try {
+        await raiseIssue({
+          rid, subject: String(ib?.subject || ""), body: ib?.body,
+          raisedBy: g.user?.name || g.user?.username || "Kitchen",
+          raisedRole: g.user?.role || "kitchen",
+          imageUrl: ib?.image_url, audioUrl: ib?.audio_url,
+        });
+      } catch (e) { return err(e instanceof Error ? e.message : "Couldn't raise the issue.", 400); }
+      return ok({ ok: true });
+    }
 
     // orders/:id/accept — everything not served → preparing
     if (a === "orders" && c === "accept") {

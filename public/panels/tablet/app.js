@@ -2522,6 +2522,8 @@ window.addEventListener("online", () => load().catch(() => {}));
   const bqDrawerBtn = drawer.querySelector("#dwBanquet");
   if (bqDrawerBtn) bqDrawerBtn.onclick = () => { closeDrawer(); openBanquet(); };
   const ham = document.getElementById("hamburger"); if (ham) ham.onclick = openDrawer;
+  // 🚩 Report an issue (subject + optional photo + live voice note) — shared widget.
+  { const rib = document.getElementById("reportIssueBtn"); if (rib) rib.onclick = () => { if (window.LFH_ISSUE) LFH_ISSUE.open({ api, rid: PANEL_RID, notify: (m) => toast(m, true) }); }; }
 
   let profileLoaded = false;
   async function loadProfile() {

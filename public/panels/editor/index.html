@@ -84,8 +84,11 @@
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
   <script src="/panels/backstack.js"></script>
+  <!-- Shared "Report an issue" widget (subject + photo + live voice note). Must load
+       BEFORE app.js so openIssueModal() can call it. -->
+  <script src="/panels/issue-raise.js?v=1"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=20260707mgr1"></script>
+  <script src="/panels/editor/app.js?v=20260708mgr2"></script>
 </body>
 </html>
