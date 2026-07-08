@@ -2,9 +2,22 @@
 // Admin · Logs — both logs in one place, like the manager has: OPERATIONS (every
 // staff action, incl. the admin's own) and CUSTOMERS (guests, their orders/calls,
 // and the blocklist). The admin sees admin actions here; the manager never does.
-import { useCallback, useEffect, useState } from "react";
+//
+// Two admin controls added 2026-07-08:
+//   1. A RESTAURANT filter (All + each by name) that scopes BOTH tabs to one
+//      restaurant. The DB keeps every restaurant's logs; this is just the view.
+//      Scoped server-side (indexed, explicit columns, limited) — never a whole-table read.
+//   2. A "logs are getting full" banner + one-tap cleanup (Keep 1 year / 6 months /
+//      1 month / 7 days). This is the MANUAL complement to the automatic per-restaurant
+//      nightly prune (lfh_prune_logs, migration 152). It only ever deletes activity-log
+//      rows (staff_actions) — never bills or customer records.
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ACT_LABEL, PANEL_COLOR, timeAgo, type Action } from "@/components/admin/shared";
+import { useToast } from "@/components/admin/toast";
+import { useAdminModal } from "@/components/admin/useAdminModal";
+import { adminFetch } from "@/lib/adminFetch";
 
+type Restaurant = { id: string; name: string };
 type Member = {
   id: string; name: string | null; phone: string | null; role: string;
   approved: boolean; removed: boolean; joined_at: string; restaurant_name?: string | null;
@@ -13,27 +26,112 @@ type Member = {
 type Block = { id: string; device_id?: string | null; phone?: string | null; table_number?: string | null; reason?: string | null; blocked_at: string; restaurant_name?: string | null };
 type CustData = { members: Member[]; blocklist: Block[]; orders: { member_id: string }[]; calls: { member_id: string }[] };
 
+// Cleanup windows offered in the "logs are getting full" banner (delete older than).
+const CLEANUP_OPTS = [
+  { days: 365, label: "Keep 1 year" },
+  { days: 182, label: "Keep 6 months" },
+  { days: 30, label: "Keep 1 month" },
+  { days: 7, label: "Keep 7 days" },
+];
+
 export default function AdminLogs() {
+  const toast = useToast();
   const [tab, setTab] = useState<"ops" | "cust">("ops");
+  // "" = All restaurants; otherwise scope both tabs + the cleanup to this restaurant.
+  const [rid, setRid] = useState("");
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [ops, setOps] = useState<Action[] | null>(null);
   const [cust, setCust] = useState<CustData | null>(null);
   // Error flags so a failed fetch shows a retry instead of an eternal "Loading…"
   // (bug #7, 2026-07-06 — the catch used to swallow errors and never clear the sentinel).
   const [opsErr, setOpsErr] = useState(false);
   const [custErr, setCustErr] = useState(false);
+  // Log-volume count for the "getting full" banner (scoped to the current restaurant).
+  const [count, setCount] = useState<number | null>(null);
+  const [threshold, setThreshold] = useState(50000);
+  // The cleanup choice awaiting confirmation (null = nothing pending).
+  const [pending, setPending] = useState<{ days: number; label: string } | null>(null);
+
+  // Load the restaurant list once for the dropdown (reuses the admin Restaurants endpoint).
+  useEffect(() => {
+    (async () => {
+      const r = await adminFetch<{ restaurants: Restaurant[] }>("/api/admin/restaurants");
+      if (r.ok) setRestaurants(r.data.restaurants || []);
+    })();
+  }, []);
 
   const loadOps = useCallback(async () => {
-    try { const j = await (await fetch("/api/admin/oplog?limit=200", { cache: "no-store" })).json(); if (j.error) setOpsErr(true); else { setOps(j.actions || []); setOpsErr(false); } } catch { setOpsErr(true); }
-  }, []);
+    const qs = rid ? `&restaurant_id=${rid}` : "";
+    try { const j = await (await fetch(`/api/admin/oplog?limit=200${qs}`, { cache: "no-store" })).json(); if (j.error) setOpsErr(true); else { setOps(j.actions || []); setOpsErr(false); } } catch { setOpsErr(true); }
+  }, [rid]);
   const loadCust = useCallback(async () => {
-    try { const j = await (await fetch("/api/admin/custlog", { cache: "no-store" })).json(); if (j.error) setCustErr(true); else { setCust(j); setCustErr(false); } } catch { setCustErr(true); }
-  }, []);
-  useEffect(() => { if (tab === "ops") loadOps(); else loadCust(); }, [tab, loadOps, loadCust]);
+    const qs = rid ? `?restaurant_id=${rid}` : "";
+    try { const j = await (await fetch(`/api/admin/custlog${qs}`, { cache: "no-store" })).json(); if (j.error) setCustErr(true); else { setCust(j); setCustErr(false); } } catch { setCustErr(true); }
+  }, [rid]);
+  // Cheap HEAD count for the banner — no rows pulled. Refreshes when the restaurant changes.
+  const loadCount = useCallback(async () => {
+    const qs = rid ? `?restaurant_id=${rid}` : "";
+    const r = await adminFetch<{ count: number; threshold: number }>(`/api/admin/oplog/cleanup${qs}`);
+    if (r.ok) { setCount(r.data.count); setThreshold(r.data.threshold); } else setCount(null);
+  }, [rid]);
+
+  // Re-load the active tab whenever the tab OR the restaurant filter changes.
+  useEffect(() => { setOps(null); setCust(null); if (tab === "ops") loadOps(); else loadCust(); }, [tab, loadOps, loadCust]);
+  useEffect(() => { loadCount(); }, [loadCount]);
+
+  const runCleanup = async () => {
+    if (!pending) return;
+    const r = await adminFetch<{ removed: number }>("/api/admin/oplog/cleanup", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ restaurant_id: rid || null, keepDays: pending.days }),
+    });
+    setPending(null);
+    if (r.ok) {
+      const n = r.data.removed;
+      toast(`Removed ${n.toLocaleString()} old ${n === 1 ? "entry" : "entries"}.`);
+      loadCount();
+      if (tab === "ops") loadOps();
+    } else {
+      toast(r.error || "Couldn't clean up just now.", "err");
+    }
+  };
+
+  const scopedName = rid ? restaurants.find((r) => r.id === rid)?.name : "";
+  const full = count !== null && count >= threshold;
 
   return (
     <>
       <h1 className="adm-page-h">Logs</h1>
       <p className="adm-page-sub">Everything that happens — staff actions and guests. (Change how long logs are kept in Settings.)</p>
+
+      {/* Restaurant filter — scopes BOTH tabs to one restaurant. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <label className="adm-ret">
+          <i className="fas fa-store" aria-hidden="true" style={{ opacity: 0.7 }} /> Restaurant
+          <select value={rid} onChange={(e) => setRid(e.target.value)} aria-label="Filter logs by restaurant">
+            <option value="">All restaurants</option>
+            {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {/* "Logs are getting full" banner — only when the activity-log volume is large. */}
+      {full && (
+        <div className="adm-card" style={{ marginBottom: 14, borderColor: "var(--adm-warn)", background: "color-mix(in srgb, var(--adm-warn) 10%, var(--card))" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13.5, lineHeight: 1.5 }}>
+            <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: "var(--adm-warn)", marginTop: 2 }} />
+            <div>
+              <b>The activity log {scopedName ? <>for {scopedName}</> : "across all restaurants"} is getting large</b>
+              {" "}— {count!.toLocaleString()} entries. Old entries auto-delete each night, but you can clear space now by keeping only the most recent:
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            {CLEANUP_OPTS.map((o) => (
+              <button key={o.days} className="adm-btn" onClick={() => setPending(o)}>{o.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="adm-tabs">
         <button className={tab === "ops" ? "active" : ""} onClick={() => setTab("ops")}>Operations</button>
@@ -44,17 +142,28 @@ export default function AdminLogs() {
       </div>
 
       {tab === "ops"
-        ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} />
+        ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} />
         : <CustTable data={cust} err={custErr} onRetry={loadCust} />}
+
+      {/* Cleanup confirm — a shared modal (phone Back + Escape + focus-trap via useAdminModal). */}
+      {pending && (
+        <CleanupModal
+          label={pending.label}
+          days={pending.days}
+          scopeName={scopedName || null}
+          onCancel={() => setPending(null)}
+          onConfirm={runCleanup}
+        />
+      )}
     </>
   );
 }
 
-function OpsTable({ rows, err, onRetry }: { rows: Action[] | null; err: boolean; onRetry: () => void }) {
+function OpsTable({ rows, err, onRetry, scopedName }: { rows: Action[] | null; err: boolean; onRetry: () => void; scopedName: string | null }) {
   const cols = "92px 1fr auto";
   if (err) return <div className="adm-empty">Couldn&rsquo;t load the operations log. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={onRetry}>Retry</button></div>;
   if (rows === null) return <div className="adm-empty">Loading…</div>;
-  if (rows.length === 0) return <div className="adm-empty">No staff actions yet.</div>;
+  if (rows.length === 0) return <div className="adm-empty">No staff actions {scopedName ? `for ${scopedName}` : "yet"}.</div>;
   return (
     <div className="adm-logwrap">
       <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>Panel</div><div>Action</div><div>When</div></div>
@@ -117,6 +226,37 @@ function CustTable({ data, err, onRetry }: { data: CustData | null; err: boolean
             ))}
           </div>
         )}
+      </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cleanup confirm modal. useAdminModal wires phone Back + Escape close, focus trap,
+// and scroll-lock (CLAUDE.md rule: every new modal registers with the back-stack).
+// ─────────────────────────────────────────────────────────────────────────────
+function CleanupModal({ label, days, scopeName, onCancel, onConfirm }: {
+  label: string; days: number; scopeName: string | null; onCancel: () => void; onConfirm: () => Promise<void>;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useAdminModal(ref, "admin-logs-cleanup", onCancel);
+  const [busy, setBusy] = useState(false);
+  const go = async () => { setBusy(true); try { await onConfirm(); } finally { setBusy(false); } };
+  return (
+    <>
+      <div onClick={busy ? undefined : onCancel} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
+      <div ref={ref} role="dialog" aria-modal="true" aria-label="Confirm log cleanup" style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+        <div className="adm-card" style={{ pointerEvents: "auto", width: "min(94vw, 440px)" }}>
+          <h2 style={{ margin: "0 0 8px" }}>Delete old activity-log entries?</h2>
+          <p style={{ fontSize: 13.5, lineHeight: 1.55, color: "var(--muted)", margin: "0 0 6px" }}>
+            This permanently deletes activity-log entries older than <b style={{ color: "var(--text)" }}>{days} days</b> ({label.toLowerCase()}) {scopeName ? <>for <b style={{ color: "var(--text)" }}>{scopeName}</b></> : <>across <b style={{ color: "var(--text)" }}>all restaurants</b></>}.
+          </p>
+          <p style={{ fontSize: 12.5, color: "var(--muted)", margin: "0 0 14px" }}>Bills and customer records are never touched. This can&rsquo;t be undone.</p>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <button className="adm-btn" disabled={busy} onClick={onCancel}>Cancel</button>
+            <button className="adm-btn danger" disabled={busy} onClick={go}>{busy ? "Deleting…" : "Delete old entries"}</button>
+          </div>
+        </div>
       </div>
     </>
   );

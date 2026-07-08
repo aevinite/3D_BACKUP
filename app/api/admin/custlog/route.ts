@@ -11,17 +11,28 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  // ?restaurant_id scopes ALL three lists to ONE restaurant — the admin Logs page's
+  // restaurant filter passes it so the Customers tab shows just that tenant (the DB
+  // still keeps everyone's rows; this is only the admin's view). Validate the id
+  // before it hits a uuid column (a malformed id would 500 with a raw Postgres error).
+  const rid = new URL(req.url).searchParams.get("restaurant_id");
+  if (rid && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rid))
+    return NextResponse.json({ error: "invalid restaurant_id" }, { status: 400 });
   try {
     // The guest/customer/blocklist lists are independent — read them in parallel.
     // (session_members carries restaurant_id so we can tag each row with its restaurant;
     // customers/blocklist keep select(*) — they carry no money column, only contact info.)
-    const [members, customers, blocklist] = await Promise.all([
-      sb.from("session_members")
-        .select("id, name, phone, phone_verified, role, approved, removed, location_ok, joined_at, restaurant_id, session:sessions(table_number, status)")
-        .order("joined_at", { ascending: false }).limit(120),
-      sb.from("customers").select("*").order("last_seen_at", { ascending: false }).limit(120),
-      sb.from("blocklist").select("*").order("blocked_at", { ascending: false }).limit(200),
-    ]);
+    let membersQ = sb.from("session_members")
+      .select("id, name, phone, phone_verified, role, approved, removed, location_ok, joined_at, restaurant_id, session:sessions(table_number, status)")
+      .order("joined_at", { ascending: false }).limit(120);
+    let customersQ = sb.from("customers").select("*").order("last_seen_at", { ascending: false }).limit(120);
+    let blocklistQ = sb.from("blocklist").select("*").order("blocked_at", { ascending: false }).limit(200);
+    if (rid) {
+      membersQ = membersQ.eq("restaurant_id", rid);
+      customersQ = customersQ.eq("restaurant_id", rid);
+      blocklistQ = blocklistQ.eq("restaurant_id", rid);
+    }
+    const [members, customers, blocklist] = await Promise.all([membersQ, customersQ, blocklistQ]);
     const memberRows = members.data ?? [];
     const custRows = customers.data ?? [];
     const blockRows = blocklist.data ?? [];
