@@ -28,7 +28,7 @@ const TAB_LABEL = { items: "Dish", categories: "Category", filters: "Tag", gener
 // (/aevinite). Leaving it here let a browser whose last-used tab was "features" boot
 // straight into the removed guest-feature toggle grid (owner could flip admin-controlled
 // flags from the manager panel). A stale saved "features" now falls back to "items".
-const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "general", "banquet"];
+const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "general", "banquet", "ratings"];
 // Remember which tab you were on so a refresh keeps you there (e.g. stay on
 // Orders during a busy service instead of snapping back to Dishes).
 const savedTab = (() => { try { return localStorage.getItem("lfh_editor_tab"); } catch { return null; } })();
@@ -132,7 +132,7 @@ const fold = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toL
 // wants the editor to read in ₹ (2026-06-10). The rate mirrors CURRENCIES in
 // the menu app's lib/format.ts — update both together when rates move.
 const INR_RATE = 1; // prices are stored in rupees now (migration 043) — no conversion
-const inr = (usd) => "₹" + Math.round((parseFloat(usd) || 0) * INR_RATE).toLocaleString("en-US");
+const inr = (usd) => "₹" + Math.round((parseFloat(usd) || 0) * INR_RATE).toLocaleString("en-IN");
 // el: turn a string of HTML into a real, clickable page element we can insert.
 const el = (html) => {
   const t = document.createElement("template");
@@ -450,7 +450,7 @@ function renderList() {
         <div class="thumb">${icon}</div>
         <div class="meta"><b>${label}</b><small>${sub}</small></div>
       </li>`);
-      li.onclick = () => { dashRange = key; renderList(); loadDashboard(); };
+      li.onclick = () => { dashRange = key; try { localStorage.setItem("lfh_dash_range", key); } catch {} renderList(); loadDashboard(); };
       return li;
     };
     ul.appendChild(mk("today", '<i class="fas fa-bolt"></i>', "Today", "live snapshot"));
@@ -1381,16 +1381,21 @@ function dishNoTag(title) {
 // separate order rows still exist underneath as the record. Per-order accept/serve/
 // pay become session-level (they reuse the table-wide helpers).
 // Financial-year string for invoice numbers, e.g. "2025-26" (FY starts April).
-function financialYear() {
-  const d = new Date(); const y = d.getFullYear();
-  const start = d.getMonth() >= 3 ? y : y - 1;
+function financialYear(when) {
+  // FY of the INVOICE's OWN date, not "today" — reprinting a March invoice after 1 April must
+  // keep its issued year. Falls back to now when no/invalid date is passed (legacy callers).
+  const d = when ? new Date(when) : new Date();
+  const base = isNaN(d.getTime()) ? new Date() : d;
+  const y = base.getFullYear();
+  const start = base.getMonth() >= 3 ? y : y - 1;
   return `${start}-${String(start + 1).slice(2)}`;
 }
 // Display an invoice number: <prefix>/<FY>/<6-digit>, e.g. LFH/2025-26/000042.
-function invFmt(no) {
+// `when` = the invoice's issue date (invoice_at) so the FY segment is fixed to issue time.
+function invFmt(no, when) {
   if (no == null) return "";
   const pfx = (state.data.settings || {}).invoice_prefix || "INV";
-  return `${pfx}/${financialYear()}/${String(no).padStart(6, "0")}`;
+  return `${pfx}/${financialYear(when)}/${String(no).padStart(6, "0")}`;
 }
 // Single source of truth for a bill's money — discount comes off BEFORE tax (GST is
 // charged on the taxable amount). All inputs are DB values (server-priced items,
@@ -1534,7 +1539,7 @@ function mergedOrderCardHtml(g) {
       <b>${tnum ? "Table " + esc(tnum) : "Walk-in / no table"}</b>
       <span class="ord-pill ${cls}">${label}</span>
       <span class="pay-pill ${paid ? "paid" : "pending"}">${paid ? "💳 Paid" : "⏳ Unpaid"}</span>
-      ${invoiced ? `<span class="inv-chip" title="Tax invoice">${esc(invFmt(invNo))}</span>` : (sid && invVoided ? `<span class="inv-chip voided">invoice voided</span>` : "")}
+      ${invoiced ? `<span class="inv-chip" title="Tax invoice">${esc(invFmt(invNo, o0.invoice_at))}</span>` : (sid && invVoided ? `<span class="inv-chip voided">invoice voided</span>` : "")}
     </div>
     <small class="ord-when">${esc(when)}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
     <div class="ord-items">${items}</div>
@@ -1727,7 +1732,7 @@ function ordersPreviousHtml(previous, kind = "previous") {
     const paid = liveOrders.length > 0 && liveOrders.every((o) => o.payment_status === "paid");
     return {
       key: o0.session_id || ("solo:" + o0.id), table: (o0.table_number || "").trim(),
-      billNo: o0.bill_no, invNo: o0.invoice_no, voided: !!o0.invoice_voided,
+      billNo: o0.bill_no, invNo: o0.invoice_no, invoiceAt: o0.invoice_at, voided: !!o0.invoice_voided,
       customer: o0.customer_name || "", total, paid, ts: new Date(o0.created_at || 0).getTime(),
       when: o0.created_at ? new Date(o0.created_at).toLocaleString() : "",
       cancelled: g.every((o) => o.status === "cancelled"),
@@ -1735,7 +1740,7 @@ function ordersPreviousHtml(previous, kind = "previous") {
   });
   const q = (state.billSearch || "").toLowerCase().trim();
   const stype = state.billSearchType || "date", sort = state.billSort || "new";
-  const fieldOf = (b) => stype === "inv" ? String(invFmt(b.invNo)).toLowerCase()
+  const fieldOf = (b) => stype === "inv" ? String(invFmt(b.invNo, b.invoiceAt)).toLowerCase()
     : stype === "bill" ? String(b.billNo ?? "")
     : stype === "table" ? String(b.table)
     : stype === "cust" ? b.customer.toLowerCase()
@@ -1783,7 +1788,7 @@ function billCardHtml(b) {
     <div class="bill-cust">${esc(b.customer || "—")}</div>
     <div class="bill-amt">${inr(b.total)}</div>
     <div class="bill-when">${esc(b.when)}</div>
-    ${b.invNo != null ? `<div class="bill-inv">${esc(invFmt(b.invNo))}${b.voided ? " · voided" : ""}</div>` : ""}
+    ${b.invNo != null ? `<div class="bill-inv">${esc(invFmt(b.invNo, b.invoiceAt))}${b.voided ? " · voided" : ""}</div>` : ""}
     <button type="button" class="bill-print" data-bill-print="${esc(b.key)}" title="Print this bill" aria-label="Print bill" style="position:absolute;bottom:9px;right:11px;background:none;border:0;cursor:pointer;font-size:16px;opacity:.5;padding:3px;line-height:1">🖨</button>
   </div>`;
 }
@@ -1876,6 +1881,7 @@ function openBillModal(key) {
   requestAnimationFrame(() => wrap.classList.add("show"));
   const onEsc = (e) => { if (e.key === "Escape") close(); };
   const close = () => { wrap.classList.remove("show"); document.removeEventListener("keydown", onEsc); setTimeout(() => wrap.remove(), 180); };
+  wrap.__lfhClose = close; // hardware Back → our close() (also removes the Esc listener), not a bare remove() that leaks it
   document.addEventListener("keydown", onEsc);
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   wrap.querySelector("[data-bm-close]").onclick = close;
@@ -2253,7 +2259,7 @@ async function resolveCall(id) {
 // ---------- Dashboard tab: the restaurant's numbers as graphs ----------
 let dashCharts = []; // live Chart.js instances (destroyed before each redraw)
 
-let dashRange = "today"; // today | 30d | year — Today leads (the live summary box); 30d/year still a click away
+let dashRange = (() => { try { const v = localStorage.getItem("lfh_dash_range"); return ["today", "30d", "year"].includes(v) ? v : "today"; } catch { return "today"; } })(); // today | 30d | year — remembered across reloads
 // The Today summary box: a live snapshot across every channel (dine-in tables +
 // Zomato/Swiggy/takeaway live orders) and today's combined totals. Built from the
 // `live` + `platformToday` fields the /stats endpoint adds.
@@ -2724,7 +2730,7 @@ function printBill(t, sess, os) {
   // values (e.g. "Takeaway", "T5") are left exactly as entered.
   const tnum = (t || "").toString().trim();
   const tableDisp = /^\d+$/.test(tnum) ? "T" + tnum : esc(tnum || "—");
-  const invNo = sess && sess.invoice_no != null ? esc(invFmt(sess.invoice_no)) : "";
+  const invNo = sess && sess.invoice_no != null ? esc(invFmt(sess.invoice_no, sess.invoice_at)) : "";
   const billNo = sess && sess.bill_no != null ? esc(sess.bill_no) : "";
   const now = new Date();
   const pct = Math.round(m.rate * 10000) / 100; // e.g. 5
@@ -3650,12 +3656,12 @@ function logDetailDialog(title, rows) {
     </div>`;
   document.body.appendChild(wrap);
   requestAnimationFrame(() => wrap.classList.add("show"));
-  const close = () => { wrap.classList.remove("show"); setTimeout(() => wrap.remove(), 200); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const close = () => { wrap.classList.remove("show"); document.removeEventListener("keydown", onKey); setTimeout(() => wrap.remove(), 200); };
+  wrap.__lfhClose = close; // hardware Back closes via our close() (removes the keydown listener) — no leaked listener
   wrap.querySelector(".confirm-ok").onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
-  document.addEventListener("keydown", function k(e) {
-    if (e.key === "Escape") { close(); document.removeEventListener("keydown", k); }
-  });
+  document.addEventListener("keydown", onKey);
 }
 
 // Fetch the whole board in one call. `fromPoll` = silent (no error toast, and don't
@@ -7040,6 +7046,7 @@ const XRAY_TABS = [
   { tab: "dash", flag: "view_dashboard", label: "Dashboard" },
   { tab: "items", flag: "edit_menu", label: "Menu editor" },
   { tab: "ratings", flag: "view_ratings", label: "Guest ratings" },
+  { tab: "general", flag: "edit_settings", label: "Settings" },
 ];
 // Phase 2 (the ladder, 2026-07-06): permission-gated CONTROLS inside tabs. Matched by
 // CSS selector on every repaint (MutationObserver below), so a live-poll re-render can
