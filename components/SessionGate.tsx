@@ -132,6 +132,11 @@ export default function SessionGate() {
   const [tableInput, setTableInput] = useState(""); // typed table number when no QR scan yet
   const [name, setName] = useState(""); // the name the guest types when asking to join
   const [note, setNote] = useState(""); // a small explanatory message (e.g. "too far")
+  // Whether the "we've let staff know" screen may PROMISE the order sends automatically.
+  // True only on the "open the table" path, where proceedWhenOpen is watching and will
+  // auto-continue. On the "call a waiter" (access) path — used when the guest is too far
+  // or as an escape hatch — nothing watches, so we must NOT promise auto-send (audit fix S1).
+  const [reqAutoSend, setReqAutoSend] = useState(true);
 
   // Working values that shouldn't trigger a re-draw when they change:
   const settingsRef = useRef<Settings | null>(null); // cached restaurant settings
@@ -616,6 +621,9 @@ export default function SessionGate() {
   // confirmed, or as the escape hatch on a table someone else holds.
   const doRequest = async (type: "open" | "access") => {
     const p = pending.current!;
+    // The "access" (call-a-waiter) path has NO watcher, so it can't auto-send the order;
+    // only the "open" path does. Drive the request_sent copy off this (audit fix S1).
+    setReqAutoSend(type === "open");
     // Don't stack duplicate waiter calls: a guest already waiting to be let in who
     // taps "Call a waiter instead" (once, or twice) should send ONE request, not a
     // fresh one each time — otherwise the same person can appear repeatedly in the
@@ -625,6 +633,11 @@ export default function SessionGate() {
     // Only mark the waiter-call as sent AFTER it actually succeeded, so a failed
     // request can still be retried (bug #18 fix must not swallow a real retry).
     if (type === "access") accessReqRef.current = true;
+    // The access path won't auto-send the order, so release whatever started this (e.g.
+    // Place Order): tell the caller it's done — un-sticks the cart's "Placing…" button and
+    // KEEPS the cart so the guest can order once a waiter seats them. The sheet stays on
+    // request_sent; Cancel just closes it (fireDone is once-only, so this is safe). (S1)
+    if (type === "access") fireDone({ ok: false, reason: "cancelled", action: pending.current?.action });
     setStep("request_sent");
   };
   // From the "not open" screen: tell staff, then keep waiting — proceedWhenOpen
@@ -636,6 +649,7 @@ export default function SessionGate() {
   const doRequestOpen = async () => {
     // Name is collected on this SAME screen — if it's blank, stay put and say why.
     if (!name.trim()) { setNote("Add your name so staff know who's asking."); return; }
+    setReqAutoSend(true); // the not-open watcher (proceedWhenOpen) is running → auto-send is real
     const p = pending.current!; await requestAccess(p.table, "open", name.trim(), null, ridRef.current);
     setStep("request_sent");
   };
@@ -945,8 +959,12 @@ export default function SessionGate() {
         {/* We've notified staff -> keep open so we auto-continue when they act. */}
         {step === "request_sent" && (<>
           <div className="sg-badge"><i className="fas fa-bell-concierge"></i></div><h3 className="sg-title">We&apos;ve let the staff know</h3>
-          <p className="sg-sub">Keep this open — the moment a waiter opens your table you&apos;ll be brought in and your order sent automatically. Tap cancel to stop.</p>
-          <div className="sg-actions"><button className="sg-btn ghost" onClick={close}>Cancel</button></div>
+          {reqAutoSend ? (
+            <p className="sg-sub">Keep this open — the moment a waiter opens your table you&apos;ll be brought in and your order sent automatically. Tap cancel to stop.</p>
+          ) : (
+            <p className="sg-sub">A waiter is on the way to help you. Your order hasn&apos;t been sent yet — it&apos;s saved in your cart, so you can place it once you&apos;re seated.</p>
+          )}
+          <div className="sg-actions"><button className="sg-btn ghost" onClick={close}>{reqAutoSend ? "Cancel" : "Close"}</button></div>
         </>)}
 
         {/* The restaurant has blocked this table -> dead end with an explanation. */}
