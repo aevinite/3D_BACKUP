@@ -742,6 +742,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
               placeholder={t.searchPlaceholder}
               aria-label={t.searchPlaceholder}
               value={searchQuery}
+              maxLength={60}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
             {/* When there are matches, show the dropdown of quick results. */}
@@ -754,7 +755,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                     className="search-result"
                     onClick={() => setSearchQuery("")}
                   >
-                    <img className="search-result-img" src={r.image} alt="" loading="lazy" decoding="async" />
+                    <img className="search-result-img" src={r.image} alt="" loading="lazy" decoding="async" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
                     <span className="search-result-name">{r.title}</span>
                     <span className="search-result-cat">
                       {localized(dbCategories.find((c) => c.slug === r.category)?.name, lang) || r.category}
