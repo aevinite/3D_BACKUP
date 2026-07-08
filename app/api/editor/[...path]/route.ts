@@ -472,11 +472,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const d = byDay.get(b.day) || { taxable: 0, tax: 0, gross: 0, bills: 0 };
         d.taxable += tx; d.tax += t; d.gross += tot; d.bills += 1; byDay.set(b.day, d);
       }
+      // CGST/SGST must add back to the SAME total tax shown (and thus to the grand total). The
+      // total tax is summed with PER-BILL rounding; computing each component off the whole-month
+      // taxable base rounds at a different point, so the split wouldn't reconcile on the filing
+      // document (off by a few paise/rupees). Split the ACTUAL rounded total tax by component rate
+      // instead, with the last component absorbing the remainder → the parts sum to tax exactly.
+      const taxR2 = r2(tax);
+      const compRateSum = comps.reduce((s, c) => s + c.rate, 0);
+      let compAllocated = 0;
+      const components = comps.map((c, i) => {
+        const amount = compRateSum > 0 && i < comps.length - 1 ? r2(taxR2 * (c.rate / compRateSum)) : r2(taxR2 - compAllocated);
+        compAllocated += amount;
+        return { label: c.label, rate: c.rate, amount };
+      });
       return ok({
         month: monthStr,
         restaurant: { name: set.restaurant_name || "Little French House", gstin: set.gstin || "" },
         ratePct: Math.round(rate * 10000) / 100,
-        components: comps.map((c) => ({ label: c.label, rate: c.rate, amount: r2(taxable * (c.rate / 100)) })),
+        components,
         totals: { bills: bills.size, taxable: r2(taxable), tax: r2(tax), gross: r2(gross) },
         days: [...byDay.entries()].sort().map(([date, v]) => ({ date, taxable: r2(v.taxable), tax: r2(v.tax), gross: r2(v.gross), bills: v.bills })),
         note: "Paid dine-in bills only (this restaurant's own sales; excludes Zomato/Swiggy). Discount applied before tax.",
@@ -544,20 +557,25 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // /stats now does too. (B9 root cause — dashboard truncation.) On-demand endpoint, never polled;
       // pre-aggregated summary table is the extreme-scale follow-up per CLAUDE.md.
       const allRows: any[] = [];
-      // Page NEWEST-first, capped at ~12,000 rows. A single big .limit() is silently capped by
+      // Page NEWEST-first, capped at STATS_ROW_CAP rows. A single big .limit() is silently capped by
       // PostgREST's db-max-rows (~1000) — which truncated the dashboard to the newest ~1000 orders and
       // under-counted a busy restaurant (why it disagreed with the owner panel). Paging fixes that; the
-      // 12k cap stops a huge range from turning the dashboard into a slow, egress-heavy full-table scan.
-      // Newest-first keeps the RECENT window complete + deterministic. The cap keeps the dashboard
-      // fast (deep OFFSET paging gets slow), so the "Today" and "30 days" views are exact and match
-      // the owner panel for a normal restaurant. A very-high-volume FULL YEAR can exceed the cap →
-      // its totals reflect the most recent ~5k orders; penny-exact big-range analytics is the planned
-      // pre-aggregated-summary follow-up (CLAUDE.md: dashboards read summaries, not live scans).
-      for (let from = 0; from < 5000; from += 1000) {
+      // cap stops a huge range from turning the dashboard into a slow, egress-heavy full-table scan.
+      // Newest-first keeps the RECENT window complete + deterministic. So "Today" and "30 days" are
+      // exact for a normal restaurant. A very-high-volume FULL YEAR can still exceed the cap → its
+      // totals reflect only the most recent STATS_ROW_CAP orders, so we return truncated:true and the
+      // dashboard shows an HONEST "most recent N orders" note instead of a silently-too-low number.
+      // Penny-exact big-range totals are the planned pre-aggregated-summary follow-up (CLAUDE.md:
+      // dashboards read summaries, not live scans) — that fix needs the owner to sign off on the numbers.
+      const STATS_ROW_CAP = 5000;
+      let statsTruncated = false;
+      for (let from = 0; from < STATS_ROW_CAP; from += 1000) {
         const page = (must(await sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).order("created_at", { ascending: false }).range(from, from + 999)) as any[] | null) || [];
         allRows.push(...page);
         if (page.length < 1000) break;
+        if (from + 1000 >= STATS_ROW_CAP) statsTruncated = true; // filled the cap on a full page → older orders exist beyond it
       }
+      const oldestLoadedIso = allRows.length ? allRows[allRows.length - 1].created_at : null;
       const dishes = must(dishesQ);
       const sinceMs = since.getTime(), prevSinceMs = prevSince.getTime();
       const orders = allRows.filter((o: { created_at: string }) => new Date(o.created_at).getTime() >= sinceMs);
@@ -778,6 +796,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         biggestBill: biggestBill ? { amt: r2(biggestBill.amt), table: biggestBill.table } : null,
         cancelledValue: r2(cancelledValue),
         channels: Object.fromEntries(Object.entries(channels).map(([k, v]) => [k, { rev: r2(v.rev), count: v.count }])),
+        // Honesty flag: on a very busy restaurant a wide range can exceed STATS_ROW_CAP, so these
+        // totals + the menu-winners split reflect only the most recent N orders. The dashboard shows
+        // a plain note when truncated is true, instead of a silently-too-low number. (review #2)
+        truncated: statsTruncated, statsCap: STATS_ROW_CAP, oldestLoaded: oldestLoadedIso,
         updatedAt: now.toISOString(),
       });
     }
@@ -809,6 +831,32 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // staff changes, permission grants…) are both hidden here; they show only in
       // their own panels' logs.
       return ok(must(await sb.from("staff_actions").select("*").eq("restaurant_id", rid).not("panel", "in", "(admin,owner)").order("created_at", { ascending: false }).limit(200)));
+    }
+
+    if (p === "staff-risk") {
+      // Staff-watch aggregation: count the risk actions (discounts / voids / deletes / paid-reverts)
+      // per staff member over a DATE RANGE, aggregated SERVER-SIDE so the browser gets a tiny summary
+      // instead of thousands of log rows (egress-safe). Scoped to this restaurant; hides admin + owner
+      // rows exactly like /oplog. Replaces the old client that aggregated only the newest 200 rows with
+      // NO date window (which silently undercounted, and could miss a staff member, on a busy day). (review #4)
+      const range = new URL(req.url).searchParams.get("range") || "today";
+      const DAY = 864e5;
+      let sinceMs: number;
+      if (range === "year") sinceMs = Date.now() - 365 * DAY;
+      else if (range === "30d") sinceMs = Date.now() - 30 * DAY;
+      else { const ist = new Date(Date.now() + 5.5 * 3600e3); sinceMs = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()) - 5.5 * 3600e3; } // "today" = IST midnight
+      const sinceIso = new Date(sinceMs).toISOString();
+      const RISK: Record<string, "disc" | "void" | "del" | "rev"> = { order_discount: "disc", invoice_void: "void", void_invoice: "void", order_delete: "del", orders_delete: "del", payment_revert: "rev" };
+      const by: Record<string, { disc: number; void: number; del: number; rev: number; total: number }> = {};
+      let truncated = false;
+      for (let from = 0; from < 20000; from += 1000) {
+        const page = (must(await sb.from("staff_actions").select("action,actor,created_at").eq("restaurant_id", rid).not("panel", "in", "(admin,owner)").gte("created_at", sinceIso).order("created_at", { ascending: false }).range(from, from + 999)) as { action: string; actor: string | null }[] | null) || [];
+        for (const r of page) { const k = RISK[r.action]; if (!k) continue; const who = r.actor || "— (device only)"; const a = by[who] || (by[who] = { disc: 0, void: 0, del: 0, rev: 0, total: 0 }); a[k]++; a.total++; }
+        if (page.length < 1000) break;
+        if (from + 1000 >= 20000) truncated = true;
+      }
+      const rows = Object.entries(by).map(([who, v]) => ({ who, ...v })).sort((a, b) => b.total - a.total);
+      return ok({ range, rows, truncated });
     }
 
     return err("unknown GET endpoint", 404);
