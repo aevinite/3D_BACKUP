@@ -79,9 +79,19 @@
   let profile = null; // {username, role, name, phone, hasPin, needsProfile, canSelfReset}
   let overlay = null;
 
+  let backOff = null; // LFH_BACK unregister for the open drawer — hardware BACK closes it (B6)
+  // Hardware BACK pressed: backstack has ALREADY popped this layer. During forced first-login setup,
+  // swallow it (stay open + re-arm) so Back can neither skip setup nor exit the whole panel; else close.
+  function onBackClose() {
+    backOff = null;
+    if (profile && profile.needsProfile) { armBack(); return; }
+    if (overlay) { overlay.remove(); overlay = null; }
+  }
+  function armBack() { if (window.LFH_BACK && !backOff) backOff = window.LFH_BACK.layer("staff-profile", onBackClose); }
   function closeDrawer() {
-    // Block closing during the one-time setup until name + phone are confirmed.
+    // Block closing (✕ / backdrop) during the one-time setup until name + phone are confirmed.
     if (profile && profile.needsProfile) { alert("Please confirm your name and phone to continue."); return; }
+    if (backOff) { backOff(); backOff = null; } // rewind the hardware-Back history entry
     if (overlay) { overlay.remove(); overlay = null; }
   }
 
@@ -92,6 +102,7 @@
 
   function openDrawer() {
     injectStyles();
+    if (backOff) { backOff(); backOff = null; }
     if (overlay) overlay.remove();
     const roleLabel = { manager: "Manager", editor: "Manager", kitchen: "Kitchen", tablet: "Tablet (waiter)" }[profile.role] || profile.role;
     const accent = ROLE_COLOR[profile.role] || "#9ca3af";
@@ -252,6 +263,7 @@
     const drawer = el("div", { class: "lfh-dw" }, sections);
     overlay = el("div", { class: "lfh-ov", onClick: (e) => { if (e.target === overlay) closeDrawer(); } }, [drawer]);
     document.body.appendChild(overlay);
+    armBack(); // hardware BACK now closes this drawer instead of exiting the whole panel (B6)
   }
 
   // ── user: the ⚙️ Settings button in the top bar ────────────────────────────

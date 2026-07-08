@@ -28,7 +28,7 @@ const TAB_LABEL = { items: "Dish", categories: "Category", filters: "Tag", gener
 // (/aevinite). Leaving it here let a browser whose last-used tab was "features" boot
 // straight into the removed guest-feature toggle grid (owner could flip admin-controlled
 // flags from the manager panel). A stale saved "features" now falls back to "items".
-const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "general", "banquet"];
+const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "general", "banquet", "ratings"];
 // Remember which tab you were on so a refresh keeps you there (e.g. stay on
 // Orders during a busy service instead of snapping back to Dishes).
 const savedTab = (() => { try { return localStorage.getItem("lfh_editor_tab"); } catch { return null; } })();
@@ -132,7 +132,7 @@ const fold = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toL
 // wants the editor to read in ₹ (2026-06-10). The rate mirrors CURRENCIES in
 // the menu app's lib/format.ts — update both together when rates move.
 const INR_RATE = 1; // prices are stored in rupees now (migration 043) — no conversion
-const inr = (usd) => "₹" + Math.round((parseFloat(usd) || 0) * INR_RATE).toLocaleString("en-US");
+const inr = (usd) => "₹" + Math.round((parseFloat(usd) || 0) * INR_RATE).toLocaleString("en-IN");
 // el: turn a string of HTML into a real, clickable page element we can insert.
 const el = (html) => {
   const t = document.createElement("template");
@@ -450,7 +450,7 @@ function renderList() {
         <div class="thumb">${icon}</div>
         <div class="meta"><b>${label}</b><small>${sub}</small></div>
       </li>`);
-      li.onclick = () => { dashRange = key; renderList(); loadDashboard(); };
+      li.onclick = () => { dashRange = key; try { localStorage.setItem("lfh_dash_range", key); } catch {} renderList(); loadDashboard(); };
       return li;
     };
     ul.appendChild(mk("today", '<i class="fas fa-bolt"></i>', "Today", "live snapshot"));
@@ -1381,16 +1381,21 @@ function dishNoTag(title) {
 // separate order rows still exist underneath as the record. Per-order accept/serve/
 // pay become session-level (they reuse the table-wide helpers).
 // Financial-year string for invoice numbers, e.g. "2025-26" (FY starts April).
-function financialYear() {
-  const d = new Date(); const y = d.getFullYear();
-  const start = d.getMonth() >= 3 ? y : y - 1;
+function financialYear(when) {
+  // FY of the INVOICE's OWN date, not "today" — reprinting a March invoice after 1 April must
+  // keep its issued year. Falls back to now when no/invalid date is passed (legacy callers).
+  const d = when ? new Date(when) : new Date();
+  const base = isNaN(d.getTime()) ? new Date() : d;
+  const y = base.getFullYear();
+  const start = base.getMonth() >= 3 ? y : y - 1;
   return `${start}-${String(start + 1).slice(2)}`;
 }
 // Display an invoice number: <prefix>/<FY>/<6-digit>, e.g. LFH/2025-26/000042.
-function invFmt(no) {
+// `when` = the invoice's issue date (invoice_at) so the FY segment is fixed to issue time.
+function invFmt(no, when) {
   if (no == null) return "";
   const pfx = (state.data.settings || {}).invoice_prefix || "INV";
-  return `${pfx}/${financialYear()}/${String(no).padStart(6, "0")}`;
+  return `${pfx}/${financialYear(when)}/${String(no).padStart(6, "0")}`;
 }
 // Single source of truth for a bill's money — discount comes off BEFORE tax (GST is
 // charged on the taxable amount). All inputs are DB values (server-priced items,
@@ -1534,7 +1539,7 @@ function mergedOrderCardHtml(g) {
       <b>${tnum ? "Table " + esc(tnum) : "Walk-in / no table"}</b>
       <span class="ord-pill ${cls}">${label}</span>
       <span class="pay-pill ${paid ? "paid" : "pending"}">${paid ? "💳 Paid" : "⏳ Unpaid"}</span>
-      ${invoiced ? `<span class="inv-chip" title="Tax invoice">${esc(invFmt(invNo))}</span>` : (sid && invVoided ? `<span class="inv-chip voided">invoice voided</span>` : "")}
+      ${invoiced ? `<span class="inv-chip" title="Tax invoice">${esc(invFmt(invNo, o0.invoice_at))}</span>` : (sid && invVoided ? `<span class="inv-chip voided">invoice voided</span>` : "")}
     </div>
     <small class="ord-when">${esc(when)}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
     <div class="ord-items">${items}</div>
@@ -1727,7 +1732,7 @@ function ordersPreviousHtml(previous, kind = "previous") {
     const paid = liveOrders.length > 0 && liveOrders.every((o) => o.payment_status === "paid");
     return {
       key: o0.session_id || ("solo:" + o0.id), table: (o0.table_number || "").trim(),
-      billNo: o0.bill_no, invNo: o0.invoice_no, voided: !!o0.invoice_voided,
+      billNo: o0.bill_no, invNo: o0.invoice_no, invoiceAt: o0.invoice_at, voided: !!o0.invoice_voided,
       customer: o0.customer_name || "", total, paid, ts: new Date(o0.created_at || 0).getTime(),
       when: o0.created_at ? new Date(o0.created_at).toLocaleString() : "",
       cancelled: g.every((o) => o.status === "cancelled"),
@@ -1735,7 +1740,7 @@ function ordersPreviousHtml(previous, kind = "previous") {
   });
   const q = (state.billSearch || "").toLowerCase().trim();
   const stype = state.billSearchType || "date", sort = state.billSort || "new";
-  const fieldOf = (b) => stype === "inv" ? String(invFmt(b.invNo)).toLowerCase()
+  const fieldOf = (b) => stype === "inv" ? String(invFmt(b.invNo, b.invoiceAt)).toLowerCase()
     : stype === "bill" ? String(b.billNo ?? "")
     : stype === "table" ? String(b.table)
     : stype === "cust" ? b.customer.toLowerCase()
@@ -1783,7 +1788,7 @@ function billCardHtml(b) {
     <div class="bill-cust">${esc(b.customer || "—")}</div>
     <div class="bill-amt">${inr(b.total)}</div>
     <div class="bill-when">${esc(b.when)}</div>
-    ${b.invNo != null ? `<div class="bill-inv">${esc(invFmt(b.invNo))}${b.voided ? " · voided" : ""}</div>` : ""}
+    ${b.invNo != null ? `<div class="bill-inv">${esc(invFmt(b.invNo, b.invoiceAt))}${b.voided ? " · voided" : ""}</div>` : ""}
     <button type="button" class="bill-print" data-bill-print="${esc(b.key)}" title="Print this bill" aria-label="Print bill" style="position:absolute;bottom:9px;right:11px;background:none;border:0;cursor:pointer;font-size:16px;opacity:.5;padding:3px;line-height:1">🖨</button>
   </div>`;
 }
@@ -1876,6 +1881,7 @@ function openBillModal(key) {
   requestAnimationFrame(() => wrap.classList.add("show"));
   const onEsc = (e) => { if (e.key === "Escape") close(); };
   const close = () => { wrap.classList.remove("show"); document.removeEventListener("keydown", onEsc); setTimeout(() => wrap.remove(), 180); };
+  wrap.__lfhClose = close; // hardware Back → our close() (also removes the Esc listener), not a bare remove() that leaks it
   document.addEventListener("keydown", onEsc);
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   wrap.querySelector("[data-bm-close]").onclick = close;
@@ -2253,7 +2259,7 @@ async function resolveCall(id) {
 // ---------- Dashboard tab: the restaurant's numbers as graphs ----------
 let dashCharts = []; // live Chart.js instances (destroyed before each redraw)
 
-let dashRange = "today"; // today | 30d | year — Today leads (the live summary box); 30d/year still a click away
+let dashRange = (() => { try { const v = localStorage.getItem("lfh_dash_range"); return ["today", "30d", "year"].includes(v) ? v : "today"; } catch { return "today"; } })(); // today | 30d | year — remembered across reloads
 // The Today summary box: a live snapshot across every channel (dine-in tables +
 // Zomato/Swiggy/takeaway live orders) and today's combined totals. Built from the
 // `live` + `platformToday` fields the /stats endpoint adds.
@@ -2724,7 +2730,7 @@ function printBill(t, sess, os) {
   // values (e.g. "Takeaway", "T5") are left exactly as entered.
   const tnum = (t || "").toString().trim();
   const tableDisp = /^\d+$/.test(tnum) ? "T" + tnum : esc(tnum || "—");
-  const invNo = sess && sess.invoice_no != null ? esc(invFmt(sess.invoice_no)) : "";
+  const invNo = sess && sess.invoice_no != null ? esc(invFmt(sess.invoice_no, sess.invoice_at)) : "";
   const billNo = sess && sess.bill_no != null ? esc(sess.bill_no) : "";
   const now = new Date();
   const pct = Math.round(m.rate * 10000) / 100; // e.g. 5
@@ -3650,12 +3656,12 @@ function logDetailDialog(title, rows) {
     </div>`;
   document.body.appendChild(wrap);
   requestAnimationFrame(() => wrap.classList.add("show"));
-  const close = () => { wrap.classList.remove("show"); setTimeout(() => wrap.remove(), 200); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  const close = () => { wrap.classList.remove("show"); document.removeEventListener("keydown", onKey); setTimeout(() => wrap.remove(), 200); };
+  wrap.__lfhClose = close; // hardware Back closes via our close() (removes the keydown listener) — no leaked listener
   wrap.querySelector(".confirm-ok").onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
-  document.addEventListener("keydown", function k(e) {
-    if (e.key === "Escape") { close(); document.removeEventListener("keydown", k); }
-  });
+  document.addEventListener("keydown", onKey);
 }
 
 // Fetch the whole board in one call. `fromPoll` = silent (no error toast, and don't
@@ -3977,9 +3983,11 @@ async function closeAllTables() {
     const closed = (res && res.closed) || 0, skipped = (res && res.skipped) || 0;
     const closedTables = (res && res.closed_tables) || [];
     if (!closed && skipped) return toast(`Couldn't close ${skipped} table${skipped > 1 ? "s" : ""} — they owe money or still have food cooking.`, "err");
-    // Gmail-style 8s UNDO: reopen exactly the tables we closed (fresh sessions).
+    // Gmail-style 8s action: REOPEN the tables we just closed (as fresh, empty tables). Close-all only
+    // ever closes fully-SETTLED tables, so there's no party or unpaid bill left to restore — hence
+    // "Reopen", not "Undo" (which wrongly implied the old party/orders would come back). (B26)
     toast(skipped ? `Closed ${closed}, left ${skipped} (unpaid/cooking)` : `Closed ${closed} table${closed > 1 ? "s" : ""}`, skipped ? "err" : "ok", closedTables.length ? {
-      label: "UNDO",
+      label: "Reopen",
       fn: async () => {
         await Promise.allSettled(closedTables.map((tb) => api("POST", "/sessions/open", { table: tb })));
         await loadSessions();
@@ -5615,7 +5623,7 @@ function openShiftPicker(t, sess) {
 // Both modes just compute the same ₹ discount the server has always accepted — the API
 // call at the bottom (POST .../discount {amount, note}) is byte-identical to before, so
 // the clamp-to-bill-total safety net and the note field behave exactly as they did.
-function openDiscountModal(order, rerender, billTotal, bm) {
+function openDiscountModal(order, rerender, billTotal, bm, wholeBill) {
   document.querySelector(".disc-overlay")?.remove();
   const round2 = (n) => Math.round(n * 100) / 100;
   const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
@@ -5628,7 +5636,10 @@ function openDiscountModal(order, rerender, billTotal, bm) {
   // billTotal is kept only for legacy callers that don't pass bm).
   const rate = bm ? bm.rate : taxModel(state.data.settings).rate;
   const subtotal = bm ? bm.subtotal : ((Number(order.total) || 0) / (1 + rate) + current);
-  const otherDisc = bm ? Math.max(0, bm.disc - current) : 0;
+  // wholeBill (manager bill discount): the amount passed IS the whole-bill discount (stored on the
+  // session, split server-side), so there is no "other orders' discount" to preserve — discount the
+  // full pre-tax bill. Legacy per-order callers keep the old "subtract other orders" behaviour.
+  const otherDisc = wholeBill ? 0 : (bm ? Math.max(0, bm.disc - current) : 0);
   const base = Math.max(0, round2(subtotal - otherDisc)); // pre-tax base THIS modal discounts
   const payFor = (d) => round2(Math.max(0, base - clamp(d, 0, base)) * (1 + rate)); // what the customer pays
   const total = payFor(0); // the table total BEFORE this order's discount (shown as "Bill total")
@@ -5777,7 +5788,14 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   root.querySelectorAll("[data-disc]").forEach((b) => (b.onclick = () => {
     const order = (os || []).find((o) => o.id === b.dataset.disc) || { id: b.dataset.disc, total: parseFloat(b.dataset.discMax) || 0, discount: parseFloat(b.dataset.discCur) || 0 };
     const bm = (os && os.length) ? billMath(os) : null;
-    openDiscountModal(order, rerender, bm ? bm.total : (Number(order.total) || 0), bm);
+    // The manager discount is a WHOLE-BILL discount: the server stores it on the session and splits
+    // it across the orders (so it can't shrink when the bill is marked paid). Show the SESSION's
+    // total discount as "current" — NOT this one order's split share, which would mis-show the amount.
+    const wholeBill = !!sess;
+    const discOrder = wholeBill
+      ? { ...order, discount: Number(sess.discount) || 0, discount_note: sess.discount_note || "" }
+      : order;
+    openDiscountModal(discOrder, rerender, bm ? bm.total : (Number(order.total) || 0), bm, wholeBill);
   }));
   const auto = root.querySelector("#sxAuto"); if (auto && sess) auto.onchange = () => setSessAutoApprove(sess.id, auto.checked);
   root.querySelectorAll("[data-mem-approve]").forEach((b) => (b.onclick = () => memberAction(b.dataset.memApprove, "approve")));
@@ -6714,9 +6732,9 @@ function startOrderWatch() {
       },
       menu: () => { if (Date.now() >= rtBootGraceUntil) loadAll(); }, // boot already loaded the menu
     }});
-    setInterval(() => { pollOrders(); loadPlatform(); }, 60000); // backup sync (also ages out handed-over platform tickets)
+    setInterval(() => { if (document.hidden) return; pollOrders(); loadPlatform(); }, 60000); // backup sync; skip on a hidden/backgrounded tab (realtime refetches on wake) so an idle tab stops costing egress (B18)
   } else {
-    setInterval(() => { pollOrders(); loadPlatform(); }, 2000); // fallback poll
+    setInterval(() => { if (document.hidden) return; pollOrders(); loadPlatform(); }, 2000); // fallback poll (realtime down); paused while hidden (B18)
   }
 }
 
@@ -7030,6 +7048,7 @@ const XRAY_TABS = [
   { tab: "dash", flag: "view_dashboard", label: "Dashboard" },
   { tab: "items", flag: "edit_menu", label: "Menu editor" },
   { tab: "ratings", flag: "view_ratings", label: "Guest ratings" },
+  { tab: "general", flag: "edit_settings", label: "Settings" },
 ];
 // Phase 2 (the ladder, 2026-07-06): permission-gated CONTROLS inside tabs. Matched by
 // CSS selector on every repaint (MutationObserver below), so a live-poll re-render can

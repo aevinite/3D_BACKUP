@@ -927,27 +927,33 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "discount") {
       if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
       if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
-      // .eq(restaurant_id, rid) on every by-id write: sb is service-role (RLS bypassed), so
-      // this is the only tenant boundary — a foreign order id can't be discounted/edited.
+      // .eq(restaurant_id, rid) is the only tenant boundary (sb is service-role, RLS bypassed) —
+      // a foreign order id can't be discounted.
       const cur = must(await sb.from("orders").select("subtotal, session_id").eq("id", b).eq("restaurant_id", rid).single());
-      // The stored discount is a PRE-TAX amount (billMath subtracts it from the SUBTOTAL, then
-      // adds tax). So the cap must be the TABLE's pre-tax subtotal, not the tax-INCLUSIVE total
-      // (capping at `total` let a discount exceed the food value and drive the taxable base
-      // negative). Also subtract any discount already sitting on the table's OTHER orders, so
-      // the combined bill discount can't exceed the food total — matches the client modal.
-      let billCap = Number(cur.subtotal) || 0;
-      if (cur.session_id) {
-        const sessOrders = must(await sb.from("orders").select("id, subtotal, discount, status").eq("restaurant_id", rid).eq("session_id", cur.session_id));
-        const live = sessOrders.filter((o: { status: string }) => o.status !== "cancelled");
-        const subTotal = live.reduce((a: number, o: { subtotal: number | null }) => a + (Number(o.subtotal) || 0), 0);
-        const otherDisc = live.filter((o: { id: string }) => o.id !== b).reduce((a: number, o: { discount: number | null }) => a + (Number(o.discount) || 0), 0);
-        billCap = Math.max(0, subTotal - otherDisc);
-      }
       const raw = Number(body && body.amount);
-      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), billCap) : 0;
       const note = String((body && body.note) || "").slice(0, 200) || null;
-      // return=minimal: client re-fetches the board; no need to pull the full order row back.
+      // WHOLE-BILL (session) discount path — the FIX for the "discount shrinks when marked paid"
+      // bug (2026-07-08). A table's discount is conceptually on the whole BILL, but the manager
+      // panel used to write the entire amount onto ONE order (the first non-cancelled one). When
+      // that order's own subtotal was smaller than the discount, mig 148's re-price trigger clamped
+      // the discount down to that order's subtotal on the next subtotal/payment change (e.g. Mark
+      // paid) — so the recorded + printed total jumped ABOVE what the guest actually paid. Routing
+      // through lfh_staff_bill_discount (mig 143 — the SAME path the tablet uses) stores the amount
+      // on the SESSION and splits it proportionally across the unpaid orders, each clamped to its
+      // OWN subtotal. That is clamp-safe, partial-payment safe, and mutually exclusive with a
+      // tablet-entered bill discount (so a manager discount can no longer be silently reverted — B5).
+      if (cur.session_id) {
+        const amount = Number.isFinite(raw) ? Math.max(raw, 0) : 0;
+        const res = must(await sb.rpc("lfh_staff_bill_discount", { p_session: cur.session_id, p_amount: amount, p_note: note }));
+        await logAction("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `bill discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
+        return ok({ ok: true, discount: (res && (res as { discount?: number }).discount) ?? amount });
+      }
+      // Legacy standalone order (no table session): keep the per-order write, capped at its OWN
+      // pre-tax subtotal (a lone order can't carry more discount than its food value).
+      const billCap = Number(cur.subtotal) || 0;
+      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), billCap) : 0;
       must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid));
+      await logAction("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
       return ok({ ok: true });
     }
     // orders/:id/allergies — staff edit of the order-wide "avoid" list (add a
@@ -1148,6 +1154,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // The RPC refuses to touch a PAID bill. Returns { ok, items_left, total, ... }.
     if (a === "items" && c === "delete") {
       if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
+      // Confirm the dish belongs to THIS restaurant before the RPC (which looks it up by id alone) —
+      // the same tenant boundary the sibling money endpoints enforce. (B15 scoping consistency.)
+      if (!(await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That dish was already removed.", 404);
       const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) {
@@ -1172,6 +1181,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
       const qty = Math.round(Number(body?.qty));
       if (!Number.isFinite(qty) || qty < 1) return err("invalid quantity");
+      if (!(await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That dish was already removed.", 404); // B15 scoping
       const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -1182,6 +1192,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // items/:id/note — STAFF EDIT: change ONE dish's note on a PLACED order.
     if (a === "items" && c === "note") {
+      if (!(await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That dish was already removed.", 404); // B15 scoping
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -1233,6 +1244,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
       const dishId = String(body?.dishId || body?.id || "").trim();
       if (!dishId) return err("dish required");
+      if (!(await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That order was not found.", 404); // B15 scoping
       const line = {
         id: dishId,
         qty: Math.max(1, Math.round(Number(body?.qty) || 1)),
@@ -1274,10 +1286,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "requests" && c === "resolve") {
       const status = body && body.status;
       if (!["approved", "denied"].includes(status)) return err("invalid status");
-      const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).eq("restaurant_id", rid).select())[0];
+      // Only resolve a STILL-PENDING request (B22): a double-tap or a re-poll re-approve then updates
+      // 0 rows (reqRow undefined) and returns cleanly, instead of re-running the open-session insert.
+      const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).eq("restaurant_id", rid).eq("status", "pending").select())[0];
       if (status === "approved" && reqRow && reqRow.type === "open") {
         const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).eq("restaurant_id", rid).neq("status", "closed").limit(1));
-        if (!existing.length) must(await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }));
+        if (!existing.length) {
+          // A concurrent open (two waiters, or a waiter tap-open racing the guest's own open) can both
+          // pass the check above; the one-open-session-per-table unique index (mig 082) rejects the
+          // loser. Treat that as success ("already open") rather than a raw duplicate-key 500. (B22)
+          const ins = await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid });
+          if (ins.error && !/duplicate|unique/i.test(ins.error.message)) throw new Error(ins.error.message);
+        }
       }
       return ok(reqRow || null);
     }
@@ -1431,6 +1451,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // isCreate (create vs edit) was resolved + stripped above, shared across kinds.
         const slugify = (s: string) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
         if (!body.slug && body.title) body.slug = slugify(body.title);
+        // Price sanity (B7): the price column is read downstream as ::numeric, so a blank, negative,
+        // or multi-separator value ("", "12.5.5", "1,299") either sold the dish for ₹0 or CRASHED
+        // every guest order that included it. Validate + normalise to one clean number here. Only
+        // when a price is actually being set (a tag-only edit omits it, so partial saves still work).
+        if ("price" in body) {
+          const cleaned = String(body.price ?? "").replace(/[^0-9.]/g, "");
+          const n = Number(cleaned);
+          if (cleaned === "" || !Number.isFinite(n) || n < 0 || (cleaned.match(/\./g) || []).length > 1) {
+            return err("Enter a valid price — a number like 1299 or 129.99.", 400);
+          }
+          body.price = String(Math.round(n * 100) / 100);
+        }
         // menu_items.id is the GLOBAL primary key. A bare slug-as-id would let a save
         // silently OVERWRITE another restaurant's (or this restaurant's own existing)
         // dish that happens to share the name. So we never trust a client-supplied id
@@ -1460,7 +1492,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             body.id = rid === DEFAULT_RESTAURANT_ID ? base : `${base}__${rid.slice(0, 8)}`;
           }
           const owner = (await sb.from("menu_items").select("restaurant_id").eq("id", String(body.id)).maybeSingle()).data as { restaurant_id?: string } | null;
-          if (owner && owner.restaurant_id !== rid) return err("That dish belongs to another restaurant", 409);
+          // No such dish → it was deleted (another device removed it while this one had it open, or a
+          // tag-toggle raced a delete). Refuse with a friendly message instead of letting the upsert
+          // INSERT a partial row (missing title/slug/price → a raw NOT NULL 500). (B21)
+          if (!owner) return err("That dish was removed — reload to see the current menu.", 404);
+          if (owner.restaurant_id !== rid) return err("That dish belongs to another restaurant", 409);
         }
       }
       // Stamp ownership + match the per-restaurant unique key: categories/filters are
@@ -1474,6 +1510,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Any of items/categories/filters/settings changes the SHARED guest menu →
       // bust this restaurant's cached bundle so guests see it within seconds.
       bustMenuCache(rid);
+      // Record menu changes in the operation log (B25) — dish/category/tag creates + edits now leave a
+      // "who changed the menu, and when" trail, like orders/bans/payments/discounts already do.
+      if (a === "items" || a === "categories" || a === "filters") {
+        const kind = a === "items" ? "dish" : a === "categories" ? "category" : "tag";
+        const label = String(body.title || (body.name && (body.name.en || body.name)) || body.slug || (data[0] && data[0].id) || "").slice(0, 80);
+        await logAction("manager", isCreate ? "menu_create" : "menu_edit", { restaurant_id: rid, detail: `${isCreate ? "added" : "edited"} ${kind}: ${label}`, device_id: dev });
+      }
       return ok(data[0]);
     }
 
