@@ -336,13 +336,16 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
   // Save only the fields that changed. Role change logs the user out, so confirm it.
   async function save() {
     setMErr(""); setOk("");
-    if (form.role !== user.role && !confirm(`Change ${user.name || user.username} to ${ROLE_LABEL[form.role]}? They'll be logged out.`)) return;
+    // A role change logs the user out, so confirm it — but cancelling must only skip the
+    // ROLE change, not throw away the name/phone/access edits too (audit 2026-07-08).
+    let doRole = form.role !== user.role;
+    if (doRole && !confirm(`Change ${user.name || user.username} to ${ROLE_LABEL[form.role]}? They'll be logged out.`)) doRole = false;
     setSaving(true);
     try {
       if (form.name !== (user.name || "") || form.phone !== (user.phone || "")) {
         await apiPatch({ action: "edit", name: form.name, phone: form.phone });
       }
-      if (form.role !== user.role) await apiPatch({ action: "set_role", role: form.role });
+      if (doRole) await apiPatch({ action: "set_role", role: form.role });
       if (form.active !== user.active) await apiPatch({ action: "set_active", active: form.active });
       if (form.can_self_reset !== user.can_self_reset || form.can_self_set_pin !== user.can_self_set_pin) {
         await apiPatch({ action: "set_access", can_self_reset: form.can_self_reset, can_self_set_pin: form.can_self_set_pin });

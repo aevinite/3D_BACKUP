@@ -47,7 +47,8 @@ export async function GET(req: NextRequest) {
       // editing/deleting an owner from this page was a side door that could orphan a
       // restaurant's ownership (admin audit 2026-07-06).
       .neq("role", "owner")
-      .order("created_at", { ascending: true }),
+      .order("created_at", { ascending: true })
+      .limit(2000), // safety cap so this never becomes an unbounded whole-table read; true per-restaurant server scoping/pagination is a follow-up (audit 2026-07-08)
     sb.from("restaurants").select("id, name"),
   ]);
   if (usersQ.error) return bad(usersQ.error.message, 500);
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest) {
   };
   const { data, error } = await sb.from("staff_users").insert(row).select("id, username, role, name").single();
   if (error) return bad(error.message, 500);
-  await logAction("admin", "user_create", { actor: "admin", detail: `created ${role} "${display}" · id ${data!.id}` });
+  await logAction("admin", "user_create", { actor: "admin", restaurant_id: restaurantId, detail: `created ${role} "${display}" · id ${data!.id}` });
   // Return the password ONCE so the admin can hand it over; it's only stored hashed.
   return ok({ ok: true, id: data!.id, username: key, name: display, role, password });
 }
@@ -111,14 +112,14 @@ export async function PATCH(req: NextRequest) {
     if (password.length < 6) return bad("Password must be at least 6 characters.");
     // Bump token_version → kills all their existing logins immediately.
     await sb.from("staff_users").update({ password_hash: await hashSecret(password), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);
-    await logAction("admin", "user_reset_password", { actor: "admin", detail: `reset password for "${u.username}" · id ${id}` });
+    await logAction("admin", "user_reset_password", { actor: "admin", restaurant_id: u.restaurant_id, detail: `reset password for "${u.username}" · id ${id}` });
     return ok({ ok: true, password });
   }
   if (action === "set_active") {
     const active = !!body?.active;
     // Disabling someone also invalidates their cookies (token_version bump).
     await sb.from("staff_users").update({ active, token_version: active ? u.token_version : (u.token_version || 0) + 1 }).eq("id", id);
-    await logAction("admin", active ? "user_enable" : "user_disable", { actor: "admin", detail: `${active ? "enabled" : "disabled"} "${u.username}" · id ${id}` });
+    await logAction("admin", active ? "user_enable" : "user_disable", { actor: "admin", restaurant_id: u.restaurant_id, detail: `${active ? "enabled" : "disabled"} "${u.username}" · id ${id}` });
     return ok({ ok: true });
   }
   if (action === "set_role") {
@@ -127,7 +128,7 @@ export async function PATCH(req: NextRequest) {
     // Role is part of the cookie signature, so this invalidates old cookies; bump
     // token_version too to be doubly sure.
     await sb.from("staff_users").update({ role, token_version: (u.token_version || 0) + 1 }).eq("id", id);
-    await logAction("admin", "user_set_role", { actor: "admin", detail: `set "${u.username}" → ${role} · id ${id}` });
+    await logAction("admin", "user_set_role", { actor: "admin", restaurant_id: u.restaurant_id, detail: `set "${u.username}" → ${role} · id ${id}` });
     return ok({ ok: true });
   }
   if (action === "set_access") {
@@ -140,7 +141,7 @@ export async function PATCH(req: NextRequest) {
     if (body?.can_self_set_pin !== undefined) { patch.can_self_set_pin = !!body.can_self_set_pin; notes.push(`${body.can_self_set_pin ? "granted" : "revoked"} self PIN-change`); }
     if (!Object.keys(patch).length) return bad("Nothing to change.");
     await sb.from("staff_users").update(patch).eq("id", id);
-    await logAction("admin", "user_set_access", { actor: "admin", detail: `${notes.join(" & ")} for "${u.username}" · id ${id}` });
+    await logAction("admin", "user_set_access", { actor: "admin", restaurant_id: u.restaurant_id, detail: `${notes.join(" & ")} for "${u.username}" · id ${id}` });
     return ok({ ok: true });
   }
   if (action === "set_pin") {
@@ -148,13 +149,13 @@ export async function PATCH(req: NextRequest) {
     // it). Stored hashed, never returned. clear=true removes the PIN.
     if (body?.clear === true) {
       await sb.from("staff_users").update({ pin_hash: null }).eq("id", id);
-      await logAction("admin", "user_set_pin", { actor: "admin", detail: `cleared PIN for "${u.username}" · id ${id}` });
+      await logAction("admin", "user_set_pin", { actor: "admin", restaurant_id: u.restaurant_id, detail: `cleared PIN for "${u.username}" · id ${id}` });
       return ok({ ok: true });
     }
     const pin = String(body?.pin || "").trim();
     if (!/^\d{4,8}$/.test(pin)) return bad("PIN must be 4–8 digits.");
     await sb.from("staff_users").update({ pin_hash: await hashSecret(pin) }).eq("id", id);
-    await logAction("admin", "user_set_pin", { actor: "admin", detail: `${u.pin_hash ? "changed" : "set"} PIN for "${u.username}" · id ${id}` });
+    await logAction("admin", "user_set_pin", { actor: "admin", restaurant_id: u.restaurant_id, detail: `${u.pin_hash ? "changed" : "set"} PIN for "${u.username}" · id ${id}` });
     return ok({ ok: true });
   }
   if (action === "edit") {
@@ -188,7 +189,7 @@ export async function DELETE(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!id) return bad("Missing user id.");
-  const u = (await sb.from("staff_users").select("username, role").eq("id", id).limit(1)).data?.[0];
+  const u = (await sb.from("staff_users").select("username, role, restaurant_id").eq("id", id).limit(1)).data?.[0];
   // 404 on an unknown id instead of silently "succeeding" (deleting nothing but logging a
   // bogus 'deleted "?"' row and returning ok — audit 2026-07-07).
   if (!u) return bad("User not found.", 404);
@@ -196,6 +197,6 @@ export async function DELETE(req: NextRequest) {
   // co-owner handoff and orphan the restaurant. Owners page only.
   if (u.role === "owner") return bad("Owners are managed on the Owners page, not here.", 403);
   await sb.from("staff_users").delete().eq("id", id);
-  await logAction("admin", "user_delete", { actor: "admin", detail: `deleted "${u?.username || "?"}" · id ${id}` });
+  await logAction("admin", "user_delete", { actor: "admin", restaurant_id: u.restaurant_id, detail: `deleted "${u?.username || "?"}" · id ${id}` });
   return ok({ ok: true });
 }

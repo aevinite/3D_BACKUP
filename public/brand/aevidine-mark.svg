@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Aevidine">
+  <defs>
+    <linearGradient id="ae-tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b2130"/>
+      <stop offset="1" stop-color="#0d1017"/>
+    </linearGradient>
+    <linearGradient id="ae-gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe6a8"/>
+      <stop offset=".45" stop-color="#e8a13c"/>
+      <stop offset="1" stop-color="#b9741f"/>
+    </linearGradient>
+    <linearGradient id="ae-gold-lite" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff2cf"/>
+      <stop offset="1" stop-color="#f0b856"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="46" height="46" rx="12" fill="url(#ae-tile)" stroke="#2a3446" stroke-width="1"/>
+  <polygon points="16,13 32,13 41,21 24,39 7,21" fill="url(#ae-gold)"/>
+  <polygon points="16,13 32,13 28,21 20,21" fill="url(#ae-gold-lite)"/>
+  <g stroke="#7a4f16" stroke-width="1" stroke-opacity=".55" fill="none" stroke-linejoin="round">
+    <path d="M7,21 H41"/>
+    <path d="M16,13 L20,21 M32,13 L28,21"/>
+    <path d="M20,21 L24,39 M28,21 L24,39"/>
+    <path d="M7,21 L20,21 M41,21 L28,21"/>
+  </g>
+</svg>

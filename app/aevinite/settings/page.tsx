@@ -11,6 +11,7 @@ export default function AdminSettings() {
   const [ret, setRet] = useState<{ oplog_retention_days: number; custlog_retention_days: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [maintMsg, setMaintMsg] = useState(""); // maintenance-toggle feedback (audit 2026-07-08)
   // Load-error flags so a failed fetch shows a Retry instead of a button stuck on "…"
   // / dropdowns disabled forever (bug #7, 2026-07-06).
   const [maintErr, setMaintErr] = useState(false);
@@ -34,11 +35,13 @@ export default function AdminSettings() {
       ? "Put the guest menu into maintenance (“we’ll be right back”)? Guests can’t browse or order until you turn it back on."
       : "Bring the guest menu back online?");
     if (!ok) return;
-    setBusy(true);
+    setBusy(true); setMaintMsg("");
     try {
-      await fetch("/api/admin/maintenance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: turningOn }) });
+      const r = await fetch("/api/admin/maintenance", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: turningOn }) });
+      if (!r.ok) setMaintMsg("Couldn't change maintenance just now — please try again.");
       await loadMaint();
-    } finally { setBusy(false); }
+    } catch { setMaintMsg("Couldn't change maintenance — network error."); await loadMaint(); }
+    finally { setBusy(false); }
   };
 
   const saveRet = async (which: "oplog_retention_days" | "custlog_retention_days", val: number) => {
@@ -68,6 +71,7 @@ export default function AdminSettings() {
             </button>
           )}
           {maint && !maintErr && <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>⚠ The flagship menu is currently offline.</p>}
+          {maintMsg && <p style={{ fontSize: 12, marginTop: 10, color: "var(--adm-danger)" }}>{maintMsg}</p>}
         </div>
 
         <div className="adm-card">
@@ -79,12 +83,14 @@ export default function AdminSettings() {
               <span>Operations log</span>
               <select value={ret?.oplog_retention_days ?? 90} disabled={!ret} onChange={(e) => saveRet("oplog_retention_days", Number(e.target.value))}>
                 {RET_OPTS.map((o) => <option key={o.d} value={o.d}>{o.label}</option>)}
+                {ret && !RET_OPTS.some((o) => o.d === ret.oplog_retention_days) && <option value={ret.oplog_retention_days}>{ret.oplog_retention_days} days</option>}
               </select>
             </label>
             <label className="adm-ret" style={{ justifyContent: "space-between" }}>
               <span>Customer log</span>
               <select value={ret?.custlog_retention_days ?? 90} disabled={!ret} onChange={(e) => saveRet("custlog_retention_days", Number(e.target.value))}>
                 {RET_OPTS.map((o) => <option key={o.d} value={o.d}>{o.label}</option>)}
+                {ret && !RET_OPTS.some((o) => o.d === ret.custlog_retention_days) && <option value={ret.custlog_retention_days}>{ret.custlog_retention_days} days</option>}
               </select>
             </label>
           </div>

@@ -23,7 +23,7 @@ function previewParts(text: string, textColor: string, accentColor: string) {
 }
 const stripMarkers = (s: string) => stripBrandMarkers(s);
 
-type Restaurant = { id: string; slug: string; name: string; active: boolean; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null };
+type Restaurant = { id: string; slug: string; name: string; active: boolean; createdAt: string | null; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null };
 type Owner = { id: string; name: string };
 // Activity health per restaurant (from /api/admin/restaurants/health, mig 146). Signals
 // only, no money — the admin panel never shows earnings.
@@ -32,7 +32,7 @@ type Health = { last_order_at: string | null; orders_24h: number; open_issues: n
 // Turn the raw signals into a one-word status + colour. "Healthy" = busy now (staff online
 // or an order in the last 24h); "Quiet" = ordered within a week; "Dormant" = nothing for 7+
 // days (or never); "Suspended" = the restaurant is turned off.
-function healthStatus(active: boolean, h: Health | undefined): { label: string; color: string; note: string } {
+function healthStatus(active: boolean, h: Health | undefined, createdAt?: string | null): { label: string; color: string; note: string } {
   if (!active) return { label: "Suspended", color: "var(--muted)", note: "turned off" };
   if (!h) return { label: "—", color: "var(--muted)", note: "" };
   if (h.staff_online > 0 || h.orders_24h > 0) {
@@ -44,7 +44,13 @@ function healthStatus(active: boolean, h: Health | undefined): { label: string; 
     const days = Math.floor(last / 86400000);
     return { label: "Quiet", color: "#d4a574", note: days <= 0 ? "ordered today" : `last order ${days}d ago` };
   }
-  return { label: "Dormant", color: "var(--adm-danger)", note: h.last_order_at ? "no orders in 7+ days" : "no orders yet" };
+  // Never ordered but only just set up → "New" (not a problem — don't alarm). Neutral blue.
+  const ageMs = createdAt ? Date.now() - new Date(createdAt).getTime() : Infinity;
+  if (!h.last_order_at && ageMs <= 14 * 86400000) {
+    return { label: "New", color: "#60a5fa", note: "just added — no orders yet" };
+  }
+  // Long-quiet is INFORMATIONAL, not an emergency — muted grey, never danger-red (audit 2026-07-08).
+  return { label: "Dormant", color: "var(--muted)", note: h.last_order_at ? "no orders in 7+ days" : "no orders yet" };
 }
 
 // The seeded default restaurant (#1) — can never be deleted (matches the API + SQL guards).
@@ -72,7 +78,7 @@ export default function AdminRestaurants() {
   const [list, setList] = useState<Restaurant[] | null>(null);
   const [owners, setOwners] = useState<Owner[]>([]);
   const [health, setHealth] = useState<Record<string, Health>>({});
-  const [healthFilter, setHealthFilter] = useState<"all" | "Healthy" | "Quiet" | "Dormant" | "Suspended">("all");
+  const [healthFilter, setHealthFilter] = useState<"all" | "Healthy" | "Quiet" | "New" | "Dormant" | "Suspended">("all");
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Restaurant | null>(null);
   // ?focus=<slug> (set by the Command page's Manage→ + the topbar quick-switcher):
@@ -124,19 +130,19 @@ export default function AdminRestaurants() {
   if (selected) {
     // Re-read the freshest copy from the list so the owner shows correctly after a round-trip.
     const fresh = (list || []).find((r) => r.id === selected.id) || selected;
-    return <RestaurantDetail restaurant={fresh} owners={owners} onBack={() => { setSelected(null); loadList(); }} onChanged={loadList} />;
+    return <RestaurantDetail key={fresh.id} restaurant={fresh} owners={owners} onBack={() => { setSelected(null); loadList(); }} onChanged={loadList} />;
   }
 
   const needle = q.trim().toLowerCase();
   const rows = (list || []).filter((r) => {
     if (needle && !(r.name.toLowerCase().includes(needle) || r.slug.toLowerCase().includes(needle))) return false;
-    if (healthFilter !== "all" && healthStatus(r.active, health[r.id]).label !== healthFilter) return false;
+    if (healthFilter !== "all" && healthStatus(r.active, health[r.id], r.createdAt).label !== healthFilter) return false;
     return true;
   });
   // Counts per health bucket for the filter chips (so the admin sees at a glance how many
   // restaurants are dormant, etc.).
   const healthCounts = (list || []).reduce((acc, r) => {
-    const l = healthStatus(r.active, health[r.id]).label;
+    const l = healthStatus(r.active, health[r.id], r.createdAt).label;
     acc[l] = (acc[l] || 0) + 1; return acc;
   }, {} as Record<string, number>);
 
@@ -173,7 +179,8 @@ export default function AdminRestaurants() {
             ["all", "All", "var(--text)"],
             ["Healthy", "Healthy", "var(--adm-ok)"],
             ["Quiet", "Quiet", "#d4a574"],
-            ["Dormant", "Dormant", "var(--adm-danger)"],
+            ["New", "New", "#60a5fa"],
+            ["Dormant", "Dormant", "var(--muted)"],
             ["Suspended", "Suspended", "var(--muted)"],
           ] as const).map(([key, lbl, col]) => {
             const on = healthFilter === key;
@@ -217,7 +224,7 @@ export default function AdminRestaurants() {
                 <span className="adm-muted" style={{ fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{r.slug}</span>
                 <span className="adm-muted" style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ownerName || "—"}</span>
                 {(() => {
-                  const hs = healthStatus(r.active, health[r.id]);
+                  const hs = healthStatus(r.active, health[r.id], r.createdAt);
                   return (
                     <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }} title={hs.note}>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: hs.color, flexShrink: 0 }} />
@@ -787,6 +794,10 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoBusy, setLogoBusy] = useState(false); const [logoMsg, setLogoMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null);
+  // Guard: only allow Save once the current branding actually LOADED. A failed load
+  // left every field blank; saving then wrote those blanks over the real values,
+  // wiping the restaurant's whole look (audit 2026-07-08). No successful load = no save.
+  const [brandLoaded, setBrandLoaded] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -799,6 +810,7 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
           const t = j.theme || {};
           setTheme({ dark: { ...(t.dark || {}) }, light: { ...(t.light || {}) } });
           setHero(j.hero_title || ""); setTagline(j.tagline || ""); setLogoText(j.logo_text || ""); setAccent(j.accent_color || ""); setLogoUrl(j.logo_url || null);
+          setBrandLoaded(true); // load succeeded → Save is now safe (can't blank a populated restaurant)
         } else {
           toast("Couldn't load branding — " + (j.error || "try reopening."), "err");
         }
@@ -842,6 +854,7 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
   })();
 
   const save = async () => {
+    if (!brandLoaded) { setMsg("Branding hasn't loaded yet — reopen this restaurant before saving (so a glitch can't blank it)."); return; }
     for (const m of ["dark", "light"] as const)
       for (const k of Object.keys(theme[m]))
         if (theme[m][k] && !HEX_RE.test(theme[m][k])) { setMsg(`${m} ${k}: "${theme[m][k]}" isn't a hex colour (e.g. #1a0f09).`); return; }
@@ -920,7 +933,8 @@ function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14 }}>
-        <button className="adm-btn primary" disabled={busy} onClick={save}><i className="fas fa-check" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Saving…" : "Save branding"}</button>
+        <button className="adm-btn primary" disabled={busy || !brandLoaded} onClick={save}><i className="fas fa-check" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Saving…" : "Save branding"}</button>
+        {!brandLoaded && <span className="adm-muted" style={{ fontSize: 12 }}>Couldn&apos;t load current branding — reopen this restaurant before saving.</span>}
         {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
       </div>
     </div>
@@ -1008,8 +1022,9 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
       // Shared act-as helper (components/admin/shared.tsx) — also used by the
       // Command page's quick-open buttons. Sets the act-as cookie, then opens the
       // panel in a new tab pinned to this restaurant via ?rid=.
-      await openRestaurantPanel(restaurant.id, path);
-      setViewing(true);
+      const w = await openRestaurantPanel(restaurant.id, path);
+      if (w) setViewing(true);
+      else setMsg("Couldn't open the panel tab — allow pop-ups for this site, then try again.");
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const stop = async () => {
@@ -1025,9 +1040,15 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
       <h2>View &amp; manage this restaurant</h2>
       <p className="hint">See <b>{restaurant.name}</b> exactly as its guests and staff do, and manage its people. Each opens in a new tab.</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        <a className="adm-btn primary" href={`/r/${restaurant.slug}/menu`} target="_blank" rel="noopener" title={`Open ${restaurant.name}'s guest menu`}>
-          <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />View guest menu
-        </a>
+        {restaurant.active ? (
+          <a className="adm-btn primary" href={`/r/${restaurant.slug}/menu`} target="_blank" rel="noopener" title={`Open ${restaurant.name}'s guest menu`}>
+            <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />View guest menu
+          </a>
+        ) : (
+          <button className="adm-btn" disabled title="The guest menu is offline while this restaurant is suspended — reactivate it below to view.">
+            <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />Guest menu offline
+          </button>
+        )}
         {panelOn("owner") && (
           <button className="adm-btn primary" disabled={busy} onClick={() => openPanel("/owner")} title={`Open ${restaurant.name}'s owner dashboard`}>
             <i className="fas fa-crown" style={{ marginRight: 7 }} aria-hidden="true" />Owner dashboard

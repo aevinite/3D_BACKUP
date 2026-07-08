@@ -18,11 +18,18 @@ const FEATURES: [string, string][] = [
 const MANAGER_POWERS: [string, string][] = [
   ["manage_staff", "Manage staff"], ["edit_menu", "Edit menu"], ["give_discounts", "Give discounts"],
   ["view_dashboard", "View dashboard"], ["void_bills", "Void bills"],
+  // Keep in sync with MANAGER_POWER_FLAGS in lib/ownerEntitlements.ts — these two were
+  // missing, so the admin couldn't gate them at all (audit 2026-07-08).
+  ["edit_settings", "Edit settings"], ["view_ratings", "See & handle ratings"],
 ];
 // Owner-panel SECTIONS the admin can remove per restaurant (mig 133). Off = the
 // section disappears from the real owner's panel (admin act-as still sees it, tinted).
 const OWNER_SECTIONS: [string, string][] = [
   ["reports", "Reports"], ["staff", "Staff & powers"], ["issues", "Feedback & issues"],
+  // Keep in sync with OWNER_SECTION_KEYS in lib/ownerEntitlements.ts (can't import it —
+  // that's a server module). These three were missing, so the admin couldn't turn them
+  // off for a restaurant even though the backend supports it (audit 2026-07-08).
+  ["ratings", "Ratings"], ["customers", "Customers list"], ["settings", "Settings (appearance & password)"],
 ];
 const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"]];
 const TRI: [string, string][] = [["off", "Off"], ["on", "On"], ["pin", "On · PIN"]];

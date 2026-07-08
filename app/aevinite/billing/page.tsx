@@ -13,12 +13,18 @@ type Row = {
   id: string; name: string; slug: string; active: boolean;
   plan: string | null; status: string; amount: number | null; currency: string; cycle: string;
   startedOn: string | null; nextDueOn: string | null; notes: string | null;
-  paidThisYear: number; lastPayment: { amount: number; paid_on: string } | null;
+  paidThisYear: number;
 };
 type Summary = { totalCollectedThisYear: number; statusCounts: Record<string, number>; dueSoon: number; overdue: number };
 type Payment = { id: string; restaurant_id: string; amount: number; paid_on: string; method: string | null; period_label: string | null; note: string | null; created_at: string };
 
-const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
+// Currency-aware money formatter — shows each restaurant's OWN currency instead of
+// always ₹ (audit 2026-07-08). Falls back to "CODE 12,000" for an unknown code.
+const money = (n: number, currency = "INR") => {
+  const c = (currency || "INR").toUpperCase();
+  try { return new Intl.NumberFormat("en-IN", { style: "currency", currency: c, maximumFractionDigits: 0 }).format(Number(n) || 0); }
+  catch { return `${c} ${Math.round(Number(n) || 0).toLocaleString("en-IN")}`; }
+};
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function AdminBilling() {
@@ -61,7 +67,7 @@ export default function AdminBilling() {
         <div className="adm-stat"><div className="k">Active</div><div className="v">{summary?.statusCounts.active || 0}</div></div>
         <div className="adm-stat"><div className="k">Trial</div><div className="v">{summary?.statusCounts.trial || 0}</div></div>
         <div className="adm-stat"><div className="k">Paused / cancelled</div><div className="v">{(summary?.statusCounts.paused || 0) + (summary?.statusCounts.cancelled || 0)}</div></div>
-        <div className="adm-stat"><div className="k">Collected this year</div><div className="v">{summary ? inr(summary.totalCollectedThisYear) : "…"}</div></div>
+        <div className="adm-stat"><div className="k">Collected this year</div><div className="v">{summary ? money(summary.totalCollectedThisYear, "INR") : "…"}</div></div>
         <div className="adm-stat"><div className="k">Due in 30 days</div><div className="v" style={summary && summary.overdue > 0 ? { color: "var(--adm-danger)" } : undefined}>{summary?.dueSoon ?? "…"}{summary && summary.overdue > 0 ? ` (${summary.overdue} overdue)` : ""}</div></div>
       </div>
 
@@ -92,9 +98,9 @@ export default function AdminBilling() {
                   </div>
                   <div className="adm-muted">{r.plan || "—"}</div>
                   <div><span className={`adx-billpill ${r.status}`}>{r.status}</span></div>
-                  <div className="adm-muted">{r.amount ? `${inr(r.amount)} / ${r.cycle === "monthly" ? "mo" : "yr"}` : "—"}</div>
+                  <div className="adm-muted">{r.amount ? `${money(r.amount, r.currency)} /${r.cycle === "monthly" ? "mo" : "yr"}` : "—"}</div>
                   <div className={overdue ? "adx-overdue" : undefined}>{r.nextDueOn || "—"}{overdue ? " · overdue" : ""}</div>
-                  <div style={{ textAlign: "right", fontWeight: 700 }}>{inr(r.paidThisYear)}</div>
+                  <div style={{ textAlign: "right", fontWeight: 700 }}>{money(r.paidThisYear, r.currency)}</div>
                   <div style={{ textAlign: "right" }}>
                     <button className="adm-btn" onClick={() => setEditing(r)}>Manage</button>
                   </div>
@@ -135,6 +141,9 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   const [payments, setPayments] = useState<Payment[] | null>(null);
   // Synchronous guard so a double-click can't record the same payment twice (audit 2026-07-07).
   const payingRef = useRef(false);
+  // Stable per-payment action id → a lost-response RETRY (same id) is deduped server-side so
+  // the payment can't be recorded twice; reset only after a successful save (audit 2026-07-08).
+  const payActionIdRef = useRef<string | null>(null);
 
   const loadHistory = useCallback(async () => {
     // Now announces a failure via the shared toast instead of swallowing it — a failed load
@@ -163,7 +172,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
     setSaving(true); setMsg(null);
     try {
       const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-        action: "set_plan", restaurant_id: row.id, plan: plan || null, status, amount: amount === "" ? null : Number(amount), currency, cycle,
+        action: "set_plan", restaurant_id: row.id, plan: plan || null, status, amount: amount === "" ? null : amount, currency, cycle,
         started_on: startedOn || null, next_due_on: nextDueOn || null, notes: notes || null,
       }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
@@ -172,17 +181,19 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
   };
 
   const addPayment = async () => {
-    const amt = Number(payAmount);
-    if (!(amt > 0)) { setPayMsg("Enter an amount greater than 0."); return; }
+    const amt = Number(String(payAmount).replace(/[^0-9.-]/g, "")); // tolerate "12,000" / stray symbols (audit 2026-07-08)
+    if (!(amt > 0)) { setPayMsg("Enter an amount greater than 0 (e.g. 12000)."); return; }
     if (!payDate) { setPayMsg("Pick a payment date."); return; }
     if (payingRef.current) return;
     payingRef.current = true;
+    if (!payActionIdRef.current) payActionIdRef.current = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
     setPayBusy(true); setPayMsg(null);
     try {
-      const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      const r = await fetch("/api/admin/billing", { method: "POST", headers: { "Content-Type": "application/json", "X-LFH-Action-Id": payActionIdRef.current }, body: JSON.stringify({
         action: "add_payment", restaurant_id: row.id, amount: amt, paid_on: payDate, method: payMethod || null, period_label: payLabel || null, note: payNote || null, roll_next_due: rollDue,
       }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't record payment.");
+      payActionIdRef.current = null; // committed → the next payment gets a fresh id
       setPayAmount(""); setPayMethod(""); setPayLabel(""); setPayNote("");
       setPayMsg("Payment recorded.");
       // loadHistory() re-reads billing and refreshes the "Next due on" field (rolled server-side).
@@ -273,7 +284,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
                   {payments.map((p) => (
                     <div key={p.id} className="adm-logrow" style={{ gridTemplateColumns: "90px 90px 1fr 1fr 40px" }}>
                       <span>{p.paid_on}</span>
-                      <span style={{ fontWeight: 700 }}>{inr(p.amount)}</span>
+                      <span style={{ fontWeight: 700 }}>{money(p.amount, row.currency)}</span>
                       <span className="adm-muted">{p.method || "—"}</span>
                       <span className="adm-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.period_label || p.note || "—"}</span>
                       <span style={{ textAlign: "right" }}>

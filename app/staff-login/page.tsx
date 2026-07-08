@@ -16,7 +16,14 @@ export default async function StaffLogin({
         action="/api/staff-login"
         style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 16, padding: 28, width: "min(92vw, 360px)" }}
       >
-        <h1 style={{ fontSize: 18, margin: "0 0 14px" }}>🔒 Admin sign in</h1>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, marginBottom: 18 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/aevidine-mark.svg" alt="Aevidine" width={48} height={48} />
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 0.2 }}>Aevidine</div>
+            <div style={{ fontSize: 12.5, color: "#8aa0c6" }}>Restaurant OS · staff sign in</div>
+          </div>
+        </div>
         <input type="hidden" name="next" value={next} />
         <input
           type="password"

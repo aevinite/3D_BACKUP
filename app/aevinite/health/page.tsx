@@ -85,7 +85,7 @@ export default function AdminHealth() {
             <span className="adx-pill good"><span className="dot" />{h.restaurants.active} restaurant{h.restaurants.active !== 1 ? "s" : ""} live</span>
             {h.restaurants.suspended > 0 && <span className="adx-pill warn"><span className="dot" />{h.restaurants.suspended} suspended</span>}
             <span className={`adx-pill ${h.staffOnlineNow > 0 ? "good" : "warn"}`}><span className="dot" />{h.staffOnlineNow} staff online now</span>
-            <span className={`adx-pill ${h.openIssues ? "warn" : "good"}`}><span className="dot" />{h.issuesFeedWired ? `${h.openIssues} open issue${h.openIssues === 1 ? "" : "s"}` : "issue feed unreachable"}</span>
+            <span className={`adx-pill ${h.issuesFeedWired ? (h.openIssues ? "warn" : "good") : "warn"}`}><span className="dot" />{h.issuesFeedWired ? `${h.openIssues} open issue${h.openIssues === 1 ? "" : "s"}` : "issue feed unreachable"}</span>
           </div>
 
           <div className="adx-grid2col">

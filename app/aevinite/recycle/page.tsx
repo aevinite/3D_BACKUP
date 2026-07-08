@@ -20,11 +20,12 @@ export default function RecycleBin() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setMsg(null);
     try {
       const j = await (await fetch("/api/admin/restaurants?deleted=1", { cache: "no-store" })).json();
       if (!j.error) { setList(j.trashed || []); if (j.retentionDays) setRetentionDays(j.retentionDays); }
-      else setMsg(j.error);
-    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); }
+      else { setMsg(j.error); setList([]); } // show the error + Retry, not a perpetual "Loading…" (audit 2026-07-08)
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); setList([]); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -42,11 +43,11 @@ export default function RecycleBin() {
       </p>
 
       <div className="adm-card">
-        {msg && <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>{msg}</div>}
+        {msg && <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>{msg} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>}
         {list === null ? (
           <div className="adm-empty">Loading…</div>
         ) : list.length === 0 ? (
-          <div className="adm-empty">The recycle bin is empty — no deleted restaurants.</div>
+          <div className="adm-empty">{msg ? "" : "The recycle bin is empty — no deleted restaurants."}</div>
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
             {list.map((r) => <BinRow key={r.id} r={r} onChanged={load} />)}
