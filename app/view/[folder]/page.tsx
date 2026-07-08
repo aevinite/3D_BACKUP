@@ -1,6 +1,21 @@
 // The actual 3D viewer (spins the dish model, shows hotspots) lives in
 // ViewerClient and runs in the browser. This file is the small server wrapper.
 import ViewerClient from "./ViewerClient";
+import { getRestaurantBySlug } from "@/lib/tenant";
+
+// White-label (audit fix 2026-07-08): give the 3D page its OWN tab title. Without a
+// generateMetadata it inherited the platform default ("Aevidine — Restaurant OS"),
+// leaking the SaaS name onto a restaurant's 3D view. The dish's restaurant travels in
+// ?r=<slug> (set by the link that opens the viewer); if it's absent we show a neutral
+// "3D View" — never the platform name.
+export async function generateMetadata({ searchParams }: { searchParams: Promise<{ r?: string }> }) {
+  const { r } = await searchParams;
+  if (r) {
+    const rest = await getRestaurantBySlug(r).catch(() => null);
+    if (rest?.name) return { title: `3D View — ${rest.name}` };
+  }
+  return { title: "3D View" };
+}
 
 // This is the 3D viewer page, shown at addresses like "/view/croissant".
 // The "[folder]" folder name means the last part of the address becomes
