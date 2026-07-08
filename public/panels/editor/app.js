@@ -2229,14 +2229,17 @@ async function payOrdersWithMethod(orders, label) {
   const picked = await openPaymentMethodModal(due, label);
   if (!picked) return false; // cancelled
   let okCount = 0, failCount = 0;
+  const paidIds = [];
   for (const o of payable) {
     const done = await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true, method: picked.method, note: picked.note });
-    if (done) okCount++; else failCount++;
+    if (done) { okCount++; paidIds.push(o.id); } else failCount++;
   }
-  // Store the optional tip on the first paid order (a bill's tip lives on one order; it's separate
-  // from the bill total, so this never affects the money math). Best-effort — a tip failing to save
-  // must not undo a completed payment.
-  if (okCount && Number(picked.tip) > 0) { try { await api("POST", "/orders/" + payable[0].id + "/tip", { amount: Number(picked.tip) }); } catch { /* tip is non-critical */ } }
+  // Store the optional tip on the first order that ACTUALLY settled (a bill's tip lives on one
+  // order; it's separate from the bill total, so this never affects the money math). Before this
+  // it went to payable[0] unconditionally — if that specific order failed to settle, the tip was
+  // written to an unpaid order and the Z-report (which sums tips over PAID orders only) dropped it.
+  // Best-effort — a tip failing to save must not undo a completed payment.
+  if (paidIds.length && Number(picked.tip) > 0) { try { await api("POST", "/orders/" + paidIds[0] + "/tip", { amount: Number(picked.tip) }); } catch { /* tip is non-critical */ } }
   // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
   if (okCount && !failCount) toast(skipped ? `Marked paid via ${picked.method} — ${skipped} new order still needs accepting.` : `Marked paid via ${picked.method} 💳`, "ok");
   else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
