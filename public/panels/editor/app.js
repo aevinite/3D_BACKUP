@@ -1859,7 +1859,7 @@ function openBillModal(key) {
   const wrap = document.createElement("div");
   wrap.className = "bill-overlay";
   wrap.innerHTML = `<div class="bill-modal">
-      <div class="bm-head"><b>${o0.table_number ? "Table " + esc(o0.table_number) : "Walk-in"} · Bill #${esc(o0.bill_no ?? "—")}</b>${o0.invoice_voided ? `<span class="inv-chip voided">voided</span>` : ""}</div>
+      <div class="bm-head"><b>${o0.table_number ? "Table " + esc(o0.table_number) : "Walk-in"}${o0.bill_no != null ? ` · Bill #${esc(o0.bill_no)}` : ""}</b>${o0.invoice_voided ? `<span class="inv-chip voided">voided</span>` : ""}</div>
       <div class="bm-sub">${esc(o0.customer_name || "")}${o0.created_at ? " · " + esc(new Date(o0.created_at).toLocaleString()) : ""}</div>
       <div class="bm-items">${lines}</div>
       <div class="bm-totals">
@@ -3157,7 +3157,7 @@ function renderEditor() {
   // From here down we're on an editable tab (dishes/categories/filters/settings).
   // If nothing is selected yet, show a gentle prompt.
   if (!state.sel) {
-    ed.innerHTML = `<div class="empty">Pick something on the left, or hit <b>+ New</b>.</div>`;
+    ed.innerHTML = `<div class="empty">Pick something from the list, or hit <b>+ New</b>.</div>`;
     return;
   }
   const isGeneral = state.tab === "general";
@@ -3602,6 +3602,9 @@ const RETENTION_OPTS = [
 ];
 // Human labels for the operation-log action codes (shared by the table row and
 // the click-to-open detail card).
+// Internal panel keys → friendly labels for the operation log (the manager panel's internal name
+// is still "editor"; show it as "Manager"). (polish)
+const PANEL_LABEL = { editor: "Manager", manager: "Manager", kitchen: "Kitchen", tablet: "Tablet", owner: "Owner", admin: "Admin", guest: "Guest" };
 const OP_ACTION_LABELS = {
   order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
   order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
@@ -6118,7 +6121,7 @@ function oplogHtml() {
     }
     return `<div class="oprow oprow-click${blockedDev[r.device_id] ? " op-blocked" : ""}" data-op-detail="${esc(r.id)}">
       <div class="opcell">${device}</div>
-      <div class="opcell"><span class="op-panel op-${esc(r.panel)}">${esc(r.panel)}</span></div>
+      <div class="opcell"><span class="op-panel op-${esc(r.panel)}">${esc(PANEL_LABEL[r.panel] || r.panel)}</span></div>
       <div class="opcell"><b>${esc(ACT[r.action] || r.action)}</b></div>
       <div class="opcell lg-muted">${where}</div>
       <div class="opcell"><small>${esc(whenLabel(r.created_at))}</small></div>
@@ -6161,7 +6164,7 @@ function showOpDetail(id) {
   if (!r) return;
   logDetailDialog("Operation log entry", [
     { label: "Action", value: OP_ACTION_LABELS[r.action] || r.action },
-    { label: "Panel", value: r.panel },
+    { label: "Panel", value: PANEL_LABEL[r.panel] || r.panel },
     { label: "Device", value: r.device_id ? "#" + r.device_id : "—" },
     // The "who" slot — filled once staff login lands (migration 053 actor column).
     { label: "By", value: r.actor || "— (no staff login yet, device only)" },
@@ -6580,8 +6583,12 @@ function reconcileBoard() {
       reqCount,
     ]);
     const typing = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    // Don't advance lastPollSig when we SKIP the redraw because the owner is typing (B19): otherwise a
+    // bill change that lands mid-typing is fingerprinted-as-seen and never repaints until the NEXT
+    // change. Leaving it stale means the next poll (once typing stops) still sees a diff and redraws.
+    const skippedForTyping = state.tab === "orders" && sig !== lastPollSig && typing;
     if (state.tab === "orders" && sig !== lastPollSig && !typing) { renderList(); renderEditor(); }
-    lastPollSig = sig;
+    if (!skippedForTyping) lastPollSig = sig;
     if (state.tab === "tables" && !floorOpsInFlight) {
       // TARGETED realtime path (pollTables named specific tables) → patch JUST those tiles +
       // the stats/queues, NOT the whole grid. Any other path (full poll, optimistic action,
