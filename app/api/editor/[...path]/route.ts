@@ -1628,6 +1628,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           if (owner.restaurant_id !== rid) return err("That dish belongs to another restaurant", 409);
         }
       }
+      // Sort order (B20): the "Sort order" box is a number input, so clearing it sends "" —
+      // which the numeric sort_order column rejects (a raw 500) or stores as null (the row
+      // then sorts unpredictably and can vanish to the bottom). Coalesce a blank/invalid
+      // value to 0 so a save never breaks the list order. Only when the field is actually
+      // present, so a partial save (e.g. a tag-only toggle) leaves the stored value alone.
+      if ((a === "items" || a === "categories" || a === "filters") && body && typeof body === "object" && "sort_order" in body) {
+        const so = Number((body as { sort_order?: unknown }).sort_order);
+        (body as { sort_order?: number }).sort_order = Number.isFinite(so) ? Math.round(so) : 0;
+      }
       // Stamp ownership + match the per-restaurant unique key: categories/filters are
       // keyed (restaurant_id, slug); settings is keyed (restaurant_id); menu_items
       // keeps its global id PK. So a save only ever touches THIS restaurant's row.
