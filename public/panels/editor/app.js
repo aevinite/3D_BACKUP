@@ -4063,20 +4063,31 @@ async function loadSessions(fromPoll) {
   // the redraw and flush it on pointerup. We intentionally DON'T update lastBoardSig here, so
   // the flushed loadSessions(true) still sees sig !== lastBoardSig and actually redraws.
   if (fromPoll && floatInteracting) { floatRenderPending = true; return; }
-  lastBoardSig = sig;
   const ed = $("#editor");
-  // Don't yank the floor out from under the owner mid-edit: if they're typing in a
-  // field during a background poll, hold off on the full redraw.
+  // Don't yank the floor out from under the owner mid-edit: if they're typing in a field
+  // during a background poll, hold off on the full redraw. CRUCIALLY, also DON'T advance
+  // lastBoardSig while we skip — otherwise the update that landed while they typed is
+  // swallowed forever (the next poll sees the same sig and dedups it away). Leaving the sig
+  // stale makes the very next poll redraw; a one-shot blur listener flushes it the instant
+  // they leave the field, so they never wait for the 60s backstop. (B19)
   const typing = document.activeElement && ed.contains(document.activeElement) && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
-  if (!fromPoll || !typing) {
-    // Keep the in-panel table detail's scroll across a background re-render so a
-    // live poll never flings a half-read order list back to the top.
-    const prevBody = ed.querySelector(".tp-detail-body");
-    const detailTop = prevBody ? prevBody.scrollTop : 0;
-    renderEditor();
-    const newBody = ed.querySelector(".tp-detail-body");
-    if (newBody) newBody.scrollTop = detailTop;
+  if (fromPoll && typing) {
+    if (!state._boardFlushArmed) {
+      state._boardFlushArmed = true;
+      document.activeElement.addEventListener("blur", () => { state._boardFlushArmed = false; loadSessions(true); }, { once: true });
+    }
+    renderTablePanel(); // the legacy pop-up is a separate overlay — safe to refresh
+    return;
   }
+  state._boardFlushArmed = false;
+  lastBoardSig = sig;
+  // Keep the in-panel table detail's scroll across a background re-render so a
+  // live poll never flings a half-read order list back to the top.
+  const prevBody = ed.querySelector(".tp-detail-body");
+  const detailTop = prevBody ? prevBody.scrollTop : 0;
+  renderEditor();
+  const newBody = ed.querySelector(".tp-detail-body");
+  if (newBody) newBody.scrollTop = detailTop;
   renderTablePanel(); // refresh the legacy pop-up panel too, if one is open
 }
 
