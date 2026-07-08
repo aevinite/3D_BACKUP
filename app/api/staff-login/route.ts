@@ -2,21 +2,50 @@
 // redirect back to where the user was headed. Public (not behind the gate) so
 // login is possible. Stores a HASH of the password in an HttpOnly cookie, plus a
 // readable flag cookie the UI uses to show the admin switcher.
+//
+// The admin password is a SINGLE shared secret (not a staff_users row), so it can't
+// use the per-account lockout in lib/userAuth. Instead it gets an IP-keyed lockout
+// via lib/loginThrottle (migration 143): too many wrong tries locks that IP out for
+// a few minutes. Every attempt (ok / wrong / blocked) is written to the ADMIN
+// operation log so the admin can see who tried what on the most-targeted screen.
 
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, adminPassword } from "@/lib/staffAuth";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
+import { throttleStatus, throttleFail, throttleReset, clientIp } from "@/lib/loginThrottle";
+
+const ADMIN_MAX_FAILS = 10;             // wrong tries from one IP before a lockout
+const ADMIN_LOCK_MS = 5 * 60 * 1000;    // lockout length (5 minutes)
+const MAX_PASSWORD_LEN = 200;           // reject oversize input outright
 
 export async function POST(req: NextRequest) {
+  const ip = clientIp(req);
+  const dev = deviceIdFrom(req);
+  const throttleKey = `admin:${ip}`;
+
   const form = await req.formData().catch(() => null);
   const password = String(form?.get("password") || "");
   const rawNext = String(form?.get("next") || "/aevinite");
   // Only allow same-site relative paths as the redirect target (no open redirect).
   const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/aevinite";
 
+  // Locked out? Refuse before even checking the password, and log the attempt.
+  const st = await throttleStatus(throttleKey);
+  if (st.locked) {
+    await logAction("admin", "login_blocked", { device_id: dev, detail: `admin login blocked — ${ip} is locked out (too many wrong tries)` });
+    return NextResponse.redirect(new URL(`/staff-login?locked=1&next=${encodeURIComponent(next)}`, req.url), 303);
+  }
+
   const expected = adminPassword();
-  if (!expected || password !== expected) {
+  if (!expected || password.length > MAX_PASSWORD_LEN || password !== expected) {
+    await throttleFail(throttleKey, ADMIN_MAX_FAILS, ADMIN_LOCK_MS);
+    await logAction("admin", "login_failed", { device_id: dev, detail: `wrong admin password from ${ip}` });
     return NextResponse.redirect(new URL(`/staff-login?bad=1&next=${encodeURIComponent(next)}`, req.url), 303);
   }
+
+  // Correct: clear the counter and record the successful admin sign-in.
+  await throttleReset(throttleKey);
+  await logAction("admin", "login", { actor: "admin", device_id: dev, detail: `admin signed in from ${ip}` });
 
   const token = await sha256hex(expected);
   const res = NextResponse.redirect(new URL(next, req.url), 303);

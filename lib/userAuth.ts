@@ -23,6 +23,17 @@ const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // cookies are good for 7 days
 const MAX_FAILS = 5;                            // wrong tries before a lockout
 const LOCK_MS = 60 * 1000;                      // lockout length (1 minute)
 const PBKDF2_ITERS = 120_000;                   // slow-hash work factor
+const MAX_USERNAME_LEN = 100;                   // login inputs are length-capped so an
+const MAX_PASSWORD_LEN = 200;                   // oversize value can't waste PBKDF2 CPU
+
+// Why a login failed — the SENSITIVE detail. NEVER shown to the user (they only ever
+// see the generic "Wrong name or password."); it's returned so the route can record
+// it in the ADMIN operation log ("who tried what was lacking"). "transient" is a
+// server/DB blip, not a real failure, and must not be logged as one.
+export type LoginFailReason = "empty" | "too_long" | "transient" | "no_such_name" | "locked" | "wrong_password";
+// Who/where an attempt was aimed at, for the audit log. For an unknown name we only
+// know what was typed; for a wrong password we know the real account it targeted.
+export type LoginAttempt = { username: string; role?: Role; restaurant_id?: string; actor?: string | null };
 
 // The HMAC signing key for cookies. Prefer a dedicated SESSION_SECRET; fall back
 // to the admin password so the gate still works if it isn't set separately.
@@ -106,9 +117,17 @@ async function sign(u: { id: string; role: string; token_version: number }): Pro
 // matches at all, which removes the bare login's cross-restaurant ambiguity below.
 export async function loginUser(
   username: string, password: string, restaurantId?: string,
-): Promise<{ ok: true; user: StaffUser; cookie: string } | { ok: false; error: string; transient?: boolean }> {
+): Promise<
+  | { ok: true; user: StaffUser; cookie: string }
+  | { ok: false; error: string; transient?: boolean; reason?: LoginFailReason; attempted?: LoginAttempt }
+> {
   const uname = normalizeLoginName(username);
-  if (!uname || !password) return { ok: false, error: "Enter your name and password." };
+  if (!uname || !password) return { ok: false, error: "Enter your name and password.", reason: "empty" };
+  // Length cap BEFORE the (slow) PBKDF2 verify: a huge password would otherwise burn
+  // CPU per attempt. Same generic message so it reveals nothing.
+  if (uname.length > MAX_USERNAME_LEN || password.length > MAX_PASSWORD_LEN) {
+    return { ok: false, error: "Wrong name or password.", reason: "too_long", attempted: { username: uname.slice(0, 80) } };
+  }
   // Username is unique only PER restaurant (mig 091), so the SAME name can exist at
   // several restaurants. Fetch every active match and pick the one whose PASSWORD
   // verifies — so the login form needs no restaurant field. (The only ambiguity is
@@ -116,7 +135,7 @@ export async function loginUser(
   const candRes = await sb.from("staff_users").select("*").eq("username", uname).eq("active", true);
   // A FAILED lookup is a server problem, not wrong credentials — don't gaslight the
   // waiter into resetting a password during a network blip (stress test 2026-07-03).
-  if (candRes.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true };
+  if (candRes.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true, reason: "transient" };
   let candidates = (candRes.data || []) as any[];
   if (restaurantId) {
     // Tenant door (/r/<slug>/login): only THAT restaurant's people may match. Staff
@@ -129,19 +148,27 @@ export async function loginUser(
     if (ownerIds.length) {
       const links = await sb.from("restaurant_owners").select("user_id")
         .eq("restaurant_id", restaurantId).in("user_id", ownerIds);
-      if (links.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true };
+      if (links.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true, reason: "transient" };
       ownsHere = new Set((links.data || []).map((l) => l.user_id as string));
     }
     candidates = candidates.filter((u) =>
       u.restaurant_id === restaurantId || (u.role === "owner" && ownsHere.has(u.id)));
   }
+  // Build the audit-log "who was targeted" from a candidate row (the real account a
+  // wrong password / lockout was aimed at). Used only for the admin log, never shown.
+  const attemptOf = (u: any): LoginAttempt => ({
+    username: uname, role: u.role, restaurant_id: u.restaurant_id, actor: u.name || u.username,
+  });
   // Same generic message whether the name is missing or the password is wrong —
   // never reveal which names exist.
-  if (!candidates.length) return { ok: false, error: "Wrong name or password." };
+  if (!candidates.length) {
+    return { ok: false, error: "Wrong name or password.", reason: "no_such_name", attempted: { username: uname, restaurant_id: restaurantId } };
+  }
   // Honour a lockout on ANY matching row (don't let a colliding name dodge it).
   const now = new Date();
-  if (candidates.some((u) => u.locked_until && new Date(u.locked_until) > now)) {
-    return { ok: false, error: "Too many tries — wait a minute and try again." };
+  const lockedCand = candidates.find((u) => u.locked_until && new Date(u.locked_until) > now);
+  if (lockedCand) {
+    return { ok: false, error: "Too many tries — wait a minute and try again.", reason: "locked", attempted: attemptOf(lockedCand) };
   }
   let matched: any = null;
   for (const u of candidates) {
@@ -156,7 +183,7 @@ export async function loginUser(
         : { failed_count: fc };
       await sb.from("staff_users").update(patch).eq("id", u.id);
     }
-    return { ok: false, error: "Wrong name or password." };
+    return { ok: false, error: "Wrong name or password.", reason: "wrong_password", attempted: attemptOf(candidates[0]) };
   }
   await sb.from("staff_users")
     .update({ failed_count: 0, locked_until: null, last_seen_at: new Date().toISOString() })
