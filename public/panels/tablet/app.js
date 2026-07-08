@@ -641,13 +641,14 @@ function openDishEditModal(itemId) {
   ov.innerHTML = `<div class="dish-edit-box" style="width:min(94vw,460px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
     <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Edit dish · ${esc(item.title)}</h3><button class="dish-edit-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
     <div style="padding:16px 18px">
+      ${item.status === "served" ? `<div class="muted" style="font-size:13px;line-height:1.5;margin:0 0 12px;padding:9px 11px;border:1px solid var(--line);border-radius:9px">This dish is already <b style="color:#4ade80">served</b> — allergens &amp; note are locked now. If it went out by mistake, use <b>↩ Send back to kitchen</b> below.</div>` : ""}
       <div style="font-size:13px;font-weight:700;margin:0 0 8px">⚠ Allergies to avoid <span class="muted small">— tap to add or remove</span></div>
       <div class="dish-alg-list" style="display:flex;flex-wrap:wrap;gap:8px"></div>
       <div style="display:flex;gap:8px;margin-top:10px"><input type="text" class="dish-edit-custominput" maxlength="24" placeholder="Type a custom allergen — e.g. water" style="flex:1;min-width:0;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px"><button class="btn small dish-edit-customadd">Add</button></div>
       <div style="font-size:13px;font-weight:700;margin:15px 0 6px">✎ Note for the kitchen</div>
       <textarea class="dish-edit-note" rows="2" maxlength="200" placeholder="e.g. less ice, extra chocolate" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;resize:vertical"></textarea>
     </div>
-    <div style="display:flex;gap:10px;align-items:center;padding:14px 18px;border-top:1px solid var(--line)">${(item.status === "served") ? `<button class="btn dish-edit-unserve" style="margin-right:auto;border-color:#7f5f1d;color:#f0b232" title="Mark this dish not-served so the kitchen can remake/re-serve it">↩ Send back to kitchen</button>` : ""}<button class="btn dish-edit-cancel"${(item.status === "served") ? "" : ' style="margin-left:auto"'}>Cancel</button><button class="btn primary dish-edit-save">Save</button></div>
+    <div style="display:flex;gap:10px;align-items:center;padding:14px 18px;border-top:1px solid var(--line)">${(item.status === "served") ? `<button class="btn dish-edit-unserve" style="margin-right:auto;border-color:#7f5f1d;color:#f0b232" title="Mark this dish not-served so the kitchen can remake/re-serve it">↩ Send back to kitchen</button>` : ""}<button class="btn dish-edit-cancel"${(item.status === "served") ? "" : ' style="margin-left:auto"'}>Cancel</button>${(item.status === "served") ? `<button class="btn primary dish-edit-save" disabled title="Already served — allergens & note are locked; use Send back to kitchen">Save</button>` : `<button class="btn primary dish-edit-save">Save</button>`}</div>
   </div>`;
   document.body.appendChild(ov);
   ov.querySelector(".dish-edit-note").value = item.note || "";
@@ -1276,7 +1277,12 @@ async function runOptimistic(mutate, fn) {
     const r = await fn();
     if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: saved offline — not a failure, and load() would no-op
   }
-  catch (e) { state.table = prevTable; toast("Failed: " + e.message, false); }
+  // On failure the optimistic mutate() must be REVERTED by the reconciling load() below. But if the
+  // write never reached the server (e.g. a 409 refusal — target already invoiced), the server state
+  // is unchanged, so load() would short-circuit on an unchanged signature and LEAVE the optimistic
+  // change (e.g. an order shown moved away) on screen until the next poll. Clearing lastSig forces
+  // load() to re-apply server truth and repaint immediately. (audit 2026-07-09)
+  catch (e) { state.table = prevTable; lastSig = null; toast("Failed: " + e.message, false); }
   await load();   // load() already repaints if anything changed — no second render (that was the extra flash)
 }
 
@@ -1641,17 +1647,16 @@ function tabletDiscount(orderId) {
 function tabletBillDiscount(t) {
   const s = sessionOf(t);
   if (!s || String(s.id).startsWith("pending-")) { toast("Open the table first.", false); return; }
-  const os = ordersOf(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
-  if (!os.length) { toast("No unpaid orders to discount yet.", false); return; }
-  const billTotal = os.reduce((sum, o) => sum + (Number(o.total) || 0), 0); // gross, tax-incl (UNPAID only)
-  // Only the UNPAID part of the bill is still discountable. Discount already spent on orders
-  // that were PAID is gone, so preview against the REMAINING discount (session total − discount
-  // already on paid orders) — otherwise "They pay" quotes too low once part of the table has
-  // settled. The server already clamps to this; this keeps the on-screen quote honest. (audit 2026-07-08)
-  const paidDisc = ordersOf(t).filter((o) => o.payment_status === "paid").reduce((sum, o) => sum + (Number(o.discount) || 0), 0);
-  const remaining = Math.max(0, (Number(s.discount) || 0) - paidDisc);
-  // Synthetic "order-like" object the modal understands; id = session id, target = session.
-  openDiscountModal({ id: s.id, table_number: t, total: billTotal, discount: remaining, discount_note: s.discount_note || "" }, { bill: true });
+  const unpaid = ordersOf(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  if (!unpaid.length) { toast("No unpaid orders to discount yet.", false); return; }
+  // sessions.discount is the WHOLE-BILL discount total; the server (lfh_split_bill_discount) then
+  // spreads (that − discount already on PAID orders) across the still-unpaid orders. So this modal
+  // MUST speak WHOLE-BILL too: base = every non-cancelled order (paid + unpaid), current value =
+  // sessions.discount. If it worked on only the unpaid remainder, the amount it SENDS would be
+  // remainder-scoped while the server reads it as the whole-bill total and subtracts the paid part a
+  // SECOND time — quietly over-charging the remaining guests after a partial payment. (audit 2026-07-09)
+  const billTotal = ordersOf(t).filter((o) => o.status !== "cancelled").reduce((sum, o) => sum + (Number(o.total) || 0), 0); // whole bill, gross
+  openDiscountModal({ id: s.id, table_number: t, total: billTotal, discount: Number(s.discount) || 0, discount_note: s.discount_note || "" }, { bill: true });
 }
 
 // ── order-taking mode ────────────────────────────────────────────────────────
