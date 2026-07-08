@@ -49,17 +49,30 @@ export async function GET(req: NextRequest) {
   }
 
   const monthAgo = Date.now() - 30 * 86_400_000;
+  const monthAgoIso = new Date(monthAgo).toISOString();
   const isReturning = (c: { first_seen_at: string; last_seen_at: string }) =>
     new Date(c.last_seen_at).getTime() - new Date(c.first_seen_at).getTime() > RETURN_GAP_MS;
   const customers = list.map((c) => ({ ...c, restaurantName: names[c.restaurant_id] || "—", returning: isReturning(c) }));
 
-  // True total (cheap head count) so the summary isn't capped at the 300-row page.
-  const cnt = await sb.from("customers").select("phone", { count: "exact", head: true }).in("restaurant_id", ids);
+  // Summary counts are TRUE scoped head-counts, not derived from the 300-row display page —
+  // before this, "Blocked"/"New" undercounted for a restaurant with >300 guests (a guest
+  // blocked long ago, or a busy month, fell outside the recent-300 window). `total`,
+  // `blocked` and `newThisMonth` are plain column filters, so each is one cheap indexed
+  // COUNT(head) scoped by restaurant_id — no extra rows fetched. `returning` needs a
+  // per-row comparison of two timestamps (last_seen vs first_seen), which a column filter
+  // can't express, so it stays derived from the shown page and can undercount on very busy
+  // restaurants; making it exact needs a small scoped DB function (see OVERNIGHT note).
+  const head = () => sb.from("customers").select("phone", { count: "exact", head: true }).in("restaurant_id", ids);
+  const [cntAll, cntBlocked, cntNew] = await Promise.all([
+    head(),
+    head().eq("blocked", true),
+    head().gte("first_seen_at", monthAgoIso),
+  ]);
   const summary = {
-    total: cnt.count ?? list.length,
+    total: cntAll.count ?? list.length,
     returning: customers.filter((c) => c.returning).length,
-    newThisMonth: list.filter((c) => new Date(c.first_seen_at).getTime() >= monthAgo).length,
-    blocked: list.filter((c) => c.blocked).length,
+    newThisMonth: cntNew.count ?? list.filter((c) => new Date(c.first_seen_at).getTime() >= monthAgo).length,
+    blocked: cntBlocked.count ?? list.filter((c) => c.blocked).length,
     shown: list.length,
   };
   return NextResponse.json({ summary, customers });
