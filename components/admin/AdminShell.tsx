@@ -28,6 +28,7 @@ const GROUPS: NavGroup[] = [
       { href: "/aevinite/floor", label: "Live floor", icon: "fa-chair" },
       { href: "/aevinite/analytics", label: "Analytics", icon: "fa-chart-pie" },
       { href: "/aevinite/issues", label: "Tickets", icon: "fa-flag" },
+      { href: "/aevinite/attention", label: "At-risk", icon: "fa-triangle-exclamation" },
       { href: "/aevinite/logs", label: "Activity log", icon: "fa-scroll" },
     ],
   },
@@ -45,6 +46,7 @@ const GROUPS: NavGroup[] = [
     label: "Platform",
     items: [
       { href: "/aevinite/revenue", label: "Revenue", icon: "fa-chart-line" },
+      { href: "/aevinite/usage", label: "Usage & cost", icon: "fa-gauge-high" },
       { href: "/aevinite/billing", label: "Billing & plans", icon: "fa-file-invoice" },
       { href: "/aevinite/health", label: "System health", icon: "fa-heart-pulse" },
       { href: "/aevinite/settings", label: "Settings", icon: "fa-gear" },
