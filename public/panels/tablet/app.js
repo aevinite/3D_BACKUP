@@ -1673,6 +1673,15 @@ function orderSections() {
   if (other.dishes.length) secs.push(other);
   return secs;
 }
+// The badge in a dish tile's bottom-right. Empty = a plain ＋ hint (tap the tile to add);
+// once in the cart it's a real − button (tap to remove one — the rest of the tile still
+// adds one) next to the ×N count. Shared by the first render + the two in-place updaters
+// so all three stay identical. (owner 2026-07-08)
+function dishBadgeInner(id, qty) {
+  return qty
+    ? `<span class="dminus" data-dishminus="${esc(id)}" role="button" aria-label="Remove one">−</span><span class="dqty">×${qty}</span>`
+    : `<span class="dadd" aria-hidden="true">＋</span>`;
+}
 function dishBtnHtml(d) {
   const out = (d.tags || []).includes("sold-out");
   // Total this dish across ALL its cart lines (a dish can now appear on several
@@ -1683,7 +1692,7 @@ function dishBtnHtml(d) {
     <span class="dname">${esc(d.title)}</span>
     <span class="drow">
       <span class="dprice">${out ? "SOLD OUT" : inr(dishPrice(d))}</span>
-      <span class="dbadge">${out ? "" : inCartQty ? `<span class="dqty">×${inCartQty}</span>` : `<span class="dadd" aria-hidden="true">＋</span>`}</span>
+      <span class="dbadge">${out ? "" : dishBadgeInner(d.id, inCartQty)}</span>
     </span>
   </button>`;
 }
@@ -1757,7 +1766,7 @@ function updateDishBadges() {
     const qty = state.cart.filter((l) => l.id === btn.dataset.dish).reduce((s, l) => s + l.qty, 0);
     btn.classList.toggle("in", qty > 0);
     const slot = btn.querySelector(".dbadge");
-    if (slot && !btn.disabled) slot.innerHTML = qty ? `<span class="dqty">×${qty}</span>` : `<span class="dadd" aria-hidden="true">＋</span>`;
+    if (slot && !btn.disabled) slot.innerHTML = dishBadgeInner(btn.dataset.dish, qty);
   });
 }
 // #17: patch each visible dish button's SOLD-OUT state in place — called when a menu realtime
@@ -1780,10 +1789,21 @@ function updateDishAvailability() {
       if (out) slot.innerHTML = "";
       else {
         const qty = state.cart.filter((l) => l.id === d.id).reduce((s, l) => s + l.qty, 0);
-        slot.innerHTML = qty ? `<span class="dqty">×${qty}</span>` : `<span class="dadd" aria-hidden="true">＋</span>`;
+        slot.innerHTML = dishBadgeInner(d.id, qty);
       }
     }
   });
+}
+// Mirror of the quick-add: take ONE off the cart for this dish. Prefer the PLAIN line
+// (the one quick-add stacks onto); if there's only a customised/sized line, peel one off
+// that. Removing the last of a line drops the line entirely. (owner 2026-07-08)
+function removeOneDish(id) {
+  let idx = state.cart.findIndex((l) => l.id === id && !l.options && !l.allergy && !l.note);
+  if (idx < 0) idx = state.cart.findIndex((l) => l.id === id);
+  if (idx < 0) return;
+  const line = state.cart[idx];
+  line.qty -= 1;
+  if (line.qty <= 0) state.cart.splice(idx, 1);
 }
 function bindDishButtons() {
   // The small ✎ on each tile → the quantity/allergy popup (owner 2026-07-05). Its own
@@ -1797,6 +1817,14 @@ function bindDishButtons() {
     if (e.target.closest && e.target.closest("[data-dishedit]")) return; // ✎ handled above
     const d = state.data.dishes.find((x) => x.id === b.dataset.dish);
     if (!d) { toast("That dish just changed — refreshing the menu", false); renderOrderMode(); return; }
+    // The − button (only shown once the dish is in the cart) removes ONE. Checked before
+    // everything else so it works even for a sized/options dish. The rest of the tile still
+    // adds. (owner 2026-07-08)
+    if (e.target.closest && e.target.closest("[data-dishminus]")) {
+      removeOneDish(d.id);
+      updateDishBadges(); updateOrderCart(); updateViewPill();
+      return;
+    }
     // A sized/extra dish can't be quick-added blindly — open the popup to choose.
     if (Array.isArray(d.options) && d.options.length) { renderDishOptions(d, null); return; }
     // ADD-TO-EXISTING-ORDER mode: a plain dish is added straight away (no cart).
