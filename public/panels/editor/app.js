@@ -2492,6 +2492,7 @@ async function loadDashboard(useCache) {
   body.innerHTML = `
     ${summary}
     <div class="dash-fresh"><i class="fa-solid fa-clock-rotate-left"></i> Updated ${freshT} · deltas ${cmpLabel}</div>
+    ${s.truncated ? `<div class="dash-fresh" style="background:#d9770622;color:#b45309;border:1px solid #d9770655" role="note"><i class="fa-solid fa-circle-info"></i> Showing the most recent ${Number(s.statsCap || 5000).toLocaleString()} orders — this range has more, so these totals (and the menu winners) read a little low for now. Penny-exact full-range totals are coming.</div>` : ""}
     <div class="dash-cards">
       ${kpi("revenue", "fa-indian-rupee-sign", "#b97f35", `Revenue · ${rangeLabel}`, `<span data-cu="${s.revenue}" data-cu-fmt="inr">${inr(s.revenue)}</span>${deltaChip(s.revenue, prev.revenue)}${sparkSvg((s.series || []).map((p) => p.revenue), "#b97f35")}`, revSub)}
       ${kpi("orders", "fa-utensils", "#2a78d6", "Orders", `<span data-cu="${s.orderCount}">${s.orderCount}</span>${deltaChip(s.orderCount, prev.orders)}`, ordSub)}
@@ -2927,27 +2928,30 @@ async function printManagerReport() {
 // heads-up to glance at — the "anti-theft" pattern the bigger POS systems use.
 async function openStaffRisk() {
   document.querySelector(".sr-overlay")?.remove();
+  const rangeLbl = { today: "today", "30d": "the last 30 days", year: "the last 12 months" }[dashRange] || dashRange;
   const wrap = el(`<div class="sx-modal-overlay sr-overlay"><div class="sx-modal" style="max-width:620px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🔍 Staff watch</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
-    <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">Discounts, voids, deletes &amp; paid-reverts by staff, from the recent activity log. A high count is just worth a glance — not proof of anything.</div><div id="srBody"><div class="empty">Loading…</div></div></div>
+    <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">Discounts, voids, deletes &amp; paid-reverts by staff over ${esc(rangeLbl)} (follows the Dashboard range). A high count is just worth a glance — not proof of anything.</div><div id="srBody"><div class="empty">Loading…</div></div></div>
   </div></div>`);
   document.body.appendChild(wrap);
   const close = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   try {
-    const rows = await api("GET", "/oplog");
-    const RISK = { order_discount: "disc", void_invoice: "void", order_delete: "del", orders_delete: "del", payment_revert: "rev" };
-    const by = {};
-    for (const r of (rows || [])) { const k = RISK[r.action]; if (!k) continue; const who = r.actor || "— (device only)"; const a = by[who] || (by[who] = { disc: 0, void: 0, del: 0, rev: 0, total: 0 }); a[k]++; a.total++; }
-    const list = Object.entries(by).map(([who, v]) => ({ who, ...v })).sort((a, b) => b.total - a.total);
+    // The server aggregates by staff over the whole selected range (was: the newest 200 log rows
+    // with no date window, which undercounted — and could miss a staff member — on a busy day,
+    // review #4). It returns a small { rows:[{who,disc,void,del,rev,total}], truncated } summary,
+    // with the void action name handled correctly server-side (review #1).
+    const res = await api("GET", "/staff-risk?range=" + dashRange);
+    const list = (res && res.rows) || [];
     const maxT = list.length ? list[0].total : 0;
     const flag = (t) => t >= Math.max(8, maxT * 0.8) ? ` <span class="inv-chip voided">watch</span>` : "";
+    const trunc = res && res.truncated ? `<div class="muted small" style="margin-bottom:8px;color:#b45309"><i class="fa-solid fa-circle-info"></i> Very busy range — counts cover the most recent activity.</div>` : "";
     wrap.querySelector("#srBody").innerHTML = list.length
-      ? `<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left;padding:4px">Staff</th><th style="text-align:right;padding:4px">Discounts</th><th style="text-align:right;padding:4px">Voids/Deletes</th><th style="text-align:right;padding:4px">Reverts</th><th style="text-align:right;padding:4px">Total</th></tr></thead><tbody>`
+      ? trunc + `<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left;padding:4px">Staff</th><th style="text-align:right;padding:4px">Discounts</th><th style="text-align:right;padding:4px">Voids/Deletes</th><th style="text-align:right;padding:4px">Reverts</th><th style="text-align:right;padding:4px">Total</th></tr></thead><tbody>`
         + list.map((v) => `<tr style="border-top:1px solid var(--line)"><td style="padding:5px 4px"><b>${esc(v.who)}</b>${flag(v.total)}</td><td style="text-align:right">${v.disc}</td><td style="text-align:right">${v.void + v.del}</td><td style="text-align:right">${v.rev}</td><td style="text-align:right"><b>${v.total}</b></td></tr>`).join("")
         + `</tbody></table>`
-      : `<div class="empty">No discounts, voids, deletes or reverts in the recent log — nothing to flag. 👍</div>`;
+      : `<div class="empty">No discounts, voids, deletes or reverts over ${esc(rangeLbl)} — nothing to flag. 👍</div>`;
   } catch (e) { wrap.querySelector("#srBody").innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; }
 }
 
@@ -2979,7 +2983,13 @@ async function openMenuMatrix() {
       return `<div class="tp-bill" style="padding:12px"><div style="font-weight:800;margin-bottom:2px">${Q.icon} ${Q.name} <span class="muted">· ${all.length}</span></div><div class="muted small" style="margin-bottom:8px">${Q.tip}</div>${rows.length ? rows.map((d) => `<div class="tp-bl"><span>${esc(d.title)} <span class="muted">×${d.units}</span></span><b>${inr(d.rev)}</b></div>`).join("") + (all.length > rows.length ? `<div class="muted small">+${all.length - rows.length} more</div>` : "") : `<div class="muted small">—</div>`}</div>`;
     }).join("") + `</div>`;
   };
-  const paint = (s) => { const b = wrap.querySelector("#mmBody"); if (b) b.innerHTML = render(s && s.menuMatrix); };
+  const paint = (s) => {
+    const b = wrap.querySelector("#mmBody"); if (!b) return;
+    // Same honesty note as the dashboard: if the range exceeded the row cap, the winners/losers
+    // split is from the most recent orders only and can shift once full-range totals arrive. (review #2)
+    const note = s && s.truncated ? `<div class="muted small" style="margin-bottom:10px;color:#b45309"><i class="fa-solid fa-circle-info"></i> Based on the most recent ${Number(s.statsCap || 5000).toLocaleString()} orders — a longer range has more, so this split may shift once full-range totals arrive.</div>` : "";
+    b.innerHTML = note + render(s && s.menuMatrix);
+  };
   // Reuse the Dashboard's already-loaded stats for the current range if present (no extra fetch).
   if (loadDashboard._last && loadDashboard._lastRange === dashRange) paint(loadDashboard._last);
   else { try { paint(await api("GET", "/stats?range=" + dashRange)); } catch (e) { const b = wrap.querySelector("#mmBody"); if (b) b.innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; } }
