@@ -263,7 +263,7 @@ export default function OwnerStaffPage() {
                   </div>
                   {editing?.id === s.id && (
                     <div className="ost-editrow">
-                      <input className="ost-in" value={editing.name} autoFocus placeholder="Name (their login)" autoComplete="off"
+                      <input className="ost-in" value={editing.name} autoFocus placeholder="Username (their login)" autoComplete="off"
                         onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
                       <input className="ost-in" value={editing.phone} placeholder="Phone (optional)" autoComplete="off"
                         onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
@@ -277,7 +277,7 @@ export default function OwnerStaffPage() {
 
             {/* Add staff */}
             <form className="ost-add" onSubmit={(e) => { e.preventDefault(); addStaff(r.id, e.currentTarget); }}>
-              <input className="ost-in" name="name" placeholder="Name (their login)" autoComplete="off" required />
+              <input className="ost-in" name="name" placeholder="Username (their login)" autoComplete="off" required />
               <select className="ost-in" name="role" defaultValue="manager">{ROLES.map((ro) => <option key={ro} value={ro}>{ro}</option>)}</select>
               <input className="ost-in" name="password" placeholder="Password (blank = auto)" autoComplete="off" />
               <button className="ost-btn" type="submit" disabled={busy}><i className="fas fa-user-plus" /> Add</button>

@@ -69,9 +69,9 @@ export async function POST(req: NextRequest) {
     // normalized copy in `username` (the matchable key); reject duplicates.
     const display = String(body.name || "").trim().slice(0, 80);
     const key = normalizeLoginName(display);
-    if (!display || !key) return NextResponse.json({ error: "Your name can't be empty." }, { status: 400 });
+    if (!display || !key) return NextResponse.json({ error: "Your username can't be empty." }, { status: 400 });
     const clash = (await sb.from("staff_users").select("id").eq("username", key).neq("id", u.id).limit(1)).data?.[0];
-    if (clash) return NextResponse.json({ error: "That name is already taken — please pick another." }, { status: 409 });
+    if (clash) return NextResponse.json({ error: "That username is already taken — please pick another." }, { status: 409 });
     patch.name = display;
     patch.username = key;
     if (key !== normalizeLoginName(u.name || u.username)) changes.push("name");

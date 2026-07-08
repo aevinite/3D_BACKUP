@@ -302,12 +302,12 @@ export async function POST(req: NextRequest) {
   if (action !== "create_owner") return bad("Unknown action.");
   const display = String(body?.name ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
-  if (key.length < 2) return bad("Name must be at least 2 characters.");
+  if (key.length < 2) return bad("Username must be at least 2 characters.");
   // An owner's "home" restaurant_id is #1; their OWNED restaurants come from
   // restaurants.owner_user_id (assigned via PATCH). Names are unique per-restaurant,
   // so clash-check owners within #1.
   const dup = (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", DEFAULT_RID).limit(1)).data?.[0];
-  if (dup) return bad("That owner name is taken — pick another.", 409);
+  if (dup) return bad("That username is taken — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const { data, error } = await sb.from("staff_users")

@@ -1022,7 +1022,7 @@ function userSettingCardHtml() {
     ${reveal}
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">${rows}</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;padding-top:12px;border-top:1px solid var(--line)">
-      <input class="sx-input" id="usrNewName" placeholder="Name (their login)" style="flex:1 1 150px"/>
+      <input class="sx-input" id="usrNewName" placeholder="Username (their login)" style="flex:1 1 150px"/>
       <select id="usrNewRole" style="flex:0 0 auto;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--text)">${ROLES.map((r) => `<option value="${r}">${r}</option>`).join("")}</select>
       <input class="sx-input" id="usrNewPassword" placeholder="Password (blank = auto)" style="flex:1 1 150px"/>
       <button class="btn primary" id="usrAddStaff">+ Add</button>

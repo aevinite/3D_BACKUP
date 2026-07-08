@@ -134,8 +134,8 @@ export async function POST(req: NextRequest) {
 
   const display = String(body?.name ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
-  if (key.length < 2) return bad("Name must be at least 2 characters.");
-  if (await ownerNameTaken(key)) return bad("That owner name is taken — pick another.", 409);
+  if (key.length < 2) return bad("Username must be at least 2 characters.");
+  if (await ownerNameTaken(key)) return bad("That username is taken — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
 
@@ -234,8 +234,8 @@ export async function PATCH(req: NextRequest) {
   if (action === "rename") {
     const display = String(body?.name ?? "").trim().slice(0, 80);
     const key = normalizeLoginName(display);
-    if (key.length < 2) return bad("Name must be at least 2 characters.");
-    if (key !== owner.username && (await ownerNameTaken(key))) return bad("That owner name is taken — pick another.", 409);
+    if (key.length < 2) return bad("Username must be at least 2 characters.");
+    if (key !== owner.username && (await ownerNameTaken(key))) return bad("That username is taken — pick another.", 409);
     const { error } = await sb.from("staff_users").update({ name: display, username: key }).eq("id", ownerId);
     if (error) return bad(error.message, 500);
     await logAction("admin", "owner_rename", { actor: "admin", detail: `renamed owner "${who}" → "${display}"` });

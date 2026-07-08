@@ -168,7 +168,7 @@ export default function AdminOwners() {
                   </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontWeight: 800, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}{!o.active && <span style={{ fontSize: 11, color: "#fca5a5", fontWeight: 600 }}> · suspended</span>}</div>
-                    <div style={{ fontSize: 11.5, color: "var(--muted)" }}>signs in as “{o.username}” · seen {seen(o.lastSeenAt)}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--muted)" }}>seen {seen(o.lastSeenAt)}</div>
                   </div>
                   <div style={{ textAlign: "right" }}>
                     <div style={{ fontSize: 20, fontWeight: 900, color: "#60a5fa", lineHeight: 1 }}>{o.restaurants.length}</div>
@@ -298,7 +298,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
         <form onSubmit={create} style={{ ...card, pointerEvents: "auto", width: "min(96vw, 440px)", maxHeight: "90vh", overflowY: "auto", display: "grid", gap: 13 }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>New owner</div>
           {err ? <div style={{ fontSize: 12.5, color: "#fca5a5" }}>{err}</div> : null}
-          <label style={label}>Owner name <span style={{ color: "var(--muted)" }}>· this is their login</span>
+          <label style={label}>Username <span style={{ color: "var(--muted)" }}>· this is their login</span>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rakesh Patel" style={field} autoFocus required />
           </label>
           <label style={label}>Password (blank = auto-generated, shown once)
@@ -392,9 +392,9 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
   // confirm makes "gone forever" a deliberate act, not a slip.
   async function deleteForever() {
     if (!confirm(`Delete ${owner.name} FOREVER?\n\nThis cannot be undone — no restore, no recycle bin. Their restaurants fall back to a co-owner or to "no owner". The activity log is kept.`)) return;
-    const typed = prompt(`Type their login name (${owner.username}) to confirm the permanent delete:`);
+    const typed = prompt(`Type their username (${owner.username}) to confirm the permanent delete:`);
     if (typed === null) return;
-    if (typed.trim().toLowerCase() !== owner.username.toLowerCase()) { setMErr("Name didn't match — nothing was deleted."); return; }
+    if (typed.trim().toLowerCase() !== owner.username.toLowerCase()) { setMErr("Username didn't match — nothing was deleted."); return; }
     setMErr(""); setBusy(true);
     try {
       const r = await fetch(`/api/admin/owners?id=${encodeURIComponent(owner.id)}`, { method: "DELETE" });
@@ -421,7 +421,7 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
                 {owner.name}{!owner.active && <span style={{ fontSize: 11, color: "#fca5a5", fontWeight: 600 }}> · suspended</span>}
               </div>
               <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
-                signs in as &ldquo;{owner.username}&rdquo; · created {created ? new Date(created).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"} · seen {seen(owner.lastSeenAt)}
+                created {created ? new Date(created).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"} · seen {seen(owner.lastSeenAt)}
               </div>
             </div>
             <button onClick={onClose} aria-label="Close" style={{ background: "transparent", border: 0, color: "var(--muted)", fontSize: 18, cursor: "pointer", lineHeight: 1, padding: 6 }}><i className="fas fa-xmark" aria-hidden="true" /></button>
@@ -439,7 +439,7 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
               <button style={actBtn} disabled={busy}
                 onClick={() => { if (confirm(`Set a NEW password for ${owner.name}? They'll be logged out everywhere.`)) run(async () => { const j = await onPatch({ owner_id: owner.id, action: "reset_password" }); setPwReveal(j.password); onReveal(owner.name, j.password); }); }}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
               <button style={actBtn} disabled={busy}
-                onClick={() => { const nn = prompt(`New name for ${owner.name} (this also changes their login name):`, owner.name); if (nn && nn.trim() && nn.trim() !== owner.name) run(async () => { await onPatch({ owner_id: owner.id, action: "rename", name: nn.trim() }); }); }}><i className="fas fa-pen" style={ic} aria-hidden="true" />Rename</button>
+                onClick={() => { const nn = prompt(`New username for ${owner.name} (this is their login):`, owner.name); if (nn && nn.trim() && nn.trim() !== owner.name) run(async () => { await onPatch({ owner_id: owner.id, action: "rename", name: nn.trim() }); }); }}><i className="fas fa-pen" style={ic} aria-hidden="true" />Rename</button>
               <button style={{ ...actBtn, color: owner.active ? "#fca5a5" : "#86efac" }} disabled={busy}
                 onClick={() => { if (confirm(owner.active ? `Suspend ${owner.name}? They're logged out immediately and can't sign in.` : `Restore ${owner.name}'s access?`)) run(async () => { await onPatch({ owner_id: owner.id, action: "set_active", active: !owner.active }); }); }}>
                 <i className={`fas ${owner.active ? "fa-ban" : "fa-rotate-left"}`} style={ic} aria-hidden="true" />{owner.active ? "Suspend" : "Restore"}</button>

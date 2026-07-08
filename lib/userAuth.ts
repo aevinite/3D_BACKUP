@@ -122,7 +122,7 @@ export async function loginUser(
   | { ok: false; error: string; transient?: boolean; reason?: LoginFailReason; attempted?: LoginAttempt }
 > {
   const uname = normalizeLoginName(username);
-  if (!uname || !password) return { ok: false, error: "Enter your name and password.", reason: "empty" };
+  if (!uname || !password) return { ok: false, error: "Enter your username and password.", reason: "empty" };
   // Length cap BEFORE the (slow) PBKDF2 verify: a huge password would otherwise burn
   // CPU per attempt. Same generic message so it reveals nothing.
   if (uname.length > MAX_USERNAME_LEN || password.length > MAX_PASSWORD_LEN) {

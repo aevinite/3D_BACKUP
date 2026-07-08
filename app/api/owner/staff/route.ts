@@ -156,13 +156,13 @@ export async function POST(req: NextRequest) {
   const key = normalizeLoginName(display);
   const role = String(body?.role || "") as Role;
   const rid = String(body?.restaurant_id || "");
-  if (realCharCount(key) < 2) return bad("Name must be at least 2 characters.");
+  if (realCharCount(key) < 2) return bad("Username must be at least 2 characters.");
   // Hierarchy: a manager may only create BELOW their level (kitchen/tablet).
   if (!assignableFor(s.actor).includes(role)) return bad(s.actor === "manager" ? "Managers can only add kitchen or tablet logins." : "Pick a valid role (manager, kitchen, or tablet).");
   if (!s.restaurants.some((r) => r.id === rid)) return bad("That restaurant isn't yours to staff.", 403);
   // Names are unique PER restaurant (mig 091) — only clash-check within this one.
   const dup = (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", rid).limit(1)).data?.[0];
-  if (dup) return bad("That name is taken at this restaurant — pick another.", 409);
+  if (dup) return bad("That username is taken at this restaurant — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   if (password.length > 128) return bad("Password is too long (max 128 characters).");
@@ -174,7 +174,7 @@ export async function POST(req: NextRequest) {
     // unique_violation on (restaurant_id, username): show the SAME friendly 409, never the
     // raw "duplicate key value violates unique constraint …" DB message. Any other DB error
     // is unexpected → a generic message, not the internals.
-    if ((error as { code?: string }).code === "23505") return bad("That name is taken at this restaurant — pick another.", 409);
+    if ((error as { code?: string }).code === "23505") return bad("That username is taken at this restaurant — pick another.", 409);
     return bad("Something went wrong, please try again.", 500);
   }
   await logAction("owner", "staff_create", { restaurant_id: rid, actor: s.actor, detail: `created ${role} "${display}"` });
@@ -260,9 +260,9 @@ export async function PATCH(req: NextRequest) {
     if (body?.name !== undefined) {
       const display = String(body.name || "").trim().slice(0, 80);
       const nkey = normalizeLoginName(display);
-      if (realCharCount(nkey) < 2) return bad("Name must be at least 2 characters.");
+      if (realCharCount(nkey) < 2) return bad("Username must be at least 2 characters.");
       const clash = (await sb.from("staff_users").select("id").eq("username", nkey).eq("restaurant_id", u.restaurant_id).neq("id", id).limit(1)).data?.[0];
-      if (clash) return bad("That name is taken at this restaurant.", 409);
+      if (clash) return bad("That username is taken at this restaurant.", 409);
       patch.name = display; patch.username = nkey;
     }
     if (body?.phone !== undefined) patch.phone = String(body.phone || "").trim().slice(0, 20) || null;

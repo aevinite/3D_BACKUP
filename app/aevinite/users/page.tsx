@@ -201,7 +201,7 @@ export default function AdminUsers() {
           </button>
         </form>
         <p style={{ fontSize: 12, color: "var(--muted)", margin: "10px 0 0" }}>
-          The <b>Name</b> is what they sign in with (and how they appear everywhere) — it must be unique. They confirm their details once on first login and can edit their name/phone, change their password, and set a PIN in their profile.
+          The <b>Username</b> is what they sign in with (and how they appear everywhere) — it must be unique. They confirm their details once on first login and can edit their username/phone, change their password, and set a PIN in their profile.
         </p>
       </section>
 
@@ -414,7 +414,7 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
 
             {/* Details */}
             <div style={{ display: "grid", gap: 10 }}>
-              <label style={label}>Name <span style={{ color: "var(--muted)" }}>· this is their login</span>
+              <label style={label}>Username <span style={{ color: "var(--muted)" }}>· this is their login</span>
                 <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Raj" style={field} />
               </label>
               <label style={label}>Phone
