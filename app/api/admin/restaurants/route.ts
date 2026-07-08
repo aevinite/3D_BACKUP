@@ -295,7 +295,7 @@ export async function POST(req: NextRequest) {
       }
     }
     const onPanels = (Object.keys(panels) as (keyof typeof panels)[]).filter((k) => panels[k]);
-    await logAction("admin", "restaurant_create", { actor: "admin", detail: `created restaurant "${name}" (${slug}) · panels ${onPanels.join("+")}${seedMenu ? (menuSeeded ? " · menu seeded" : " · menu seed FAILED") : " · no menu"}` });
+    await logAction("admin", "restaurant_create", { actor: "admin", restaurant_id: rid, detail: `created restaurant "${name}" (${slug}) · panels ${onPanels.join("+")}${seedMenu ? (menuSeeded ? " · menu seeded" : " · menu seed FAILED") : " · no menu"}` });
     return ok({ ok: true, id: rid, slug, name, panels, logins, loginErrors, menuSeeded, seedError });
   }
 
