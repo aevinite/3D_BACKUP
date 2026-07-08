@@ -53,6 +53,13 @@ export default function AdminAnalytics() {
   const [data, setData] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Honor ?range= on first mount so a drill-in (dashboard "Orders today" → ?range=today) opens
+  // the right window, not the 7-day default. Done in an effect (not the useState init) to avoid
+  // an SSR hydration mismatch (audit 2026-07-08).
+  useEffect(() => {
+    const r = new URLSearchParams(window.location.search).get("range");
+    if (r === "today" || r === "30d") setRange(r);
+  }, []);
 
   const load = useCallback(async (r: Range) => {
     setLoading(true); setErr(null);

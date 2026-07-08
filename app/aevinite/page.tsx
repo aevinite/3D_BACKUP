@@ -95,7 +95,7 @@ export default function AdminCommand() {
     { k: "Open issues", v: openIssues.length, href: "/aevinite/issues", warn: openIssues.length > 0 },
     { k: "Open tables now", v: openTablesNow ?? "…", href: "/aevinite/open-tables" },
     { k: "Staff online now", v: online.length, href: "/aevinite/staff-online" },
-    { k: "Orders today", v: ordersToday ?? "…", href: "/aevinite/analytics" },
+    { k: "Orders today", v: ordersToday ?? "…", href: "/aevinite/analytics?range=today" },
   ];
 
   return (
