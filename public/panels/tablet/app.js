@@ -1027,8 +1027,15 @@ function renderPanel() {
   const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
     const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
     if (!(await confirmDialog(`Close table ${t} and free it?${warn}`, "Close table"))) return;
-    // OPTIMISTIC: drop the session locally so the tile frees INSTANTLY, then persist.
+    // OPTIMISTIC: drop the session AND this table's orders/members locally so the FLOOR TILE
+    // (which renders from the slim summary, not the slice) goes free INSTANTLY, instead of
+    // showing the old occupied colour for ~1s until the reconcile. patchTileFromSlice recomputes
+    // the now-empty tile into state.summary; load() below reconciles (and reverts it if the
+    // server refuses the close). (audit 2026-07-08 round2)
     state.data.sessions = (state.data.sessions || []).filter((x) => x.id !== s.id);
+    state.data.orders = (state.data.orders || []).filter((o) => String(o.table_number) !== String(t));
+    state.data.members = (state.data.members || []).filter((m) => m.session_id !== s.id);
+    patchTileFromSlice(t);
     state.table = null; state.ordering = false;
     renderFloor(); renderPanel();
     try {
@@ -1260,12 +1267,16 @@ function renderMoveOrderTarget(t, orderId) {
 // Apply a local change, repaint instantly, then persist and reconcile from the
 // server. On failure we toast and reload so the screen can't lie.
 async function runOptimistic(mutate, fn) {
+  // Remember which table we were viewing: a shift optimistically repoints state.table to the
+  // TARGET, so if the move is refused (target just got taken) we must snap back to the source
+  // table — otherwise the waiter is left staring at the wrong, empty table. (audit 2026-07-08 round2)
+  const prevTable = state.table;
   try {
     mutate(); renderFloor(); renderPanel();
     const r = await fn();
     if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: saved offline — not a failure, and load() would no-op
   }
-  catch (e) { toast("Failed: " + e.message, false); }
+  catch (e) { state.table = prevTable; toast("Failed: " + e.message, false); }
   await load();   // load() already repaints if anything changed — no second render (that was the extra flash)
 }
 
@@ -1649,25 +1660,34 @@ const dishPrice = (d) => Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
 // Add ONE dish to an already-placed order (staff edit). Server prices + re-prices.
 // Stays in add mode so the waiter can add several, then taps "✓ Done".
 const addingDishKeys = new Set();
+const pendingAddQty = new Map(); // key -> extra qty tapped while an add was in flight (coalesced, never dropped)
 async function addDishToOrder(orderId, payload) {
-  // Ignore a double-tap of the SAME dish while its add is still in flight (add mode has no
-  // visible cart, so a fat-fingered second tap silently added the dish twice — 2026-07-07).
-  // A DIFFERENT dish is keyed separately, so quick adds of several dishes still all go through.
   const key = orderId + "|" + (payload && (payload.dishId || payload.id));
-  if (addingDishKeys.has(key)) return;
+  const tapQty = Math.max(1, Math.round(Number(payload && payload.qty) || 1));
+  // While an add for THIS dish is in flight, don't DROP repeat taps (add mode has no visible
+  // cart, so fast-tapping the same dish 3× used to land only 1 — audit 2026-07-08 round2).
+  // Accumulate the extra qty and flush it as ONE add when the in-flight call returns; the
+  // server's add-item respects a qty>1 (the options modal already relies on that).
+  if (addingDishKeys.has(key)) { pendingAddQty.set(key, (pendingAddQty.get(key) || 0) + tapQty); return; }
   addingDishKeys.add(key);
   try {
     const r = await api("POST", `/orders/${orderId}/add-item`, payload);
     if (r && r.ok === false) { toast("Couldn't add: " + (r.reason || "rejected"), false); return; }
     // #16: keep a running "added this visit" tally so the waiter can see what they've piled on
     // (the cart badges aren't used in add mode). Rendered on the "✓ Done" button.
-    state._addedThisVisit = (state._addedThisVisit || 0) + (Math.max(1, Math.round(Number(payload && payload.qty) || 1)));
+    state._addedThisVisit = (state._addedThisVisit || 0) + tapQty;
     // #2: offline → the add is queued; say so honestly instead of "Dish added ✓".
     toast(isQueued(r) ? "Dish saved ✓ — adds when you're back online" : "Dish added ✓");
     await load();  // offline → no-ops; the tally + toast are the feedback until reconnect
     if (state.addToOrderId) renderOrderMode(); else if (!state.ordering) renderPanel();
   } catch (e) { toast("Failed: " + e.message, false); }
-  finally { addingDishKeys.delete(key); }
+  finally {
+    addingDishKeys.delete(key);
+    // Flush any taps that arrived mid-flight, as ONE accumulated add (keeps the same dish
+    // options/removed), so no fast tap is ever silently lost.
+    const extra = pendingAddQty.get(key);
+    if (extra > 0) { pendingAddQty.delete(key); addDishToOrder(orderId, Object.assign({}, payload, { qty: extra })); }
+  }
 }
 
 // Menu-style browse (owner, 2026-07-03): ALL categories are laid out as sections in ONE
