@@ -70,7 +70,10 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     <div className="adm adx" data-skin={skin}>
       <aside className="adx-side">
         <div className="adx-brand">
-          <span className="mark"><i className="fas fa-diamond" aria-hidden="true" /></span>
+          <span className="mark" style={{ background: "transparent", boxShadow: "none" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/aevidine-mark.svg" alt="Aevidine" width={28} height={28} style={{ display: "block" }} />
+          </span>
           <span className="who"><b>Aevidine</b><span>Platform admin</span></span>
         </div>
         <nav className="adx-nav" aria-label="Admin sections">

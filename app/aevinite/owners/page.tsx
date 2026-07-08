@@ -356,6 +356,9 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
   const [created, setCreated] = useState<string | null>(owner.createdAt || null);
   const [mErr, setMErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // Show the one-time reset password INSIDE this modal — the page-level banner
+  // renders behind the modal overlay, so the admin couldn't see/copy it (audit 2026-07-08).
+  const [pwReveal, setPwReveal] = useState<string | null>(null);
   // Add-restaurant picker (inline, no nested modal). The list is driven by the
   // live `owner` prop, so after attach/detach → onChanged reloads → this recomputes.
   const [showAttach, setShowAttach] = useState(false);
@@ -433,11 +436,25 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
                   href={`/api/admin/act-as/go?rid=${encodeURIComponent(owner.restaurants[0].id)}&to=/owner`} target="_blank" rel="noreferrer"><i className="fas fa-eye" style={ic} aria-hidden="true" />Open their screen</a>
               )}
               <button style={actBtn} disabled={busy}
-                onClick={() => { if (confirm(`Set a NEW password for ${owner.name}? They'll be logged out everywhere.`)) run(async () => { const j = await onPatch({ owner_id: owner.id, action: "reset_password" }); onReveal(owner.name, j.password); }); }}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
+                onClick={() => { if (confirm(`Set a NEW password for ${owner.name}? They'll be logged out everywhere.`)) run(async () => { const j = await onPatch({ owner_id: owner.id, action: "reset_password" }); setPwReveal(j.password); onReveal(owner.name, j.password); }); }}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
               <button style={{ ...actBtn, color: owner.active ? "#fca5a5" : "#86efac" }} disabled={busy}
                 onClick={() => { if (confirm(owner.active ? `Suspend ${owner.name}? They're logged out immediately and can't sign in.` : `Restore ${owner.name}'s access?`)) run(async () => { await onPatch({ owner_id: owner.id, action: "set_active", active: !owner.active }); }); }}>
                 <i className={`fas ${owner.active ? "fa-ban" : "fa-rotate-left"}`} style={ic} aria-hidden="true" />{owner.active ? "Suspend" : "Restore"}</button>
             </div>
+
+            {/* One-time reset password — shown HERE inside the modal so it's actually
+                visible/copyable (the page-level banner sits behind the modal overlay,
+                audit 2026-07-08). */}
+            {pwReveal ? (
+              <div style={{ ...card, padding: 12, borderColor: "#166534", background: "rgba(22,101,52,.08)" }}>
+                <div style={{ fontSize: 12.5, color: "#86efac" }}>New password for <b>{owner.name}</b> — copy it now, it won&apos;t be shown again:</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                  <code style={{ fontSize: 17, background: "var(--bg)", padding: "8px 12px", borderRadius: 8, letterSpacing: 1 }}>{pwReveal}</code>
+                  <button style={btn("#3b82f6")} onClick={() => navigator.clipboard?.writeText(pwReveal)}>Copy</button>
+                  <button style={btn("#374151")} onClick={() => setPwReveal(null)}>Done</button>
+                </div>
+              </div>
+            ) : null}
 
             {/* Restaurants — fully managed HERE (add + remove), owner request 2026-07-06.
                 Each chip has a remove (×); "Add restaurant" opens an inline picker. */}
