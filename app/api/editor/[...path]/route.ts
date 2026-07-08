@@ -822,6 +822,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 export const POST = withIdempotency(postImpl, "editor");
 async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
+  // Attribute every logged action to the signed-in staff member (name = their login;
+  // admin super-user has no per-user cookie). Before this, `actor` was never filled, so
+  // the Operation-log "By" column and the Staff-watch tool saw only an anonymous row.
+  const actorName = g.user?.name || g.user?.username || null;
+  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(a[2] || {}) });
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   try {
@@ -899,7 +904,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         p_items: pick, p_total: total, p_restaurant_id: rid,
       });
       if (error) throw new Error(error.message);
-      await logAction("manager", "platform_test_order", { restaurant_id: rid, detail: `${src} test order`, device_id: dev });
+      await log("manager", "platform_test_order", { restaurant_id: rid, detail: `${src} test order`, device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
     }
 
@@ -916,7 +921,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       const row = Array.isArray(data) ? data[0] : data;
       void notifyAggregator(row?.source, row?.external_id, status); // best-effort push back to the platform (dormant w/o keys)
-      await logAction("manager", "platform_status", { restaurant_id: rid, detail: status, device_id: dev });
+      await log("manager", "platform_status", { restaurant_id: rid, detail: status, device_id: dev });
       return ok(row);
     }
 
@@ -927,7 +932,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (typeof body.platform_in_bills === "boolean") patch.platform_in_bills = body.platform_in_bills;
       if (!Object.keys(patch).length) return err("no toggle given");
       must(await sb.from("settings").update(patch).eq("restaurant_id", rid).select());
-      await logAction("manager", "platform_toggle", { restaurant_id: rid, detail: JSON.stringify(patch), device_id: dev });
+      await log("manager", "platform_toggle", { restaurant_id: rid, detail: JSON.stringify(patch), device_id: dev });
       return ok({ ok: true, ...patch });
     }
 
@@ -951,14 +956,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           ? must(await sb.from("banquet_items").update(patch).eq("id", String(body.id)).eq("restaurant_id", rid).select("id,title,price,unit,sort_order,active"))[0]
           : must(await sb.from("banquet_items").insert({ ...patch, restaurant_id: rid }).select("id,title,price,unit,sort_order,active"))[0];
         if (!row) return err("banquet item not found", 404);
-        await logAction("manager", "banquet_item_save", { restaurant_id: rid, detail: `"${title}" ₹${price}`, device_id: dev });
+        await log("manager", "banquet_item_save", { restaurant_id: rid, detail: `"${title}" ₹${price}`, device_id: dev });
         return ok(row);
       }
       // banquet/item-delete — { id }
       if (b === "item-delete") {
         if (!(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the banquet menu");
         must(await sb.from("banquet_items").delete().eq("id", String(body?.id || "")).eq("restaurant_id", rid).select("id"));
-        await logAction("manager", "banquet_item_delete", { restaurant_id: rid, device_id: dev });
+        await log("manager", "banquet_item_delete", { restaurant_id: rid, device_id: dev });
         return ok({ ok: true });
       }
       // banquet/place — { table?, lines:[{id, qty}] }. With a table the bill lands on
@@ -977,7 +982,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const { data, error } = await sb.rpc("lfh_banquet_place_order", { p_table: t || null, p_lines: lines, p_restaurant_id: rid });
         if (error) throw new Error(error.message);
         if (!(data as any)?.ok) return err(banquetErrMsg((data as any)?.reason), 400);
-        await logAction("manager", "banquet_place", { restaurant_id: rid, table_number: t || null, detail: `total ${(data as any)?.total}`, device_id: dev });
+        await log("manager", "banquet_place", { restaurant_id: rid, table_number: t || null, detail: `total ${(data as any)?.total}`, device_id: dev });
         return ok(data);
       }
       return err("unknown banquet action", 404);
@@ -1006,7 +1011,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         kept = candidates.length - deletable.length;
       } else return err("no ids");
       if (deletable.length) must(await sb.from("orders").delete().eq("restaurant_id", rid).in("id", deletable));
-      await logAction("editor", "orders_delete", { restaurant_id: rid, detail: all ? `cleared all freed records (${deletable.length})` : `deleted ${deletable.length} bill(s)`, device_id: dev });
+      await log("editor", "orders_delete", { restaurant_id: rid, detail: all ? `cleared all freed records (${deletable.length})` : `deleted ${deletable.length} bill(s)`, device_id: dev });
       return ok({ ok: true, deleted: deletable.length, kept });
     }
 
@@ -1017,7 +1022,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "tip") {
       const amt = Math.max(0, Number(body?.amount) || 0);
       must(await sb.from("orders").update({ tip: amt }).eq("id", b).eq("restaurant_id", rid));
-      await logAction("manager", "order_tip", { restaurant_id: rid, order_id: b, detail: `tip ₹${amt}`, device_id: dev });
+      await log("manager", "order_tip", { restaurant_id: rid, order_id: b, detail: `tip ₹${amt}`, device_id: dev });
       return ok({ ok: true });
     }
     if (a === "orders" && c === "discount") {
@@ -1041,7 +1046,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (cur.session_id) {
         const amount = Number.isFinite(raw) ? Math.max(raw, 0) : 0;
         const res = must(await sb.rpc("lfh_staff_bill_discount", { p_session: cur.session_id, p_amount: amount, p_note: note }));
-        await logAction("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `bill discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
+        await log("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `bill discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
         return ok({ ok: true, discount: (res && (res as { discount?: number }).discount) ?? amount });
       }
       // Legacy standalone order (no table session): keep the per-order write, capped at its OWN
@@ -1049,7 +1054,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const billCap = Number(cur.subtotal) || 0;
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), billCap) : 0;
       must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid));
-      await logAction("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
+      await log("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
       return ok({ ok: true });
     }
     // orders/:id/allergies — staff edit of the order-wide "avoid" list (add a
@@ -1078,7 +1083,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         }
       }
       const detail = [addedOW.length ? `added ${addedOW.join(", ")}` : "", removedOW.length ? `removed ${removedOW.join(", ")}` : ""].filter(Boolean).join("; ") || (allergies.join(", ") || "(none)");
-      await logAction("editor", "order_allergies", { restaurant_id: rid, order_id: b, detail, device_id: dev });
+      await log("editor", "order_allergies", { restaurant_id: rid, order_id: b, detail, device_id: dev });
       return ok({ ok: true });
     }
     if (a === "orders" && c === "accept") {
@@ -1088,7 +1093,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // return=minimal: client re-fetches the board → skip both the .select() and the full-row re-read.
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
-      await logAction("editor", "order_accept", { restaurant_id: rid, order_id: b, device_id: dev });
+      await log("editor", "order_accept", { restaurant_id: rid, order_id: b, device_id: dev });
       return ok({ ok: true });
     }
     if (a === "orders" && c === "serve-all") {
@@ -1097,7 +1102,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
-      await logAction("editor", "order_serve", { restaurant_id: rid, order_id: b, device_id: dev });
+      await log("editor", "order_serve", { restaurant_id: rid, order_id: b, device_id: dev });
       // Only session_id is needed (for auto-settle); the client discards the body → not the full row.
       const servedRow = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).single());
       await maybeAutoSettle((servedRow as any)?.session_id, { panel: "editor", deviceId: dev }); // serving may complete the table
@@ -1134,7 +1139,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_open_table", { p_restaurant_id: rid, p_table: table });
       if (error) throw new Error(error.message);
       if (data && data.error) return err(data.error);
-      await logAction("editor", "table_open", { restaurant_id: rid, table_number: table, device_id: dev });
+      await log("editor", "table_open", { restaurant_id: rid, table_number: table, device_id: dev });
       return ok(data || null);
     }
 
@@ -1145,7 +1150,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && b === "open-all") {
       const { data, error } = await sb.rpc("lfh_staff_open_all_tables", { p_restaurant_id: rid });
       if (error) throw new Error(error.message);
-      await logAction("editor", "table_open_all", { restaurant_id: rid, detail: `opened ${(data && data.opened) || 0}`, device_id: dev });
+      await log("editor", "table_open_all", { restaurant_id: rid, detail: `opened ${(data && data.opened) || 0}`, device_id: dev });
       return ok(data || { opened: 0 });
     }
 
@@ -1156,7 +1161,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && b === "close-all") {
       const { data, error } = await sb.rpc("lfh_staff_close_all_tables", { p_restaurant_id: rid, p_force: false });
       if (error) throw new Error(error.message);
-      await logAction("editor", "table_close_all", { restaurant_id: rid, detail: `closed ${(data && data.closed) || 0}, skipped ${(data && data.skipped) || 0}`, device_id: dev });
+      await log("editor", "table_close_all", { restaurant_id: rid, detail: `closed ${(data && data.closed) || 0}, skipped ${(data && data.skipped) || 0}`, device_id: dev });
       return ok(data || { closed: 0, skipped: 0, closed_tables: [] });
     }
 
@@ -1186,7 +1191,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!ownsGen) return err("That table isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
       if (error) throw new Error(error.message);
-      await logAction("editor", "invoice_generate", { restaurant_id: rid, detail: `session ${b}`, device_id: dev });
+      await log("editor", "invoice_generate", { restaurant_id: rid, detail: `session ${b}`, device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
     }
     // sessions/:id/void-invoice — VOID it (reopen the bill for edits; number kept in record).
@@ -1197,7 +1202,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!ownsVoid) return err("That table isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_void_invoice", { p_session: b, p_reason: (body && body.reason) || null });
       if (error) throw new Error(error.message);
-      await logAction("editor", "invoice_void", { restaurant_id: rid, detail: `session ${b}` + ((body && body.reason) ? ` · ${body.reason}` : ""), device_id: dev });
+      await log("editor", "invoice_void", { restaurant_id: rid, detail: `session ${b}` + ((body && body.reason) ? ` · ${body.reason}` : ""), device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
     }
     if (a === "sessions" && c === "shift") {
@@ -1216,7 +1221,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (tableCount && Number(to) > tableCount) return err("That table number is out of range.", 400);
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
-      await logAction("editor", "table_shift", { restaurant_id: rid, detail: "→ table " + to, device_id: dev });
+      await log("editor", "table_shift", { restaurant_id: rid, detail: "→ table " + to, device_id: dev });
       return ok(data);
     }
 
@@ -1264,7 +1269,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             : reason;
         return err(msg, reason === "order_paid" ? 409 : 400);
       }
-      await logAction("editor", "order_item_delete", { restaurant_id: rid, order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
+      await log("editor", "order_item_delete", { restaurant_id: rid, order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
       await stampEdited(data?.order_id, rid);
       return ok(data);
     }
@@ -1281,7 +1286,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
-      await logAction("editor", "order_item_qty", { restaurant_id: rid, order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
+      await log("editor", "order_item_qty", { restaurant_id: rid, order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
       await stampEdited(data?.order_id, rid);
       return ok(data);
     }
@@ -1292,7 +1297,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
-      await logAction("editor", "order_item_note", { restaurant_id: rid, order_id: data?.order_id, device_id: dev });
+      await log("editor", "order_item_note", { restaurant_id: rid, order_id: data?.order_id, device_id: dev });
       await stampEdited(data?.order_id, rid);
       return ok(data);
     }
@@ -1328,7 +1333,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const added_allergens = [...addedMark].filter((s) => removed.includes(s)); // keep only ones still present
       const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).eq("restaurant_id", rid).select());
       const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : ""].filter(Boolean).join("; ") || "no change";
-      await logAction("editor", "order_item_removed", { restaurant_id: rid, order_id: item.order_id, detail, device_id: dev });
+      await log("editor", "order_item_removed", { restaurant_id: rid, order_id: item.order_id, detail, device_id: dev });
       await stampEdited(item.order_id, rid);
       return ok(rowU[0] || { ok: true });
     }
@@ -1351,7 +1356,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_add_item_to_order", { p_order: b, p_items: [line] });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
-      await logAction("editor", "order_add_item", { restaurant_id: rid, order_id: b, detail: dishId, device_id: dev });
+      await log("editor", "order_add_item", { restaurant_id: rid, order_id: b, detail: dishId, device_id: dev });
       await stampEdited(b, rid);
       return ok(data);
     }
@@ -1415,7 +1420,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       await clearTableSignals(rid, t); // the B12 fix — no ghost waiter-call bell on the emptied table
       const setg = (await sb.from("settings").select("sessions_enabled").eq("restaurant_id", rid).maybeSingle()).data as { sessions_enabled?: boolean } | null;
       if (setg?.sessions_enabled && !openSess) await sb.from("sessions").insert({ table_number: t, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid });
-      await logAction("manager", "table_restart", { restaurant_id: rid, table_number: t, detail: `${rows.length} order(s) cleared`, device_id: dev });
+      await log("manager", "table_restart", { restaurant_id: rid, table_number: t, detail: `${rows.length} order(s) cleared`, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
 
@@ -1441,7 +1446,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Record WHO banned WHAT in the Log (accountability). Describe the target type only —
       // never write the raw phone number into the log (no PII in the audit trail).
       const banTarget = [table ? `table ${table}` : "", phone ? "a phone" : "", device ? "a device" : "", memberId ? "a guest" : ""].filter(Boolean).join(", ") || "a guest";
-      await logAction("editor", "blocklist_add", { restaurant_id: rid, detail: `banned ${banTarget}${body.reason ? ` · ${String(body.reason).slice(0, 60)}` : ""}`, device_id: dev });
+      await log("editor", "blocklist_add", { restaurant_id: rid, detail: `banned ${banTarget}${body.reason ? ` · ${String(body.reason).slice(0, 60)}` : ""}`, device_id: dev });
       return ok(row || null);
     }
 
@@ -1639,7 +1644,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (a === "items" || a === "categories" || a === "filters") {
         const kind = a === "items" ? "dish" : a === "categories" ? "category" : "tag";
         const label = String(body.title || (body.name && (body.name.en || body.name)) || body.slug || (data[0] && data[0].id) || "").slice(0, 80);
-        await logAction("manager", isCreate ? "menu_create" : "menu_edit", { restaurant_id: rid, detail: `${isCreate ? "added" : "edited"} ${kind}: ${label}`, device_id: dev });
+        await log("manager", isCreate ? "menu_create" : "menu_edit", { restaurant_id: rid, detail: `${isCreate ? "added" : "edited"} ${kind}: ${label}`, device_id: dev });
       }
       return ok(data[0]);
     }
@@ -1654,6 +1659,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 export const PATCH = withIdempotency(patchImpl, "editor");
 async function patchImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
+  const actorName = g.user?.name || g.user?.username || null;
+  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(a[2] || {}) });
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   try {
@@ -1707,7 +1714,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
         if (tooOld(cur.paid_at)) return err("This bill was marked paid more than 30 minutes ago and can no longer be reverted.", 409);
         const reason = String((body && body.revert_reason) || "").trim();
         if (!reason) return err("Reverting a PAID bill needs a reason (refund/correction).", 409);
-        await logAction("editor", "payment_revert", { restaurant_id: rid, order_id: id, detail: reason, device_id: deviceIdFrom(req) });
+        await log("editor", "payment_revert", { restaurant_id: rid, order_id: id, detail: reason, device_id: deviceIdFrom(req) });
       }
       if (patch.archived === false && cur.archived === true) {
         if (tooOld(cur.archived_at)) return err("This bill was freed more than 30 minutes ago and can no longer be restored.", 409);
@@ -1743,6 +1750,8 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
 export const DELETE = withIdempotency(deleteImpl, "editor");
 async function deleteImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
+  const actorName = g.user?.name || g.user?.username || null;
+  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(a[2] || {}) });
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   try {
@@ -1757,7 +1766,7 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       if (cur && cur.payment_status === "paid" && cur.status !== "cancelled")
         return err("Won't delete a PAID bill — it's a financial record. Mark it unpaid or void it first.", 409);
       must(await sb.from("orders").delete().eq("id", id).eq("restaurant_id", rid));
-      await logAction("editor", "order_delete", { restaurant_id: rid, order_id: id, device_id: deviceIdFrom(req) });
+      await log("editor", "order_delete", { restaurant_id: rid, order_id: id, device_id: deviceIdFrom(req) });
       return ok({ ok: true });
     }
 
@@ -1775,7 +1784,7 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
         if (!others.length) await sb.from("customers").update({ blocked: false }).eq("phone", phone).eq("restaurant_id", rid);
       }
       // Unbanning is recorded too, so a ban that's quietly lifted still leaves a trace.
-      await logAction("editor", "blocklist_remove", { restaurant_id: rid, detail: "unbanned", device_id: deviceIdFrom(req) });
+      await log("editor", "blocklist_remove", { restaurant_id: rid, detail: "unbanned", device_id: deviceIdFrom(req) });
       return ok({ ok: true });
     }
 
@@ -1802,7 +1811,7 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       } catch { /* orphan cleanup is best-effort */ }
       // Record the menu deletion in the operation log (B25) — like create/edit above.
       if (a === "items" || a === "categories" || a === "filters") {
-        await logAction("manager", "menu_delete", { restaurant_id: rid, detail: `deleted ${a === "items" ? "dish" : a === "categories" ? "category" : "tag"}: ${id}`, device_id: deviceIdFrom(req) });
+        await log("manager", "menu_delete", { restaurant_id: rid, detail: `deleted ${a === "items" ? "dish" : a === "categories" ? "category" : "tag"}: ${id}`, device_id: deviceIdFrom(req) });
       }
       // Deleting a dish/category/filter changes the SHARED guest menu → bust cache.
       bustMenuCache(rid);
