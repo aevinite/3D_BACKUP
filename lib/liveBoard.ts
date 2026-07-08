@@ -119,6 +119,22 @@ export async function liveOrdersAndItems(
     return { orders, items };
   }
 
+  // ACTIVE-ONLY (kitchen) full board: the caller already dropped served/cancelled orders
+  // server-side, and the client only ever reads items keyed to an order still on the board.
+  // So scope items to exactly those active orders' ids instead of shipping EVERY of today's
+  // items (served + cancelled included) on this 60s-polled, rush-throttled path — the whole-
+  // board read the egress rules forbid, once per kitchen screen. The tablet (activeOnly=false)
+  // still needs served items for bills, so it keeps the full read below. (egress fix 2026-07-09)
+  if (activeOnly) {
+    const activeIds = orders.map((o) => o.id);
+    if (!activeIds.length) return { orders, items: [] };
+    const items = await pageAll<Row>((from, to) =>
+      sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
+        .in("order_id", activeIds)
+        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to));
+    return { orders, items };
+  }
+
   // FULL path: per-dish rows are today's, PLUS the items of the OLD (pre-rollover)
   // open-session orders we just kept — so their dishes' statuses come along too.
   // Keeping the id-list to just those old orders keeps the query small.
