@@ -130,7 +130,7 @@ export default function AdminRestaurants() {
   if (selected) {
     // Re-read the freshest copy from the list so the owner shows correctly after a round-trip.
     const fresh = (list || []).find((r) => r.id === selected.id) || selected;
-    return <RestaurantDetail restaurant={fresh} owners={owners} onBack={() => { setSelected(null); loadList(); }} onChanged={loadList} />;
+    return <RestaurantDetail key={fresh.id} restaurant={fresh} owners={owners} onBack={() => { setSelected(null); loadList(); }} onChanged={loadList} />;
   }
 
   const needle = q.trim().toLowerCase();
@@ -1022,8 +1022,9 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
       // Shared act-as helper (components/admin/shared.tsx) — also used by the
       // Command page's quick-open buttons. Sets the act-as cookie, then opens the
       // panel in a new tab pinned to this restaurant via ?rid=.
-      await openRestaurantPanel(restaurant.id, path);
-      setViewing(true);
+      const w = await openRestaurantPanel(restaurant.id, path);
+      if (w) setViewing(true);
+      else setMsg("Couldn't open the panel tab — allow pop-ups for this site, then try again.");
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const stop = async () => {
@@ -1039,9 +1040,15 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
       <h2>View &amp; manage this restaurant</h2>
       <p className="hint">See <b>{restaurant.name}</b> exactly as its guests and staff do, and manage its people. Each opens in a new tab.</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        <a className="adm-btn primary" href={`/r/${restaurant.slug}/menu`} target="_blank" rel="noopener" title={`Open ${restaurant.name}'s guest menu`}>
-          <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />View guest menu
-        </a>
+        {restaurant.active ? (
+          <a className="adm-btn primary" href={`/r/${restaurant.slug}/menu`} target="_blank" rel="noopener" title={`Open ${restaurant.name}'s guest menu`}>
+            <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />View guest menu
+          </a>
+        ) : (
+          <button className="adm-btn" disabled title="The guest menu is offline while this restaurant is suspended — reactivate it below to view.">
+            <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />Guest menu offline
+          </button>
+        )}
         {panelOn("owner") && (
           <button className="adm-btn primary" disabled={busy} onClick={() => openPanel("/owner")} title={`Open ${restaurant.name}'s owner dashboard`}>
             <i className="fas fa-crown" style={{ marginRight: 7 }} aria-hidden="true" />Owner dashboard

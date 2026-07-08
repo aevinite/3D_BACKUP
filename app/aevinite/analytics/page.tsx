@@ -155,7 +155,7 @@ export default function AdminAnalytics() {
             icon: "fa-store", label: "Active restaurants",
             value: t ? <>{t.activeRestaurants}<span style={{ color: "var(--muted)", fontWeight: 600, fontSize: 17 }}> / {t.totalRestaurants}</span></> : "…",
             href: "/aevinite/restaurants", title: "Manage restaurants",
-            sub: t && t.totalRestaurants - t.activeRestaurants > 0 ? `${t.totalRestaurants - t.activeRestaurants} suspended or binned` : "all live",
+            sub: t && t.totalRestaurants - t.activeRestaurants > 0 ? `${t.totalRestaurants - t.activeRestaurants} suspended` : "all live",
           })}
           {tile({
             icon: "fa-user-group", label: "Active staff",
@@ -168,7 +168,7 @@ export default function AdminAnalytics() {
         <div className="adm-card" style={{ marginBottom: 14 }}>
           <h2>Orders per {range === "today" ? "hour" : "day"}</h2>
           <p className="hint">Platform-wide order count for {RANGE_LABEL[range].toLowerCase()} — every bucket plotted, quiet ones as zero.</p>
-          {data ? <OrdersTrend data={data.trend} bucket={data.bucket || "day"} /> : <div className="adm-empty">Loading…</div>}
+          {data ? <OrdersTrend data={data.trend} bucket={data.bucket || "day"} /> : <div className="adm-empty">{err ? "Couldn't load — press Refresh." : "Loading…"}</div>}
         </div>
 
         <div className="adx-grid2col">
@@ -176,7 +176,7 @@ export default function AdminAnalytics() {
             <h2>Busiest restaurants</h2>
             <p className="hint">Ranked by order count (not money) for {RANGE_LABEL[range].toLowerCase()}.</p>
             {data === null ? (
-              <div className="adm-empty">Loading…</div>
+              <div className="adm-empty">{err ? "Couldn't load — press Refresh." : "Loading…"}</div>
             ) : busiestActive.length === 0 ? (
               <div className="adm-empty">No orders in this range yet.</div>
             ) : (
@@ -210,7 +210,7 @@ export default function AdminAnalytics() {
             <h2>Orders by source</h2>
             <p className="hint">Dine-in vs platform (Zomato / Swiggy / takeaway) order counts.</p>
             {data === null ? (
-              <div className="adm-empty">Loading…</div>
+              <div className="adm-empty">{err ? "Couldn't load — press Refresh." : "Loading…"}</div>
             ) : sourceTotal === 0 ? (
               <div className="adm-empty">No orders in this range yet.</div>
             ) : (

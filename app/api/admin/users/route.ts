@@ -47,7 +47,8 @@ export async function GET(req: NextRequest) {
       // editing/deleting an owner from this page was a side door that could orphan a
       // restaurant's ownership (admin audit 2026-07-06).
       .neq("role", "owner")
-      .order("created_at", { ascending: true }),
+      .order("created_at", { ascending: true })
+      .limit(2000), // safety cap so this never becomes an unbounded whole-table read; true per-restaurant server scoping/pagination is a follow-up (audit 2026-07-08)
     sb.from("restaurants").select("id, name"),
   ]);
   if (usersQ.error) return bad(usersQ.error.message, 500);

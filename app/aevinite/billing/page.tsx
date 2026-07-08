@@ -13,7 +13,7 @@ type Row = {
   id: string; name: string; slug: string; active: boolean;
   plan: string | null; status: string; amount: number | null; currency: string; cycle: string;
   startedOn: string | null; nextDueOn: string | null; notes: string | null;
-  paidThisYear: number; lastPayment: { amount: number; paid_on: string } | null;
+  paidThisYear: number;
 };
 type Summary = { totalCollectedThisYear: number; statusCounts: Record<string, number>; dueSoon: number; overdue: number };
 type Payment = { id: string; restaurant_id: string; amount: number; paid_on: string; method: string | null; period_label: string | null; note: string | null; created_at: string };

@@ -42,7 +42,7 @@ export default function AdminOwners() {
   const [err, setErr] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   // One-time password reveal (after create or reset) — shown until dismissed.
-  const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
+  const [reveal, setReveal] = useState<{ name: string; password: string; warn?: string } | null>(null);
   // Which owner's attach-picker is open (chips + a small inline list, no modal).
   const [attachFor, setAttachFor] = useState<string | null>(null);
   // Which owner's DETAIL view is open (click anywhere on a card): profile,
@@ -125,6 +125,7 @@ export default function AdminOwners() {
             <button style={btn("#3b82f6")} onClick={() => navigator.clipboard?.writeText(reveal.password)}>Copy</button>
             <button style={btn("#374151")} onClick={() => setReveal(null)}>Done</button>
           </div>
+          {reveal.warn && <div style={{ fontSize: 12, color: "#fcd34d", marginTop: 8 }}>{reveal.warn}</div>}
         </div>
       ) : null}
 
@@ -227,7 +228,7 @@ export default function AdminOwners() {
       {showCreate && (
         <CreateOwnerModal rests={rests}
           onClose={() => setShowCreate(false)}
-          onCreated={(name, password) => { setShowCreate(false); setReveal({ name, password }); load(); }} />
+          onCreated={(name, password, attachErrors) => { setShowCreate(false); setReveal({ name, password, warn: attachErrors && attachErrors.length ? `Heads-up: ${attachErrors.length} restaurant(s) couldn't be attached — add them from the owner's card.` : undefined }); load(); }} />
       )}
 
       {detailOwner && (
@@ -256,7 +257,7 @@ const ic: React.CSSProperties = { marginRight: 6, fontSize: 11 };
 
 // ── Create-owner modal: name + optional password + multi-select restaurants ──
 function CreateOwnerModal({ rests, onClose, onCreated }: {
-  rests: Rest[]; onClose: () => void; onCreated: (name: string, password: string) => void;
+  rests: Rest[]; onClose: () => void; onCreated: (name: string, password: string, attachErrors?: string[]) => void;
 }) {
   const [name, setName] = useState("");
   const [pw, setPw] = useState("");
@@ -285,7 +286,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(j.error || "Could not create owner."); return; }
-      onCreated(j.name, j.password);
+      onCreated(j.name, j.password, j.attachErrors);
     } catch { setErr("Network error."); }
     finally { setBusy(false); creatingRef.current = false; }
   }
@@ -437,6 +438,8 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
               )}
               <button style={actBtn} disabled={busy}
                 onClick={() => { if (confirm(`Set a NEW password for ${owner.name}? They'll be logged out everywhere.`)) run(async () => { const j = await onPatch({ owner_id: owner.id, action: "reset_password" }); setPwReveal(j.password); onReveal(owner.name, j.password); }); }}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
+              <button style={actBtn} disabled={busy}
+                onClick={() => { const nn = prompt(`New name for ${owner.name} (this also changes their login name):`, owner.name); if (nn && nn.trim() && nn.trim() !== owner.name) run(async () => { await onPatch({ owner_id: owner.id, action: "rename", name: nn.trim() }); }); }}><i className="fas fa-pen" style={ic} aria-hidden="true" />Rename</button>
               <button style={{ ...actBtn, color: owner.active ? "#fca5a5" : "#86efac" }} disabled={busy}
                 onClick={() => { if (confirm(owner.active ? `Suspend ${owner.name}? They're logged out immediately and can't sign in.` : `Restore ${owner.name}'s access?`)) run(async () => { await onPatch({ owner_id: owner.id, action: "set_active", active: !owner.active }); }); }}>
                 <i className={`fas ${owner.active ? "fa-ban" : "fa-rotate-left"}`} style={ic} aria-hidden="true" />{owner.active ? "Suspend" : "Restore"}</button>

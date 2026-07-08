@@ -52,22 +52,18 @@ export async function GET(req: NextRequest) {
   }
 
   const yearStart = `${new Date().getUTCFullYear()}-01-01`;
-  const [restQ, billingQ, yearPaymentsQ, lastPaymentsQ] = await Promise.all([
+  const [restQ, billingQ, yearPaymentsQ] = await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): a binned restaurant must not appear
     // as a billable row in the SaaS billing table.
     sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name"),
     sb.from("restaurant_billing").select("*"),
     sb.from("restaurant_payments").select("restaurant_id, amount").gte("paid_on", yearStart).limit(5000),
-    sb.from("restaurant_payments").select("restaurant_id, amount, paid_on").order("paid_on", { ascending: false }).limit(1000),
   ]);
-  for (const q of [restQ, billingQ, yearPaymentsQ, lastPaymentsQ]) if (q.error) return bad(q.error.message, 500);
+  for (const q of [restQ, billingQ, yearPaymentsQ]) if (q.error) return bad(q.error.message, 500);
 
   const billingByRid = new Map<string, Billing>((billingQ.data || []).map((b: Billing) => [b.restaurant_id, b]));
   const paidThisYearByRid = new Map<string, number>();
   for (const p of yearPaymentsQ.data || []) paidThisYearByRid.set(p.restaurant_id, (paidThisYearByRid.get(p.restaurant_id) || 0) + (Number(p.amount) || 0));
-  const lastPaymentByRid = new Map<string, { amount: number; paid_on: string }>();
-  for (const p of lastPaymentsQ.data || []) if (!lastPaymentByRid.has(p.restaurant_id)) lastPaymentByRid.set(p.restaurant_id, { amount: Number(p.amount) || 0, paid_on: p.paid_on });
-
   const rows = (restQ.data || []).map((r: { id: string; name: string; slug: string; active: boolean }) => {
     const b = billingByRid.get(r.id) || null;
     return {
@@ -75,7 +71,6 @@ export async function GET(req: NextRequest) {
       plan: b?.plan ?? null, status: b?.status ?? "trial", amount: b?.amount ?? null, currency: b?.currency ?? "INR",
       cycle: b?.cycle ?? "yearly", startedOn: b?.started_on ?? null, nextDueOn: b?.next_due_on ?? null, notes: b?.notes ?? null,
       paidThisYear: Math.round((paidThisYearByRid.get(r.id) || 0) * 100) / 100,
-      lastPayment: lastPaymentByRid.get(r.id) || null,
     };
   });
 
