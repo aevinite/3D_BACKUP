@@ -183,8 +183,14 @@ export async function flushGuestOutbox() {
       // original order_id back with the duplicate, so we can still show it to the guest
       // (previously this silently dropped the order and the guest thought it failed).
       if (res.ok && j?.duplicate) { if (j.order_id) recordActive(item, j.order_id as string); await removeItem(item.id); notify(); continue; }
+      // A TRANSIENT server error (5xx — e.g. the route's 502 on a DB timeout/deadlock) is
+      // NOT a business rejection: keep the order queued and let the periodic re-flush resend
+      // it, rather than marking it permanently failed and stranding the guest (who has no
+      // manual retry). Only a genuine rejection (sold out / session closed → carries a
+      // `reason`) moves to failed. (audit fix 2026-07-09 — "no lost orders")
+      if (!res.ok && res.status >= 500) break;
       // Server accepted the call but rejected the order (state changed while offline),
-      // or a hard error → surface it instead of losing it.
+      // or a hard 4xx → surface it instead of losing it.
       await moveToFailed(item, reasonMsg(j?.reason)); notify(); continue;
     }
   } finally { flushing = false; notify(); }
@@ -196,6 +202,12 @@ function ensureStarted() {
   if (started || typeof window === "undefined") return;
   started = true;
   window.addEventListener("online", () => { flushGuestOutbox(); });
+  // A flaky reconnect may never fire a clean "online" event, and a flush that broke mid-way
+  // (network throw → break) wasn't rescheduled — so a queued order could sit "Waiting"
+  // until a page reload. Retry on a cheap 15s timer (no-ops when offline/empty/already
+  // flushing) and whenever the tab regains focus, mirroring the staff outbox. (fix 2026-07-09)
+  setInterval(() => { flushGuestOutbox(); }, 15_000);
+  window.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") flushGuestOutbox(); });
   idbAll().then((all) => {
     queued = all.filter((x) => x.status !== "failed").sort((a, b) => a.at - b.at);
     failed = all.filter((x) => x.status === "failed");
