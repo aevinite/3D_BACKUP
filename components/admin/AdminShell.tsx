@@ -69,11 +69,23 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     setSkin((cur) => { const next = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("aevidine_skin", next); } catch {} return next; });
   };
 
+  // Mobile nav drawer (≤900px): a ☰ hamburger slides the sidebar in from the left.
+  // Closes on route change, backdrop tap, a nav-link tap, or Escape.
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => { setNavOpen(false); }, [path]);
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setNavOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [navOpen]);
+
   const isActive = (n: NavItem) => (n.exact ? path === n.href : path.startsWith(n.href));
 
   return (
     <div className="adm adx" data-skin={skin}>
-      <aside className="adx-side">
+      {navOpen && <div className="adx-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+      <aside className={"adx-side" + (navOpen ? " open" : "")}>
         <div className="adx-brand">
           <span className="mark" style={{ background: "transparent", boxShadow: "none" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -86,7 +98,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             <div key={g.label} className={"adx-group" + (g.quiet ? " quiet" : "")}>
               <div className="adx-group-lbl">{g.label}</div>
               {g.items.map((n) => (
-                <Link key={n.href} href={n.href} className={"adx-navlink" + (isActive(n) ? " active" : "")} title={n.label}>
+                <Link key={n.href} href={n.href} className={"adx-navlink" + (isActive(n) ? " active" : "")} title={n.label} onClick={() => setNavOpen(false)}>
                   <i className={`fas ${n.icon}`} aria-hidden="true" />
                   <span className="lbl">{n.label}</span>
                   {n.soon && <span className="navsoon">Soon</span>}
@@ -100,6 +112,9 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
       <div className="adm-body">
         <header className="adx-top">
+          <button className="adx-burger" onClick={() => setNavOpen(true)} aria-label="Open menu" aria-expanded={navOpen}>
+            <i className="fas fa-bars" aria-hidden="true" />
+          </button>
           <RestaurantSwitcher />
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
             <ConnectionBadge />
