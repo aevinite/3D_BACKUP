@@ -14,12 +14,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
+import { withIdempotency } from "@/lib/idempotency";
 
 export const dynamic = "force-dynamic";
 const ok = (d: unknown, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+// Parse a money amount tolerantly: strip thousands separators / stray symbols so
+// "12,000" or "₹12,000" becomes 12000. Returns null when no valid number remains, so a
+// comma-formatted amount no longer silently saves as blank (audit 2026-07-08).
+const parseAmount = (v: unknown): number | null => {
+  if (v === "" || v == null) return null;
+  const n = Number(String(v).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(n) ? n : null;
+};
 
 type Billing = {
   restaurant_id: string; plan: string | null; status: string; amount: number | null;
@@ -96,7 +105,9 @@ function rollForward(dateStr: string, cycle: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-export async function POST(req: NextRequest) {
+// Wrapped so a lost-response RETRY of "add_payment" (same X-LFH-Action-Id) can't record
+// the payment twice (audit 2026-07-08). set_plan / delete_payment send no id → pass through.
+export const POST = withIdempotency(async (req: NextRequest) => {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: Record<string, unknown> = {};
   try { body = await req.json(); } catch {}
@@ -107,11 +118,15 @@ export async function POST(req: NextRequest) {
     if (!isUuid(rid)) return bad("valid restaurant_id required");
     const status = ["trial", "active", "paused", "cancelled"].includes(String(body.status)) ? String(body.status) : "trial";
     const cycle = body.cycle === "monthly" ? "monthly" : "yearly";
+    // Reject an amount that isn't a number (rather than silently storing blank — the old
+    // Number("12,000") → NaN bug). Empty is allowed (it clears the amount).
+    const amount = parseAmount(body.amount);
+    if (body.amount !== "" && body.amount != null && amount == null) return bad("Amount isn't a valid number — e.g. 12000 or 12,000.");
     const patch = {
       restaurant_id: rid,
       plan: body.plan ? String(body.plan) : null,
       status,
-      amount: body.amount === "" || body.amount == null ? null : Number(body.amount),
+      amount,
       currency: body.currency ? String(body.currency) : "INR",
       cycle,
       started_on: body.started_on ? String(body.started_on) : null,
@@ -127,10 +142,10 @@ export async function POST(req: NextRequest) {
 
   if (action === "add_payment") {
     const rid = String(body.restaurant_id || "");
-    const amount = Number(body.amount);
+    const amount = parseAmount(body.amount);
     const paidOn = String(body.paid_on || "");
     if (!isUuid(rid)) return bad("valid restaurant_id required");
-    if (!(amount > 0)) return bad("amount must be greater than 0");
+    if (amount == null || !(amount > 0)) return bad("Amount must be a number greater than 0 (e.g. 12000).");
     if (!paidOn) return bad("paid_on required");
     const row = {
       restaurant_id: rid, amount, paid_on: paidOn,
@@ -162,4 +177,4 @@ export async function POST(req: NextRequest) {
   }
 
   return bad("unknown action");
-}
+}, "admin");

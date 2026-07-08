@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
   const [restQ, setQ, ownersQ] = await Promise.all([
     // deleted_at IS NULL → the live/suspended list; trashed restaurants are hidden
     // here (they live in the recycle bin above).
-    sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name"),
+    sb.from("restaurants").select("id, slug, name, active, owner_user_id, created_at").is("deleted_at", null).order("name"),
     // enabled_panels rides along (tiny JSONB) so the admin home can show each
     // restaurant's M/K/T/O panel chips WITHOUT a per-row fetch. Read-only add.
     sb.from("settings").select("restaurant_id, enabled_panels"),
@@ -71,6 +71,7 @@ export async function GET(req: NextRequest) {
   const ownerName = new Map(owners.map((o) => [o.id, o.name]));
   const restaurants = (restQ.data || []).map((r) => ({
     id: r.id, slug: r.slug, name: r.name, active: r.active === true,
+    createdAt: r.created_at || null, // lets the list tell "New" (just set up) from long-Dormant
     hasSettings: withSettings.has(r.id),
     ownerUserId: r.owner_user_id || null,
     ownerName: r.owner_user_id ? (ownerName.get(r.owner_user_id) || "—") : null,
