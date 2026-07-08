@@ -121,7 +121,13 @@
       if (RT_RID && row && row.restaurant_id && row.restaurant_id !== RT_RID) return;
       const tn = row && row.table_number;
       const spans = !tn || (row && row.kind === "platform"); // unscopable → full reload
-      if (spans) a.full = true; else a.tables.add(String(tn));
+      if (spans) a.full = true;
+      else {
+        a.tables.add(String(tn));
+        // A bulk action (open-all / close-all) emits ONE breadcrumb per table; past ~20 changed
+        // tables a single full reload is far cheaper than N per-table fetches. (B13 egress)
+        if (a.tables.size > 20) { a.full = true; a.tables.clear(); }
+      }
       firePerTopic[topic]();
     };
     // Wake/reconnect/initial → FULL refetch of every topic once (each debounced).

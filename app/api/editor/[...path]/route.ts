@@ -1286,10 +1286,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "requests" && c === "resolve") {
       const status = body && body.status;
       if (!["approved", "denied"].includes(status)) return err("invalid status");
-      const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).eq("restaurant_id", rid).select())[0];
+      // Only resolve a STILL-PENDING request (B22): a double-tap or a re-poll re-approve then updates
+      // 0 rows (reqRow undefined) and returns cleanly, instead of re-running the open-session insert.
+      const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).eq("restaurant_id", rid).eq("status", "pending").select())[0];
       if (status === "approved" && reqRow && reqRow.type === "open") {
         const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).eq("restaurant_id", rid).neq("status", "closed").limit(1));
-        if (!existing.length) must(await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }));
+        if (!existing.length) {
+          // A concurrent open (two waiters, or a waiter tap-open racing the guest's own open) can both
+          // pass the check above; the one-open-session-per-table unique index (mig 082) rejects the
+          // loser. Treat that as success ("already open") rather than a raw duplicate-key 500. (B22)
+          const ins = await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid });
+          if (ins.error && !/duplicate|unique/i.test(ins.error.message)) throw new Error(ins.error.message);
+        }
       }
       return ok(reqRow || null);
     }
@@ -1502,6 +1510,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Any of items/categories/filters/settings changes the SHARED guest menu →
       // bust this restaurant's cached bundle so guests see it within seconds.
       bustMenuCache(rid);
+      // Record menu changes in the operation log (B25) — dish/category/tag creates + edits now leave a
+      // "who changed the menu, and when" trail, like orders/bans/payments/discounts already do.
+      if (a === "items" || a === "categories" || a === "filters") {
+        const kind = a === "items" ? "dish" : a === "categories" ? "category" : "tag";
+        const label = String(body.title || (body.name && (body.name.en || body.name)) || body.slug || (data[0] && data[0].id) || "").slice(0, 80);
+        await logAction("manager", isCreate ? "menu_create" : "menu_edit", { restaurant_id: rid, detail: `${isCreate ? "added" : "edited"} ${kind}: ${label}`, device_id: dev });
+      }
       return ok(data[0]);
     }
 
