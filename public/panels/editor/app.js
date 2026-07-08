@@ -3983,9 +3983,11 @@ async function closeAllTables() {
     const closed = (res && res.closed) || 0, skipped = (res && res.skipped) || 0;
     const closedTables = (res && res.closed_tables) || [];
     if (!closed && skipped) return toast(`Couldn't close ${skipped} table${skipped > 1 ? "s" : ""} — they owe money or still have food cooking.`, "err");
-    // Gmail-style 8s UNDO: reopen exactly the tables we closed (fresh sessions).
+    // Gmail-style 8s action: REOPEN the tables we just closed (as fresh, empty tables). Close-all only
+    // ever closes fully-SETTLED tables, so there's no party or unpaid bill left to restore — hence
+    // "Reopen", not "Undo" (which wrongly implied the old party/orders would come back). (B26)
     toast(skipped ? `Closed ${closed}, left ${skipped} (unpaid/cooking)` : `Closed ${closed} table${closed > 1 ? "s" : ""}`, skipped ? "err" : "ok", closedTables.length ? {
-      label: "UNDO",
+      label: "Reopen",
       fn: async () => {
         await Promise.allSettled(closedTables.map((tb) => api("POST", "/sessions/open", { table: tb })));
         await loadSessions();
@@ -6730,9 +6732,9 @@ function startOrderWatch() {
       },
       menu: () => { if (Date.now() >= rtBootGraceUntil) loadAll(); }, // boot already loaded the menu
     }});
-    setInterval(() => { pollOrders(); loadPlatform(); }, 60000); // backup sync (also ages out handed-over platform tickets)
+    setInterval(() => { if (document.hidden) return; pollOrders(); loadPlatform(); }, 60000); // backup sync; skip on a hidden/backgrounded tab (realtime refetches on wake) so an idle tab stops costing egress (B18)
   } else {
-    setInterval(() => { pollOrders(); loadPlatform(); }, 2000); // fallback poll
+    setInterval(() => { if (document.hidden) return; pollOrders(); loadPlatform(); }, 2000); // fallback poll (realtime down); paused while hidden (B18)
   }
 }
 
