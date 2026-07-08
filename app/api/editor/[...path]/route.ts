@@ -1154,6 +1154,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // The RPC refuses to touch a PAID bill. Returns { ok, items_left, total, ... }.
     if (a === "items" && c === "delete") {
       if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
+      // Confirm the dish belongs to THIS restaurant before the RPC (which looks it up by id alone) —
+      // the same tenant boundary the sibling money endpoints enforce. (B15 scoping consistency.)
+      if (!(await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That dish was already removed.", 404);
       const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) {
@@ -1178,6 +1181,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
       const qty = Math.round(Number(body?.qty));
       if (!Number.isFinite(qty) || qty < 1) return err("invalid quantity");
+      if (!(await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That dish was already removed.", 404); // B15 scoping
       const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -1188,6 +1192,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // items/:id/note — STAFF EDIT: change ONE dish's note on a PLACED order.
     if (a === "items" && c === "note") {
+      if (!(await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That dish was already removed.", 404); // B15 scoping
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -1239,6 +1244,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
       const dishId = String(body?.dishId || body?.id || "").trim();
       if (!dishId) return err("dish required");
+      if (!(await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That order was not found.", 404); // B15 scoping
       const line = {
         id: dishId,
         qty: Math.max(1, Math.round(Number(body?.qty) || 1)),
@@ -1437,6 +1443,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // isCreate (create vs edit) was resolved + stripped above, shared across kinds.
         const slugify = (s: string) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
         if (!body.slug && body.title) body.slug = slugify(body.title);
+        // Price sanity (B7): the price column is read downstream as ::numeric, so a blank, negative,
+        // or multi-separator value ("", "12.5.5", "1,299") either sold the dish for ₹0 or CRASHED
+        // every guest order that included it. Validate + normalise to one clean number here. Only
+        // when a price is actually being set (a tag-only edit omits it, so partial saves still work).
+        if ("price" in body) {
+          const cleaned = String(body.price ?? "").replace(/[^0-9.]/g, "");
+          const n = Number(cleaned);
+          if (cleaned === "" || !Number.isFinite(n) || n < 0 || (cleaned.match(/\./g) || []).length > 1) {
+            return err("Enter a valid price — a number like 1299 or 129.99.", 400);
+          }
+          body.price = String(Math.round(n * 100) / 100);
+        }
         // menu_items.id is the GLOBAL primary key. A bare slug-as-id would let a save
         // silently OVERWRITE another restaurant's (or this restaurant's own existing)
         // dish that happens to share the name. So we never trust a client-supplied id
@@ -1466,7 +1484,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             body.id = rid === DEFAULT_RESTAURANT_ID ? base : `${base}__${rid.slice(0, 8)}`;
           }
           const owner = (await sb.from("menu_items").select("restaurant_id").eq("id", String(body.id)).maybeSingle()).data as { restaurant_id?: string } | null;
-          if (owner && owner.restaurant_id !== rid) return err("That dish belongs to another restaurant", 409);
+          // No such dish → it was deleted (another device removed it while this one had it open, or a
+          // tag-toggle raced a delete). Refuse with a friendly message instead of letting the upsert
+          // INSERT a partial row (missing title/slug/price → a raw NOT NULL 500). (B21)
+          if (!owner) return err("That dish was removed — reload to see the current menu.", 404);
+          if (owner.restaurant_id !== rid) return err("That dish belongs to another restaurant", 409);
         }
       }
       // Stamp ownership + match the per-restaurant unique key: categories/filters are
