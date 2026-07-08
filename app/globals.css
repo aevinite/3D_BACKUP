@@ -3900,6 +3900,10 @@ a:focus:not(:focus-visible) { outline: none; }
    "new scoped classes only when needed" rule; everything else reuses .adm-*. */
 .adx-grid2col { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; align-items: start; }
 @media (max-width: 900px) { .adx-grid2col { grid-template-columns: 1fr; } }
+/* Let each column shrink below its content's min-width so a wide child (e.g. a dense
+   table with min-width) scrolls inside its own box instead of forcing the column past
+   the phone's screen edge (audit 2026-07-08). */
+.adx-grid2col > * { min-width: 0; }
 
 /* Health page's status pills (latency / db / realtime). */
 .adx-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }

@@ -115,7 +115,7 @@ export default function AdminRevenue() {
         {d ? <CollectedChart data={d.monthly} /> : <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div>}
       </div>
 
-      <div className="adx-grid2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className="adx-grid2col">
         {/* Subscriptions by status */}
         <div className="adm-card">
           <h2 style={{ margin: "0 0 10px" }}>Subscriptions by status</h2>
@@ -187,7 +187,6 @@ export default function AdminRevenue() {
         .rev-strip .k { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
         .rev-strip .v { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
         .rev-strip .h { font-size: 11px; color: var(--muted); }
-        @media (max-width: 900px) { .adx-grid2col { grid-template-columns: 1fr !important; } }
       `}</style>
     </>
   );
