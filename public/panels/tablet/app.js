@@ -146,16 +146,16 @@ const pinPrompt = (message, errText) => new Promise((resolve) => {
   const ov = document.createElement("div");
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
   const box = document.createElement("div");
-  Object.assign(box.style, { width: "min(92vw,340px)", background: "#0f1830", color: "#e7eefc", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
+  Object.assign(box.style, { width: "min(92vw,340px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
   box.innerHTML = `
     <div style="font-size:16px;font-weight:800;margin:0 0 6px">🔑 Manager PIN</div>
-    <div style="font-size:13px;color:#9fb2d8;margin:0 0 12px">${message || "A manager PIN is required for this action."}</div>
+    <div style="font-size:13px;color:var(--muted);margin:0 0 12px">${message || "A manager PIN is required for this action."}</div>
     <input class="pp-in" type="password" inputmode="numeric" maxlength="8" placeholder="••••" autocomplete="off"
-      style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:18px;letter-spacing:4px;text-align:center;outline:none" />
+      style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:18px;letter-spacing:4px;text-align:center;outline:none" />
     <div class="pp-err" style="font-size:12px;color:#fca5a5;min-height:16px;margin:6px 2px 0">${errText || ""}</div>
     <div style="display:flex;gap:10px;margin-top:12px">
-      <button class="pp-cancel" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:#243049;color:#fff;cursor:pointer">Cancel</button>
-      <button class="pp-ok" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:#3b82f6;color:#fff;cursor:pointer">Confirm</button>
+      <button class="pp-cancel" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--panel-2);color:var(--text);cursor:pointer">Cancel</button>
+      <button class="pp-ok" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--gold);color:#14110d;cursor:pointer">Confirm</button>
     </div>`;
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -638,16 +638,16 @@ function openDishEditModal(itemId) {
   const ov = document.createElement("div");
   ov.className = "dish-edit-overlay";
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
-  ov.innerHTML = `<div class="dish-edit-box" style="width:min(94vw,460px);max-height:90vh;overflow:auto;background:#0f1830;color:#e7eefc;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
-    <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #1d2944"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Edit dish · ${esc(item.title)}</h3><button class="dish-edit-close" aria-label="Close" style="background:#243049;border:0;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
+  ov.innerHTML = `<div class="dish-edit-box" style="width:min(94vw,460px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Edit dish · ${esc(item.title)}</h3><button class="dish-edit-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
     <div style="padding:16px 18px">
       <div style="font-size:13px;font-weight:700;margin:0 0 8px">⚠ Allergies to avoid <span class="muted small">— tap to add or remove</span></div>
       <div class="dish-alg-list" style="display:flex;flex-wrap:wrap;gap:8px"></div>
-      <div style="display:flex;gap:8px;margin-top:10px"><input type="text" class="dish-edit-custominput" maxlength="24" placeholder="Type a custom allergen — e.g. water" style="flex:1;min-width:0;padding:9px 11px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px"><button class="btn small dish-edit-customadd">Add</button></div>
+      <div style="display:flex;gap:8px;margin-top:10px"><input type="text" class="dish-edit-custominput" maxlength="24" placeholder="Type a custom allergen — e.g. water" style="flex:1;min-width:0;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px"><button class="btn small dish-edit-customadd">Add</button></div>
       <div style="font-size:13px;font-weight:700;margin:15px 0 6px">✎ Note for the kitchen</div>
-      <textarea class="dish-edit-note" rows="2" maxlength="200" placeholder="e.g. less ice, extra chocolate" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;resize:vertical"></textarea>
+      <textarea class="dish-edit-note" rows="2" maxlength="200" placeholder="e.g. less ice, extra chocolate" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;resize:vertical"></textarea>
     </div>
-    <div style="display:flex;gap:10px;align-items:center;padding:14px 18px;border-top:1px solid #1d2944">${(item.status === "served") ? `<button class="btn dish-edit-unserve" style="margin-right:auto;border-color:#7f5f1d;color:#f0b232" title="Mark this dish not-served so the kitchen can remake/re-serve it">↩ Send back to kitchen</button>` : ""}<button class="btn dish-edit-cancel"${(item.status === "served") ? "" : ' style="margin-left:auto"'}>Cancel</button><button class="btn primary dish-edit-save">Save</button></div>
+    <div style="display:flex;gap:10px;align-items:center;padding:14px 18px;border-top:1px solid var(--line)">${(item.status === "served") ? `<button class="btn dish-edit-unserve" style="margin-right:auto;border-color:#7f5f1d;color:#f0b232" title="Mark this dish not-served so the kitchen can remake/re-serve it">↩ Send back to kitchen</button>` : ""}<button class="btn dish-edit-cancel"${(item.status === "served") ? "" : ' style="margin-left:auto"'}>Cancel</button><button class="btn primary dish-edit-save">Save</button></div>
   </div>`;
   document.body.appendChild(ov);
   ov.querySelector(".dish-edit-note").value = item.note || "";
@@ -755,8 +755,7 @@ function renderPanel() {
      <div class="detail-pop">
       <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
       <div class="phead">
-        <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${dishN ? `${dishN} dish${dishN === 1 ? "" : "es"}` : "opening…"}</div></div>
-        <span class="live">● open</span>
+        <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${dishN ? `${dishN} dish${dishN === 1 ? "" : "es"}` : "opening…"} · <span class="live">● open</span></div></div>
       </div>
       <div class="detail-body">
         <div class="sec"><h3>Orders</h3>${pills}${load}</div>
@@ -820,8 +819,16 @@ function renderPanel() {
     const editing = state.editOrders.has(o.id);
     // No editing once a dish is READY or SERVED — it's cooked/out, changing it is too
     // late (mirror the manager; place a new order instead). (owner, 2026-06-18)
-    const editCtl = (editing && r.fromDb && r.status !== "served" && r.status !== "ready")
-      ? `<span class="iedit"><button class="qbtn" data-qty-dec="${esc(r.id)}" data-qty="${r.qty}" title="Fewer">−</button><button class="qbtn" data-qty-inc="${esc(r.id)}" data-qty="${r.qty}" title="More">＋</button><button class="qbtn" data-edit-dish="${esc(r.id)}" title="Edit allergens & note for this dish">✎ Edit</button></span>`
+    // Still cooking (received/preparing) → fully editable: qty steppers + the ✎ Edit modal.
+    // SERVED → qty is locked, but it MUST still reach the ✎ Edit modal, because that's the
+    // ONLY place with "↩ Send back to kitchen" — without this, a mis-served dish was stuck
+    // served forever and the whole order had to be deleted to recover it (audit 2026-07-08).
+    // 'ready' stays hands-off (serve it, or place a new order).
+    const editCtl = !(editing && r.fromDb) ? ""
+      : r.status === "served"
+        ? `<span class="iedit"><button class="qbtn" data-edit-dish="${esc(r.id)}" title="Edit or send this dish back to the kitchen">✎ Edit</button></span>`
+      : r.status !== "ready"
+        ? `<span class="iedit"><button class="qbtn" data-qty-dec="${esc(r.id)}" data-qty="${r.qty}" title="Fewer">−</button><button class="qbtn" data-qty-inc="${esc(r.id)}" data-qty="${r.qty}" title="More">＋</button><button class="qbtn" data-edit-dish="${esc(r.id)}" title="Edit allergens & note for this dish">✎ Edit</button></span>`
       : "";
     return `<div class="iline${editing ? " editing" : ""}"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${remMark}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}${editCtl}${delBtn}</div>`;
   };
@@ -892,8 +899,7 @@ function renderPanel() {
    <div class="detail-pop">
     <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
     <div class="phead">
-      <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"}` : "closed"}</div></div>
-      ${s ? `<span class="live">● open</span>` : `<span class="off">closed</span>`}
+      <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"} · <span class="live">● open</span>` : `<span class="off">closed</span>`}</div></div>
     </div>
     <div class="detail-body">
       ${reqRows ? `<div class="sec"><h3>Requests</h3>${reqRows}</div>` : ""}
@@ -1221,10 +1227,15 @@ function renderShiftPicker(t, s) {
 // target table. PAID / cancelled orders are excluded — settled revenue can't be re-homed.
 function renderMoveOrderPicker(t) {
   const os = ordersOf(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled");
-  const list = os.map((o, i) => `<button class="btn" style="text-align:left" data-pickorder="${esc(o.id)}">#${esc(o.kot_no ?? "—")} · Order ${i + 1} · ${inr(o.total)}</button>`).join("");
+  // Show each order's NET due (total − discount, discount before tax), not the gross total,
+  // so it reads like every other money view on the panel. (audit 2026-07-08)
+  const netDue = (o) => Math.max(0, (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + effRate()));
+  const list = os.map((o, i) => `<button class="btn" style="text-align:left" data-pickorder="${esc(o.id)}">#${esc(o.kot_no ?? "—")} · Order ${i + 1} · ${inr(netDue(o))}</button>`).join("");
   const body = `<div class="muted small" style="margin-bottom:10px">Pick the order to move off Table ${esc(t)}:</div><div class="pactions">${list || `<div class="muted">No movable orders (paid bills can't be moved).</div>`}</div>`;
-  renderPickerShell("Move an order", body, "tablet-move-picker", renderPanel);
-  document.querySelectorAll("[data-pickorder]").forEach((b) => (b.onclick = () => renderMoveOrderTarget(t, b.dataset.pickorder)));
+  const { dropLayer } = renderPickerShell("Move an order", body, "tablet-move-picker", renderPanel);
+  // Drop THIS step's back-stack layer before advancing to the target step — otherwise the
+  // step-1 layer leaks and the phone Back button needs one extra press afterwards. (audit 2026-07-08)
+  document.querySelectorAll("[data-pickorder]").forEach((b) => (b.onclick = () => { dropLayer(); renderMoveOrderTarget(t, b.dataset.pickorder); }));
 }
 function renderMoveOrderTarget(t, orderId) {
   const n = tableCount();
@@ -1397,24 +1408,24 @@ function openPaymentMethodModal(due, label) {
     const ov = document.createElement("div");
     ov.className = "pay-overlay";
     Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
-    ov.innerHTML = `<div class="pay-box" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:#0f1830;color:#e7eefc;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
-      <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #1d2944"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${esc(label)}</h3><button class="pay-close" aria-label="Close" style="background:#243049;border:0;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
+    ov.innerHTML = `<div class="pay-box" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+      <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${esc(label)}</h3><button class="pay-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
       <div style="padding:16px 18px">
-        <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:#9fb2d8;margin-bottom:12px"><span>Amount collected</span><b style="color:#e7eefc;font-size:15px">${inr(due)}</b></div>
-        <div style="font-size:13px;font-weight:700;margin:0 0 8px">How did they pay? <span style="color:#9fb2d8;font-weight:400">— only pick one if the money's actually in hand</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:var(--muted);margin-bottom:12px"><span>Amount collected</span><b style="color:var(--text);font-size:15px">${inr(due)}</b></div>
+        <div style="font-size:13px;font-weight:700;margin:0 0 8px">How did they pay? <span style="color:var(--muted);font-weight:400">— only pick one if the money's actually in hand</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <button type="button" class="pay-method-btn" data-method="UPI" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;font-weight:600"><span style="font-size:22px">📱</span>UPI</button>
-          <button type="button" class="pay-method-btn" data-method="Cash" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;font-weight:600"><span style="font-size:22px">💵</span>Cash</button>
-          <button type="button" class="pay-method-btn" data-method="Card" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;font-weight:600"><span style="font-size:22px">💳</span>Card</button>
-          <button type="button" class="pay-method-btn" data-method="Other" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;font-weight:600"><span style="font-size:22px">⋯</span>Other</button>
+          <button type="button" class="pay-method-btn" data-method="UPI" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">📱</span>UPI</button>
+          <button type="button" class="pay-method-btn" data-method="Cash" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">💵</span>Cash</button>
+          <button type="button" class="pay-method-btn" data-method="Card" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">💳</span>Card</button>
+          <button type="button" class="pay-method-btn" data-method="Other" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">⋯</span>Other</button>
         </div>
         <div class="pay-other-field" style="display:none;margin-top:12px">
           <div style="font-size:13px;font-weight:700;margin:0 0 8px">What kind?</div>
-          <input type="text" class="pay-other-input" maxlength="60" placeholder="e.g. wallet, bank transfer" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px;margin-bottom:10px">
+          <input type="text" class="pay-other-input" maxlength="60" placeholder="e.g. wallet, bank transfer" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;margin-bottom:10px">
           <button type="button" class="btn primary pay-other-confirm" style="width:100%">Confirm</button>
         </div>
       </div>
-      <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid #1d2944"><button class="btn pay-cancel-btn">Cancel</button></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid var(--line)"><button class="btn pay-cancel-btn">Cancel</button></div>
     </div>`;
     document.body.appendChild(ov);
     let resolved = false;
@@ -1491,32 +1502,32 @@ function openDiscountModal(order, opts = {}) {
   const ov = document.createElement("div");
   ov.className = "disc-overlay";
   Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
-  ov.innerHTML = `<div class="disc-box" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:#0f1830;color:#e7eefc;border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
-    <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #1d2944"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${opts.bill ? "Discount whole bill" : "Apply discount"}</h3><button class="disc-close" aria-label="Close" style="background:#243049;border:0;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
+  ov.innerHTML = `<div class="disc-box" style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${opts.bill ? "Discount whole bill" : "Apply discount"}</h3><button class="disc-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
     <div style="padding:16px 18px">
-      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:#9fb2d8;margin-bottom:12px"><span>Bill total</span><b style="color:#e7eefc;font-size:15px">${inr(total)}</b></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:var(--muted);margin-bottom:12px"><span>Bill total</span><b style="color:var(--text);font-size:15px">${inr(total)}</b></div>
       <div style="display:flex;gap:8px;margin-bottom:14px">
         <span class="chip disc-mode-chip on" data-mode="pay" style="flex:1;text-align:center;padding:9px 10px">They pay</span>
         <span class="chip disc-mode-chip" data-mode="percent" style="flex:1;text-align:center;padding:9px 10px">Percent off</span>
       </div>
       <div data-panel="pay">
         <div style="font-size:13px;font-weight:700;margin:0 0 8px">Amount they'll pay</div>
-        <input type="number" inputmode="decimal" min="0" step="1" class="disc-pay-input" placeholder="e.g. 3000" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:17px;font-weight:700">
+        <input type="number" inputmode="decimal" min="0" step="1" class="disc-pay-input" placeholder="e.g. 3000" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:17px;font-weight:700">
       </div>
       <div data-panel="percent" style="display:none">
         <div style="font-size:13px;font-weight:700;margin:0 0 8px">Percent off</div>
-        <input type="number" inputmode="decimal" min="0" max="100" step="1" class="disc-pct-input" placeholder="e.g. 20" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:17px;font-weight:700">
+        <input type="number" inputmode="decimal" min="0" max="100" step="1" class="disc-pct-input" placeholder="e.g. 20" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:17px;font-weight:700">
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${[5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p}%</span>`).join("")}</div>
       </div>
-      <div style="margin-top:16px;padding:12px 14px;border-radius:12px;background:#0a1326;border:1px solid #1d2944;display:flex;flex-direction:column;gap:6px">
-        <div style="display:flex;justify-content:space-between;font-size:13.5px;color:#9fb2d8"><span>Discount</span><b class="disc-prev-amt" style="color:#e7eefc">− ${inr(current)}</b></div>
-        <div style="display:flex;justify-content:space-between;font-size:13.5px;color:#9fb2d8"><span>That's</span><b class="disc-prev-pct" style="color:#e7eefc">${pctVal}% off</b></div>
-        <div style="display:flex;justify-content:space-between;font-size:14.5px;padding-top:6px;margin-top:2px;border-top:1px dashed #1d2944"><span style="color:#60a5fa;font-weight:800">They pay</span><b class="disc-prev-pay" style="color:#60a5fa;font-weight:800">${inr(payVal)}</b></div>
+      <div style="margin-top:16px;padding:12px 14px;border-radius:12px;background:var(--bg);border:1px solid var(--line);display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted)"><span>Discount</span><b class="disc-prev-amt" style="color:var(--text)">− ${inr(current)}</b></div>
+        <div style="display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted)"><span>That's</span><b class="disc-prev-pct" style="color:var(--text)">${pctVal}% off</b></div>
+        <div style="display:flex;justify-content:space-between;font-size:14.5px;padding-top:6px;margin-top:2px;border-top:1px dashed var(--line)"><span style="color:var(--gold-strong);font-weight:800">They pay</span><b class="disc-prev-pay" style="color:var(--gold-strong);font-weight:800">${inr(payVal)}</b></div>
       </div>
-      <div style="font-size:13px;font-weight:700;margin:15px 0 6px">Reason <span style="color:#9fb2d8;font-weight:400">(optional)</span></div>
-      <input type="text" class="disc-note-input" maxlength="200" placeholder="e.g. loyalty, comp, manager approval" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid #2a3a5f;background:#0a1326;color:#eaf1ff;font-size:14px">
+      <div style="font-size:13px;font-weight:700;margin:15px 0 6px">Reason <span style="color:var(--muted);font-weight:400">(optional)</span></div>
+      <input type="text" class="disc-note-input" maxlength="200" placeholder="e.g. loyalty, comp, manager approval" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px">
     </div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid #1d2944">
+    <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid var(--line)">
       ${current > 0 ? `<button class="btn danger disc-remove-btn">Remove</button><span style="flex:1"></span>` : ""}
       <button class="btn disc-cancel-btn">Cancel</button>
       <button class="btn primary disc-apply-btn">Apply</button>
@@ -1621,9 +1632,15 @@ function tabletBillDiscount(t) {
   if (!s || String(s.id).startsWith("pending-")) { toast("Open the table first.", false); return; }
   const os = ordersOf(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
   if (!os.length) { toast("No unpaid orders to discount yet.", false); return; }
-  const billTotal = os.reduce((sum, o) => sum + (Number(o.total) || 0), 0); // gross, tax-incl
+  const billTotal = os.reduce((sum, o) => sum + (Number(o.total) || 0), 0); // gross, tax-incl (UNPAID only)
+  // Only the UNPAID part of the bill is still discountable. Discount already spent on orders
+  // that were PAID is gone, so preview against the REMAINING discount (session total − discount
+  // already on paid orders) — otherwise "They pay" quotes too low once part of the table has
+  // settled. The server already clamps to this; this keeps the on-screen quote honest. (audit 2026-07-08)
+  const paidDisc = ordersOf(t).filter((o) => o.payment_status === "paid").reduce((sum, o) => sum + (Number(o.discount) || 0), 0);
+  const remaining = Math.max(0, (Number(s.discount) || 0) - paidDisc);
   // Synthetic "order-like" object the modal understands; id = session id, target = session.
-  openDiscountModal({ id: s.id, table_number: t, total: billTotal, discount: Number(s.discount) || 0, discount_note: s.discount_note || "" }, { bill: true });
+  openDiscountModal({ id: s.id, table_number: t, total: billTotal, discount: remaining, discount_note: s.discount_note || "" }, { bill: true });
 }
 
 // ── order-taking mode ────────────────────────────────────────────────────────
@@ -1952,7 +1969,7 @@ function orderCartHtml() {
   return `<div class="cart">
       <h3>This order</h3>
       <div class="cart-lines">${lines || `<div class="muted">Tap dishes to add them.</div>`}</div>
-      <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Allergies to avoid in ALL dishes (e.g. nuts, dairy) — whole order" value="${esc(state.allergies || "")}">
+      <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Avoid in ALL dishes — e.g. nuts, dairy" value="${esc(state.allergies || "")}">
       <div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
       <div class="muted small">Final bill (incl. tax) is computed by the system when you send it.</div>
       <button class="btn primary big" id="sendOrder" ${state.cart.length ? "" : "disabled"}>SEND TO KITCHEN</button>
@@ -2131,7 +2148,15 @@ async function sendOrder() {
     // #2: offline → the order is saved on this device (at-most-once) and will send on reconnect.
     // Treat it as a clean success with an honest "saved" note, NOT the old "#undefined" + "Failed".
     if (isQueued(r)) { toast("Order saved ✓ — it'll go to the kitchen the moment you're back online."); finishSent(); renderPanel(); return; }
-    if (!r || r.ok !== true) { toast("Rejected: " + ((r && r.reason) || "unknown") + (r && r.item ? ` (${r.item})` : ""), false); return; }
+    if (!r || r.ok !== true) {
+      // Friendly, actionable message instead of the raw server reason. The cart is KEPT (we
+      // return without clearing) so the waiter can fix the flagged dish and resend. (audit 2026-07-08)
+      const reason = r && r.reason, item = r && r.item;
+      const msg = reason === "sold_out" ? `😕 ${item || "A dish"} just sold out — remove it from the order and send again.`
+        : reason === "unknown_item" ? `😕 ${item || "A dish"} is no longer on the menu — remove it and send again.`
+        : "Couldn't send the order: " + (reason || "unknown") + (item ? ` (${item})` : "") + ". Please try again.";
+      toast(msg, false); return;
+    }
     toast(`Sent! Kitchen ticket #${r.kot_no}`);
     finishSent();
     await load(); renderPanel();
