@@ -2357,6 +2357,9 @@ async function loadDashboard(useCache) {
     if (seq !== loadDashboard._seq) return;
     loadDashboard._last = s; loadDashboard._lastRange = dashRange;
   }
+  // If the owner switched tabs during the async /stats fetch, #dashBody is detached — bail before
+  // rendering + drawing Chart.js onto a null canvas (rapid tab-switching threw getContext-of-null).
+  if (state.tab !== "dash") return;
   const RL = { today: "today", "30d": "last 30 days", year: "last 12 months" };
   const rangeLabel = RL[dashRange] || dashRange;
   // The range sub-nav lives in the LEFT SIDEBAR (renderList), so the content is
@@ -2899,7 +2902,7 @@ async function openMenuMatrix() {
       { k: "workhorse", icon: "🐎", name: "Workhorses", tip: "Popular but lower revenue — a small price bump?" },
       { k: "dog", icon: "🐟", name: "Dogs", tip: "Low on both — rework or drop." },
     ];
-    return `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">` + QUAD.map((Q) => {
+    return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">` + QUAD.map((Q) => {
       const all = mm.filter((d) => d.q === Q.k);
       const rows = all.slice(0, 12);
       return `<div class="tp-bill" style="padding:12px"><div style="font-weight:800;margin-bottom:2px">${Q.icon} ${Q.name} <span class="muted">· ${all.length}</span></div><div class="muted small" style="margin-bottom:8px">${Q.tip}</div>${rows.length ? rows.map((d) => `<div class="tp-bl"><span>${esc(d.title)} <span class="muted">×${d.units}</span></span><b>${inr(d.rev)}</b></div>`).join("") + (all.length > rows.length ? `<div class="muted small">+${all.length - rows.length} more</div>` : "") : `<div class="muted small">—</div>`}</div>`;
