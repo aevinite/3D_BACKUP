@@ -982,7 +982,7 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
         {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
-        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New owner name"
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New owner username"
           style={{ padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />
         <button className="adm-btn" disabled={busy} onClick={createOwner}><i className="fas fa-user-plus" style={{ marginRight: 6 }} aria-hidden="true" />Create &amp; assign owner</button>
       </div>

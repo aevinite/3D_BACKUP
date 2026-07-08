@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
   const role = String(body?.role || "") as Role;
   // WHICH restaurant this user works at. Admin picks it; defaults to #1 for back-compat.
   const restaurantId = String(body?.restaurant_id || "").trim() || DEFAULT_RESTAURANT_ID;
-  if (key.length < 2) return bad("Name must be at least 2 characters.");
+  if (key.length < 2) return bad("Username must be at least 2 characters.");
   if (!ROLES.includes(role)) return bad("Pick a valid role.");
   // Exclude binned restaurants — creating staff on a soft-deleted restaurant just makes
   // orphan rows the admin can never reach (login is blocked for binned restaurants).
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
   if (!rest) return bad("Pick a valid restaurant.");
   // Names are unique PER restaurant (mig 091) — clash-check within this one only.
   const dup = (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", restaurantId).limit(1)).data?.[0];
-  if (dup) return bad("That name is taken at this restaurant — pick another.", 409);
+  if (dup) return bad("That username is taken at this restaurant — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const row = {
@@ -166,14 +166,14 @@ export async function PATCH(req: NextRequest) {
       // next login just uses the new Name.
       const display = String(body.name || "").trim().slice(0, 80);
       const key = normalizeLoginName(display);
-      if (key.length < 2) return bad("Name must be at least 2 characters.");
+      if (key.length < 2) return bad("Username must be at least 2 characters.");
       // Names are unique PER restaurant (mig 091), so the clash-check MUST be scoped to
       // this user's restaurant — a global check wrongly rejected a name that's free at the
       // user's own restaurant just because another tenant uses it (bug M6, 2026-07-05).
       // Matches the create path, which already scopes by restaurant_id.
       const target = (await sb.from("staff_users").select("restaurant_id").eq("id", id).maybeSingle()).data;
       const clash = target ? (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", target.restaurant_id).neq("id", id).limit(1)).data?.[0] : null;
-      if (clash) return bad("That name is taken — pick another.", 409);
+      if (clash) return bad("That username is taken — pick another.", 409);
       patch.name = display;
       patch.username = key;
     }

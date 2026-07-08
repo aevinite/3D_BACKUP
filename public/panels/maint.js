@@ -90,7 +90,7 @@
   function armBack() { if (window.LFH_BACK && !backOff) backOff = window.LFH_BACK.layer("staff-profile", onBackClose); }
   function closeDrawer() {
     // Block closing (✕ / backdrop) during the one-time setup until name + phone are confirmed.
-    if (profile && profile.needsProfile) { alert("Please confirm your name and phone to continue."); return; }
+    if (profile && profile.needsProfile) { alert("Please confirm your username and phone to continue."); return; }
     if (backOff) { backOff(); backOff = null; } // rewind the hardware-Back history entry
     if (overlay) { overlay.remove(); overlay = null; }
   }
@@ -138,7 +138,7 @@
     }
 
     // — details (name / phone) — name doubles as the sign-in name —
-    const nameIn = el("input", { class: "lfh-in", value: profile.name || "", placeholder: "Your name" });
+    const nameIn = el("input", { class: "lfh-in", value: profile.name || "", placeholder: "Your username" });
     const phoneIn = el("input", { class: "lfh-in", value: profile.phone || "", placeholder: "Your phone number", inputmode: "tel" });
     // Managers set their PIN as part of first-login setup (only when required).
     const setupPinIn = pinRequiredAtSetup
@@ -147,7 +147,7 @@
     const detMsg = el("div", { class: "lfh-msg" });
     const saveDet = el("button", { class: "lfh-bt", style: { background: "#22c55e", width: "100%" }, onClick: async () => {
       const name = nameIn.value.trim(), phone = phoneIn.value.trim();
-      if (!name || !phone) { setMsg(detMsg, "Both your name and phone are required.", false); return; }
+      if (!name || !phone) { setMsg(detMsg, "Both your username and phone are required.", false); return; }
       const payload = { name, phone };
       if (setupPinIn) {
         const pin = setupPinIn.value.trim();
@@ -171,7 +171,7 @@
     } }, [profile.needsProfile ? "Save & continue" : "Save details"]);
     sections.push(el("div", { class: "lfh-sec" }, [
       el("h3", null, ["Your details"]),
-      el("label", { class: "lfh-lab" }, ["Name (this is also your sign-in name)"]), nameIn,
+      el("label", { class: "lfh-lab" }, ["Username (this is your sign-in name)"]), nameIn,
       el("label", { class: "lfh-lab" }, ["Phone"]), phoneIn,
       ...(setupPinIn ? [el("label", { class: "lfh-lab" }, ["Manager PIN (unlocks sensitive tablet actions)"]), setupPinIn] : []),
       detMsg, saveDet,
