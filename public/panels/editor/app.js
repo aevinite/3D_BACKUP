@@ -1070,6 +1070,40 @@ function tableSeatingCardHtml(s) {
   </div>`;
 }
 
+// Guest QR links: one PERMANENT, table-scoped link per table (…/r/<slug>/menu?table=N). Each link is
+// hard-wired to its own table number — the QR you print on table 3 always opens table 3's menu, it
+// never expires, and it can't reach another table. Shown half (the meaningful tail) + a Copy button
+// that grabs the FULL url, so you can paste it into any QR-code maker.
+function tableQrLinksCardHtml(s) {
+  const n = Math.max(1, parseInt(s.table_count, 10) || 12);
+  const names = s.table_names && typeof s.table_names === "object" ? s.table_names : {};
+  const seats = s.table_seats && typeof s.table_seats === "object" ? s.table_seats : {};
+  const slug = (state.data.restaurant || {}).slug || "";
+  const origin = location.origin;
+  if (!slug) return `<div class="card"><h3>Guest QR links</h3><p style="color:var(--muted);font-size:13px">Couldn't read this restaurant's web address yet — reload the panel and try again.</p></div>`;
+  let rows = "";
+  for (let i = 1; i <= n; i++) {
+    const nm = (names[String(i)] || "").trim();
+    const label = nm ? `${esc(nm)} <span class="muted" style="font-weight:400">(T${i})</span>` : `T${i}`;
+    const st = seats[String(i)] ?? 4;
+    const full = `${origin}/r/${slug}/menu?table=${i}`;
+    rows += `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--panel-2);flex-wrap:wrap">
+      <span style="font-weight:700;font-size:13px;min-width:78px">${label}</span>
+      <span class="muted" style="font-size:12px;min-width:50px">${esc(st)} seats</span>
+      <code style="flex:1;min-width:130px;font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">…/r/${esc(slug)}/menu?table=${i}</code>
+      <button class="btn small" type="button" data-copy-link="${esc(full)}" title="Copy this table's full link">⧉ Copy</button>
+    </div>`;
+  }
+  return `<div class="card"><h3>Guest QR links · one per table</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
+      A <b>permanent</b> link for each table — it always opens the guest menu for <b>that table only</b>
+      (table 3's link can never reach table 6), and it never expires. Tap <b>Copy</b> and paste it into
+      any QR-code maker to print that table's code. Links use this site's address (<code>${esc(origin)}</code>).
+    </p>
+    <div style="display:grid;gap:6px;max-height:360px;overflow-y:auto;padding-right:4px">${rows}</div>
+  </div>`;
+}
+
 // ---------- Settings SECTIONS (owner, 2026-07-03) ----------
 // The Settings tab is organized into sidebar sections instead of one long scroll.
 // Each section groups related cards; renderList() draws the sidebar from this same
@@ -1180,6 +1214,7 @@ function formGeneral(s) {
     <div style="max-width:200px">${tf("Number of tables", "table_count", s.table_count ?? 12, { type: "number", min: 1, max: 500, step: 1 })}</div>
   </div>
   ${tableSeatingCardHtml(s)}
+  ${tableQrLinksCardHtml(s)}
   <div class="card"><h3>Auto close / restart tables</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       When a table's bill is fully <b>paid</b> and every dish is <b>served</b>, free it
@@ -7481,6 +7516,18 @@ function toggleXrayZones(zones) {
 document.addEventListener("click", (e) => {
   const zp = document.getElementById("xrayZones");
   if (zp && !e.target.closest("#xrayZones") && !e.target.closest("#xrayZonesBtn")) (zp._xrayClose || (() => zp.remove()))();
+});
+
+// Copy-to-clipboard for any [data-copy-link] button (the per-table Guest QR links). Delegated so it
+// works for every table row without per-render wiring. Clipboard API needs https/localhost; falls
+// back to a prompt() the owner can copy from if it's blocked.
+document.addEventListener("click", (e) => {
+  const cb = e.target.closest("[data-copy-link]");
+  if (!cb) return;
+  const url = cb.getAttribute("data-copy-link") || "";
+  const flash = () => { const o = cb.textContent; cb.textContent = "✓ Copied"; setTimeout(() => { cb.textContent = o; }, 1400); toast("Link copied", "ok"); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(flash).catch(() => window.prompt("Copy this table's link:", url));
+  else window.prompt("Copy this table's link:", url);
 });
 
 api("GET", "/whoami").then((w) => { XRAY_WHO = w; applyHierarchyView(); }).catch(() => {});
