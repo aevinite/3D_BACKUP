@@ -65,6 +65,11 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .kot { font-size: 24px; font-weight: 900; letter-spacing: 0.5px; }           /* the shoutable number */
 .tbl { font-size: 15px; font-weight: 700; color: var(--blue); }
 .age { margin-left: auto; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+/* Manual reprint (🖨) — a secondary control, so it's subtle and small; only rendered when KOT
+   printing is enabled for the restaurant. Sits after the age in the ticket header. */
+.reprint { margin-left: 8px; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 3px 9px; font-size: 14px; line-height: 1; cursor: pointer; flex: 0 0 auto; }
+.reprint:hover { border-color: var(--blue); color: var(--text); }
+.reprint:active { transform: scale(0.92); }
 /* Per-dish edit markers: green "＋" on a staff-ADDED allergen; amber "✎−" on the dish
    name when an allergen was REMOVED after the order — so the line cook re-checks it. */
 .alg-add { color: #4ade80; font-weight: 900; vertical-align: super; font-size: .8em; }
@@ -172,6 +177,9 @@ html[data-theme="light"]{
 }
 html[data-theme="light"] .done.rdy{ color:#be185d; }
 html[data-theme="light"] .line-ready .ltitle{ color:#9d174d; }
+/* Deepen the "new — waiting for the waiter" footer text in light mode: the dark-theme
+   pink (#f9a8d4) is too faint on the pale-pink pill against a white board (audit 2026-07-07). */
+html[data-theme="light"] .awaiting{ color:#9d174d; }
 html[data-theme="light"] .alg-removed, html[data-theme="light"] .ltitle .alg-removed{ color:#b45309; }
 html[data-theme="light"] .alg-add{ color:#15803d; }
 
@@ -182,4 +190,9 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
   .top-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
   .top-actions .btn { padding: 9px 11px; min-height: 44px; display: inline-flex; align-items: center; }
   .theme-toggle { width: 44px; height: 44px; }
+  /* Leave room at the bottom so the last ticket / "Nothing here" isn't hidden behind the
+     fixed "Tap to enable sound" nudge + toasts on a phone (audit 2026-07-07). */
+  .cols, .wall { padding-bottom: 104px; }
+  /* Bigger reprint tap target on a phone/greasy tablet. */
+  .reprint { min-height: 40px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }

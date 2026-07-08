@@ -180,8 +180,14 @@ function ticketHtml(o, rows) {
     : (!allCooked
       ? `<button class="big ready" data-ready="${esc(o.id)}">ALL READY</button>`
       : `<div class="awaiting">✓ ready — waiter serving</div>`);
+  // Manual REPRINT button — only shown when KOT auto-print is enabled for this restaurant
+  // (state.autoPrintKot), so restaurants that don't print see no clutter. A print-first
+  // kitchen needs this: if the printer jammed / ran out of paper when the KOT auto-printed,
+  // the cook can reprint that exact ticket on demand. Independent of the auto-print tracking
+  // (printedIds) — it just re-runs printKot for this order's current dishes. (owner 2026-07-07)
+  const reprintBtn = state.autoPrintKot ? `<button class="reprint" data-reprint="${esc(o.id)}" title="Reprint this kitchen ticket" aria-label="Reprint kitchen ticket">🖨</button>` : "";
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span></div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${lines}${action}</div>`;
 }
 
@@ -208,6 +214,8 @@ function bindDelegation() {
   if (clickDelegationBound) return;
   clickDelegationBound = true;
   document.body.addEventListener("click", (e) => {
+    const reprint = e.target.closest("[data-reprint]");
+    if (reprint) { reprintOrder(reprint.dataset.reprint); return; }
     const ready = e.target.closest("[data-ready]");
     if (ready) { markOrderReady(ready.dataset.ready); return; }
     // The kitchen ✓ marks a dish READY (cooked) — the waiter serves it on the tablet.
@@ -475,48 +483,74 @@ function markOrderReady(orderId) {
   api("POST", `/orders/${orderId}/ready`).then(scheduleReadyReconcile).catch((e) => { toast("Failed: " + e.message); load(); });
 }
 
+// Manual REPRINT (owner 2026-07-07): re-run the KOT print for ONE order's current dishes on
+// demand — the safety net for a print-first kitchen when the printer jammed / ran out of paper
+// during the automatic print. It calls printKot directly (a local, no-network action), so it
+// does NOT touch the auto-print tracking (printedIds) and can be tapped as many times as needed.
+function reprintOrder(id) {
+  const o = (state.orders || []).find((x) => x.id === id);
+  if (!o) { toast("That order isn't on the board any more."); return; }
+  const rows = (state.items || []).filter((it) => it.order_id === id); // empty for legacy orders → printKot falls back to o.items
+  printKot(o, rows, state.restaurant);
+  toast(`Reprinting KOT #${o.kot_no ?? "—"} · Table ${o.table_number}`);
+}
+
 // ── the 86 board (sold-out toggles) ──────────────────────────────────────────
 function renderDishes() {
   const q = ($("#dishSearch").value || "").toLowerCase();
   const list = state.dishes.filter((d) => !q || (d.title || "").toLowerCase().includes(q));
-  $("#dishList").innerHTML = list.map((d) => {
+  const html = list.map((d) => {
     const out = (d.tags || []).includes("sold-out");
     return `<div class="dish-row ${out ? "is-out" : ""}">
       <span class="dtitle">${esc(d.title)}<small>${esc(d.category || "")}</small></span>
       <button class="btn ${out ? "danger" : ""}" data-86="${esc(d.id)}" data-out="${out ? "1" : "0"}">${out ? "SOLD OUT" : "available"}</button>
     </div>`;
   }).join("");
+  // Skip the rebuild when nothing changed (audit 2026-07-07): a poll while the drawer is
+  // open used to blow away #dishList on EVERY refresh, which (a) lost the search box's focus/
+  // caret mid-type and (b) orphaned the button node the optimistic toggle + UNDO closure hold,
+  // so an UNDO landed on a detached node and the on-screen button kept showing the wrong label.
+  if ($("#dishList").__kdsHtml === html) return;
+  $("#dishList").innerHTML = html;
+  $("#dishList").__kdsHtml = html;
   // OPTIMISTIC sold-out toggle (audit polish 2026-07-07): flip the button + the local
   // dish tag INSTANTLY (no ~1.5s dead window), disable to swallow a rapid double-tap, and
   // roll back on failure. No full load() per tap — the server POST fires the guest 86-sync
   // breadcrumb itself, and the kitchen tickets don't render sold-out, so a whole-board
   // refetch was pure waste. Mirrors the ticket-✓ optimistic+surgical pattern.
-  const set86 = (btn, out) => {
+  // set86 works by dish ID and RE-QUERIES the on-screen button every time (audit 2026-07-07):
+  // renderDishes can rebuild #dishList between the tap and the UNDO, so a captured button node
+  // may be detached. Updating the local dish tag is independent of the DOM, so it still happens
+  // even if the button isn't currently visible (e.g. filtered out by the search box).
+  const set86 = (id, out) => {
+    const dish = state.dishes.find((d) => d.id === id);
+    if (dish) { const tags = new Set(dish.tags || []); out ? tags.add("sold-out") : tags.delete("sold-out"); dish.tags = [...tags]; }
+    const btn = document.querySelector(`[data-86="${window.CSS && CSS.escape ? CSS.escape(id) : id}"]`);
+    if (!btn) return;
     btn.dataset.out = out ? "1" : "0";
     btn.textContent = out ? "SOLD OUT" : "available";
     btn.classList.toggle("danger", out);
     btn.closest(".dish-row")?.classList.toggle("is-out", out);
-    const dish = state.dishes.find((d) => d.id === btn.dataset["86"]);
-    if (dish) { const tags = new Set(dish.tags || []); out ? tags.add("sold-out") : tags.delete("sold-out"); dish.tags = [...tags]; }
   };
   document.querySelectorAll("[data-86]").forEach((b) => (b.onclick = async () => {
     if (b.disabled) return;
     const id = b.dataset["86"], wasOut = b.dataset.out === "1", nowOut = !wasOut;
-    b.disabled = true; set86(b, nowOut);
+    b.disabled = true; set86(id, nowOut);
     try {
       await api("POST", `/dishes/${id}/sold-out`, { value: nowOut });
       const dish = state.dishes.find((d) => d.id === id);
-      // No confirm — kitchens move fast — but always an UNDO escape hatch.
+      // No confirm — kitchens move fast — but always an UNDO escape hatch. The UNDO
+      // targets the dish by ID (re-querying the live button), so it works even after a
+      // background refresh rebuilt the list. The server toggle is an explicit set, so a
+      // double-tap is harmless — no disabled-guard needed on the undo path.
       toast(`${dish ? dish.title : "Dish"} ${wasOut ? "back on the menu" : "marked SOLD OUT"}`,
         async () => {
-          if (b.disabled) return;
-          b.disabled = true; set86(b, wasOut);
+          set86(id, wasOut);
           try { await api("POST", `/dishes/${id}/sold-out`, { value: wasOut }); }
-          catch (e) { set86(b, nowOut); toast("Undo failed: " + e.message); }
-          finally { b.disabled = false; }
+          catch (e) { set86(id, nowOut); toast("Undo failed: " + e.message); }
         });
     } catch (e) {
-      set86(b, wasOut); // roll back the optimistic flip
+      set86(id, wasOut); // roll back the optimistic flip
       toast("Failed: " + e.message);
     } finally { b.disabled = false; }
   }));
@@ -543,6 +577,9 @@ function boardSig(d) {
     (d.dishes || []).map(stableRow),
     (d.platform || []).map(stableRow),
     d.platformAccept,
+    // autoPrintKot drives whether the per-ticket 🖨 reprint button renders, so a change to it
+    // must flip the signature and force a repaint (read from state — it's not on every caller's d).
+    state.autoPrintKot,
   ]);
 }
 let lastSig = null;
@@ -710,6 +747,11 @@ function printKot(order, itemRows, restaurant) {
 //  • Prints are SERIALIZED (spaced) so a burst doesn't stack N blocking dialogs at once
 //    in a non-kiosk browser (partially mitigates M7; kiosk mode prints silently anyway).
 const printedIds = new Set();
+// When this panel booted. Used so a brand-new order that arrives DURING the first /board
+// fetch (the ~1s boot window) is recognised as genuinely new and still auto-prints — the
+// old code seeded EVERY order on first load as "already printed", so a KOT placed in that
+// window was silently never printed. KOT print is the kitchen's main use, so this matters.
+const BOOT_TS = Date.now();
 // Serialized (spaced) printer for a queue of orders — the ONE place that actually prints,
 // so print-tracking (printedIds) stays consistent and a burst can't stack N blocking
 // dialogs at once in a non-kiosk browser. Paused while the tab is hidden mid-burst.
@@ -761,16 +803,29 @@ async function load() {
     // never double-prints (printedIds).
     autoPrintNew(!!data.autoPrintKot, data.orders, data.items, data.restaurant);
   } else {
-    // FIRST load (no baseline yet): treat EVERY order already on the board as already
-    // handled so we never retro-print the existing board (bug H7's sibling — printedIds is
-    // separate from knownIds, so it needs its own baseline). Baseline ALL statuses, not just
-    // 'received': otherwise the visibility-flush (which now also prints 'preparing') would
-    // retroactively print orders that were already cooking before this panel even opened.
-    for (const o of data.orders) printedIds.add(o.id);
+    // FIRST load (no baseline yet): treat orders that already existed BEFORE this panel
+    // opened as already handled, so we never retro-print the existing board. But an order
+    // that arrived DURING the boot fetch (created at/after BOOT_TS) is genuinely new and, as
+    // KOT print is the main use, it MUST still print — the old code seeded EVERY order as
+    // printed, so an order placed in the ~1s boot window was silently never printed.
+    // Invalid/missing created_at is treated as pre-existing (seeded) so a bad timestamp can
+    // never spew an old ticket. (audit 2026-07-07)
+    for (const o of data.orders) {
+      const t = new Date(o.created_at).getTime();
+      if (!Number.isFinite(t) || t < BOOT_TS) printedIds.add(o.id);
+    }
+    // Print any order that landed during boot (created after BOOT_TS, still 'received' and
+    // not seeded above). Safe: printedIds guards against a double-print on the next pass.
+    autoPrintNew(!!data.autoPrintKot, data.orders, data.items, data.restaurant);
   }
   state.autoPrintKot = !!data.autoPrintKot;
   state.restaurant = data.restaurant || null;
   state.knownIds = ids;
+  // Bound printedIds on a long (24/7 wall-display) service: an order that has LEFT the board
+  // (served/cancelled) can never reappear as a new 'received', so forgetting it can't cause a
+  // reprint — this stops the Set growing forever. Only prune the ones no longer on the board.
+  // (knownIds is already replaced with the current board `ids` each full load, so it's bounded.)
+  if (printedIds.size > 500) { for (const id of printedIds) if (!ids.has(id)) printedIds.delete(id); }
   state.dishes = data.dishes;
   // Re-apply the LEGACY-order optimistic overlay so a just-ALL-READY'd legacy order (dishes
   // in orders[].items, no order_items rows) doesn't revert to cooking when this refetch
@@ -856,7 +911,10 @@ if (window.LFH_RT) {
     ops: (detail) => (detail && !detail.full && detail.tables && detail.tables.length) ? loadTables(detail.tables) : fullSoon(),
     menu: () => fullSoon(),
   }});
-  setInterval(() => load().catch(() => {}), 60000); // backup sync
+  // Backup sync — but NOT while the tab is hidden: a backgrounded wall display kept
+  // firing a full-board read every 60s forever (egress waste). realtime.js already does
+  // a fresh full reload via wake() on re-show, so a hidden tab needs no backstop.
+  setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 60000);
   // If realtime NEVER actually connects (blocked/flaky WebSocket), LFH_RT.start() swallows
   // the subscribe error and only the 60s backstop runs — a new KOT could sit unseen up to
   // 60s (bug M9, 2026-07-05). Engage a 5s catch-up poll UNTIL a subscription lands. Gated on

@@ -139,14 +139,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // .eq(restaurant_id, rid) on EVERY by-id write: sb is the service-role client (RLS
       // bypassed), so this filter is the ONLY tenant boundary — without it a stale/foreign
       // order id would be actioned across restaurants (owner's isolation concern, 2026-07-03).
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
-
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!cur) return err("That order isn't on this restaurant's board any more.", 404);
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
       // return=minimal: the client discards the body and re-fetches the board, so we skip
       // BOTH the .select() on the update and the full-row re-read (server↔DB egress saver).
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
-      await logAction("kitchen", "order_accept", { order_id: b, device_id: dev });
+      await logAction("kitchen", "order_accept", { order_id: b, device_id: dev, restaurant_id: rid });
       return ok({ ok: true });
     }
 
@@ -154,12 +154,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // (cooked, waiting for the waiter to carry it out). NOT served — serving is
     // the waiter's action on the tablet. Order stays "preparing" until served.
     if (a === "orders" && c === "ready") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!cur) return err("That order isn't on this restaurant's board any more.", 404);
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "ready" })) : [];
       // return=minimal: client discards the body and re-fetches the board → skip the full-row re-read.
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
-      await logAction("kitchen", "order_ready", { order_id: b, device_id: dev });
+      await logAction("kitchen", "order_ready", { order_id: b, device_id: dev, restaurant_id: rid });
       return ok({ ok: true });
     }
 
@@ -193,33 +194,39 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "platform" && c === "status") {
       const status = body && body.status;
       if (!["accepted", "preparing", "ready", "handed_over"].includes(status)) return err("invalid status");
-      if (status === "accepted") {
+      // lfh_platform_set_status updates by id with NO tenant scope (mig 071), so confirm
+      // this platform order belongs to THIS restaurant first (service-role bypasses RLS).
+      // Also read its CURRENT status for the accept-gate below.
+      const owns = must(await sb.from("aggregator_orders").select("id, status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!owns) return err("That platform order isn't for this restaurant.", 404);
+      // The MANAGER owns ACCEPTING (moving a still-'new' order forward). If the kitchen isn't
+      // allowed to accept platform orders, it may not advance a 'new' one by ANY status — not
+      // just the literal "accepted" (audit 2026-07-07: the old gate only checked
+      // status==='accepted', and the RPC has no from-state guard). Once past 'new', cooking it
+      // through is the kitchen's job. The UI already hides the button; this is belt-and-braces.
+      if (owns.status === "new") {
         const s = await sb.from("settings").select("kitchen_can_accept_platform").eq("restaurant_id", rid).maybeSingle();
         if (!(s.data && s.data.kitchen_can_accept_platform)) {
           return err("The kitchen isn't allowed to accept platform orders — the manager accepts them.", 403);
         }
       }
-      // lfh_platform_set_status updates by id with NO tenant scope (mig 071), so confirm
-      // this platform order belongs to THIS restaurant first (service-role bypasses RLS).
-      const owns = must(await sb.from("aggregator_orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
-      if (!owns) return err("That platform order isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "kitchen" });
       if (error) throw new Error(error.message);
       const row = Array.isArray(data) ? data[0] : data;
       void notifyAggregator(row?.source, row?.external_id, status); // best-effort push back to the platform (dormant w/o keys)
-      await logAction("kitchen", "platform_status", { detail: status, device_id: dev });
+      await logAction("kitchen", "platform_status", { detail: status, device_id: dev, restaurant_id: rid });
       return ok(row);
     }
 
     // dishes/:id/sold-out — toggle the 'sold-out' tag (the 86 board)
     if (a === "dishes" && c === "sold-out") {
       const value = !!(body && body.value === true);
-      const cur = must(await sb.from("menu_items").select("tags").eq("id", b).eq("restaurant_id", rid).single());
-
+      const cur = must(await sb.from("menu_items").select("tags").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!cur) return err("That dish isn't on this restaurant's menu.", 404);
       const tags = Array.isArray(cur.tags) ? cur.tags.filter((t: string) => t !== "sold-out") : [];
       if (value) tags.push("sold-out");
       const row = must(await sb.from("menu_items").update({ tags }).eq("id", b).eq("restaurant_id", rid).select());
-      await logAction("kitchen", value ? "sold_out_on" : "sold_out_off", { detail: b, device_id: dev });
+      await logAction("kitchen", value ? "sold_out_on" : "sold_out_off", { detail: b, device_id: dev, restaurant_id: rid });
       return ok(row[0] || null);
     }
 
