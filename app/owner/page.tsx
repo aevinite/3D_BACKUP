@@ -289,7 +289,9 @@ export default function OwnerDashboard() {
       // The owner panel has NO realtime socket — it polls. So IT drives the connection
       // light: a successful load = healthy (green), a failed one = amber. Without this the
       // badge was hard-stuck on green "Live" even while the dashboard showed "Couldn't load"
-      // (audit 2026-07-07).
+      // (audit 2026-07-07). It deliberately shows NO "ms" — the refresh time is dominated by
+      // heavy analytics QUERY time, not connection latency, so a slow query would falsely
+      // look like a bad link (owner 2026-07-08). Badge stays a calm "Connected".
       reportRealtime("online");
     } catch (e) {
       if (fresh()) setErr(e instanceof Error ? e.message : String(e));
@@ -309,7 +311,17 @@ export default function OwnerDashboard() {
   useEffect(() => { load({ withRecords: true }); }, [load]);
   const [refreshing, setRefreshing] = useState(false);
   useActiveAutoRefresh(() => loadRef.current(), 60000);
-  const manualRefresh = () => { setRefreshing(true); loadRef.current({ withRecords: true }); setTimeout(() => setRefreshing(false), 600); };
+  // Stop the spinner when the fetch actually finishes, not on a blind 600ms timer (which
+  // "finished" while a slow query was still loading, audit 2026-07-09). Keep a small floor
+  // so a very fast refresh still shows a brief spin instead of an imperceptible flicker.
+  const manualRefresh = () => {
+    setRefreshing(true);
+    const started = Date.now();
+    Promise.resolve(loadRef.current({ withRecords: true })).finally(() => {
+      const wait = Math.max(0, 400 - (Date.now() - started));
+      setTimeout(() => setRefreshing(false), wait);
+    });
+  };
   const goHome = () => { setView({ level: "home" }); if (!single) setRest(null); };
 
   // ── shape group timeseries → multi-line rows {label,[name]:rev} ──
@@ -395,11 +407,16 @@ export default function OwnerDashboard() {
   }, [rest, group, money, range]);
 
   const dishView = useMemo(() => {
-    if (view.level !== "dish" || !rest) return null;
+    if (view.level !== "dish") return null;
+    // Distinguish "still loading" from "loaded, but this dish had no sales in this range".
+    // Before, both returned null and the view hung on a permanent false "Loading dish…" when
+    // you switched to a range where the dish didn't sell (audit 2026-07-09). Also treat a
+    // stale `rest` from a different restaurant as still-loading (kills the switch flash).
+    if (!rest || rest.restaurant.id !== view.rid) return "loading" as const;
     const total = rest.dishes.reduce((a, d) => a + d.revenue, 0) || 1;
     const idx = rest.dishes.findIndex((d) => d.title === view.dish);
     const d = rest.dishes[idx];
-    return d ? { d, rank: idx + 1, share: Math.round((d.revenue / total) * 100), of: rest.dishes.length } : null;
+    return d ? { d, rank: idx + 1, share: Math.round((d.revenue / total) * 100), of: rest.dishes.length } : ("missing" as const);
   }, [view, rest]);
 
   const groupTotals = useMemo(() => {
@@ -628,7 +645,7 @@ export default function OwnerDashboard() {
 
       {/* ═══════ RESTAURANT (drill-down, or HOME when there's only one) ═══════ */}
       {((view.level === "home" && single) || view.level === "restaurant") && activeRid && (
-        <RestaurantView rest={rest} money={money} range={range} restTrend={restTrend} restSpark={restSpark}
+        <RestaurantView rest={rest && rest.restaurant.id === activeRid ? rest : null} money={money} range={range} restTrend={restTrend} restSpark={restSpark}
           dishSort={dishSort} setDishSort={setDishSort}
           onDish={(title) => setView({ level: "dish", rid: activeRid, dish: title })} />
       )}
@@ -636,7 +653,15 @@ export default function OwnerDashboard() {
       {/* ═══════ DISH ═══════ */}
       {view.level === "dish" && (
         <div className="adm-card own-dish">
-          {!dishView ? <div className="adm-empty">Loading dish…</div> : (<>
+          {dishView === "loading" || dishView === null ? <div className="adm-empty">Loading dish…</div>
+          : dishView === "missing" ? (
+            <div className="adm-empty">
+              No sales for <b>{view.dish}</b> in {RANGES.find((r) => r.k === range)?.label?.toLowerCase()}.{" "}
+              <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setView({ level: "restaurant", rid: view.rid })}>
+                <i className="fas fa-arrow-left" aria-hidden="true" /> Back to restaurant
+              </button>
+            </div>
+          ) : (<>
             <div className="own-dish-h" style={{ ["--rcol" as string]: rest?.restaurant.accentColor || FALLBACK }}>
               <div className="own-dish-name">{dishView.d.title}</div>
               <div className="adm-muted">at {rest?.restaurant.name} · {RANGES.find((r) => r.k === range)?.label}</div>

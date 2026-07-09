@@ -3659,7 +3659,9 @@ a:focus:not(:focus-visible) { outline: none; }
 /* ── phone: tighter spacing + let wide tables scroll instead of squishing ─────── */
 @media (max-width: 560px) {
   .adm-top { padding: 10px 14px; gap: 8px; flex-wrap: wrap; }
-  .adm-main { padding: 14px; }
+  /* Pad the bottom by the phone gesture/nav-bar inset so the last card/row isn't tucked
+     under the OS bar on a phone (audit 2026-07-09). */
+  .adm-main { padding: 14px; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
   .adm-page-h { font-size: 19px; }
   .adm-page-sub { margin-bottom: 16px; }
   .adm-card { padding: 14px; }
@@ -3847,7 +3849,8 @@ a:focus:not(:focus-visible) { outline: none; }
   .adx-navlink .navsoon { display: none; }
   .adx-side-foot { display: none; }
   .adx-top { padding: 8px 12px; }
-  .adx .adm-main { padding: 14px; }
+  /* Bottom gesture/nav-bar inset so the last row clears the OS bar (audit 2026-07-09). */
+  .adx .adm-main { padding: 14px; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
   /* Touch: every primary admin control gets a ≥40px hit area on phones (audit 2026-07-07 —
      the desktop 30–32px buttons were too small to tap reliably at ~390px). */
   .adx .adm-btn, .adx a.adm-btn { min-height: 40px; }
@@ -4119,8 +4122,11 @@ a:focus:not(:focus-visible) { outline: none; }
   .owx-side-foot { display: none; }
   .owx-top { padding: 8px 12px; }
   /* Bottom breathing room so scrolling content (last staff row / first chart title) never
-     butts the screen edge or sits under any floating control on phones. Desktop unchanged. */
-  .owx .adm-main { padding: 14px; padding-bottom: 32px; }
+     butts the screen edge or sits under any floating control on phones. Desktop unchanged.
+     Add the device's safe-area inset: with viewport-fit:cover (app/layout.tsx) the page draws
+     edge-to-edge UNDER the phone's home-indicator / gesture bar, so a flat 32px let the last
+     row tuck under it on notched phones — matches the guest menu's safe-area handling. */
+  .owx .adm-main { padding: 14px; padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .owx-navlink, .owx-chip, .owx .adm-btn { transition: none; }
