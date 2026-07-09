@@ -22,12 +22,11 @@ export async function GET(req: NextRequest) {
   const onlineSinceIso = new Date(Date.now() - 180_000).toISOString(); // "online" = seen in last 3 min
   const head = { count: "exact" as const, head: true };
 
-  const [restQ, setQ, ownersQ, openTablesQ, ordersTodayQ, maintQ, onlineQ, issuesQ, ovRpc, actQ] =
+  const [restQ, setQ, ownersQ, ordersTodayQ, maintQ, onlineQ, issuesQ, ovRpc, actQ] =
     await Promise.all([
       sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name"),
       sb.from("settings").select("restaurant_id, enabled_panels"),
       sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true),
-      sb.from("sessions").select("id", head).eq("status", "open"),
       sb.from("orders").select("id", head).neq("status", "cancelled").gte("created_at", sinceIso),
       sb.from("settings").select("restaurant_id").eq("service_mode", true),
       // Only the staff CURRENTLY online (seen in the last 3 min) — a small list, instead of
@@ -88,7 +87,12 @@ export async function GET(req: NextRequest) {
     maintenance: maintenanceNames.length > 0,
     maintenanceNames,
     ordersToday: ordersTodayQ.count || 0,
-    openTables: openTablesQ.count || 0,
+    // Headline = SUM of the per-restaurant rows shown right below it (same lfh_owner_overview
+    // source), so the card and the table can never disagree; also drops a separate sessions
+    // COUNT query every 60s refresh (audit 2026-07-08). Both mean "open dining sessions" — the
+    // /open-tables detail page counts occupied floor TILES, which can differ only for table-less
+    // banquet/takeaway sessions or a cleared-not-yet-freed table (rare, documented, not a bug).
+    openTables: openByRid.reduce((n, r) => n + r.openTables, 0),
     online,
     issues,
     activity,
