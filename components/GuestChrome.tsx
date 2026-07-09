@@ -10,20 +10,31 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import ModelToastHost from "@/components/ModelToastHost";
-import OrderConfirmModal from "@/components/OrderConfirmModal";
-import OrderTracker from "@/components/OrderTracker";
-import MiniCart from "@/components/MiniCart";
-import CartPanel from "@/components/CartPanel";
-import ToastHost from "@/components/ToastHost";
-import SessionGate from "@/components/SessionGate";
-import RealtimeProvider from "@/components/RealtimeProvider";
-import SessionOwner from "@/components/SessionOwner";
-import SessionCartSync from "@/components/SessionCartSync";
-import SessionStatusWidget from "@/components/SessionStatusWidget";
-import BackQuitDialog from "@/components/BackQuitDialog";
-import PointerCaptureGuard from "@/components/PointerCaptureGuard";
-import BanGate from "@/components/BanGate";
+import dynamic from "next/dynamic";
+
+// PERF (2026-07-09): load every guest widget LAZILY (next/dynamic, client-only).
+// They all render nothing until an effect/interaction fires (RealtimeProvider →
+// null + effects, SessionGate → !open → null, BanGate → !banned → null, cart/
+// toasts start closed), so deferring them is invisible on the guest menu. The win:
+// their JS (incl. supabase-js via RealtimeProvider) stays OUT of the shared bundle,
+// so the STAFF PANELS (/tablet, /kitchen, /manager, …) — which render null here —
+// no longer DOWNLOAD ~200KB+ of guest-app code they never use. That download was the
+// bulk of the slow panel open on mobile (the DB call is only ~0.9s). Guest routes
+// fetch these small chunks right after hydration, the same moment they activated before.
+const RealtimeProvider   = dynamic(() => import("@/components/RealtimeProvider"),   { ssr: false });
+const ModelToastHost     = dynamic(() => import("@/components/ModelToastHost"),     { ssr: false });
+const OrderConfirmModal  = dynamic(() => import("@/components/OrderConfirmModal"),  { ssr: false });
+const OrderTracker       = dynamic(() => import("@/components/OrderTracker"),       { ssr: false });
+const MiniCart           = dynamic(() => import("@/components/MiniCart"),           { ssr: false });
+const CartPanel          = dynamic(() => import("@/components/CartPanel"),          { ssr: false });
+const ToastHost          = dynamic(() => import("@/components/ToastHost"),          { ssr: false });
+const SessionGate        = dynamic(() => import("@/components/SessionGate"),        { ssr: false });
+const SessionOwner       = dynamic(() => import("@/components/SessionOwner"),       { ssr: false });
+const SessionCartSync    = dynamic(() => import("@/components/SessionCartSync"),    { ssr: false });
+const SessionStatusWidget = dynamic(() => import("@/components/SessionStatusWidget"), { ssr: false });
+const BackQuitDialog     = dynamic(() => import("@/components/BackQuitDialog"),     { ssr: false });
+const PointerCaptureGuard = dynamic(() => import("@/components/PointerCaptureGuard"), { ssr: false });
+const BanGate            = dynamic(() => import("@/components/BanGate"),            { ssr: false });
 
 // Staff routes never get guest chrome. Two shapes must both be caught:
 //  - the flat admin routes (/manager, /kitchen, /tablet, /login, …), and
