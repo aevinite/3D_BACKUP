@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
     if ((error as { code?: string }).code === "23505") return bad("That username is taken at this restaurant — pick another.", 409);
     return bad("Something went wrong, please try again.", 500);
   }
-  await logAction("owner", "staff_create", { restaurant_id: rid, actor: s.actor, detail: `created ${role} "${display}"` });
+  await logAction("owner", "staff_create", { restaurant_id: rid, actor: s.actor, actor_id: s.actorId, detail: `created ${role} "${display}"` });
   return ok({ ok: true, id: data!.id, name: display, role, restaurant_id: rid, password });
 }
 
@@ -202,7 +202,7 @@ export async function PATCH(req: NextRequest) {
     // the staffer couldn't log in and the OLD password still worked (audit 2026-07-07).
     const { error } = await sb.from("staff_users").update({ password_hash: await hashSecret(password), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);
     if (error) return bad("Couldn't reset the password — please try again.", 500);
-    await logAction("owner", "staff_reset_password", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `reset "${u.username}"` });
+    await logAction("owner", "staff_reset_password", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `reset "${u.username}"` });
     return ok({ ok: true, password });
   }
   if (action === "set_active") {
@@ -212,7 +212,7 @@ export async function PATCH(req: NextRequest) {
     const active = body.active;
     const { error } = await sb.from("staff_users").update({ active, token_version: active ? u.token_version : (u.token_version || 0) + 1 }).eq("id", id);
     if (error) return bad("Couldn't update that account — please try again.", 500);
-    await logAction("owner", active ? "staff_enable" : "staff_disable", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `${active ? "enabled" : "disabled"} "${u.username}"` });
+    await logAction("owner", active ? "staff_enable" : "staff_disable", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `${active ? "enabled" : "disabled"} "${u.username}"` });
     return ok({ ok: true });
   }
   if (action === "set_role") {
@@ -222,7 +222,7 @@ export async function PATCH(req: NextRequest) {
     if (!assignableFor(s.actor).includes(role)) return bad("Pick a valid role.");
     const { error } = await sb.from("staff_users").update({ role, token_version: (u.token_version || 0) + 1 }).eq("id", id);
     if (error) return bad("Couldn't change the role — please try again.", 500);
-    await logAction("owner", "staff_set_role", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `set "${u.username}" → ${role}` });
+    await logAction("owner", "staff_set_role", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `set "${u.username}" → ${role}` });
     return ok({ ok: true });
   }
   // set_permissions — per-user capability overrides (migration 115). Body:
@@ -252,7 +252,7 @@ export async function PATCH(req: NextRequest) {
     if (!noted.length) return bad("Nothing to change.");
     const { error } = await sb.from("staff_users").update({ permissions: merged }).eq("id", id);
     if (error) return bad("Couldn't update permissions — please try again.", 500);
-    await logAction("owner", "staff_set_permissions", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `"${u.username}": ${noted.join(", ")}` });
+    await logAction("owner", "staff_set_permissions", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `"${u.username}": ${noted.join(", ")}` });
     return ok({ ok: true, permissions: merged });
   }
   if (action === "edit") {
@@ -285,6 +285,6 @@ export async function DELETE(req: NextRequest) {
   if (!assignableFor(s.actor).includes(u.role as Role)) return bad("You can't manage accounts at or above your own level.", 403);
   const { error } = await sb.from("staff_users").delete().eq("id", id);
   if (error) return bad("Couldn't remove that account — please try again.", 500);
-  await logAction("owner", "staff_delete", { restaurant_id: u.restaurant_id, actor: s.actor, detail: `deleted "${u.username}"` });
+  await logAction("owner", "staff_delete", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `deleted "${u.username}"` });
   return ok({ ok: true });
 }

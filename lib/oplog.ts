@@ -31,9 +31,12 @@ type Fields = {
   // it shows up in the Operation log automatically. See migration 053 (the
   // staff_actions.actor column) — this is the ready "who" slot.
   actor?: string | null;
-  // WHICH restaurant the action belongs to (multi-tenant). Omit it and the row
-  // keeps the table's default (#1); pass it on multi-restaurant actions so the
-  // manager's Operation log only shows that restaurant's entries.
+  // WHO did it, as a STABLE id (the acting staff user's uuid). Preferred over `actor`
+  // (a display name) for reliable attribution — the admin owner-activity feed matches on it.
+  actor_id?: string | null;
+  // WHICH restaurant the action belongs to (multi-tenant). OMIT it and the row keeps the
+  // table's DEFAULT (#1); pass a value on multi-restaurant actions; pass an explicit `null`
+  // for platform-level actions (e.g. creating/renaming an owner) so they don't pollute #1's log.
   restaurant_id?: string | null;
 };
 
@@ -47,10 +50,12 @@ export async function logAction(panel: Panel, action: string, fields: Fields = {
       detail: fields.detail ?? null,
       device_id: fields.device_id ?? null,
       actor: fields.actor ?? null,
-      // Only set restaurant_id when given, so existing single-restaurant callers
-      // keep the column DEFAULT (#1) instead of writing an explicit NULL (the
-      // column is NOT NULL — an explicit null would throw and lose the log row).
-      ...(fields.restaurant_id ? { restaurant_id: fields.restaurant_id } : {}),
+      actor_id: fields.actor_id ?? null,
+      // restaurant_id: omit (or pass undefined) → column DEFAULT (#1), unchanged for the many
+      // single-restaurant callers; a value scopes it; an explicit `null` records a platform-level
+      // action (mig 156 made the column nullable). Using !== undefined (not `in`) so a stray
+      // undefined keeps the old default-#1 behaviour instead of flipping to null.
+      ...(fields.restaurant_id !== undefined ? { restaurant_id: fields.restaurant_id } : {}),
     });
   } catch {
     /* never let logging break the real action */

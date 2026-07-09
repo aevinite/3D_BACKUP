@@ -57,12 +57,14 @@ export async function GET(req: NextRequest) {
       .select("id, username, name, active, last_seen_at, created_at")
       .eq("id", ownerId).eq("role", "owner").limit(1)).data?.[0];
     if (!o) return bad("Owner not found.", 404);
-    // Strip every char PostgREST's .or() grammar uses as a delimiter (, . ( ) %) so the
-    // owner's display name can't break or alter the filter expression.
-    const who = (o.name || o.username).replace(/[%,().]/g, "");
+    // Match by the owner's STABLE id: actor_id on their own panel actions (mig 156), plus the
+    // owner id embedded in the detail of admin-on-owner actions + their login rows. Replaces the
+    // old display-NAME match, which missed role-logged actions AND surfaced a same-named staff
+    // member's rows under the wrong owner (audit 2026-07-09). ownerId is a validated UUID — safe
+    // in the .or() filter (no delimiter chars to escape).
     const actQ = await sb.from("staff_actions")
       .select("id, panel, action, actor, detail, restaurant_id, created_at")
-      .or(`actor.eq.${who},detail.ilike.%${ownerId}%`)
+      .or(`actor_id.eq.${ownerId},detail.ilike.%${ownerId}%`)
       .order("created_at", { ascending: false })
       .limit(100);
     if (actQ.error) return bad(actQ.error.message, 500);
@@ -154,7 +156,7 @@ export async function POST(req: NextRequest) {
     if (e) attachErrors.push(`${rid}: ${e}`);
   }
   await logAction("admin", "owner_create", {
-    actor: "admin",
+    actor: "admin", restaurant_id: null, // platform-level: not tied to one restaurant (mig 156)
     detail: `created owner "${display}" · id ${ownerId}${rids.length ? ` · attached ${rids.length} restaurant(s)` : ""}`,
   });
   return ok({ ok: true, id: ownerId, name: display, password, attachErrors });
@@ -177,7 +179,7 @@ export async function PATCH(req: NextRequest) {
     if (!r) return bad("Restaurant not found.", 404);
     const e = await attach(ownerId, rid);
     if (e) return bad(e, 500);
-    await logAction("admin", "owner_attach_restaurant", { restaurant_id: rid, actor: "admin", detail: `${r.name} attached to owner "${who}"` });
+    await logAction("admin", "owner_attach_restaurant", { restaurant_id: rid, actor: "admin", detail: `${r.name} attached to owner "${who}" · owner ${ownerId}` });
     return ok({ ok: true });
   }
 
@@ -196,7 +198,7 @@ export async function PATCH(req: NextRequest) {
       const set = await sb.from("restaurants").update({ owner_user_id: next?.user_id ?? null }).eq("id", rid);
       if (set.error) return bad(set.error.message, 500);
     }
-    await logAction("admin", "owner_detach_restaurant", { restaurant_id: rid, actor: "admin", detail: `${r?.name || rid} detached from owner "${who}"` });
+    await logAction("admin", "owner_detach_restaurant", { restaurant_id: rid, actor: "admin", detail: `${r?.name || rid} detached from owner "${who}" · owner ${ownerId}` });
     return ok({ ok: true });
   }
 
@@ -209,7 +211,7 @@ export async function PATCH(req: NextRequest) {
       .update({ password_hash: await hashSecret(password), token_version: ((cur?.token_version as number) || 0) + 1, failed_count: 0, locked_until: null })
       .eq("id", ownerId);
     if (error) return bad(error.message, 500);
-    await logAction("admin", "owner_reset_password", { actor: "admin", detail: `reset password for owner "${who}"` });
+    await logAction("admin", "owner_reset_password", { actor: "admin", restaurant_id: null, detail: `reset password for owner "${who}" · owner ${ownerId}` });
     return ok({ ok: true, password });
   }
 
@@ -221,7 +223,7 @@ export async function PATCH(req: NextRequest) {
     if (!active) patch.token_version = ((cur?.token_version as number) || 0) + 1;
     const { error } = await sb.from("staff_users").update(patch).eq("id", ownerId);
     if (error) return bad(error.message, 500);
-    await logAction("admin", active ? "owner_restore" : "owner_suspend", { actor: "admin", detail: `${active ? "restored" : "suspended"} owner "${who}"` });
+    await logAction("admin", active ? "owner_restore" : "owner_suspend", { actor: "admin", restaurant_id: null, detail: `${active ? "restored" : "suspended"} owner "${who}" · owner ${ownerId}` });
     return ok({ ok: true, active });
   }
 
@@ -238,7 +240,7 @@ export async function PATCH(req: NextRequest) {
     if (key !== owner.username && (await ownerNameTaken(key))) return bad("That username is taken — pick another.", 409);
     const { error } = await sb.from("staff_users").update({ name: display, username: key }).eq("id", ownerId);
     if (error) return bad(error.message, 500);
-    await logAction("admin", "owner_rename", { actor: "admin", detail: `renamed owner "${who}" → "${display}"` });
+    await logAction("admin", "owner_rename", { actor: "admin", restaurant_id: null, detail: `renamed owner "${who}" → "${display}" · owner ${ownerId}` });
     return ok({ ok: true });
   }
 
@@ -279,7 +281,7 @@ export async function DELETE(req: NextRequest) {
   const delUser = await sb.from("staff_users").delete().eq("id", ownerId);
   if (delUser.error) return bad(delUser.error.message, 500);
   await logAction("admin", "owner_delete_forever", {
-    actor: "admin",
+    actor: "admin", restaurant_id: null, // platform-level (mig 156)
     detail: `PERMANENTLY deleted owner "${who}" (${ownerId}) · ${links.length} restaurant(s) released`,
   });
   return ok({ ok: true, deleted: true });

@@ -72,6 +72,6 @@ export async function PATCH(req: NextRequest) {
   const merged = { ...(cur.manager_permissions || {}), ...patch };
   const { error } = await sb.from("restaurants").update({ manager_permissions: merged }).eq("id", rid);
   if (error) return bad("Something went wrong, please try again.", 500);
-  await logAction("owner", "manager_permissions", { restaurant_id: rid, detail: `${cur.name}: ${Object.entries(patch).map(([k, v]) => `${k}=${v ? "on" : "off"}`).join(", ")}` });
+  await logAction("owner", "manager_permissions", { restaurant_id: rid, actor_id: u?.id ?? null, detail: `${cur.name}: ${Object.entries(patch).map(([k, v]) => `${k}=${v ? "on" : "off"}`).join(", ")}` });
   return ok({ ok: true, manager_permissions: merged });
 }
