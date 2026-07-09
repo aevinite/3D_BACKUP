@@ -14,8 +14,10 @@ type Health = {
   tableEstimates: { table: string; estRows: number }[];
   tableEstimatesError: string | null;
   restaurants: { active: number; suspended: number; total: number };
+  restaurantsError?: string | null;
   staffOnlineNow: number;
   staffTotal: number;
+  staffError?: string | null;
   realtime: { configuredHost: string | null };
   openIssues: number | null;
   issuesFeedWired: boolean;
@@ -82,9 +84,9 @@ export default function AdminHealth() {
         <>
           <div className="adm-card" style={{ marginBottom: 14, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
             <span className={`adx-pill ${h.dbOk ? tier : "bad"}`}><span className="dot" />{h.dbOk ? `Database ${h.latencyMs}ms` : "Database unreachable"}</span>
-            <span className="adx-pill good"><span className="dot" />{h.restaurants.active} restaurant{h.restaurants.active !== 1 ? "s" : ""} live</span>
+            <span className={`adx-pill ${h.restaurantsError ? "warn" : "good"}`}><span className="dot" />{h.restaurantsError ? "restaurants unreadable" : `${h.restaurants.active} restaurant${h.restaurants.active !== 1 ? "s" : ""} live`}</span>
             {h.restaurants.suspended > 0 && <span className="adx-pill warn"><span className="dot" />{h.restaurants.suspended} suspended</span>}
-            <span className={`adx-pill ${h.staffOnlineNow > 0 ? "good" : "warn"}`}><span className="dot" />{h.staffOnlineNow} staff online now</span>
+            <span className={`adx-pill ${h.staffError ? "warn" : h.staffOnlineNow > 0 ? "good" : "warn"}`}><span className="dot" />{h.staffError ? "staff status unreadable" : `${h.staffOnlineNow} staff online now`}</span>
             <span className={`adx-pill ${h.issuesFeedWired ? (h.openIssues ? "warn" : "good") : "warn"}`}><span className="dot" />{h.issuesFeedWired ? `${h.openIssues} open issue${h.openIssues === 1 ? "" : "s"}` : "issue feed unreachable"}</span>
           </div>
 

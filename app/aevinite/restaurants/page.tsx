@@ -380,12 +380,19 @@ function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChang
   // (audit 2026-07-08). The guest menu honours each restaurant's own service_mode (lib/menu.ts).
   const [maint, setMaint] = useState<boolean | null>(null);
   const [mBusy, setMBusy] = useState(false);
+  const [maintErr, setMaintErr] = useState(false);
+  const [maintReload, setMaintReload] = useState(0);
   useEffect(() => {
     let dead = false;
+    setMaintErr(false);
     fetch(`/api/admin/maintenance?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
-      .then((r) => r.json()).then((j) => { if (!dead && typeof j.maintenance === "boolean") setMaint(j.maintenance); }).catch(() => {});
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((j) => { if (dead) return; if (typeof j.maintenance === "boolean") setMaint(j.maintenance); else setMaintErr(true); })
+      // Don't swallow a failed load: leaving maint=null used to show a false green "Live" chip +
+      // a stuck "…" button with no error. Flag it so the chip reads "Status unknown" + a Retry shows.
+      .catch(() => { if (!dead) setMaintErr(true); });
     return () => { dead = true; };
-  }, [restaurant.id]);
+  }, [restaurant.id, maintReload]);
   const setActive = async (active: boolean) => {
     if (!active && !window.confirm(`Suspend ${restaurant.name}?\n\nIts guest menu goes OFFLINE immediately (staff panels stay reachable to you via act-as). You can reactivate any time.`)) return;
     setBusy(true); setErr(null);
@@ -409,12 +416,14 @@ function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChang
       setMaint(d.maintenance === true);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setMBusy(false); }
   };
-  const statusLabel = !restaurant.active ? "Suspended" : maint ? "In maintenance" : "Live";
+  const statusLabel = !restaurant.active ? "Suspended" : maint === true ? "In maintenance" : maint === false ? "Live" : maintErr ? "Status unknown" : "Checking…";
   const statusStyle = !restaurant.active
     ? { background: "color-mix(in srgb, var(--adm-danger) 22%, transparent)", color: "var(--adm-danger)" }
-    : maint
+    : maint === true
       ? { background: "color-mix(in srgb, var(--adm-warn) 22%, transparent)", color: "var(--adm-warn)" }
-      : { background: "color-mix(in srgb, var(--adm-ok) 22%, transparent)", color: "var(--adm-ok)" };
+      : maint === false
+        ? { background: "color-mix(in srgb, var(--adm-ok) 22%, transparent)", color: "var(--adm-ok)" }
+        : { background: "var(--muted2)", color: "var(--muted)" }; // unknown / still checking — not a confident green "Live"
   return (
     <div className="adm-card" style={{ marginBottom: 14, ...(restaurant.active ? {} : { borderColor: "var(--adm-danger)" }) }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -422,9 +431,13 @@ function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChang
         <span style={{ flex: 1, fontSize: 13 }} className="adm-muted">
           {!restaurant.active
             ? "Suspended — the guest menu is offline. Staff panels stay reachable to you via the buttons below."
-            : maint
+            : maint === true
               ? "In maintenance — guests see a “we’ll be right back” screen. Staff panels keep working."
-              : "Guests can open this restaurant's menu."}
+              : maint === false
+                ? "Guests can open this restaurant's menu."
+                : maintErr
+                  ? "Couldn't check the menu's status just now — use Retry."
+                  : "Checking the menu's status…"}
         </span>
         {err && <span style={{ color: "var(--adm-danger)", fontSize: 12.5 }}>{err}</span>}
         {restaurant.active
@@ -434,10 +447,16 @@ function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChang
       {restaurant.active && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
           <span className="adm-muted" style={{ flex: 1, fontSize: 12.5, minWidth: 180 }}>Maintenance — a soft &ldquo;we&rsquo;ll be right back&rdquo; pause (staff panels keep working), lighter than Suspend.</span>
-          <button className={maint ? "adm-btn primary" : "adm-btn"} disabled={mBusy || maint === null} onClick={toggleMaint}>
-            <i className={`fas ${maint ? "fa-play" : "fa-pause"}`} style={{ marginRight: 7 }} aria-hidden="true" />
-            {maint === null ? "…" : maint ? "Bring menu back online" : "Take menu offline"}
-          </button>
+          {maintErr ? (
+            <button className="adm-btn" onClick={() => setMaintReload((n) => n + 1)} title="Couldn't check maintenance — try again">
+              <i className="fas fa-rotate-right" style={{ marginRight: 7 }} aria-hidden="true" />Retry
+            </button>
+          ) : (
+            <button className={maint ? "adm-btn primary" : "adm-btn"} disabled={mBusy || maint === null} onClick={toggleMaint}>
+              <i className={`fas ${maint ? "fa-play" : "fa-pause"}`} style={{ marginRight: 7 }} aria-hidden="true" />
+              {maint === null ? "…" : maint ? "Bring menu back online" : "Take menu offline"}
+            </button>
+          )}
         </div>
       )}
     </div>

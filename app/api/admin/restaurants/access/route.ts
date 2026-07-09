@@ -11,13 +11,15 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
-import { OWNER_ENTITLEMENT_KEYS, mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
+import { OWNER_ENTITLEMENT_KEYS, mergeOwnerEntitlements, MANAGER_POWER_FLAGS } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
 
-// The five manager powers (restaurants.manager_permissions) + their safe defaults.
-const MANAGER_POWERS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills"] as const;
-const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false };
+// The manager powers (restaurants.manager_permissions) come from the CANONICAL list so this can
+// never drift again: edit_settings + view_ratings were missing here, so the admin's grant/revoke
+// of those two silently never persisted (audit 2026-07-09).
+const MANAGER_POWERS = MANAGER_POWER_FLAGS;
+const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false };
 // The three tablet billing capabilities (settings.*), tri-state off|on|pin.
 const TABLET_CAPS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice"] as const;
 const isTri = (v: unknown): v is "off" | "on" | "pin" => v === "off" || v === "on" || v === "pin";
