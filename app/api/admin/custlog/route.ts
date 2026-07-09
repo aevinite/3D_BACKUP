@@ -33,6 +33,10 @@ export async function GET(req: NextRequest) {
       blocklistQ = blocklistQ.eq("restaurant_id", rid);
     }
     const [members, customers, blocklist] = await Promise.all([membersQ, customersQ, blocklistQ]);
+    // Surface a failed read — otherwise a broken query shows an EMPTY customer log ("no
+    // customers") with a 200 instead of an error the page can retry (audit).
+    const cErr = members.error || customers.error || blocklist.error;
+    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 });
     const memberRows = members.data ?? [];
     const custRows = customers.data ?? [];
     const blockRows = blocklist.data ?? [];
@@ -47,7 +51,9 @@ export async function GET(req: NextRequest) {
           sb.from("orders").select("member_id, created_at").in("member_id", memberIds),
           sb.from("waiter_calls").select("member_id, note, created_at").in("member_id", memberIds),
         ])
-      : [{ data: [] }, { data: [] }];
+      : [{ data: [], error: null }, { data: [], error: null }];
+    if (orders.error || calls.error)
+      return NextResponse.json({ error: (orders.error || calls.error)!.message }, { status: 500 });
 
     // Stamp each row with its restaurant name so the admin (who sees every restaurant at
     // once) can tell tenants apart instead of one indistinguishable jumble.

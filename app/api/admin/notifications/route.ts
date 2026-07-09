@@ -29,6 +29,10 @@ export async function GET(req: NextRequest) {
     sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open"),
     sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null),
   ]);
+  // Surface a failed read — otherwise a broken tickets/restaurants query silently shows an
+  // empty bell (no tickets, and NO suspended-restaurant alerts) as if everything's clear (audit).
+  const nErr = ticketsQ.error || countQ.error || restQ.error;
+  if (nErr) return NextResponse.json({ error: nErr.message }, { status: 500 });
 
   const restaurants = (restQ.data || []) as { id: string; name: string; slug: string; active: boolean }[];
   const nameOf: Record<string, string> = {};
