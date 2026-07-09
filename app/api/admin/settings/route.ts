@@ -8,9 +8,11 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 
 export const dynamic = "force-dynamic";
 
+// Capped at 1 MONTH (30 days) — the owner's platform-wide "max save lock" (2026-07-09). 7 days
+// is the lighter option; never longer than a month, to keep the log tables small.
 const clampDays = (v: unknown) => {
   const n = Math.round(Number(v));
-  return Number.isFinite(n) ? Math.min(Math.max(n, 1), 90) : 90;
+  return Number.isFinite(n) ? Math.min(Math.max(n, 1), 30) : 30;
 };
 
 export async function GET(req: NextRequest) {
@@ -30,12 +32,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   let body: Record<string, unknown> = {};
   try { body = await req.json(); } catch {}
-  const patch: Record<string, unknown> = { id: "site" };
+  // "One setting for all" (owner 2026-07-09): the admin's retention window applies to EVERY
+  // restaurant — a true platform-wide policy, no per-restaurant divergence (and no coupling to
+  // restaurant #1's id='site' row). Capped at 1 month by clampDays.
+  const patch: Record<string, unknown> = {};
   for (const k of ["oplog_retention_days", "custlog_retention_days"]) {
     if (k in body) patch[k] = clampDays(body[k]);
   }
-  if (Object.keys(patch).length === 1) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
-  const r = await sb.from("settings").upsert(patch, { onConflict: "id" }).select();
+  if (!Object.keys(patch).length) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
+  // Every settings row carries a restaurant_id (id='site' is #1's row) → this writes them all.
+  const r = await sb.from("settings").update(patch).not("restaurant_id", "is", null);
   if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

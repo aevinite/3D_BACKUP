@@ -8,7 +8,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 
-const RET_OPTS = [{ d: 7, label: "7 days" }, { d: 30, label: "1 month" }, { d: 90, label: "3 months" }];
+// Owner 2026-07-09: 1 month MAX, but freely toggleable down to a single day.
+const RET_OPTS = [{ d: 1, label: "1 day" }, { d: 3, label: "3 days" }, { d: 7, label: "7 days" }, { d: 14, label: "2 weeks" }, { d: 30, label: "1 month" }];
 
 export default function AdminSettings() {
   const [ret, setRet] = useState<{ oplog_retention_days: number; custlog_retention_days: number } | null>(null);
@@ -29,7 +30,7 @@ export default function AdminSettings() {
     try {
       const r = await fetch("/api/admin/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [which]: val }) });
       if (!r.ok) throw new Error();
-      setMsg("Saved — the default for restaurants that haven't set their own.");
+      setMsg("Saved — applied to every restaurant.");
     } catch { setMsg("Couldn't save that just now."); loadRet(); }
   };
 
@@ -51,8 +52,8 @@ export default function AdminSettings() {
         </div>
 
         <div className="adm-card">
-          <h2>Log retention <span className="adm-muted">· platform default</span></h2>
-          <p className="hint">The default window for keeping the activity &amp; customer logs. It applies to any restaurant that hasn&rsquo;t chosen its own — a restaurant&rsquo;s own manager setting takes priority. Older entries auto-delete each night; bills are never touched.</p>
+          <h2>Log retention <span className="adm-muted">· all restaurants</span></h2>
+          <p className="hint">How long <b>every restaurant</b> keeps its activity &amp; customer logs — one platform-wide setting, from a single day up to a <b>1-month maximum</b>. Older entries auto-delete each night; bills are never touched.</p>
           {retErr && <p className="adm-muted" style={{ fontSize: 12, marginBottom: 8 }}>Couldn&rsquo;t load retention. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={loadRet}>Retry</button></p>}
           <div style={{ display: "grid", gap: 12 }}>
             <label className="adm-ret" style={{ justifyContent: "space-between" }}>
