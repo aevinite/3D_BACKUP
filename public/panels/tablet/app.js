@@ -1755,9 +1755,25 @@ function dishBtnHtml(d) {
     </span>
   </button>`;
 }
+let menuReloadInFlight = false;
 function orderSectionsHtml() {
   const secs = orderSections();
-  if (!secs.length) return `<div class="muted" style="padding:14px">No dishes match.</div>`;
+  if (!secs.length) {
+    // Empty because the MENU hasn't loaded yet (two-tier: the dishes ride the /summary full load,
+    // so opening Take-order mid-load found an empty list and wrongly showed "No dishes match") vs
+    // a search that truly matched nothing. If it's NOT a search and no dishes are cached, show a
+    // loading line + kick ONE fresh load, then re-render the moment it lands. (audit 2026-07-09)
+    if (!state.dishSearch.trim() && !(state.data.dishes || []).length) {
+      if (!menuReloadInFlight) {
+        menuReloadInFlight = true;
+        load().finally(() => { menuReloadInFlight = false; state._menuLoadedOnce = true; if (state.ordering && !state.viewOrder) renderOrderMode(); });
+      }
+      return state._menuLoadedOnce
+        ? `<div class="muted" style="padding:14px">No dishes on the menu yet.</div>`
+        : `<div class="muted" style="padding:14px;display:flex;align-items:center;gap:8px"><span class="tsl-dot"></span> Loading the menu…</div>`;
+    }
+    return `<div class="muted" style="padding:14px">No dishes match.</div>`;
+  }
   return secs.map((s) => `<section class="om-sec" data-cat="${esc(s.slug)}">
     <h3 class="om-sec-h">${esc(s.label)} <span class="om-sec-n">· ${s.dishes.length}</span></h3>
     <div class="dishgrid">${s.dishes.map(dishBtnHtml).join("")}</div>
