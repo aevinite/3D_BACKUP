@@ -550,7 +550,7 @@ body.om-mode #tabletClose { display: none; }
    every size: a browse screen (menu + ✎ per dish + floating "View order" pill) and a
    SEPARATE view-order screen (items + ONE note + SEND, one scroll). Overrides the old
    in-panel lite layout above. Desktop no longer keeps a side pane during ordering. */
-.om.lite { position: fixed; inset: 0; z-index: 45; background: var(--bg);
+.om.lite { position: fixed; top: 0; left: 0; right: 0; z-index: 45; background: var(--bg);
   display: flex; flex-direction: column; height: 100vh; height: 100dvh; padding: calc(10px + env(safe-area-inset-top)) 14px 10px; box-sizing: border-box; }
 /* Compact ONE-ROW header: the table number as a small pill, the search beside it. */
 .om.lite .om-head { padding: 2px 0 8px; margin: 0; align-items: center; flex-wrap: nowrap; gap: 8px; }
@@ -564,7 +564,7 @@ body.om-mode #tabletClose { display: none; }
 .om.lite .om-scroll .dishgrid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 /* BROWSE: the menu fills the screen; the order review is a SEPARATE screen reached by
    the floating "View order" pill. Search + chips stay pinned above the dish scroll. */
-.om.lite:not(.vieworder) .om-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; padding-bottom: 88px; }
+.om.lite:not(.vieworder) .om-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; padding-bottom: 12px; }
 .om.lite:not(.vieworder) .om-cart { display: none; }        /* no side pane while browsing */
 .om.lite:not(.vieworder) .om-viewpill { display: flex; }
 /* VIEW-ORDER: the added items, the ONE allergy/note field, the total AND SEND all
@@ -602,7 +602,7 @@ body:has(.opt-overlay) #tabletClose { display: none; }
 
 /* Floating "View order" pill — guest-menu style; shown only on the phone browse screen
    (the media rule above flips it to flex). */
-.om-viewpill { display: none; position: absolute; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+.om-viewpill { display: none; position: relative; flex: 0 0 auto; margin: 8px 2px calc(6px + env(safe-area-inset-bottom));
   z-index: 60; align-items: center; gap: 10px; padding: 13px 16px; border: 0; border-radius: 14px;
   background: var(--gold, #b8923f); color: #14110d; font-family: inherit; font-weight: 800; font-size: 15px;
   box-shadow: 0 8px 26px rgba(0,0,0,.32); cursor: pointer; }
