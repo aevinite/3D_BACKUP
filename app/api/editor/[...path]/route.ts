@@ -551,9 +551,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Newest-first keeps the RECENT window complete + deterministic. The cap keeps the dashboard
       // fast (deep OFFSET paging gets slow), so the "Today" and "30 days" views are exact and match
       // the owner panel for a normal restaurant. A very-high-volume FULL YEAR can exceed the cap →
-      // its totals reflect the most recent ~5k orders; penny-exact big-range analytics is the planned
+      // its totals reflect the most recent ~12k orders; penny-exact big-range analytics is the planned
       // pre-aggregated-summary follow-up (CLAUDE.md: dashboards read summaries, not live scans).
-      for (let from = 0; from < 5000; from += 1000) {
+      for (let from = 0; from < 12000; from += 1000) {
         const page = (must(await sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).order("created_at", { ascending: false }).range(from, from + 999)) as any[] | null) || [];
         allRows.push(...page);
         if (page.length < 1000) break;
