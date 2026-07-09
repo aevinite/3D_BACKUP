@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
 import { TimeBar, LeaderBar } from "@/components/owner/Charts";
 
-type RType = "sales" | "tax" | "dishes" | "categories" | "payments" | "discounts" | "cancellations" | "hourly";
+type RType = "sales" | "tax" | "dishes" | "categories" | "payments" | "discounts" | "cancellations" | "hourly" | "menu";
 type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy";
 
 const REPORTS: { k: RType; label: string; icon: string; blurb: string }[] = [
@@ -18,6 +18,7 @@ const REPORTS: { k: RType; label: string; icon: string; blurb: string }[] = [
   { k: "tax", label: "Tax / GST", icon: "fa-landmark", blurb: "Tax collected, with the CGST/SGST split for filing" },
   { k: "dishes", label: "Dishes (item-wise)", icon: "fa-utensils", blurb: "Every dish: how many sold, what it earned" },
   { k: "categories", label: "Categories", icon: "fa-layer-group", blurb: "Which sections of the menu earn" },
+  { k: "menu", label: "Menu insights", icon: "fa-lightbulb", blurb: "Which dishes to promote, reprice or drop — popularity vs price" },
   { k: "payments", label: "Payment methods", icon: "fa-wallet", blurb: "UPI vs cash vs card" },
   { k: "discounts", label: "Discounts", icon: "fa-tag", blurb: "What was given away, when" },
   { k: "cancellations", label: "Cancellations", icon: "fa-ban", blurb: "Lost business — voided orders and their value" },
@@ -72,6 +73,37 @@ function downloadCsv(filename: string, header: string[], rows: (string | number)
   URL.revokeObjectURL(a.href);
 }
 
+// ── Menu insights helpers: group dishes by how OFTEN they sell vs their PRICE ──
+type MI = { title: string; qty: number; revenue: number };
+type Klass = "star" | "workhorse" | "puzzle" | "dog";
+const KLASS: Record<Klass, { label: string; emoji: string; tip: string }> = {
+  star:      { label: "Stars",      emoji: "⭐", tip: "Popular & higher-priced — keep them front and centre." },
+  workhorse: { label: "Workhorses", emoji: "🐎", tip: "Popular but low-priced — a small rise or an upsell adds up." },
+  puzzle:    { label: "Puzzles",    emoji: "🧩", tip: "Higher-priced but rarely ordered — promote or reposition." },
+  dog:       { label: "Dogs",       emoji: "🐕", tip: "Rarely ordered & low-priced — rework or drop." },
+};
+function miMedian(arr: number[]): number {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b), m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+// Popularity (units sold) × price (list-price ÷ units), each split at its median — the classic
+// menu-engineering quadrant. Honest: it uses PRICE not profit (no per-dish cost stored yet).
+function classifyMenu(rows: MI[]) {
+  const clean = rows.filter((r) => (Number(r.qty) || 0) > 0);
+  const totalQty = clean.reduce((a, r) => a + r.qty, 0);
+  const totalRev = clean.reduce((a, r) => a + r.revenue, 0);
+  const medQty = miMedian(clean.map((r) => r.qty));
+  const medPrice = miMedian(clean.map((r) => (r.qty ? r.revenue / r.qty : 0)));
+  const dishes = clean.map((r) => {
+    const price = r.qty ? r.revenue / r.qty : 0;
+    const popular = r.qty >= medQty, dear = price >= medPrice;
+    const klass: Klass = popular && dear ? "star" : popular ? "workhorse" : dear ? "puzzle" : "dog";
+    return { ...r, price, qtyShare: totalQty ? r.qty / totalQty : 0, revShare: totalRev ? r.revenue / totalRev : 0, klass };
+  });
+  return { dishes, totalQty, totalRev, medQty, medPrice };
+}
+
 export default function OwnerReports() {
   const [rests, setRests] = useState<Rest[]>([]);
   const [ready, setReady] = useState(false);           // restaurant list has loaded
@@ -110,14 +142,17 @@ export default function OwnerReports() {
     const myseq = ++seqRef.current;
     setBusy(true); setErr(null);
     const asked = { type, rid, range };
+    // "menu" is a client-only VIEW over the dishes data — fetch dishes, then re-tag the
+    // result so the render switches to the Menu-insights view (no API or DB change).
+    const apiType = type === "menu" ? "dishes" : type;
     try {
-      const q = new URLSearchParams({ type, range });
+      const q = new URLSearchParams({ type: apiType, range });
       if (rid) q.set("rid", rid);
       if (scopePin) q.set("scope", scopePin);
       const r = await fetch(`/api/owner/reports?${q}`, { cache: "no-store" }).then((x) => x.json());
       if (myseq !== seqRef.current) return; // a newer request superseded this one
       if (r.error) throw new Error(r.error);
-      setRep(r); setGen({ type: asked.type, rid: asked.rid, range: asked.range });
+      setRep(asked.type === "menu" ? { ...r, type: "menu" as RType } : r); setGen({ type: asked.type, rid: asked.rid, range: asked.range });
     } catch (e) {
       if (myseq !== seqRef.current) return;
       setErr(e instanceof Error ? e.message : String(e)); setRep(null); setGen(null);
@@ -210,6 +245,10 @@ export default function OwnerReports() {
       downloadCsv(name, ["Method", "Orders", "Revenue"], (rep.rows as { method: string; orders: number; revenue: number }[]).map((r) => [payLabel(r.method), r.orders, r.revenue]));
     } else if (rep.type === "hourly") {
       downloadCsv(name, ["Hour", "Orders", "Revenue"], (rep.rows as { hour: number; orders: number; revenue: number }[]).map((r) => [`${r.hour}:00`, r.orders, r.revenue]));
+    } else if (rep.type === "menu") {
+      const byRev = [...classifyMenu(rep.rows as MI[]).dishes].sort((a, b) => b.revenue - a.revenue);
+      downloadCsv(name, ["Dish", "Group", "Sold", "% of units", "Item sales (list price)", "% of sales"],
+        byRev.map((d) => [d.title, KLASS[d.klass].label.replace(/s$/, ""), d.qty, +(d.qtyShare * 100).toFixed(1), d.revenue, +(d.revShare * 100).toFixed(1)]));
     }
   };
 
@@ -275,6 +314,9 @@ export default function OwnerReports() {
             <span className="adm-muted"> · {restName} · {RANGES.find((r) => r.k === rep.range)?.label}</span>
           </div>
 
+          {rep.type === "menu" ? (
+            <MenuInsights rows={rep.rows as MI[]} />
+          ) : (<>
           {/* Summary tiles */}
           {money && t && (
             <div className="adm-stats" style={{ marginTop: 10 }}>
@@ -414,6 +456,7 @@ export default function OwnerReports() {
               <p className="rp-note">{LIST_PRICE_LABEL} is menu list price × quantity — before discounts and tax, so it won&apos;t match the net Revenue on the Sales report.</p>
             )}
           </div>
+          </>)}
         </div>
       )}
 
@@ -447,6 +490,94 @@ export default function OwnerReports() {
           :global(.adm-card) { border: 1px solid #ddd !important; box-shadow: none !important; break-inside: avoid; }
           :global(.owx-tablewrap) { max-height: none !important; overflow: visible !important; }
         }
+      `}</style>
+    </>
+  );
+}
+
+// ── Menu insights view: the Stars / Workhorses / Puzzles / Dogs quadrant + product mix ──
+// A client-only VIEW over the existing dishes report (no API/DB change). Popularity (units
+// sold) runs left→right, price (list-price ÷ units) runs bottom→top; each split at its median.
+function MenuInsights({ rows }: { rows: MI[] }) {
+  const { dishes } = useMemo(() => classifyMenu(rows), [rows]);
+  const byRev = useMemo(() => [...dishes].sort((a, b) => b.revenue - a.revenue), [dishes]);
+  if (!dishes.length) return <div className="adm-empty" style={{ marginTop: 12 }}>No dish sales in this period.</div>;
+  const ORDER: Klass[] = ["puzzle", "star", "dog", "workhorse"]; // grid cells: top-left, top-right, bottom-left, bottom-right
+  return (
+    <>
+      <p className="mi-note">
+        Every dish grouped by how <b>often</b> it sells (popularity) against its <b>price</b> — the classic
+        menu map. It uses menu price, not profit, so add a cost per dish later for true margin; the median
+        splits popular-vs-quiet and dearer-vs-cheaper.
+      </p>
+      <div className="mi-axis-y">↑ Higher price</div>
+      <div className="mi-grid">
+        {ORDER.map((k) => {
+          const list = byRev.filter((d) => d.klass === k);
+          return (
+            <div key={k} className={`mi-box mi-${k}`}>
+              <div className="mi-box-h">
+                <span className="mi-emoji" aria-hidden="true">{KLASS[k].emoji}</span>
+                <b>{KLASS[k].label}</b>
+                <span className="mi-n">{list.length}</span>
+              </div>
+              <div className="mi-tip">{KLASS[k].tip}</div>
+              <div className="mi-chips">
+                {list.length === 0 ? <span className="mi-more">none</span>
+                  : list.slice(0, 8).map((d) => (
+                    <span key={d.title} className="mi-chip" title={`${d.qty} sold · ₹${Math.round(d.price)} each`}>{d.title}</span>
+                  ))}
+                {list.length > 8 && <span className="mi-more">+{list.length - 8} more</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mi-axis-x">More often ordered →</div>
+
+      <div className="owx-tablewrap" style={{ marginTop: 14 }}>
+        <div className="rp-ct" style={{ marginBottom: 6 }}>Product mix <span className="adm-muted">· each dish&apos;s share of what sold</span></div>
+        <table className="owx-table">
+          <thead><tr><th>Dish</th><th>Group</th><th>Sold</th><th>% of units</th><th>Item sales (list price)</th><th>% of sales</th></tr></thead>
+          <tbody>
+            {byRev.map((d) => (
+              <tr key={d.title}>
+                <td>{d.title}</td>
+                <td><span className={`mi-tag mi-${d.klass}`}>{KLASS[d.klass].label.replace(/s$/, "")}</span></td>
+                <td>{d.qty}</td>
+                <td>{(d.qtyShare * 100).toFixed(1)}%</td>
+                <td><b>{inr(d.revenue)}</b></td>
+                <td>{(d.revShare * 100).toFixed(1)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="rp-note">Item sales is menu list price × quantity — before discounts and tax.</p>
+      </div>
+
+      <style jsx global>{`
+        .mi-note { font-size: 12px; color: var(--muted); margin: 12px 2px 10px; line-height: 1.5; }
+        .mi-axis-y { font-size: 10px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 5px; }
+        .mi-axis-x { font-size: 10px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; text-align: right; margin-top: 5px; }
+        .mi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .mi-box { border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 12px 13px; min-height: 118px; background: var(--card); }
+        .mi-box.mi-star { border-color: color-mix(in srgb, #16a34a 45%, transparent); }
+        .mi-box.mi-workhorse { border-color: color-mix(in srgb, #3987e5 42%, transparent); }
+        .mi-box.mi-puzzle { border-color: color-mix(in srgb, #c98500 48%, transparent); }
+        .mi-box.mi-dog { border-color: color-mix(in srgb, #e2607a 42%, transparent); }
+        .mi-box-h { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+        .mi-emoji { font-size: 16px; }
+        .mi-n { margin-left: auto; font-size: 12px; font-weight: 800; color: var(--muted); background: rgba(128,128,128,.16); border-radius: 999px; padding: 1px 9px; }
+        .mi-tip { font-size: 11.5px; color: var(--muted); margin: 5px 0 9px; line-height: 1.4; }
+        .mi-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+        .mi-chip { font-size: 12px; font-weight: 600; padding: 4px 9px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 9%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
+        .mi-more { font-size: 11.5px; color: var(--muted); align-self: center; }
+        .mi-tag { font-size: 10.5px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: rgba(128,128,128,.16); color: var(--muted); white-space: nowrap; }
+        .mi-tag.mi-star { background: color-mix(in srgb, #16a34a 16%, transparent); color: #16a34a; }
+        .mi-tag.mi-workhorse { background: color-mix(in srgb, #3987e5 16%, transparent); color: #3987e5; }
+        .mi-tag.mi-puzzle { background: color-mix(in srgb, #c98500 18%, transparent); color: #c98500; }
+        .mi-tag.mi-dog { background: color-mix(in srgb, #e2607a 16%, transparent); color: #e2607a; }
+        @media (max-width: 640px) { .mi-grid { grid-template-columns: 1fr; } .mi-axis-y, .mi-axis-x { display: none; } }
       `}</style>
     </>
   );
