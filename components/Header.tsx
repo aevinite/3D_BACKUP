@@ -111,6 +111,18 @@ export default function Header({ logoText }: { logoText?: string }) {
     // scoped storage instead of lingering on the previous restaurant's.
   }, [restaurantId]);
 
+  // Single-currency / English-only restaurants (owner 2026-07-09): when a restaurant
+  // turns the currency or language switcher OFF, keep the RESTAURANT DEFAULT — INR and
+  // English — even for a RETURNING guest who picked another currency/language at a
+  // DIFFERENT restaurant. Hiding the picker isn't enough on its own: the device-wide
+  // saved choice would still apply, so we force it back to the default when the feature
+  // is off. (When it's on, the guest's own choice is untouched.)
+  useEffect(() => {
+    if (features.currency === false && getCurrency().code !== "INR") setCurrency("INR");
+    if (features.languages === false && getLanguage().code !== "en") setLanguage("en");
+    // Re-runs only when a feature flag resolves/changes — never on the guest's own pick.
+  }, [features.currency, features.languages]);
+
   // toggleTheme(): flip between dark and light when the toggle is tapped.
   const toggleTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark"; // pick the opposite

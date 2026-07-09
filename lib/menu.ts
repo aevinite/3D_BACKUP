@@ -348,6 +348,10 @@ export interface Settings {
   // cart uses this so the quoted GST matches the actual bill (was hardcoded 5%). Only
   // the single number is exposed to guests, never the component labels/GSTIN.
   taxRate: number;
+  // Per-restaurant Google review link (owner 2026-07-09). When set, the guest sees a
+  // "loved it? review us on Google" nudge after a HIGH dish rating; null = feature off.
+  // A PUBLIC link, so it's guest-safe to expose (unlike gstin/phone).
+  googleReviewUrl: string | null;
 }
 // Reads the single site-wide settings row and returns it with safe defaults,
 // so the app still works even if settings haven't been configured yet.
@@ -379,7 +383,7 @@ async function fetchSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Prom
   // prefix, phone…) that `*` was silently shipping to every menu visitor.
   const { data, error } = await supabase
     .from("settings")
-    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features, tax_rate, tax_components")
+    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features, tax_rate, tax_components, google_review_url")
     .eq("restaurant_id", restaurantId)   // one settings row per restaurant (079)
     .maybeSingle();
   if (error) throw new Error(`Failed to load settings: ${error.message}`);
@@ -405,6 +409,7 @@ async function fetchSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Prom
       ? Object.fromEntries(Object.entries(data.features as Record<string, unknown>).filter(([, v]) => typeof v === "boolean")) as Record<string, boolean>
       : {},
     taxRate: effectiveTaxRate(data),
+    googleReviewUrl: data && typeof data.google_review_url === "string" && data.google_review_url.trim() ? data.google_review_url.trim() : null,
   };
 }
 
