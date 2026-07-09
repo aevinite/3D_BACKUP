@@ -41,6 +41,8 @@ export default function AdminCommand() {
   const [maintenanceNames, setMaintenanceNames] = useState<string[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [online, setOnline] = useState<Staff[]>([]);
+  const [onlineCount, setOnlineCount] = useState<number | null>(null);
+  const [openIssuesCount, setOpenIssuesCount] = useState<number | null>(null);
   const [activity, setActivity] = useState<Action[]>([]);
   const [q, setQ] = useState("");
   const [busyRow, setBusyRow] = useState<string | null>(null);
@@ -63,7 +65,9 @@ export default function AdminCommand() {
       setOrdersToday(Number(j.ordersToday) || 0);
       setOpenTablesNow(Number(j.openTables) || 0);
       setIssues(j.issues || []);
+      setOpenIssuesCount(typeof j.openIssuesCount === "number" ? j.openIssuesCount : null);
       setOnline(j.online || []);
+      setOnlineCount(typeof j.onlineCount === "number" ? j.onlineCount : null);
       setActivity(j.activity || []);
     }).catch(() => setLoadErr(true));
   }, []);
@@ -92,9 +96,9 @@ export default function AdminCommand() {
   // should be clickable"). A card with a `href` becomes a link with a → affordance.
   const STATS: { k: string; v: string | number; href?: string; warn?: boolean }[] = [
     { k: "Restaurants", v: rests === null ? "…" : `${activeCount} active / ${rests.length}`, href: "/aevinite/restaurants" },
-    { k: "Open issues", v: openIssues.length, href: "/aevinite/issues", warn: openIssues.length > 0 },
+    { k: "Open issues", v: openIssuesCount ?? openIssues.length, href: "/aevinite/issues", warn: (openIssuesCount ?? openIssues.length) > 0 },
     { k: "Open tables now", v: openTablesNow ?? "…", href: "/aevinite/open-tables" },
-    { k: "Staff online now", v: online.length, href: "/aevinite/staff-online" },
+    { k: "Staff online now", v: onlineCount ?? online.length, href: "/aevinite/staff-online" },
     { k: "Orders today", v: ordersToday ?? "…", href: "/aevinite/analytics?range=today" },
   ];
 
