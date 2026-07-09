@@ -2,7 +2,7 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "outputDirectory": ".next",
-  "regions": ["syd1"],
+  "regions": ["bom1"],
   "headers": [
     {
       "source": "/models/(.*)",
