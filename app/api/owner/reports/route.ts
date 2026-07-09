@@ -165,8 +165,12 @@ export async function GET(req: NextRequest) {
       if (!rid && !scope.all) {
         const per = await mapLimit(scope.ids, 8, (id) =>
           sb.rpc("lfh_owner_sales_report", { p_restaurant_id: id, p_from: from, p_to: to, p_bucket: bucket }));
-        for (const p of per) if (p.error) throw p.error;
-        raw = mergeBy(per.map((p) => (p.data ?? []) as Row[]), "bucket",
+        // Degrade gracefully: ONE restaurant's RPC failing must not blank the WHOLE
+        // all-restaurants report — keep the healthy restaurants, only surface an error
+        // when EVERY restaurant failed (audit 2026-07-09).
+        const okData = per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]);
+        if (!okData.length && per.length) throw per.find((p) => p.error)?.error || new Error("Report failed");
+        raw = mergeBy(okData, "bucket",
           ["orders", "paid_orders", "subtotal", "tax", "discount", "revenue", "cancelled_orders", "cancelled_value"]);
         raw.sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)));
       }
@@ -227,7 +231,12 @@ export async function GET(req: NextRequest) {
       else if (!scope.all) ids = scope.ids;
       else ids = await allRestaurantIds();
       const per = await mapLimit(ids, 8, (id) => sb.rpc(fn, { p_restaurant_id: id, p_from: from, p_to: to }));
-      for (const p of per) if (p.error) throw p.error;
+      // Degrade gracefully (audit 2026-07-09): keep the restaurants that succeeded, drop the
+      // ones whose RPC errored, and only surface an error when EVERY one failed. Pair each
+      // result with its id so the per-restaurant name labelling below stays aligned.
+      const okPairs = ids.map((id, i) => ({ id, p: per[i] })).filter((x) => !x.p.error);
+      if (!okPairs.length && per.length) throw per.find((p) => p.error)?.error || new Error("Report failed");
+      const okIds = okPairs.map((x) => x.id);
       const keyCol = type === "dishes" ? "title" : type === "categories" ? "category" : "hour";
       const numeric = type === "hourly" ? ["orders", "revenue"] : ["qty", "revenue"];
       // Multi-restaurant dishes/categories: the SAME title in two brands is a DIFFERENT
@@ -235,12 +244,12 @@ export async function GET(req: NextRequest) {
       // Label each row with its restaurant ("Water · Green Bowl") so identical names stay
       // distinct in the existing list (audit 2026-07-07). Hourly stays a pure cross-restaurant
       // aggregate — an hour-of-day is the same everywhere.
-      let rowsets = per.map((p) => (p.data ?? []) as Row[]);
-      if (type !== "hourly" && ids.length > 1) {
+      let rowsets = okPairs.map((x) => (x.p.data ?? []) as Row[]);
+      if (type !== "hourly" && okIds.length > 1) {
         const nameById: Record<string, string> = {};
-        const nq = await sb.from("restaurants").select("id, name").in("id", ids);
+        const nq = await sb.from("restaurants").select("id, name").in("id", okIds);
         for (const x of (nq.data || []) as { id: string; name: string }[]) nameById[x.id] = x.name;
-        rowsets = rowsets.map((rows, i) => rows.map((r) => ({ ...r, [keyCol]: `${String(r[keyCol])} · ${nameById[ids[i]] || "—"}` })));
+        rowsets = rowsets.map((rows, i) => rows.map((r) => ({ ...r, [keyCol]: `${String(r[keyCol])} · ${nameById[okIds[i]] || "—"}` })));
       }
       const rows: Row[] = mergeBy(rowsets, keyCol, numeric)
         .map((r) => ({ ...r, revenue: num(r.revenue) }));
@@ -251,8 +260,10 @@ export async function GET(req: NextRequest) {
     if (type === "payments") {
       const per = await mapLimit(ridList, 8, (id) =>
         sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
-      for (const p of per) if (p.error) throw p.error;
-      const rows = mergeBy(per.map((p) => (p.data ?? []) as Row[]), "method", ["revenue", "orders"])
+      // Degrade gracefully: keep the restaurants that succeeded (audit 2026-07-09).
+      const okData = per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]);
+      if (!okData.length && per.length) throw per.find((p) => p.error)?.error || new Error("Report failed");
+      const rows = mergeBy(okData, "method", ["revenue", "orders"])
         .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))
         .sort((a, b) => b.revenue - a.revenue);
       return NextResponse.json({ type, range, rows });

@@ -4145,8 +4145,11 @@ a:focus:not(:focus-visible) { outline: none; }
   .owx-side-foot { display: none; }
   .owx-top { padding: 8px 12px; }
   /* Bottom breathing room so scrolling content (last staff row / first chart title) never
-     butts the screen edge or sits under any floating control on phones. Desktop unchanged. */
-  .owx .adm-main { padding: 14px; padding-bottom: 32px; }
+     butts the screen edge or sits under any floating control on phones. Desktop unchanged.
+     Add the device's safe-area inset: with viewport-fit:cover (app/layout.tsx) the page draws
+     edge-to-edge UNDER the phone's home-indicator / gesture bar, so a flat 32px let the last
+     row tuck under it on notched phones — matches the guest menu's safe-area handling. */
+  .owx .adm-main { padding: 14px; padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .owx-navlink, .owx-chip, .owx .adm-btn { transition: none; }

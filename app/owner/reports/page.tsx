@@ -21,7 +21,7 @@ const REPORTS: { k: RType; label: string; icon: string; blurb: string }[] = [
   { k: "payments", label: "Payment methods", icon: "fa-wallet", blurb: "UPI vs cash vs card" },
   { k: "discounts", label: "Discounts", icon: "fa-tag", blurb: "What was given away, when" },
   { k: "cancellations", label: "Cancellations", icon: "fa-ban", blurb: "Lost business — voided orders and their value" },
-  { k: "hourly", label: "Busy hours", icon: "fa-clock", blurb: "Orders and revenue by hour of day" },
+  { k: "hourly", label: "Busy hours", icon: "fa-clock", blurb: "Revenue by hour of day (order counts in the table)" },
 ];
 // Rolling windows first, then the calendar/filing periods a GST return actually needs.
 const RANGES: { k: Range; label: string }[] = [
@@ -51,6 +51,19 @@ function bucketLabel(iso: string, range: Range): string {
   if (range === "today" || range === "yesterday") return d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: tz });
   if (range === "12m" || range === "fy") return d.toLocaleDateString("en-IN", { month: "short", year: "2-digit", timeZone: tz });
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: tz });
+}
+
+// Round a list of values to whole numbers that STILL add up to a given integer total
+// (largest-remainder method). Used for the CGST/SGST split so the displayed component
+// rupees always sum to the displayed "Total tax" — rounding each half on its own let
+// e.g. 29.5 + 29.5 show as ₹30 + ₹30 = ₹60 under a ₹59 total (audit 2026-07-09).
+function roundToSum(vals: number[], target: number): number[] {
+  const floors = vals.map((v) => Math.floor(v));
+  const out = [...floors];
+  let rem = Math.round(target) - floors.reduce((a, b) => a + b, 0);
+  const order = vals.map((v, i) => ({ i, frac: v - Math.floor(v) })).sort((a, b) => b.frac - a.frac);
+  for (let k = 0; k < order.length && rem > 0; k++) { out[order[k].i]++; rem--; }
+  return out;
 }
 
 // CSV download — plain client-side blob, no server round-trip.
@@ -313,9 +326,10 @@ export default function OwnerReports() {
                 <thead><tr><th>Tax line</th><th>Rate</th><th>Collected</th></tr></thead>
                 <tbody>
                   <tr><td><b>Total tax (as the manager panel shows)</b></td><td>{rep.tax.effectivePct}%</td><td><b>{inr(t?.tax ?? 0)}</b></td></tr>
-                  {rep.tax.components.map((c) => (
-                    <tr key={c.label} className="owx-taxsplit"><td>{c.label}</td><td>{c.rate}%</td><td>{inr(c.amount)}</td></tr>
-                  ))}
+                  {roundToSum(rep.tax.components.map((c) => c.amount), t?.tax ?? 0).map((amt, idx) => {
+                    const c = rep.tax!.components[idx];
+                    return <tr key={c.label} className="owx-taxsplit"><td>{c.label}</td><td>{c.rate}%</td><td>{inr(amt)}</td></tr>;
+                  })}
                 </tbody>
               </table>
             </div>
@@ -411,7 +425,7 @@ export default function OwnerReports() {
               </div>
             )}
             {(rep.type === "dishes" || rep.type === "categories") && rep.rows.length > 0 && (
-              <p className="rp-note">{LIST_PRICE_LABEL} is menu list price × quantity — before discounts and tax, so it won&apos;t match the net Revenue on the Sales report.</p>
+              <p className="rp-note"><b>Qty</b> counts every order placed (kitchen volume). <b>{LIST_PRICE_LABEL}</b> is menu list price × <i>paid</i> quantity — before discounts and tax — so it counts only paid orders and won&apos;t equal Qty × price, nor the net Revenue on the Sales report.</p>
             )}
           </div>
         </div>
