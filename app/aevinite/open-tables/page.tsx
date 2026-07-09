@@ -46,7 +46,9 @@ export default function AdminOpenTables() {
     fetch("/api/admin/floor?all=1", { cache: "no-store" }).then((r) => r.json()).then((j) => {
       if (my !== seq.current) return;
       setFetching(false);
-      if (j.error) { setErr(j.error); return; }
+      // floor?all=1 returns tilesError (not top-level error) when the tiles RPC fails — honour it,
+      // else a failed load shows the empty "no tables open" state as a quiet floor (audit 2026-07-09).
+      if (j.error || j.tilesError) { setErr(j.error || j.tilesError); return; }
       setErr("");
       setRests(j.restaurants as RestFloor[]);
       setUpdatedAt(Date.now());
@@ -68,7 +70,9 @@ export default function AdminOpenTables() {
     .filter(({ r, open }) => open.length > 0 && (!q || r.name.toLowerCase().includes(q) || r.slug.toLowerCase().includes(q)))
     .sort((a, b) => b.open.length - a.open.length || a.r.name.localeCompare(b.r.name));
 
-  const totalOpen = (rests || []).reduce((s, r) => s + r.tables.filter(isOpen).length, 0);
+  // Count over the SAME filtered set that's displayed, so the header total always matches the
+  // tiles on screen (searching used to show e.g. "40 open across 1 restaurant"; audit 2026-07-09).
+  const totalOpen = withOpen.reduce((s, { open }) => s + open.length, 0);
 
   return (
     <>

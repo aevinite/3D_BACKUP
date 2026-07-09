@@ -40,7 +40,12 @@ export async function GET(req: NextRequest) {
       sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, created_at").order("created_at", { ascending: false }).limit(18),
     ]);
 
-  if (restQ.error) return NextResponse.json({ error: restQ.error.message }, { status: 500 });
+  // Surface a failed read on any number/banner the home screen relies on — otherwise a backend
+  // hiccup shows a confident "0 open tables / 0 orders / no maintenance" all-clear with a 200
+  // (the anti-pattern the floor route avoids). The two soft LISTS below (online staff, issues)
+  // may still degrade to empty; the notifications bell is the primary issues surface (audit 2026-07-09).
+  const critErr = restQ.error || ovRpc.error || ordersTodayQ.error || maintQ.error;
+  if (critErr) return NextResponse.json({ error: critErr.message }, { status: 500 });
 
   const withSettings = new Set((setQ.data || []).map((r) => r.restaurant_id).filter(Boolean));
   const panelsByRid = new Map((setQ.data || []).map((r) => [r.restaurant_id, (r as { enabled_panels?: Record<string, boolean> | null }).enabled_panels || null]));
@@ -55,9 +60,14 @@ export async function GET(req: NextRequest) {
     panels: panelsByRid.get(r.id) || null,
   }));
 
-  // Per-restaurant open tables (revenue columns from the RPC are dropped).
+  // Per-restaurant open tables (revenue columns from the RPC are dropped). Filtered to restaurants
+  // that still EXIST (not soft-deleted): the RPC counts open sessions even for recycle-binned
+  // restaurants (soft-delete doesn't close their sessions), which would push the headline sum above
+  // the rows shown + the /open-tables drill-down (audit 2026-07-09).
+  const liveIds = new Set(restaurants.map((r) => r.id));
   const openByRid = ((ovRpc.data as { restaurant_id: string; open_tables: number }[] | null) || [])
-    .map((r) => ({ id: r.restaurant_id, openTables: Number(r.open_tables) || 0 }));
+    .map((r) => ({ id: r.restaurant_id, openTables: Number(r.open_tables) || 0 }))
+    .filter((r) => liveIds.has(r.id));
 
   // Live restaurants currently in maintenance, by name.
   const maintenanceNames = (maintQ.data || [])

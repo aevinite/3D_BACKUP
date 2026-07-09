@@ -58,8 +58,10 @@ export async function GET(req: NextRequest) {
     tableEstimates,
     tableEstimatesError: estimatesQ.error?.message || null,
     restaurants: { active: activeRestaurants, suspended: suspendedRestaurants, total: restaurants.length },
+    restaurantsError: restQ.error?.message || null, // so the page shows "unreadable", not a green "0 live"
     staffOnlineNow,
     staffTotal: (staffQ.data || []).length,
+    staffError: staffQ.error?.message || null,
     realtime: { configuredHost: supaHost || null },
     openIssues: issuesQ.error ? null : (issuesQ.count || 0),
     issuesFeedWired: !issuesQ.error,
