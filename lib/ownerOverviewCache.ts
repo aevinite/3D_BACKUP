@@ -15,7 +15,15 @@ export function fetchOwnerOverview(scp: string): Promise<unknown> {
   const now = Date.now();
   const hit = cache.get(key);
   if (hit && now - hit.at < TTL_MS) return hit.p;
-  const p = fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then((r) => r.json());
+  const p = fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then((r) => r.json()).then((j) => {
+    // A failed request (HTTP 500) RESOLVES with an { error } body rather than rejecting, so
+    // the .catch below never fires for it — evict here too, or a transient failure stays
+    // cached for the TTL and blocks manual-refresh retries for up to 8s (audit 2026-07-09).
+    if (j && typeof j === "object" && (j as { error?: unknown }).error) {
+      if (cache.get(key)?.p === p) cache.delete(key);
+    }
+    return j;
+  });
   cache.set(key, { at: now, p });
   p.catch(() => { if (cache.get(key)?.p === p) cache.delete(key); });
   return p;

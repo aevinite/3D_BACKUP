@@ -13,6 +13,9 @@ type Issue = {
   id: string; restaurant_id: string; restaurantName: string;
   subject: string; body: string | null; raised_by: string | null; raised_role: string | null;
   status: string; created_at: string; resolved_at: string | null;
+  // Optional attachments a staffer added when raising the ticket (mig 150). The API
+  // already returns these; the owner page must SHOW them like the admin panel does.
+  image_url: string | null; audio_url: string | null;
 };
 type Rating = {
   id: string; restaurant_id: string; restaurantName: string; order_id: string;
@@ -110,23 +113,37 @@ export default function OwnerFeedback() {
       return { ...s, unhandled: Math.max(0, s.unhandled + (acknowledged ? -1 : 1)) };
     });
     try {
-      await fetch(`/api/owner/ratings${scp}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, acknowledged }) });
-      await loadRatings();
-    } finally { setBusy(null); }
+      const res = await fetch(`/api/owner/ratings${scp}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, acknowledged }) });
+      // Don't let a failed write pretend it worked: surface the error (the reload below
+      // then restores the true state instead of leaving a false optimistic tick).
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || "Couldn't save — please try again."); }
+      setErr(null); await loadRatings();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); await loadRatings(); }
+    finally { setBusy(null); }
   };
   const saveNote = async (id: string) => {
     setBusy(id);
     try {
-      await fetch(`/api/owner/ratings${scp}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, note: noteVal }) });
-      setNoteFor(null); setNoteVal(""); await loadRatings();
-    } finally { setBusy(null); }
+      const res = await fetch(`/api/owner/ratings${scp}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, note: noteVal }) });
+      // Only close the editor + clear the box AFTER the save actually succeeds — otherwise
+      // a failed PATCH used to wipe the note the owner typed with no warning.
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || "Couldn't save your note — please try again."); }
+      setErr(null); setNoteFor(null); setNoteVal(""); await loadRatings();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(null); }
   };
   const setIssueStatus = async (id: string, status: "open" | "resolved") => {
     setBusy(id);
+    const prev = status === "resolved" ? "open" : "resolved";
     setIssues((cur) => (cur || []).map((i) => (i.id === id ? { ...i, status } : i)));
     try {
-      await fetch(`/api/owner/issues${scp}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) });
-      await loadIssues();
+      const res = await fetch(`/api/owner/issues${scp}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status }) });
+      // A failed Resolve/Reopen must not silently revert: roll the row back and tell the owner.
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || "Couldn't update — please try again."); }
+      setErr(null); await loadIssues();
+    } catch (e) {
+      setIssues((cur) => (cur || []).map((i) => (i.id === id ? { ...i, status: prev } : i)));
+      setErr(e instanceof Error ? e.message : String(e));
     } finally { setBusy(null); }
   };
 
@@ -282,6 +299,18 @@ export default function OwnerFeedback() {
                         </span>
                       </div>
                       {i.body && <p style={{ margin: "8px 0 0", color: "var(--muted)", fontSize: 13, lineHeight: 1.5, ...wrap }}>{i.body}</p>}
+                      {/* Staff-attached photo + voice note (mig 150) — shown to the owner just like the
+                          admin panel. Photo opens full-size in a new tab; audio plays inline. Only
+                          accept http(s) media URLs (these come from the server upload) so a stray
+                          non-http value can never become a clickable javascript: link. */}
+                      {i.image_url && /^https?:\/\//i.test(i.image_url) && (
+                        <a href={i.image_url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", marginTop: 10 }}>
+                          <img src={i.image_url} alt="Attached photo" style={{ maxWidth: 220, maxHeight: 180, borderRadius: 8, border: "1px solid var(--border,#ddd)", objectFit: "cover" }} />
+                        </a>
+                      )}
+                      {i.audio_url && /^https?:\/\//i.test(i.audio_url) && (
+                        <audio controls preload="none" src={i.audio_url} style={{ display: "block", marginTop: 10, maxWidth: "100%" }} />
+                      )}
                       <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted)" }}>
                         Raised by <b>{i.raised_by || "—"}</b> ({i.raised_role || "staff"}) · {new Date(i.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: IST })}
                         {i.resolved_at ? ` · resolved ${new Date(i.resolved_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST })}` : ""}

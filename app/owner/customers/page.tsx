@@ -36,9 +36,11 @@ export default function OwnerCustomers() {
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }, [scopePin]);
 
-  // First load + debounced reload as the owner types in the search box.
-  useEffect(() => { load(); }, [load]);
+  // First load is immediate; later reloads (as the owner types) are debounced. A single
+  // effect handles both so mount doesn't fire TWO back-to-back requests (audit 2026-07-09).
+  const firstRun = useRef(true);
   useEffect(() => {
+    if (firstRun.current) { firstRun.current = false; load(); return; }
     const t = setTimeout(() => load(), 350);
     return () => clearTimeout(t);
   }, [search, load]);
@@ -120,11 +122,18 @@ export default function OwnerCustomers() {
                     ))}
                   </tbody>
                 </table>
-                {summary && summary.total > summary.shown && (
+                {/* Only the UNFILTERED list is "the N most-recent of TOTAL" — during a search the
+                    rows are matches, not the most-recent, and total is the whole-list head-count, so
+                    the line would be misleading (audit 2026-07-09). Show a plain match count instead. */}
+                {search ? (
+                  <div className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
+                    {rows.length} match{rows.length === 1 ? "" : "es"} for “{search.trim()}”.
+                  </div>
+                ) : summary && summary.total > summary.shown ? (
                   <div className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>
                     Showing the {summary.shown} most-recent of {summary.total.toLocaleString("en-IN")}. Search to find an older guest.
                   </div>
-                )}
+                ) : null}
               </div>
             )}
           </div>

@@ -39,6 +39,9 @@ export default function OwnerStaffPage() {
   const pwRef = useRef<HTMLInputElement>(null);
   const revealRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
+  // Bumped only to force a re-render so a controlled <select> snaps back to the real value
+  // when the owner cancels a role change (otherwise the native picker keeps the chosen row).
+  const [, forceRerender] = useState(0);
   // Inline rename / edit-phone editor: which row is open + its draft values.
   const [editing, setEditing] = useState<{ id: string; name: string; phone: string } | null>(null);
   // Synchronous re-entry guard so a fast double-click on "Add" can't fire twice before
@@ -163,7 +166,7 @@ export default function OwnerStaffPage() {
     if (!confirm(`Reset ${s.name || s.username}'s password? Their current login stops working.`)) return;
     try {
       const d = await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s.id, action: "reset_password" }) });
-      setReveal({ name: s.name || s.username, password: d.password });
+      setReveal({ name: s.name || s.username, password: d.password }); setCopied(false);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
   async function setActive(s: Staff, active: boolean) {
@@ -174,6 +177,15 @@ export default function OwnerStaffPage() {
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
   async function setRole(s: Staff, role: string) {
+    if (role === s.role) return;
+    // A role change bumps their token → instant logout mid-shift (exactly like Disable),
+    // so warn first. Before, changing the role — or a mis-tap on the mobile select wheel —
+    // silently booted a working staffer with no prompt (audit 2026-07-09). On cancel, force a
+    // re-render so the controlled <select> snaps back to their real role.
+    if (!confirm(`Change ${s.name || s.username} from ${s.role} to ${role}? They'll be logged out and must sign in again with their new ${role} access.`)) {
+      forceRerender((n) => n + 1);
+      return;
+    }
     try { await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s.id, action: "set_role", role }) }); await load(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
@@ -224,7 +236,7 @@ export default function OwnerStaffPage() {
                 if (!exists) {
                   return (
                     <button key={key} type="button" className="ost-perm xray-off" data-perm-key={key}
-                      onClick={() => { window.location.href = `/aevinite/access?rid=${linked.rid || r.id}&focus=manager-powers`; }}
+                      onClick={() => { window.location.href = `/aevinite/access?rid=${r.id}&focus=manager-powers`; }}
                       title="Removed by admin — the owner can't see this. Tap to change it in Access control.">
                       <i className="fas fa-lock" /> <span>{label}</span>
                     </button>
@@ -263,7 +275,7 @@ export default function OwnerStaffPage() {
                   </div>
                   {editing?.id === s.id && (
                     <div className="ost-editrow">
-                      <input className="ost-in" value={editing.name} autoFocus placeholder="Username (their login)" autoComplete="off"
+                      <input className="ost-in" value={editing.name} autoFocus placeholder="Username (their login)" autoComplete="off" maxLength={80}
                         onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
                       <input className="ost-in" value={editing.phone} placeholder="Phone (optional)" autoComplete="off"
                         onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
@@ -277,7 +289,7 @@ export default function OwnerStaffPage() {
 
             {/* Add staff */}
             <form className="ost-add" onSubmit={(e) => { e.preventDefault(); addStaff(r.id, e.currentTarget); }}>
-              <input className="ost-in" name="name" placeholder="Username (their login)" autoComplete="off" required />
+              <input className="ost-in" name="name" placeholder="Username (their login)" autoComplete="off" maxLength={80} required />
               <select className="ost-in" name="role" defaultValue="manager">{ROLES.map((ro) => <option key={ro} value={ro}>{ro}</option>)}</select>
               <input className="ost-in" name="password" placeholder="Password (blank = auto)" autoComplete="off" />
               <button className="ost-btn" type="submit" disabled={busy}><i className="fas fa-user-plus" /> Add</button>
