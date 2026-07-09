@@ -31,8 +31,8 @@ export async function GET(req: NextRequest) {
       sb.from("settings").select("restaurant_id").eq("service_mode", true),
       // Only the staff CURRENTLY online (seen in the last 3 min) — a small list, instead of
       // hauling the ENTIRE staff_users table every 60s just to filter it on the client.
-      sb.from("staff_users").select("name, username, role, restaurant_id, last_seen_at").eq("active", true).gte("last_seen_at", onlineSinceIso).limit(200),
-      sb.from("issues").select("id, restaurant_id, subject, status, created_at").eq("status", "open").order("created_at", { ascending: false }).limit(50),
+      sb.from("staff_users").select("name, username, role, restaurant_id, last_seen_at", { count: "exact" }).eq("active", true).gte("last_seen_at", onlineSinceIso).limit(200),
+      sb.from("issues").select("id, restaurant_id, subject, status, created_at", { count: "exact" }).eq("status", "open").order("created_at", { ascending: false }).limit(50),
       // Per-restaurant open-table counts from the pre-aggregated RPC (p_ids=null → all). We read
       // ONLY open_tables from it; its revenue columns are ignored (no money to admin).
       sb.rpc("lfh_owner_overview", { p_ids: null }),
@@ -104,7 +104,9 @@ export async function GET(req: NextRequest) {
     // banquet/takeaway sessions or a cleared-not-yet-freed table (rare, documented, not a bug).
     openTables: openByRid.reduce((n, r) => n + r.openTables, 0),
     online,
+    onlineCount: onlineQ.count ?? online.length, // exact total (list capped at 200) so the KPI can't under-report at scale
     issues,
+    openIssuesCount: issuesQ.count ?? issues.length, // exact open total (list capped at 50)
     activity,
   });
 }
