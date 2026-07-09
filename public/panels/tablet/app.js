@@ -398,6 +398,12 @@ const txray = (k) => (tperm(k) === "off" && tHigher() ? " xray-off" : "");
 async function selectTable(t) {
   state.table = String(t);
   state.ordering = false; state.cart = []; state.note = ""; state.allergies = ""; state.dishSearch = "";
+  // Also drop any ADD-TO-ORDER / view-order / per-order EDIT state — it belongs to the table we're
+  // leaving. Without this, "＋ Add dish" then tapping another tile left addToOrderId pointing at the
+  // OLD table's order, so dishes meant for the new table were appended to the old bill + kitchen
+  // ticket (audit 2026-07-09). editOrders/viewOrder cleared for the same reason.
+  if (voBackOff) { voBackOff(); voBackOff = null; }
+  state.addToOrderId = null; state.viewOrder = false; state.editOrders.clear();
   renderFloor(); renderPanel();         // instant feedback (selected tile highlights; detail fills in next)
   // Stacked (phone/narrow) layout: the detail sits below the floor — jump to it.
   if (window.matchMedia("(max-width: 760px)").matches) {
@@ -583,7 +589,9 @@ function bindFloorDelegation() {
     // Quick "Accept" — load the table's orders first (grid has only the slim summary), then accept.
     if ((q = e.target.closest(".tacc[data-quick='accept']"))) {
       const qt = q.dataset.qt;
-      await ensureTableSlice(qt);
+      await ensureTableSlice(qt, true);  // FORCE — the tile's summary can be fresh while the cached
+                                         // slice is up to 60s stale, so a just-arrived order would be
+                                         // missed and silently accept nothing (audit 2026-07-09).
       optimisticAccept(ordersOf(qt).filter((o) => o.status === "received").map((o) => o.id));
       return;
     }
@@ -593,14 +601,23 @@ function bindFloorDelegation() {
     // without opening it.
     if ((q = e.target.closest(".tpay[data-quick='pay']"))) {
       const t = q.dataset.qt;
-      await ensureTableSlice(t);  // load the table's orders so billNo/due + optimisticPay have real rows
+      await ensureTableSlice(t, true);  // FORCE fresh rows so billNo/due + optimisticPay reflect the
+                                        // table's real current bill, not an up-to-60s-stale slice.
       const a = tableAgg(t);
       await payBillWithMethod(t, a);
       return;
     }
     // TILE SELECT last — only reached when no quick button above matched.
     const tile = e.target.closest(".tile[data-t]");
-    if (tile) selectTable(tile.dataset.t);
+    if (tile) {
+      // On a wide tablet the floor stays clickable beside the order panel, so an accidental tile
+      // tap while building a NEW order would silently wipe the whole cart. Confirm first (only when
+      // there are unsent items and it's a DIFFERENT table). (audit 2026-07-09)
+      if (state.ordering && state.cart.length && String(tile.dataset.t) !== String(state.table)) {
+        if (!(await confirmDialog("Discard this unsent order and switch table?", "Yes, discard"))) return;
+      }
+      selectTable(tile.dataset.t);
+    }
   });
 }
 
