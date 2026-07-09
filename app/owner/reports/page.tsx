@@ -89,11 +89,11 @@ function downloadCsv(filename: string, header: string[], rows: (string | number)
 // ── Menu insights helpers: group dishes by how OFTEN they sell vs their PRICE ──
 type MI = { title: string; qty: number; revenue: number };
 type Klass = "star" | "workhorse" | "puzzle" | "dog";
-const KLASS: Record<Klass, { label: string; emoji: string; tip: string }> = {
-  star:      { label: "Stars",      emoji: "⭐", tip: "Popular & higher-priced — keep them front and centre." },
-  workhorse: { label: "Workhorses", emoji: "🐎", tip: "Popular but low-priced — a small rise or an upsell adds up." },
-  puzzle:    { label: "Puzzles",    emoji: "🧩", tip: "Higher-priced but rarely ordered — promote or reposition." },
-  dog:       { label: "Dogs",       emoji: "🐕", tip: "Rarely ordered & low-priced — rework or drop." },
+const KLASS: Record<Klass, { label: string; emoji: string; sub: string; tip: string }> = {
+  star:      { label: "Stars",      emoji: "⭐", sub: "Ordered a lot · priced high",   tip: "Your winners — show them off: top of the menu, photos, specials." },
+  workhorse: { label: "Workhorses", emoji: "🐎", sub: "Ordered a lot · low price",     tip: "Nudge the price up a little, or add a combo — easy extra money." },
+  puzzle:    { label: "Puzzles",    emoji: "🧩", sub: "Priced high · rarely ordered",  tip: "Give them a photo, a clearer name, or a small offer to get them moving." },
+  dog:       { label: "Dogs",       emoji: "🐕", sub: "Low price · rarely ordered",    tip: "Mostly clutter the menu — worth thinking about dropping." },
 };
 function miMedian(arr: number[]): number {
   if (!arr.length) return 0;
@@ -520,11 +520,12 @@ function MenuInsights({ rows }: { rows: MI[] }) {
   return (
     <>
       <p className="mi-note">
-        Every dish grouped by how <b>often</b> it sells (popularity) against its <b>price</b> — the classic
-        menu map. It uses menu price, not profit, so add a cost per dish later for true margin; the median
-        splits popular-vs-quiet and dearer-vs-cheaper.
+        Every dish is sorted into <b>4 groups</b> by how <b>often</b> it&apos;s ordered and how <b>pricey</b> it is,
+        so at a glance you can see what to <b>promote</b>, what to <b>price up</b>, what to <b>fix</b>, and what to <b>drop</b>.
+        Boxes on the right are ordered more often; boxes higher up are priced higher.
       </p>
-      <div className="mi-axis-y">↑ Higher price</div>
+      <p className="mi-note2">Note: &ldquo;pricey vs cheap&rdquo; uses the menu price for now — not what a dish costs you to make.</p>
+      <div className="mi-axis-y">↑ Priced higher</div>
       <div className="mi-grid">
         {ORDER.map((k) => {
           const list = byRev.filter((d) => d.klass === k);
@@ -535,6 +536,7 @@ function MenuInsights({ rows }: { rows: MI[] }) {
                 <b>{KLASS[k].label}</b>
                 <span className="mi-n">{list.length}</span>
               </div>
+              <div className="mi-sub">{KLASS[k].sub}</div>
               <div className="mi-tip">{KLASS[k].tip}</div>
               <div className="mi-chips">
                 {list.length === 0 ? <span className="mi-more">none</span>
@@ -547,7 +549,7 @@ function MenuInsights({ rows }: { rows: MI[] }) {
           );
         })}
       </div>
-      <div className="mi-axis-x">More often ordered →</div>
+      <div className="mi-axis-x">Ordered more often →</div>
 
       <div className="owx-tablewrap" style={{ marginTop: 14 }}>
         <div className="rp-ct" style={{ marginBottom: 6 }}>Product mix <span className="adm-muted">· each dish&apos;s share of what sold</span></div>
@@ -570,7 +572,9 @@ function MenuInsights({ rows }: { rows: MI[] }) {
       </div>
 
       <style jsx global>{`
-        .mi-note { font-size: 12px; color: var(--muted); margin: 12px 2px 10px; line-height: 1.5; }
+        .mi-note { font-size: 12px; color: var(--muted); margin: 12px 2px 6px; line-height: 1.5; }
+        .mi-note2 { font-size: 11px; color: var(--muted); opacity: .8; margin: 0 2px 10px; }
+        .mi-sub { font-size: 11px; font-weight: 700; color: var(--text); opacity: .82; margin: 5px 0 1px; }
         .mi-axis-y { font-size: 10px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 5px; }
         .mi-axis-x { font-size: 10px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; text-align: right; margin-top: 5px; }
         .mi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
