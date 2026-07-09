@@ -25,11 +25,24 @@ export default function TabletFrame({ src }: { src: string }) {
 
     const push = () => {
       const cs = getComputedStyle(probe);
-      const top = cs.paddingTop || "0px";
-      const bottom = cs.paddingBottom || "0px";
+      const envTop = parseFloat(cs.paddingTop) || 0;
+      const envBottom = parseFloat(cs.paddingBottom) || 0;
+      // env(safe-area-inset-*) covers iOS notch/home-indicator + gesture nav. But Android's
+      // 3-BUTTON nav bar (owner's Galaxy S24 Ultra) is NOT reported as a safe-area inset at all,
+      // even on the top-level document — so env reads 0 and the docked controls sit UNDER it.
+      // Also try to MEASURE the gap (layout viewport minus the visible visual viewport), and if
+      // both are 0 on Android, reserve the standard ~48px nav height. (audit 2026-07-09)
+      let measured = 0;
+      try {
+        const vv = window.visualViewport;
+        if (vv) measured = Math.max(0, Math.round(window.innerHeight - vv.height - (vv.offsetTop || 0)));
+      } catch { /* no visualViewport */ }
+      if (measured > 120) measured = 0;   // a big gap is the on-screen keyboard, not the nav bar
+      let bottom = Math.max(envBottom, measured);
+      if (bottom === 0 && /Android/i.test(navigator.userAgent || "")) bottom = 48;
       try {
         const doc = ref.current?.contentWindow?.document?.documentElement;
-        if (doc) { doc.style.setProperty("--safe-t", top); doc.style.setProperty("--safe-b", bottom); }
+        if (doc) { doc.style.setProperty("--safe-t", envTop + "px"); doc.style.setProperty("--safe-b", bottom + "px"); }
       } catch { /* iframe not ready yet — the load handler / delayed pushes will catch it */ }
     };
 
