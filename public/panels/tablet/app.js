@@ -2072,7 +2072,12 @@ function renderOrderMode() {
   // Phone: the added-items review lives on its OWN screen (like the guest menu), reached
   // by the floating "View order" pill. Desktop keeps the side pane, so it never sets
   // viewOrder. (owner 2026-07-05)
-  if (state.viewOrder) { renderViewOrder(); return; }
+  // Never strand the waiter on an empty "Your order" review: if the cart is empty, show the
+  // dish MENU (what they actually need) instead of the "no dishes" screen. Only open the review
+  // when there's actually something in the cart. This kills the intermittent "no dishes added"
+  // screen when the order opens. (audit 2026-07-09)
+  if (state.viewOrder && state.cart.length) { renderViewOrder(); return; }
+  state.viewOrder = false;
   const p = $("#panel");
   p.classList.remove("has-detail");
   p.classList.add("om-open");
