@@ -2387,7 +2387,23 @@ async function loadTables(tables) {
   if (!state.ordering && !state.pickerOpen) renderPanel();   // never repaint under a mid-order waiter OR an open Move picker (#U1)
 }
 
-async function load() {
+// Coalesce concurrent load() calls onto ONE in-flight fetch. On boot ~5 triggers fire (the
+// explicit boot load + LFH_RT.start's per-topic once-on-start handlers + subscribe/reconnect);
+// without this each did its OWN /summary, contending on the DB pool and stacking to ~4.5s before
+// the floor painted. Now they share one fetch, plus at most one trailing refresh so a change that
+// landed mid-flight isn't missed. Post-write reconcile callers stay correct: if nothing is in
+// flight they start a fresh fetch that includes their write; if one is running, the trailing
+// refresh repaints server truth right after (loadSeq still guarantees latest-wins). (audit 2026-07-09)
+let loadInFlight = null, loadQueued = false;
+function load() {
+  if (navigator.onLine === false) return Promise.resolve();
+  if (loadInFlight) { loadQueued = true; return loadInFlight; }
+  const p = loadImpl();
+  loadInFlight = p;
+  p.then(() => {}, () => {}).then(() => { loadInFlight = null; if (loadQueued) { loadQueued = false; load(); } });
+  return p;
+}
+async function loadImpl() {
   // #2/#19: offline → don't fire the GET (it would reject and surface as "Failed: Failed to
   // fetch" from every caller that awaits load() after a queued write). The reconnect flush
   // (lfh:outbox-flushed) + the 'online' event both trigger a fresh load() once we're back.
@@ -2624,7 +2640,7 @@ window.addEventListener("online", () => load().catch(() => {}));
     // #5: clock lives here on phones (moved off the cramped top bar; desktop keeps it on the bar).
     '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
     // Build tag: lets the owner confirm at a glance he's on the latest code (rules out a stale cache). (audit 2026-07-09)
-    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260709g</span></div>' +
+    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260709h</span></div>' +
     // Banquet module (mig 130): shown only when the admin entitlement AND the
     // waiter's tablet_banquet capability allow it (openDrawer re-checks each open).
     '<button class="dw-btn" id="dwBanquet" type="button" hidden style="margin-top:auto;margin-bottom:10px">🎪 Banquet billing</button>' +
