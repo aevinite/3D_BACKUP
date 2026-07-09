@@ -567,7 +567,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // dashboard shows an HONEST "most recent N orders" note instead of a silently-too-low number.
       // Penny-exact big-range totals are the planned pre-aggregated-summary follow-up (CLAUDE.md:
       // dashboards read summaries, not live scans) — that fix needs the owner to sign off on the numbers.
-      const STATS_ROW_CAP = 5000;
+      // Cap = 12k (was 5k): a busy/demo restaurant's 30-day window spans ~60 days of rows (current +
+      // previous period for the delta chips), which exceeded 5k and truncated the 30-day total; 12k keeps
+      // the common Today/30-day demo views COMPLETE (no truncation note) while still bounding a full scan.
+      const STATS_ROW_CAP = 12000;
       let statsTruncated = false;
       for (let from = 0; from < STATS_ROW_CAP; from += 1000) {
         const page = (must(await sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).order("created_at", { ascending: false }).range(from, from + 999)) as any[] | null) || [];
