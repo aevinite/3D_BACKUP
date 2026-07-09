@@ -2433,7 +2433,16 @@ function renderRatings(d) {
   }).join("") : `<div class="empty">${state.ratingsFilter === "unhandled" ? "Nothing left to handle 🎉" : "No guest ratings yet."}</div>`;
   body.innerHTML = summaryHtml + filterHtml + cards;
   body.querySelectorAll("[data-rfilter]").forEach((b) => (b.onclick = () => { state.ratingsFilter = b.dataset.rfilter; loadRatings(); }));
-  body.querySelectorAll("[data-rack]").forEach((b) => (b.onclick = async () => { try { await api("POST", "/ratings/ack", { id: b.dataset.rack, acknowledged: b.dataset.val === "1" }); loadRatings(); } catch (e) { toast("Failed: " + e.message, "err"); } }));
+  body.querySelectorAll("[data-rack]").forEach((b) => (b.onclick = async () => {
+    // Carry any note the user typed into the SAME request so pressing "Mark handled"
+    // (instead of the note's own Save) no longer discards it. The note input is always
+    // rendered pre-filled with the saved note, so sending it when untouched is a no-op.
+    const noteRow = body.querySelector(`[data-rnoterow="${b.dataset.rack}"]`);
+    const noteInput = noteRow ? noteRow.querySelector("input") : null;
+    const payload = { id: b.dataset.rack, acknowledged: b.dataset.val === "1" };
+    if (noteInput) payload.note = noteInput.value;
+    try { await api("POST", "/ratings/ack", payload); loadRatings(); } catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
   body.querySelectorAll("[data-rnote]").forEach((b) => (b.onclick = () => { const row = body.querySelector(`[data-rnoterow="${b.dataset.rnote}"]`); if (row) row.hidden = !row.hidden; }));
   body.querySelectorAll("[data-rnotesave]").forEach((b) => (b.onclick = async () => { const row = body.querySelector(`[data-rnoterow="${b.dataset.rnotesave}"]`); const val = row ? row.querySelector("input").value : ""; try { await api("POST", "/ratings/ack", { id: b.dataset.rnotesave, note: val }); loadRatings(); } catch (e) { toast("Failed: " + e.message, "err"); } }));
 }
@@ -6700,9 +6709,17 @@ function setTab(tab) {
 // the Orders tab. Used by the Refresh button and after any order change.
 // Invoice pipeline (manager). generate locks the bill + assigns a permanent number;
 // void reopens it for edits (number kept in record). Server-authoritative (migration 073).
+// Guard against a double-tap on "Generate invoice": on a laggy tablet two quick taps
+// fire two POSTs before the button re-renders, and each consumes an invoice sequence
+// number (one gets overwritten) → a gap in the numbering. Keyed per session so two
+// DIFFERENT bills can still invoice at once; the same bill can't fire twice in flight.
+const _invBusy = new Set();
 async function generateInvoice(sid) {
+  if (_invBusy.has(sid)) return;
+  _invBusy.add(sid);
   try { await api("POST", `/sessions/${sid}/invoice`); await loadOrders(); toast("Invoice generated", "ok"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
+  finally { _invBusy.delete(sid); }
 }
 async function voidInvoice(sid) {
   if (!(await confirmDialog("Reopen this bill? Its invoice is voided (kept in records) and the bill unlocks for edits — a new invoice number is issued next time.", "Reopen bill"))) return;
