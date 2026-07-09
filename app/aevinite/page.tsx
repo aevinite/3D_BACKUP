@@ -205,8 +205,8 @@ export default function AdminCommand() {
             <div style={{ color: "var(--muted)", fontSize: 13, padding: "6px 0" }}>No staff active right now.</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column" }}>
-              {online.map((u) => (
-                <div key={`${u.username}-${u.role}`} className="cmd-staff">
+              {online.map((u, i) => (
+                <div key={`${u.restaurantName || "?"}-${u.username}-${u.role}-${i}`} className="cmd-staff">
                   <span className="dot" aria-hidden="true" />
                   <b>{u.name || u.username}</b>
                   <span style={{ color: "var(--accent)", fontWeight: 600, fontSize: 12 }}>{PANEL_NAME(u.role)}</span>

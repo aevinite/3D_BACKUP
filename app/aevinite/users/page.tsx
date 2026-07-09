@@ -352,7 +352,13 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
       }
       setOk("Saved.");
       onChanged();
-    } catch (e: any) { setMErr(e.message || "Could not save."); }
+    } catch (e: any) {
+      // These are several independent writes; if one fails mid-way, the earlier ones are
+      // already saved. Refresh the parent from server truth so the list shows what actually
+      // persisted, and say so rather than implying nothing changed (audit 2026-07-09).
+      setMErr((e.message || "Could not save.") + " Some changes may not have saved — check the row.");
+      onChanged();
+    }
     finally { setSaving(false); }
   }
 

@@ -135,7 +135,7 @@ export default function AdminAnalytics() {
           {tile({
             icon: "fa-receipt", label: `Orders · ${RANGE_LABEL[range].toLowerCase()}`,
             value: t ? nf.format(t.totalOrders) : "…",
-            sub: t && t.totalOrders === 0 ? "no orders in this range" : "every channel, all restaurants",
+            sub: t && t.totalOrders === 0 ? "no orders in this range" : "dine-in orders, all restaurants",
             extra: <Spark pts={sparkPts} />,
           })}
           {tile({

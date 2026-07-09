@@ -94,7 +94,7 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
           </button>
         </div>
 
-        <div style={{ flex: 1, overflow: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ flex: 1, overflow: "auto", padding: 14, paddingBottom: "calc(14px + env(safe-area-inset-bottom, 0px))", display: "flex", flexDirection: "column", gap: 16 }}>
           {/* System-health alerts */}
           <section>
             <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 8 }}>

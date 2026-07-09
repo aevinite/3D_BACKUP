@@ -22,12 +22,11 @@ export async function GET(req: NextRequest) {
   const onlineSinceIso = new Date(Date.now() - 180_000).toISOString(); // "online" = seen in last 3 min
   const head = { count: "exact" as const, head: true };
 
-  const [restQ, setQ, ownersQ, openTablesQ, ordersTodayQ, maintQ, onlineQ, issuesQ, ovRpc, actQ] =
+  const [restQ, setQ, ownersQ, ordersTodayQ, maintQ, onlineQ, issuesQ, ovRpc, actQ] =
     await Promise.all([
       sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name"),
       sb.from("settings").select("restaurant_id, enabled_panels"),
       sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true),
-      sb.from("sessions").select("id", head).eq("status", "open"),
       sb.from("orders").select("id", head).neq("status", "cancelled").gte("created_at", sinceIso),
       sb.from("settings").select("restaurant_id").eq("service_mode", true),
       // Only the staff CURRENTLY online (seen in the last 3 min) — a small list, instead of
@@ -56,8 +55,13 @@ export async function GET(req: NextRequest) {
     panels: panelsByRid.get(r.id) || null,
   }));
 
-  // Per-restaurant open tables (revenue columns from the RPC are dropped).
+  // Per-restaurant open tables (revenue columns from the RPC are dropped). Keep only LIVE
+  // restaurants so the headline total matches the /open-tables detail, which also excludes
+  // binned restaurants — the old raw platform-wide session count inflated the card with
+  // sessions from deleted restaurants (audit 2026-07-09).
+  const liveIdSet = new Set((restQ.data || []).map((r) => r.id));
   const openByRid = ((ovRpc.data as { restaurant_id: string; open_tables: number }[] | null) || [])
+    .filter((r) => r.restaurant_id && liveIdSet.has(r.restaurant_id))
     .map((r) => ({ id: r.restaurant_id, openTables: Number(r.open_tables) || 0 }));
 
   // Live restaurants currently in maintenance, by name.
@@ -88,7 +92,7 @@ export async function GET(req: NextRequest) {
     maintenance: maintenanceNames.length > 0,
     maintenanceNames,
     ordersToday: ordersTodayQ.count || 0,
-    openTables: openTablesQ.count || 0,
+    openTables: openByRid.reduce((s, r) => s + r.openTables, 0),
     online,
     issues,
     activity,

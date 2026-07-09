@@ -48,8 +48,11 @@ export async function POST(req: NextRequest) {
   await logAction("admin", "login", { actor: "admin", device_id: dev, detail: `admin signed in from ${ip}` });
 
   const token = await sha256hex(expected);
+  // `secure` in production so the sign-in cookie is only ever sent over HTTPS (Vercel is
+  // HTTPS-only); left off in dev so localhost:4000 (plain HTTP) still works (audit 2026-07-09).
+  const secure = process.env.NODE_ENV === "production";
   const res = NextResponse.redirect(new URL(next, req.url), 303);
-  res.cookies.set(AUTH_COOKIE, token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 604800 });
-  res.cookies.set(FLAG_COOKIE, "1", { httpOnly: false, sameSite: "lax", path: "/", maxAge: 604800 });
+  res.cookies.set(AUTH_COOKIE, token, { httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: 604800 });
+  res.cookies.set(FLAG_COOKIE, "1", { httpOnly: false, secure, sameSite: "lax", path: "/", maxAge: 604800 });
   return res;
 }

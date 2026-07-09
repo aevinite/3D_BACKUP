@@ -161,6 +161,17 @@ export default function AdminFloor() {
   // First load is on-demand only (the "Load live floor" button); no fetch on mount.
   const start = useCallback(() => { setStarted(true); load(); }, [load]);
 
+  // Lazy-load the cancelled-today list (only when the section is opened, or re-opened
+  // after a Refresh). Keeps the normal floor snapshot free of this extra read. Declared
+  // BEFORE the effect that calls it so the React Compiler can preserve its memoization.
+  const loadCancelled = useCallback(() => {
+    setCancelledLoading(true); setCancelledErr(null);
+    fetch("/api/admin/cancelled-today", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+      if (j.error) setCancelledErr(j.error);
+      else setCancelledList((j.orders as CancelledRow[]) || []);
+    }).catch((e) => setCancelledErr(e instanceof Error ? e.message : String(e))).finally(() => setCancelledLoading(false));
+  }, []);
+
   // When a fresh snapshot lands (Refresh) and the cancelled list is open, reload it too so
   // the drill-down list can't show stale rows next to a freshly-counted "Cancelled today".
   useEffect(() => {
@@ -175,15 +186,6 @@ export default function AdminFloor() {
   }, []);
   const changeSort = (v: string) => { setSortBy(v); try { localStorage.setItem(SORT_KEY, v); } catch {} };
 
-  // Lazy-load the cancelled-today list (only when the section is opened, or re-opened
-  // after a Refresh). Keeps the normal floor snapshot free of this extra read.
-  const loadCancelled = useCallback(() => {
-    setCancelledLoading(true); setCancelledErr(null);
-    fetch("/api/admin/cancelled-today", { cache: "no-store" }).then((r) => r.json()).then((j) => {
-      if (j.error) setCancelledErr(j.error);
-      else setCancelledList((j.orders as CancelledRow[]) || []);
-    }).catch((e) => setCancelledErr(e instanceof Error ? e.message : String(e))).finally(() => setCancelledLoading(false));
-  }, []);
   const toggleCancelled = () => {
     const next = !cancelledOpen;
     setCancelledOpen(next);
@@ -325,7 +327,6 @@ export default function AdminFloor() {
         <div className="adm-flooryear">
           {sorted.map((r) => {
             const calls = callCount(r.tables);
-            const unpaidT = unpaidTableCount(r.tables);
             return (
               <section key={r.id} className="adm-card adm-floormonth" aria-label={`${r.name} floor`}>
                 <header>

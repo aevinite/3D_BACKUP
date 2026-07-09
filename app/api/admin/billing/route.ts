@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
   // 2026-07-06). Every row is INR today; this keeps the number honest if a non-INR plan
   // is ever entered (that currency would need its own line, a later feature).
   const totalCollectedThisYear = Math.round(
-    rows.filter((r) => (r.currency || "INR") === "INR").reduce((s, r) => s + r.paidThisYear, 0) * 100
+    rows.filter((r) => (r.currency || "INR").trim().toUpperCase() === "INR").reduce((s, r) => s + r.paidThisYear, 0) * 100
   ) / 100;
   const statusCounts = rows.reduce((m: Record<string, number>, r) => { m[r.status] = (m[r.status] || 0) + 1; return m; }, {});
   const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
@@ -122,7 +122,10 @@ export const POST = withIdempotency(async (req: NextRequest) => {
       plan: body.plan ? String(body.plan) : null,
       status,
       amount,
-      currency: body.currency ? String(body.currency) : "INR",
+      // Normalise currency to a canonical UPPER-cased, trimmed code so the yearly-total
+      // sum (which keeps only INR rows) can't silently drop a row typed "inr" / "INR "
+      // (audit 2026-07-09).
+      currency: body.currency ? String(body.currency).trim().toUpperCase() : "INR",
       cycle,
       started_on: body.started_on ? String(body.started_on) : null,
       next_due_on: body.next_due_on ? String(body.next_due_on) : null,
@@ -164,6 +167,7 @@ export const POST = withIdempotency(async (req: NextRequest) => {
   if (action === "delete_payment") {
     const id = String(body.payment_id || "");
     if (!id) return bad("payment_id required");
+    if (!isUuid(id)) return bad("Invalid payment_id.");
     const row = (await sb.from("restaurant_payments").select("restaurant_id").eq("id", id).maybeSingle()).data as { restaurant_id: string } | null;
     const { error } = await sb.from("restaurant_payments").delete().eq("id", id);
     if (error) return bad(error.message, 500);

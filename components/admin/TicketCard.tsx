@@ -67,7 +67,6 @@ export default function TicketCard({
             {issue.image_url && (
               <button type="button" onClick={() => setImgOpen(true)} title="View photo"
                 style={{ padding: 0, border: "1px solid var(--line)", borderRadius: 9, overflow: "hidden", cursor: "zoom-in", background: "none", lineHeight: 0 }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={issue.image_url} alt="attached photo" width={64} height={64} style={{ width: 64, height: 64, objectFit: "cover", display: "block" }} />
               </button>
             )}
@@ -115,7 +114,6 @@ export default function TicketCard({
       {imgOpen && issue.image_url && (
         <div onClick={() => setImgOpen(false)} role="dialog" aria-label="Photo"
           style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(0,0,0,.8)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, cursor: "zoom-out" }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={issue.image_url} alt="attached photo" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 10 }} />
         </div>
       )}

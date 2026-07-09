@@ -614,7 +614,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // so admin can remember what it's for"). The thumbnail zooms on tap (setZoomImg).
   const staffFeatCard = (k: string, label: string, hint: string, img: string) => (
     <div key={k} className="adm-featcard">
-      {/* eslint-disable-next-line @next/next/no-img-element -- tiny local help shot, no next/image needed */}
+      { }
       <img src={img} alt={`What "${label}" looks like`} loading="lazy"
         onClick={() => setZoomImg(img)} title="Tap to enlarge" />
       <div className="adm-featcard-body">
@@ -631,7 +631,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   return (
     <>
       {toast && (
-        <div role="status" style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 1002, background: "var(--adm-danger, #e5484d)", color: "#fff", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, boxShadow: "0 6px 24px rgba(0,0,0,0.25)" }}>{toast}</div>
+        <div role="status" style={{ position: "fixed", left: "50%", bottom: "calc(24px + env(safe-area-inset-bottom, 0px))", transform: "translateX(-50%)", zIndex: 1002, background: "var(--adm-danger, #e5484d)", color: "#fff", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, boxShadow: "0 6px 24px rgba(0,0,0,0.25)" }}>{toast}</div>
       )}
       {/* Breadcrumb: Restaurants › <name> — matches the owner-view breadcrumb (.adm-crumbs)
           so stepping back up is consistent everywhere inside a restaurant (owner request). */}
@@ -687,7 +687,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       </div>
       {zoomImg && (
         <div className="adm-imgzoom" onClick={() => setZoomImg(null)} role="button" title="Tap anywhere to close">
-          {/* eslint-disable-next-line @next/next/no-img-element -- local help screenshot lightbox */}
+          { }
           <img src={zoomImg} alt="Feature screenshot, enlarged" />
         </div>
       )}
@@ -949,6 +949,9 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
   const [msg, setMsg] = useState<string | null>(null);
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
   const [newName, setNewName] = useState("");
+  // Synchronous re-entry guard: `busy` only disables the button after a re-render, so a
+  // fast double-click could mint two owner logins / hit a raw dup error (audit 2026-07-09).
+  const creatingRef = useRef(false);
 
   const assign = async (ownerId: string) => {
     setBusy(true); setMsg(null);
@@ -960,13 +963,15 @@ function OwnerCard({ restaurant, owners, onChanged }: { restaurant: Restaurant; 
   };
   const createOwner = async () => {
     const name = newName.trim(); if (name.length < 2) { setMsg("Name must be at least 2 characters."); return; }
+    if (creatingRef.current) return; // block a fast double-click before `busy` re-renders
+    creatingRef.current = true;
     setBusy(true); setMsg(null);
     try {
       const r = await fetch("/api/admin/restaurants", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create_owner", name }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't create.");
       setReveal({ name: d.name, password: d.password }); setNewName("");
       await assign(d.id); // auto-assign the brand-new owner to this restaurant
-    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); creatingRef.current = false; }
   };
 
   return (

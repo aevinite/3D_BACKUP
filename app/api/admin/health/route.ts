@@ -31,6 +31,12 @@ export async function GET(req: NextRequest) {
     sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open"),
   ]);
 
+  // If the ping worked but the core reads failed, DON'T render "0 restaurants / 0 staff"
+  // as if that were healthy — surface it so the page shows its error state (audit 2026-07-09).
+  if (restQ.error || staffQ.error) {
+    return NextResponse.json({ latencyMs, dbOk: false, error: (restQ.error || staffQ.error)!.message }, { status: 200 });
+  }
+
   const restaurants = restQ.data || [];
   const activeRestaurants = restaurants.filter((r) => r.active).length;
   const suspendedRestaurants = restaurants.length - activeRestaurants;

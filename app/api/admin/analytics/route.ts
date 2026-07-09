@@ -76,14 +76,18 @@ export async function GET(req: NextRequest) {
   const fromIso = from.toISOString();
   const toIso = to.toISOString();
 
-  const [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ] = await Promise.all([
+  const [restQ, staffCountQ, openOvQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ] = await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): binned restaurants must not inflate
     // total/active counts. The busiest-restaurants RPC gets the same guard in mig 130.
     sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null),
     // Fetch active staff's restaurant_id (bounded) so we can DROP staff that belong to a
     // binned restaurant — a head count included them and over-stated "Active staff".
     sb.from("staff_users").select("restaurant_id").eq("active", true).limit(5000),
-    sb.from("sessions").select("restaurant_id").eq("status", "open"),
+    // Per-restaurant open-table counts from the pre-aggregated RPC (p_ids=null → all live),
+    // NOT a whole-set read of every open session (that had no LIMIT and capped at PostgREST's
+    // max-rows once >1000 tables were open, silently under-counting "Tables occupied now" on a
+    // 60s poll — audit 2026-07-09). We read only open_tables; its revenue columns are ignored.
+    sb.rpc("lfh_owner_overview", { p_ids: null }),
     sb.from("settings").select("restaurant_id, table_count"),
     sb.from("orders").select("id", { count: "exact", head: true }).neq("status", "cancelled").gte("created_at", fromIso).lt("created_at", toIso),
     // Today buckets HOURLY (adaptive time-axis rule — a one-day window ticks by
@@ -92,7 +96,7 @@ export async function GET(req: NextRequest) {
     sb.rpc("lfh_admin_busiest_restaurants", { p_from: fromIso, p_to: toIso, p_limit: 10 }),
     sb.rpc("lfh_admin_orders_by_source", { p_from: fromIso, p_to: toIso }),
   ]);
-  for (const q of [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ]) {
+  for (const q of [restQ, staffCountQ, openOvQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ]) {
     if (q.error) return NextResponse.json({ error: q.error.message }, { status: 500 });
   }
 
@@ -108,10 +112,11 @@ export async function GET(req: NextRequest) {
   const totalStaff = (staffCountQ.data || []).filter((u) => u.restaurant_id && liveIds.has(u.restaurant_id)).length;
   const openByRid = new Map<string, number>();
   let activeTablesNow = 0;
-  for (const s of openSessionsQ.data || []) {
+  for (const s of (openOvQ.data as { restaurant_id: string; open_tables: number }[] | null) || []) {
     if (!s.restaurant_id || !liveIds.has(s.restaurant_id)) continue; // ignore binned restaurants
-    openByRid.set(s.restaurant_id, (openByRid.get(s.restaurant_id) || 0) + 1);
-    activeTablesNow++;
+    const n = Number(s.open_tables) || 0;
+    openByRid.set(s.restaurant_id, n);
+    activeTablesNow += n;
   }
 
   const busiest = (busiestQ.data || []).map((r: { restaurant_id: string; slug: string; name: string; orders: number }) => ({
