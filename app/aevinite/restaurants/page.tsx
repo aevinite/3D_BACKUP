@@ -463,6 +463,47 @@ function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChang
   );
 }
 
+// Google review link — the admin pastes this restaurant's Google review URL. When set, a
+// guest who rates a dish 4–5★ sees a "review us on Google" nudge (guest side in ItemClient);
+// a low rating stays private. Empty clears it. Saved to settings.google_review_url. (owner 2026-07-09)
+function GoogleReviewCard({ restaurant }: { restaurant: Restaurant }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let dead = false;
+    fetch(`/api/admin/restaurants/google-review?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (dead) return; if (typeof j.url !== "undefined") { setUrl(j.url || null); setDraft(j.url || ""); } setLoaded(true); })
+      .catch(() => { if (!dead) setLoaded(true); });
+    return () => { dead = true; };
+  }, [restaurant.id]);
+  const save = async () => {
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      const r = await fetch("/api/admin/restaurants/google-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, url: draft.trim() }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
+      setUrl(d.url || null); setDraft(d.url || "");
+      setMsg(d.url ? "Saved — guests who rate a dish 4–5★ now see a Google-review nudge." : "Cleared — the Google nudge is off for this restaurant.");
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="adm-card" style={{ marginBottom: 14 }}>
+      <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Google review link</div>
+      <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Paste this restaurant&apos;s Google review URL. When set, a guest who rates a dish <b>4–5★</b> is invited to review you on Google (a low rating stays private). Leave blank to turn the nudge off.</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input className="adm-input" style={{ flex: 1, minWidth: 240 }} type="url" inputMode="url" placeholder="https://g.page/r/…/review" value={draft} maxLength={500} disabled={!loaded || busy} onChange={(e) => setDraft(e.target.value)} />
+        <button className="adm-btn primary" disabled={!loaded || busy || draft.trim() === (url || "")} onClick={save}>{busy ? "Saving…" : "Save"}</button>
+      </div>
+      {msg && <div style={{ color: "var(--adm-ok,#16a34a)", fontSize: 12.5, marginTop: 8 }}>{msg}</div>}
+      {err && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
+    </div>
+  );
+}
+
 // Tickets card at the TOP of a restaurant's detail view — the issues its staff raised
 // (manager/kitchen/tablet), newest first, resolvable inline. Defaults to OPEN tickets;
 // a toggle reveals resolved history. Scoped read: ?restaurant_id= narrows the admin's
@@ -712,6 +753,8 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       <RestaurantTickets restaurantId={restaurant.id} />
 
       <StatusCard restaurant={restaurant} onChanged={onChanged} />
+
+      <GoogleReviewCard restaurant={restaurant} />
 
       <OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} />
 
