@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation"; // lets us send the user to another
 import StarRating from "@/components/StarRating";   // the tappable star picker
 import InfinityLoader from "@/components/InfinityLoader"; // the loading spinner
 import { modelLoader } from "@/lib/modelLoader";     // 3D model download manager
-import { getMenuItems, getMenuItem, CARD_COLUMNS, getItemReviews, submitReview as submitReviewRpc } from "@/lib/menu"; // dishes + reviews + the review-saving RPC
+import { getMenuItems, getMenuItem, CARD_COLUMNS, getItemReviews, submitReview as submitReviewRpc, getSettings } from "@/lib/menu"; // dishes + reviews + the review-saving RPC + per-restaurant settings (Google link)
 import { getDeviceId } from "@/lib/device";          // stable per-browser id (one rating per dish per device)
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
 import { useFeatures } from "@/lib/features"; // per-restaurant feature switches
@@ -84,6 +84,10 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   const [localReviews, setLocalReviews] = useState<{name: string; rating: number; text: string; deviceId?: string}[]>([]); // reviews shown (incl. ones just added)
   const [reviewTab, setReviewTab] = useState<"rate" | "reviews">("reviews"); // which review tab is open
   const reviewSubmittingRef = useRef(false); // blocks a double-tap from firing two review saves (audit)
+  // After a HIGH rating (>= 4★) we invite the guest to share it on Google — but ONLY if
+  // this restaurant configured a Google review link. A low rating stays private (no
+  // nudge). null = prompt hidden. (owner 2026-07-09 "do push to google review")
+  const [googleReviewUrl, setGoogleReviewUrl] = useState<string | null>(null);
   const [imgZoom, setImgZoom] = useState(false);             // is the full-screen photo open?
   const [lbScale, setLbScale] = useState(1);                 // zoom level in the lightbox (1 = normal)
   const [lbPos, setLbPos] = useState({ x: 0, y: 0 });        // pan offset while zoomed in
@@ -475,6 +479,15 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     setSelectedRating(0);
     // Show a friendly success toast.
     window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Review posted", subtitle: "thanks for sharing", kicker: "review", variant: "success" } }));
+    // HAPPY diner → invite a Google review (owner 2026-07-09). Only on a high rating,
+    // and only if THIS restaurant set a Google link. getSettings is cached per restaurant
+    // so this is effectively free, and a low rating (< 4★) stays private + costs nothing.
+    if (selectedRating >= 4) {
+      try {
+        const s = await getSettings(restaurantId);
+        if (s.googleReviewUrl) setGoogleReviewUrl(s.googleReviewUrl);
+      } catch { /* no nudge if settings can't load */ }
+    }
   };
 
   // Pick + shuffle once per dish/data change. Computing this during render
@@ -802,6 +815,20 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           </button>
         </div>
 
+        {/* Happy-diner Google review nudge — appears after a HIGH rating (>= 4★) when
+            this restaurant configured a Google link. Tapping opens their Google review
+            page in a new tab; "No thanks" (or tapping through) dismisses it. */}
+        {googleReviewUrl && (
+          <div className="google-review-prompt" style={{ background: "var(--card, rgba(255,255,255,0.06))", border: "1px solid var(--accent)", borderRadius: 14, padding: "16px 18px", margin: "0 0 16px", textAlign: "center" }}>
+            <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">⭐</div>
+            <div style={{ fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>Thank you! Would you share it on Google?</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>A quick Google review really helps us — it only takes a moment.</div>
+            <a href={googleReviewUrl} target="_blank" rel="noopener noreferrer" className="btn btn-gold" style={{ display: "inline-flex", alignItems: "center", gap: 8, textDecoration: "none" }} onClick={() => setGoogleReviewUrl(null)}>
+              <i className="fab fa-google" aria-hidden="true"></i> Review on Google
+            </a>
+            <div><button type="button" onClick={() => setGoogleReviewUrl(null)} style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 12.5, marginTop: 10, cursor: "pointer" }}>No thanks</button></div>
+          </div>
+        )}
         {/* The review form — shown only when the "rate" tab is active. */}
         {reviewTab === "rate" && (
           <div className="review-form" id="review-form">
