@@ -2414,6 +2414,9 @@ async function load() {
     // state.data; the detail re-pulls below), but we clear them so a closed table can't linger.
     sessions: [], members: [], orders: [], items: [], calls: [], requests: [],
   });
+  // Cache the menu on-device for instant Take-order next time (only when we actually got dishes,
+  // so a transient empty response never wipes a good cache). Paired with the boot hydrate. (audit 2026-07-09)
+  try { if ((dishes || []).length) localStorage.setItem("lfh_tablet_menu", JSON.stringify({ dishes, categories: categories || [] })); } catch (_e) {}
   if (sel != null && selSlice) mergeSelectedSlice(sel, selSlice);
   // Show WHICH restaurant this panel is scoped to (multi-tenant). Set here in load()
   // — NOT in renderFloor()/renderPanel() — because they're skipped when the board
@@ -2433,6 +2436,20 @@ const tickClock = () => {
   const dc = document.getElementById("dwClock"); if (dc) dc.textContent = t;
 };
 tickClock(); setInterval(tickClock, 1000);
+
+// NOTE: the phone's bottom-nav clearance (var(--safe-b)/--safe-t) is set by the OUTER page
+// (app/tablet/TabletFrame.tsx), which pushes the measured inset into this iframe. It's the
+// single source of truth — do NOT also set --safe-b here or the two writers fight. (audit 2026-07-09)
+
+// ── Instant menu: hydrate the last dish list from on-device cache so Take-order NEVER waits on
+// the network (the load() below refreshes it + rewrites the cache). Fixes the ~5s menu wait. (audit 2026-07-09)
+try {
+  const _mc = JSON.parse(localStorage.getItem("lfh_tablet_menu") || "null");
+  if (_mc && Array.isArray(_mc.dishes) && _mc.dishes.length) {
+    state.data.dishes = _mc.dishes;
+    if (Array.isArray(_mc.categories) && _mc.categories.length) state.data.categories = _mc.categories;
+  }
+} catch (_e) {}
 load().catch((e) => toast("Can't reach the database: " + e.message, false));
 
 // ── HIERARCHY X-RAY ribbon (Phase 3) ─────────────────────────────────────────
@@ -2606,6 +2623,8 @@ window.addEventListener("online", () => load().catch(() => {}));
     '<div class="dw-row"><span>Theme</span><button class="btn small" id="dwTheme" type="button">Light / Dark</button></div>' +
     // #5: clock lives here on phones (moved off the cramped top bar; desktop keeps it on the bar).
     '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
+    // Build tag: lets the owner confirm at a glance he's on the latest code (rules out a stale cache). (audit 2026-07-09)
+    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260709g</span></div>' +
     // Banquet module (mig 130): shown only when the admin entitlement AND the
     // waiter's tablet_banquet capability allow it (openDrawer re-checks each open).
     '<button class="dw-btn" id="dwBanquet" type="button" hidden style="margin-top:auto;margin-bottom:10px">🎪 Banquet billing</button>' +
