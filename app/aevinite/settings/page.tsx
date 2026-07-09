@@ -1,37 +1,18 @@
 "use client";
-// Admin · Settings — platform-level settings only: how long activity logs are kept, plus a
-// small platform-info card. Guest-menu MAINTENANCE moved OFF this page — it used to be a
-// flagship-(#1)-only toggle here, which was confusing on a multi-tenant platform panel; it's
-// now a per-restaurant control on each restaurant's own page (audit 2026-07-08).
-import { useCallback, useEffect, useState } from "react";
+// Admin · Settings — platform-level INFO only. Guest-menu MAINTENANCE and log RETENTION are both
+// per-restaurant, not platform-wide: maintenance is a control on each restaurant's own page, and
+// log retention is set per restaurant by its manager (platform default 90 days, enforced by
+// lfh_prune_logs mig 152). Neither belongs as a flagship-(#1)-only control here — that was
+// confusing on a multi-tenant panel. The old "Log retention · platform-wide" control actually
+// only changed restaurant #1's row (it wrote id='site', which prune never consults for other
+// restaurants), so it was removed until a genuine platform-wide default is wired (audit 2026-07-09).
 import Link from "next/link";
 
-const RET_OPTS = [{ d: 7, label: "7 days" }, { d: 30, label: "1 month" }, { d: 90, label: "3 months" }];
-
 export default function AdminSettings() {
-  const [ret, setRet] = useState<{ oplog_retention_days: number; custlog_retention_days: number } | null>(null);
-  const [retErr, setRetErr] = useState(false);
-  const [msg, setMsg] = useState("");
-
-  const loadRet = useCallback(async () => {
-    try { const j = await (await fetch("/api/admin/settings", { cache: "no-store" })).json(); if (j.error) setRetErr(true); else { setRet(j); setRetErr(false); } } catch { setRetErr(true); }
-  }, []);
-  useEffect(() => { loadRet(); }, [loadRet]);
-
-  const saveRet = async (which: "oplog_retention_days" | "custlog_retention_days", val: number) => {
-    setRet((r) => (r ? { ...r, [which]: val } : r));
-    setMsg("");
-    try {
-      const r = await fetch("/api/admin/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [which]: val }) });
-      if (!r.ok) throw new Error();
-      setMsg("Saved — old logs auto-delete after the chosen window.");
-    } catch { setMsg("Couldn't save that just now."); loadRet(); }
-  };
-
   return (
     <>
       <h1 className="adm-page-h">Settings</h1>
-      <p className="adm-page-sub">Platform-level settings — how long activity logs are kept, and where the rest is managed.</p>
+      <p className="adm-page-sub">Platform-level info — everything else is managed on each restaurant&rsquo;s own page.</p>
 
       <div className="adx-grid2col" style={{ marginBottom: 14 }}>
         <div className="adm-card">
@@ -41,31 +22,15 @@ export default function AdminSettings() {
             <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Environment</span><span style={{ fontWeight: 700, color: "var(--adm-ok)" }}>Production</span></div>
             <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>You&rsquo;re signed in as</span><span className="adm-muted">Platform admin</span></div>
             <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Guest-menu maintenance</span><span className="adm-muted">per restaurant</span></div>
+            <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Log retention</span><span className="adm-muted">per restaurant · 90-day default</span></div>
           </div>
           <p className="hint" style={{ marginTop: 10, marginBottom: 0 }}>To put a restaurant&rsquo;s menu into a &ldquo;we&rsquo;ll be right back&rdquo; state, open it on the <b>Restaurants</b> page and use its <b>Maintenance</b> toggle (or <b>Suspend</b> to take it fully offline).</p>
         </div>
 
         <div className="adm-card">
-          <h2>Log retention <span className="adm-muted">· platform-wide</span></h2>
-          <p className="hint">Applies to the admin activity &amp; customer logs across all restaurants. Older entries are deleted automatically each night. Bills are never touched.</p>
-          {retErr && <p className="adm-muted" style={{ fontSize: 12, marginBottom: 8 }}>Couldn&rsquo;t load retention. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={loadRet}>Retry</button></p>}
-          <div style={{ display: "grid", gap: 12 }}>
-            <label className="adm-ret" style={{ justifyContent: "space-between" }}>
-              <span>Operations log</span>
-              <select value={ret?.oplog_retention_days ?? 90} disabled={!ret} onChange={(e) => saveRet("oplog_retention_days", Number(e.target.value))}>
-                {RET_OPTS.map((o) => <option key={o.d} value={o.d}>{o.label}</option>)}
-                {ret && !RET_OPTS.some((o) => o.d === ret.oplog_retention_days) && <option value={ret.oplog_retention_days}>{ret.oplog_retention_days} days</option>}
-              </select>
-            </label>
-            <label className="adm-ret" style={{ justifyContent: "space-between" }}>
-              <span>Customer log</span>
-              <select value={ret?.custlog_retention_days ?? 90} disabled={!ret} onChange={(e) => saveRet("custlog_retention_days", Number(e.target.value))}>
-                {RET_OPTS.map((o) => <option key={o.d} value={o.d}>{o.label}</option>)}
-                {ret && !RET_OPTS.some((o) => o.d === ret.custlog_retention_days) && <option value={ret.custlog_retention_days}>{ret.custlog_retention_days} days</option>}
-              </select>
-            </label>
-          </div>
-          {msg && <p className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>{msg}</p>}
+          <h2>Log retention</h2>
+          <p className="hint">How long the activity &amp; customer logs are kept is set <b>per restaurant</b> — each restaurant&rsquo;s manager controls it in their own panel. The platform default is <b>90 days</b>, and bills are never auto-deleted.</p>
+          <p className="hint" style={{ marginTop: 8, marginBottom: 0, opacity: 0.8 }}>A single platform-wide override for every restaurant at once is a planned addition.</p>
         </div>
       </div>
 
