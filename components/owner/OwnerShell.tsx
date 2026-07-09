@@ -71,8 +71,14 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   // the URL carries ?rid=<id>. Carry it across EVERY sidebar link so navigating
   // dashboard→reports→staff keeps this tab pinned to that restaurant instead of
   // falling back to the browser-wide act-as cookie (which a second tab can overwrite).
-  const [ridPin] = useState<string | null>(() =>
-    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
+  // Read ?rid AFTER mount, not in the useState initializer: the server never sees ?rid, so
+  // seeding from window.location on the client made the FIRST client render diverge from the
+  // server — the admin banner name AND every sidebar link href — throwing a hydration mismatch on
+  // every admin ?rid= drill-in (audit 2026-07-09). Starting null (same as the server) then filling
+  // it in useEffect keeps SSR and first paint identical; the pin lands on the next render, before
+  // any nav click. A real owner has no ?rid, so this stays null throughout.
+  const [ridPin, setRidPin] = useState<string | null>(null);
+  useEffect(() => { setRidPin(new URLSearchParams(window.location.search).get("rid")); }, []);
   const withRid = (href: string) => (ridPin ? `${href}${href.includes("?") ? "&" : "?"}rid=${ridPin}` : href);
   // Skin: the server passes the cookie value as `initialSkin` so SSR already emits the
   // RIGHT data-skin — no dark→light flash on load for owners who chose light (fixed
@@ -127,11 +133,10 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   // ?rid-scoped) numbers. When this tab is pinned (?rid), prefer the name of the
   // pinned restaurant from the already-fetched list; fall back to the server prop.
   const pinnedName = ridPin ? myRests.find((r) => r.id === ridPin)?.name : undefined;
-  // In a PINNED tab never fall back to the server prop: restaurantName is derived from the
-  // browser-wide act-as cookie, which a second tab may have repointed to a DIFFERENT
-  // restaurant, so the banner would name the wrong one over this tab's (correctly ?rid-scoped)
-  // numbers. Show the pinned restaurant's name once resolved, else a neutral placeholder
-  // (until myRests loads / if that fetch fails) — never the cookie name (audit 2026-07-07).
+  // On the first render ridPin is null (read post-mount, see above) so this is `restaurantName`,
+  // matching the server — no hydration mismatch. Once ?rid is read, a pinned tab shows its OWN
+  // restaurant's name (never the shared act-as cookie's, which a second tab may have repointed);
+  // "this restaurant" is the brief placeholder until myRests resolves (bug #10, 2026-07-06).
   const shownName = ridPin ? (pinnedName || "this restaurant") : restaurantName;
 
   // Open one restaurant's dashboard from anywhere: on /owner the dashboard listens
