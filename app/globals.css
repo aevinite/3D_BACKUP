@@ -181,9 +181,9 @@ html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
 }
 .overlay.active { opacity: 1; pointer-events: auto; }
 
-.panel { 
-  position: fixed; bottom: 0; left: 0; width: 100%; background: var(--bg); 
-  border-radius: 36px 36px 0 0; padding: 32px; z-index: 5000; 
+.panel {
+  position: fixed; bottom: 0; left: 0; width: 100%; background: var(--bg);
+  border-radius: 36px 36px 0 0; padding: 32px 32px calc(32px + env(safe-area-inset-bottom, 0px)); z-index: 5000;
   transform: translateY(100%); transition: 0.5s var(--ease);
   border-top: 2px solid var(--accent);
   box-shadow: 0 -20px 60px rgba(0,0,0,0.5);
@@ -1482,7 +1482,7 @@ body.menu-frost .nav {
 }
 .viewer-wrapper #topbar{
   position:fixed;top:0;left:0;right:0;z-index:30;
-  padding:12px 14px;
+  padding:calc(12px + env(safe-area-inset-top, 0px)) 14px 12px;
   display:flex;align-items:center;justify-content:space-between;
   background:linear-gradient(to bottom,rgba(0,0,0,0.5),transparent);
 }
@@ -1599,7 +1599,7 @@ body.menu-frost .nav {
 /* dish info panel (the ℹ button in the 3D view) */
 .vinfo-overlay{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,0.55);backdrop-filter:blur(4px);display:flex;align-items:flex-end;justify-content:center;animation:vinfoFade 0.25s ease;}
 @keyframes vinfoFade{from{opacity:0;}to{opacity:1;}}
-.vinfo-sheet{position:relative;width:100%;max-width:520px;max-height:80vh;overflow-y:auto;background:#1a120c;border:1px solid rgba(212,165,116,0.25);border-radius:20px 20px 0 0;padding:26px 22px 30px;animation:vinfoUp 0.32s cubic-bezier(0.22,1,0.36,1);}
+.vinfo-sheet{position:relative;width:100%;max-width:520px;max-height:80vh;overflow-y:auto;background:#1a120c;border:1px solid rgba(212,165,116,0.25);border-radius:20px 20px 0 0;padding:26px 22px calc(30px + env(safe-area-inset-bottom, 0px));animation:vinfoUp 0.32s cubic-bezier(0.22,1,0.36,1);}
 @keyframes vinfoUp{from{transform:translateY(100%);}to{transform:translateY(0);}}
 /* The sheet is always dark (it sits over the 3D scene), so its text is locked to
    cream/gold regardless of the site theme — otherwise light mode makes the theme
@@ -1616,7 +1616,7 @@ body.menu-frost .nav {
 .viewer-wrapper #bar{
   position:fixed;bottom:0;left:0;right:0;z-index:30;
   background:linear-gradient(to top,rgba(0,0,0,0.95) 55%,transparent);
-  padding:18px 18px 30px;
+  padding:18px 18px calc(30px + env(safe-area-inset-bottom, 0px));
   transform:translateY(110%);
   transition:transform 0.8s cubic-bezier(0.22,1,0.36,1);
 }
@@ -3527,7 +3527,7 @@ a:focus:not(:focus-visible) { outline: none; }
 .adm-rest .soon { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .adm-icnbtn { width: 38px; height: 38px; border-radius: 10px; border: var(--border); background: var(--bg); color: var(--text); cursor: pointer; font-size: 15px; display: grid; place-items: center; transition: background .15s; }
 .adm-icnbtn:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-.adm-main { flex: 1; overflow-y: auto; padding: 24px; }
+.adm-main { flex: 1; overflow-y: auto; padding: 24px 24px calc(24px + env(safe-area-inset-bottom, 0px)); }
 /* ── Hover-expand icon RAIL (desktop > 900px only) ───────────────────────────
    The sidebar collapses to a 76px icon rail and expands to 248px on hover, as an
    OVERLAY so the main content never shifts (Linear/Vercel pattern). Labels stay in
@@ -3659,7 +3659,7 @@ a:focus:not(:focus-visible) { outline: none; }
 /* ── phone: tighter spacing + let wide tables scroll instead of squishing ─────── */
 @media (max-width: 560px) {
   .adm-top { padding: 10px 14px; gap: 8px; flex-wrap: wrap; }
-  .adm-main { padding: 14px; }
+  .adm-main { padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px)); }
   .adm-page-h { font-size: 19px; }
   .adm-page-sub { margin-bottom: 16px; }
   .adm-card { padding: 14px; }
@@ -3769,7 +3769,7 @@ a:focus:not(:focus-visible) { outline: none; }
 .adx-side-foot { margin-top: auto; flex-shrink: 0; font-size: 11px; color: var(--muted); padding: 10px 10px 2px; border-top: var(--border); background: var(--side); }
 /* ── topbar ──────────────────────────────────────────────────────────────── */
 .adx-top {
-  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  display: flex; align-items: center; gap: 10px; padding: calc(8px + env(safe-area-inset-top, 0px)) 16px 8px;
   border-bottom: var(--border); background: var(--card); flex-shrink: 0; min-height: 48px;
 }
 .adx .adm-icnbtn { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; }
@@ -3846,6 +3846,7 @@ a:focus:not(:focus-visible) { outline: none; }
     position: fixed; top: 0; left: 0; height: 100dvh; width: min(82vw, 300px); z-index: 1002;
     transform: translateX(-100%); transition: transform .22s ease; overflow-y: auto;
     box-shadow: 18px 0 50px rgba(0,0,0,.55); border-right: var(--border);
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .adx-side.open { transform: translateX(0); }
   .adx-backdrop { position: fixed; inset: 0; z-index: 1001; background: rgba(2,6,16,.55); }
@@ -4045,7 +4046,7 @@ a:focus:not(:focus-visible) { outline: none; }
 .owx-myrest .rrow.all { color: var(--accent); }
 /* ── topbar ──────────────────────────────────────────────────────────────── */
 .owx-top {
-  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  display: flex; align-items: center; gap: 10px; padding: calc(8px + env(safe-area-inset-top, 0px)) 16px 8px;
   border-bottom: var(--border); background: var(--card); flex-shrink: 0; min-height: 48px;
 }
 .owx .adm-icnbtn { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; }

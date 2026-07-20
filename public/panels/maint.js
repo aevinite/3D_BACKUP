@@ -55,7 +55,7 @@
     if (document.getElementById("lfh-set-style")) return;
     const css = `
     .lfh-ov{position:fixed;inset:0;background:rgba(4,8,18,.6);backdrop-filter:blur(4px);z-index:99998;display:flex;justify-content:flex-end}
-    .lfh-dw{width:min(92vw,430px);height:100%;overflow:auto;background:var(--panel,#0f1830);color:var(--text,#e7eefc);box-shadow:-20px 0 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif;animation:lfhslide .2s cubic-bezier(.16,1,.3,1)}
+    .lfh-dw{width:min(92vw,430px);height:100%;overflow:auto;background:var(--panel,#0f1830);color:var(--text,#e7eefc);box-shadow:-20px 0 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif;animation:lfhslide .2s cubic-bezier(.16,1,.3,1);padding-bottom:max(env(safe-area-inset-bottom,0px),var(--safe-b,0px))}
     @keyframes lfhslide{from{transform:translateX(40px);opacity:.2}to{transform:none;opacity:1}}
     .lfh-dw h2{font-size:16px;margin:0;font-weight:800}
     .lfh-sec{padding:16px 18px;border-bottom:1px solid var(--line,#1d2944)}

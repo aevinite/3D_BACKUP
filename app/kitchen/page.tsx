@@ -10,16 +10,11 @@
 // panelAdminRid enforces the entry rule (admin only via the console's link) and
 // strips ?rid= from non-admin visits.
 import { panelAdminRid } from "@/lib/panelGate";
+import PanelFrame from "@/components/PanelFrame";
 
 export default async function KitchenPanel({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
   const { rid } = await searchParams;
   const adminRid = await panelAdminRid("kitchen", rid);
   const src = "/panels/kitchen/index.html" + (adminRid ? `?rid=${encodeURIComponent(adminRid)}` : "");
-  return (
-    <iframe
-      src={src}
-      title="Kitchen — live orders"
-      style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", border: 0 }}
-    />
-  );
+  return <PanelFrame src={src} title="Kitchen — live orders" />;
 }

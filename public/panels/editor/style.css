@@ -16,6 +16,12 @@
   --display: "Playfair Display", Georgia, "Times New Roman", serif;
   --shadow-sm: 0 2px 10px rgba(0,0,0,.25);
   --shadow-md: 0 14px 34px rgba(0,0,0,.42);
+  /* SAFE-AREA utilities — use these on EVERY fixed/sticky/docked element. env() covers the
+     iPhone notch/home bar when top-level; --safe-t/--safe-b are the real pixel insets the
+     host PanelFrame injects (env() reads 0 inside an iframe, and Android's 3-button nav
+     isn't in env() at all). */
+  --sat: max(env(safe-area-inset-top, 0px), var(--safe-t, 0px));
+  --sab: max(env(safe-area-inset-bottom, 0px), var(--safe-b, 0px));
 }
 
 * { box-sizing: border-box; }
@@ -30,7 +36,7 @@ body {
 /* ---------- top bar ---------- */
 .topbar {
   display: flex; align-items: center; gap: 24px;
-  padding: 0 20px; height: 60px;
+  padding: var(--sat) 20px 0; height: calc(60px + var(--sat));
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 10;
@@ -283,7 +289,8 @@ input:disabled { opacity: .55; cursor: not-allowed; }
 
 /* toast */
 .toast {
-  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: calc(24px + var(--sab)); left: 50%; transform: translateX(-50%);
+  max-width: calc(100vw - 24px);
   background: var(--panel); border: 1px solid var(--line); color: var(--text);
   /* Above everything (panel = 1000, confirm = 1200): a toast is feedback for
      what you JUST did, so no overlay is ever allowed to hide it. */
@@ -1882,12 +1889,20 @@ html[data-theme="light"] .op-tablet{ color:#1d4ed8; }
 @media (max-width: 760px) {
   .tp-detail-floating {
     position: fixed !important; left: 8px !important; right: 8px !important;
-    top: calc(62px + var(--ribbon-h, 0px)) !important; width: auto !important; margin-top: 0;
-    height: auto !important; max-height: calc(100vh - 76px - var(--ribbon-h, 0px)); max-height: calc(100dvh - 76px - var(--ribbon-h, 0px));
+    top: calc(62px + var(--ribbon-h, 0px) + var(--sat)) !important; width: auto !important; margin-top: 0;
+    height: auto !important; max-height: calc(100vh - 76px - var(--ribbon-h, 0px)); max-height: calc(100dvh - 76px - var(--ribbon-h, 0px) - var(--sat) - var(--sab));
     z-index: 40;
   }
   .tp-detail-floating .tp-detail-body { overflow-y: auto; }
   .tp-detail-floating .tp-detail-head { cursor: default; }
+  /* Phone popups/modals reach the device bottom: keep the sticky action bar's buttons
+     above the home indicator / 3-button nav (safe-area, audit 2026-07-20). */
+  .tp-detail-foot, .tbl-modal-foot { padding-bottom: calc(13px + var(--sab)); }
+  /* Dish rows: the price + status + serve/🗑 cluster no longer fits beside the name on a
+     ~360px phone (the name was crushed to a sliver, Galaxy A36 audit 2026-07-20).
+     Row 1 = qty · name · price; row 2 = the actions cluster, right-aligned. */
+  .tp-order .sx-item { grid-template-columns: 32px minmax(0, 1fr) auto; row-gap: 8px; }
+  .tp-order .sx-item .sx-item-acts { grid-column: 1 / -1; justify-content: flex-end; }
   .tp-resize-handle { display: none; }
   /* The ‹/› side-panel chevron is meaningless on a phone (popup mode is forced). */
   .floor-side-toggle { display: none; }

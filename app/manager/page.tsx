@@ -12,16 +12,11 @@
 // enforces the entry rule (admin may ONLY arrive via the console's per-restaurant
 // link, never a bare hand-typed /manager) and strips ?rid= from non-admin visits.
 import { panelAdminRid } from "@/lib/panelGate";
+import PanelFrame from "@/components/PanelFrame";
 
 export default async function ManagerPanel({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
   const { rid } = await searchParams;
   const adminRid = await panelAdminRid("manager", rid);
   const src = "/panels/editor/index.html" + (adminRid ? `?rid=${encodeURIComponent(adminRid)}` : "");
-  return (
-    <iframe
-      src={src}
-      title="Manager"
-      style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", border: 0 }}
-    />
-  );
+  return <PanelFrame src={src} title="Manager" />;
 }

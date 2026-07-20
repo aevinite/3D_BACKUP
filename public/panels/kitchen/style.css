@@ -14,12 +14,18 @@
   --green: #5fae6e;     /* ready */
   --amber: #e6b450;     /* new/attention */
   --red: #e2664f;       /* allergies/sold-out */
+  /* SAFE-AREA utilities — use these on EVERY fixed/sticky/docked element. env() covers the
+     iPhone notch/home bar when top-level; --safe-t/--safe-b are the real pixel insets the
+     host PanelFrame injects (env() reads 0 inside an iframe, and Android's 3-button nav
+     isn't in env() at all). */
+  --sat: max(env(safe-area-inset-top, 0px), var(--safe-t, 0px));
+  --sab: max(env(safe-area-inset-bottom, 0px), var(--safe-b, 0px));
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 
 /* top bar */
-.topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 12px 18px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: calc(12px + var(--sat)) 18px 12px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
 html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide child scroll the page sideways on a phone */
 .brand { font-size: 20px; font-weight: 800; }
 .brand .sub { color: var(--muted); font-weight: 500; font-size: 13px; margin-left: 6px; }
@@ -95,7 +101,7 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 
 /* the 86 board drawer */
 .drawer-overlay { position: fixed; inset: 0; background: rgba(3,7,16,0.6); z-index: 20; }
-.drawer { position: absolute; top: 0; right: 0; height: 100%; width: min(94vw, 420px); background: var(--bg); border-left: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; }
+.drawer { position: absolute; top: 0; right: 0; height: 100%; width: min(94vw, 420px); background: var(--bg); border-left: 1px solid var(--line); padding: calc(16px + var(--sat)) 16px calc(16px + var(--sab)); display: flex; flex-direction: column; }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .drawer-head h3 { margin: 0; font-size: 17px; }
 .drawer-head .sub { color: var(--muted); font-weight: 500; font-size: 13px; }
@@ -112,7 +118,7 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
    running; the tap that dismisses it IS the gesture that unlocks audio. Sits just above
    the toasts so it never covers them. */
 .sound-nudge {
-  position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%);
+  position: fixed; left: 50%; bottom: calc(74px + var(--sab)); transform: translateX(-50%);
   z-index: 60; display: inline-flex; align-items: center; gap: 8px;
   background: var(--amber); color: #201500; border: 0; border-radius: 999px;
   padding: 12px 22px; font-family: inherit; font-size: 15px; font-weight: 800;
@@ -124,7 +130,7 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 @media (prefers-reduced-motion: reduce) { .sound-nudge { animation: none; } }
 
 /* toasts (bottom-centre, with the UNDO escape hatch) */
-.toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+.toasts { position: fixed; bottom: calc(16px + var(--sab)); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 50; max-width: calc(100vw - 24px); }
 .toast { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 11px 16px; font-size: 14px; display: flex; gap: 14px; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .toast .undo { background: none; border: none; color: var(--blue); font-weight: 800; cursor: pointer; font-size: 13px; letter-spacing: 0.5px; }
 .toast .toast-x { margin-left: auto; background: none; border: none; color: var(--muted, #9aa); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; border-radius: 6px; }
@@ -192,7 +198,7 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
   .theme-toggle { width: 44px; height: 44px; }
   /* Leave room at the bottom so the last ticket / "Nothing here" isn't hidden behind the
      fixed "Tap to enable sound" nudge + toasts on a phone (audit 2026-07-07). */
-  .cols, .wall { padding-bottom: 104px; }
+  .cols, .wall { padding-bottom: calc(104px + var(--sab)); }
   /* Bigger reprint tap target on a phone/greasy tablet. */
   .reprint { min-height: 40px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
