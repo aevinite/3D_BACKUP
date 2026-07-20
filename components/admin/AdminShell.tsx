@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import NotificationBell from "@/components/admin/NotificationBell";
+import { useBackClose } from "@/lib/backStack";
 
 type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean };
 type NavGroup = { label: string; items: NavItem[]; quiet?: boolean };
@@ -95,9 +96,27 @@ export default function AdminShell({ children, initialSkin }: { children: React.
 
   const isActive = (n: NavItem) => (n.exact ? path === n.href : path.startsWith(n.href));
 
+  // Phone (≤900px) nav drawer. The .adx-burger/.adx-side.open/.adx-backdrop CSS shipped
+  // 2026-07-08 but the button that toggles it never did — so on a phone the sidebar sat
+  // off-screen with NO way to open it. This is that missing half (found 2026-07-20).
+  const [navOpen, setNavOpen] = useState(false);
+  // Hardware BACK closes the drawer instead of leaving the page (project rule: every
+  // overlay registers). Self-noops while closed.
+  useBackClose("admin-nav", navOpen, () => setNavOpen(false));
+  // A nav click changes the route → close; widening past the breakpoint → close too
+  // (otherwise the .open class + BACK layer silently linger on desktop).
+  useEffect(() => { setNavOpen(false); }, [path]);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 900px)");
+    const onChange = (e: MediaQueryListEvent) => { if (!e.matches) setNavOpen(false); };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
   return (
     <div className="adm adx" data-skin={skin}>
-      <aside className="adx-side">
+      {navOpen && <div className="adx-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+      <aside className={"adx-side" + (navOpen ? " open" : "")} id="adminNav">
         <div className="adx-brand">
           <span className="mark" style={{ background: "transparent", boxShadow: "none" }}>
             <img src="/brand/aevidine-mark.svg" alt="Aevidine" width={28} height={28} style={{ display: "block" }} />
@@ -109,7 +128,13 @@ export default function AdminShell({ children, initialSkin }: { children: React.
             <div key={g.label} className={"adx-group" + (g.quiet ? " quiet" : "")}>
               <div className="adx-group-lbl">{g.label}</div>
               {g.items.map((n) => (
-                <Link key={n.href} href={n.href} className={"adx-navlink" + (isActive(n) ? " active" : "")} title={n.label}>
+                // Navigating to a DIFFERENT page: the path-effect above closes the drawer
+                // AFTER the route commits (closing in the click handler races the
+                // router.push against the back-stack's history rewind and can bounce the
+                // navigation back — 2026-07-20). Re-tapping the CURRENT page's link never
+                // navigates, so that one closes here (no race possible).
+                <Link key={n.href} href={n.href} className={"adx-navlink" + (isActive(n) ? " active" : "")} title={n.label}
+                  onClick={() => { if (isActive(n)) setNavOpen(false); }}>
                   <i className={`fas ${n.icon}`} aria-hidden="true" />
                   <span className="lbl">{n.label}</span>
                   {n.soon && <span className="navsoon">Soon</span>}
@@ -123,6 +148,10 @@ export default function AdminShell({ children, initialSkin }: { children: React.
 
       <div className="adm-body">
         <header className="adx-top">
+          <button type="button" className="adx-burger" onClick={() => setNavOpen((o) => !o)}
+            aria-label={navOpen ? "Close menu" : "Open menu"} aria-expanded={navOpen} aria-controls="adminNav">
+            <i className={`fas ${navOpen ? "fa-xmark" : "fa-bars"}`} aria-hidden="true" />
+          </button>
           <RestaurantSwitcher />
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
             <ConnectionBadge />

@@ -92,16 +92,20 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Mobile (≤900px): the sidebar collapses to a horizontally-scrolling pill strip.
-  // Pills past the first few (incl. the real "Feedback & issues") sit off-screen with
-  // no hint, so after mount / route change, scroll the ACTIVE pill into view within the
-  // strip (mirrors the staff page's scrollIntoView). block:"nearest" keeps it from
-  // yanking the page vertically; desktop is untouched (the guard bails >900px).
+  // Mobile (≤900px): the sidebar becomes a ☰ left slide-in drawer (2026-07-20, same
+  // pattern as the manager + admin panels — replaced the old horizontally-scrolling
+  // pill strip that hid sections off the right edge). Hardware BACK closes the drawer
+  // (project rule: every overlay registers); a route change or widening past the
+  // breakpoint closes it too.
+  const [navOpen, setNavOpen] = useState(false);
+  useBackClose("owner-nav", navOpen, () => setNavOpen(false));
+  useEffect(() => { setNavOpen(false); }, [path]);
   useEffect(() => {
-    if (typeof window === "undefined" || window.innerWidth > 900) return;
-    const el = document.querySelector<HTMLElement>(".owx-nav .owx-navlink.active");
-    el?.scrollIntoView({ inline: "center", block: "nearest" });
-  }, [path]);
+    const mq = window.matchMedia("(max-width: 900px)");
+    const onChange = (e: MediaQueryListEvent) => { if (!e.matches) setNavOpen(false); };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   // "My restaurants" — the full list the owner owns, ALWAYS visible in the sidebar
   // (owner request 2026-07-06). The shared overview cache collapses this with the
@@ -143,8 +147,10 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   // for this event (no reload); from any other page we navigate home with ?focus=.
   const openRestaurant = (rid: string | null) => {
     if (path === "/owner") {
+      setNavOpen(false); // no navigation happens on the home page → close explicitly
       window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid } }));
     } else {
+      // navigating → the path-effect closes the drawer after the route commits
       const q = [rid ? `focus=${rid}` : "", ridPin ? `rid=${ridPin}` : ""].filter(Boolean).join("&");
       router.push(`/owner${q ? `?${q}` : ""}`);
     }
@@ -181,7 +187,8 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
 
   return (
     <div className="adm owx" data-skin={skin}>
-      <aside className="owx-side">
+      {navOpen && <div className="owx-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+      <aside className={"owx-side" + (navOpen ? " open" : "")} id="ownerNav">
         <div className="owx-brand">
           <span className="mark"><i className="fas fa-store" aria-hidden="true" /></span>
           <span className="who"><b>Owner</b><span>Aevidine</span></span>
@@ -197,6 +204,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                 if (!on && !adminViewing) return null;
                 return (
                   <Link key={it.href} href={withRid(it.href)} className={`owx-navlink${isActive(it) ? " active" : ""}${on ? "" : " xray-off"}`}
+                    onClick={() => { if (isActive(it)) setNavOpen(false); }} /* different page → the path-effect closes AFTER the route commits (closing here races the back-stack rewind and can bounce the nav) */
                     aria-current={isActive(it) ? "page" : undefined}
                     title={on ? undefined : `${it.label} is off for this owner — you can still open it (admin view)`}>
                     <i className={`fas ${it.icon}`} aria-hidden="true" />
@@ -275,6 +283,10 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
           </div>
         )}
         <header className="owx-top">
+          <button type="button" className="owx-burger" onClick={() => setNavOpen((o) => !o)}
+            aria-label={navOpen ? "Close menu" : "Open menu"} aria-expanded={navOpen} aria-controls="ownerNav">
+            <i className={`fas ${navOpen ? "fa-xmark" : "fa-bars"}`} aria-hidden="true" />
+          </button>
           <span className="owx-scope">
             <span className="dot" aria-hidden="true" /> {adminViewing ? shownName : "Owner overview"}
           </span>

@@ -3841,6 +3841,7 @@ a:focus:not(:focus-visible) { outline: none; }
    scroll felt bad; a tap-to-open drawer is the standard phone pattern). The drawer keeps the
    normal vertical grouped nav (same as desktop), just slides in from the left. ── */
 .adx-burger { display: none; }
+.adx-backdrop { display: none; } /* only the ≤900px block turns it on; belt-and-braces for a resize race */
 @media (max-width: 900px) {
   .adx-side {
     position: fixed; top: 0; left: 0; height: 100dvh; width: min(82vw, 300px); z-index: 1002;
@@ -3849,7 +3850,7 @@ a:focus:not(:focus-visible) { outline: none; }
     padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .adx-side.open { transform: translateX(0); }
-  .adx-backdrop { position: fixed; inset: 0; z-index: 1001; background: rgba(2,6,16,.55); }
+  .adx-backdrop { display: block; position: fixed; inset: 0; z-index: 1001; background: rgba(2,6,16,.55); }
   .adx-burger { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; border: var(--border); background: transparent; color: var(--text); cursor: pointer; flex: 0 0 auto; }
   .adx-top { padding: 8px 10px; gap: 6px; }
   /* Icon-only restaurant switcher on phones so the topbar (now with a hamburger) fits and the
@@ -3865,7 +3866,7 @@ a:focus:not(:focus-visible) { outline: none; }
   .adx-navlink { min-height: 40px; display: inline-flex; align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .adx-navlink, .adx-switch-trig, .adx-switch-opt, .adx .adm-btn { transition: none; }
+  .adx-navlink, .adx-switch-trig, .adx-switch-opt, .adx .adm-btn, .adx-side { transition: none; }
 }
 
 /* Live floor — the "year calendar" (owner 2026-07-04): restaurants = months,
@@ -4118,33 +4119,27 @@ a:focus:not(:focus-visible) { outline: none; }
 /* Tax split sub-rows */
 .owx-taxsplit { border-left: 3px solid color-mix(in srgb, var(--accent) 45%, transparent); }
 .owx-taxsplit td:first-child { padding-left: 20px; color: var(--muted); }
-/* ── responsive: sidebar → horizontally scrollable nav pills row (≤900px) ── */
+/* ── responsive (≤900px): sidebar → ☰ left slide-in drawer (2026-07-20) ──
+   Replaced the horizontally-scrolling pill strip (sections past the first few sat
+   off the right edge) with the same tap-to-open drawer the admin + manager panels
+   use: the WHOLE desktop sidebar — grouped nav, My-restaurants list, brand — slides
+   in from the left, unchanged. The burger lives in .owx-top (OwnerShell). */
+.owx-burger { display: none; }
+.owx-backdrop { display: none; }
 @media (max-width: 900px) {
-  .owx-side { width: 100%; flex-direction: row; align-items: center; gap: 8px; padding: 8px 10px; border-right: 0; border-bottom: var(--border); overflow: visible; flex-wrap: wrap; }
-  /* My-restaurants drops to its own full-width line of scrollable chips on phones —
-     the list must stay reachable on EVERY page (owner rule), just in chip form. */
-  .owx-myrest { width: 100%; margin: 2px 0 0; border: none; background: none; padding: 0; }
-  .owx-myrest .hd { display: none; }
-  .owx-myrest .rows { flex-direction: row; max-height: none; overflow-x: auto; overflow-y: hidden; gap: 6px; scrollbar-width: none; }
-  .owx-myrest .rows::-webkit-scrollbar { display: none; }
-  .owx-myrest .rrow { flex: none; width: auto; white-space: nowrap; border: var(--border); border-radius: 999px; padding: 5px 11px; font-size: 12px; }
-  .owx-myrest .rrow .rv { display: none; }
-  .owx-brand { padding: 0 6px 0 0; margin: 0; border-bottom: 0; border-right: var(--border); flex-shrink: 0; }
-  .owx-brand .who { display: none; }
-  /* A subtle edge fade hints there's more to scroll on either side of the pill strip. */
-  .owx-nav { flex-direction: row; overflow-x: auto; -webkit-overflow-scrolling: touch; gap: 4px; scrollbar-width: none;
-    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
-    mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%); }
-  .owx-nav::-webkit-scrollbar { display: none; }
-  .owx-group { display: contents; }
-  .owx-group-lbl { display: none; }
-  .owx-navlink { flex: none; white-space: nowrap; padding: 6px 10px; font-size: 12.5px; border: var(--border); border-radius: 999px; }
-  .owx-navlink.active { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-  /* Keep the "Soon" badge visible on mobile (compact) so unbuilt placeholder sections
-     stay visually distinct from real working ones in the pill row (was display:none). */
-  .owx-navlink .navsoon { margin-left: 6px; padding: 1px 5px; font-size: 8.5px; }
-  .owx-side-foot { display: none; }
-  .owx-top { padding: 8px 12px; }
+  .owx-side {
+    position: fixed; top: 0; left: 0; height: 100dvh; width: min(82vw, 300px); z-index: 1002;
+    transform: translateX(-100%); transition: transform .22s ease; overflow-y: auto;
+    box-shadow: 18px 0 50px rgba(0,0,0,.55); border-right: var(--border);
+    padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  .owx-side.open { transform: translateX(0); }
+  .owx-backdrop { display: block; position: fixed; inset: 0; z-index: 1001; background: rgba(2,6,16,.55); }
+  .owx-burger { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; border: var(--border); background: transparent; color: var(--text); cursor: pointer; flex: 0 0 auto; }
+  /* Comfortable thumb targets inside the drawer (desktop rows are 7px-padded). */
+  .owx-navlink { min-height: 40px; }
+  .owx-myrest .rrow { min-height: 40px; }
+  .owx-top { padding: 8px 12px; gap: 8px; }
   /* Bottom breathing room so scrolling content (last staff row / first chart title) never
      butts the screen edge or sits under any floating control on phones. Desktop unchanged.
      Add the device's safe-area inset: with viewport-fit:cover (app/layout.tsx) the page draws
@@ -4153,7 +4148,7 @@ a:focus:not(:focus-visible) { outline: none; }
   .owx .adm-main { padding: 14px; padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .owx-navlink, .owx-chip, .owx .adm-btn { transition: none; }
+  .owx-navlink, .owx-chip, .owx .adm-btn, .owx-side { transition: none; }
 }
 /* ── PRINT / PDF — force the owner console to a LIGHT palette ──────────────────
    The owx skin is DARK by default: near-white text + dark cards. Printed, that put

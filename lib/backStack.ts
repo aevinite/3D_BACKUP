@@ -71,6 +71,13 @@ function reconcile() {
     // e.g. the Leave dialog right after close-all — verified 2026-06-19.)
     const remove = s.pushed - target;
     s.pushed = target;
+    // BUT: if a real NAVIGATION already pushed on top of our buffer (tapping a nav
+    // link inside an open drawer: router.push lands, THEN the drawer closes), the
+    // current entry is the new page — not our buffer. Rewinding would yank the user
+    // straight back off the page they just opened (bug found 2026-07-20: admin/owner
+    // drawer nav-taps kept "bouncing back"). Leave the buried buffer alone; a later
+    // back press just crosses it (same URL as the page before, so it's invisible).
+    if (!(history.state as { __lfhLayer?: boolean } | null)?.__lfhLayer) return;
     s.ignore += 1;
     history.go(-remove);
   }
