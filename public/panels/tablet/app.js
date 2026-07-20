@@ -2413,26 +2413,37 @@ async function loadImpl() {
   // TIER 1: the slim summary drives the GRID + side aggregates + the table-agnostic bundle
   // (settings/dishes/categories/restaurant). TIER 2: if a table's detail is open, ALSO fetch its
   // full slice so the detail renders complete order/member rows. The grid never needs the slice.
+  // The recurring floor refresh doesn't need the big dish list — the menu is cached on-device and
+  // only refetched when it's flagged stale (realtime `menu` topic, first load / empty cache, wake,
+  // or the ~10min safety-net). Slim refreshes drop ~50KB of the ~77KB. (perf 2026-07-20)
+  const needMenu = state._menuStale || !(state.data.dishes || []).length;
   const [summary, selSlice] = await Promise.all([
-    api("GET", "/summary"),
+    api("GET", needMenu ? "/summary" : "/summary?nomenu=1"),
     sel != null ? api("GET", "/state?table=" + encodeURIComponent(sel)) : Promise.resolve(null),
   ]);
   if (seq !== loadSeq) return;          // a newer refresh started — this one is stale, drop it
   // Split the full-summary response into the per-tile summary (+ aggregates) and the agnostic bundle.
   const { settings, dishes, categories, restaurant, ...summaryOnly } = summary || {};
   state.summary = summaryOnly;
-  state.data = Object.assign({}, state.data, {
+  const patch = {
     settings: settings ?? null,
-    dishes: dishes || [],
-    categories: categories || [],
+    categories: categories || state.data.categories || [],   // categories are always returned; keep last if absent
     restaurant: restaurant ?? null,
     // Stale per-table detail rows from a previously-selected table are harmless (the grid ignores
     // state.data; the detail re-pulls below), but we clear them so a closed table can't linger.
     sessions: [], members: [], orders: [], items: [], calls: [], requests: [],
-  });
-  // Cache the menu on-device for instant Take-order next time (only when we actually got dishes,
-  // so a transient empty response never wipes a good cache). Paired with the boot hydrate. (audit 2026-07-09)
-  try { if ((dishes || []).length) localStorage.setItem("lfh_tablet_menu", JSON.stringify({ dishes, categories: categories || [] })); } catch (_e) {}
+  };
+  // `dishes` is present ONLY on a full load (ABSENT — not [] — on a slim ?nomenu=1 response). On a
+  // slim refresh KEEP the cached menu; on a full one refresh it, rewrite the on-device cache, and
+  // clear the stale flag. This is what lets a slim refresh never wipe the dish list.
+  if (Array.isArray(dishes)) {
+    patch.dishes = dishes;
+    state._menuStale = false;
+    try { if (dishes.length) localStorage.setItem("lfh_tablet_menu", JSON.stringify({ dishes, categories: categories || [] })); } catch (_e) {}
+  } else {
+    patch.dishes = state.data.dishes || [];
+  }
+  state.data = Object.assign({}, state.data, patch);
   if (sel != null && selSlice) mergeSelectedSlice(sel, selSlice);
   // Show WHICH restaurant this panel is scoped to (multi-tenant). Set here in load()
   // — NOT in renderFloor()/renderPanel() — because they're skipped when the board
@@ -2466,6 +2477,10 @@ try {
     if (Array.isArray(_mc.categories) && _mc.categories.length) state.data.categories = _mc.categories;
   }
 } catch (_e) {}
+// Force the FIRST network load to be a FULL one (fresh dishes) even when the cache hydrated the
+// menu above — the menu may have changed while this tablet was closed. After that first refresh,
+// recurring floor refreshes go slim. (perf 2026-07-20)
+state._menuStale = true;
 load().catch((e) => toast("Can't reach the database: " + e.message, false));
 
 // ── HIERARCHY X-RAY ribbon (Phase 3) ─────────────────────────────────────────
@@ -2582,10 +2597,14 @@ if (window.LFH_RT) {
     ops: (detail) => (detail && !detail.full && detail.tables && detail.tables.length) ? loadTables(detail.tables) : load(),
     // #17: after a menu change lands, if the waiter is mid-order patch the open dish grid in
     // place so a just-sold-out dish becomes untappable immediately (load() skips renderPanel
-    // while ordering, so without this the grid stayed stale).
-    menu: () => load().then(() => { if (state.ordering) updateDishAvailability(); }).catch(() => {}),
+    // while ordering, so without this the grid stayed stale). Flag the menu stale so this load()
+    // is a FULL one that actually refetches the dishes (normal refreshes are slim). (perf 2026-07-20)
+    menu: () => { state._menuStale = true; return load().then(() => { if (state.ordering) updateDishAvailability(); }).catch(() => {}); },
   }});
-  setInterval(() => load().catch(() => {}), 60000); // backup sync
+  // Backup floor sync every 60s (slim). Every ~10th minute also flag the menu stale so the next
+  // load refetches dishes — a safety-net that self-heals a missed realtime `menu` event. (perf 2026-07-20)
+  let _menuHealN = 0;
+  setInterval(() => { if ((++_menuHealN % 10) === 0) state._menuStale = true; load().catch(() => {}); }, 60000);
 } else {
   setInterval(() => load().catch(() => {}), 2000); // fallback poll
 }
@@ -2640,7 +2659,7 @@ window.addEventListener("online", () => load().catch(() => {}));
     // #5: clock lives here on phones (moved off the cramped top bar; desktop keeps it on the bar).
     '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
     // Build tag: lets the owner confirm at a glance he's on the latest code (rules out a stale cache). (audit 2026-07-09)
-    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260709h</span></div>' +
+    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260720a</span></div>' +
     // Banquet module (mig 130): shown only when the admin entitlement AND the
     // waiter's tablet_banquet capability allow it (openDrawer re-checks each open).
     '<button class="dw-btn" id="dwBanquet" type="button" hidden style="margin-top:auto;margin-bottom:10px">🎪 Banquet billing</button>' +
