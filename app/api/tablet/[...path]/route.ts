@@ -168,24 +168,37 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // The selected table's FULL detail still comes from /state?table=N (tier 2).
     if (path.join("/") === "summary") {
       const tbl = new URL(req.url).searchParams.get("table");
+      // ?nomenu=1 → skip the big dishes list (the panel keeps its on-device cached menu and
+      // refetches dishes only when the realtime `menu` topic says it changed, boot, or a ~10min
+      // safety-net). The recurring floor refresh (60s poll / ops reloads) is the common case, and
+      // the dish list was ~50KB of the ~77KB payload — so this cuts that recurring egress ~2.5x. (perf 2026-07-20)
+      const nomenu = new URL(req.url).searchParams.get("nomenu") === "1";
       const { data, error } = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl || null });
       if (error) throw new Error(error.message);
       const summary = data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] };
       // Targeted (?table=N): tile only — the panel keeps its cached agnostic bundle.
       if (tbl) return ok(summary);
-      // Full floor: attach the small table-agnostic collections in ONE round-trip.
-      const [settings, dishes, categories, restaurant] = await Promise.all([
+      // Full floor: attach the small table-agnostic collections in ONE round-trip. The dishes
+      // query is STARTED here only on a full load (so it runs in parallel with the rest); on a
+      // slim (nomenu) load it's never issued at all.
+      const dishesP = nomenu
+        ? null
+        : sb.from("menu_items").select("id,title,price,category,tags,veg,options").eq("restaurant_id", rid).order("category");
+      const [settings, categories, restaurant] = await Promise.all([
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
-        sb.from("menu_items").select("id,title,price,category,tags,veg,options").eq("restaurant_id", rid).order("category"),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
       ]);
-      return ok({
+      const body: Record<string, unknown> = {
         ...summary,
         // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
-        settings: overlayUserPerms(must(settings), g.user), dishes: must(dishes), categories: must(categories),
+        settings: overlayUserPerms(must(settings), g.user), categories: must(categories),
         restaurant: must(restaurant) || null,
-      });
+      };
+      // Only attach dishes on a FULL load. On nomenu the key is ABSENT (not []), so the client
+      // can tell "menu not sent, keep the cached one" apart from "menu is genuinely empty".
+      if (dishesP) body.dishes = must(await dishesP);
+      return ok(body);
     }
 
     // ── GET /api/tablet/banquet-items — the banquet menu (mig 130), fetched ONLY
