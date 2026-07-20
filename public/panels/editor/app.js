@@ -7094,8 +7094,36 @@ window.addEventListener("resize", () => {
   }
   if (state.floatingTables.length) layoutFloatingRow();
 });
+// ---- Phone nav drawer (≤760px) ----
+// The ☰ button slides the .tabs nav in from the left as a drawer (CSS does the
+// showing/hiding off body.nav-open; here we just flip that class). Registered with
+// LFH_BACK so the phone's hardware BACK closes the drawer instead of leaving the
+// panel (project rule: every overlay is a back step). On desktop the burger is
+// display:none so none of this ever fires.
+let navBackOff = null; // unregister handle while the drawer is open (idempotent)
+function navDrawerSet(open) {
+  if (open === document.body.classList.contains("nav-open")) return;
+  document.body.classList.toggle("nav-open", open);
+  const burger = document.getElementById("navBurger");
+  if (burger) burger.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    if (window.LFH_BACK && !navBackOff) navBackOff = LFH_BACK.layer("nav-drawer", () => navDrawerSet(false));
+  } else if (navBackOff) {
+    const off = navBackOff; navBackOff = null; off(); // safe even when BACK itself closed it
+  }
+}
+{
+  const burger = document.getElementById("navBurger");
+  if (burger) burger.onclick = () => navDrawerSet(!document.body.classList.contains("nav-open"));
+  const scrim = document.getElementById("navScrim");
+  if (scrim) scrim.onclick = () => navDrawerSet(false);
+  const close = document.getElementById("navClose");
+  if (close) close.onclick = () => navDrawerSet(false);
+  // widen past the phone breakpoint with the drawer open → drop the class + back layer
+  window.matchMedia("(max-width: 760px)").addEventListener("change", (e) => { if (!e.matches) navDrawerSet(false); });
+}
 // Top tabs + Editor sub-nav switch views — but first guard any unsaved edits.
-document.querySelectorAll(".tab").forEach((t) => (t.onclick = async () => { if (await confirmDiscardIfDirty()) setTab(t.dataset.tab); }));
+document.querySelectorAll(".tab").forEach((t) => (t.onclick = async () => { if (await confirmDiscardIfDirty()) { setTab(t.dataset.tab); navDrawerSet(false); } }));
 document.querySelectorAll(".subtab").forEach((t) => (t.onclick = async () => { if (await confirmDiscardIfDirty()) setTab(t.dataset.tab); }));
 $("#newBtn").onclick = async () => { if (await confirmDiscardIfDirty()) newRecord(); }; // the "+ New" button
 // Dishes multi-select toggle.

@@ -52,6 +52,10 @@ body {
    lets the flex item actually shrink so the scroll can engage. */
 .tabs { display: flex; gap: 6px; overflow-x: auto; min-width: 0; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
+/* Phone-drawer parts (☰ burger, dimmed scrim, drawer header) exist in the markup at
+   every width but only DO anything ≤760px — on desktop they stay hidden and the tabs
+   render in the bar exactly as before. */
+.nav-burger, .nav-scrim, .tabs-head { display: none; }
 .tab {
   background: transparent; color: var(--muted);
   border: 1px solid transparent; border-radius: 999px;
@@ -1203,22 +1207,75 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   /* belt-and-braces: never let a stray wide element scroll the whole page sideways */
   html, body { overflow-x: hidden; }
 
-  /* --- top bar: two rows, with the tabs on a horizontally-swipeable strip --- */
+  /* --- top bar: ONE slim row (☰ + brand + actions); the tabs move into a left
+     slide-in drawer opened by the ☰ button (owner request 2026-07-20 — the old
+     wrap-to-many-rows tab strip ate a third of the phone screen). --- */
   .topbar {
-    height: auto; flex-wrap: wrap; gap: 8px 14px; padding: 10px 14px;
+    height: auto; flex-wrap: wrap; gap: 8px 10px; padding: 10px 12px;
   }
   .brand { font-size: 18px; }
   .conn { margin-left: auto; }              /* stays top-right, on the brand's row */
-  /* On a phone the tabs WRAP to as many rows as needed so EVERY section
-     (Dashboard, Log, Settings…) is visible — the old horizontal-swipe strip
-     hid the last 3 tabs off the right edge with no scroll hint, so a manager
-     on a phone could not reach them at all (2026-07-05 phone audit). */
-  .tabs {
-    order: 3; width: 100%;                  /* full-width row beneath the brand */
-    flex-wrap: wrap;                        /* show every tab, wrapping as needed */
-    gap: 6px; padding-bottom: 2px;
+
+  /* ☰ hamburger: three bars that cross into an ✕ while the drawer is open */
+  .nav-burger {
+    display: inline-flex; flex-direction: column; justify-content: center; align-items: center;
+    gap: 4px; flex: none;
+    width: 40px; height: 40px; min-height: 40px;      /* comfortable tap target */
+    background: transparent; border: 1px solid var(--line); border-radius: 10px;
+    cursor: pointer; padding: 0;
   }
-  .tab { flex: 0 0 auto; padding: 9px 14px; font-size: 13px; white-space: nowrap; min-height: 40px; }
+  .nav-burger span {
+    display: block; width: 18px; height: 2px; border-radius: 2px;
+    background: var(--text); transition: transform .2s ease, opacity .2s ease;
+  }
+  body.nav-open .nav-burger span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+  body.nav-open .nav-burger span:nth-child(2) { opacity: 0; }
+  body.nav-open .nav-burger span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+  /* dimmed page behind the open drawer; tapping it closes. Sits inside the topbar's
+     stacking context (z 1) so the drawer (z 2) always paints above it. */
+  .nav-scrim {
+    display: block; position: fixed; inset: 0; z-index: 1;
+    background: rgba(0, 0, 0, .45);
+    opacity: 0; pointer-events: none; transition: opacity .22s ease;
+  }
+  body.nav-open .nav-scrim { opacity: 1; pointer-events: auto; }
+
+  /* the SAME .tabs nav (badges, banquet-gating, active state all keep working)
+     restyled as a left drawer: off-screen by default, slides in on body.nav-open */
+  .tabs {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 2;
+    width: min(78vw, 300px);
+    flex-direction: column; align-items: stretch; gap: 4px;
+    background: var(--panel); border-right: 1px solid var(--line);
+    box-shadow: 0 0 40px rgba(0, 0, 0, .35);
+    padding: calc(12px + var(--sat)) 12px calc(16px + var(--sab)); /* --sat/--sab: real insets even inside the iframe (env() reads 0 there) */
+    overflow-y: auto; overflow-x: hidden;
+    transform: translateX(-110%); transition: transform .25s ease;
+  }
+  body.nav-open .tabs { transform: translateX(0); }
+
+  /* drawer header: "Sections" + ✕ close */
+  .tabs-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 2px 6px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--line);
+    font-weight: 700; font-size: 14px; color: var(--muted);
+    letter-spacing: .4px; text-transform: uppercase;
+  }
+  .tabs-head button {
+    background: transparent; border: 1px solid var(--line); border-radius: 10px;
+    width: 36px; height: 36px; font-size: 15px; color: var(--text); cursor: pointer;
+  }
+
+  .tab {
+    flex: 0 0 auto; width: 100%; text-align: left;
+    padding: 12px 14px; font-size: 15px; white-space: nowrap;
+    min-height: 44px; border-radius: 12px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tabs, .nav-scrim, .nav-burger span { transition: none; }
+  }
 
   /* --- main layout: single column, page scrolls instead of fixed panes --- */
   .layout { grid-template-columns: 1fr; height: auto; }
@@ -1871,6 +1928,10 @@ html[data-theme="light"] .op-tablet{ color:#1d4ed8; }
 @media (max-width: 760px) {
   html, body { height: auto; overflow-y: auto; }
   .topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; gap: 8px 10px; position: sticky; top: 0; z-index: 30; }
+  /* Drawer open → lift the topbar (which contains the drawer + scrim) ABOVE the
+     phone table-detail popup (.tp-detail-floating, z-index 40): without this the
+     drawer slid in UNDERNEATH an open popup and looked broken. */
+  body.nav-open .topbar { z-index: 50; }
   /* Editor tab: dish list on top (own scroll), edit pane below — was a 320px column. */
   .layout { grid-template-columns: 1fr; height: auto; }
   .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 50vh; }
