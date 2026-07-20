@@ -3,16 +3,11 @@
 // invisible to users). See app/r/[restaurant]/tablet/page.tsx for the
 // slug↔session rules.
 import { requirePanelAt } from "@/lib/panelGate";
+import PanelFrame from "@/components/PanelFrame";
 
 export default async function ScopedManagerPanel({ params }: { params: Promise<{ restaurant: string }> }) {
   const { restaurant } = await params;
   const { restaurantId, admin } = await requirePanelAt("manager", restaurant);
   const src = "/panels/editor/index.html" + (admin ? `?rid=${encodeURIComponent(restaurantId)}` : "");
-  return (
-    <iframe
-      src={src}
-      title="Manager"
-      style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", border: 0 }}
-    />
-  );
+  return <PanelFrame src={src} title="Manager" />;
 }

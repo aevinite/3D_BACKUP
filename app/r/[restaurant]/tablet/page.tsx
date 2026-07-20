@@ -6,16 +6,13 @@
 // super-user the slug IS the view-as choice: the iframe gets ?rid=<id>, the
 // existing per-tab admin pin (ignored server-side for real staff sessions).
 import { requirePanelAt } from "@/lib/panelGate";
+import PanelFrame from "@/components/PanelFrame";
 
 export default async function ScopedTabletPanel({ params }: { params: Promise<{ restaurant: string }> }) {
   const { restaurant } = await params;
   const { restaurantId, admin } = await requirePanelAt("tablet", restaurant);
   const src = "/panels/tablet/index.html" + (admin ? `?rid=${encodeURIComponent(restaurantId)}` : "");
-  return (
-    <iframe
-      src={src}
-      title="Waiter tablet"
-      style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", border: 0 }}
-    />
-  );
+  // PanelFrame (not a raw iframe) — sizes to the VISIBLE viewport and bridges the
+  // phone's safe-area insets into the panel. See components/PanelFrame.tsx.
+  return <PanelFrame src={src} title="Waiter tablet" />;
 }

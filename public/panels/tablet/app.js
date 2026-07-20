@@ -848,7 +848,10 @@ function renderPanel() {
       : r.status !== "ready"
         ? `<span class="iedit"><button class="qbtn" data-qty-dec="${esc(r.id)}" data-qty="${r.qty}" title="Fewer">−</button><button class="qbtn" data-qty-inc="${esc(r.id)}" data-qty="${r.qty}" title="More">＋</button><button class="qbtn" data-edit-dish="${esc(r.id)}" title="Edit allergens & note for this dish">✎ Edit</button></span>`
       : "";
-    return `<div class="iline${editing ? " editing" : ""}"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${remMark}${opt}${rem}${note}</span>${priceTag}${statusBadge}${serveBtn}${editCtl}${delBtn}</div>`;
+    // The trailing status/serve/edit/delete cluster is ONE .iacts container so narrow
+    // phones can wrap it to its own right-aligned second row (the name + price keep the
+    // first row) instead of crushing the dish name to a sliver (A36 audit 2026-07-20).
+    return `<div class="iline${editing ? " editing" : ""}"><span class="iqty">${r.qty}×</span><span class="inm">${esc(r.title)}${remMark}${opt}${rem}${note}</span>${priceTag}<span class="iacts">${statusBadge}${serveBtn}${editCtl}${delBtn}</span></div>`;
   };
   // Per-order staff controls. NOT editing: an "✎ Edit" button (opens the gated edit
   // mode) + Delete order. EDITING: allergen toggle chips ("avoid in all dishes"),
@@ -2659,7 +2662,7 @@ window.addEventListener("online", () => load().catch(() => {}));
     // #5: clock lives here on phones (moved off the cramped top bar; desktop keeps it on the bar).
     '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
     // Build tag: lets the owner confirm at a glance he's on the latest code (rules out a stale cache). (audit 2026-07-09)
-    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260720a</span></div>' +
+    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260720safe1</span></div>' +
     // Banquet module (mig 130): shown only when the admin entitlement AND the
     // waiter's tablet_banquet capability allow it (openDrawer re-checks each open).
     '<button class="dw-btn" id="dwBanquet" type="button" hidden style="margin-top:auto;margin-bottom:10px">🎪 Banquet billing</button>' +

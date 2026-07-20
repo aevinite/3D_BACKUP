@@ -21,7 +21,7 @@ export function AdminToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={toast}>
       {children}
-      <div aria-live="polite" style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 2000, display: "flex", flexDirection: "column", gap: 8, pointerEvents: "none" }}>
+      <div aria-live="polite" style={{ position: "fixed", left: "50%", bottom: "calc(24px + env(safe-area-inset-bottom, 0px))", transform: "translateX(-50%)", zIndex: 2000, display: "flex", flexDirection: "column", gap: 8, pointerEvents: "none", maxWidth: "calc(100vw - 24px)" }}>
         {items.map((t) => (
           <div key={t.id} role="status" style={{ background: t.kind === "err" ? "var(--adm-danger, #e5484d)" : "var(--adm-ok, #2e9e6b)", color: "#fff", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, boxShadow: "0 6px 24px rgba(0,0,0,0.25)" }}>{t.msg}</div>
         ))}

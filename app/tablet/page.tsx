@@ -10,13 +10,13 @@
 // panelAdminRid enforces the entry rule (admin only via the console's link) and
 // strips ?rid= from non-admin visits.
 import { panelAdminRid } from "@/lib/panelGate";
-import TabletFrame from "./TabletFrame";
+import PanelFrame from "@/components/PanelFrame";
 
 export default async function TabletPanel({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
   const { rid } = await searchParams;
   const adminRid = await panelAdminRid("tablet", rid);
   const src = "/panels/tablet/index.html" + (adminRid ? `?rid=${encodeURIComponent(adminRid)}` : "");
-  // TabletFrame renders the iframe AND pushes the phone's real safe-area insets into it (env()
-  // doesn't resolve inside a nested iframe — see TabletFrame.tsx).
-  return <TabletFrame src={src} />;
+  // PanelFrame renders the iframe sized to the VISIBLE viewport AND pushes the phone's real
+  // safe-area insets into it (env() doesn't resolve inside a nested iframe — see PanelFrame.tsx).
+  return <PanelFrame src={src} title="Waiter tablet" />;
 }

@@ -6,7 +6,7 @@
   <title>Waiter tablet</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=20260720a">
+  <link rel="stylesheet" href="style.css?v=20260720safe1">
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js"></script>
 </head>
@@ -69,7 +69,7 @@
       </div>
     </div>
   </div>
-  <script src="/panels/maint.js"></script>
+  <script src="/panels/maint.js?v=b7"></script>
   <script src="/panels/realtime.js?v=b14"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=1"></script>
@@ -78,6 +78,6 @@
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js"></script>
   <script src="/panels/issue-raise.js?v=1"></script>
-  <script src="app.js?v=20260720a"></script>
+  <script src="app.js?v=20260720safe1"></script>
 </body>
 </html>
