@@ -58,37 +58,48 @@ const GROUPS: NavGroup[] = [
 
 type Rest = { id: string; slug: string; name: string; active: boolean };
 
-export default function AdminShell({ children }: { children: React.ReactNode }) {
+export default function AdminShell({ children, initialSkin }: { children: React.ReactNode; initialSkin?: "light" | "dark" }) {
   const path = usePathname();
   // DARK is the default skin (owner spec 2026-07-04) — light stays as the toggle.
-  const [skin, setSkin] = useState<"light" | "dark">("dark");
+  // The server passes the cookie value as `initialSkin` so SSR already emits the RIGHT
+  // data-skin — no dark→light flash on load/refresh for admins who chose light (mirrors
+  // the owner-panel fix 2026-07-06; before this the state defaulted to "dark" and only
+  // flipped to light AFTER hydration, which is what caused the black flash). Falls back
+  // to dark on a first-ever visit (no cookie yet).
+  const [skin, setSkin] = useState<"light" | "dark">(initialSkin ?? "dark");
   useEffect(() => {
-    try { const s = localStorage.getItem("aevidine_skin"); if (s === "dark" || s === "light") setSkin(s); } catch {}
+    // Reconcile with localStorage only if it and the SSR cookie disagree (rare) — keeps
+    // the toggle working even if the cookie was cleared but localStorage kept. Also seed
+    // the cookie from localStorage so admins who chose light BEFORE this fix (value only
+    // in localStorage, no cookie yet) get a flash-free load next time, without re-toggling.
+    try {
+      const s = localStorage.getItem("aevidine_skin");
+      if (s === "dark" || s === "light") {
+        if (s !== skin) setSkin(s);
+        if (!document.cookie.includes("aevidine_skin=")) {
+          document.cookie = `aevidine_skin=${s}; path=/; max-age=31536000; samesite=lax`;
+        }
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const toggleSkin = () => {
-    setSkin((cur) => { const next = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("aevidine_skin", next); } catch {} return next; });
+    setSkin((cur) => {
+      const next = cur === "dark" ? "light" : "dark";
+      try { localStorage.setItem("aevidine_skin", next); } catch {}
+      // Persist to a cookie too so the NEXT server render starts on the right skin.
+      try { document.cookie = `aevidine_skin=${next}; path=/; max-age=31536000; samesite=lax`; } catch {}
+      return next;
+    });
   };
-
-  // Mobile nav drawer (≤900px): a ☰ hamburger slides the sidebar in from the left.
-  // Closes on route change, backdrop tap, a nav-link tap, or Escape.
-  const [navOpen, setNavOpen] = useState(false);
-  useEffect(() => { setNavOpen(false); }, [path]);
-  useEffect(() => {
-    if (!navOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setNavOpen(false); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [navOpen]);
 
   const isActive = (n: NavItem) => (n.exact ? path === n.href : path.startsWith(n.href));
 
   return (
     <div className="adm adx" data-skin={skin}>
-      {navOpen && <div className="adx-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
-      <aside className={"adx-side" + (navOpen ? " open" : "")}>
+      <aside className="adx-side">
         <div className="adx-brand">
           <span className="mark" style={{ background: "transparent", boxShadow: "none" }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/brand/aevidine-mark.svg" alt="Aevidine" width={28} height={28} style={{ display: "block" }} />
           </span>
           <span className="who"><b>Aevidine</b><span>Platform admin</span></span>
@@ -98,7 +109,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             <div key={g.label} className={"adx-group" + (g.quiet ? " quiet" : "")}>
               <div className="adx-group-lbl">{g.label}</div>
               {g.items.map((n) => (
-                <Link key={n.href} href={n.href} className={"adx-navlink" + (isActive(n) ? " active" : "")} title={n.label} onClick={() => setNavOpen(false)}>
+                <Link key={n.href} href={n.href} className={"adx-navlink" + (isActive(n) ? " active" : "")} title={n.label}>
                   <i className={`fas ${n.icon}`} aria-hidden="true" />
                   <span className="lbl">{n.label}</span>
                   {n.soon && <span className="navsoon">Soon</span>}
@@ -112,9 +123,6 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
       <div className="adm-body">
         <header className="adx-top">
-          <button className="adx-burger" onClick={() => setNavOpen(true)} aria-label="Open menu" aria-expanded={navOpen}>
-            <i className="fas fa-bars" aria-hidden="true" />
-          </button>
           <RestaurantSwitcher />
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
             <ConnectionBadge />
