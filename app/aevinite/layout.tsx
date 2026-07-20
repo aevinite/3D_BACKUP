@@ -12,5 +12,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const store = await cookies();
   const ok = await tokenIsValid(store.get(AUTH_COOKIE)?.value);
   if (!ok) redirect("/staff-login?next=/aevinite");
-  return <AdminShell><AdminToastProvider>{children}</AdminToastProvider></AdminShell>;
+  // Read the saved skin from the cookie so SSR emits the RIGHT data-skin and there's no
+  // dark→light flash on load for admins who chose light mode (mirrors the owner layout).
+  const skinCookie = store.get("aevidine_skin")?.value;
+  const initialSkin = skinCookie === "light" || skinCookie === "dark" ? skinCookie : undefined;
+  return <AdminShell initialSkin={initialSkin}><AdminToastProvider>{children}</AdminToastProvider></AdminShell>;
 }
