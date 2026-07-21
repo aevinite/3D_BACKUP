@@ -61,7 +61,7 @@ export function closeBlock(orders: OrderLite[], force: boolean):
 export async function closeSession(
   sessionId: string,
   opts: { force?: boolean },
-  ctx: { panel: "editor" | "tablet"; deviceId?: string | null; restaurantId?: string | null },
+  ctx: { panel: "editor" | "tablet" | "admin"; deviceId?: string | null; restaurantId?: string | null },
 ): Promise<CloseResult> {
   const force = opts.force === true;
 

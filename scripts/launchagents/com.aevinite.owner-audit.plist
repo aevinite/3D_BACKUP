@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aevinite.owner-audit</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>/Users/aevinite/Documents/Projects/backup_Menu/scripts/nightly-owner-audit.sh</string>
+    </array>
+
+    <!-- 6:00 AM local time (Asia/Calcutta), every day. Shifted from 4:00 so it does not
+         collide with the 4:00 tablet audit on the one shared browser. launchd uses local time. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/aevinite/Documents/Projects/backup_Menu</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/aevinite/Documents/Projects/backup_Menu/.claude/audits/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/aevinite/Documents/Projects/backup_Menu/.claude/audits/launchd.err.log</string>
+</dict>
+</plist>

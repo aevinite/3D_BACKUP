@@ -22,15 +22,22 @@ export async function GET(req: NextRequest) {
 
   // Bounded, scoped reads only. Tickets: open, newest, capped, explicit columns.
   // A separate head-count gives the TRUE open total for the badge without pulling >30 rows.
-  const [ticketsQ, countQ, restQ] = await Promise.all([
+  // errorsQ/errorCountQ: recent app errors (Everything Log, mig 159) so the bell warns the
+  // admin something broke — cheap via the partial idx_staff_actions_error index.
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [ticketsQ, countQ, restQ, errorsQ, errorCountQ] = await Promise.all([
     sb.from("issues")
       .select("id, restaurant_id, subject, body, raised_by, raised_role, created_at, image_url, audio_url")
       .eq("status", "open").order("created_at", { ascending: false }).limit(TICKET_LIMIT),
     sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open"),
     sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null),
+    sb.from("staff_actions").select("id, panel, action, detail, restaurant_id, created_at")
+      .eq("level", "error").gte("created_at", since24h).order("created_at", { ascending: false }).limit(10),
+    sb.from("staff_actions").select("id", { count: "exact", head: true }).eq("level", "error").gte("created_at", since24h),
   ]);
   // Surface a failed read — otherwise a broken tickets/restaurants query silently shows an
   // empty bell (no tickets, and NO suspended-restaurant alerts) as if everything's clear (audit).
+  // Errors are non-fatal to the feed: if that read fails we still return the rest.
   const nErr = ticketsQ.error || countQ.error || restQ.error;
   if (nErr) return NextResponse.json({ error: nErr.message }, { status: 500 });
 
@@ -40,6 +47,10 @@ export async function GET(req: NextRequest) {
   for (const r of restaurants) { nameOf[r.id] = r.name; slugOf[r.id] = r.slug; }
 
   const tickets = (ticketsQ.data || []).map((t) => ({ ...t, restaurantName: nameOf[t.restaurant_id] || "—", restaurantSlug: slugOf[t.restaurant_id] || "" }));
+
+  // Recent app errors (last 24h) — a signal that something broke, with a jump into the log.
+  const errors = (errorsQ.data || []).map((e) => ({ ...e, restaurantName: e.restaurant_id ? (nameOf[e.restaurant_id] || "—") : "Platform" }));
+  const errorCount = errorCountQ.count ?? errors.length;
 
   // Alerts = restaurants that are SUSPENDED (guest menu off) — the one actionable state.
   const alerts: Array<{ restaurant_id: string; restaurantName: string; restaurantSlug: string; kind: "suspended"; detail: string }> = [];
@@ -53,6 +64,8 @@ export async function GET(req: NextRequest) {
     openTicketCount: countQ.count ?? tickets.length,  // TRUE open total (for the badge)
     alerts,
     alertCount: alerts.length,
+    errors,                                           // up to 10 newest app errors (last 24h)
+    errorCount,                                        // TRUE error total in the last 24h
     healthOk: true,
     checkedAt: new Date().toISOString(),
   });

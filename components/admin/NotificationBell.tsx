@@ -11,7 +11,8 @@ import { useAdminModal } from "@/components/admin/useAdminModal";
 import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
 
 type Alert = { restaurant_id: string; restaurantName: string; restaurantSlug: string; kind: "suspended" | "dormant"; detail: string };
-type Feed = { tickets: TicketLike[]; openTicketCount: number; alerts: Alert[]; alertCount: number };
+type ErrRow = { id: string; panel: string; action: string; detail: string | null; restaurant_id: string | null; restaurantName: string; created_at: string };
+type Feed = { tickets: TicketLike[]; openTicketCount: number; alerts: Alert[]; alertCount: number; errors: ErrRow[]; errorCount: number };
 
 export default function NotificationBell() {
   const [feed, setFeed] = useState<Feed | null>(null);
@@ -20,13 +21,13 @@ export default function NotificationBell() {
   const load = useCallback(() => {
     fetch("/api/admin/notifications", { cache: "no-store" })
       .then((r) => r.json())
-      .then((j) => { if (!j.error) setFeed({ tickets: j.tickets || [], openTicketCount: j.openTicketCount || 0, alerts: j.alerts || [], alertCount: j.alertCount || 0 }); })
+      .then((j) => { if (!j.error) setFeed({ tickets: j.tickets || [], openTicketCount: j.openTicketCount || 0, alerts: j.alerts || [], alertCount: j.alertCount || 0, errors: j.errors || [], errorCount: j.errorCount || 0 }); })
       .catch(() => { /* keep last-known feed; the badge just won't update this tick */ });
   }, []);
   useEffect(() => { load(); }, [load]);
   useActiveAutoRefresh(load, 60000);
 
-  const count = (feed?.openTicketCount || 0) + (feed?.alertCount || 0);
+  const count = (feed?.openTicketCount || 0) + (feed?.alertCount || 0) + (feed?.errorCount || 0);
 
   return (
     <>
@@ -57,6 +58,7 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
   useEffect(() => { setTickets(feed?.tickets || []); }, [feed]);
 
   const alerts = feed?.alerts || [];
+  const errors = feed?.errors || [];
 
   const openRestaurant = (slug: string) => {
     onClose();
@@ -95,6 +97,31 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
         </div>
 
         <div style={{ flex: 1, overflow: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* App errors (last 24h) — jumps into the Everything Log filtered to errors. */}
+          <section>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)" }}>
+                App errors (24h) {(feed?.errorCount || 0) > 0 && <span>· {feed?.errorCount}</span>}
+              </div>
+              <a href="/aevinite/logs?level=error" onClick={onClose} style={{ marginLeft: "auto", fontSize: 12, color: "var(--accent)", fontWeight: 700 }}>View log →</a>
+            </div>
+            {errors.length === 0 ? (
+              <div className="adm-empty" style={{ padding: "14px 12px", fontSize: 13 }}>No errors in the last 24 hours. 🎉</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {errors.map((e) => (
+                  <div key={e.id} className="adm-card" style={{ display: "flex", alignItems: "flex-start", gap: 11, padding: "10px 12px", borderLeft: "3px solid var(--adm-danger, #e5484d)" }}>
+                    <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: "var(--adm-danger, #e5484d)", fontSize: 15, marginTop: 1 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.panel} · {e.detail || e.action}</div>
+                      <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{e.restaurantName} · {new Date(e.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
           {/* System-health alerts */}
           <section>
             <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)", marginBottom: 8 }}>

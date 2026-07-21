@@ -39,6 +39,9 @@ export default function AdminLogs() {
   const [tab, setTab] = useState<"ops" | "cust">("ops");
   // "" = All restaurants; otherwise scope both tabs + the cleanup to this restaurant.
   const [rid, setRid] = useState("");
+  // Everything-Log filters (Operations tab): severity + free-text search.
+  const [level, setLevel] = useState<"" | "error" | "warn" | "info">("");
+  const [q, setQ] = useState("");
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [ops, setOps] = useState<Action[] | null>(null);
   const [cust, setCust] = useState<CustData | null>(null);
@@ -61,9 +64,9 @@ export default function AdminLogs() {
   }, []);
 
   const loadOps = useCallback(async () => {
-    const qs = rid ? `&restaurant_id=${rid}` : "";
+    const qs = (rid ? `&restaurant_id=${rid}` : "") + (level ? `&level=${level}` : "") + (q.trim() ? `&q=${encodeURIComponent(q.trim())}` : "");
     try { const j = await (await fetch(`/api/admin/oplog?limit=200${qs}`, { cache: "no-store" })).json(); if (j.error) setOpsErr(true); else { setOps(j.actions || []); setOpsErr(false); } } catch { setOpsErr(true); }
-  }, [rid]);
+  }, [rid, level, q]);
   const loadCust = useCallback(async () => {
     const qs = rid ? `?restaurant_id=${rid}` : "";
     try { const j = await (await fetch(`/api/admin/custlog${qs}`, { cache: "no-store" })).json(); if (j.error) setCustErr(true); else { setCust(j); setCustErr(false); } } catch { setCustErr(true); }
@@ -75,8 +78,13 @@ export default function AdminLogs() {
     if (r.ok) { setCount(r.data.count); setThreshold(r.data.threshold); } else setCount(null);
   }, [rid]);
 
-  // Re-load the active tab whenever the tab OR the restaurant filter changes.
-  useEffect(() => { setOps(null); setCust(null); if (tab === "ops") loadOps(); else loadCust(); }, [tab, loadOps, loadCust]);
+  // Re-load the active tab whenever the tab, restaurant filter, level or search changes.
+  // Debounced 300ms so typing in the search box doesn't fire a request per keystroke.
+  useEffect(() => {
+    setOps(null); setCust(null);
+    const t = setTimeout(() => { if (tab === "ops") loadOps(); else loadCust(); }, 300);
+    return () => clearTimeout(t);
+  }, [tab, loadOps, loadCust]);
   useEffect(() => { loadCount(); }, [loadCount]);
 
   const runCleanup = async () => {
@@ -98,6 +106,16 @@ export default function AdminLogs() {
 
   const scopedName = rid ? restaurants.find((r) => r.id === rid)?.name : "";
   const full = count !== null && count >= threshold;
+
+  // "Send to Claude" — file a fix request from an error row (bundles the surrounding log lines).
+  const sendToClaude = async (a: Action) => {
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now()) },
+      body: JSON.stringify({ action_id: a.id, restaurant_id: a.restaurant_id || null }),
+    });
+    if (r.ok) toast("Sent to Claude — it'll be looked at overnight."); else toast(r.error || "Couldn't send that.", "err");
+  };
 
   return (
     <>
@@ -137,12 +155,33 @@ export default function AdminLogs() {
         <button className={tab === "ops" ? "active" : ""} onClick={() => setTab("ops")}>Operations</button>
         <button className={tab === "cust" ? "active" : ""} onClick={() => setTab("cust")}>Customers</button>
       </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
-        <button className="adm-btn" onClick={() => (tab === "ops" ? loadOps() : loadCust())}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>
-      </div>
+      {/* Severity filter + search — Operations tab only (the Everything Log view). */}
+      {tab === "ops" && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+          <div className="adm-tabs" role="group" aria-label="Filter by severity" style={{ margin: 0 }}>
+            <button className={level === "" ? "active" : ""} onClick={() => setLevel("")}>All</button>
+            <button className={level === "error" ? "active" : ""} onClick={() => setLevel("error")}>⚠️ Errors</button>
+            <button className={level === "warn" ? "active" : ""} onClick={() => setLevel("warn")}>Notable</button>
+            <button className={level === "info" ? "active" : ""} onClick={() => setLevel("info")}>Info</button>
+          </div>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search action or detail…"
+            aria-label="Search the log"
+            style={{ flex: "1 1 200px", minWidth: 160, padding: "7px 10px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13 }}
+          />
+          <button className="adm-btn" onClick={() => loadOps()}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>
+        </div>
+      )}
+      {tab === "cust" && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+          <button className="adm-btn" onClick={() => loadCust()}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>
+        </div>
+      )}
 
       {tab === "ops"
-        ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} />
+        ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} onSendToClaude={sendToClaude} />
         : <CustTable data={cust} err={custErr} onRetry={loadCust} />}
 
       {/* Cleanup confirm — a shared modal (phone Back + Escape + focus-trap via useAdminModal). */}
@@ -159,24 +198,60 @@ export default function AdminLogs() {
   );
 }
 
-function OpsTable({ rows, err, onRetry, scopedName }: { rows: Action[] | null; err: boolean; onRetry: () => void; scopedName: string | null }) {
+function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude }: { rows: Action[] | null; err: boolean; onRetry: () => void; scopedName: string | null; onSendToClaude: (a: Action) => void }) {
   const cols = "92px 1fr auto";
+  // Which row's full detail is expanded (errors + tap-batches carry long text worth reading).
+  const [open, setOpen] = useState<string | null>(null);
   if (err) return <div className="adm-empty">Couldn&rsquo;t load the operations log. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={onRetry}>Retry</button></div>;
   if (rows === null) return <div className="adm-empty">Loading…</div>;
   if (rows.length === 0) return <div className="adm-empty">No staff actions {scopedName ? `for ${scopedName}` : "yet"}.</div>;
   return (
     <div className="adm-logwrap">
       <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>Panel</div><div>Action</div><div>When</div></div>
-      {rows.map((a) => (
-        <div key={a.id} className="adm-logrow" style={{ gridTemplateColumns: cols }}>
-          <div><span className="adm-chip" style={{ background: "color-mix(in srgb, " + (PANEL_COLOR[a.panel] || "#888") + " 22%, transparent)", color: PANEL_COLOR[a.panel] || "var(--muted)" }}>{a.panel}</span></div>
-          <div style={{ minWidth: 0 }}>
-            {ACT_LABEL[a.action] || a.action}{a.actor ? <span className="adm-muted"> · {a.actor}</span> : a.detail ? <span className="adm-muted"> · {a.detail}</span> : a.table_number ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
-            {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
+      {rows.map((a) => {
+        const isErr = a.level === "error";
+        const isWarn = a.level === "warn";
+        // A row is expandable when it carries detail longer than fits on one line, or is a
+        // tap-batch / error worth reading in full.
+        const expandable = !!a.detail && (a.detail.length > 60 || a.action === "ui_taps" || isErr);
+        const isOpen = open === a.id;
+        return (
+          <div
+            key={a.id}
+            className="adm-logrow"
+            onClick={expandable ? () => setOpen(isOpen ? null : a.id) : undefined}
+            style={{
+              gridTemplateColumns: cols,
+              cursor: expandable ? "pointer" : "default",
+              // Tint the whole row by severity so errors jump out.
+              background: isErr ? "color-mix(in srgb, var(--adm-danger) 12%, transparent)" : isWarn ? "color-mix(in srgb, var(--adm-warn) 8%, transparent)" : undefined,
+              borderLeft: isErr ? "3px solid var(--adm-danger)" : isWarn ? "3px solid var(--adm-warn)" : "3px solid transparent",
+            }}
+          >
+            <div><span className="adm-chip" style={{ background: "color-mix(in srgb, " + (PANEL_COLOR[a.panel] || "#888") + " 22%, transparent)", color: PANEL_COLOR[a.panel] || "var(--muted)" }}>{a.panel}</span></div>
+            <div style={{ minWidth: 0 }}>
+              <span style={{ color: isErr ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined }}>{ACT_LABEL[a.action] || a.action}</span>
+              {a.actor ? <span className="adm-muted"> · {a.actor}</span> : a.table_number ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
+              {a.detail ? (
+                isOpen
+                  ? <div className="adm-muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{a.detail}</div>
+                  : <span className="adm-muted"> · {a.detail.length > 60 ? a.detail.slice(0, 60) + "…" : a.detail}</span>
+              ) : null}
+              {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
+              {isErr && (
+                <button
+                  className="adm-btn"
+                  onClick={(e) => { e.stopPropagation(); onSendToClaude(a); }}
+                  style={{ marginTop: 6, fontSize: 11.5, padding: "3px 9px" }}
+                >
+                  <i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 5 }} />Send to Claude
+                </button>
+              )}
+            </div>
+            <div className="adm-when">{timeAgo(a.created_at)}</div>
           </div>
-          <div className="adm-when">{timeAgo(a.created_at)}</div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

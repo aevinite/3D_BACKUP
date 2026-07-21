@@ -227,6 +227,9 @@
 
   window.LFH_RT = {
     start, metrics,
+    // This panel's restaurant id, once learned from /api/rt-config (empty until then).
+    // Shared so errlog.js can tag client-error / tap-batch diary lines with the tenant.
+    getRid: () => RT_RID,
     // Current connection state: "online" | "weak" | "offline".
     getStatus: () => connStatus,
     // Has the live socket connected at least once this session? (badge: calm

@@ -1,0 +1,64 @@
+// Gather the overnight repair agent's INPUT: every OPEN fix_request + the last 24h of
+// error-level log rows, written as a plain-language markdown file the agent reads.
+// Reads PROD via the Management API (same PAT pattern as apply-migration.mjs). Prints only
+// a summary + the output path — never a secret. Usage: node scripts/fetch-fix-requests.mjs
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const parseEnv = (t) =>
+  Object.fromEntries(
+    t.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#")).map((l) => {
+      const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")];
+    })
+  );
+
+const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
+const pat = env.SUPABASE_ACCESS_TOKEN;
+const projectRef = new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0];
+if (!pat) throw new Error("Missing SUPABASE_ACCESS_TOKEN in .env.local");
+
+async function q(sql) {
+  const res = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${pat}`, "Content-Type": "application/json", "User-Agent": "curl/8" },
+    body: JSON.stringify({ query: sql }),
+  });
+  if (!res.ok) throw new Error(`query failed HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  return res.json();
+}
+
+const requests = await q(`
+  SELECT fr.id, fr.restaurant_id, r.name AS restaurant, fr.created_at, fr.source, fr.summary, fr.note, fr.context
+  FROM fix_requests fr LEFT JOIN restaurants r ON r.id = fr.restaurant_id
+  WHERE fr.status = 'open' ORDER BY fr.created_at DESC LIMIT 50;
+`);
+const errors = await q(`
+  SELECT sa.panel, sa.action, sa.detail, r.name AS restaurant, sa.created_at
+  FROM staff_actions sa LEFT JOIN restaurants r ON r.id = sa.restaurant_id
+  WHERE sa.level = 'error' AND sa.created_at > now() - interval '24 hours'
+  ORDER BY sa.created_at DESC LIMIT 100;
+`);
+
+const DATE = new Date().toISOString().slice(0, 10);
+const out = join(root, ".claude", "audits", `repair-input-${DATE}.md`);
+mkdirSync(dirname(out), { recursive: true });
+
+let md = `# Repair agent input — ${DATE}\n\n`;
+md += `## Open fix requests (${requests.length})\n\n`;
+if (!requests.length) md += `_None._\n\n`;
+for (const r of requests) {
+  md += `### ${r.summary}\n`;
+  md += `- id: \`${r.id}\` · restaurant: ${r.restaurant || "(platform)"} · source: ${r.source || "?"} · at: ${r.created_at}\n`;
+  if (r.note) md += `- owner note: ${r.note}\n`;
+  if (r.context) md += `- context:\n\`\`\`json\n${JSON.stringify(r.context, null, 2).slice(0, 4000)}\n\`\`\`\n`;
+  md += `\n`;
+}
+md += `## Error-level log rows, last 24h (${errors.length})\n\n`;
+if (!errors.length) md += `_None._\n`;
+for (const e of errors) md += `- [${e.created_at}] ${e.restaurant || "(platform)"} · ${e.panel}/${e.action}: ${e.detail || ""}\n`;
+
+writeFileSync(out, md);
+console.log(`✓ wrote ${out}`);
+console.log(`  open fix requests: ${requests.length} · errors(24h): ${errors.length}`);

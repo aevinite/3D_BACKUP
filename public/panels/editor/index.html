@@ -95,6 +95,8 @@
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
   <script src="/panels/backstack.js"></script>
+  <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
+  <script src="/panels/errlog.js?v=1"></script>
   <!-- Shared "Report an issue" widget (subject + photo + live voice note). Must load
        BEFORE app.js so openIssueModal() can call it. -->
   <script src="/panels/issue-raise.js?v=1"></script>

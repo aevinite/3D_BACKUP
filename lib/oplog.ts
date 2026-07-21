@@ -38,6 +38,10 @@ type Fields = {
   // table's DEFAULT (#1); pass a value on multi-restaurant actions; pass an explicit `null`
   // for platform-level actions (e.g. creating/renaming an owner) so they don't pollute #1's log.
   restaurant_id?: string | null;
+  // SEVERITY (mig 159). Defaults to 'info' at the DB level, so existing callers are unchanged.
+  // 'warn' = notable but not broken (a repair action, a manual DB edit); 'error' = something
+  // failed. Error rows show red in the admin log and drive the alert / nightly-fix tooling.
+  level?: "info" | "warn" | "error";
 };
 
 export async function logAction(panel: Panel, action: string, fields: Fields = {}): Promise<void> {
@@ -56,9 +60,53 @@ export async function logAction(panel: Panel, action: string, fields: Fields = {
       // action (mig 156 made the column nullable). Using !== undefined (not `in`) so a stray
       // undefined keeps the old default-#1 behaviour instead of flipping to null.
       ...(fields.restaurant_id !== undefined ? { restaurant_id: fields.restaurant_id } : {}),
+      ...(fields.level ? { level: fields.level } : {}),
     });
   } catch {
     /* never let logging break the real action */
+  }
+}
+
+// logError — record an ERROR-level diary line (level='error') when something in the app
+// throws or fails. Same fire-and-forget contract as logAction: it must NEVER itself throw or
+// block the real request, so it swallows everything. The message is truncated (a stack/PostgREST
+// error can be huge and we only need the gist to know where to look). Call it from the top-level
+// catch of a route handler, or any place a real failure is swallowed.
+//
+// After writing the row it fires an optional owner alert (Phase 3, lib/alerts.ts) — imported
+// lazily so this module has no hard dependency on the alert layer.
+export async function logError(
+  panel: Panel | "db" | "guest",
+  action: string,
+  err: unknown,
+  fields: Omit<Fields, "level"> = {},
+): Promise<void> {
+  const msg = err instanceof Error ? err.message : String(err ?? "unknown error");
+  const detail = `${fields.detail ? fields.detail + " — " : ""}${msg}`.slice(0, 500);
+  try {
+    await sb.from("staff_actions").insert({
+      // panel is a free-text column; 'db'/'guest' are valid tags for non-staff origins.
+      panel,
+      action,
+      table_number: fields.table_number ?? null,
+      order_id: fields.order_id ?? null,
+      detail,
+      device_id: fields.device_id ?? null,
+      actor: fields.actor ?? null,
+      actor_id: fields.actor_id ?? null,
+      level: "error",
+      ...(fields.restaurant_id !== undefined ? { restaurant_id: fields.restaurant_id } : {}),
+    });
+  } catch {
+    /* never let error-logging break the request */
+  }
+  // Best-effort outbound alert (grouped, non-blocking). Wrapped so a missing/errored alert
+  // layer can't affect the request.
+  try {
+    const { sendOwnerAlert } = await import("@/lib/alerts");
+    await sendOwnerAlert(`⚠️ ${panel}/${action}: ${msg.slice(0, 120)}`, `${panel}:${action}`);
+  } catch {
+    /* alert layer optional / best-effort */
   }
 }
 

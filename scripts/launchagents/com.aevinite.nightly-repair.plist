@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Nightly REPAIR agent. Tracked copy — the live one lives at
+  ~/Library/LaunchAgents/com.aevinite.nightly-repair.plist.
+  ENABLE:  cp scripts/launchagents/com.aevinite.nightly-repair.plist ~/Library/LaunchAgents/ \
+           && launchctl load ~/Library/LaunchAgents/com.aevinite.nightly-repair.plist
+  DISABLE: launchctl unload ~/Library/LaunchAgents/com.aevinite.nightly-repair.plist
+  Runs at 02:30 local — before the 04:00 tablet + 06:00 owner audits (one shared browser).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aevinite.nightly-repair</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>/Users/aevinite/Documents/Projects/backup_Menu/scripts/nightly-repair.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/aevinite/Documents/Projects/backup_Menu</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/aevinite/Documents/Projects/backup_Menu/.claude/audits/repair-launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/aevinite/Documents/Projects/backup_Menu/.claude/audits/repair-launchd.err.log</string>
+</dict>
+</plist>

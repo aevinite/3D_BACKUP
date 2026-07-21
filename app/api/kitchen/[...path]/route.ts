@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
-import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
+import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { notifyAggregator } from "@/lib/aggregators";
@@ -99,6 +99,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
     return err("unknown GET endpoint", 404);
   } catch (e) {
+    logError("kitchen", "route_error", e, { restaurant_id: rid });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }
@@ -232,6 +233,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     return err("unknown POST endpoint", 404);
   } catch (e) {
+    logError("kitchen", "route_error", e, { restaurant_id: rid });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }

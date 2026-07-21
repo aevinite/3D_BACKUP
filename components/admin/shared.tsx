@@ -16,7 +16,7 @@ export type Overview = {
   openTables: number; activeOrders: number; unpaidOrders: number;
   ordersToday: number;
 };
-export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string; restaurant_name?: string | null; restaurant_slug?: string | null };
+export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string; restaurant_id?: string | null; restaurant_name?: string | null; restaurant_slug?: string | null; level?: "info" | "warn" | "error" };
 
 export const STATE_LABEL: Record<Tile["state"], string> = {
   free: "Free", seated: "Seated", new: "New order", preparing: "Preparing", served: "Served", cleared: "Cleared",
@@ -25,7 +25,7 @@ export const STATE_LABEL: Record<Tile["state"], string> = {
 export const STATE_COLOR: Record<Tile["state"], string> = {
   free: "", seated: "#2563eb", new: "#ea580c", preparing: "#7c3aed", served: "#ca8a04", cleared: "#15803d",
 };
-export const PANEL_COLOR: Record<string, string> = { editor: "#d4a574", manager: "#d4a574", kitchen: "#7ec88a", tablet: "#60a5fa", admin: "#e8a13c" };
+export const PANEL_COLOR: Record<string, string> = { editor: "#d4a574", manager: "#d4a574", kitchen: "#7ec88a", tablet: "#60a5fa", admin: "#e8a13c", owner: "#c084fc", db: "#94a3b8", guest: "#38bdf8", menu: "#38bdf8" };
 export const ACT_LABEL: Record<string, string> = {
   order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
   order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
@@ -41,6 +41,12 @@ export const ACT_LABEL: Record<string, string> = {
   bill_paid: "Marked paid", close_unpaid: "Closed unpaid", payment_revert: "Reverted payment",
   member_remove: "Removed guest", member_ban: "Banned guest", auto_approve: "Auto-approve", table_restart: "Restarted table",
   billing_set_plan: "Set billing plan", billing_add_payment: "Recorded a payment", billing_delete_payment: "Deleted a payment",
+  // Everything Log (mig 159) + runtime-support tooling.
+  route_error: "Server error", client_error: "Screen error", ui_taps: "Button taps", row_change: "Manual DB edit",
+  alert_sent: "Alert sent",
+  repair_void_bill: "Repair · voided bill", repair_delete_order: "Repair · deleted order",
+  repair_refire_order: "Repair · re-fired order", repair_unstick_table: "Repair · unstuck table",
+  repair_edit_time: "Repair · edited time", fix_request: "Sent to Claude",
 };
 
 export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
