@@ -1,82 +1,73 @@
-# "One database per restaurant?" — the honest answer (2026-07-21)
+# Multiple databases per restaurant — for the FUTURE own-server stack (2026-07-21)
 
-Someone told you: *"later, when you have your own database, give every restaurant
-its OWN database — so if one fails, the others keep running."* Here's what that
-really means, what big companies actually do, and what we should do.
+The suggestion you got: *"when you have your own server and own API (the full
+SaaS stack — load balancer, many backend servers, Redis, database), give
+restaurants separate databases, so if one fails the others keep running."*
 
-## The idea, like you're 10
+This doc is about THAT day — after we leave Vercel+Supabase-only and run our
+own API server. Not about today. (Today's job is only: keep every table and
+query scoped by `restaurant_id` — which we already do — so all doors below
+stay open.)
 
-Today all restaurants share **one big notebook** (our Supabase database). Every
-page has the restaurant's name stamped on it (`restaurant_id`), and a guard (RLS
-+ the API) makes sure French House can never read Pizza Palace's pages.
+## Like you're 10: three ways to "give everyone their own notebook"
 
-The suggestion is: give every restaurant **its own separate notebook**. Then if
-one notebook catches fire, only that one restaurant is affected.
+Right now: one big notebook, every page stamped with the restaurant's name.
+On our own stack, "separate databases" can mean three very different things:
 
-It sounds obviously better. It mostly isn't — at our size.
+| | What it physically is | If something fails… | Cost |
+|---|---|---|---|
+| **A. Separate notebooks, same shelf** — one Postgres machine, one logical database per restaurant | same computer, many notebooks | the computer dies → **ALL restaurants still die together.** Only protects against pages getting mixed up | almost free |
+| **B. Pods / cells** — one machine per GROUP (10–20 restaurants), app servers grouped the same way | a few computers, each serving its own group | pod 2's machine dies → **only pod 2's restaurants are down**, pods 1 and 3 keep serving ✅ | one server per pod (~$10–25/mo each) |
+| **C. One machine per restaurant** | a computer each | truly independent ✅ | full server price × every restaurant 💸 |
 
-## The "if one fails, others keep running" promise — mostly a myth for us
+**The key insight: "if one fails, others keep running" comes from separate
+MACHINES, not separate notebooks.** Option A sounds like isolation but gives
+almost none. Option C is what banks/hospitals buy (and pay enterprise money
+for). Option B — pods — is what real companies at scale actually run: Shopify
+calls them pods, Slack calls them shards. One pod having a bad night takes out
+1/10th of customers, never all of them.
 
-Think about what ACTUALLY fails:
+And one honest catch: the database is only half the story. If ALL pods still
+share ONE API server, that API server dying kills everyone anyway. A real
+"cell" = its own app servers + its own database. That's why this design only
+makes sense on the own-server stack — it IS that stack, multiplied.
 
-| What breaks | Does per-restaurant DB help? |
-|---|---|
-| A bug in our code (bad deploy) | ❌ No — all restaurants run the SAME app on Vercel. A broken bill button is broken for everyone either way. |
-| Vercel is down | ❌ No — the app is the shared part, not the notebook. |
-| Supabase region (Mumbai) has an outage | ❌ No — all the little databases would sit in the same building anyway. |
-| One restaurant hammers the DB so hard others slow down ("noisy neighbour") | ✅ **Yes — this is the one real benefit.** |
-| We corrupt one restaurant's data with a bad manual edit | ✅ Partly — blast radius is smaller. |
+## The two pieces the future API server must have FROM DAY ONE
 
-So the promise is really about ONE failure type (noisy neighbour), which we
-haven't hit and won't at 2–20 restaurants with scoped, indexed, limited queries
-(our egress rules exist exactly for this).
+These are the design decisions to bake in when we build the own stack — cheap
+to include at the start, painful to retrofit:
 
-## What it would COST us today
+1. **The directory (router).** A tiny lookup the API does first on every
+   request: *"French House? → lives in pod 2, address X."* Day one it returns
+   the same address for everyone (because there's only one database). But
+   because every request already asks the directory, splitting into pods later
+   is: copy a restaurant's rows to the new pod + change one directory row.
+   No code rewrite. This is the real meaning of "build once, scale forever."
+2. **The migration runner.** We're at 160+ numbered migrations. With pods,
+   every schema change must run on EVERY pod, and the runner must remember
+   which pod has which version and retry the one that failed halfway.
+   This is the biggest ongoing tax of multiple databases — accept it
+   knowingly, and only when pods actually exist.
 
-- **Money:** Supabase free tier = 2 projects. Separate DB per restaurant means a
-  paid project each (~$10/month × restaurants). 20 restaurants = $200/month on
-  notebooks alone, before a single feature.
-- **Migrations ×N:** we're at 160+ numbered migrations. Every schema change would
-  have to run on EVERY restaurant's database, tracked separately, with some
-  succeeding and some failing halfway. This is the single biggest pain in
-  per-tenant setups.
-- **The admin panel breaks conceptually:** "show me all restaurants' health/usage
-  tiles" is one cheap query today. Across 20 databases it's 20 connections and
-  hand-stitched results.
-- **Backups, keys, connection pools, realtime channels — all ×N.**
+## When to actually split into pods (write-down triggers)
 
-## What big companies actually do (the part nobody puts in reels)
+Start the own stack with **one database + the directory from day one**. Split
+when any of these happens:
 
-- **Almost everyone STARTS like us:** one database, tenant column, row-level
-  guards. Shopify, Slack, Stripe all began there.
-- **When they outgrow it, they don't go one-DB-per-customer** — they go to
-  **"pods" / "cells"**: groups of, say, 100 customers per stack (Shopify calls
-  them pods, Slack calls them shards). Cell 3 failing takes out cell 3's
-  customers only. It's per-GROUP isolation, not per-customer.
-- **True one-database-per-customer** exists mostly in enterprise B2B (banks,
-  hospitals) where the customer PAYS for that isolation as a feature.
+- one restaurant's load measurably slows the others (noisy neighbour), or
+- restaurant count makes one database genuinely big (think 50+, not 5), or
+- a paying client demands physical data isolation (then THEY fund option C
+  for themselves — isolation as a paid feature, like enterprise SaaS does).
 
-## The verdict + what we do about it
+## What this means for the app we write TODAY
 
-**Not now. Design for it, don't build it.** The good news: the ONE thing that
-makes per-restaurant (or per-pod) databases possible later is something we
-already enforce everywhere — **every table and every query is scoped by
-`restaurant_id`**. Because of that, moving a restaurant (or a group) to its own
-database later is "copy their rows + point their connection there", not a
-rewrite.
+Nothing new — just keep the habits that keep the door open:
 
-Rules that keep the door open (all already our habits — now written down):
-
-1. Every new table carries `restaurant_id` + RLS. No exceptions.
-2. No feature ever JOINs across restaurants, except admin/platform pages —
-   and those keep their cross-restaurant queries in clearly separate files.
-3. Migrations stay numbered, idempotent, and small — so one day they can be
-   replayed onto a fresh per-pod database.
-4. Per-restaurant kill switches, maintenance mode, health tiles (all built) —
-   these give us "one restaurant can be isolated" TODAY at the app level, which
-   is 80% of the operational benefit for ₹0.
-
-**When to revisit (write-down triggers):** the future SaaS stack exists (own API
-server), AND either (a) one tenant's load measurably slows others, or (b) a big
-client demands data isolation and pays for it. Then we do **pods** (e.g. 10–20
-restaurants per database), not one-per-restaurant.
+1. Every table carries `restaurant_id` + RLS. No exceptions.
+2. No feature JOINs across restaurants except admin/platform pages, and those
+   keep their cross-restaurant queries in clearly separate files (they'll need
+   to fan out across pods one day).
+3. Migrations stay numbered, small, idempotent — replayable onto a fresh pod.
+4. Per-restaurant kill switches, maintenance mode, health tiles (all built)
+   already give "isolate one restaurant" at the app level — 80% of the
+   day-to-day benefit, ₹0, available right now.
