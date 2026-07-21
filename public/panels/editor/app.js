@@ -2871,13 +2871,16 @@ function printBill(t, sess, os) {
   if (!w) { toast("Allow popups for this site to print the bill", "err"); return; }
   w.document.write(`<!doctype html><title>Tax Invoice — ${name}</title>
 <style>
-  /* Thermal roll = ONE continuous 80mm-wide page, no fixed paper length. Without
-     size:…auto the printer/driver treats the roll as fixed A4-ish pages and chops
-     the bill into "1/4, 2/4…" pages; margin:0 also drops the browser's own
-     header/footer decorations (the "about:blank / date / page number" junk). The
-     on-screen preview keeps its comfortable margins (this only applies to print). */
-  @page{size:80mm auto;margin:0}
-  @media print{body{width:80mm;margin:0;padding:6mm 4mm}}
+  /* Thermal-roll print recipe — VALIDATED offline through the real CUPS+ESC/POS driver
+     chain (2026-07-21, see aangan-thermal-printer-setup memory). Three rules:
+     · @page margin:0 kills the browser's own header/footer ("about:blank", page numbers).
+     · NO @page size override — a forced size smaller/squarer than the paper gets rotated
+       or bottom-anchored by CUPS (sideways prints + 20cm blank lead-ins). The queue's
+       own short receipt paper does the pagination; Chrome never slices a text line.
+     · Content ≤66mm CENTERED: the 80mm head only prints ~70mm, offset ~5mm from the
+       left paper edge — a full-width 80mm body loses ~8mm of every line on the right. */
+  @page{margin:0}
+  @media print{body{width:66mm;margin:0 auto;padding:2mm 0}}
   body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:22px 34px;color:#111}
   .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.1)}
   h2{font-family:Georgia,'Times New Roman',serif;font-size:19px;margin:0;text-align:center}
@@ -2911,18 +2914,7 @@ ${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}
   <div class="g"><span>TOTAL</span><span>${inr(m.total)}</span></div>
 </div>
 <div class="foot">${footer}</div>
-<script>
-  // Pin the print page to the bill's actual height so it prints as ONE page. The
-  // thermal printer's default media is only 65mm tall, so a multi-item bill paginated
-  // and the end-of-page cutter sliced through the middle of the items. +12px rounding.
-  window.onload=function(){
-    try{
-      var h=Math.ceil(document.body.getBoundingClientRect().height)+12;
-      var s=document.createElement('style'); s.textContent='@page{size:80mm '+h+'px;margin:0}'; document.head.appendChild(s);
-    }catch(e){}
-    setTimeout(function(){print();},260);
-  };
-<\/script>`);
+<script>setTimeout(()=>print(),300)<\/script>`);
   w.document.close();
 }
 
@@ -3143,6 +3135,10 @@ async function printZReport() {
   if (!w) { toast("Allow popups to print the report", "err"); return; }
   w.document.write(`<!doctype html><title>Day-close Z report — ${esc(z.date)}</title>
 <style>
+  /* Same thermal recipe as printBill: margin:0 (no browser header/footer), no @page
+     size, content ≤66mm centered so the 70mm printable head never clips it. */
+  @page{margin:0}
+  @media print{body{width:66mm;margin:0 auto;padding:2mm 0}}
   body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:20px;color:#111}
   h2{font-family:Georgia,serif;font-size:18px;margin:0;text-align:center}
   .sub{text-align:center;color:#444;font-size:10.5px;margin:3px 0 12px}

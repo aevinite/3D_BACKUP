@@ -710,7 +710,7 @@ function printKot(order, itemRows, restaurant) {
       const opts = Array.isArray(r.options) ? r.options.map((o) => (typeof o === "string" ? o : (o && o.label) || "")).filter(Boolean).join(", ") : "";
       const rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
       const note = r.note ? String(r.note) : "";
-      return `<div class="kl"><span class="q">${q}×</span><span class="n">${esc(r.title || "")}${opts ? ` <i>(${esc(opts)})</i>` : ""}${rem ? ` <i>— no ${esc(rem)}</i>` : ""}${note ? `<br><small>📝 ${esc(note)}</small>` : ""}</span></div>`;
+      return `<div class="kl"><span class="q">${q}×</span><span class="n">${esc(r.title || "")}${opts ? ` <i>(${esc(opts)})</i>` : ""}${rem ? ` <i>— no ${esc(rem)}</i>` : ""}${note ? `<br><small>&raquo; ${esc(note)}</small>` : ""}</span></div>`;
     }).join("");
     const allerg = Array.isArray(order.allergies) && order.allergies.length ? `<div class="al">⚠ AVOID: ${esc(order.allergies.join(", "))}</div>` : "";
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>KOT ${esc(String(kot))}</title><style>
@@ -719,39 +719,27 @@ function printKot(order, itemRows, restaurant) {
       .meta{display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:4px}
       .kl{font-size:14px;padding:4px 0;border-bottom:1px dotted #999}.kl .q{font-weight:700;margin-right:6px}.kl i{font-style:italic;color:#333;font-size:12px}
       .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}
-      /* Trailing blank space so the last printed line clears the print-head→cutter gap
-         on an 80mm thermal roll — without it the ticket cuts/tears THROUGH the final
-         line (the print head sits ~1.5–2cm above the exit/cutter). ~64px ≈ that gap. */
-      .feed{height:64px}
-      /* size is set to the EXACT rendered height just before print (see below) so the
-         whole ticket is ONE page — the printer's default media is only 65mm tall, so
-         'auto'/default paginated a long ticket and the end-of-page cutter sliced through
-         the middle of the items. margin:0 also drops the browser header/footer junk. */
-      @page{size:80mm auto;margin:0}
-      @media print{body{width:80mm;padding:4mm}}
+      /* Thermal-roll print recipe — VALIDATED offline through the real CUPS+ESC/POS
+         driver chain (2026-07-21). margin:0 kills the browser header/footer junk; NO
+         @page size override (a forced short page is landscape-shaped → CUPS rotates it
+         sideways, and a mismatched size gets bottom-anchored → 20cm blank lead-in);
+         content ≤66mm CENTERED because the 80mm head only prints ~70mm, ~5mm in from
+         the left paper edge — a full-width body loses the right ~8mm of every line.
+         The cutter is driven by the QUEUE (CutMedia=EndOfJob, after the end feed). */
+      @page{margin:0}
+      @media print{body{width:66mm;margin:0 auto;padding:2mm 0}}
     </style></head><body>
       <div class="h">${esc(rname)}<br>KITCHEN TICKET</div>
       <div class="meta"><span>KOT #${esc(String(kot))}</span><span>Table ${esc(String(tnum))}</span></div>
       <div class="meta"><span>${esc(when)}</span></div>
       ${linesHtml || "<div>(no items)</div>"}
       ${allerg}
-      <div class="feed"></div>
     </body></html>`;
     const ifr = document.createElement("iframe");
     ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
     document.body.appendChild(ifr);
     const d = ifr.contentWindow.document; d.open(); d.write(html); d.close();
-    setTimeout(() => {
-      try {
-        const cw = ifr.contentWindow, cd = cw.document;
-        // Pin the page to the ticket's actual height → one page, so the end-of-page
-        // cutter fires once BELOW the content (never mid-item). +8px rounding guard.
-        const h = Math.ceil(cd.body.getBoundingClientRect().height) + 8;
-        const st = cd.createElement("style"); st.textContent = `@page{size:80mm ${h}px;margin:0}`; cd.head.appendChild(st);
-        cw.focus(); cw.print();
-      } catch (e) {}
-      setTimeout(() => ifr.remove(), 1500);
-    }, 250);
+    setTimeout(() => { try { ifr.contentWindow.focus(); ifr.contentWindow.print(); } catch (e) {} setTimeout(() => ifr.remove(), 1500); }, 250);
   } catch (e) { /* printing must NEVER break the board */ }
 }
 
