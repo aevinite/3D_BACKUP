@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
-import { logAction, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
+import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
@@ -265,6 +265,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
     return err("unknown GET endpoint", 404);
   } catch (e) {
+    logError("tablet", "route_error", e, { restaurant_id: rid });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }
@@ -931,6 +932,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // error from a since-deleted row) — don't leak the internal message to the waiter's toast;
     // log it server-side and return a generic 500. (NB2)
     console.error("[tablet POST]", e instanceof Error ? e.message : e);
+    logError("tablet", "route_error", e, { restaurant_id: rid });
     return err("Something went wrong — try again.", 500);
   }
 }

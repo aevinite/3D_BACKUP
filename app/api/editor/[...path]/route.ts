@@ -12,7 +12,7 @@ import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { menuTag } from "@/lib/menuDataServer";
-import { logAction, deviceIdFrom } from "@/lib/oplog";
+import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
@@ -833,7 +833,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // ADMIN's actions (panel='admin') AND the OWNER's actions (panel='owner' —
       // staff changes, permission grants…) are both hidden here; they show only in
       // their own panels' logs.
-      return ok(must(await sb.from("staff_actions").select("*").eq("restaurant_id", rid).not("panel", "in", "(admin,owner)").order("created_at", { ascending: false }).limit(200)));
+      return ok(must(await sb.from("staff_actions").select("*").eq("restaurant_id", rid).not("panel", "in", "(admin,owner,db)").order("created_at", { ascending: false }).limit(200)));
     }
 
     if (p === "staff-risk") {
@@ -853,7 +853,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const by: Record<string, { disc: number; void: number; del: number; rev: number; total: number }> = {};
       let truncated = false;
       for (let from = 0; from < 20000; from += 1000) {
-        const page = (must(await sb.from("staff_actions").select("action,actor,created_at").eq("restaurant_id", rid).not("panel", "in", "(admin,owner)").gte("created_at", sinceIso).order("created_at", { ascending: false }).range(from, from + 999)) as { action: string; actor: string | null }[] | null) || [];
+        const page = (must(await sb.from("staff_actions").select("action,actor,created_at").eq("restaurant_id", rid).not("panel", "in", "(admin,owner,db)").gte("created_at", sinceIso).order("created_at", { ascending: false }).range(from, from + 999)) as { action: string; actor: string | null }[] | null) || [];
         for (const r of page) { const k = RISK[r.action]; if (!k) continue; const who = r.actor || "— (device only)"; const a = by[who] || (by[who] = { disc: 0, void: 0, del: 0, rev: 0, total: 0 }); a[k]++; a.total++; }
         if (page.length < 1000) break;
         if (from + 1000 >= 20000) truncated = true;
@@ -864,6 +864,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     return err("unknown GET endpoint", 404);
   } catch (e) {
+    // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
+    // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
+    logError("manager", "route_error", e, { restaurant_id: rid });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }
@@ -1711,6 +1714,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     return err("unknown POST endpoint", 404);
   } catch (e) {
+    // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
+    // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
+    logError("manager", "route_error", e, { restaurant_id: rid });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }
@@ -1802,6 +1808,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
 
     return err("unknown PATCH endpoint", 404);
   } catch (e) {
+    // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
+    // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
+    logError("manager", "route_error", e, { restaurant_id: rid });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }
@@ -1880,6 +1889,9 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
 
     return err("unknown DELETE endpoint", 404);
   } catch (e) {
+    // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
+    // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
+    logError("manager", "route_error", e, { restaurant_id: rid });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }

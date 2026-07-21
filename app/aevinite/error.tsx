@@ -5,11 +5,14 @@
 // page. Added after the System Health page white-screened when the DB was down
 // (admin audit 2026-07-06); this is the defence-in-depth net behind that fix.
 import { useEffect } from "react";
+import { reportClientError } from "@/lib/errorReport";
 
 export default function AdminError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
     // Surface it in the console for debugging; no user secrets are logged.
     console.error("[admin] page error:", error);
+    // Also record it in the Everything Log so it shows red in Admin → Logs.
+    reportClientError("admin", error?.message || "admin page error", error?.digest);
   }, [error]);
 
   return (

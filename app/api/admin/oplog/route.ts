@@ -22,10 +22,21 @@ export async function GET(req: NextRequest) {
   // "invalid input syntax for type uuid" in the 500 body — every sibling route validates).
   if (restaurantId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(restaurantId))
     return NextResponse.json({ error: "invalid restaurant_id" }, { status: 400 });
+  // ?level=error|warn|info filters severity (Everything Log, mig 159) — e.g. "just show me
+  // what broke". ?q= is a free-text search over the action + detail (the incident hunt).
+  const level = url.searchParams.get("level");
+  const qText = (url.searchParams.get("q") || "").trim().slice(0, 80);
   // Only the columns the activity feed actually renders — not select("*") — so we don't move
-  // unused columns across the wire on every refresh (egress trim, 2026-07-07).
-  let q = sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, created_at").order("created_at", { ascending: false }).limit(limit);
+  // unused columns across the wire on every refresh (egress trim, 2026-07-07). `level` added
+  // so the viewer can colour error rows red.
+  let q = sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, level, created_at").order("created_at", { ascending: false }).limit(limit);
   if (restaurantId) q = q.eq("restaurant_id", restaurantId);
+  if (level === "error" || level === "warn" || level === "info") q = q.eq("level", level);
+  if (qText) {
+    // Escape the PostgREST or-filter meta-characters (%,) so a search term can't break the filter.
+    const safe = qText.replace(/[%,()]/g, " ");
+    q = q.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`);
+  }
   const r = await q;
   if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
   const rows = r.data ?? [];
