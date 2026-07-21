@@ -6,6 +6,11 @@ Send-to-Claude flow + the nightly repair agent. See:*
 - `alerts-setup.md` — turn on phone alerts (ntfy + Telegram) + UptimeRobot.
 - `nightly-agent-setup.md` — turn on the overnight fixer (needs a 1-min macOS
   Full Disk Access grant — which also revives your existing audit jobs).
+- `live-fix-popup.md` — "look at it NOW": a request typed in admin pops a
+  working Claude terminal on the Mac (built 2026-07-21).
+- `database-per-restaurant.md` — the "separate database per restaurant so if
+  one fails others keep running" question: what's true, what's myth, verdict
+  = not now, design for pods later (added 2026-07-21).
 
 *Structure 3 (separate always-on server) is deliberately deferred to the future
 SaaS stack.)*
@@ -123,6 +128,20 @@ write. That's why (see structure 1) we log every WRITE and every ERROR but we
 do NOT log every harmless button tap individually — we batch those. Logging
 literally everything raw would eat the Supabase quota the same way the egress
 bug did in June.
+
+## What's left (owner's 2 setup steps + a fire drill)
+
+Everything above is built and merged. Before the first real restaurant night:
+
+1. **Turn on phone alerts** (~15 min): follow `alerts-setup.md` — ntfy app +
+   Telegram bot + the same keys in Vercel + UptimeRobot on `/api/health`.
+2. **Grant Full Disk Access** (~1 min): follow `nightly-agent-setup.md` so the
+   overnight fixer (and the older audit jobs) can run.
+3. **Fire drill** (~20 min, strongly recommended): on a test restaurant, break
+   something on purpose (flip a feature off, delete a bill via Repair Kit,
+   throw an error). Watch the whole chain fire: phone pings → Logs shows red
+   rows → Repair Kit calms it → Send to Claude files the report → night robot
+   picks it up. Practising once in peace is what makes 8pm-on-Saturday calm.
 
 ## Inspiration screenshots
 
