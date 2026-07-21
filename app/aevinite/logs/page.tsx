@@ -12,7 +12,7 @@
 //      nightly prune (lfh_prune_logs, migration 152). It only ever deletes activity-log
 //      rows (staff_actions) — never bills or customer records.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ACT_LABEL, PANEL_COLOR, timeAgo, type Action } from "@/components/admin/shared";
+import { ACT_LABEL, PANEL_COLOR, timeAgo, formatActionDetail, type Action } from "@/components/admin/shared";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
@@ -213,7 +213,10 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude }: { rows: Ac
         const isWarn = a.level === "warn";
         // A row is expandable when it carries detail longer than fits on one line, or is a
         // tap-batch / error worth reading in full.
-        const expandable = !!a.detail && (a.detail.length > 60 || a.action === "ui_taps" || isErr);
+        // Errors keep their raw text (stack/where matters); everything else (esp. tap batches)
+        // is shown in plain English via the shared formatter.
+        const det = isErr ? (a.detail || "") : formatActionDetail(a.action, a.detail);
+        const expandable = !!det && (det.length > 60 || isErr);
         const isOpen = open === a.id;
         return (
           <div
@@ -232,10 +235,10 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude }: { rows: Ac
             <div style={{ minWidth: 0 }}>
               <span style={{ color: isErr ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined }}>{ACT_LABEL[a.action] || a.action}</span>
               {a.actor ? <span className="adm-muted"> · {a.actor}</span> : a.table_number ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
-              {a.detail ? (
+              {det ? (
                 isOpen
-                  ? <div className="adm-muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{a.detail}</div>
-                  : <span className="adm-muted"> · {a.detail.length > 60 ? a.detail.slice(0, 60) + "…" : a.detail}</span>
+                  ? <div className="adm-muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{det}</div>
+                  : <span className="adm-muted"> · {det.length > 60 ? det.slice(0, 60) + "…" : det}</span>
               ) : null}
               {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
               {isErr && (
