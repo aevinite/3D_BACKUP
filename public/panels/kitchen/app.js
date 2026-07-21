@@ -723,8 +723,10 @@ function printKot(order, itemRows, restaurant) {
          on an 80mm thermal roll — without it the ticket cuts/tears THROUGH the final
          line (the print head sits ~1.5–2cm above the exit/cutter). ~64px ≈ that gap. */
       .feed{height:64px}
-      /* One continuous 80mm-wide page (no fixed paper length → no "1/4, 2/4" page
-         splits) and margin:0 drops the browser header/footer junk. */
+      /* size is set to the EXACT rendered height just before print (see below) so the
+         whole ticket is ONE page — the printer's default media is only 65mm tall, so
+         'auto'/default paginated a long ticket and the end-of-page cutter sliced through
+         the middle of the items. margin:0 also drops the browser header/footer junk. */
       @page{size:80mm auto;margin:0}
       @media print{body{width:80mm;padding:4mm}}
     </style></head><body>
@@ -739,7 +741,17 @@ function printKot(order, itemRows, restaurant) {
     ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
     document.body.appendChild(ifr);
     const d = ifr.contentWindow.document; d.open(); d.write(html); d.close();
-    setTimeout(() => { try { ifr.contentWindow.focus(); ifr.contentWindow.print(); } catch (e) {} setTimeout(() => ifr.remove(), 1500); }, 250);
+    setTimeout(() => {
+      try {
+        const cw = ifr.contentWindow, cd = cw.document;
+        // Pin the page to the ticket's actual height → one page, so the end-of-page
+        // cutter fires once BELOW the content (never mid-item). +8px rounding guard.
+        const h = Math.ceil(cd.body.getBoundingClientRect().height) + 8;
+        const st = cd.createElement("style"); st.textContent = `@page{size:80mm ${h}px;margin:0}`; cd.head.appendChild(st);
+        cw.focus(); cw.print();
+      } catch (e) {}
+      setTimeout(() => ifr.remove(), 1500);
+    }, 250);
   } catch (e) { /* printing must NEVER break the board */ }
 }
 
