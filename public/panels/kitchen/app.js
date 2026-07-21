@@ -723,7 +723,10 @@ function printKot(order, itemRows, restaurant) {
          on an 80mm thermal roll — without it the ticket cuts/tears THROUGH the final
          line (the print head sits ~1.5–2cm above the exit/cutter). ~64px ≈ that gap. */
       .feed{height:64px}
-      @media print{@page{margin:4mm}}
+      /* One continuous 80mm-wide page (no fixed paper length → no "1/4, 2/4" page
+         splits) and margin:0 drops the browser header/footer junk. */
+      @page{size:80mm auto;margin:0}
+      @media print{body{width:80mm;padding:4mm}}
     </style></head><body>
       <div class="h">${esc(rname)}<br>KITCHEN TICKET</div>
       <div class="meta"><span>KOT #${esc(String(kot))}</span><span>Table ${esc(String(tnum))}</span></div>

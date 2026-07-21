@@ -2871,6 +2871,13 @@ function printBill(t, sess, os) {
   if (!w) { toast("Allow popups for this site to print the bill", "err"); return; }
   w.document.write(`<!doctype html><title>Tax Invoice — ${name}</title>
 <style>
+  /* Thermal roll = ONE continuous 80mm-wide page, no fixed paper length. Without
+     size:…auto the printer/driver treats the roll as fixed A4-ish pages and chops
+     the bill into "1/4, 2/4…" pages; margin:0 also drops the browser's own
+     header/footer decorations (the "about:blank / date / page number" junk). The
+     on-screen preview keeps its comfortable margins (this only applies to print). */
+  @page{size:80mm auto;margin:0}
+  @media print{body{width:80mm;margin:0;padding:6mm 4mm}}
   body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:22px 34px;color:#111}
   .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.1)}
   h2{font-family:Georgia,'Times New Roman',serif;font-size:19px;margin:0;text-align:center}
