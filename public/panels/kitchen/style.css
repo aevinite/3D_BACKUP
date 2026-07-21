@@ -42,8 +42,9 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 
 /* the three columns — fluid, no dead gap (stack on a narrow screen) */
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; padding: 14px 18px; align-items: start; }
-.col h2 { font-size: 15px; margin: 0 0 10px; color: var(--muted); letter-spacing: 0.4px; }
-.col .count { background: var(--panel); border: 1px solid var(--line); padding: 2px 9px; border-radius: 999px; font-size: 12px; margin-left: 4px; }
+/* one chip = label + count together (same look as the tablet header's .cchip) */
+.col h2 { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; margin: 0 0 10px; color: var(--muted); letter-spacing: 0.4px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 6px 12px; }
+.col .count { font-size: 14.5px; font-weight: 700; color: var(--text); }
 #col-new h2 { color: var(--amber); }
 #col-cooking h2 { color: var(--blue); }
 #col-ready h2 { color: var(--green); }
