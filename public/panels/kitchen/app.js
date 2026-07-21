@@ -719,6 +719,10 @@ function printKot(order, itemRows, restaurant) {
       .meta{display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:4px}
       .kl{font-size:14px;padding:4px 0;border-bottom:1px dotted #999}.kl .q{font-weight:700;margin-right:6px}.kl i{font-style:italic;color:#333;font-size:12px}
       .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}
+      /* Trailing blank space so the last printed line clears the print-head→cutter gap
+         on an 80mm thermal roll — without it the ticket cuts/tears THROUGH the final
+         line (the print head sits ~1.5–2cm above the exit/cutter). ~64px ≈ that gap. */
+      .feed{height:64px}
       @media print{@page{margin:4mm}}
     </style></head><body>
       <div class="h">${esc(rname)}<br>KITCHEN TICKET</div>
@@ -726,6 +730,7 @@ function printKot(order, itemRows, restaurant) {
       <div class="meta"><span>${esc(when)}</span></div>
       ${linesHtml || "<div>(no items)</div>"}
       ${allerg}
+      <div class="feed"></div>
     </body></html>`;
     const ifr = document.createElement("iframe");
     ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
@@ -768,7 +773,14 @@ function printQueue(queue, allItems, restaurant) {
 }
 function autoPrintNew(autoOn, orders, allItems, restaurant) {
   if (!autoOn || document.hidden) return;
-  printQueue((orders || []).filter((o) => o.status === "received" && !printedIds.has(o.id)), allItems, restaurant);
+  // Print a brand-new order that still needs a KOT — 'received' (guest order awaiting
+  // accept) OR 'preparing'. Waiter/tablet orders auto-accept straight to 'preparing'
+  // (the waiter already took them), so they never pass through 'received' while the
+  // tab is open — filtering to 'received' alone meant a tablet-only restaurant (e.g.
+  // Aangan) never auto-printed a single KOT. printedIds guards against a double-print
+  // when a guest order later advances received→preparing. Matches the visibilitychange
+  // handler below, which already prints both.
+  printQueue((orders || []).filter((o) => (o.status === "received" || o.status === "preparing") && !printedIds.has(o.id)), allItems, restaurant);
 }
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
