@@ -107,6 +107,16 @@ export default function AdminLogs() {
   const scopedName = rid ? restaurants.find((r) => r.id === rid)?.name : "";
   const full = count !== null && count >= threshold;
 
+  // "Send to Claude" — file a fix request from an error row (bundles the surrounding log lines).
+  const sendToClaude = async (a: Action) => {
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now()) },
+      body: JSON.stringify({ action_id: a.id, restaurant_id: a.restaurant_id || null }),
+    });
+    if (r.ok) toast("Sent to Claude — it'll be looked at overnight."); else toast(r.error || "Couldn't send that.", "err");
+  };
+
   return (
     <>
       <h1 className="adm-page-h">Logs</h1>
@@ -171,7 +181,7 @@ export default function AdminLogs() {
       )}
 
       {tab === "ops"
-        ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} />
+        ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} onSendToClaude={sendToClaude} />
         : <CustTable data={cust} err={custErr} onRetry={loadCust} />}
 
       {/* Cleanup confirm — a shared modal (phone Back + Escape + focus-trap via useAdminModal). */}
@@ -188,7 +198,7 @@ export default function AdminLogs() {
   );
 }
 
-function OpsTable({ rows, err, onRetry, scopedName }: { rows: Action[] | null; err: boolean; onRetry: () => void; scopedName: string | null }) {
+function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude }: { rows: Action[] | null; err: boolean; onRetry: () => void; scopedName: string | null; onSendToClaude: (a: Action) => void }) {
   const cols = "92px 1fr auto";
   // Which row's full detail is expanded (errors + tap-batches carry long text worth reading).
   const [open, setOpen] = useState<string | null>(null);
@@ -228,6 +238,15 @@ function OpsTable({ rows, err, onRetry, scopedName }: { rows: Action[] | null; e
                   : <span className="adm-muted"> · {a.detail.length > 60 ? a.detail.slice(0, 60) + "…" : a.detail}</span>
               ) : null}
               {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
+              {isErr && (
+                <button
+                  className="adm-btn"
+                  onClick={(e) => { e.stopPropagation(); onSendToClaude(a); }}
+                  style={{ marginTop: 6, fontSize: 11.5, padding: "3px 9px" }}
+                >
+                  <i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 5 }} />Send to Claude
+                </button>
+              )}
             </div>
             <div className="adm-when">{timeAgo(a.created_at)}</div>
           </div>

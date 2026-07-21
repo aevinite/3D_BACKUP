@@ -15,6 +15,7 @@ type Restaurant = { id: string; name: string };
 type Session = { id: string; table_number: string; status: string; bill_no: number | null; invoice_no: number | null; invoice_voided: boolean };
 type Order = { id: string; table_number: string; kot_no: number | null; status: string; payment_status: string; created_at: string; session_id: string | null };
 type RepairData = { sessions: Session[]; orders: Order[] };
+type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; summary: string; pr_url: string | null };
 
 type Op = "void_bill" | "delete_order" | "refire_order" | "unstick_table" | "edit_time";
 
@@ -35,6 +36,10 @@ export default function AdminRepair() {
   const [data, setData] = useState<RepairData | null>(null);
   const [dataErr, setDataErr] = useState(false);
   const [tool, setTool] = useState<Op | null>(null);
+  // "Describe a problem to Claude" + the open fix-request queue.
+  const [note, setNote] = useState("");
+  const [sending, setSending] = useState(false);
+  const [requests, setRequests] = useState<FixRequest[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -50,6 +55,34 @@ export default function AdminRepair() {
     if (r.ok) setData(r.data); else setDataErr(true);
   }, [rid]);
   useEffect(() => { load(); }, [load]);
+
+  const loadRequests = useCallback(async () => {
+    const r = await adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open");
+    if (r.ok) setRequests(r.data.requests || []);
+  }, []);
+  useEffect(() => { loadRequests(); }, [loadRequests]);
+
+  const uuidLocal = () => (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now());
+  const sendDescribed = async () => {
+    if (!note.trim()) { toast("Type what's happening first.", "err"); return; }
+    setSending(true);
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuidLocal() },
+      body: JSON.stringify({ note: note.trim(), restaurant_id: rid || null }),
+    });
+    setSending(false);
+    if (r.ok) { setNote(""); toast("Sent to Claude — it'll be looked at overnight."); loadRequests(); }
+    else toast(r.error || "Couldn't send that.", "err");
+  };
+  const dismissRequest = async (id: string) => {
+    setRequests((prev) => prev.filter((x) => x.id !== id)); // optimistic
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status: "dismissed" }),
+    });
+    if (!r.ok) { toast(r.error || "Couldn't update that.", "err"); loadRequests(); }
+  };
 
   const scopedName = restaurants.find((r) => r.id === rid)?.name || null;
 
@@ -70,8 +103,41 @@ export default function AdminRepair() {
         {rid && <button className="adm-btn" onClick={load}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>}
       </div>
 
+      {/* Describe a problem to Claude — for issues with no matching error row. */}
+      <div className="adm-card" style={{ marginBottom: 14 }}>
+        <h2 style={{ margin: "0 0 6px" }}><i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 8, opacity: 0.85 }} />Report a problem to Claude</h2>
+        <p className="adm-muted" style={{ fontSize: 12.5, lineHeight: 1.5, margin: "0 0 10px" }}>
+          Describe what&rsquo;s going wrong (printer, a button, a wrong total…). It&rsquo;s queued and Claude fixes the real cause overnight. {rid ? <>Tagged to <b>{scopedName}</b>.</> : <>Pick a restaurant above to tag it, or leave it general.</>}
+        </p>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} rows={3}
+          placeholder="e.g. The bill button on table 12 does nothing during rush; happens on the waiter tablet."
+          style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13.5, resize: "vertical" }} />
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+          <button className="adm-btn primary" disabled={sending} onClick={sendDescribed}>{sending ? "Sending…" : "Send to Claude"}</button>
+        </div>
+      </div>
+
+      {/* Open fix requests queue */}
+      {requests.length > 0 && (
+        <div className="adm-card" style={{ marginBottom: 14 }}>
+          <h2 style={{ margin: "0 0 8px" }}>Waiting for Claude <span className="adm-muted" style={{ fontWeight: 400 }}>· {requests.length}</span></h2>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {requests.map((q) => (
+              <div key={q.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
+                <i className={`fas ${q.source === "error_row" ? "fa-triangle-exclamation" : "fa-comment-dots"}`} aria-hidden="true" style={{ marginTop: 2, opacity: 0.7 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.summary}</div>
+                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{new Date(q.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>fix ready →</a></> : ""}</div>
+                </div>
+                <button className="adm-btn" onClick={() => dismissRequest(q.id)} title="Dismiss" style={{ fontSize: 11.5, padding: "3px 9px" }}>Dismiss</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {!rid ? (
-        <div className="adm-empty">Pick a restaurant to see its tables and orders.</div>
+        <div className="adm-empty">Pick a restaurant to use the repair tools on its tables and orders.</div>
       ) : dataErr ? (
         <div className="adm-empty">Couldn&rsquo;t load that restaurant. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>
       ) : data === null ? (
