@@ -31,11 +31,21 @@ is ambiguous instead of guessing.
    fix_requests row: `status='fixed'`, `pr_url=<url>`, `resolved_at=now()` — use the Management
    API query pattern from `scripts/fetch-fix-requests.mjs`. If the owner says it's not a real
    problem, set `status='dismissed'` instead.
-5½. **Write your history report.** Your opening prompt includes an `agent_runs` history id. Before
-   you finish, UPDATE that row's `report` with a short PLAIN-LANGUAGE summary (3–8 lines: what the
-   problem was, what you changed, the PR link, anything left for the owner — no jargon, ≤8000
-   chars). This is what the owner reads later under admin → Repair → History, so write it for
-   them, not for a programmer. Leave `status` alone — the window wrapper stamps it.
+5½. **Write your history report — COMPACT, owner's exact format (2026-07-21).** Your opening
+   prompt includes an `agent_runs` history id. Before you finish, UPDATE that row's `report`
+   with EXACTLY this shape — nothing more:
+
+   ```
+   Problem: <ONE plain line — the ACTUAL cause. Name it honestly: a code bug / a device or
+             printer problem / a network drop / not a bug at all>
+   Fix: <ONE plain line — what was done. If nothing needed doing, say so>
+   PR: <link — only if there is one>
+   You: <only if something waits on the owner; otherwise OMIT this line entirely>
+   ```
+
+   No investigation story, no file names, no jargon, no restating their request back. The owner
+   reads this under admin → Repair → History and wants ONLY "what was wrong + what was done".
+   Leave `status` alone — the window wrapper stamps it.
 6. **Sweep before you leave.** Check the input file for OTHER open requests — if any are fresh
    and clear, offer the owner to take them now; otherwise leave them for the night robot.
 

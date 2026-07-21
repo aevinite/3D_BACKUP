@@ -36,6 +36,16 @@ one-line "nothing to repair" report and STOP.
   flag it in the report as "needs the owner's OK in the morning". When unsure, DON'T auto-merge.
 
 ## Output
-Write a plain-language report to `.claude/audits/repair-<today>.md`: for each request — what was
-wrong, what you changed, verified?, PR link, auto-merged or awaiting-approval. Keep it readable by
-a non-coder. Then STOP. Do not touch requests that weren't in the input file.
+Write a COMPACT plain-language report to `.claude/audits/repair-<today>.md` — the owner reads it
+under admin → Repair → History and wants ONLY "what was wrong + what was done" (owner 2026-07-21).
+For EACH request, exactly this shape and nothing more:
+
+```
+Problem: <ONE line — the ACTUAL cause, named honestly: code bug / device or printer problem /
+          network drop / not a bug>
+Fix: <ONE line — what was done; "nothing needed" is a valid answer>
+PR: <link, only if there is one> · <auto-merged | waiting for your OK>
+```
+
+No investigation stories, no file names, no jargon. Then STOP. Do not touch requests that
+weren't in the input file.
