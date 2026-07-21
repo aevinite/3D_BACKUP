@@ -8,6 +8,14 @@
   commit, then build my PR in a dedicated `git worktree` off origin/main. RULE: for any multi-commit task in this
   repo, create a worktree FROM THE START; and run `git branch --show-current` immediately before EVERY commit/push.
 
+- **Printer hardware tests with raw `printf`/`lp` are NOT the app's format — say so LOUDLY or the owner judges the product by the ugly test slip.** `#printing`
+  (2026-07-21) Testing a new thermal printer, I sent crude hand-typed plain-text slips via `lp` to check feed/cut. They looked trash (drifting columns, stray chars) because plain text goes through CUPS' generic text filter, not the app's styled HTML. Owner saw them and thought the APP output was garbage. The app prints real HTML via Chrome (`printBill`/`printKot`) which looks like the on-screen preview. RULE: whenever sending raw test prints, state up-front "these are hardware-only tests, NOT the app's real format" — and reserve judging layout for an actual app-print test.
+
+- **When the owner says "I'll do it myself, you don't have to do anything" — DON'T automate that action.** `#collab`
+  (2026-07-21) Owner wanted to place a test order HIMSELF from the tablet and watch the KOT print; he'd said "I'll order myself." I ran a script that auto-placed the order via API. Overstep — it took the action he'd explicitly reserved, and produced confusing output he didn't initiate. RULE: if the owner reserves a step ("I'll open it / I'll order / you don't do X"), do the supporting setup only and HAND CONTROL BACK at that boundary; never drive the reserved action "to be helpful."
+- **Printer feed/cut defaults set via `lpoptions -d` (user) do NOT apply to app/Chrome prints — only to `lp` command-line jobs.** `#printing`
+  (2026-07-21) I forced FeedDist=45mm + CutMedia on my `lp` test jobs and saved them with `lpoptions -d`, saw full eject + cut, declared it fixed. But the app prints via Chrome kiosk-printing, which ignored those and used the PPD defaults (9mm feed, no cut) → KOT came out half-way, uncut. FIX must be baked into the QUEUE/system defaults (lpadmin -o / PPD *Default lines) + trailing blank space in the KOT HTML template. Verify the ACTUAL app print path, not a proxy `lp` test.
+
 ## What works
 - **Per-user permission overrides as JSONB + "override ?? restaurant-default ?? off" fallback** `#backend`
   (PR #106): one additive column, keys named identically to the settings tri-states, resolution in ONE
@@ -217,9 +225,69 @@ says "merge without review". A revert is cheap, but don't rely on that — get t
 irreversible step. (Faithful-attribution: my miscommunication via ambiguous option wording, not a
 changed mind.)
 
+## 2026-07-08 — Verify NEW UI by PROGRAMMATICALLY checking overflow on the real app (phone+desktop); use PROD when local dev is flaky
+Owner: don't verify a detached mockup + static PNGs — drive the REAL running app (scripts/view-device.mjs
+for a visible emulated Chrome, or headless Playwright), at phone (Samsung A35, 360px) AND desktop, and
+actually check for elements spilling past the screen — compare each element's getBoundingClientRect().right
+to window.innerWidth — not just "no console errors". This caught a 2-column grid cramming on a 360px phone
+(fix: grid-template-columns repeat(auto-fit, minmax(220px,1fr)) → 1 col on phone) and a Chart.js
+getContext-of-null on rapid tab-switching (fix: bail if state.tab changed during the async fetch). Also:
+open a modal that needs live state by calling its GLOBAL function directly via page.evaluate (pure UI, no
+data mutation) when no live row exists to click. And when the local :4000 dev server keeps getting reaped
+(background tasks don't survive here), verify against the live PROD url instead (Vercel deployment url +
+the diag login) — it's stable and it's the real thing.
+
 ## 2026-07-06 — Don't declare a feature "dead/unwired" from a scoped grep
 Told the owner the `auto_table_action` (auto close/restart on paid) setting was "never
 wired, does nothing" after grepping only app.js + route.ts for the literal string. It IS
 wired — the enforcement lives in lib/autoSettle.ts (maybeAutoSettle), called from the
 editor+tablet routes after payment/serve. Lesson: before calling a feature dead, grep the
 WHOLE repo (esp. lib/ helpers) for the behaviour, not just the string in the obvious files.
+
+## 2026-07-09 — Parallel sessions WILL wipe your uncommitted edits in the shared folder
+- Mid-task, another session ran a git op (stash pop / checkout) in the SHARED working dir
+  (backup_Menu) and my uncommitted edits to 7 files reverted to HEAD; CLAUDE.md picked up
+  that session's stash-pop conflict markers. tsc had passed + screenshots looked right
+  minutes earlier, then poof.
+- LESSON: for any multi-file change while other sessions may run, WORK IN A WORKTREE FROM
+  THE START (git worktree add ../wt -b branch origin/main), or at minimum COMMIT within
+  seconds of each coherent chunk. Uncommitted work in the shared tree is not safe.
+- Worktree gotchas that bit me this time: (1) symlinked node_modules => Turbopack build
+  panics ('Symlink node_modules points out of filesystem root'); do a real npm ci.
+  (2) fresh worktree has no .env.local => 'supabaseUrl is required' at build page-data;
+  cp the gitignored .env.local in (it stays gitignored). (3) other sessions occupy ports
+  (4000/4010/4020...) => next dev -p 4020 hit EADDRINUSE and I was silently reading ANOTHER
+  session's old server; pick a free port programmatically and confirm it serves YOUR code
+  (curl the changed asset + grep for a new token) before trusting any verification.
+
+## Headless-verifying a manager SETTINGS feature: two gotchas that cost ~10 rounds (2026-07-09)
+Verifying the new Settings→Tables QR card via Playwright kept showing "0 rows / card not there"
+even though the code was correct + deployed. Two causes, both TEST-harness, not product bugs:
+1. **Drive the LIVE iframe via `page.$("iframe").contentFrame()`, NOT `page.frames().find(...)`.**
+   The manager panel iframe RE-MOUNTS once on boot, leaving a STALE detached frame in
+   page.frames(); reads on it succeed (it loaded once) but clicks/`.click()` do NOTHING
+   (dead handlers) — the tab never switches. contentFrame() always returns the current frame.
+2. **A plain manager can't even OPEN Settings.** The Settings/Dashboard/Menu/Ratings tabs are
+   XRAY-gated by manager_permissions (edit_settings/view_dashboard/edit_menu/view_ratings); a
+   diag manager without the power has the tab HIDDEN and applyHierarchyView() BOUNCES you off it
+   (setTab runs, then hops to the first visible tab). So a headless "click Settings" silently
+   stays on Dishes. To see it: grant the power to a NON-#1 TEST restaurant's manager (revert
+   after), or drive as admin (higher role = tab tinted-but-clickable). NEVER grant on #1 (prod).
+Also: local Next-dev iframe re-mount is flaky for click-through — verify on the STABLE PROD build
+(3-d-backup.vercel.app) after deploy; it boots fast + deterministically. Confirm slug-driven links
+render for a NON-#1 tenant (pizza-palace), not just #1.
+
+- 2026-07-09 (tablet mobile-UI verify miss): I verified the waiter ORDER screen only on French House (long 2-line dish names → tall cards) + headless emulation, and MISSED two bugs the owner hit on his real S24 Ultra: (1) the corner ✎ overlapped the +/− badge on SHORT (1-line) dish names because the 2-per-row card min-height (62px) was too small → ALWAYS test a short-name tenant, not just #1; (2) a position:fixed;bottom "View order" pill sits BEHIND the phone browser's bottom toolbar — env(safe-area) does NOT cover the browser chrome, so anchor bottom UI to a 100dvh container (position:absolute) and remember the owner tests on a REAL device where browser chrome eats top+bottom. Headless emulation ≠ real mobile browser chrome.
+- 2026-07-09 (cache-buster miss, cost the owner a "still cannot see the fix" round): a CSS-only fix (#276) changed style.css but REUSED ?v=20260708g in index.html, so phones kept the stale cached stylesheet and the live fix was invisible until a follow-up ?v bump (#278). RULE: bump index.html's ?v= on EVERY change to a panel's style.css OR app.js, not just the first — the fix being live on the server means nothing if the browser serves the cached old file. CLAUDE.md already warns this; apply it every single time.
+- 2026-07-09 (cost the owner MANY rounds — mobile docked-bar hidden under Android 3-button nav): the tablet panel had viewport-fit=cover, which renders EDGE-TO-EDGE under the OS nav bar; Android 3-button nav reports env(safe-area-inset-bottom)=0, so EVERY safe-area bottom-padding I added was a no-op and the docked bars (View-order pill, options-popup Add-to-order, SEND) sat UNDER the nav bar. FIX: for a panel that just needs its bottom bar visible (not a true edge-to-edge design), DO NOT use viewport-fit=cover — let the browser inset content above the system nav. Also: OS-nav-bar / viewport-fit behavior CANNOT be reproduced in headless or DevTools device emulation — when the owner reports a bottom-cut on his real phone, treat it as real, explain I cannot fully verify it locally, and iterate fast with him rather than shipping repeated emulator-passing guesses.
+- 2026-07-09 (SOLVED the docked-bar-under-nav blocker — corrects the note directly above): the real root cause was NOT viewport-fit=cover. A prior pass (#285) wired the panel CSS to pad by `max(env(safe-area-inset-bottom), var(--safe-b))` AND added an outer bridge `app/tablet/TabletFrame.tsx` that pushes a measured inset into the iframe as `--safe-b`. But TWO writers fought over `--safe-b`: the in-iframe app.js set 48px, then TabletFrame overwrote it with 0px (its env() probe reads 0 for a 3-button nav). The 0px writer ran LAST → won → padding 0 → bars under the nav. LESSONS: (1) When a CSS var "is used but nothing sets it", grep the OUTER Next page + ALL files, not just the panel — and suspect TWO setters fighting; PROVE it with a timeline poll of the inline value over the first ~5s (I saw 0→48→0). (2) You CAN verify an OS-3-button-nav fix in headless emulation after all: the emulator uses an Android UA, so force the `/Android/ → 48px` fallback path and MEASURE the resolved `getComputedStyle(...).paddingBottom` on each docked container (opt-foot=62, view-order=132, detail=78, pill margin=54) — that proves the mechanism even though the emulator has no real nav bar. (3) Fix = ONE authoritative writer (the outer TabletFrame) computing `max(env, measured-gap, Android-48)`, remove the competing in-iframe writer. viewport-fit=cover stays (needed for env on iOS/modern Chrome). Shipped PR #293, verified on prod.
+- 2026-07-09 (root-caused the "menu takes 4-5s" the RIGHT way — measure, don't add more caching): the tablet /summary took 4-7s via the endpoint but each of its queries ran <0.5s DIRECTLY against the DB → the time was in TRANSIT, not the DB. Cause: `vercel.json "regions":["syd1"]` (Sydney) while the DB had been migrated to Mumbai (ap-south-1) — every DB round-trip crossed oceans. Confirmed via `x-vercel-id: bom1::syd1` (edge::function region) + the Supabase Management API project region. Fix: regions syd1→bom1 (app-wide, /summary 4-7s→0.9s). LESSONS: (1) when an endpoint is slow but the raw query is fast, SUSPECT A REGION MISMATCH between the serverless function and the DB — check `x-vercel-id` (2nd field = compute region) against the DB region, don't just add client caching. (2) After ANY DB region migration, MOVE THE COMPUTE REGION TOO — a DB-move "latency win" is silently NOT realized if the functions stay in the old region (it can even be net-worse: local→cross-region). (3) Also found the panel fired 5× /summary on boot (boot load + LFH_RT per-topic fireAll ops+menu + subscribe) — added in-flight coalescing to load() (5→1, floor paints after the first). Both shipped PRs #294/#295, verified on prod: floor 4.6s→~1.9s, Take-order ~40ms from cache. Method that worked: profile the live endpoint timings + sizes FIRST, then time the individual queries, instead of guessing.
+- 2026-07-09 (advice caused the owner to perceive it as unfixed): I told the owner to "hard-refresh" to pick up each new build — but he hard-refreshed EVERY test, and a hard refresh bypasses the browser cache and re-downloads the whole app (~500KB), so he kept seeing the slow cold-first-load and concluded my fixes did nothing. LESSON: when telling the owner to verify a deploy, say "hard-refresh ONCE to get the new build, then open/refresh NORMALLY" — a normal open reuses cached JS and is fast. Don't imply repeated hard-refreshes. Also: the panel's own /panels/* files are served max-age=0,must-revalidate so even a normal reopen does a tiny 304 recheck per file (fixable by hard-caching the ?v-versioned ones) — but that's small vs a hard-refresh full re-download.
+
+## Never ship a visible layout trade-off silently (2026-07-21)
+I kept a blanket "reserve 48px on Android" knowing it would leave controls "floating a bit
+high" on some phones and called it acceptable without flagging it — the owner then caught
+the dead band in a screenshot. If a fix knowingly produces a visible artifact on ANY device
+class, either detect the condition properly (trust platform signals like env()/visualViewport
+over invented constants) or explicitly tell the owner what it will look like and let him
+decide. A hardcoded pixel guess for a system UI size is a smell: the platform reports it.

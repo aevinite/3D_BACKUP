@@ -7,7 +7,7 @@
 // Guests pass only { menu } so they never receive the 'ops' order firehose.
 import { useEffect, useRef } from "react";
 import { createClient, type SupabaseClient, type RealtimeChannel } from "@supabase/supabase-js";
-import { reportRealtime } from "@/lib/connectionStatus";
+import { reportRealtime, reportLatency } from "@/lib/connectionStatus";
 
 type Topic = "ops" | "menu";
 type Handlers = Partial<Record<Topic, () => void | Promise<void>>>;
@@ -78,7 +78,13 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
           .on(
             "postgres_changes" as never,
             { event: "INSERT", schema: "public", table: "realtime_events", filter } as never,
-            () => fire(topic) // filter already scoped it; no client-side rid check needed
+            (payload: { new?: { created_at?: string } }) => {
+              // FREE latency reading: how long this breadcrumb took to reach us
+              // (now − when it was written). No extra request — the event already arrived.
+              const ts = payload?.new?.created_at;
+              if (ts) { const lat = Date.now() - Date.parse(ts); if (lat >= 0 && lat < 60000) reportLatency(lat); }
+              fire(topic); // filter already scoped it; no client-side rid check needed
+            }
           )
           .subscribe(onStatus);
       });

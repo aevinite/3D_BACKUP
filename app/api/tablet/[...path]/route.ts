@@ -513,8 +513,19 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // same as the per-ticket discount (off/on/pin). (mig 143)
     if (a === "sessions" && c === "bill-discount") {
       const g = await tabletPerm("tablet_discount", req, body, rid, actor); if (!g.allow) return g.resp;
-      const sess = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const sess = must(await sb.from("sessions").select("id, discount").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!sess) return err("That table isn't there anymore — refresh.", 404);
+      // Reciprocal of the per-ticket guard above: the two discounts are mutually exclusive (a
+      // whole-bill discount OWNS every ticket's orders.discount via the split, so applying one
+      // over a manually-set per-ticket discount silently overwrites it — audit 2026-07-09). When
+      // there's no active bill discount yet (session.discount == 0) but a ticket already carries a
+      // hand-set discount, block until it's cleared. (session.discount > 0 → the ticket discounts
+      // ARE the existing split, so re-applying/clearing the bill discount is fine.)
+      if (!(Number(sess.discount) > 0)) {
+        const perTicket = must(await sb.from("orders").select("id").eq("session_id", b).eq("restaurant_id", rid)
+          .neq("status", "cancelled").neq("payment_status", "paid").gt("discount", 0).limit(1));
+        if (perTicket.length) return err("Clear the single-ticket discount first, then apply a whole-bill discount.", 409);
+      }
       // Clamp to the table's Σ pre-tax subtotal of UNPAID, non-cancelled orders (defense in
       // depth — the modal already caps the UI; this guards a replay / hand-formed body).
       const subs = must(await sb.from("orders").select("subtotal").eq("session_id", b).eq("restaurant_id", rid).neq("status", "cancelled").neq("payment_status", "paid"));

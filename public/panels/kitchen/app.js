@@ -768,7 +768,14 @@ function printQueue(queue, allItems, restaurant) {
 }
 function autoPrintNew(autoOn, orders, allItems, restaurant) {
   if (!autoOn || document.hidden) return;
-  printQueue((orders || []).filter((o) => o.status === "received" && !printedIds.has(o.id)), allItems, restaurant);
+  // Print a brand-new order that still needs a KOT — 'received' (guest order awaiting
+  // accept) OR 'preparing'. Waiter/tablet orders auto-accept straight to 'preparing'
+  // (the waiter already took them), so they never pass through 'received' while the
+  // tab is open — filtering to 'received' alone meant a tablet-only restaurant (e.g.
+  // Aangan) never auto-printed a single KOT. printedIds guards against a double-print
+  // when a guest order later advances received→preparing. Matches the visibilitychange
+  // handler below, which already prints both.
+  printQueue((orders || []).filter((o) => (o.status === "received" || o.status === "preparing") && !printedIds.has(o.id)), allItems, restaurant);
 }
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {

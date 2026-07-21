@@ -2,11 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- viewport-fit=cover: REQUIRED for env(safe-area-inset-*) to report the phone's real notch /
+       bottom gesture-bar size. Without it those insets resolve to 0 inside this full-screen panel,
+       so the floating "view order" pill + the SEND footer sat behind the bottom bar (audit 2026-07-09). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Waiter tablet</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=20260705e">
+  <link rel="stylesheet" href="style.css?v=20260709a">
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js"></script>
 </head>
@@ -74,10 +77,10 @@
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=1"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=2"></script>
+  <script src="/panels/connbadge.js?v=3"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js"></script>
   <script src="/panels/issue-raise.js?v=1"></script>
-  <script src="app.js?v=20260708e"></script>
+  <script src="app.js?v=20260709a"></script>
 </body>
 </html>

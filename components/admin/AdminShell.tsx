@@ -58,15 +58,39 @@ const GROUPS: NavGroup[] = [
 
 type Rest = { id: string; slug: string; name: string; active: boolean };
 
-export default function AdminShell({ children }: { children: React.ReactNode }) {
+export default function AdminShell({ children, initialSkin }: { children: React.ReactNode; initialSkin?: "light" | "dark" }) {
   const path = usePathname();
   // DARK is the default skin (owner spec 2026-07-04) — light stays as the toggle.
-  const [skin, setSkin] = useState<"light" | "dark">("dark");
+  // The server passes the cookie value as `initialSkin` so SSR already emits the RIGHT
+  // data-skin — no dark→light flash on load/refresh for admins who chose light (mirrors
+  // the owner-panel fix 2026-07-06; before this the state defaulted to "dark" and only
+  // flipped to light AFTER hydration, which is what caused the black flash). Falls back
+  // to dark on a first-ever visit (no cookie yet).
+  const [skin, setSkin] = useState<"light" | "dark">(initialSkin ?? "dark");
   useEffect(() => {
-    try { const s = localStorage.getItem("aevidine_skin"); if (s === "dark" || s === "light") setSkin(s); } catch {}
+    // Reconcile with localStorage only if it and the SSR cookie disagree (rare) — keeps
+    // the toggle working even if the cookie was cleared but localStorage kept. Also seed
+    // the cookie from localStorage so admins who chose light BEFORE this fix (value only
+    // in localStorage, no cookie yet) get a flash-free load next time, without re-toggling.
+    try {
+      const s = localStorage.getItem("aevidine_skin");
+      if (s === "dark" || s === "light") {
+        if (s !== skin) setSkin(s);
+        if (!document.cookie.includes("aevidine_skin=")) {
+          document.cookie = `aevidine_skin=${s}; path=/; max-age=31536000; samesite=lax`;
+        }
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const toggleSkin = () => {
-    setSkin((cur) => { const next = cur === "dark" ? "light" : "dark"; try { localStorage.setItem("aevidine_skin", next); } catch {} return next; });
+    setSkin((cur) => {
+      const next = cur === "dark" ? "light" : "dark";
+      try { localStorage.setItem("aevidine_skin", next); } catch {}
+      // Persist to a cookie too so the NEXT server render starts on the right skin.
+      try { document.cookie = `aevidine_skin=${next}; path=/; max-age=31536000; samesite=lax`; } catch {}
+      return next;
+    });
   };
 
   const isActive = (n: NavItem) => (n.exact ? path === n.href : path.startsWith(n.href));
