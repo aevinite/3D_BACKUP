@@ -180,12 +180,12 @@ function ticketHtml(o, rows) {
     : (!allCooked
       ? `<button class="big ready" data-ready="${esc(o.id)}">ALL READY</button>`
       : `<div class="awaiting">✓ ready — waiter serving</div>`);
-  // Manual REPRINT button — only shown when KOT auto-print is enabled for this restaurant
-  // (state.autoPrintKot), so restaurants that don't print see no clutter. A print-first
-  // kitchen needs this: if the printer jammed / ran out of paper when the KOT auto-printed,
-  // the cook can reprint that exact ticket on demand. Independent of the auto-print tracking
-  // (printedIds) — it just re-runs printKot for this order's current dishes. (owner 2026-07-07)
-  const reprintBtn = state.autoPrintKot ? `<button class="reprint" data-reprint="${esc(o.id)}" title="Reprint this kitchen ticket" aria-label="Reprint kitchen ticket">🖨</button>` : "";
+  // Manual PRINT button — on EVERY ticket for EVERY restaurant (owner 2026-07-21: "it
+  // should be for everyone"). Any kitchen with any printer can print a ticket on demand
+  // (or reprint after a jam / paper-out). Only the AUTOMATIC printing stays gated by the
+  // admin entitlement + owner toggle (autoPrintKot). Independent of the auto-print
+  // tracking (printedIds) — it just runs printKot for this order's current dishes.
+  const reprintBtn = `<button class="reprint" data-reprint="${esc(o.id)}" title="Print this kitchen ticket" aria-label="Print kitchen ticket">🖨</button>`;
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
     <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${lines}${action}</div>`;
