@@ -51,6 +51,33 @@ export const ACT_LABEL: Record<string, string> = {
 
 export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
 
+// formatActionDetail — turn a raw stored `detail` into a plain-English phrase for the
+// activity feed. Today only "ui_taps" needs it: the black-box logger (public/panels/errlog.js)
+// stores a batch of button taps as JSON like `[{"t":12,"l":"Add dish"}]`, which is unreadable
+// on screen. We parse it into the button LABELS that were tapped, deduped with a "×N" count and
+// in first-seen order — e.g. `Add dish, Send order ×2, Close`. Connection-signal-light taps are
+// dropped as noise (people tap that pill constantly just to check their signal). Anything we
+// can't parse falls back to the raw string, so a future detail shape is never hidden.
+export function formatActionDetail(action: string, detail: string | null | undefined): string {
+  if (!detail) return "";
+  if (action !== "ui_taps") return detail;
+  let arr: unknown;
+  try { arr = JSON.parse(detail); } catch { return detail; }
+  if (!Array.isArray(arr)) return detail;
+  const order: string[] = [];
+  const counts = new Map<string, number>();
+  for (const item of arr) {
+    if (!item || typeof item !== "object") continue;
+    const l = String((item as { l?: unknown }).l ?? "").trim();
+    if (!l) continue;
+    if (/^connection\b/i.test(l)) continue; // signal-light checks are noise, not an action
+    if (!counts.has(l)) order.push(l);
+    counts.set(l, (counts.get(l) || 0) + 1);
+  }
+  if (order.length === 0) return "checked the screen";
+  return order.map((l) => (counts.get(l)! > 1 ? `${l} ×${counts.get(l)}` : l)).join(", ");
+}
+
 // openRestaurantPanel — the admin "act-as" pattern, shared by the home command
 // table and the Restaurants detail page. Opens the tab SYNCHRONOUSLY on the
 // /api/admin/act-as/go redirect, which sets the act-as cookie and 302s to the
@@ -169,16 +196,19 @@ export function ActivityFeed({ rows }: { rows: Action[] }) {
   if (rows.length === 0) return <p className="adm-muted" style={{ fontSize: 13, margin: 0 }}>No staff actions yet.</p>;
   return (
     <div style={{ display: "flex", flexDirection: "column", maxHeight: 340, overflowY: "auto" }}>
-      {rows.map((a) => (
+      {rows.map((a) => {
+        const det = formatActionDetail(a.action, a.detail);
+        return (
         <div key={a.id} style={{ display: "grid", gridTemplateColumns: "84px 1fr auto", gap: 10, alignItems: "center", fontSize: 13, padding: "8px 0", borderBottom: "var(--border)" }}>
           <span className="adm-chip" style={{ background: "color-mix(in srgb, " + (PANEL_COLOR[a.panel] || "#888") + " 22%, transparent)", color: PANEL_COLOR[a.panel] || "var(--muted)" }}>{a.panel}</span>
           <span style={{ minWidth: 0 }}>
-            {ACT_LABEL[a.action] || a.action}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : a.detail ? ` · ${a.detail}` : ""}
+            {ACT_LABEL[a.action] || a.action}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : det ? ` · ${det}` : ""}
             {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
           </span>
           <span className="adm-when">{timeAgo(a.created_at)}</span>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

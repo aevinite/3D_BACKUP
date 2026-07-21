@@ -73,6 +73,10 @@
     try {
       var el = e.target && e.target.closest ? e.target.closest("button, [data-log], a.btn, .btn") : null;
       if (!el) return;
+      // The connection-signal pill (connbadge.js: button.lfh-conn + its details popover) is NOT
+      // an action — staff tap it constantly just to check their signal, which floods the admin
+      // activity log with meaningless "Connection: Excellent…" rows. Never record it.
+      if (el.closest(".lfh-conn") || el.closest(".lfh-conn-pop")) return;
       taps.push({ t: Math.round((Date.now() - t0) / 1000), l: label(el) });
       if (taps.length > 60) taps.shift(); // bound memory between flushes
     } catch (err) { /* ignore */ }
