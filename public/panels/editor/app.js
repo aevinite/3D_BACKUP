@@ -2880,7 +2880,13 @@ function printBill(t, sess, os) {
      · Content ≤66mm CENTERED: the 80mm head only prints ~70mm, offset ~5mm from the
        left paper edge — a full-width 80mm body loses ~8mm of every line on the right. */
   @page{margin:0}
-  @media print{body{width:66mm;margin:0 auto;padding:2mm 0}}
+  @media print{body{width:66mm;margin:0 auto;padding:2mm 0}
+    /* a bill spanning several 65mm printer pages: print the ITEM header ONCE (browsers
+       otherwise repeat <thead> on every page — it showed up mid-bill), and never split
+       a row across a page boundary (a fragmented flex row shifted every amount one
+       line down — owner's 18:04 invoice). Validated in the offline print simulator. */
+    thead{display:table-row-group}
+    tr,.t,.g,.kv{break-inside:avoid;page-break-inside:avoid}}
   body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:22px 34px;color:#111}
   .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.1)}
   h2{font-family:Georgia,'Times New Roman',serif;font-size:19px;margin:0;text-align:center}
@@ -3138,7 +3144,8 @@ async function printZReport() {
   /* Same thermal recipe as printBill: margin:0 (no browser header/footer), no @page
      size, content ≤66mm centered so the 70mm printable head never clips it. */
   @page{margin:0}
-  @media print{body{width:66mm;margin:0 auto;padding:2mm 0}}
+  @media print{body{width:66mm;margin:0 auto;padding:2mm 0}
+    .zr,.grand,.sec{break-inside:avoid;page-break-inside:avoid}}
   body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:20px;color:#111}
   h2{font-family:Georgia,serif;font-size:18px;margin:0;text-align:center}
   .sub{text-align:center;color:#444;font-size:10.5px;margin:3px 0 12px}
