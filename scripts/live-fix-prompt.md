@@ -31,6 +31,11 @@ is ambiguous instead of guessing.
    fix_requests row: `status='fixed'`, `pr_url=<url>`, `resolved_at=now()` — use the Management
    API query pattern from `scripts/fetch-fix-requests.mjs`. If the owner says it's not a real
    problem, set `status='dismissed'` instead.
+5½. **Write your history report.** Your opening prompt includes an `agent_runs` history id. Before
+   you finish, UPDATE that row's `report` with a short PLAIN-LANGUAGE summary (3–8 lines: what the
+   problem was, what you changed, the PR link, anything left for the owner — no jargon, ≤8000
+   chars). This is what the owner reads later under admin → Repair → History, so write it for
+   them, not for a programmer. Leave `status` alone — the window wrapper stamps it.
 6. **Sweep before you leave.** Check the input file for OTHER open requests — if any are fresh
    and clear, offer the owner to take them now; otherwise leave them for the night robot.
 

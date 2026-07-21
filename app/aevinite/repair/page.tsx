@@ -16,6 +16,7 @@ type Session = { id: string; table_number: string; status: string; bill_no: numb
 type Order = { id: string; table_number: string; kot_no: number | null; status: string; payment_status: string; created_at: string; session_id: string | null };
 type RepairData = { sessions: Session[]; orders: Order[] };
 type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; summary: string; pr_url: string | null };
+type AgentRun = { id: string; kind: "live" | "nightly" | "audit"; title: string; status: "running" | "done" | "closed" | "failed"; report: string | null; started_at: string; ended_at: string | null };
 
 type Op = "void_bill" | "delete_order" | "refire_order" | "unstick_table" | "edit_time";
 
@@ -40,6 +41,9 @@ export default function AdminRepair() {
   const [note, setNote] = useState("");
   const [sending, setSending] = useState(false);
   const [requests, setRequests] = useState<FixRequest[]>([]);
+  // Session history (agent_runs): every Claude run — pop-up terminal, night robot, audits.
+  const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [openRun, setOpenRun] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -59,6 +63,8 @@ export default function AdminRepair() {
   const loadRequests = useCallback(async () => {
     const r = await adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open");
     if (r.ok) setRequests(r.data.requests || []);
+    const h = await adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs");
+    if (h.ok) setRuns(h.data.runs || []);
   }, []);
   useEffect(() => { loadRequests(); }, [loadRequests]);
 
@@ -72,7 +78,7 @@ export default function AdminRepair() {
       body: JSON.stringify({ note: note.trim(), restaurant_id: rid || null }),
     });
     setSending(false);
-    if (r.ok) { setNote(""); toast("Sent to Claude — it'll be looked at overnight."); loadRequests(); }
+    if (r.ok) { setNote(""); toast("Sent — a Claude window pops up on the Mac within a minute (or it's handled overnight)."); loadRequests(); }
     else toast(r.error || "Couldn't send that.", "err");
   };
   const dismissRequest = async (id: string) => {
@@ -107,7 +113,7 @@ export default function AdminRepair() {
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2 style={{ margin: "0 0 6px" }}><i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 8, opacity: 0.85 }} />Report a problem to Claude</h2>
         <p className="adm-muted" style={{ fontSize: 12.5, lineHeight: 1.5, margin: "0 0 10px" }}>
-          Describe what&rsquo;s going wrong (printer, a button, a wrong total…). It&rsquo;s queued and Claude fixes the real cause overnight. {rid ? <>Tagged to <b>{scopedName}</b>.</> : <>Pick a restaurant above to tag it, or leave it general.</>}
+          Describe what&rsquo;s going wrong (printer, a button, a wrong total…). A Claude window opens on the office Mac within a minute if it&rsquo;s on — otherwise the night robot takes it. {rid ? <>Tagged to <b>{scopedName}</b>.</> : <>Pick a restaurant above to tag it, or leave it general.</>}
         </p>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} rows={3}
           placeholder="e.g. The bill button on table 12 does nothing during rush; happens on the waiter tablet."
@@ -132,6 +138,47 @@ export default function AdminRepair() {
                 <button className="adm-btn" onClick={() => dismissRequest(q.id)} title="Dismiss" style={{ fontSize: 11.5, padding: "3px 9px" }}>Dismiss</button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Claude session history — every run: pop-up terminals (live), night robot, audits. */}
+      {runs.length > 0 && (
+        <div className="adm-card" style={{ marginBottom: 14 }}>
+          <h2 style={{ margin: "0 0 8px" }}><i className="fas fa-clock-rotate-left" aria-hidden="true" style={{ marginRight: 8, opacity: 0.85 }} />Claude session history <span className="adm-muted" style={{ fontWeight: 400 }}>· {runs.length}</span></h2>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {runs.map((s) => {
+              const mins = s.ended_at ? Math.max(1, Math.round((new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 60000)) : null;
+              const kindLabel = s.kind === "live" ? "LIVE" : s.kind === "nightly" ? "NIGHT" : "AUDIT";
+              const statusInfo: Record<AgentRun["status"], { label: string; color: string }> = {
+                running: { label: "working…", color: "var(--adm-accent, #e8a13c)" },
+                done: { label: "finished", color: "var(--adm-ok, #4caf82)" },
+                closed: { label: "window closed", color: "var(--adm-muted-fg, #9aa)" },
+                failed: { label: "failed", color: "var(--adm-danger)" },
+              };
+              const st = statusInfo[s.status];
+              const expanded = openRun === s.id;
+              return (
+                <div key={s.id} style={{ padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
+                  <button onClick={() => setOpenRun(expanded ? "" : s.id)} aria-expanded={expanded}
+                    style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", background: "none", border: "none", padding: 0, color: "inherit", font: "inherit", textAlign: "left", cursor: s.report ? "pointer" : "default", minHeight: 40 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, padding: "2px 6px", borderRadius: 5, marginTop: 1, background: "color-mix(in srgb, var(--adm-accent, #e8a13c) 18%, transparent)", color: "var(--adm-accent, #e8a13c)" }}>{kindLabel}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</span>
+                      <span className="adm-muted" style={{ fontSize: 11.5 }}>
+                        {new Date(s.started_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        {mins !== null ? <> · {mins} min</> : null} · <span style={{ color: st.color }}>{st.label}</span>
+                        {s.report ? <> · {expanded ? "hide" : "read what it did"}</> : null}
+                      </span>
+                    </span>
+                    {s.report ? <i className={`fas fa-chevron-${expanded ? "up" : "down"}`} aria-hidden="true" style={{ marginTop: 4, opacity: 0.5, fontSize: 11 }} /> : null}
+                  </button>
+                  {expanded && s.report ? (
+                    <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, lineHeight: 1.55, margin: "8px 0 0", padding: "10px 12px", borderRadius: 8, background: "color-mix(in srgb, var(--card) 60%, transparent)", border: "var(--border)", maxHeight: 320, overflowY: "auto", fontFamily: "inherit" }}>{s.report}</pre>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

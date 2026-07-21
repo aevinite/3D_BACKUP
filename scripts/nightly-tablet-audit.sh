@@ -41,12 +41,14 @@ mkdir -p "$PROJ/.claude/audits"
   # 2) Run the audit headlessly. Unattended => skip permission prompts (read-only audit
   #    that only writes one report file). Falls back to sonnet if opus is busy.
   echo "Launching Claude tablet audit at $(date)..."
-  "$CLAUDE" -p "$(cat "$PROJ/scripts/tablet-audit-prompt.md")" \
+  RUN_ID="$("$NODE_BIN/node" "$PROJ/scripts/agent-run-record.mjs" start audit "Waiter tablet nightly audit" 2>/dev/null || true)"
+  if "$CLAUDE" -p "$(cat "$PROJ/scripts/tablet-audit-prompt.md")" \
     --dangerously-skip-permissions \
     --fallback-model claude-sonnet-5 \
     --add-dir "$PROJ" \
-    2>&1
+    2>&1; then AGENT_STATUS="done"; else AGENT_STATUS="failed"; fi
   echo "Claude tablet audit finished at $(date)."
+  [ -n "$RUN_ID" ] && "$NODE_BIN/node" "$PROJ/scripts/agent-run-record.mjs" end "$RUN_ID" "$AGENT_STATUS" "$PROJ/.claude/audits/tablet-audit-$DATE.md" 2>/dev/null
 
   # 3) If WE started the server, leave it running (harmless) — the machine is the owner's.
   [ "$STARTED_SERVER" = "1" ] && echo "(Note: dev server was auto-started by this job.)"
