@@ -8,9 +8,10 @@ Send-to-Claude flow + the nightly repair agent. See:*
   Full Disk Access grant — which also revives your existing audit jobs).
 - `live-fix-popup.md` — "look at it NOW": a request typed in admin pops a
   working Claude terminal on the Mac (built 2026-07-21).
-- `database-per-restaurant.md` — the "separate database per restaurant so if
-  one fails others keep running" question: what's true, what's myth, verdict
-  = not now, design for pods later (added 2026-07-21).
+- `database-per-restaurant.md` — for the FUTURE own-server stack: how
+  "separate database per restaurant" really works (pods/cells), the two pieces
+  the future API server needs from day one (directory + migration runner),
+  and the triggers for splitting (added 2026-07-21).
 
 *Structure 3 (separate always-on server) is deliberately deferred to the future
 SaaS stack.)*
