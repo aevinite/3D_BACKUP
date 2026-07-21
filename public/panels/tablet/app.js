@@ -1972,8 +1972,8 @@ function drawDishOptions() {
       <div class="opt-scroll">
         <div class="muted small">Base ${inr(base)}</div>
         ${groups || ""}
-        <div class="optgroup"><h4>⚠ Allergy / avoid <span class="muted small">· this item</span></h4>
-          <input type="text" id="optAllergy" class="note allergy" placeholder="e.g. nuts, dairy" value="${esc(state._opt.allergy || "")}"></div>
+        <div class="optgroup"><h4>✎ Note / allergy <span class="muted small">· kitchen sees exactly what you type</span></h4>
+          <input type="text" id="optAllergy" class="note allergy" placeholder="e.g. no nuts, less ice" value="${esc(state._opt.allergy || "")}"></div>
         <div class="optgroup"><h4>Quantity</h4>
           <div class="opt-qty"><button class="qbtn" id="optMinus" aria-label="Less">−</button><b id="optQ">${qty}</b><button class="qbtn" id="optPlus" aria-label="More">+</button></div></div>
       </div>
@@ -2002,9 +2002,10 @@ function drawDishOptions() {
     const allergy = (state._opt.allergy || "").trim();
     const useQty = Math.max(1, state._opt.qty || 1);
     // ADD-TO-EXISTING-ORDER mode: send straight to the order's add-item endpoint.
+    // The ✎ box travels as a VERBATIM note (kitchen sees exactly what was typed) —
+    // it used to become removed[], which force-prefixed "NO" onto every entry.
     if (state.addToOrderId) {
-      const removed = allergy ? allergy.split(",").map((s) => s.trim()).filter(Boolean) : [];
-      addDishToOrder(state.addToOrderId, { dishId: d.id, qty: useQty, options: opts.length ? opts.map((o) => ({ group: o.group, label: o.label })) : undefined, removed: removed.length ? removed : undefined });
+      addDishToOrder(state.addToOrderId, { dishId: d.id, qty: useQty, options: opts.length ? opts.map((o) => ({ group: o.group, label: o.label })) : undefined, note: allergy || undefined });
       closeDishOptions();
       return;
     }
@@ -2022,7 +2023,7 @@ function drawDishOptions() {
 // perfect right now"), it just lives in its own scroll region now instead of under the grid.
 function orderCartHtml() {
   const lines = state.cart.map((l, i) => `<div class="cline">
-      <span class="cname">${esc(l.title)}${l.options && l.options.length ? `<small class="copts">${esc(l.options.map((o) => o.label).join(", "))}</small>` : ""}${l.allergy ? `<small class="callergy">⚠ ${esc(l.allergy)}</small>` : ""}${l.note ? `<small class="copts">✎ ${esc(l.note)}</small>` : ""}</span>
+      <span class="cname">${esc(l.title)}${l.options && l.options.length ? `<small class="copts">${esc(l.options.map((o) => o.label).join(", "))}</small>` : ""}${l.allergy ? `<small class="callergy">✎ ${esc(l.allergy)}</small>` : ""}${l.note ? `<small class="copts">✎ ${esc(l.note)}</small>` : ""}</span>
       <span class="cqty"><button class="qbtn" data-minus="${i}">−</button><b>${l.qty}</b><button class="qbtn" data-plus="${i}">+</button><button class="qbtn edit" data-edit="${i}" title="Size / extras / allergy">✎</button></span>
       <span class="cprice">${inr(l.price * l.qty)}</span>
     </div>`).join("");
@@ -2182,12 +2183,17 @@ async function sendOrder() {
     const buildBody = (extra) => Object.assign({
       table: state.table,
       items: state.cart.map((l) => {
-        const removed = splitCsv(l.allergy);
+        // The ✎ per-item box travels as a VERBATIM note — the kitchen sees exactly what
+        // the waiter typed ("less ice", "no nuts", "extra spicy"). It used to become a
+        // removed[] list, which force-prefixed "NO" onto every entry ("less ice" printed
+        // as "NO LESS ICE" — owner 2026-07-21). removed[] keeps its real "NO X" wording
+        // for guest allergen tags and the staff allergy-edit modal, which still write it.
+        const typed = (l.allergy || "").trim();
+        const note = [l.note, typed].filter(Boolean).join(" · ");
         return {
           id: l.id, qty: l.qty,
           options: l.options ? l.options.map((o) => ({ group: o.group, label: o.label })) : undefined,
-          removed: removed.length ? removed : undefined,
-          note: l.note || undefined,
+          note: note || undefined,
         };
       }),
       allergies: [...new Set(orderAllergies)],
