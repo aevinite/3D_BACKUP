@@ -35,13 +35,16 @@ mkdir -p "$PROJ/.claude/audits"
   fi
 
   # 3) Run the repair agent headlessly. Unattended => skip permission prompts. Falls back to sonnet.
+  # The run is recorded in agent_runs (mig 161) so it shows under admin -> Repair -> History.
+  RUN_ID="$("$NODE_BIN/node" "$PROJ/scripts/agent-run-record.mjs" start nightly "Nightly repair run" 2>/dev/null || true)"
   echo "Launching Claude repair agent at $(date)..."
-  "$CLAUDE" -p "$(cat "$PROJ/scripts/repair-agent-prompt.md")" \
+  if "$CLAUDE" -p "$(cat "$PROJ/scripts/repair-agent-prompt.md")" \
     --dangerously-skip-permissions \
     --fallback-model claude-sonnet-5 \
     --add-dir "$PROJ" \
-    2>&1
+    2>&1; then AGENT_STATUS="done"; else AGENT_STATUS="failed"; fi
   echo "Repair agent finished at $(date)."
+  [ -n "$RUN_ID" ] && "$NODE_BIN/node" "$PROJ/scripts/agent-run-record.mjs" end "$RUN_ID" "$AGENT_STATUS" "$PROJ/.claude/audits/repair-$DATE.md" 2>/dev/null
 
   echo "===== Done: $(date) ====="
 } >>"$LOG" 2>&1

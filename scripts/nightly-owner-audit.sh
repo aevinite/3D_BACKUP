@@ -39,12 +39,14 @@ mkdir -p "$PROJ/.claude/audits"
   # 2) Run the audit headlessly. Unattended => skip permission prompts (read-only
   #    audit that only writes one report file). Falls back to sonnet if opus is busy.
   echo "Launching Claude audit at $(date)..."
-  "$CLAUDE" -p "$(cat "$PROJ/scripts/owner-audit-prompt.md")" \
+  RUN_ID="$("$NODE_BIN/node" "$PROJ/scripts/agent-run-record.mjs" start audit "Owner panel nightly audit" 2>/dev/null || true)"
+  if "$CLAUDE" -p "$(cat "$PROJ/scripts/owner-audit-prompt.md")" \
     --dangerously-skip-permissions \
     --fallback-model claude-sonnet-5 \
     --add-dir "$PROJ" \
-    2>&1
+    2>&1; then AGENT_STATUS="done"; else AGENT_STATUS="failed"; fi
   echo "Claude audit finished at $(date)."
+  [ -n "$RUN_ID" ] && "$NODE_BIN/node" "$PROJ/scripts/agent-run-record.mjs" end "$RUN_ID" "$AGENT_STATUS" "$PROJ/.claude/audits/owner-audit-$DATE.md" 2>/dev/null
 
   # 3) If WE started the server, leave it running (harmless) — the machine is the
   #    owner's; killing it could stomp another session. Just note it.
