@@ -2911,7 +2911,18 @@ ${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}
   <div class="g"><span>TOTAL</span><span>${inr(m.total)}</span></div>
 </div>
 <div class="foot">${footer}</div>
-<script>setTimeout(()=>print(),300)<\/script>`);
+<script>
+  // Pin the print page to the bill's actual height so it prints as ONE page. The
+  // thermal printer's default media is only 65mm tall, so a multi-item bill paginated
+  // and the end-of-page cutter sliced through the middle of the items. +12px rounding.
+  window.onload=function(){
+    try{
+      var h=Math.ceil(document.body.getBoundingClientRect().height)+12;
+      var s=document.createElement('style'); s.textContent='@page{size:80mm '+h+'px;margin:0}'; document.head.appendChild(s);
+    }catch(e){}
+    setTimeout(function(){print();},260);
+  };
+<\/script>`);
   w.document.close();
 }
 
