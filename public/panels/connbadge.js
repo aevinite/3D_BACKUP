@@ -12,6 +12,7 @@
 // React components/ConnectionBadge.tsx; both read the same model & tiers.
 (function () {
   var LATENCY_FRESH_MS = 90000; // a reading older than this → fall back to a calm "Live"
+  var SPARK_SLOTS = 24;         // sparkline width in bars (matches HISTORY_MAX in lib/connectionStatus.ts)
 
   // latency (ms) → quality tier. Mirrors latencyTier() in lib/connectionStatus.ts.
   // `bars` (0–3) carries the same meaning as colour so it's never colour-only (a11y).
@@ -87,8 +88,12 @@
       ".lfh-conn-pop-figs b{font-size:24px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}",
       ".lfh-conn-pop-unit{font-size:13px;font-weight:600;opacity:.7}",
       ".lfh-conn-pop-figs small{font-size:11px;opacity:.7}",
-      ".lfh-spark{display:flex;align-items:flex-end;gap:2px;height:30px;padding:4px 2px 0;border-top:1px solid var(--line,rgba(127,127,127,.14))}",
-      ".lfh-spark-bar{flex:1;min-width:2px;border-radius:2px 2px 0 0;opacity:.85}",
+      ".lfh-spark-wrap{display:flex;flex-direction:column;gap:7px;border-top:1px solid var(--line,rgba(127,127,127,.14));padding-top:10px}",
+      ".lfh-spark-cap{display:flex;justify-content:space-between;align-items:baseline;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;opacity:.55}",
+      ".lfh-spark-cap span{font-weight:600;text-transform:none;letter-spacing:0;opacity:.85}",
+      ".lfh-spark{display:flex;align-items:flex-end;gap:3px;height:32px}",
+      ".lfh-spark-bar{flex:1 1 0;min-width:0;border-radius:2px 2px 0 0;opacity:.9}",
+      ".lfh-spark-bar.is-empty{height:14%;background:currentColor;opacity:.1}",
       ".lfh-conn-pop-sync{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line,rgba(127,127,127,.14));padding-top:10px}",
       ".lfh-conn-pop-sub{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;opacity:.6}",
       ".lfh-conn-row{display:flex;align-items:center;gap:8px}",
@@ -196,21 +201,31 @@
     figs.appendChild(el("small", null, v.ms != null ? v.label : (v.level === "online" ? "Speed shows when data flows" : "")));
     main.appendChild(figs);
     pop.appendChild(main);
-    // sparkline
+    // sparkline — a fixed 24-slot chart of recent latency, newest at the right.
+    // Real readings fill from the right; any unused leading slots are faint baseline
+    // ticks, so it always reads as a proper bar chart (never a couple of fat blocks)
+    // and visibly fills up as more breadcrumbs arrive.
     if (v.level === "online") {
       var hist = (window.LFH_RT && window.LFH_RT.getLatencyHistory && window.LFH_RT.getLatencyHistory()) || [];
-      hist = hist.slice(-16);
-      if (hist.length >= 2) {
-        var max = Math.max.apply(null, hist.concat([1]));
+      var data = hist.slice(-SPARK_SLOTS);
+      if (data.length >= 1) {
+        var max = Math.max.apply(null, data.concat([1]));
+        var wrap = el("span", "lfh-spark-wrap");
+        var cap = el("span", "lfh-spark-cap");
+        cap.appendChild(document.createTextNode("Recent speed"));
+        cap.appendChild(el("span", null, data.length < 4 ? "building history…" : "last " + data.length + " updates"));
+        wrap.appendChild(cap);
         var sp = el("span", "lfh-spark");
-        hist.forEach(function (val) {
+        for (var i = 0; i < SPARK_SLOTS - data.length; i++) sp.appendChild(el("span", "lfh-spark-bar is-empty"));
+        data.forEach(function (val) {
           var t = latencyTier(val);
           var bar = el("span", "lfh-spark-bar");
-          bar.style.height = Math.max(12, Math.round((val / max) * 100)) + "%";
+          bar.style.height = Math.max(14, Math.round((val / max) * 100)) + "%";
           bar.style.background = t ? t.color : "#22c55e";
           sp.appendChild(bar);
         });
-        pop.appendChild(sp);
+        wrap.appendChild(sp);
+        pop.appendChild(wrap);
       }
     }
     // waiting-to-sync

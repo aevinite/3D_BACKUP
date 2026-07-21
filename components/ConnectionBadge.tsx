@@ -85,19 +85,26 @@ function SignalBars({ lit, color, big = false }: { lit: number; color: string; b
   );
 }
 
-// A tiny sparkline of the recent latency readings — each bar coloured by its own tier,
-// so the history literally shows green/amber/orange spikes. No axes; decorative-but-
-// meaningful. Empty until at least two readings exist.
+// A fixed-width sparkline of recent latency, newest at the right. Real readings (each
+// coloured by its own tier, so the history shows green/amber spikes) fill from the
+// right; any unused leading slots are faint baseline ticks — so it always reads as a
+// proper bar chart (never a couple of fat blocks) and visibly fills up over time.
+const SPARK_SLOTS = 24; // matches HISTORY_MAX in lib/connectionStatus.ts
 function Sparkline({ history }: { history: number[] }) {
-  const data = history.slice(-16);
-  if (data.length < 2) return null;
+  const data = history.slice(-SPARK_SLOTS);
+  if (data.length < 1) return null;
   const max = Math.max(...data, 1);
+  const pad = SPARK_SLOTS - data.length;
   return (
-    <span className="lfh-spark" aria-hidden="true">
-      {data.map((v, i) => {
-        const t = latencyTier(v);
-        return <span key={i} className="lfh-spark-bar" style={{ height: `${Math.max(12, Math.round((v / max) * 100))}%`, background: t ? t.color : "#22c55e" }} />;
-      })}
+    <span className="lfh-spark-wrap" aria-hidden="true">
+      <span className="lfh-spark-cap">Recent speed<span>{data.length < 4 ? "building history…" : `last ${data.length} updates`}</span></span>
+      <span className="lfh-spark">
+        {Array.from({ length: pad }).map((_, i) => <span key={`e${i}`} className="lfh-spark-bar is-empty" />)}
+        {data.map((v, i) => {
+          const t = latencyTier(v);
+          return <span key={i} className="lfh-spark-bar" style={{ height: `${Math.max(14, Math.round((v / max) * 100))}%`, background: t ? t.color : "#22c55e" }} />;
+        })}
+      </span>
     </span>
   );
 }
@@ -215,8 +222,12 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
         .lfh-conn-pop-unit { font-size: 13px; font-weight: 600; opacity: 0.7; }
         .lfh-conn-pop-figs small { font-size: 11px; opacity: 0.7; }
 
-        .lfh-spark { display: flex; align-items: flex-end; gap: 2px; height: 30px; padding: 4px 2px 0; border-top: 1px solid var(--line, rgba(127,127,127,.14)); }
-        .lfh-spark-bar { flex: 1; min-width: 2px; border-radius: 2px 2px 0 0; opacity: 0.85; }
+        .lfh-spark-wrap { display: flex; flex-direction: column; gap: 7px; border-top: 1px solid var(--line, rgba(127,127,127,.14)); padding-top: 10px; }
+        .lfh-spark-cap { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.55; }
+        .lfh-spark-cap span { font-weight: 600; text-transform: none; letter-spacing: 0; opacity: 0.85; }
+        .lfh-spark { display: flex; align-items: flex-end; gap: 3px; height: 32px; }
+        .lfh-spark-bar { flex: 1 1 0; min-width: 0; border-radius: 2px 2px 0 0; opacity: 0.9; }
+        .lfh-spark-bar.is-empty { height: 14%; background: currentColor; opacity: 0.1; }
 
         .lfh-conn-pop-sync { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line, rgba(127,127,127,.14)); padding-top: 10px; }
         .lfh-conn-pop-sub { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.6; }
