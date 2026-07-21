@@ -16,13 +16,21 @@ import { useEffect, useRef } from "react";
 //
 // 2) INSETS — the panel CSS pads its bottom-anchored controls (view-order footer, SEND
 //    bar, drawers, sheets) with `env(safe-area-inset-bottom)` for the iPhone home
-//    indicator / gesture bar, but `env()` does NOT reliably resolve inside a nested
-//    iframe (commonly 0). The TOP-LEVEL document does resolve it (app/layout sets
+//    indicator / Android gesture bar, but `env()` does NOT reliably resolve inside a
+//    nested iframe (commonly 0). The TOP-LEVEL document does resolve it (app/layout sets
 //    viewport-fit=cover), so we measure it here with a hidden probe and push real pixel
-//    values into the same-origin iframe as `--safe-t` / `--safe-b`. Android's 3-BUTTON
-//    nav bar is not reported by env() at all, so when the phone reports nothing we
-//    reserve the standard 48px on Android (owner's S24 Ultra audit 2026-07-09). Panel
-//    CSS reads `max(env(...), var(--safe-b/t, 0px))`, so it works either way.
+//    values into the same-origin iframe as `--safe-t` / `--safe-b`. Panel CSS reads
+//    `max(env(...), var(--safe-b/t, 0px))`, so it works either way.
+//
+//    We reserve ONLY what the phone reports (env + the visualViewport gap) — NO blanket
+//    Android fallback. Chrome draws under the GESTURE nav bar (edge-to-edge, Chrome 135+,
+//    https://developer.chrome.com/docs/css-ui/edge-to-edge) and reports that overlap via
+//    env() LIVE as it changes; with 3-BUTTON nav the page always ends ABOVE the buttons,
+//    so any reserve there is a dead strip (the earlier hard 48px painted exactly that
+//    dead band under the view-order pill on a Galaxy A36 — owner report 2026-07-21). The
+//    "hidden under the nav bar" bug that 48px was papering over was really the 100vh
+//    sizing bug in (1). The visualViewport resize listener below re-pushes when Chrome
+//    slides between the two states.
 export default function PanelFrame({ src, title }: { src: string; title: string }) {
   const ref = useRef<HTMLIFrameElement>(null);
 
@@ -37,17 +45,15 @@ export default function PanelFrame({ src, title }: { src: string; title: string 
       const cs = getComputedStyle(probe);
       const envTop = parseFloat(cs.paddingTop) || 0;
       const envBottom = parseFloat(cs.paddingBottom) || 0;
-      // Some browsers under-report the gesture/nav area via env(): also MEASURE the gap
-      // between the layout viewport and the visible visual viewport, and if both read 0
-      // on Android, reserve the standard ~48px 3-button-nav height.
+      // Some browsers under-report the overlap via env(): also MEASURE the gap between
+      // the layout viewport and the visible visual viewport, and trust the larger signal.
       let measured = 0;
       try {
         const vv = window.visualViewport;
         if (vv) measured = Math.max(0, Math.round(window.innerHeight - vv.height - (vv.offsetTop || 0)));
       } catch { /* no visualViewport */ }
       if (measured > 120) measured = 0;   // a big gap is the on-screen keyboard, not the nav bar
-      let bottom = Math.max(envBottom, measured);
-      if (bottom === 0 && /Android/i.test(navigator.userAgent || "")) bottom = 48;
+      const bottom = Math.max(envBottom, measured);
       try {
         const doc = ref.current?.contentWindow?.document?.documentElement;
         if (doc) { doc.style.setProperty("--safe-t", envTop + "px"); doc.style.setProperty("--safe-b", bottom + "px"); }
