@@ -403,6 +403,10 @@ const TABLE_TAG_INFO = {
 // The feature ladder's application rung (settings, mig 166): admin's switch AND
 // (the owner's toggle, only while the admin transferred control to them).
 function tabletTagsOn() {
+  // ADMIN X-RAY rule (owner 2026-07-22): the admin act-as view always sees module
+  // buttons — txray() tints them when off for real waiters; the server lets the
+  // admin through. Real waiters need the module effective.
+  if (tHigher()) return true;
   const s = state.data.settings || {};
   return s.table_tags_allowed === true && (s.table_tags_owner_control !== true || s.table_tags_enabled !== false);
 }
@@ -1324,6 +1328,30 @@ function renderPickerShell(titleHtml, bodyHtml, layerId, onBack) {
   return { dropLayer: drop };
 }
 
+// One-time styles for the KOT action sheet (matches the manager's; owner design
+// feedback 2026-07-22 — proper rows, not bare buttons). Panel vars keep the theme.
+(function injectKotMenuStyles() {
+  const css = `
+  .kotm-row { display:flex; align-items:center; gap:12px; width:100%; text-align:left;
+    background: var(--card,#151f31); border:1px solid var(--line,#26324a); border-radius:12px;
+    padding:12px 14px; margin:0 0 8px; cursor:pointer; font:inherit; color:inherit; }
+  .kotm-row:disabled { opacity:.45; cursor:default; }
+  .kotm-ico { width:38px; height:38px; border-radius:10px; flex:none; display:flex; align-items:center;
+    justify-content:center; font-size:18px; background: color-mix(in srgb, var(--gold,#e3c06f) 14%, transparent);
+    border:1px solid color-mix(in srgb, var(--gold,#e3c06f) 30%, transparent); }
+  .kotm-txt b { font-size:14.5px; display:block; }
+  .kotm-txt small { color: var(--muted,#9fb0cc); font-size:11.5px; line-height:1.3; display:block; margin-top:1px; }
+  .kotm-chev { margin-left:auto; color: var(--muted,#9fb0cc); flex:none; }
+  .kotm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(84px,1fr)); gap:8px; }
+  .kotm-tile { border:1px solid var(--line,#26324a); border-radius:12px; background:var(--card,#151f31);
+    padding:10px 6px; text-align:center; cursor:pointer; font:inherit; color:inherit; }
+  .kotm-tile b { display:block; font-size:15px; }
+  .kotm-tile small { display:block; color:var(--muted,#9fb0cc); font-size:10.5px; margin-top:2px; }
+  .kotm-tile.occ { border-color: color-mix(in srgb, var(--gold,#e3c06f) 45%, transparent);
+    background: color-mix(in srgb, var(--gold,#e3c06f) 9%, var(--card,#151f31)); }`;
+  const st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
+})();
+
 // ── KOT ▾ — Table & KOT operations (PetPooja-style unified menu; owner 2026-07-22) ──
 // The ladder's tablet rung (mig 172): the KOT button REPLACES the separate Move-table /
 // Move-an-order buttons when the manager's Access grant (settings.tablet_table_ops,
@@ -1340,9 +1368,8 @@ function kotOpsOn() {
 }
 function renderKotMenu(t, s) {
   const movable = ordersOf(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled");
-  const row = (id, icon, label, sub, on) => `<button class="btn" data-kotop="${id}" ${on ? "" : "disabled"}
-    style="display:flex;align-items:center;gap:12px;width:100%;justify-content:flex-start;text-align:left;margin-bottom:8px;padding:12px 14px">
-    <span style="font-size:18px">${icon}</span><span><b>${label}</b><br><span class="muted small">${sub}</span></span></button>`;
+  const row = (id, icon, label, sub, on) => `<button class="kotm-row" data-kotop="${id}" ${on ? "" : "disabled"}>
+    <span class="kotm-ico">${icon}</span><span class="kotm-txt"><b>${label}</b><small>${sub}</small></span><span class="kotm-chev">›</span></button>`;
   let occupiedOthers = 0;
   for (let i = 1, n = tableCount(); i <= n; i++) if (String(i) !== String(t) && tileIsOpen(i)) occupiedOthers++;
   const body =
@@ -1437,9 +1464,10 @@ function renderMoveItemTarget(t, itemId) {
   const tiles = [];
   for (let i = 1, n = tableCount(); i <= n; i++) {
     if (String(i) === String(t)) continue;
-    tiles.push(`<button class="btn shiftpick" data-mvto="${i}">Table ${i}<br><span class="muted small">${tileState(i).label}</span></button>`);
+    const st2 = tileState(i);
+    tiles.push(`<button class="kotm-tile${tileIsOpen(i) ? " occ" : ""}" data-mvto="${i}"><b>T${i}</b><small>${st2.label}</small></button>`);
   }
-  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Send this dish to which table? (it gets its own new KOT there)</div><div class="shiftgrid">${tiles.join("")}</div>`;
+  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Send this dish to which table? (it gets its own new KOT there)</div><div class="kotm-grid">${tiles.join("")}</div>`;
   const { dropLayer } = renderPickerShell("Move dish →", bodyHtml, "tablet-moveitem-target", () => renderMoveItemPicker(t));
   document.querySelectorAll("[data-mvto]").forEach((b) => (b.onclick = () => {
     const to = b.dataset.mvto;
@@ -1458,7 +1486,7 @@ function renderMergePicker(t, s) {
   const occ = [];
   for (let i = 1, n = tableCount(); i <= n; i++) { if (String(i) !== String(t) && tileIsOpen(i)) occ.push(i); }
   const btns = occ.length
-    ? occ.map((i) => `<button class="btn shiftpick" data-mergeto="${i}">Table ${i}<br><span class="muted small">${tileState(i).label}</span></button>`).join("")
+    ? `<div class="kotm-grid">` + occ.map((i) => `<button class="kotm-tile occ" data-mergeto="${i}"><b>T${i}</b><small>${tileState(i).label}</small></button>`).join("") + `</div>`
     : `<div class="muted">No other open tables to merge with.</div>`;
   const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Everything — orders, guests &amp; bill — joins the other table as ONE bill. Table ${esc(t)} then frees up:</div><div class="shiftgrid">${btns}</div>`;
   const { dropLayer } = renderPickerShell(`Merge Table ${esc(t)} into →`, bodyHtml, "tablet-merge-picker", renderPanel);
@@ -3111,13 +3139,15 @@ window.addEventListener("online", () => load().catch(() => {}));
     drawer.querySelector("#dwRest").textContent = (document.getElementById("restName")?.textContent || "").trim() || "—";
     const bqBtn = drawer.querySelector("#dwBanquet");
     if (bqBtn) {
-      // Ladder rule for the banquet entry too: hidden from the real waiter when its
-      // tri-state is off, tinted for the admin view. banquet_allowed (the admin
-      // entitlement) still hides it for EVERYONE when the restaurant lacks the module.
+      // Ladder rule for the banquet entry too: hidden from the real waiter when the
+      // module or its tri-state is off. ADMIN X-RAY rule (owner 2026-07-22): the admin
+      // act-as view ALWAYS sees it — tinted when it's off for real waiters (module OR
+      // tri-state) — and the server lets the admin through.
       const sset = state.data.settings || {};
       const allowed = sset.banquet_allowed === true && (sset.banquet_owner_control !== true || sset.banquet_enabled !== false);
-      bqBtn.hidden = !(allowed && tshow("tablet_banquet"));
-      bqBtn.classList.toggle("xray-off", allowed && !!txray("tablet_banquet"));
+      const offForWaiters = !allowed || tperm("tablet_banquet") === "off";
+      bqBtn.hidden = tHigher() ? false : offForWaiters;
+      bqBtn.classList.toggle("xray-off", tHigher() && offForWaiters);
     }
     loadProfile();
     if (window.LFH_BACK && !drawerOff) drawerOff = LFH_BACK.layer("tablet-drawer", closeDrawer);

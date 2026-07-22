@@ -233,7 +233,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // scoped + limited. Available whenever the manager's tablet_khata rung isn't off (the
     // park action itself re-runs the full tri-state gate incl. PIN mode).
     if (path.join("/") === "khata/customers") {
-      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       const kperm = (g.user?.permissions ?? {})[`tablet_khata`];
       let kmode: string;
       if (kperm === "on" || kperm === "pin" || kperm === "off") kmode = kperm;
@@ -249,7 +249,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const flags = await sb.from("settings").select("banquet_allowed, tablet_banquet").eq("restaurant_id", rid).maybeSingle();
       const f = overlayUserPerms((flags.data as Record<string, any> | null), g.user);
       // Full ladder (mig 167): the owner's toggle counts too, not just the admin switch.
-      if (!(await banquetLadder(rid)).effective) return err("Banquet billing isn't enabled for this restaurant.", 403);
+      if (g.user && !(await banquetLadder(rid)).effective) return err("Banquet billing isn't enabled for this restaurant.", 403);
       if ((f?.tablet_banquet || "off") === "off" && g.user) return err("Banquet billing is off for the tablet — ask a manager.", 403);
       const items = must(await sb.from("banquet_items")
         .select("id,title,price,unit,sort_order,active").eq("restaurant_id", rid).eq("active", true)
@@ -447,7 +447,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "banquet" && b === "place") {
       // Full ladder (mig 167): owner's toggle counts; the RPC re-checks the admin
       // switch in SQL as the backstop.
-      if (!(await banquetLadder(rid)).effective) return err("Banquet billing isn't enabled for this restaurant.", 403);
+      if (actor && !(await banquetLadder(rid)).effective) return err("Banquet billing isn't enabled for this restaurant.", 403);
       const gate2 = await tabletPerm("tablet_banquet", req, body, rid, actor);
       if (!gate2.allow) return gate2.resp;
       // Table is OPTIONAL (mig 132): blank → a standalone walk-in-style bill the
@@ -1023,7 +1023,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "tag") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      if (!(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
+      if (actor && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       const tg = await tabletPerm("tablet_table_tags", req, body, rid, actor); if (!tg.allow) return tg.resp;
       const tag = body?.tag ?? null;
       if (tag === null || tag === "") {
@@ -1047,7 +1047,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "on-the-house") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      if (!(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
+      if (actor && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       const hg = await tabletPerm("tablet_mark_paid", req, body, rid, actor); if (!hg.allow) return hg.resp;
       const tagRow = (await sb.from("table_tags").select("tag").eq("restaurant_id", rid).eq("table_number", t).maybeSingle()).data as { tag?: TableTag } | null;
       if (!tagRow?.tag || !COMP_TAGS.includes(tagRow.tag)) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
@@ -1077,7 +1077,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "khata") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (actor && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       const kg = await tabletPerm("tablet_khata", req, body, rid, actor); if (!kg.allow) return kg.resp;
       const openSess = (await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)

@@ -247,7 +247,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "banquet/items") {
       // Full ladder (mig 167): admin switch AND (owner's toggle when transferred)
       // AND the owner->manager grant (backfilled true, so nothing changed by itself).
-      if (!(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
+      if (g.user && !(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
       const items = must(await sb.from("banquet_items")
         .select("id,title,price,unit,sort_order,active").eq("restaurant_id", rid)
@@ -259,7 +259,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // (admin/owner pass managerCan automatically). Outstanding bills only; a bill = the
     // orders parked together (grouped by session, solo orders by their own id).
     if (p === "khata") {
-      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("see the khata book");
       const rows = must(await sb.from("orders")
         .select("id,session_id,khata_customer_id,khata_at,table_number,subtotal,tax,total,discount,created_at")
@@ -297,7 +297,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     // khata/customers?q= — the person picker's search (scoped, limited, debounced client-side).
     if (p === "khata/customers") {
-      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("use the khata book");
       const q = (new URL(req.url).searchParams.get("q") || "").trim().slice(0, 60);
       let sel = sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(8);
@@ -309,7 +309,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // pre-discount value). Keyed on the reserved payment method, so it lists exactly the
     // bills settled through the on-the-house button. Dashboard power gates it.
     if (p === "onhouse") {
-      if (!(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
+      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
       const days = Math.min(Math.max(Math.round(Number(new URL(req.url).searchParams.get("days"))) || 30, 1), 365);
       const since = new Date(Date.now() - days * 86400000).toISOString();
@@ -1177,7 +1177,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "banquet") {
       // Full ladder (mig 167) — see the GET gate above; the place RPC still re-checks
       // the admin switch inside SQL as the final backstop.
-      if (!(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
+      if (g.user && !(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
       // banquet/item-save — create/update one banquet line ({ id?, title, price, unit, active, sort_order })
       if (b === "item-save") {
@@ -1776,7 +1776,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "tag") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      if (!(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
+      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "table_tags"))) return permDenied("mark tables");
       const tag = body?.tag ?? null;
       if (tag === null || tag === "") {
@@ -1800,7 +1800,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "on-the-house") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      if (!(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
+      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "table_tags"))) return permDenied("settle a bill on the house");
       const tagRow = (await sb.from("table_tags").select("tag").eq("restaurant_id", rid).eq("table_number", t).maybeSingle()).data as { tag?: TableTag } | null;
       if (!tagRow?.tag || !COMP_TAGS.includes(tagRow.tag)) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
@@ -1831,7 +1831,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "khata") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("park bills to collect later");
       const openSess = (await sb.from("sessions").select("id").eq("table_number", t).eq("status", "open").eq("restaurant_id", rid).order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
       let kq = sb.from("orders").select("id,status,payment_status").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled");
@@ -1876,7 +1876,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // khata/customers — add a person to the book directly (the picker's "add new").
     if (a === "khata" && b === "customers" && !c) {
-      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("use the khata book");
       const name = String(body?.name || "").trim().slice(0, 80);
       if (!name) return err("name required");
@@ -1894,7 +1894,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // khata/pay — collect a parked bill. body { session_id } (a bill) or { order_id }
     // (a solo parked order), + { method, note? }. Normal payment methods only.
     if (a === "khata" && b === "pay") {
-      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("collect khata payments");
       const method = String(body?.method || "");
       if (!PAYMENT_METHODS.includes(method as (typeof PAYMENT_METHODS)[number])) return err("invalid payment_method");

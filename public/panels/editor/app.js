@@ -4837,6 +4837,9 @@ function tableTagsOn() {
 // May the CURRENT viewer use a tag/khata action? Admin + owner always (higherView);
 // a real manager needs the owner-granted power (whoami.effectivePowers).
 function tagActionAllowed(flag) {
+  // ADMIN X-RAY rule (owner 2026-07-22): the admin view always sees module buttons,
+  // tinted (XRAY_CONTROLS) when off for real staff; the server lets the admin through.
+  if (XRAY_WHO && XRAY_WHO.actor === "admin") return true;
   if (!tableTagsOn()) return false;
   if (XRAY_WHO && XRAY_WHO.higherView) return true;
   return xrayGrantedForManager(flag);
@@ -5253,7 +5256,7 @@ function floorHtml() {
     const floatBtn = alreadyFloating ? "" : `<button class="tp-detail-float" data-float-open="${esc(t)}" title="Pop out as a movable floating window">⤢ Float</button>`;
     sideInner = `<div class="tp-detail" data-table-detail="${esc(t)}">
         <div class="tp-detail-head">
-          <div class="tp-detail-top"><h3>${esc(tableLabel(t))}</h3>${headPill}${floatBtn}<button class="tp-detail-close" id="tpDetailClose" aria-label="Back to floor controls" title="Back to floor controls">✕</button></div>
+          <div class="tp-detail-top"><h3>${esc(tableLabel(t))}</h3>${headPill}${parts.kotHeadBtn || ""}${floatBtn}<button class="tp-detail-close" id="tpDetailClose" aria-label="Back to floor controls" title="Back to floor controls">✕</button></div>
           ${headMeta}
         </div>
         <div class="tp-detail-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div>
@@ -5279,7 +5282,7 @@ function floorHtml() {
     return `<div class="tp-detail-floating${f.pinned ? " tp-pinned" : ""}" data-floating-table="${esc(f.table)}" style="${styleParts.join(";")}">
       <div class="tp-detail" data-table-detail="${esc(f.table)}">
         <div class="tp-detail-head">
-          <div class="tp-detail-top"><h3>${esc(tableLabel(f.table))}</h3>${headPill}${dockBtn}<button class="tp-detail-close" data-float-close="${esc(f.table)}" aria-label="Close" title="Close">✕</button></div>
+          <div class="tp-detail-top"><h3>${esc(tableLabel(f.table))}</h3>${headPill}${parts.kotHeadBtn || ""}${dockBtn}<button class="tp-detail-close" data-float-close="${esc(f.table)}" aria-label="Close" title="Close">✕</button></div>
           ${headMeta}
         </div>
         <div class="tp-detail-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div>
@@ -6195,21 +6198,23 @@ function tablePanelParts(t) {
   // ONE sticky action bar holds every table-wide action: the primary action + pay +
   // discount on the LEFT, then table-management (shift/print/restart/close) on the RIGHT.
   const tagBtn = tagActionAllowed("table_tags") ? `<button class="btn" id="sxTag" title="Mark this table VIP / Family / Owner's guest">${TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷"} Type</button>` : "";
-  // Table-move actions: when the KOT ▾ menu (Table & KOT operations, mig 172) is on
-  // for this viewer it REPLACES the plain ⇄ Shift — one menu holding every table/KOT
-  // operation. When the ladder says off, today's plain Shift renders exactly as before.
-  const tableOpsBtn = sess
-    ? (tableOpsOn()
-        ? `<button class="btn" id="sxKot" title="Table &amp; KOT operations — change table, move a KOT, and more">🧾 KOT ▾</button>`
-        : `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>`)
+  // KOT ▾ (Table & KOT operations) lives in the detail HEADER, not this crowded bar
+  // (owner, 2026-07-22 — "keep the kot option at the top"): tablePanelParts returns it
+  // as kotHeadBtn and BOTH detail headers (docked + floating) render it next to Float.
+  // While the menu is on, the footer DROPS its duplicates: 🍴 Split (lives inside KOT)
+  // and ⇄ Shift (Change table lives inside KOT). Ladder off → both render as before.
+  const kotOn = tableOpsOn() && !!sess;
+  const kotHeadBtn = kotOn
+    ? `<button class="tp-detail-float tp-kot-head" id="sxKot" title="Table &amp; KOT operations — change table, merge, move a KOT or dish, split, reprint">🧾 KOT ▾</button>`
     : "";
+  const shiftFallbackBtn = !kotOn && sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : "";
   // ＋ Take order — start a brand-new order for this table, like the waiter tablet.
   // Gated by the take_orders manager power: XRAY_CONTROLS hides it for a manager without
   // the power (and tints it for an admin/owner looking in); the server re-checks too.
   const takeOrderBtn = `<button class="btn primary tp-take-order" data-take-order="${esc(t)}">＋ Take order</button>`;
-  const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${splitBtn}<span class="tp-foot-spacer"></span>${tagBtn}${tableOpsBtn}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
+  const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${kotOn ? "" : splitBtn}<span class="tp-foot-spacer"></span>${tagBtn}${shiftFallbackBtn}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
 
-  return { sess, os, canFree, headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot };
+  return { sess, os, canFree, headPill, headMeta, kotHeadBtn, sessionSec, ordersSec, callsSec, billSec, foot };
 }
 
 // Compact dish-picker modal for ADDING a dish to an already-placed order (staff
@@ -6416,6 +6421,44 @@ function tableOpsOn() {
   return w.higherView ? true : !!(w.effectivePowers && w.effectivePowers.table_ops);
 }
 
+// One-time styles for the KOT action sheet + its pickers — a proper PetPooja-grade
+// surface, not bare buttons (owner design feedback, 2026-07-22). Uses the panel's own
+// CSS variables so it follows the theme.
+(function injectKotMenuStyles() {
+  const css = `
+  .kotm-sheet { max-width: 460px; }
+  .kotm-head { padding: 16px 18px 10px; }
+  .kotm-title { display:flex; align-items:center; gap:10px; }
+  .kotm-title h3 { margin:0; font-size:17px; }
+  .kotm-bill { color: var(--muted,#8a7a5c); font-size:12.5px; margin-top:3px; }
+  .kotm-list { padding: 6px 12px 14px; }
+  .kotm-row { display:flex; align-items:center; gap:13px; width:100%; text-align:left;
+    background: var(--card, #fff); border:1px solid var(--line,#e6dcc9); border-radius:12px;
+    padding:12px 14px; margin:0 0 8px; cursor:pointer; font:inherit; color:inherit;
+    transition: transform .06s, border-color .12s, background .12s; }
+  .kotm-row:hover:not(:disabled) { border-color: var(--gold,#c98f3f); background: color-mix(in srgb, var(--gold,#c98f3f) 6%, var(--card,#fff)); }
+  .kotm-row:active:not(:disabled) { transform: scale(.985); }
+  .kotm-row:disabled { opacity:.45; cursor:default; }
+  .kotm-ico { width:40px; height:40px; border-radius:11px; flex:none; display:flex; align-items:center;
+    justify-content:center; font-size:19px; background: color-mix(in srgb, var(--gold,#c98f3f) 13%, transparent);
+    border:1px solid color-mix(in srgb, var(--gold,#c98f3f) 30%, transparent); }
+  .kotm-txt b { font-size:14.5px; display:block; }
+  .kotm-txt small { color: var(--muted,#8a7a5c); font-size:12px; line-height:1.35; display:block; margin-top:1px; }
+  .kotm-chev { margin-left:auto; color: var(--muted,#8a7a5c); font-size:15px; flex:none; }
+  .kotm-off-why { font-size:10.5px; color: var(--muted,#8a7a5c); border:1px solid var(--line,#e6dcc9);
+    border-radius:999px; padding:2px 8px; margin-left:auto; flex:none; }
+  .tp-kot-head { font-weight:700; }
+  .kotm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(88px,1fr)); gap:8px; padding:4px 0 6px; }
+  .kotm-tile { border:1px solid var(--line,#e6dcc9); border-radius:12px; background:var(--card,#fff);
+    padding:10px 6px; text-align:center; cursor:pointer; font:inherit; color:inherit; }
+  .kotm-tile b { display:block; font-size:15px; }
+  .kotm-tile small { display:block; color:var(--muted,#8a7a5c); font-size:10.5px; margin-top:2px; }
+  .kotm-tile.occ { border-color: color-mix(in srgb, var(--gold,#c98f3f) 45%, transparent);
+    background: color-mix(in srgb, var(--gold,#c98f3f) 8%, var(--card,#fff)); }
+  .kotm-tile:hover { border-color: var(--gold,#c98f3f); }`;
+  const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
+})();
+
 function openKotMenu(t, sess) {
   document.querySelector(".kotmenu-overlay")?.remove();
   // Movable KOTs = this table's orders that aren't paid or cancelled (same rule the
@@ -6425,22 +6468,24 @@ function openKotMenu(t, sess) {
   const nAll = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   let occupiedOthers = 0;
   for (let i = 1; i <= nAll; i++) if (String(i) !== String(t) && summaryTableOpen(i)) occupiedOthers++;
+  const bill = billMath(movable.filter((o) => o.status !== "received"));
   const rows = [
-    { id: "shift", icon: "⇄", label: "Change table", sub: "Move this party — orders, calls & bill — to a free table", on: !!sess },
-    { id: "merge", icon: "🪢", label: "Merge tables", sub: "Join this party with another table's party — one table, one bill", on: !!sess && occupiedOthers > 0 },
-    { id: "movekot", icon: "🧾", label: "Move a KOT to another table", sub: "Send ONE order (one KOT) to a different table's bill", on: movable.length > 0 },
+    { id: "shift", icon: "⇄", label: "Change table", sub: "Party, orders & bill move to a free table", on: !!sess, why: "table closed" },
+    { id: "merge", icon: "🪢", label: "Merge tables", sub: "Join another party — one table, one bill", on: !!sess && occupiedOthers > 0, why: occupiedOthers ? "table closed" : "no other open table" },
+    { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "Send one order to another table's bill", on: movable.length > 0, why: "no movable KOT" },
     // Only DB-backed dish rows (kind "session") can move — legacy JSON lines have no row id.
-    { id: "moveitem", icon: "🍛", label: "Move a single dish", sub: "Send one dish to another table — it gets its own new KOT there", on: movable.some((o) => orderItemRows(o).some((r) => r.kind === "session")) },
-    { id: "split", icon: "🍴", label: "Split the bill", sub: "Collect one bill as several payments — equal, custom amounts, or by dish", on: movable.some((o) => o.status !== "received") },
-    { id: "reprint", icon: "🖨️", label: "Reprint a KOT", sub: "Print one order's kitchen ticket again", on: ordersForTable(t).some((o) => o.status !== "cancelled") },
+    { id: "moveitem", icon: "🍛", label: "Move a single dish", sub: "One dish moves — it gets its own new KOT there", on: movable.some((o) => orderItemRows(o).some((r) => r.kind === "session")), why: "no movable dish" },
+    { id: "split", icon: "🍴", label: "Split the bill", sub: "Equal · custom amounts · by dish", on: movable.some((o) => o.status !== "received"), why: "nothing settleable" },
+    { id: "reprint", icon: "🖨️", label: "Reprint a KOT", sub: "Print an order's kitchen ticket again", on: ordersForTable(t).some((o) => o.status !== "cancelled"), why: "no KOTs" },
   ];
-  const rowHtml = (r) => `<button class="btn kotmenu-row" data-kotop="${r.id}" ${r.on ? "" : "disabled"}
-    style="display:flex;align-items:center;gap:12px;width:100%;justify-content:flex-start;padding:12px 14px;margin:0 0 8px">
-    <span style="font-size:18px">${r.icon}</span>
-    <span style="text-align:left"><b>${r.label}</b><br><span class="muted" style="font-size:12px">${r.sub}</span></span></button>`;
-  const wrap = el(`<div class="sx-modal-overlay kotmenu-overlay"><div class="sx-modal" style="max-width:440px">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🧾 Table ${esc(t)} — KOT &amp; table operations</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
-    <div class="dish-edit-body" style="padding:14px">${rows.map(rowHtml).join("")}</div></div></div>`);
+  const rowHtml = (r) => `<button class="kotm-row" data-kotop="${r.id}" ${r.on ? "" : "disabled"}>
+    <span class="kotm-ico">${r.icon}</span>
+    <span class="kotm-txt"><b>${r.label}</b><small>${r.sub}</small></span>
+    ${r.on ? `<span class="kotm-chev">›</span>` : `<span class="kotm-off-why">${r.why}</span>`}</button>`;
+  const wrap = el(`<div class="sx-modal-overlay kotmenu-overlay"><div class="sx-modal kotm-sheet">
+    <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 Table ${esc(t)}</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
+    <div class="kotm-bill">KOT &amp; table operations${bill.total > 0 ? ` · bill due ${inr(bill.total)}` : ""}${sess && sess.bill_no != null ? ` · bill #${esc(sess.bill_no)}` : ""}</div></div>
+    <div class="kotm-list">${rows.map(rowHtml).join("")}</div></div></div>`);
   document.body.appendChild(wrap);
   const closeM = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = closeM;
@@ -6626,9 +6671,10 @@ function openMoveItemPicker(t) {
     const tiles = [];
     for (let i = 1; i <= n; i++) {
       if (String(i) === String(t)) continue;
-      tiles.push(`<button class="btn shiftpick" data-mvto="${i}">Table ${i}<br><span class="muted" style="font-size:11px">${summaryTableOpen(i) ? "joins that bill" : "free"}</span></button>`);
+      const open = summaryTableOpen(i);
+      tiles.push(`<button class="kotm-tile${open ? " occ" : ""}" data-mvto="${i}"><b>T${i}</b><small>${open ? "joins bill" : "free"}</small></button>`);
     }
-    body.innerHTML = `<div class="shiftgrid">${tiles.join("")}</div>`;
+    body.innerHTML = `<div class="kotm-grid">${tiles.join("")}</div>`;
     body.querySelectorAll("[data-mvto]").forEach((tb) => (tb.onclick = async () => {
       const to = tb.dataset.mvto; closeM();
       try {
@@ -6650,7 +6696,7 @@ function openMergePicker(t, sess) {
   for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && summaryTableOpen(i)) occ.push(i); }
   const tileDue = (i) => { const tile = (state.summary && state.summary.tiles || {})[String(i)]; return tile && tile.due > 0 ? inr(tile.due) : ""; };
   const grid = occ.length
-    ? occ.map((i) => `<button class="btn shiftpick" data-mergeto="${i}">Table ${i}${tileDue(i) ? `<br><span class="muted" style="font-size:11px">due ${tileDue(i)}</span>` : ""}</button>`).join("")
+    ? `<div class="kotm-grid">` + occ.map((i) => `<button class="kotm-tile occ" data-mergeto="${i}"><b>T${i}</b><small>${tileDue(i) ? `due ${tileDue(i)}` : "open"}</small></button>`).join("") + `</div>`
     : `<div class="muted" style="padding:14px">No other open tables to merge with.</div>`;
   const wrap = el(`<div class="sx-modal-overlay merge-overlay"><div class="sx-modal shift-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>🪢 Merge Table ${esc(t)} into →</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><div class="muted small" style="padding:0 14px 10px">Everything — orders, guests, calls &amp; bill — joins the other table as ONE bill. Table ${esc(t)} then frees up.</div><div class="shiftgrid">${grid}</div></div></div>`);
   document.body.appendChild(wrap);
@@ -6702,9 +6748,9 @@ function openMoveKotPicker(t) {
     for (let i = 1; i <= n; i++) {
       if (String(i) === String(t)) continue;
       const open = summaryTableOpen(i);
-      tiles.push(`<button class="btn shiftpick" data-moveto="${i}">Table ${i}<br><span class="muted" style="font-size:11px">${open ? "joins that bill" : "free"}</span></button>`);
+      tiles.push(`<button class="kotm-tile${open ? " occ" : ""}" data-moveto="${i}"><b>T${i}</b><small>${open ? "joins bill" : "free"}</small></button>`);
     }
-    body.innerHTML = `<div class="shiftgrid">${tiles.join("")}</div>`;
+    body.innerHTML = `<div class="kotm-grid">${tiles.join("")}</div>`;
     body.querySelectorAll("[data-moveto]").forEach((tb) => (tb.onclick = async () => {
       const to = tb.dataset.moveto; closeM();
       try {
@@ -6980,7 +7026,7 @@ function renderTablePanel() {
   const t = state.openSess;
   const parts = tablePanelParts(t);
   const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
-  const wrap = el(`<div class="sx-modal-overlay tbl-modal-overlay"><div class="tbl-modal sx-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(tableLabel(t))}</h3>${headPill}<button class="tbl-modal-close" aria-label="Close">✕</button></div>${headMeta}</div><div class="tbl-modal-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div><div class="tbl-modal-foot">${foot}</div></div></div>`);
+  const wrap = el(`<div class="sx-modal-overlay tbl-modal-overlay"><div class="tbl-modal sx-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(tableLabel(t))}</h3>${headPill}${parts.kotHeadBtn || ""}<button class="tbl-modal-close" aria-label="Close">✕</button></div>${headMeta}</div><div class="tbl-modal-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div><div class="tbl-modal-foot">${foot}</div></div></div>`);
   document.body.appendChild(wrap);
   const newModal = wrap.querySelector(".tbl-modal"); if (newModal) newModal.scrollTop = savedScroll;
   wrap.querySelector(".tbl-modal-close").onclick = closeTablePanel;
