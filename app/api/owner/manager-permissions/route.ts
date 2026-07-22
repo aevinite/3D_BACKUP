@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
 // table_ops = the KOT ▾ menu (merge tables, move a KOT/item, split bill); its admin
 // rung is the table_ops_depth knob — mergeOwnerEntitlements derives power_table_ops
 // from it, so the existing entitlement guard below applies unchanged.
-const FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops"] as const;
+const FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops", "take_orders"] as const;
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 
@@ -69,7 +69,8 @@ export async function PATCH(req: NextRequest) {
   // means the act-as owner view — keep it able to flip only what the owner could.
   const ents = mergeOwnerEntitlements(cur.owner_entitlements);
   for (const k of Object.keys(patch)) {
-    if (patch[k] && ents[powerEntitlementKey(k)] === false)
+    if (!patch[k]) continue;
+    if (ents[powerEntitlementKey(k)] === false)
       return bad(`"${k}" isn't available for this restaurant — the admin has removed it.`, 403);
   }
   const merged = { ...(cur.manager_permissions || {}), ...patch };

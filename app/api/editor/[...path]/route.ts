@@ -1036,6 +1036,59 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
 
+    // ── order — take a BRAND-NEW dine-in order from the manager panel ───────────
+    // Same behaviour as the waiter tablet's POST /order (server-priced via
+    // lfh_staff_place_order — never trusts client prices), so the manager can run a
+    // table the same way a waiter does. Gated by the take_orders manager power (admin
+    // entitles it AND the owner grants it; managerCan, 2026-07-22). Wrapped by
+    // withIdempotency like every editor write, so a replayed offline action places once.
+    if (a === "order" && path.length === 1) {
+      if (!(await managerCan(g, rid, "take_orders"))) return permDenied("take new orders");
+      const { table, items, allergies, note } = body || {};
+      const t = String(table || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      // Reject a table that doesn't exist (1..table_count) — a typo would otherwise float
+      // a phantom order on a non-existent table (mirrors the tablet guard).
+      const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
+      const tn = Number(t);
+      if (tableCount > 0 && (tn < 1 || tn > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
+      if (!Array.isArray(items) || !items.length) return err("items required");
+      // Overridable double-tap guard: refuse an IDENTICAL order for the same table within
+      // 3s unless confirmDuplicate:true (two guests ordering the same drink is legitimate).
+      const optSig = (opts: any) => (Array.isArray(opts) && opts.length)
+        ? opts.map((o: any) => ({ group: o?.group ?? null, label: o?.label ?? null })) : null;
+      const remSig = (r: any) => (Array.isArray(r) ? r.map((x: any) => String(x).toLowerCase()).sort() : []);
+      const lineSig = (i: any) => ({ id: i.id, qty: Number(i.qty) || 1, options: optSig(i.options), removed: remSig(i.removed) });
+      const sig = JSON.stringify({ items: items.map(lineSig), allergies: Array.isArray(allergies) ? allergies : [] });
+      if (!(body && body.confirmDuplicate === true)) {
+        const recent = (await sb.from("orders").select("items, allergies")
+          .eq("table_number", t).eq("restaurant_id", rid).gte("created_at", new Date(Date.now() - 3000).toISOString()).limit(5)).data || [];
+        if (recent.some((o: any) => JSON.stringify({
+          items: (o.items || []).map(lineSig),
+          allergies: Array.isArray(o.allergies) ? o.allergies : [],
+        }) === sig)) {
+          return NextResponse.json({ error: "This looks identical to an order you just sent.", duplicateWarning: true }, { status: 409 });
+        }
+      }
+      const { data, error } = await sb.rpc("lfh_staff_place_order", {
+        p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
+        p_restaurant_id: rid,
+      });
+      if (error) throw new Error(error.message);
+      // A manager placed this, so it's already confirmed — skip the kitchen "accept" step
+      // and push it straight onto the pass as "preparing" (same as the tablet).
+      const placedId = (data as any)?.order_id;
+      if (placedId) {
+        const cur = (await sb.from("orders").select("items").eq("id", placedId).eq("restaurant_id", rid).single()).data as { items?: any[] } | null;
+        const its = Array.isArray(cur?.items) ? cur!.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
+        await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", placedId).eq("restaurant_id", rid);
+        await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("restaurant_id", rid).eq("status", "received");
+      }
+      await log("editor", "order_place", { restaurant_id: rid, table_number: t, device_id: dev });
+      return ok(data);
+    }
+
     // ── Handle a guest rating (mig 140) — mark handled / add an internal note ──
     // Gated by the view_ratings power; the feedback row must belong to THIS restaurant.
     if (a === "ratings" && b === "ack") {

@@ -67,7 +67,7 @@ const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName 
 // is re-read from the DB on every request by userFromCookie, so revoking someone's
 // access takes effect on their very next tap (no re-login needed). Admin bypasses via
 // managerPinGate as before.
-const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops"] as const;
+const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders"] as const;
 const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
 // The KOT ▾ menu's module rung (canonical ladder, mig 177): admin's allowed switch
 // AND, when transferred, the owner's toggle. One tiny single-row select on a rare
@@ -360,6 +360,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // order — server-side priced via lfh_staff_place_order (never trusts prices)
     if (a === "order" && path.length === 1) {
+      // The manager→tablet rung (mig 178): a real waiter may take orders only when the
+      // tablet_take_orders cap allows it (tri-state off/on/pin, default 'on'; per-user
+      // override honoured). The admin super-user bypasses, like every other tablet cap.
+      { const g2 = await tabletPerm("tablet_take_orders", req, body, rid, actor); if (!g2.allow) return g2.resp; }
       const { table, items, allergies, note } = body || {};
       const t = String(table || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");

@@ -32,8 +32,24 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 //                     (table_ops_allowed / _owner_control / _enabled →
 //                     tableOpsLadder() in lib/tableTags.ts); this power is the
 //                     plain manager rung on top of it.
-export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops"] as const;
+//  · take_orders    — take a brand-new dine-in order from the manager panel, like the
+//                     waiter tablet (2026-07-22). A plain manager POWER (admin exists +
+//                     owner grant) PLUS a tablet CAP (settings.tablet_take_orders
+//                     tri-state) — the same two-rail shape as discount/mark_paid, NOT a
+//                     module. The tablet cap defaults 'on' (mig 178) because taking
+//                     orders is the tablet's existing core function.
+export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops", "take_orders"] as const;
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
+
+// The authoritative "is this feature available for this restaurant AT ALL?" check
+// (rung 1a of the ladder), reading a RAW owner_entitlements JSONB value. Absent = ON,
+// so no existing restaurant changes when a new flag is added. The admin turns this OFF
+// to remove the feature from a restaurant entirely (hides every rung below).
+export function powerEntitled(rawEntitlements: unknown, flag: string): boolean {
+  const key = powerEntitlementKey(flag);
+  const v = rawEntitlements && typeof rawEntitlements === "object" ? (rawEntitlements as Record<string, unknown>)[key] : undefined;
+  return typeof v === "boolean" ? v : true;
+}
 
 export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [
   ...OWNER_SECTION_KEYS,
@@ -42,7 +58,8 @@ export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [
 
 export type OwnerEntitlements = Record<string, boolean>;
 
-// Merge a raw JSONB value over the all-on defaults (absent/non-boolean = ON).
+// Merge a raw JSONB value over the all-on defaults (absent/non-boolean = ON). Only the
+// BOOLEAN entitlement keys — the depth_<flag> strings are read separately (featureDepth).
 export function mergeOwnerEntitlements(raw: unknown): OwnerEntitlements {
   const out: OwnerEntitlements = {};
   for (const k of OWNER_ENTITLEMENT_KEYS) out[k] = true;

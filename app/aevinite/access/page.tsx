@@ -24,6 +24,10 @@ const MANAGER_POWERS: [string, string][] = [
   // Table types + khata module (mig 166) · banquet rung (mig 167, backfilled ON) ·
   // KOT ▾ menu (migs 172-177, defaults OFF).
   ["table_tags", "Mark table types + on-the-house"], ["khata", "Pay later (khata) book"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT operations"],
+  // Take a brand-new dine-in order from the manager panel, like the waiter tablet
+  // (2026-07-22). Standard manager power (exists + granted); its tablet rung is the
+  // tablet_take_orders tri-state in the Tablet card below.
+  ["take_orders", "Take orders"],
 ];
 // Owner-panel SECTIONS the admin can remove per restaurant (mig 133). Off = the
 // section disappears from the real owner's panel (admin act-as still sees it, tinted).
@@ -34,7 +38,7 @@ const OWNER_SECTIONS: [string, string][] = [
   // off for a restaurant even though the backend supports it (audit 2026-07-08).
   ["ratings", "Ratings"], ["customers", "Customers list"], ["settings", "Settings (appearance & password)"],
 ];
-const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"], ["tablet_banquet", "Banquet billing"], ["tablet_table_tags", "Mark table types"], ["tablet_khata", "Park pay-later (khata) bills"], ["tablet_table_ops", "Table & KOT operations"]];
+const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"], ["tablet_banquet", "Banquet billing"], ["tablet_table_tags", "Mark table types"], ["tablet_khata", "Park pay-later (khata) bills"], ["tablet_table_ops", "Table & KOT operations"], ["tablet_take_orders", "Take orders"]];
 // The feature LADDER's two admin switches per module (owner rule 2026-07-22):
 // "application" = the feature on/off itself; "power transfer" = may the OWNER
 // toggle it from their own panel. Keys = settings columns (mig 166).
@@ -249,7 +253,7 @@ export default function AccessPage() {
               const exists = owner[`power_${k}`] !== false;
               return (
                 <Row key={k} label={l}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ac-muted,#857655)" }}>
                       exists <Toggle on={exists} onChange={(v) => saveOwner(`power_${k}`, v)} />
                     </label>
@@ -263,6 +267,7 @@ export default function AccessPage() {
             })}
           </Card>
           <Card id="ac-tablet" title="Tablet (waiter) billing" hint="What the waiter tablet may do to a bill. 'On · PIN' requires a manager PIN each time. 'Table & KOT operations' only takes effect while its module (Modules card above) is on.">
+
             {TABLET_CAPS.map(([k, l]) => <Row key={k} label={l}><Tri val={tablet[k] || "off"} onChange={(v) => saveTablet(k, v)} /></Row>)}
           </Card>
           <Card title="Guest menu features" hint="Which features guests see on this restaurant's menu.">

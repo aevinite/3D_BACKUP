@@ -21,15 +21,19 @@ export const dynamic = "force-dynamic";
 const MANAGER_POWERS = MANAGER_POWER_FLAGS;
 // table_tags/khata default OFF (new module); banquet defaults ON (rung backfilled true in
 // mig 167 so pre-existing behaviour is unchanged); table_ops defaults OFF (KOT ▾ menu).
+// take_orders defaults OFF as a manager GRANT (owner grants deliberately) — its tablet
+// cap defaults 'on' separately (mig 178), taking orders being the tablet's core function.
 // Keep these matching the migrations — enforcement (managerCan) reads an ABSENT key as
 // false, so display and truth must agree.
-const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: true, table_ops: false };
+const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: true, table_ops: false, take_orders: false };
 // The tablet capabilities (settings.*), tri-state off|on|pin. tablet_table_tags /
 // tablet_khata are normally the MANAGER's rung (manager settings), but the admin
 // console shows every access bit of the ladder, so they're editable here too (mig 166).
 // tablet_table_ops (mig 172) is the ladder's manager→tablet rung for the KOT ▾ menu;
 // it only takes effect while the module itself is effective (mig 177).
-const TABLET_CAPS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops"] as const;
+// tablet_take_orders (mig 178) is the manager→tablet rung for order-taking; unlike the
+// others it defaults 'on' (the tablet already takes orders).
+const TABLET_CAPS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders"] as const;
 // Feature-ladder switches on settings (mig 166): the feature itself + the admin's
 // "power transfer" (may the OWNER toggle it). Booleans, default OFF via the migration.
 const FEATURE_SWITCHES = ["table_tags_allowed", "table_tags_owner_control", "banquet_allowed", "banquet_owner_control", "table_ops_allowed", "table_ops_owner_control"] as const;
@@ -51,7 +55,7 @@ export async function GET(req: NextRequest) {
   if (rq.error) return bad(rq.error.message, 500);
   if (!rq.data) return bad("Restaurant not found.", 404);
   const r = rq.data;
-  const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice, tablet_banquet, tablet_table_tags, tablet_khata, tablet_table_ops, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled").eq("restaurant_id", rid).maybeSingle()).data as Record<string, unknown> | null;
+  const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice, tablet_banquet, tablet_table_tags, tablet_khata, tablet_table_ops, tablet_take_orders, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled").eq("restaurant_id", rid).maybeSingle()).data as Record<string, unknown> | null;
   const manager = { ...MP_DEFAULT, ...(r?.manager_permissions && typeof r.manager_permissions === "object" ? r.manager_permissions : {}) };
   const tablet: Record<string, string> = {};
   for (const k of TABLET_CAPS) tablet[k] = isTri(s?.[k]) ? (s![k] as string) : "off";
@@ -84,7 +88,7 @@ export async function POST(req: NextRequest) {
   // Storing only explicit booleans keeps "absent = on" true for keys added later.
   if (body.owner && typeof body.owner === "object") {
     const cur = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data?.owner_entitlements || {};
-    const next: Record<string, boolean> = { ...(typeof cur === "object" ? cur : {}) };
+    const next: Record<string, unknown> = { ...(typeof cur === "object" ? cur : {}) };
     for (const k of OWNER_ENTITLEMENT_KEYS) if (k in (body.owner as object)) next[k] = (body.owner as Record<string, unknown>)[k] === true;
     const up = await sb.from("restaurants").update({ owner_entitlements: next }).eq("id", rid);
     if (up.error) return bad(up.error.message, 500);

@@ -48,6 +48,9 @@ export function cleanClonedSettings(
   base.tablet_discount = "off";
   base.tablet_mark_paid = "off";
   base.tablet_invoice = "off";
+  // Order-taking is the tablet's core function, so a NEW restaurant's waiters start able
+  // to take orders (default 'on' — mig 178). It's still a manager-controlled tri-state.
+  base.tablet_take_orders = "on";
   // The banquet tablet capability is a tri-state cap like the three above — same rule: a new
   // restaurant starts OFF and never inherits #1's, so a later `banquet_allowed` grant doesn't
   // arrive with waiters already able to create banquet bills. (mig 130.)
