@@ -217,9 +217,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("see the khata book");
       const rows = must(await sb.from("orders")
-        .select("id,session_id,khata_customer_id,khata_at,bill_no,table_number,subtotal,tax,total,discount,created_at")
+        .select("id,session_id,khata_customer_id,khata_at,table_number,subtotal,tax,total,discount,created_at")
         .eq("restaurant_id", rid).not("khata_at", "is", null).neq("payment_status", "paid").neq("status", "cancelled")
         .order("khata_at", { ascending: false }).limit(2000)) as any[];
+      // bill_no lives on SESSIONS (daily counter, mig 036) — one scoped lookup for the parked bills.
+      const sessIds = [...new Set(rows.map((o) => o.session_id).filter(Boolean))];
+      const billNos = new Map<string, number>();
+      if (sessIds.length) for (const srow of must(await sb.from("sessions").select("id,bill_no").in("id", sessIds)) as any[]) billNos.set(srow.id, srow.bill_no);
       const custIds = [...new Set(rows.map((o) => o.khata_customer_id).filter(Boolean))];
       const custs = custIds.length
         ? (must(await sb.from("khata_customers").select("id,name,phone,note,created_at").eq("restaurant_id", rid).in("id", custIds)) as any[])
@@ -233,9 +237,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const rate = sub > 0 ? tax / sub : 0;
         const due = Math.round(((Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate)) * 100) / 100;
         const key = o.session_id || o.id;
-        const bill = cst.bills.get(key) || { key, session_id: o.session_id, order_ids: [], bill_no: o.bill_no, table_number: o.table_number, khata_at: o.khata_at, amount: 0 };
+        const bill = cst.bills.get(key) || { key, session_id: o.session_id, order_ids: [], bill_no: o.session_id ? billNos.get(o.session_id) ?? null : null, table_number: o.table_number, khata_at: o.khata_at, amount: 0 };
         bill.order_ids.push(o.id);
-        bill.bill_no = bill.bill_no ?? o.bill_no;
         bill.amount = Math.round((bill.amount + due) * 100) / 100;
         cst.bills.set(key, bill);
         cst.outstanding = Math.round((cst.outstanding + due) * 100) / 100;
@@ -266,7 +269,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const days = Math.min(Math.max(Math.round(Number(new URL(req.url).searchParams.get("days"))) || 30, 1), 365);
       const since = new Date(Date.now() - days * 86400000).toISOString();
       const rows = must(await sb.from("orders")
-        .select("id,session_id,bill_no,table_number,subtotal,tax,total,items,paid_at,payment_note")
+        .select("id,session_id,table_number,subtotal,tax,total,items,paid_at,payment_note")
         .eq("restaurant_id", rid).eq("payment_method", ON_THE_HOUSE_METHOD).eq("payment_status", "paid")
         .gte("paid_at", since).order("paid_at", { ascending: false }).limit(1000)) as any[];
       // Group orders into bills by session (solo orders stand alone), like the bills views.
@@ -274,8 +277,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       for (const o of rows) {
         const key = o.session_id || o.id;
         const items = Array.isArray(o.items) ? o.items.reduce((s: number, it: any) => s + (Number(it.qty) || 1), 0) : 0;
-        const bl = bills.get(key) || { key, bill_no: o.bill_no, table_number: o.table_number, paid_at: o.paid_at, note: o.payment_note || "", items: 0, would_be: 0 };
-        bl.bill_no = bl.bill_no ?? o.bill_no;
+        const bl = bills.get(key) || { key, table_number: o.table_number, paid_at: o.paid_at, note: o.payment_note || "", items: 0, would_be: 0 };
         bl.items += items;
         bl.would_be = Math.round((bl.would_be + (Number(o.total) || 0)) * 100) / 100; // pre-discount value
         bills.set(key, bl);

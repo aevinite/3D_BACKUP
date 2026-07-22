@@ -179,11 +179,14 @@ BEGIN
   UPDATE sessions     SET table_number = p_to, last_activity_at = NOW() WHERE id = p_session;
   UPDATE orders       SET table_number = p_to WHERE session_id = p_session;
   UPDATE waiter_calls SET table_number = p_to WHERE session_id = p_session AND NOT resolved;
-  -- TAG: the mark belongs to the PARTY — move it with them. The target's stale tag
-  -- (if any) gives way; both rows fire the table_tags trigger → both tiles repaint.
-  DELETE FROM table_tags WHERE restaurant_id = v_rid AND table_number = p_to;
-  UPDATE table_tags SET table_number = p_to
-    WHERE restaurant_id = v_rid AND table_number = v_from;
+  -- TAG: the mark belongs to the PARTY — move it with them. Only when the party HAS a
+  -- mark: the target's stale tag then gives way (PK). An unmarked party shifting onto a
+  -- pre-marked free table leaves that mark alone. Rows fire the table_tags trigger → repaint.
+  IF EXISTS (SELECT 1 FROM table_tags WHERE restaurant_id = v_rid AND table_number = v_from) THEN
+    DELETE FROM table_tags WHERE restaurant_id = v_rid AND table_number = p_to;
+    UPDATE table_tags SET table_number = p_to
+      WHERE restaurant_id = v_rid AND table_number = v_from;
+  END IF;
   -- Nudge BOTH table topics (guests) AND BOTH tables on 'ops' (staff panels' targeted
   -- refetch) so the OLD table clears and the NEW table fills — no wrong/duplicated tile.
   INSERT INTO realtime_events(topic, kind, entity_id, table_number, restaurant_id) VALUES
