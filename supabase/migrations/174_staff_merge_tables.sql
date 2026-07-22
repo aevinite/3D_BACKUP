@@ -1,6 +1,6 @@
--- 169_staff_merge_tables.sql
+-- 174_staff_merge_tables.sql (ran on the live DB 2026-07-22 under earlier numbering — same content, renumbered around parallel PRs)
 -- MERGE two tables: the party on the source table joins the party on an OCCUPIED
--- target table — one table, ONE bill (PetPooja-style; part of the KOT ▾ menu, mig 164).
+-- target table — one table, ONE bill (PetPooja-style; part of the KOT ▾ menu, mig 172).
 -- This is the deliberate complement of lfh_staff_shift_table (mig 096), which REFUSES
 -- an occupied target: shift = move to a FREE table, merge = combine with a LIVE party.
 --

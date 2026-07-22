@@ -1141,7 +1141,12 @@ async function advanceDish(id, cur, forceNext) {
       // Only when this tap actually SERVED a dish (not an accept-to-cooking, and not
       // the "send back to kitchen" un-serve which passes forceNext) offer a takeback.
       if (next === "served" && cur !== "served" && window.LFH_UNDO) {
-        LFH_UNDO.show({ message: `${dishName} served`, onUndo: () => undoServe([{ id, prev: cur }]) });
+        const ord = it ? (state.data.orders || []).find((x) => x.id === it.order_id) : null;
+        LFH_UNDO.show({
+          message: `${dishName} served`,
+          sub: ord ? `Table ${ord.table_number} · tap undo to put it back` : "Tap undo to put it back",
+          onUndo: () => undoServe([{ id, prev: cur }]),
+        });
       }
     })
     .catch((e) => { toast("Failed: " + e.message, false); load(); });
@@ -1277,7 +1282,11 @@ function optimisticServeAll(orderIds) {
       scheduleServeReconcile();
       if (snap.length && window.LFH_UNDO) {
         const o = (state.data.orders || []).find((x) => x.id === orderIds[0]);
-        LFH_UNDO.show({ message: o ? `Table ${o.table_number} · all served` : "All served", onUndo: () => undoServe(snap) });
+        LFH_UNDO.show({
+          message: "All dishes served",
+          sub: o ? `Table ${o.table_number} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
+          onUndo: () => undoServe(snap),
+        });
       }
     })
     .catch((e) => { toast("Failed: " + e.message, false); load(); });
@@ -1316,7 +1325,7 @@ function renderPickerShell(titleHtml, bodyHtml, layerId, onBack) {
 }
 
 // ── KOT ▾ — Table & KOT operations (PetPooja-style unified menu; owner 2026-07-22) ──
-// The ladder's tablet rung (mig 164): the KOT button REPLACES the separate Move-table /
+// The ladder's tablet rung (mig 172): the KOT button REPLACES the separate Move-table /
 // Move-an-order buttons when the manager's Access grant (settings.tablet_table_ops,
 // forced 'off' server-side below 'tablet' depth) says on. When off, the two classic
 // buttons render exactly as before — zero regression. Ops arrive in phases.
@@ -1348,7 +1357,7 @@ function renderKotMenu(t, s) {
   }));
 }
 
-// SPLIT-SETTLE (mig 171) — collect ONE bill as several payment legs (equal / custom /
+// SPLIT-SETTLE (mig 176) — collect ONE bill as several payment legs (equal / custom /
 // by dish). Mirrors the manager's flow; the server re-computes the due and refuses
 // shares that don't add up, and the ladder + tablet_mark_paid gates apply server-side.
 function renderSplitSettle(t) {
@@ -1673,6 +1682,8 @@ function offerPayUndo(t, method) {
   if (stillOpen && window.LFH_UNDO) {
     LFH_UNDO.show({
       message: msg,
+      sub: `Table ${t} · tap undo to reopen the bill`,
+      icon: "💳",
       seconds: 5,
       onUndo: () => actGated("POST", `/tables/${t}/unpay`, null, { message: "Enter a manager PIN to undo this payment.", toast: "Payment undone" }),
     });
@@ -2943,9 +2954,10 @@ function renderXrayRibbon() {
   if (!tHigher()) { if (rb) rb.remove(); return; }
   const zones = XRAY_CAPS.filter((c) => {
     // Module caps only count as "zones" when the module exists for this restaurant at
-    // all (banquet entitlement / KOT-menu depth) — otherwise it's not a grantable thing.
-    if (c.key === "tablet_banquet" && !(state.data.settings || {}).banquet_allowed) return false;
-    if (c.key === "tablet_table_ops" && !(state.data.settings || {}).table_ops_tablet_allowed) return false;
+    // all (banquet full ladder / KOT-menu depth) — otherwise it's not a grantable thing.
+    const s2 = state.data.settings || {};
+    if (c.key === "tablet_banquet" && !(s2.banquet_allowed === true && (s2.banquet_owner_control !== true || s2.banquet_enabled !== false))) return false;
+    if (c.key === "tablet_table_ops" && !s2.table_ops_tablet_allowed) return false;
     return tperm(c.key) === "off";
   });
   const rest = (state.data.restaurant && state.data.restaurant.name) || "";
@@ -3092,7 +3104,8 @@ window.addEventListener("online", () => load().catch(() => {}));
       // Ladder rule for the banquet entry too: hidden from the real waiter when its
       // tri-state is off, tinted for the admin view. banquet_allowed (the admin
       // entitlement) still hides it for EVERYONE when the restaurant lacks the module.
-      const allowed = !!(state.data.settings || {}).banquet_allowed;
+      const sset = state.data.settings || {};
+      const allowed = sset.banquet_allowed === true && (sset.banquet_owner_control !== true || sset.banquet_enabled !== false);
       bqBtn.hidden = !(allowed && tshow("tablet_banquet"));
       bqBtn.classList.toggle("xray-off", allowed && !!txray("tablet_banquet"));
     }

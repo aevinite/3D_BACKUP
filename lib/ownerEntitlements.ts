@@ -24,16 +24,18 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 //  · view_ratings   — see + handle guest ratings in the manager panel (mig 138).
 //  · table_tags      — mark tables VIP/Family/Owner's-Guest + settle "on the house" (mig 166).
 //  · khata           — park a bill on a person to collect later + manage the khata book (mig 166).
+//  · banquet         — the Banquet tab / banquet billing (mig 130; rung added mig 167,
+//                      BACKFILLED true so pre-existing behaviour is unchanged).
 //  · table_ops      — the KOT ▾ menu (merge tables, move a KOT, move an item, split
 //                     bill). Its admin rung is NOT a power_ boolean: it's DERIVED from
 //                     table_ops_depth (below), so it can never disagree with the depth.
-export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "table_ops"] as const;
+export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops"] as const;
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
 // Table & KOT operations — the admin's ONE knob for the 4-rung ladder: is the feature
 // on at all, and how deep may it go (owner panel only / +manager / +tablet). Stored as
 // owner_entitlements.table_ops_depth. ABSENT = 'off' — a deliberate dark-launch
-// exception to the "absent = on" convention above (mig 164), so no restaurant gets the
+// exception to the "absent = on" convention above (mig 172), so no restaurant gets the
 // new menu until the admin switches it on.
 export const TABLE_OPS_DEPTHS = ["off", "owner", "manager", "tablet"] as const;
 export type TableOpsDepth = (typeof TABLE_OPS_DEPTHS)[number];

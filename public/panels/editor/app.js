@@ -1176,7 +1176,7 @@ const ACCESS_CAPS = [
   // from both Access cards when the feature itself is off (no dead UI).
   { key: "tablet_table_tags", label: "Mark table types (VIP/Family/Guest)" },
   { key: "tablet_khata", label: "Park pay-later (khata) bills" },
-  // KOT ▾ menu, the ladder's manager→tablet rung (mig 164→167) — only shown when the
+  // KOT ▾ menu, the ladder's manager→tablet rung (mig 172) — only shown when the
   // admin's depth knob reaches 'tablet' (whoami.tableOpsDepth; no dead UI below that).
   { key: "tablet_table_ops", label: "Table & KOT operations" },
 ];
@@ -1185,7 +1185,7 @@ function accessCapsFor() {
   const s = state.data.settings || {};
   const tagsOn = s.table_tags_allowed === true && (s.table_tags_owner_control !== true || s.table_tags_enabled !== false);
   return ACCESS_CAPS.filter((c) => {
-    if (c.key === "tablet_banquet") return !!s.banquet_allowed;
+    if (c.key === "tablet_banquet") return s.banquet_allowed === true && (s.banquet_owner_control !== true || s.banquet_enabled !== false);
     if (c.key === "tablet_table_tags" || c.key === "tablet_khata") return tagsOn;
     if (c.key === "tablet_table_ops") return !!(XRAY_WHO && XRAY_WHO.tableOpsDepth === "tablet");
     return true;
@@ -2290,7 +2290,7 @@ async function setOrderPayment(id, paid, opts = {}) {
     // end instead of once per order. For a single-order pay, the undo bar is the
     // confirmation + a few-second takeback (owner, 2026-07-22).
     if (!opts.quiet) {
-      if (paid && window.LFH_UNDO) LFH_UNDO.show({ message: "Marked paid 💳", seconds: 5, onUndo: () => editorUndoPay([id]) });
+      if (paid && window.LFH_UNDO) LFH_UNDO.show({ message: "Marked paid", sub: "Tap undo to reopen this bill", icon: "💳", seconds: 5, onUndo: () => editorUndoPay([id]) });
       else toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
     }
     return true;
@@ -2427,7 +2427,13 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
     const msg = skipped ? `Paid via ${picked.method} — ${skipped} new order still to accept` : `Marked paid via ${picked.method}`;
     // The undo bar is the confirmation + a few-second takeback (owner, 2026-07-22). The
     // revert goes through the SAME 30-min grace + audit-logged path as "restore to floor".
-    if (paidIds.length && window.LFH_UNDO) LFH_UNDO.show({ message: msg, seconds: 5, onUndo: () => editorUndoPay(paidIds) });
+    if (paidIds.length && window.LFH_UNDO) LFH_UNDO.show({
+      message: `Marked paid via ${picked.method}`,
+      sub: skipped ? `${skipped} new order still to accept` : "Tap undo to reopen this bill",
+      icon: "💳",
+      seconds: 5,
+      onUndo: () => editorUndoPay(paidIds),
+    });
     else toast(msg + " 💳", "ok");
   }
   else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
@@ -4673,7 +4679,12 @@ async function itemStatus(id, status) {
     await api("POST", "/items/" + id + "/status", { status });   // persist in the background
     // Serving a dish is easy to mis-tap — offer a few-second takeback (owner, 2026-07-22).
     if (status === "served" && prev && prev !== "served" && window.LFH_UNDO) {
-      LFH_UNDO.show({ message: `${(it && it.title) || "Dish"} served`, onUndo: () => editorUndoServe([{ kind: "session", id, prev }]) });
+      const ord = it ? (state.data.orders || []).find((x) => x.id === it.order_id) : null;
+      LFH_UNDO.show({
+        message: `${(it && it.title) || "Dish"} served`,
+        sub: ord ? `Table ${ord.table_number} · tap undo to put it back` : "Tap undo to put it back",
+        onUndo: () => editorUndoServe([{ kind: "session", id, prev }]),
+      });
     }
   } catch (e) {
     if (it && prev != null) { it.status = prev; refreshTableDetail(); } // revert the optimistic change on failure
@@ -6175,7 +6186,7 @@ function tablePanelParts(t) {
   // ONE sticky action bar holds every table-wide action: the primary action + pay +
   // discount on the LEFT, then table-management (shift/print/restart/close) on the RIGHT.
   const tagBtn = tagActionAllowed("table_tags") ? `<button class="btn" id="sxTag" title="Mark this table VIP / Family / Owner's guest">${TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷"} Type</button>` : "";
-  // Table-move actions: when the KOT ▾ menu (Table & KOT operations, mig 164→167) is on
+  // Table-move actions: when the KOT ▾ menu (Table & KOT operations, mig 172) is on
   // for this viewer it REPLACES the plain ⇄ Shift — one menu holding every table/KOT
   // operation. When the ladder says off, today's plain Shift renders exactly as before.
   const tableOpsBtn = sess
@@ -6252,7 +6263,7 @@ function openShiftPicker(t, sess) {
 }
 
 // ── KOT ▾ — Table & KOT operations (PetPooja-style unified menu; owner 2026-07-22) ──
-// ONE menu on the table detail for every table/bill operation. Ladder-gated (mig 164):
+// ONE menu on the table detail for every table/bill operation. Ladder-gated (mig 172):
 // admin depth knob → owner grants manager → (tablet has its own rung). Ops arrive in
 // phases — the menu lists only what's built, so it grows without UI rework.
 // Whether to render the KOT ▾ menu for THIS viewer. A real manager needs the owner's
@@ -6364,7 +6375,7 @@ function openReprintKotPicker(t) {
   }));
 }
 
-// SPLIT-SETTLE (mig 171) — collect ONE bill as several payment legs. Three ways to cut
+// SPLIT-SETTLE (mig 176) — collect ONE bill as several payment legs. Three ways to cut
 // it: equal N-way, custom amounts, or by dish (assign each dish line to a person; each
 // person's share scales to the real due, so tax + discount split proportionally). The
 // server re-computes the due and refuses shares that don't add up — this UI can't
@@ -6447,7 +6458,7 @@ function openSplitSettle(t) {
 
 // Move ONE dish line to another table — two steps in one modal: pick the dish
 // (grouped under its KOT), then pick the target table. The dish lands under a fresh
-// KOT on the target and BOTH bills re-price server-side (mig 170).
+// KOT on the target and BOTH bills re-price server-side (mig 175).
 function openMoveItemPicker(t) {
   document.querySelector(".moveitem-overlay")?.remove();
   const orders = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
@@ -6736,7 +6747,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   const payAll = root.querySelector("#sxPayAll"); if (payAll) payAll.onclick = () => markTablePaid(t);
   const tagB = root.querySelector("#sxTag"); if (tagB) tagB.onclick = () => openTagModal(t);
   // 🍴 Split: with the KOT ladder ON this is the REAL split-settle (several payment
-  // legs, mig 171); with it off it stays the old even-share calculator — no regression.
+  // legs, mig 176); with it off it stays the old even-share calculator — no regression.
   root.querySelectorAll("[data-split]").forEach((b) => (b.onclick = () => (tableOpsOn() ? openSplitSettle(t) : openSplitBill(parseFloat(b.dataset.split) || 0))));
   // Per-dish DELETE: confirm, then call the server, which deletes the order_item
   // AND recomputes the order's total from the survivors (lfh_delete_order_item) so
@@ -6909,7 +6920,11 @@ async function serveAllOrder(orderId) {
     await api("POST", "/orders/" + orderId + "/serve-all"); release(); await loadSessions();
     // The undo bar IS the confirmation now (message + a few-second takeback line),
     // so it replaces the old plain "served" toast.
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: o ? `Table ${o.table_number} · all served` : "All items served", onUndo: () => editorUndoServe(snap) });
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({
+      message: "All dishes served",
+      sub: o ? `Table ${o.table_number} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
+      onUndo: () => editorUndoServe(snap),
+    });
     else toast("All items served", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
@@ -6987,7 +7002,11 @@ async function serveAllOrders(t) {
   try {
     for (const o of orders) await api("POST", "/orders/" + o.id + "/serve-all");
     release(); await pollTables([String(t)]);
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: `Table ${t} · all served`, onUndo: () => editorUndoServe(snap) });
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({
+      message: "All dishes served",
+      sub: `Table ${t} · ${snap.length} dish${snap.length > 1 ? "es" : ""}`,
+      onUndo: () => editorUndoServe(snap),
+    });
     else toast("All orders served", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await pollTables([String(t)]); }
@@ -8120,9 +8139,15 @@ function bindBanquet() {
 function syncBanquetTab() {
   const btn = document.querySelector('.tabs .tab[data-tab="banquet"]');
   if (!btn) return;
-  const allowed = !!(state.data.settings || {}).banquet_allowed;
-  btn.hidden = !allowed;
-  if (!allowed && state.tab === "banquet") setTab("items");
+  // Full ladder (mig 167): admin switch AND (owner's toggle when transferred) AND —
+  // for a real manager — the owner->manager grant (higher roles see it regardless,
+  // matching the server's managerCan pass-through for admin/owner).
+  const s = state.data.settings || {};
+  const eff = s.banquet_allowed === true && (s.banquet_owner_control !== true || s.banquet_enabled !== false);
+  const granted = !XRAY_WHO || XRAY_WHO.higherView || xrayGrantedForManager("banquet");
+  const show = eff && granted;
+  btn.hidden = !show;
+  if (!show && state.tab === "banquet") setTab("items");
 }
 
 // Extend XRAY_TABS as more tabs become permission-gated. Grant rule matches the

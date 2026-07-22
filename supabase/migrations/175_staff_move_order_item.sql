@@ -1,4 +1,4 @@
--- 170_staff_move_order_item.sql
+-- 175_staff_move_order_item.sql (ran on the live DB 2026-07-22 under earlier numbering — same content, renumbered around parallel PRs)
 -- Move ONE dish line (an order_items row) to ANOTHER table — the finest-grained
 -- transfer in the KOT ▾ menu (PetPooja's "item transfer"). The line lands under a
 -- FRESH order on the target table's session, so it gets its own new KOT number

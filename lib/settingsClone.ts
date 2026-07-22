@@ -57,6 +57,10 @@ export function cleanClonedSettings(
   // billing or auto-print-KOT switched on, a brand-new restaurant was born with them enabled
   // (e.g. the manager panel showed the 🎪 Banquet tab) with no admin grant. (migs 130/107.)
   base.banquet_allowed = false;
+  // Banquet's full ladder (mig 167): a new restaurant starts with the admin holding
+  // the switch (no transfer) and the owner toggle at its neutral ON.
+  base.banquet_owner_control = false;
+  base.banquet_enabled = true;
   base.auto_print_kot_allowed = false;
   // Table types (VIP/Family/Guest) + khata (mig 166): the whole ladder starts at the
   // admin's feet for a new restaurant — feature off, no owner transfer, tablet rungs off.

@@ -1,4 +1,4 @@
--- 171_session_payments.sql
+-- 176_session_payments.sql (ran on the live DB 2026-07-22 under earlier numbering — same content, renumbered around parallel PRs)
 -- SPLIT BILL at settle time (KOT ▾ menu, PetPooja-style): one bill can be collected as
 -- several payment LEGS (equal N-way / custom amounts / by-dish shares computed client-
 -- side). The bill itself stays ONE bill on ONE session — no second session, no invoice

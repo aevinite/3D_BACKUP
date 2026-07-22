@@ -28,6 +28,7 @@ const PERMS: [string, string, string][] = [
   // power (power_<flag>), same as every row here (the `exists` check below).
   ["table_tags", "Mark table types", "Mark tables VIP / Family / Owner's guest + settle on the house"],
   ["khata", "Pay later (khata)", "Park bills on a person & collect later"],
+  ["banquet", "Banquet billing", "Create fixed-plate banquet bills"],
   ["table_ops", "Table & KOT operations", "Merge tables, move KOTs/items, split bills"],
 ];
 const ROLES = ["manager", "kitchen", "tablet"];

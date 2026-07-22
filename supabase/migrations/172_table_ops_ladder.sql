@@ -1,4 +1,4 @@
--- 167_table_ops_ladder.sql (applied to the live DB 2026-07-22 under its pre-rebase name 164_table_ops_ladder.sql — same content, renumbered around PR #328's 164/166)
+-- 172_table_ops_ladder.sql (ran on the live DB 2026-07-22 under earlier numbering — same content, renumbered around parallel PRs)
 -- "Table & KOT operations" feature (KOT ▾ menu: change table / merge tables / move a
 -- KOT / move an item / split bill) gets the full 4-rung access ladder:
 --

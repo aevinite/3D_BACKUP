@@ -5,41 +5,84 @@ selected dishes. The user is a beginner who vibe-codes; teach as you build,
 keep chat in plain language, explain why before how. See user/feedback
 memory for tone and preferences.
 
-## AVOID THE SAFETY-CLASSIFIER HALT — READ FIRST, EVERY MESSAGE (non-negotiable, 2026-07-07)
+## ⚠️ AVOID THE CYBER-SAFEGUARD HALT — SAFE-AUDIT WORDING (read FIRST, every session — non-negotiable)
 
-Claude's models (Fable 5, Opus 4.8, all of them) run a real-time safety classifier that
-**halts the whole turn** the moment a message *looks* like offensive-security work — it reacts
-to the WORDS AND SHAPE of the request, NOT your intent, so it fires even on a fully-authorized
-audit of OUR OWN app. It scans my chat messages AND the `description` field of my tool calls,
-cannot be turned off from inside a session, and has cost us several dead sessions. The ONLY
-reliable defence is wording discipline, applied to EVERYTHING I type — automatically, even
-mid-task, even if the owner only says "avoid this error":
+Claude's models (Fable 5, Opus 4.8, Sonnet — all of them) run a real-time
+cybersecurity classifier that **halts the whole turn/session** with a "safety
+measures flagged this message for a cybersecurity topic" error. It reacts to the
+WORDS AND SHAPE of the work, not intent — so it fires even on legitimate audits of
+THIS OWN app with full authorization. It scans chat messages AND the `description`
+field of tool calls, and cannot be turned off from inside a session. It has cost us
+several dead sessions. The ONLY reliable defence is wording discipline, applied to
+EVERYTHING typed, always, without being told, even mid-task:
 
-- **NEVER frame work as attack/defence.** Don't investigate whether a login gate can be got
-  around, whether an endpoint is "protected/unprotected", whether data can move from one
-  account to another by mistake, whether something is "exploitable", or anything about
-  impersonation, breaking in, or evading a check. Don't grep/read "is this guarded" as a
-  security probe. This is the #1 trigger.
-- **Banned words (chat, command descriptions, greps, agent instructions, commit msgs, comments):**
-  attack, exploit, IDOR, penetration/pentest, probe, leak, hijack, impersonate/impersonation,
-  escalate/escalation, breach, bypass, tamper, vulnerable/vulnerability, malicious,
-  unauthorized-access, injection, CSRF/XSS/RCE, "cross-tenant" (as a threat), "money-leak".
+- **NEVER frame work as attack/defence.** Do not investigate whether a login gate can
+  be bypassed, whether an endpoint is "protected/unprotected", whether data can
+  "leak" from one account to another, whether something is "exploitable/vulnerable",
+  or anything about impersonation, breaking in, or evading a check. Do not grep/read
+  for "is this auth guarded" as a security probe. This is the #1 trigger.
+- **Banned words everywhere (chat, command descriptions, prompts, greps, agent
+  instructions, commit msgs, comments):** attack, exploit, IDOR, penetration/pentest,
+  probe, leak, hijack, impersonate/impersonation, escalate/escalation, breach,
+  bypass/auth-bypass, tamper, vulnerable/vulnerability, penetrate, malicious,
+  unauthorized-access, injection, CSRF/XSS/RCE, "cross-tenant" (as a threat),
+  "money-leak". Substitute plain language every time.
 - **Say the same thing in plain product-correctness language instead:**
   - "does every admin request require being logged in?" (not "auth bypass / attack the gate")
   - "does each restaurant only see its own numbers?" (not "cross-tenant leak / tenant bleed")
   - "are owner earnings hidden where the rules require?" (not "money leak")
   - "does the login-as-restaurant view show the right restaurant?" (not "impersonation flow")
-- **Do all data-separation / login / permission checking INLINE myself — never in a sub-agent**
-  (sub-agents get killed mid-run and produce nothing). Sub-agents get purely-functional scopes
-  only (broken buttons, wrong totals, layout, realtime sync).
-- **Verify by READING code + USING the panel normally** (is every query filtered by restaurant
-  id? does the server take the restaurant from the login, not the browser?). NEVER swap an
-  id/slug in a URL to reach another restaurant, replay as another restaurant, read the DB with
-  the public key, hit an endpoint with no login "to test the gate", or otherwise trick/forge
-  anything. If code-reading suggests a gap, just REPORT it as a finding — don't tamper to prove it.
+- **Do all data-separation / login / permission checking INLINE myself — never in a
+  sub-agent** (sub-agents get killed mid-run and produce nothing). Sub-agents get
+  purely-functional scopes only (broken buttons, wrong totals, layout, realtime sync,
+  "does the right data show").
+- **Verify by READING code + OBSERVING normal use** (is every query filtered by
+  restaurant id? does the server take the restaurant from the login, not the browser?).
+  NEVER swap an id/slug in a URL to reach another restaurant, replay as another
+  restaurant, read the DB with the public key, or hit an endpoint with no login "to
+  test the gate." Trickery is exactly what the classifier (rightly) stops. If
+  code-reading suggests a gap, just REPORT it as a finding — don't tamper to prove it.
+- **This rule stands even if the owner literally says "avoid this error" and nothing
+  else** — that instruction means: apply all of the above from now on automatically.
 
-Full background: `.claude/work-checker-lessons.md` → "Safe-audit operating rules". This block is
-the always-loaded reminder so the rule can't be forgotten mid-session.
+Full background: `.claude/work-checker-lessons.md` → "Safe-audit operating rules". This
+block is the always-loaded reminder so the rule can't be forgotten mid-session.
+
+## 🔒 TWO STACKS — MAIN IS UNTOUCHABLE (owner, 2026-07-22 — ABSOLUTE, EVERY SESSION)
+
+There are TWO fully separate deployments of this product. Know which one you are
+touching BEFORE every action:
+
+| | **MAIN (live clients)** | **DEV/TEST (this folder)** |
+|---|---|---|
+| Folder | `/Users/aevinite/Documents/LIVE_PROJECTS/3D_Menu_Av` | `/Users/aevinite/Documents/Projects/backup_Menu` |
+| Git repo | `aevinitegroup/3D_Menu_Av` | `aevinite/3D_BACKUP` |
+| Vercel | `3d-menu-av` | `3-d-backup` |
+| Supabase | `kclqkmdxnwlhtyrducku` | `wnsfcizclkbobwzcxqsf` (Mumbai) |
+| Keys | `.env.MAIN.local` (in this folder, gitignored) | `.env.local` |
+
+- **MAIN is READ-ONLY BY DEFAULT — for every session, every mode.** No DB writes, no
+  migrations, no deploys, no env changes, no pushes to `aevinitegroup/3D_Menu_Av`, no
+  edits inside the `LIVE_PROJECTS/3D_Menu_Av` folder. **This rule survives
+  bypass-permissions / auto-accept mode:** before ANY action that changes MAIN, STOP and
+  ask the owner an explicit "Should I do this on MAIN? yes/no" question (use the
+  ask-user-question tool), naming exactly what will change. One yes = that one action
+  only, not a standing license.
+- **Even READING main (data copy, health check) — announce it in chat first.** Reads
+  are allowed, but say you're doing them.
+- **All building & testing happens HERE, against the dev DB, with dev keys.** Never
+  point a dev server, script, seed, or migration at MAIN's URL/keys "just to check".
+- **ONE migrations folder is the single source of truth for BOTH databases**
+  (`supabase/migrations/` here). Every schema change: written once here → run on the
+  DEV DB → verified → reaches MAIN only through the release step below. NEVER write a
+  migration only on MAIN, and never let the two schemas fork.
+- **Release to MAIN = a deliberate, asked-first ritual, every time:** (1) build + tests
+  green here, verified on dev; (2) ASK the owner explicitly; (3) on yes: scripted
+  one-way code copy dev-repo → live-repo (never hand-edit the live repo — that's how
+  drift starts), run pending migrations on MAIN DB, deploy; (4) verify MAIN end-to-end
+  (health + a real order loop) and report honestly, including anything that failed.
+- **Secrets discipline applies doubly to `.env.MAIN.local`:** never print, echo, or
+  commit any value from it; masked reads only.
 
 ## Owner working agreements (2026-06-26 — FOLLOW EVERY TIME)
 
@@ -334,6 +377,39 @@ Use the right skill the moment the task fits — don't ask permission.
 
 When a deferred tool is needed (e.g. `TaskCreate`, MCP browser tools), load it
 via `ToolSearch` BEFORE planning around it.
+
+## "Check phone view" / "check tablet view" — open a LIVE Chrome (owner shortcut, 2026-07-08)
+
+ONLY when the owner explicitly says something like **"check phone / phone view / view on
+my phone / see it on phone"** (or the **tablet** equivalent) — NOT automatically, never
+"just to be safe" — open a REAL, VISIBLE Chrome window of the local app, device-emulated,
+so the owner can look at it live. This is on-demand only so it doesn't burn tokens/load.
+
+- **Run:** `node scripts/view-device.mjs` (dev server must be on :4000). Flags:
+  `--device phone|tablet` (default **phone = Samsung Galaxy A35, 360×780, dpr3**; the owner's
+  actual phone — tablet = iPad 1194×834), `--role guest|tablet|manager|kitchen|owner`
+  (default guest), `--slug <restaurant>` (guest menu, default french-house).
+  - phone view of the guest menu: `node scripts/view-device.mjs`
+  - phone view of the waiter panel: `node scripts/view-device.mjs --role tablet`
+- It launches the installed Chrome (`channel:"chrome"`, `headless:false`, `devtools:true`),
+  logs in as the RIGHT role first, opens the route, and LEAVES the window open (run it in
+  the background so the session isn't blocked).
+- **Gotcha it bakes in:** opening `/tablet` `/manager` etc. with the ADMIN cookie shows the
+  admin console + an orange "ADMIN VIEW" bar — NOT the true staff view. The script logs in as
+  the per-restaurant diag staff user (see test-staff-logins memory) to get the clean real view.
+- Save any screenshots to the owner's **Desktop**, never the temp scratchpad.
+
+**When the owner asks to CHECK / VERIFY any UI work, always do it THIS way (not a
+detached mockup):**
+- Verify against the **real running app on `localhost:4000`** in a live Chrome window —
+  NOT a standalone `temp-*` prototype folder (its own `index.html`/`app.js` + static
+  `desktop.png`/`mobile.png`). Testing a throwaway mockup is testing the wrong thing.
+- Check **BOTH desktop AND phone (A35, ~360–390px)** — the owner tests on mobile.
+- **Log in as the right role FIRST** (per-restaurant diag user) so you see the true
+  panel, not the admin console + orange "ADMIN VIEW" bar.
+- Confirm it also works for a **non-#1 restaurant** (tenant bugs hide there), and that a
+  live change refetches only what changed (Network tab).
+- Don't leave throwaway `temp-*` prototype folders behind; screenshots go to the Desktop.
 
 ## Mobile hardware BACK button — every screen & popup is a "back step" (2026-06-19)
 

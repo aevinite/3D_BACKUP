@@ -444,7 +444,12 @@ function markItemReady(id, btn) {
     scheduleReadyReconcile();
     // A ✓ is easy to mis-tap in a rush — give the cook a few seconds to send the
     // dish back to where it was (owner undo bar, 2026-07-22).
-    if (window.LFH_UNDO) LFH_UNDO.show({ message: `${it.title || "Dish"} marked ready`, onUndo: () => undoReady([{ id, prev }]) });
+    if (window.LFH_UNDO) LFH_UNDO.show({
+      message: `${it.title || "Dish"} marked ready`,
+      sub: o ? `Table ${o.table_number} · tap undo to put it back` : "Tap undo to put it back",
+      icon: "🔥",
+      onUndo: () => undoReady([{ id, prev }]),
+    });
   }).catch((e) => { toast("Failed: " + e.message); load(); });
 }
 
@@ -521,8 +526,12 @@ function markOrderReady(orderId) {
     // Offer a takeback only when we captured per-dish rows to revert (session
     // orders); legacy JSON-item orders have no per-dish id, so we skip the bar there.
     if (snap.length && window.LFH_UNDO) {
-      const label = o ? `Table ${o.table_number} · all ready` : "Order marked ready";
-      LFH_UNDO.show({ message: label, onUndo: () => undoReady(snap, orderId) });
+      LFH_UNDO.show({
+        message: "All dishes marked ready",
+        sub: o ? `Table ${o.table_number} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
+        icon: "🔥",
+        onUndo: () => undoReady(snap, orderId),
+      });
     }
   }).catch((e) => { toast("Failed: " + e.message); load(); });
 }

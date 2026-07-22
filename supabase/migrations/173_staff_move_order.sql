@@ -1,4 +1,4 @@
--- 168_staff_move_order.sql (applied to the live DB 2026-07-22 under its pre-rebase name 165_staff_move_order.sql — same content, renumbered around PR #328's 164/166)
+-- 173_staff_move_order.sql (ran on the live DB 2026-07-22 under earlier numbering — same content, renumbered around parallel PRs)
 -- Move ONE order (a KOT) — and its dish rows — to another table, as a single atomic
 -- SECURITY DEFINER RPC. This consolidates the tablet route's inline move logic
 -- (app/api/tablet/[...path]/route.ts "orders/:id/move") so the editor + tablet share

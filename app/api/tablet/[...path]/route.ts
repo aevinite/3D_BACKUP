@@ -16,7 +16,7 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { isTableTag, tableTagsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableOpsDepth } from "@/lib/ownerEntitlements";
 import { effectiveTaxRate } from "@/lib/tax";
 
@@ -70,7 +70,7 @@ const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName 
 // managerPinGate as before.
 const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops"] as const;
 const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
-// The KOT ▾ menu's admin depth knob (mig 167): the tablet rung only exists at depth
+// The KOT ▾ menu's admin depth knob (mig 172): the tablet rung only exists at depth
 // 'tablet'. One tiny single-row select on a rare path (a merge/move tap, not a poll).
 async function tableOpsTabletAllowed(rid: string): Promise<boolean> {
   const r = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data as { owner_entitlements?: unknown } | null;
@@ -201,7 +201,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color, owner_entitlements").eq("id", rid).maybeSingle(),
       ]);
       const restRow = must(restaurant) || null;
-      // Ladder rung 1+2 resolved server-side (mig 164): unless the admin's depth knob
+      // Ladder rung 1+2 resolved server-side (mig 172): unless the admin's depth knob
       // reaches 'tablet', the tri-state ships as 'off' — the client needs zero ladder
       // logic and a stale manager grant can't surface the menu (same server-resolution
       // trick as overlayUserPerms). Applied AFTER the per-user overlay on purpose.
@@ -249,8 +249,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (path.join("/") === "banquet-items") {
       const flags = await sb.from("settings").select("banquet_allowed, tablet_banquet").eq("restaurant_id", rid).maybeSingle();
       const f = overlayUserPerms((flags.data as Record<string, any> | null), g.user);
-      if (!f?.banquet_allowed) return err("Banquet billing isn't enabled for this restaurant.", 403);
-      if ((f.tablet_banquet || "off") === "off" && g.user) return err("Banquet billing is off for the tablet — ask a manager.", 403);
+      // Full ladder (mig 167): the owner's toggle counts too, not just the admin switch.
+      if (!(await banquetLadder(rid)).effective) return err("Banquet billing isn't enabled for this restaurant.", 403);
+      if ((f?.tablet_banquet || "off") === "off" && g.user) return err("Banquet billing is off for the tablet — ask a manager.", 403);
       const items = must(await sb.from("banquet_items")
         .select("id,title,price,unit,sort_order,active").eq("restaurant_id", rid).eq("active", true)
         .order("sort_order").limit(200));
@@ -299,7 +300,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       ]);
       const restRowSt = must(restaurant) || null;
       // Same server-side ladder resolution as /summary: below 'tablet' depth the
-      // tri-state ships 'off', so the KOT menu can never render (mig 164).
+      // tri-state ships 'off', so the KOT menu can never render (mig 172).
       const setSt = overlayUserPerms(must(settings), g.user);
       const tOpsOkSt = tableOpsDepth(restRowSt?.owner_entitlements) === "tablet";
       if (setSt) {
@@ -445,6 +446,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // tablet needs the tablet_banquet capability (tri-state + per-user override,
     // same gate family as discount/mark-paid — 'pin' rides the actGated PIN flow).
     if (a === "banquet" && b === "place") {
+      // Full ladder (mig 167): owner's toggle counts; the RPC re-checks the admin
+      // switch in SQL as the backstop.
+      if (!(await banquetLadder(rid)).effective) return err("Banquet billing isn't enabled for this restaurant.", 403);
       const gate2 = await tabletPerm("tablet_banquet", req, body, rid, actor);
       if (!gate2.allow) return gate2.resp;
       // Table is OPTIONAL (mig 132): blank → a standalone walk-in-style bill the
@@ -705,7 +709,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
 
     // order-items/:id/move — move ONE dish line to another table's bill (KOT ▾ menu).
-    // Same ladder gate as merge; the RPC (mig 170) reprices both KOTs server-side.
+    // Same ladder gate as merge; the RPC (mig 175) reprices both KOTs server-side.
     if (a === "order-items" && c === "move") {
       if (!(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
       const gi = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gi.allow) return gi.resp;
@@ -925,7 +929,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const mtc = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
       const mTableCount = Number((mtc.data as { table_count?: number } | null)?.table_count) || 0;
       if (mTableCount > 0 && (Number(to) < 1 || Number(to) > mTableCount)) return err(`Table ${to} doesn't exist (this place has ${mTableCount} tables).`, 400);
-      // All the move logic lives in the shared RPC (mig 165) — atomic, tenant-checked
+      // All the move logic lives in the shared RPC (mig 173) — atomic, tenant-checked
       // against rid, re-splits both bills' discounts, and nudges BOTH tables' tiles
       // (the old inline version here forgot the SOURCE-table breadcrumb, so the moved
       // ticket lingered on the old tile for up to 60s). Editor shares the same RPC.
@@ -970,7 +974,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // in the payment-method breakdown. paid_at starts the 30-min "restore to floor" grace
       // window (migration 112 + the editor's PATCH /orders handler, which enforces + clears it).
       const payUpdate: Record<string, unknown> = { payment_status: "paid", paid_at: new Date().toISOString() };
-      // SPLIT settle (KOT ▾ menu, mig 171): several payment legs against the one bill.
+      // SPLIT settle (KOT ▾ menu, mig 176): several payment legs against the one bill.
       // Ladder-gated on top of tablet_mark_paid; Σ legs is re-checked server-side.
       const splits = Array.isArray(body?.splits) ? body.splits : null;
       if (splits) {

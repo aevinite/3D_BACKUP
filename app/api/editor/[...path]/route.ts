@@ -24,7 +24,7 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey, tableOpsDepth } from "@/lib/ownerEntitlements";
-import { isTableTag, tableTagsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -57,7 +57,7 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   if (!u || u.role === "owner") return true;
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-  // table_ops' admin rung is the depth knob (mig 164, ABSENT = off), not a stored
+  // table_ops' admin rung is the depth knob (mig 172, ABSENT = off), not a stored
   // power_ boolean — the owner may grant it only when the depth reaches 'manager'.
   const entitled = flag === "table_ops"
     ? ["manager", "tablet"].includes(tableOpsDepth(r?.owner_entitlements))
@@ -67,7 +67,7 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
 
-// Gate for the KOT ▾ menu (Table & KOT operations — the 4-rung ladder, mig 164).
+// Gate for the KOT ▾ menu (Table & KOT operations — the 4-rung ladder, mig 172).
 // Rung 1: the admin's depth knob must not be 'off' — this stops EVERYONE, owner and
 // admin view included (the feature simply doesn't exist for this restaurant).
 // Rung 2: a plain manager additionally needs the owner's table_ops grant (managerCan;
@@ -81,7 +81,7 @@ async function tableOpsGate(g: { user: StaffUser | null }, rid: string): Promise
   return null;
 }
 
-// Friendly message for the move/merge RPCs' { ok:false, reason } (migs 168/170).
+// Friendly message for the move/merge RPCs' { ok:false, reason } (migs 173/175).
 const moveErrMsg = (reason?: string) =>
   reason === "no_order" ? "That order isn't there anymore — refresh."
   : reason === "item_not_found" ? "That dish is no longer on the order."
@@ -94,7 +94,7 @@ const moveErrMsg = (reason?: string) =>
   : reason === "target_invoiced" ? "The target table's bill is already invoiced — void or regenerate its invoice before moving an order onto it."
   : (reason || "Couldn't move the order.");
 
-// Friendly message for lfh_staff_merge_tables' { ok:false, reason } (mig 169).
+// Friendly message for lfh_staff_merge_tables' { ok:false, reason } (mig 174).
 const mergeErrMsg = (reason?: string) =>
   reason === "no_session" ? "That table's session isn't there anymore — refresh."
   : reason === "session_closed" ? "This table is already closed — nothing to merge."
@@ -227,6 +227,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // above are the owner→manager rung, this is the admin(/owner) application rung.
       const lad = await tableTagsLadder(rid);
       if (!lad.effective) { effectivePowers.table_tags = false; effectivePowers.khata = false; }
+      const bq = await banquetLadder(rid);
+      if (!bq.effective) effectivePowers.banquet = false;
       return ok({
         actor,
         role: actor,
@@ -236,7 +238,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         managerPermissions: perms,
         effectivePowers,
         offByAdmin,
-        features: { table_tags: lad.effective, khata: lad.effective },
+        features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective },
         // The KOT ▾ menu ladder knob: 'off' hides the menu for EVERYONE (plain ⇄ Shift
         // renders instead); 'tablet' additionally surfaces the tablet grant in Access.
         tableOpsDepth: depth,
@@ -248,10 +250,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // place RPC re-checks server-side anyway). Includes inactive rows so the
     // manager can toggle them back on.
     if (p === "banquet/items") {
-      const flags = await sb.from("settings").select("banquet_allowed").eq("restaurant_id", rid).maybeSingle();
-      if (!(flags.data as { banquet_allowed?: boolean } | null)?.banquet_allowed) {
-        return err("Banquet isn't enabled for this restaurant.", 403);
-      }
+      // Full ladder (mig 167): admin switch AND (owner's toggle when transferred)
+      // AND the owner->manager grant (backfilled true, so nothing changed by itself).
+      if (!(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
       const items = must(await sb.from("banquet_items")
         .select("id,title,price,unit,sort_order,active").eq("restaurant_id", rid)
         .order("sort_order").limit(200));
@@ -1125,10 +1127,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // entitlement is re-checked here (and again inside the place RPC) so a
     // restaurant without the module can't be driven even by a forged client.
     if (a === "banquet") {
-      const flags = await sb.from("settings").select("banquet_allowed").eq("restaurant_id", rid).maybeSingle();
-      if (!(flags.data as { banquet_allowed?: boolean } | null)?.banquet_allowed) {
-        return err("Banquet isn't enabled for this restaurant.", 403);
-      }
+      // Full ladder (mig 167) — see the GET gate above; the place RPC still re-checks
+      // the admin switch inside SQL as the final backstop.
+      if (!(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
       // banquet/item-save — create/update one banquet line ({ id?, title, price, unit, active, sort_order })
       if (b === "item-save") {
         if (!(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the banquet menu");
@@ -1412,8 +1414,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // orders/:id/move — move ONE order (a single KOT) and its dish rows to another
     // table, leaving the rest of the party's bill behind. Part of the KOT ▾ menu
-    // (ladder-gated, mig 164); the whole-party variant is sessions/:id/shift above.
-    // The RPC (mig 165) is atomic, re-splits both bills' discounts and nudges BOTH
+    // (ladder-gated, mig 172); the whole-party variant is sessions/:id/shift above.
+    // The RPC (mig 173) is atomic, re-splits both bills' discounts and nudges BOTH
     // tables' tiles — the same shared implementation the tablet route calls.
     if (a === "orders" && c === "move") {
       const gateResp = await tableOpsGate(g, rid); if (gateResp) return gateResp;
@@ -1433,7 +1435,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // sessions/:id/merge — MERGE this table's party into an OCCUPIED table: one table,
     // one bill (KOT ▾ menu; the complement of shift, which needs a FREE target).
-    // The RPC (mig 169) moves orders/items/calls/members/cart, sums + re-splits the
+    // The RPC (mig 174) moves orders/items/calls/members/cart, sums + re-splits the
     // discounts, closes the source session, and nudges both tables' tiles.
     if (a === "sessions" && c === "merge") {
       const gateResp = await tableOpsGate(g, rid); if (gateResp) return gateResp;
@@ -1454,7 +1456,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
 
     // tables/:t/pay-split — settle the whole bill as SEVERAL payment legs (equal /
-    // custom / by-dish shares computed client-side; KOT ▾ menu, mig 171). The bill
+    // custom / by-dish shares computed client-side; KOT ▾ menu, mig 176). The bill
     // stays ONE bill: orders are marked paid once (method 'Split'), the legs land in
     // session_payments for the money trail. Σ legs must equal the due (±2p) — the
     // server recomputes the due itself, never trusting the client's number.
@@ -1504,7 +1506,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // order-items/:id/move — move ONE dish line to another table (KOT ▾ menu; the
     // finest-grained transfer). Lands under a FRESH KOT on the target; both bills
-    // re-price server-side (mig 170).
+    // re-price server-side (mig 175).
     if (a === "order-items" && c === "move") {
       const gateResp = await tableOpsGate(g, rid); if (gateResp) return gateResp;
       const to = String((body && body.to) || "").trim();
