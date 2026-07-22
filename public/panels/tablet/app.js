@@ -1139,7 +1139,12 @@ async function advanceDish(id, cur, forceNext) {
       // Only when this tap actually SERVED a dish (not an accept-to-cooking, and not
       // the "send back to kitchen" un-serve which passes forceNext) offer a takeback.
       if (next === "served" && cur !== "served" && window.LFH_UNDO) {
-        LFH_UNDO.show({ message: `${dishName} served`, onUndo: () => undoServe([{ id, prev: cur }]) });
+        const ord = it ? (state.data.orders || []).find((x) => x.id === it.order_id) : null;
+        LFH_UNDO.show({
+          message: `${dishName} served`,
+          sub: ord ? `Table ${ord.table_number} · tap undo to put it back` : "Tap undo to put it back",
+          onUndo: () => undoServe([{ id, prev: cur }]),
+        });
       }
     })
     .catch((e) => { toast("Failed: " + e.message, false); load(); });
@@ -1275,7 +1280,11 @@ function optimisticServeAll(orderIds) {
       scheduleServeReconcile();
       if (snap.length && window.LFH_UNDO) {
         const o = (state.data.orders || []).find((x) => x.id === orderIds[0]);
-        LFH_UNDO.show({ message: o ? `Table ${o.table_number} · all served` : "All served", onUndo: () => undoServe(snap) });
+        LFH_UNDO.show({
+          message: "All dishes served",
+          sub: o ? `Table ${o.table_number} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
+          onUndo: () => undoServe(snap),
+        });
       }
     })
     .catch((e) => { toast("Failed: " + e.message, false); load(); });
@@ -1527,6 +1536,8 @@ function offerPayUndo(t, method) {
   if (stillOpen && window.LFH_UNDO) {
     LFH_UNDO.show({
       message: msg,
+      sub: `Table ${t} · tap undo to reopen the bill`,
+      icon: "💳",
       seconds: 5,
       onUndo: () => actGated("POST", `/tables/${t}/unpay`, null, { message: "Enter a manager PIN to undo this payment.", toast: "Payment undone" }),
     });
