@@ -22,7 +22,9 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 // manager's effective power is off no matter what the owner granted before.
 //  · edit_settings  — enforced in the editor (mig, route:1203) but had no owner toggle.
 //  · view_ratings   — see + handle guest ratings in the manager panel (mig 138).
-export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings"] as const;
+//  · table_tags      — mark tables VIP/Family/Owner's-Guest + settle "on the house" (mig 166).
+//  · khata           — park a bill on a person to collect later + manage the khata book (mig 166).
+export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata"] as const;
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
 export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [

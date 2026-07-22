@@ -58,6 +58,13 @@ export function cleanClonedSettings(
   // (e.g. the manager panel showed the 🎪 Banquet tab) with no admin grant. (migs 130/107.)
   base.banquet_allowed = false;
   base.auto_print_kot_allowed = false;
+  // Table types (VIP/Family/Guest) + khata (mig 166): the whole ladder starts at the
+  // admin's feet for a new restaurant — feature off, no owner transfer, tablet rungs off.
+  base.table_tags_allowed = false;
+  base.table_tags_owner_control = false;
+  base.table_tags_enabled = true;
+  base.tablet_table_tags = "off";
+  base.tablet_khata = "off";
   // The auto-print-KOT capability itself (not just its entitlement) must also start OFF, so a
   // later entitlement grant doesn't immediately auto-print KOTs without the owner choosing to. (mig 107.)
   base.auto_print_kot = false;
