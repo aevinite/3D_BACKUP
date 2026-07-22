@@ -50,6 +50,8 @@ export default function AdminCommand() {
   // Load-error flag so a backend hiccup shows a Retry instead of leaving the home screen
   // stuck on "Loading…" forever (audit 2026-07-07).
   const [loadErr, setLoadErr] = useState(false);
+  // Red "Fix problems" button: 24h app errors + unsolved reported problems (owner 2026-07-22).
+  const [fixCount, setFixCount] = useState(0);
 
   const load = useCallback(() => {
     // ONE combined call instead of six separate ones (egress: fewer round-trips on the 60s
@@ -69,6 +71,7 @@ export default function AdminCommand() {
       setOnline(j.online || []);
       setOnlineCount(typeof j.onlineCount === "number" ? j.onlineCount : null);
       setActivity(j.activity || []);
+      setFixCount((Number(j.errorCount24h) || 0) + (Number(j.openFixRequests) || 0));
     }).catch(() => setLoadErr(true));
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -106,9 +109,18 @@ export default function AdminCommand() {
     <>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Dashboard</h1>
-        <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now (auto-updates are throttled to save load)">
-          <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {/* Loud red when something needs solving; quiet grey door to the same page otherwise. */}
+          <Link href="/aevinite/repair" className="adm-btn"
+            style={fixCount > 0 ? { background: "var(--adm-danger)", borderColor: "var(--adm-danger)", color: "#fff", fontWeight: 700, boxShadow: "0 0 0 3px color-mix(in srgb, var(--adm-danger) 25%, transparent)" } : undefined}
+            title={fixCount > 0 ? "Errors or reported problems are waiting — open the Repair page" : "Repair page — report a problem or use the repair tools"}>
+            <i className={`fas ${fixCount > 0 ? "fa-triangle-exclamation" : "fa-screwdriver-wrench"}`} style={{ marginRight: 7 }} aria-hidden="true" />
+            {fixCount > 0 ? `Fix problems · ${fixCount}` : "Repair"}
+          </Link>
+          <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now (auto-updates are throttled to save load)">
+            <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
+          </button>
+        </div>
       </div>
       <p className="adm-page-sub">Every restaurant on the platform — open any panel, no password.</p>
 

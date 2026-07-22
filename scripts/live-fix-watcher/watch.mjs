@@ -25,7 +25,10 @@ import os from "node:os";
 
 const BASE = dirname(fileURLToPath(import.meta.url)); // the installed copy's own folder
 const DRY = process.argv.includes("--dry-run");
-const FRESH_MINUTES = 30;
+// Only mode='instant' requests pop (the owner chose "Fix NOW"); 'overnight' ones are the 02:30
+// robot's. 2h window: an instant ask should still pop if the Mac wakes a bit later, but a
+// day-old one goes to the robot instead of surprising the owner.
+const FRESH_MINUTES = 120;
 const SEEN_CAP = 200;
 
 const parseEnv = (t) =>
@@ -54,6 +57,7 @@ const sinceIso = new Date(Date.now() - FRESH_MINUTES * 60 * 1000).toISOString();
 const q = new URLSearchParams({
   select: "id,summary,note,created_at,restaurant_id",
   status: "eq.open",
+  mode: "eq.instant",
   created_at: `gt.${sinceIso}`,
   order: "created_at.desc",
   limit: "5",

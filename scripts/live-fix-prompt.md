@@ -17,14 +17,19 @@ is ambiguous instead of guessing.
    spend time on the wrong thing. Their note may be voice-transcribed — read past typos.
 3. **Investigate honestly.** Reproduce from the context rows + code reading. If you cannot
    reproduce and the request is unclear, ask the owner right there in the terminal.
-4. **Fix it the safe way — the same rules as the night robot** (`scripts/repair-agent-prompt.md`
-   governs; the short version):
+4. **Fix it the safe way** (`scripts/repair-agent-prompt.md` also governs; the short version):
+   - **NEVER blindly change anything (owner 2026-07-22).** If you have ANY doubt about what to
+     change — or what NOT to touch — ask the owner in the terminal first, in plain words. A
+     wrong guess on the live app is worse than a 30-second question. This is the owner's #1 rule
+     for you.
    - Work in an isolated git worktree branched off the LATEST `origin/main` — never edit the
      shared project folder directly (other sessions may be using it).
    - Verify the fix actually runs (type-check + the panel/page in question) before claiming done.
-   - Ship via PR. You MAY merge it yourself only if it is small, safe, and touches NO money/tax
-     math, NO database migration, NO login/permission logic. For those, open the PR, explain it,
-     and ask the owner in the terminal — they're right there.
+   - Ship via PR — and **NOTHING merges to the live app without the owner's explicit YES in this
+     terminal** (owner's 2026-07-22 choice: permission prompts are off, so this plain-language
+     confirm replaces them). Before asking, explain in 2-3 beginner sentences what will change
+     and what could go wrong. This applies to EVERY merge here, however small; money/tax,
+     database-migration, and login/permission changes additionally get a clear warning label.
    - Every query you add follows the egress rules (scoped `restaurant_id`, explicit columns,
      LIMIT). A fix for one restaurant must never change what another restaurant sees.
 5. **Close the loop.** When the fix is merged (or the PR is waiting on the owner), update the
