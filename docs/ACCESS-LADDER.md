@@ -49,10 +49,10 @@ bypass `tabletPerm`/`managerPinGate` always gave the admin.
 - ✅ table_ops (KOT ▾ menu) — admin always sees it (tinted when off), server bypasses
   the module rung for the admin, real logins follow the ladder.
 - ✅ grant-level powers (discounts, void, ratings…) — tinted + usable for higher roles.
-- ⚠️ **table_tags / khata / banquet at MODULE-off currently hide from the admin view
-  too** (whoami zeroes their powers with no admin exception, and the banquet/tags
-  endpoints 403 the admin when the module is off). Grant-level tinting works; the
-  module rung doesn't yet follow this rule — bring them in line on the next touch.
+- ✅ table_tags / khata / banquet (fixed 2026-07-22, same PR as the KOT UI polish):
+  admin view always sees their buttons/entries (tinted when the module or grant is off
+  for real staff) and every module-rung server gate skips the admin super-user
+  (`g.user &&` in the editor API, `actor &&`/`g.user &&` in the tablet API).
 
 ## The defaults rule (apply to EVERY new feature, everywhere)
 
