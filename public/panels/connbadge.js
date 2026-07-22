@@ -64,9 +64,9 @@
       ".lfh-conn:hover{filter:brightness(1.05)}",
       ".lfh-conn:focus-visible{outline:2px solid var(--accent,#6366f1);outline-offset:2px}",
       ".lfh-bars{display:inline-flex;align-items:flex-end;gap:2px;height:12px;flex:0 0 auto}",
-      ".lfh-bars.big{height:20px;gap:3px}",
+      ".lfh-bars.lfh-big{height:20px;gap:3px}",
       ".lfh-bar{width:3px;border-radius:1.5px}",
-      ".lfh-bars.big .lfh-bar{width:4px;border-radius:2px}",
+      ".lfh-bars.lfh-big .lfh-bar{width:4px;border-radius:2px}",
       ".lfh-conn.is-pulse .lfh-bar{animation:lfhBarPulse 1.1s ease-in-out infinite}",
       "@keyframes lfhBarPulse{0%,100%{opacity:1}50%{opacity:.35}}",
       ".lfh-conn-ms{font-variant-numeric:tabular-nums;font-weight:800}",
@@ -93,14 +93,14 @@
       ".lfh-spark-cap span{font-weight:600;text-transform:none;letter-spacing:0;opacity:.85}",
       ".lfh-spark{display:flex;align-items:flex-end;gap:3px;height:32px}",
       ".lfh-spark-bar{flex:1 1 0;min-width:0;border-radius:2px 2px 0 0;opacity:.9}",
-      ".lfh-spark-bar.is-empty{height:14%;background:currentColor;opacity:.1}",
+      ".lfh-spark-bar.lfh-empty{height:14%;background:currentColor;opacity:.1}",
       ".lfh-conn-pop-sync{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line,rgba(127,127,127,.14));padding-top:10px}",
       ".lfh-conn-pop-sub{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;opacity:.6}",
       ".lfh-conn-row{display:flex;align-items:center;gap:8px}",
       ".lfh-conn-row-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}",
       ".lfh-conn-row-t b{font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
       ".lfh-conn-row-t small{font-size:11px;opacity:.7}",
-      ".lfh-conn-row-t small.e{color:#fca5a5;opacity:1}",
+      ".lfh-conn-row-t small.lfh-e{color:#fca5a5;opacity:1}",
       ".lfh-conn-pill{font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:999px;flex:0 0 auto}",
       ".lfh-conn-x{border:0;border-radius:8px;padding:6px 10px;font-size:11.5px;font-weight:700;cursor:pointer;color:#fff;flex:0 0 auto}",
       ".lfh-conn-pop-ok{font-size:11.5px;opacity:.6;border-top:1px solid var(--line,rgba(127,127,127,.14));padding-top:10px}",
@@ -118,7 +118,7 @@
 
   // Three signal bars; `lit` coloured, the rest faint. big = larger (popover).
   function barsHtml(lit, color, big) {
-    var wrap = el("span", "lfh-bars" + (big ? " big" : ""));
+    var wrap = el("span", "lfh-bars" + (big ? " lfh-big" : ""));
     var h = big ? [10, 15, 20] : [6, 9, 12];
     for (var i = 0; i < 3; i++) {
       var b = el("span", "lfh-bar");
@@ -216,7 +216,7 @@
         cap.appendChild(el("span", null, data.length < 4 ? "building history…" : "last " + data.length + " updates"));
         wrap.appendChild(cap);
         var sp = el("span", "lfh-spark");
-        for (var i = 0; i < SPARK_SLOTS - data.length; i++) sp.appendChild(el("span", "lfh-spark-bar is-empty"));
+        for (var i = 0; i < SPARK_SLOTS - data.length; i++) sp.appendChild(el("span", "lfh-spark-bar lfh-empty"));
         data.forEach(function (val) {
           var t = latencyTier(val);
           var bar = el("span", "lfh-spark-bar");
@@ -237,7 +237,7 @@
         var row = el("span", "lfh-conn-row");
         var t = el("span", "lfh-conn-row-t");
         t.appendChild(el("b", null, it.label || "Action"));
-        t.appendChild(el("small", "e", (it.error || "Failed") + " · " + fmtAgo(it.at)));
+        t.appendChild(el("small", "lfh-e", (it.error || "Failed") + " · " + fmtAgo(it.at)));
         row.appendChild(t);
         var retry = el("button", "lfh-conn-x", "Retry"); retry.style.background = "#f59e0b";
         retry.addEventListener("click", function (e) { e.stopPropagation(); if (window.LFH_OUTBOX) window.LFH_OUTBOX.retryFailed(); });
