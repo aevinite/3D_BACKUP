@@ -679,7 +679,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // the KOT ▾ menu: ladder-gated by the admin depth knob + the manager's tri-state
     // (tabletPerm handles off/pin/on + per-waiter overrides + the admin bypass).
     if (a === "sessions" && c === "merge") {
-      if (!(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      // actor null = admin act-as (X-ray rule: the greyed button genuinely works).
+      if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
       const gm = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gm.allow) return gm.resp;
       const to = String((body && body.to) || "").trim();
       if (!/^\d+$/.test(to)) return err("valid target table required");
@@ -706,7 +707,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // order-items/:id/move — move ONE dish line to another table's bill (KOT ▾ menu).
     // Same ladder gate as merge; the RPC (mig 175) reprices both KOTs server-side.
     if (a === "order-items" && c === "move") {
-      if (!(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403); // actor null = admin (X-ray)
       const gi = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gi.allow) return gi.resp;
       const to = String((body && body.to) || "").trim();
       if (!/^\d+$/.test(to)) return err("valid target table required");
@@ -973,7 +974,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Ladder-gated on top of tablet_mark_paid; Σ legs is re-checked server-side.
       const splits = Array.isArray(body?.splits) ? body.splits : null;
       if (splits) {
-        if (!(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+        if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403); // actor null = admin (X-ray)
         const gs = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gs.allow) return gs.resp;
         if (splits.length < 2 || splits.length > 12) return err("Give at least two split shares (max 12).");
         for (const s of splits) {

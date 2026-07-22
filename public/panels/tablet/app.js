@@ -1330,8 +1330,13 @@ function renderPickerShell(titleHtml, bodyHtml, layerId, onBack) {
 // forced 'off' server-side below 'tablet' depth) says on. When off, the two classic
 // buttons render exactly as before — zero regression. Ops arrive in phases.
 function kotOpsOn() {
+  // ADMIN X-RAY rule (owner, 2026-07-22): the admin act-as view always sees the KOT
+  // button — txray() tints it amber when it's off for real waiters — and the server
+  // lets the admin through (tabletPerm bypass + module-check bypass). Real waiters
+  // need the module (server-resolved table_ops_tablet_allowed) AND the tri-state.
+  if (tHigher()) return true;
   const set = state.data.settings || {};
-  return !!set.table_ops_tablet_allowed && tshow("tablet_table_ops");
+  return !!set.table_ops_tablet_allowed && tperm("tablet_table_ops") !== "off";
 }
 function renderKotMenu(t, s) {
   const movable = ordersOf(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled");
