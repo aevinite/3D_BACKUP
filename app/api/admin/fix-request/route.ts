@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   const status = new URL(req.url).searchParams.get("status") || "open";
   if (!["open", "fixed", "dismissed"].includes(status)) return err("invalid status");
   const r = await sb.from("fix_requests")
-    .select("id, restaurant_id, created_at, status, source, summary, note, pr_url, resolved_at")
+    .select("id, restaurant_id, created_at, status, source, mode, summary, note, pr_url, resolved_at")
     .eq("status", status).order("created_at", { ascending: false }).limit(50);
   if (r.error) return err(r.error.message, 500);
   return NextResponse.json({ requests: r.data ?? [] });
@@ -40,6 +40,8 @@ async function postHandler(req: NextRequest) {
   const actionId = typeof body.action_id === "string" && UUID.test(body.action_id) ? body.action_id : null;
   const note = String(body.note || "").trim().slice(0, 1000);
   let rid = typeof body.restaurant_id === "string" && UUID.test(body.restaurant_id) ? body.restaurant_id : null;
+  // Which Claude: 'instant' pops the Mac terminal, 'overnight' waits for the 02:30 robot.
+  const mode = body.mode === "overnight" ? "overnight" : "instant";
 
   let summary = note;
   let source = "owner_described";
@@ -70,7 +72,7 @@ async function postHandler(req: NextRequest) {
   if (!summary) return err("Add a short description of the problem.");
   if (rid && !UUID.test(rid)) rid = null;
 
-  const ins = await sb.from("fix_requests").insert({ restaurant_id: rid, source, summary: summary.slice(0, 300), note: note || null, context }).select("id").maybeSingle();
+  const ins = await sb.from("fix_requests").insert({ restaurant_id: rid, source, mode, summary: summary.slice(0, 300), note: note || null, context }).select("id").maybeSingle();
   if (ins.error) return err(ins.error.message, 500);
   await logAction("admin", "fix_request", { restaurant_id: rid ?? undefined, level: "info", detail: summary.slice(0, 120) });
   return NextResponse.json({ ok: true, id: ins.data?.id ?? null });

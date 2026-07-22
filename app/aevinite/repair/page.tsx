@@ -15,7 +15,7 @@ type Restaurant = { id: string; name: string };
 type Session = { id: string; table_number: string; status: string; bill_no: number | null; invoice_no: number | null; invoice_voided: boolean };
 type Order = { id: string; table_number: string; kot_no: number | null; status: string; payment_status: string; created_at: string; session_id: string | null };
 type RepairData = { sessions: Session[]; orders: Order[] };
-type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; summary: string; pr_url: string | null };
+type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; mode?: string | null; summary: string; pr_url: string | null };
 type AgentRun = { id: string; kind: "live" | "nightly" | "audit"; title: string; status: "running" | "done" | "closed" | "failed"; report: string | null; started_at: string; ended_at: string | null };
 
 type Op = "void_bill" | "delete_order" | "refire_order" | "unstick_table" | "edit_time";
@@ -69,17 +69,22 @@ export default function AdminRepair() {
   useEffect(() => { loadRequests(); }, [loadRequests]);
 
   const uuidLocal = () => (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now());
-  const sendDescribed = async () => {
+  // Two Claudes (owner 2026-07-22): 'instant' pops a terminal on the Mac now; 'overnight'
+  // waits for the 02:30 robot. Both come through here — only the mode differs.
+  const sendDescribed = async (mode: "instant" | "overnight") => {
     if (!note.trim()) { toast("Type what's happening first.", "err"); return; }
     setSending(true);
     const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuidLocal() },
-      body: JSON.stringify({ note: note.trim(), restaurant_id: rid || null }),
+      body: JSON.stringify({ note: note.trim(), restaurant_id: rid || null, mode }),
     });
     setSending(false);
-    if (r.ok) { setNote(""); toast("Sent — a Claude window pops up on the Mac within a minute (or it's handled overnight)."); loadRequests(); }
-    else toast(r.error || "Couldn't send that.", "err");
+    if (r.ok) {
+      setNote("");
+      toast(mode === "instant" ? "Sent — a Claude window opens on the Mac within a minute." : "Queued — the night robot takes it at 2:30 AM.");
+      loadRequests();
+    } else toast(r.error || "Couldn't send that.", "err");
   };
   const dismissRequest = async (id: string) => {
     setRequests((prev) => prev.filter((x) => x.id !== id)); // optimistic
@@ -118,8 +123,13 @@ export default function AdminRepair() {
         <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} rows={3}
           placeholder="e.g. The bill button on table 12 does nothing during rush; happens on the waiter tablet."
           style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13.5, resize: "vertical" }} />
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-          <button className="adm-btn primary" disabled={sending} onClick={sendDescribed}>{sending ? "Sending…" : "Send to Claude"}</button>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          <button className="adm-btn" disabled={sending} onClick={() => sendDescribed("overnight")} title="The night robot fixes it at 2:30 AM and leaves a morning report">
+            <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 7, opacity: 0.8 }} />{sending ? "Sending…" : "Fix overnight"}
+          </button>
+          <button className="adm-btn primary" disabled={sending} onClick={() => sendDescribed("instant")} title="A Claude terminal opens on the office Mac within a minute">
+            <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 7 }} />{sending ? "Sending…" : "Fix NOW on the Mac"}
+          </button>
         </div>
       </div>
 
@@ -130,7 +140,7 @@ export default function AdminRepair() {
           <div style={{ display: "flex", flexDirection: "column" }}>
             {requests.map((q) => (
               <div key={q.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
-                <i className={`fas ${q.source === "error_row" ? "fa-triangle-exclamation" : "fa-comment-dots"}`} aria-hidden="true" style={{ marginTop: 2, opacity: 0.7 }} />
+                <i className={`fas ${q.mode === "overnight" ? "fa-moon" : q.source === "error_row" ? "fa-triangle-exclamation" : "fa-bolt"}`} aria-hidden="true" title={q.mode === "overnight" ? "Waiting for the 2:30 AM robot" : "Instant — pops on the Mac"} style={{ marginTop: 2, opacity: 0.7 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.summary}</div>
                   <div className="adm-muted" style={{ fontSize: 11.5 }}>{new Date(q.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>fix ready →</a></> : ""}</div>

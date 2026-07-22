@@ -22,7 +22,9 @@ export async function GET(req: NextRequest) {
   const onlineSinceIso = new Date(Date.now() - 180_000).toISOString(); // "online" = seen in last 3 min
   const head = { count: "exact" as const, head: true };
 
-  const [restQ, setQ, ownersQ, ordersTodayQ, maintQ, onlineQ, issuesQ, ovRpc, actQ] =
+  const since24hIso = new Date(Date.now() - 24 * 3600_000).toISOString();
+
+  const [restQ, setQ, ownersQ, ordersTodayQ, maintQ, onlineQ, issuesQ, ovRpc, actQ, errQ, fixQ] =
     await Promise.all([
       sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name"),
       sb.from("settings").select("restaurant_id, enabled_panels"),
@@ -38,6 +40,10 @@ export async function GET(req: NextRequest) {
       sb.rpc("lfh_owner_overview", { p_ids: null }),
       // Only the columns the activity feed renders (not select("*")) — trims wire size.
       sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, created_at").order("created_at", { ascending: false }).limit(18),
+      // Two HEAD counts for the red "Fix problems" button (owner 2026-07-22): recent app
+      // errors (partial error index, mig 159) + problems reported but not yet solved.
+      sb.from("staff_actions").select("id", head).eq("level", "error").gte("created_at", since24hIso),
+      sb.from("fix_requests").select("id", head).eq("status", "open"),
     ]);
 
   // Surface a failed read on any number/banner the home screen relies on — otherwise a backend
@@ -108,5 +114,8 @@ export async function GET(req: NextRequest) {
     issues,
     openIssuesCount: issuesQ.count ?? issues.length, // exact open total (list capped at 50)
     activity,
+    // Red "Fix problems" button: soft counts — a failed read shows the quiet button, never a 500.
+    errorCount24h: errQ.count ?? 0,
+    openFixRequests: fixQ.count ?? 0,
   });
 }
