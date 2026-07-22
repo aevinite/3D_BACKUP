@@ -785,7 +785,7 @@ function printKot(order, itemRows, restaurant) {
          the left paper edge — a full-width body loses the right ~8mm of every line.
          The cutter is driven by the QUEUE (CutMedia=EndOfJob, after the end feed). */
       @page{margin:0}
-      @media print{body{margin:0;padding:2mm 6mm 4mm}
+      @media print{body{margin:0 !important;padding:2mm 5mm 4mm !important}
         .kl,.meta,.al{break-inside:avoid;page-break-inside:avoid}}
     </style></head><body>
       <div class="h">${esc(rname)}<br>KITCHEN TICKET</div>
