@@ -1,4 +1,4 @@
-// lib/tabletPermissions.ts — the MANAGER → TABLET rung of the access ladder (mig 163).
+// lib/tabletPermissions.ts — the MANAGER → TABLET rung of the access ladder (mig 167).
 //
 // The 4-rung ladder (owner rule, 2026-07-22): Admin entitles a feature + caps its reach
 // → Owner grants it to the Manager → MANAGER grants it to the tablet/waiters. This file
