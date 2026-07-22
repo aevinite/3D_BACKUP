@@ -11,7 +11,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
-import { OWNER_ENTITLEMENT_KEYS, mergeOwnerEntitlements, MANAGER_POWER_FLAGS } from "@/lib/ownerEntitlements";
+import { OWNER_ENTITLEMENT_KEYS, mergeOwnerEntitlements, MANAGER_POWER_FLAGS, featureDepth, featureDepthKey, type FeatureDepth } from "@/lib/ownerEntitlements";
+import { TABLET_POWER_FLAGS } from "@/lib/tabletPermissions";
 
 export const dynamic = "force-dynamic";
 
@@ -19,10 +20,12 @@ export const dynamic = "force-dynamic";
 // never drift again: edit_settings + view_ratings were missing here, so the admin's grant/revoke
 // of those two silently never persisted (audit 2026-07-09).
 const MANAGER_POWERS = MANAGER_POWER_FLAGS;
-const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false };
+// take_orders defaults OFF (opt-in) — an owner must deliberately grant it, like void_bills.
+const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, take_orders: false };
 // The three tablet billing capabilities (settings.*), tri-state off|on|pin.
 const TABLET_CAPS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice"] as const;
 const isTri = (v: unknown): v is "off" | "on" | "pin" => v === "off" || v === "on" || v === "pin";
+const isDepth = (v: unknown): v is FeatureDepth => v === "owner" || v === "manager" || v === "tablet";
 
 const bad = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
 
@@ -44,7 +47,11 @@ export async function GET(req: NextRequest) {
   const manager = { ...MP_DEFAULT, ...(r?.manager_permissions && typeof r.manager_permissions === "object" ? r.manager_permissions : {}) };
   const tablet: Record<string, string> = {};
   for (const k of TABLET_CAPS) tablet[k] = isTri(s?.[k]) ? (s![k] as string) : "off";
-  return NextResponse.json({ manager, tablet, owner: mergeOwnerEntitlements(r?.owner_entitlements) });
+  // Rung 1b — how far each ladder feature may reach (owner|manager|tablet), for the
+  // features that HAVE a tablet rung. Absent = "tablet" (full reach).
+  const depths: Record<string, FeatureDepth> = {};
+  for (const flag of TABLET_POWER_FLAGS) depths[flag] = featureDepth(r?.owner_entitlements, flag);
+  return NextResponse.json({ manager, tablet, owner: mergeOwnerEntitlements(r?.owner_entitlements), depths });
 }
 
 export async function POST(req: NextRequest) {
@@ -68,8 +75,18 @@ export async function POST(req: NextRequest) {
   // Storing only explicit booleans keeps "absent = on" true for keys added later.
   if (body.owner && typeof body.owner === "object") {
     const cur = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data?.owner_entitlements || {};
-    const next: Record<string, boolean> = { ...(typeof cur === "object" ? cur : {}) };
+    const next: Record<string, unknown> = { ...(typeof cur === "object" ? cur : {}) };
     for (const k of OWNER_ENTITLEMENT_KEYS) if (k in (body.owner as object)) next[k] = (body.owner as Record<string, unknown>)[k] === true;
+    // Rung 1b — the admin's max-reach per feature, stored as a STRING under depth_<flag>
+    // (owner|manager|tablet) in the same bag. Only accepted for features with a tablet rung.
+    for (const flag of TABLET_POWER_FLAGS) {
+      const dk = featureDepthKey(flag);
+      if (dk in (body.owner as object)) {
+        const dv = (body.owner as Record<string, unknown>)[dk];
+        if (!isDepth(dv)) return bad(`"${dk}" must be owner, manager or tablet.`);
+        next[dk] = dv;
+      }
+    }
     const up = await sb.from("restaurants").update({ owner_entitlements: next }).eq("id", rid);
     if (up.error) return bad(up.error.message, 500);
   }

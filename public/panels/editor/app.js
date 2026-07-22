@@ -1240,6 +1240,26 @@ function accessUsersCardHtml(s) {
   </div>`;
 }
 
+// ── MANAGER → TABLET rung (2026-07-22): the manager switches order-taking on/off for
+// their waiters' tablet. Only shown when the admin has ENTITLED order-taking AND capped
+// its reach at the tablet (whoami.tabletGrantable.take_orders). A higher role (admin/
+// owner looking in) sees it disabled + noted when not grantable, for visibility.
+function waiterOrderTakingCardHtml() {
+  const who = XRAY_WHO || {};
+  const grantable = !!(who.tabletGrantable && who.tabletGrantable.take_orders);
+  if (!grantable && !who.higherView) return "";
+  const on = !!(who.tabletPermissions && who.tabletPermissions.take_orders);
+  return `<div class="card"><h3>Waiter order-taking</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
+      Let your waiters start new orders from their tablet (the ＋ Take order button). Turn
+      it off and waiters can still run tables, but only a manager takes new orders.
+      ${grantable ? "" : `<br><b style="color:var(--gold-strong)">Not available:</b> the admin hasn't extended order-taking to the waiter tablet for this restaurant.`}
+    </p>
+    <label class="toggle" style="${grantable ? "" : "opacity:.6"}"><input type="checkbox" id="waiterTakeOrders" ${on ? "checked" : ""} ${grantable ? "" : "disabled"}/>
+      <span>Waiters can take orders on the tablet</span></label>
+  </div>`;
+}
+
 // formGeneral: the site-wide Settings form, now split into SECTIONS (see
 // SETTINGS_SECTIONS). Every card is unchanged in behaviour — the split is purely
 // organizational; data-path bindings and Save work exactly as before.
@@ -1276,7 +1296,7 @@ function formGeneral(s) {
     return userSettingCardHtml();
   }
   if (sec === "access") {
-    return accessDefaultsCardHtml(s) + accessUsersCardHtml(s);
+    return waiterOrderTakingCardHtml() + accessDefaultsCardHtml(s) + accessUsersCardHtml(s);
   }
   if (sec === "billing") {
     // TWO stacked sections (owner, 2026-07-05 — "manager bill and printable bill, up/down,
@@ -3552,6 +3572,17 @@ function bindEditor() {
       renderEditor(); // refresh the "· custom" marker + Default(...) labels
     } catch (e) { toast("Failed: " + e.message, "err"); renderEditor(); }
   }));
+  // Manager → tablet: grant/revoke order-taking for waiters (POST /tablet-permissions;
+  // the server re-checks the admin entitlement + reach). Optimistic; reverts on failure.
+  const wto = ed.querySelector("#waiterTakeOrders");
+  if (wto) wto.onchange = async () => {
+    const value = wto.checked;
+    try {
+      const d = await api("POST", "/tablet-permissions", { permissions: { take_orders: value } });
+      if (XRAY_WHO) XRAY_WHO.tabletPermissions = d.tablet_permissions || XRAY_WHO.tabletPermissions;
+      toast(`Waiter order-taking ${value ? "on" : "off"}`, "ok");
+    } catch (e) { wto.checked = !value; toast("Failed: " + e.message, "err"); }
+  };
   const usrAdd = $("#usrAddStaff");
   if (usrAdd) usrAdd.onclick = async () => {
     const name = ($("#usrNewName")?.value || "").trim();
@@ -5853,7 +5884,11 @@ function tablePanelParts(t) {
             : `<button class="btn tp-free" disabled>Settle bill to free</button>`);
   // ONE sticky action bar holds every table-wide action: the primary action + pay +
   // discount on the LEFT, then table-management (shift/print/restart/close) on the RIGHT.
-  const foot = `${primaryBtn}${payAllBtn}${discBtn}${splitBtn}<span class="tp-foot-spacer"></span>${sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : ""}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
+  // ＋ Take order — start a brand-new order for this table, like the waiter tablet.
+  // Gated by the take_orders power: XRAY_CONTROLS hides it for a manager without the
+  // power (and tints it for an admin/owner looking in); the server re-checks too.
+  const takeOrderBtn = `<button class="btn primary tp-take-order" data-take-order="${esc(t)}">＋ Take order</button>`;
+  const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${splitBtn}<span class="tp-foot-spacer"></span>${sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : ""}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
 
   return { sess, os, canFree, headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot };
 }
@@ -5887,6 +5922,132 @@ function openAddDishModal(orderId, rerender) {
   search.oninput = () => { listEl.innerHTML = rowsFor(search.value); bind(); };
   wrap.querySelector(".tbl-modal-close").onclick = () => wrap.remove();
   wrap.onclick = (e) => { if (e.target === wrap) wrap.remove(); };
+  search.focus();
+}
+
+// ── TAKE ORDER — start a BRAND-NEW dine-in order from the manager panel ─────────
+// Mirrors the waiter tablet's order-builder (open table → browse dishes → build a
+// cart → send to kitchen) but rendered with the editor's own components/styling and
+// posting to the manager's server-priced POST /order. Gated by the take_orders power:
+// the button that opens this only shows when the manager has it (see XRAY_CONTROLS)
+// and the server re-checks managerCan("take_orders") regardless. (2026-07-22)
+function localizeCat(name, slug) {
+  if (name && typeof name === "object") return name.en || Object.values(name).find((v) => v) || slug;
+  return name || slug;
+}
+function openTakeOrder(table, rerender) {
+  document.querySelector(".to-overlay")?.remove();
+  const dishes = (state.data.items || []).filter((d) => !(d.tags || []).includes("sold-out"));
+  const cats = (state.data.categories || []).filter((c) => dishes.some((d) => d.category === c.slug));
+  // Builder state (local to this modal — a background floor poll can redraw the detail
+  // underneath without ever touching what's being built here).
+  const cart = [];               // [{ id, title, price, qty, note }]
+  const avoid = new Set();        // whole-order allergens to avoid (ALLERGEN slugs)
+  let note = "";                  // one kitchen note for the whole order
+  let cat = "";                   // active category filter ("" = all)
+  let q = "";                     // dish search text
+
+  const qtyIn = (id) => { const l = cart.find((c) => c.id === id); return l ? l.qty : 0; };
+  const addOne = (id) => { const l = cart.find((c) => c.id === id); if (l) l.qty = Math.min(99, l.qty + 1); else { const d = dishes.find((x) => x.id === id); if (d) cart.push({ id, title: d.title, price: parseFloat(d.price) || 0, qty: 1, note: "" }); } };
+  const removeOne = (id) => { const i = cart.findIndex((c) => c.id === id); if (i < 0) return; if (cart[i].qty > 1) cart[i].qty--; else cart.splice(i, 1); };
+
+  const dishTiles = () => {
+    const ql = q.trim().toLowerCase();
+    const list = dishes.filter((d) => (!cat || d.category === cat) && (!ql || (d.title || "").toLowerCase().includes(ql)));
+    if (!list.length) return `<div class="muted" style="padding:16px">No dishes match.</div>`;
+    return list.map((d) => {
+      const n = qtyIn(d.id);
+      return `<button class="to-dish ${n ? "has" : ""}" data-add="${esc(d.id)}">${n ? `<span class="to-badge">×${n}</span>` : ""}<span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></button>`;
+    }).join("");
+  };
+  const catChips = () => `<button class="to-cat ${cat ? "" : "on"}" data-cat="">All</button>` +
+    cats.map((c) => `<button class="to-cat ${cat === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc(localizeCat(c.name, c.slug))}</button>`).join("");
+  const algChips = () => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${avoid.has(a.slug) ? "on" : ""}" data-alg="${a.slug}">${esc(a.label)}</span>`).join("");
+  const cartLines = () => cart.length
+    ? cart.map((c) => `<div class="to-line"><span class="to-line-t">${esc(c.title)}</span><span class="to-qty"><button class="to-q" data-dec="${esc(c.id)}" aria-label="Less">−</button><b>${c.qty}</b><button class="to-q" data-inc="${esc(c.id)}" aria-label="More">＋</button></span><span class="to-line-p">${inr((parseFloat(c.price) || 0) * c.qty)}</span><button class="to-rm" data-rm="${esc(c.id)}" aria-label="Remove">🗑</button></div>`).join("")
+    : `<div class="muted" style="padding:14px 4px">No dishes yet — tap dishes on the left to add them.</div>`;
+  const estTotal = () => inr(cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0));
+
+  const wrap = el(`<div class="sx-modal-overlay to-overlay"><div class="sx-modal to-modal">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>＋ Take order · Table ${esc(table)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="to-body">
+      <div class="to-menu">
+        <input type="search" class="to-search" placeholder="🔎 Search dishes…">
+        <div class="to-cats">${catChips()}</div>
+        <div class="to-list">${dishTiles()}</div>
+      </div>
+      <div class="to-cart">
+        <div class="to-cart-h">This order</div>
+        <div class="to-lines">${cartLines()}</div>
+        <div class="to-extras">
+          <div class="to-lbl">⚠ Avoid (whole order)</div>
+          <div class="to-alg">${algChips()}</div>
+          <textarea class="to-note" rows="2" placeholder="Note for the kitchen (optional)"></textarea>
+        </div>
+        <div class="to-foot">
+          <div class="to-total">≈ <b>${estTotal()}</b></div>
+          <button class="btn primary to-send" ${cart.length ? "" : "disabled"}>Send to kitchen</button>
+        </div>
+      </div>
+    </div>
+  </div></div>`);
+  document.body.appendChild(wrap);
+
+  const close = () => wrap.remove();
+  // Back/Esc closes THIS modal cleanly (wireOverlayBack prefers __lfhClose over remove()).
+  wrap.__lfhClose = close;
+
+  const listEl = wrap.querySelector(".to-list");
+  const linesEl = wrap.querySelector(".to-lines");
+  const catsEl = wrap.querySelector(".to-cats");
+  const totalEl = wrap.querySelector(".to-total b");
+  const sendBtn = wrap.querySelector(".to-send");
+
+  const paintCart = () => { linesEl.innerHTML = cartLines(); bindCart(); totalEl.textContent = estTotal(); sendBtn.disabled = !cart.length; };
+  const paintList = () => { listEl.innerHTML = dishTiles(); bindList(); };
+  const paintCats = () => { catsEl.innerHTML = catChips(); catsEl.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => { cat = b.dataset.cat; paintCats(); paintList(); })); };
+
+  function bindList() { listEl.querySelectorAll("[data-add]").forEach((b) => (b.onclick = () => { addOne(b.dataset.add); paintList(); paintCart(); })); }
+  function bindCart() {
+    linesEl.querySelectorAll("[data-inc]").forEach((b) => (b.onclick = () => { addOne(b.dataset.inc); paintList(); paintCart(); }));
+    linesEl.querySelectorAll("[data-dec]").forEach((b) => (b.onclick = () => { removeOne(b.dataset.dec); paintList(); paintCart(); }));
+    linesEl.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { const i = cart.findIndex((c) => c.id === b.dataset.rm); if (i >= 0) cart.splice(i, 1); paintList(); paintCart(); }));
+  }
+  bindList(); bindCart(); paintCats();
+
+  const search = wrap.querySelector(".to-search");
+  search.oninput = () => { q = search.value; paintList(); };
+  wrap.querySelector(".to-note").oninput = (e) => { note = e.target.value; };
+  wrap.querySelectorAll(".to-alg-chip").forEach((chip) => (chip.onclick = () => {
+    const s = chip.dataset.alg; if (avoid.has(s)) avoid.delete(s); else avoid.add(s);
+    chip.classList.toggle("on", avoid.has(s));
+  }));
+  wrap.querySelector(".tbl-modal-close").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+
+  async function send(confirmDuplicate = false) {
+    if (!cart.length) { toast("Add at least one dish first", "err"); return; }
+    if (!confirmDuplicate && !(await confirmDialog(`Send this order for Table ${table} to the kitchen?`, "Yes, send it"))) return;
+    const items = cart.map((c) => ({ id: c.id, qty: c.qty, note: c.note || undefined }));
+    const allergies = [...avoid];
+    sendBtn.disabled = true;
+    try {
+      const r = await api("POST", "/order", { table: String(table), items, allergies, note: note || null, ...(confirmDuplicate ? { confirmDuplicate: true } : {}) });
+      // Offline: the outbox saved it on this device and will replay on reconnect.
+      if (r && r.queued) { toast("Saved ✓ — it'll send to the kitchen when you're back online.", "ok"); close(); await loadSessions(); if (rerender) rerender(); return; }
+      toast(r && r.kot_no != null ? `Sent! Kitchen ticket #${r.kot_no}` : "Order sent to the kitchen", "ok");
+      close(); await loadSessions(); if (rerender) rerender();
+    } catch (e) {
+      sendBtn.disabled = !cart.length ? true : false;
+      // Overridable double-tap guard (two guests can legitimately order the same thing).
+      if (e && e.status === 409 && e.data && e.data.duplicateWarning) {
+        if (await confirmDialog("This looks identical to an order you just sent. Send it anyway?", "Send anyway")) return send(true);
+        return;
+      }
+      toast("Couldn't send: " + e.message, "err");
+    }
+  }
+  sendBtn.onclick = () => send(false);
   search.focus();
 }
 
@@ -6128,6 +6289,8 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   }));
   // Add a dish to THIS order: a compact dish-picker modal → /orders/:id/add-item.
   root.querySelectorAll("[data-add-dish-order]").forEach((b) => (b.onclick = () => openAddDishModal(b.dataset.addDishOrder, rerender)));
+  // ＋ Take order: open the full order-builder for a brand-new order on this table.
+  root.querySelectorAll("[data-take-order]").forEach((b) => (b.onclick = () => openTakeOrder(b.dataset.takeOrder, rerender)));
   // Per-bill discount: opens the "they pay / percent off" modal (openDiscountModal).
   // The discount is stored on ONE order but billMath applies it to the WHOLE table's
   // bill, so the modal must show + cap on the TABLE total (billMath(os)), not the one
@@ -7441,6 +7604,7 @@ const XRAY_TABS = [
 // never resurrect a hidden button. Same rule as tabs: hidden for the real manager,
 // tinted for a higher role. The server enforces each flag regardless (managerCan).
 const XRAY_CONTROLS = [
+  { selector: "[data-take-order]", flag: "take_orders", label: "Take orders" },
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
   { selector: '.list-item[data-settings-section="users"]', flag: "manage_staff", label: "User settings" },

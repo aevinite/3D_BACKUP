@@ -779,14 +779,14 @@ function renderPanel() {
         <div class="sec"><h3>Orders</h3>${pills}${load}</div>
       </div>
       <div class="dacts">
-        <button class="btn primary big" id="takeOrder">＋ Take order</button>
+        ${tshow("tablet_take_orders") ? `<button class="btn primary big${txray("tablet_take_orders")}" id="takeOrder">＋ Take order</button>` : ""}
       </div>
       ${billBox}
      </div>`;
     { const dc = $("#detailClose"); if (dc) dc.onclick = () => { state.table = null; renderPanel(); renderFloor(); }; }
     // #10: tap the dimmed area around the card to close, like every other tablet popup.
     p.onclick = (e) => { if (e.target === p) { state.table = null; renderPanel(); renderFloor(); } };
-    $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
+    { const tob = $("#takeOrder"); if (tob) tob.onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); }; }
     restoreScroll();   // #U2: keep the popup scroll across a live-update rebuild (same table)
     return;
   }
@@ -931,7 +931,7 @@ function renderPanel() {
     </div>
     <div class="dacts">
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
-      <button class="btn primary big" id="takeOrder">＋ Take order</button>
+      ${tshow("tablet_take_orders") ? `<button class="btn primary big${txray("tablet_take_orders")}" id="takeOrder">＋ Take order</button>` : ""}
       ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
       ${s && os.length ? `<button class="btn" id="moveOrderBtn">⇄ Move an order</button>` : ""}
       ${s && os.length ? `<button class="btn" id="restartTable">↻ Restart</button>` : ""}
@@ -1073,7 +1073,7 @@ function renderPanel() {
       toast("Failed: " + e.message, false);
     }
   };
-  $("#takeOrder").onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); };
+  { const tob = $("#takeOrder"); if (tob) tob.onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); }; }
   restoreScroll();   // #U2: keep the popup scroll across a live-update rebuild (same table)
 }
 
@@ -2497,6 +2497,7 @@ load().catch((e) => toast("Can't reach the database: " + e.message, false));
 // waiters (the tinted ones). body is a flex column, so the ribbon simply takes the
 // top row — no viewport math needed. Server still enforces everything (tabletPerm).
 const XRAY_CAPS = [
+  { key: "tablet_take_orders", label: "Take orders" },
   { key: "tablet_discount", label: "Apply discount" },
   { key: "tablet_mark_paid", label: "Mark bill paid" },
   { key: "tablet_invoice", label: "Generate invoice" },

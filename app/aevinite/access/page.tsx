@@ -21,6 +21,10 @@ const MANAGER_POWERS: [string, string][] = [
   // Keep in sync with MANAGER_POWER_FLAGS in lib/ownerEntitlements.ts — these two were
   // missing, so the admin couldn't gate them at all (audit 2026-07-08).
   ["edit_settings", "Edit settings"], ["view_ratings", "See & handle ratings"],
+  // Take a brand-new dine-in order from the manager panel, like the waiter tablet
+  // (2026-07-22). Defaults "exists" OFF (ENTITLEMENT_DEFAULT_OFF) — the owner can't see
+  // or grant it until you turn "exists" on here for this restaurant.
+  ["take_orders", "Take orders"],
 ];
 // Owner-panel SECTIONS the admin can remove per restaurant (mig 133). Off = the
 // section disappears from the real owner's panel (admin act-as still sees it, tinted).
@@ -33,6 +37,10 @@ const OWNER_SECTIONS: [string, string][] = [
 ];
 const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"]];
 const TRI: [string, string][] = [["off", "Off"], ["on", "On"], ["pin", "On · PIN"]];
+// Powers that have a tablet rung → the admin also picks how FAR the feature may reach
+// (rung 1b). Keep in sync with TABLET_POWER_FLAGS in lib/tabletPermissions.ts.
+const REACH_FLAGS = new Set<string>(["take_orders"]);
+const REACH: [string, string][] = [["owner", "Owner only"], ["manager", "+ Manager"], ["tablet", "+ Waiter tablet"]];
 
 // Small pure UI atoms — hoisted to module scope (defining them inside the page
 // body recreated them every render; the react-hooks/static-components lint
@@ -78,6 +86,7 @@ export default function AccessPage() {
   const [manager, setManager] = useState<Record<string, boolean>>({});
   const [owner, setOwner] = useState<Record<string, boolean>>({});
   const [tablet, setTablet] = useState<Record<string, string>>({});
+  const [depths, setDepths] = useState<Record<string, string>>({});
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -128,6 +137,7 @@ export default function AccessPage() {
       setManager(a.manager || {});
       setOwner(a.owner || {});
       setTablet(a.tablet || {});
+      setDepths(a.depths || {});
       setStaff((s.staff || []).filter((u: Staff) => u.restaurant_id === id && u.role !== "owner"));
     } catch { setLoadErr(true); }
     finally { setLoading(false); }
@@ -165,6 +175,12 @@ export default function AccessPage() {
   const saveOwner = async (key: string, value: boolean) => {
     setOwner((x) => ({ ...x, [key]: value }));
     const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, owner: { [key]: value } }) });
+    if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
+  };
+  // Reach (rung 1b) is stored as depth_<flag> in owner_entitlements → reuse the owner saver's route.
+  const saveDepth = async (flag: string, value: string) => {
+    setDepths((x) => ({ ...x, [flag]: value }));
+    const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, owner: { [`depth_${flag}`]: value } }) });
     if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
   };
   const saveTablet = async (key: string, value: string) => {
@@ -216,10 +232,19 @@ export default function AccessPage() {
               const exists = owner[`power_${k}`] !== false;
               return (
                 <Row key={k} label={l}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ac-muted,#857655)" }}>
                       exists <Toggle on={exists} onChange={(v) => saveOwner(`power_${k}`, v)} />
                     </label>
+                    {REACH_FLAGS.has(k) && (
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ac-muted,#857655)", opacity: exists ? 1 : 0.45 }}
+                        title="How far this feature may reach: owner only, down to the manager, or all the way to the waiter tablet">
+                        reach <select value={depths[k] || "tablet"} disabled={!exists} onChange={(e) => saveDepth(k, e.target.value)}
+                          style={{ padding: "7px 9px", borderRadius: 8, border: "1px solid var(--ac-line,#d8cdb8)", background: "var(--ac-card,#fff)", color: "inherit", fontSize: 12.5, cursor: "pointer" }}>
+                          {REACH.map(([v, lab]) => <option key={v} value={v}>{lab}</option>)}
+                        </select>
+                      </label>
+                    )}
                     <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ac-muted,#857655)", opacity: exists ? 1 : 0.45 }}
                       title={exists ? "What the owner granted their managers" : "Removed by admin — the owner can't see or grant this power"}>
                       granted <Toggle on={manager[k] === true} onChange={(v) => saveManager(k, v)} />
@@ -229,7 +254,7 @@ export default function AccessPage() {
               );
             })}
           </Card>
-          <Card id="ac-tablet" title="Tablet (waiter) billing" hint="What the waiter tablet may do to a bill. 'On · PIN' requires a manager PIN each time.">
+          <Card id="ac-tablet" title="Tablet (waiter) billing" hint="What the waiter tablet may do to a bill. 'On · PIN' requires a manager PIN each time. (Order-taking is controlled by the ladder above — set its Reach to 'Waiter tablet'.)">
             {TABLET_CAPS.map(([k, l]) => <Row key={k} label={l}><Tri val={tablet[k] || "off"} onChange={(v) => saveTablet(k, v)} /></Row>)}
           </Card>
           <Card title="Guest menu features" hint="Which features guests see on this restaurant's menu.">

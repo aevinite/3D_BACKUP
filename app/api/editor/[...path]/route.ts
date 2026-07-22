@@ -23,7 +23,8 @@ import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
+import { MANAGER_POWER_FLAGS, powerEntitled, featureDepth, depthAllows } from "@/lib/ownerEntitlements";
+import { TABLET_POWER_FLAGS, mergeTabletPermissions } from "@/lib/tabletPermissions";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -56,7 +57,10 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   if (!u || u.role === "owner") return true;
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-  if (r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
+  // The ladder for a MANAGER: admin must (1) entitle the feature AND (2) let its reach
+  // extend to the manager level, AND (3) the owner must have granted it.
+  if (!powerEntitled(r?.owner_entitlements, flag)) return false;
+  if (!depthAllows(featureDepth(r?.owner_entitlements, flag), "manager")) return false;
   return !!r?.manager_permissions?.[flag];
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
@@ -163,18 +167,26 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // server still enforces every capability (managerCan) regardless of what the UI shows.
     if (p === "whoami") {
       const actor = g.user ? g.user.role : "admin"; // no staff user cookie = admin super-user
-      const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
-        { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-      // The ladder, resolved per power (mig 133): effective = admin entitles it AND the
+      const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, tablet_permissions").eq("id", rid).maybeSingle()).data as
+        { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean>; tablet_permissions?: Record<string, boolean> } | null;
+      // The ladder, resolved per power (mig 133 + depth, 2026-07-22): a manager's
+      // effective power = admin entitles it AND the reach extends to the manager AND the
       // owner granted it. The X-ray tints on !effective and can say WHO turned it off.
       const perms = r?.manager_permissions || {};
       const ents = r?.owner_entitlements || {};
       const effectivePowers: Record<string, boolean> = {};
       const offByAdmin: Record<string, boolean> = {};
+      // What the manager may GRANT to the tablet: only when the admin entitles the
+      // feature AND caps its reach at the tablet. Drives the "Waiter permissions" card.
+      const tabletGrantable: Record<string, boolean> = {};
       for (const flag of MANAGER_POWER_FLAGS) {
-        const entitled = ents[powerEntitlementKey(flag)] !== false;
-        effectivePowers[flag] = entitled && perms[flag] === true;
-        offByAdmin[flag] = !entitled;
+        const entitled = powerEntitled(ents, flag);
+        const toManager = depthAllows(featureDepth(ents, flag), "manager");
+        effectivePowers[flag] = entitled && toManager && perms[flag] === true;
+        offByAdmin[flag] = !entitled || !toManager;
+      }
+      for (const flag of TABLET_POWER_FLAGS) {
+        tabletGrantable[flag] = powerEntitled(ents, flag) && depthAllows(featureDepth(ents, flag), "tablet");
       }
       return ok({
         actor,
@@ -185,6 +197,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         managerPermissions: perms,
         effectivePowers,
         offByAdmin,
+        // manager→tablet rung: which caps the manager may grant + what's currently granted.
+        tabletGrantable,
+        tabletPermissions: mergeTabletPermissions(r?.tablet_permissions),
       });
     }
 
@@ -906,6 +921,89 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         });
       } catch (e) { return err(e instanceof Error ? e.message : "Couldn't raise the issue.", 400); }
       return ok({ ok: true });
+    }
+
+    // ── order — take a BRAND-NEW dine-in order from the manager panel ───────────
+    // Same behaviour as the waiter tablet's POST /order (server-priced via
+    // lfh_staff_place_order — never trusts client prices), so the manager can run a
+    // table the same way a waiter does. Gated by the take_orders power (admin must
+    // entitle it AND the owner must grant it; 2026-07-22). Wrapped by withIdempotency
+    // like every editor write, so a replayed offline action places at most once.
+    if (a === "order" && path.length === 1) {
+      if (!(await managerCan(g, rid, "take_orders"))) return permDenied("take new orders");
+      const { table, items, allergies, note } = body || {};
+      const t = String(table || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      // Reject a table that doesn't exist (1..table_count) — a typo would otherwise float
+      // a phantom order on a non-existent table (mirrors the tablet guard).
+      const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
+      const tn = Number(t);
+      if (tableCount > 0 && (tn < 1 || tn > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
+      if (!Array.isArray(items) || !items.length) return err("items required");
+      // Overridable double-tap guard: refuse an IDENTICAL order for the same table within
+      // 3s unless confirmDuplicate:true (two guests ordering the same drink is legitimate).
+      // Signature folds id/qty/options/removed + order-level allergies, matching the tablet.
+      const optSig = (opts: any) => (Array.isArray(opts) && opts.length)
+        ? opts.map((o: any) => ({ group: o?.group ?? null, label: o?.label ?? null })) : null;
+      const remSig = (r: any) => (Array.isArray(r) ? r.map((x: any) => String(x).toLowerCase()).sort() : []);
+      const lineSig = (i: any) => ({ id: i.id, qty: Number(i.qty) || 1, options: optSig(i.options), removed: remSig(i.removed) });
+      const sig = JSON.stringify({ items: items.map(lineSig), allergies: Array.isArray(allergies) ? allergies : [] });
+      if (!(body && body.confirmDuplicate === true)) {
+        const recent = (await sb.from("orders").select("items, allergies")
+          .eq("table_number", t).eq("restaurant_id", rid).gte("created_at", new Date(Date.now() - 3000).toISOString()).limit(5)).data || [];
+        if (recent.some((o: any) => JSON.stringify({
+          items: (o.items || []).map(lineSig),
+          allergies: Array.isArray(o.allergies) ? o.allergies : [],
+        }) === sig)) {
+          return NextResponse.json({ error: "This looks identical to an order you just sent.", duplicateWarning: true }, { status: 409 });
+        }
+      }
+      const { data, error } = await sb.rpc("lfh_staff_place_order", {
+        p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
+        p_restaurant_id: rid,
+      });
+      if (error) throw new Error(error.message);
+      // A manager placed this on the panel, so it's already confirmed — skip the kitchen
+      // "accept" step and push it straight onto the pass as "preparing" (same as the
+      // tablet; guest/head orders still arrive as "received" and need accepting).
+      const placedId = (data as any)?.order_id;
+      if (placedId) {
+        const cur = (await sb.from("orders").select("items").eq("id", placedId).eq("restaurant_id", rid).single()).data as { items?: any[] } | null;
+        const its = Array.isArray(cur?.items) ? cur!.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
+        await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", placedId).eq("restaurant_id", rid);
+        await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("restaurant_id", rid).eq("status", "received");
+      }
+      await log("editor", "order_place", { restaurant_id: rid, table_number: t, device_id: dev });
+      return ok(data);
+    }
+
+    // ── tablet-permissions — the MANAGER → TABLET rung (2026-07-22) ─────────────
+    // The manager switches a capability on/off for their waiters' tablet. Server-gated
+    // by the two rungs above: the admin must ENTITLE the feature AND let its reach
+    // extend to the tablet. Body: { permissions: { take_orders?: boolean } }.
+    if (a === "tablet-permissions" && path.length === 1) {
+      const incoming = (body && typeof body.permissions === "object" && body.permissions) ? body.permissions as Record<string, unknown> : {};
+      const row = (await sb.from("restaurants").select("owner_entitlements, tablet_permissions").eq("id", rid).maybeSingle()).data as
+        { owner_entitlements?: Record<string, boolean>; tablet_permissions?: Record<string, boolean> } | null;
+      const ents = row?.owner_entitlements;
+      const patch: Record<string, boolean> = {};
+      for (const flag of TABLET_POWER_FLAGS) {
+        if (!(flag in incoming)) continue;
+        if (typeof incoming[flag] !== "boolean") return err(`"${flag}" must be true or false.`);
+        // Refuse a grant the admin hasn't allowed down to the tablet — the toggle is
+        // hidden in that case, so a request naming it is hand-crafted.
+        if (!(powerEntitled(ents, flag) && depthAllows(featureDepth(ents, flag), "tablet"))) {
+          return err(`"${flag}" can't be given to the tablet for this restaurant.`, 403);
+        }
+        patch[flag] = incoming[flag] as boolean;
+      }
+      if (!Object.keys(patch).length) return err("No valid tablet permissions given.");
+      const merged = { ...(row?.tablet_permissions && typeof row.tablet_permissions === "object" ? row.tablet_permissions : {}), ...patch };
+      const up = await sb.from("restaurants").update({ tablet_permissions: merged }).eq("id", rid);
+      if (up.error) throw new Error(up.error.message);
+      await log("editor", "tablet_permissions", { restaurant_id: rid, detail: Object.entries(patch).map(([k, v]) => `${k}=${v ? "on" : "off"}`).join(", "), device_id: dev });
+      return ok({ ok: true, tablet_permissions: merged });
     }
 
     // ── Handle a guest rating (mig 140) — mark handled / add an internal note ──

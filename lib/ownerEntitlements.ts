@@ -22,8 +22,42 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 // manager's effective power is off no matter what the owner granted before.
 //  · edit_settings  — enforced in the editor (mig, route:1203) but had no owner toggle.
 //  · view_ratings   — see + handle guest ratings in the manager panel (mig 138).
-export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings"] as const;
+//  · take_orders    — take a brand-new dine-in order from the manager panel, exactly
+//    like the waiter tablet does (2026-07-22). Part of the full 4-rung ladder (see
+//    below): the FEATURE is entitled by default (taking orders is the tablet's existing
+//    core function — turning the entitlement off would stop every live tablet), but the
+//    owner→manager GRANT (manager_permissions.take_orders) defaults OFF, so a manager
+//    only gets it when the owner deliberately hands it over.
+export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "take_orders"] as const;
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
+
+// The authoritative "is this feature available for this restaurant AT ALL?" check
+// (rung 1a of the ladder), reading a RAW owner_entitlements JSONB value. Absent = ON,
+// so no existing restaurant changes when a new flag is added. The admin turns this OFF
+// to remove the feature from a restaurant entirely (hides every rung below).
+export function powerEntitled(rawEntitlements: unknown, flag: string): boolean {
+  const key = powerEntitlementKey(flag);
+  const v = rawEntitlements && typeof rawEntitlements === "object" ? (rawEntitlements as Record<string, unknown>)[key] : undefined;
+  return typeof v === "boolean" ? v : true;
+}
+
+// ── Rung 1b: admin MAX-DEPTH / reach (owner rule, 2026-07-22) ──────────────────
+// Per feature the admin caps HOW FAR the ladder may reach: owner-only, owner+manager,
+// or owner+manager+tablet. Stored as a STRING under "depth_<flag>" in the SAME
+// owner_entitlements JSONB (the boolean merge ignores it; dedicated helpers below read
+// it). Absent = "tablet" (full reach) so nothing is silently narrowed for existing
+// restaurants — the admin deliberately restricts it.
+export type FeatureDepth = "owner" | "manager" | "tablet";
+export const DEPTH_ORDER: FeatureDepth[] = ["owner", "manager", "tablet"];
+export const featureDepthKey = (flag: string) => `depth_${flag}`;
+export function featureDepth(rawEntitlements: unknown, flag: string): FeatureDepth {
+  const v = rawEntitlements && typeof rawEntitlements === "object" ? (rawEntitlements as Record<string, unknown>)[featureDepthKey(flag)] : undefined;
+  return v === "owner" || v === "manager" || v === "tablet" ? v : "tablet";
+}
+// Does the admin's chosen reach for this feature extend down to `level`?
+export function depthAllows(depth: FeatureDepth, level: FeatureDepth): boolean {
+  return DEPTH_ORDER.indexOf(depth) >= DEPTH_ORDER.indexOf(level);
+}
 
 export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [
   ...OWNER_SECTION_KEYS,
@@ -32,7 +66,8 @@ export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [
 
 export type OwnerEntitlements = Record<string, boolean>;
 
-// Merge a raw JSONB value over the all-on defaults (absent/non-boolean = ON).
+// Merge a raw JSONB value over the all-on defaults (absent/non-boolean = ON). Only the
+// BOOLEAN entitlement keys — the depth_<flag> strings are read separately (featureDepth).
 export function mergeOwnerEntitlements(raw: unknown): OwnerEntitlements {
   const out: OwnerEntitlements = {};
   for (const k of OWNER_ENTITLEMENT_KEYS) out[k] = true;

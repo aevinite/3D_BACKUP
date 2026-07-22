@@ -12,7 +12,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
-import { mergeOwnerEntitlements, powerEntitlementKey } from "@/lib/ownerEntitlements";
+import { mergeOwnerEntitlements, powerEntitlementKey, featureDepth, depthAllows } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 // enforced by the editor route (managerCan(…, "edit_settings")) but had no toggle here,
 // so it was permanently off — added so the owner can actually grant it. New powers just
 // append to this whitelist (the owner page maps over it — no fixed count anywhere).
-const FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings"] as const;
+const FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "take_orders"] as const;
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 
@@ -66,8 +66,12 @@ export async function PATCH(req: NextRequest) {
   // means the act-as owner view — keep it able to flip only what the owner could.
   const ents = mergeOwnerEntitlements(cur.owner_entitlements);
   for (const k of Object.keys(patch)) {
-    if (patch[k] && ents[powerEntitlementKey(k)] === false)
+    if (!patch[k]) continue;
+    if (ents[powerEntitlementKey(k)] === false)
       return bad(`"${k}" isn't available for this restaurant — the admin has removed it.`, 403);
+    // Reach cap (rung 1b): can't grant to the manager a feature the admin capped at "owner only".
+    if (!depthAllows(featureDepth(cur.owner_entitlements, k), "manager"))
+      return bad(`"${k}" is limited to the owner for this restaurant — the admin hasn't extended it to managers.`, 403);
   }
   const merged = { ...(cur.manager_permissions || {}), ...patch };
   const { error } = await sb.from("restaurants").update({ manager_permissions: merged }).eq("id", rid);

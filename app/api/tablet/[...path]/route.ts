@@ -16,6 +16,20 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
+import { powerEntitled, featureDepth, depthAllows } from "@/lib/ownerEntitlements";
+import { tabletPowerGranted } from "@/lib/tabletPermissions";
+
+// The 4-rung ladder resolved for the tablet's order-taking (2026-07-22): the admin must
+// entitle the feature AND let its reach extend to the tablet AND the manager must have
+// granted it to the tablet. Used both to GATE POST /order and to tell the client whether
+// to show its "＋ Take order" button (injected as settings.tablet_take_orders below).
+async function tabletCanTakeOrders(rid: string): Promise<boolean> {
+  const r = (await sb.from("restaurants").select("owner_entitlements, tablet_permissions").eq("id", rid).maybeSingle()).data as
+    { owner_entitlements?: Record<string, unknown>; tablet_permissions?: Record<string, unknown> } | null;
+  return powerEntitled(r?.owner_entitlements, "take_orders")
+    && depthAllows(featureDepth(r?.owner_entitlements, "take_orders"), "tablet")
+    && tabletPowerGranted(r?.tablet_permissions, "take_orders");
+}
 
 export const dynamic = "force-dynamic";
 
@@ -184,15 +198,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const dishesP = nomenu
         ? null
         : sb.from("menu_items").select("id,title,price,category,tags,veg,options").eq("restaurant_id", rid).order("category");
-      const [settings, categories, restaurant] = await Promise.all([
+      const [settings, categories, restaurant, canTO] = await Promise.all([
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
+        tabletCanTakeOrders(rid),
       ]);
       const body: Record<string, unknown> = {
         ...summary,
-        // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
-        settings: overlayUserPerms(must(settings), g.user), categories: must(categories),
+        // Per-user overrides resolved into the tri-state keys (see overlayUserPerms), plus
+        // the resolved 4-rung "take orders" flag so the client shows/hides its button.
+        settings: { ...overlayUserPerms(must(settings), g.user), tablet_take_orders: canTO ? "on" : "off" }, categories: must(categories),
         restaurant: must(restaurant) || null,
       };
       // Only attach dishes on a FULL load. On nomenu the key is ABSENT (not []), so the client
@@ -242,7 +258,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // EXACTLY what the manager shows — today's orders plus any still-open session's
       // orders, even past the 05:00 IST rollover. (This used to be a day-clipped fetch
       // here, which hid an overnight open table's orders → tablet-vs-manager desync.)
-      const [live, settings, sessions, members, calls, dishes, categories, requests, restaurant] = await Promise.all([
+      const [live, settings, sessions, members, calls, dishes, categories, requests, restaurant, canTO] = await Promise.all([
         liveOrdersAndItems(rid),
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         sb.from("sessions").select("*").neq("status", "closed").eq("restaurant_id", rid),
@@ -254,10 +270,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // THIS restaurant's identity, so the tablet header shows which restaurant the
         // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
+        tabletCanTakeOrders(rid),
       ]);
       return ok({
-        // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
-        settings: overlayUserPerms(must(settings), g.user), sessions: must(sessions), members: must(members),
+        // Per-user overrides resolved into the tri-state keys (see overlayUserPerms), plus
+        // the resolved 4-rung "take orders" flag so the client shows/hides its button.
+        settings: { ...overlayUserPerms(must(settings), g.user), tablet_take_orders: canTO ? "on" : "off" }, sessions: must(sessions), members: must(members),
         orders: live.orders, items: live.items, calls: must(calls), dishes: must(dishes),
         categories: must(categories), requests: must(requests),
         restaurant: must(restaurant) || null,
@@ -319,6 +337,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // typo like "9932" create a phantom order floating on a non-existent table — it
       // showed orphaned in the order section and couldn't be cleared. (owner, 2026-06-18)
       const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      // The 4-rung ladder gate for the TABLET (2026-07-22): a real waiter may take orders
+      // only when the admin ENTITLES the feature AND its reach extends to the tablet AND
+      // the manager GRANTED it to the tablet. The admin super-user (actor === null)
+      // bypasses, so its X-ray "act as" still works — like the billing tri-state gates.
+      if (actor && !(await tabletCanTakeOrders(rid))) {
+        return NextResponse.json({ error: "Taking orders from the tablet is switched off for this restaurant.", disabled: true }, { status: 403 });
+      }
       const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
       const tn = Number(t);
       if (tableCount > 0 && (tn < 1 || tn > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);

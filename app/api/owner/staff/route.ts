@@ -20,7 +20,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
-import { mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
+import { mergeOwnerEntitlements, featureDepth } from "@/lib/ownerEntitlements";
+import { TABLET_POWER_FLAGS } from "@/lib/tabletPermissions";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 
 export const dynamic = "force-dynamic";
@@ -129,8 +130,14 @@ async function scope(req: NextRequest): Promise<Scope> {
 }
 
 // ownerEntitlements rides along so the Staff & powers page can HIDE an unentitled
-// power toggle from the real owner and TINT it for the admin (mig 133).
-const slim = (r: Restaurant) => ({ id: r.id, name: r.name, slug: r.slug, accentColor: r.accent_color || "#e3c06f", managerPermissions: r.manager_permissions || {}, ownerEntitlements: mergeOwnerEntitlements(r.owner_entitlements) });
+// power toggle from the real owner and TINT it for the admin (mig 133). featureDepths
+// rides along too (2026-07-22) so the page can hide a power the admin capped at
+// "owner only" — the owner can't grant it to their manager in that case.
+const slim = (r: Restaurant) => ({
+  id: r.id, name: r.name, slug: r.slug, accentColor: r.accent_color || "#e3c06f",
+  managerPermissions: r.manager_permissions || {}, ownerEntitlements: mergeOwnerEntitlements(r.owner_entitlements),
+  featureDepths: Object.fromEntries(TABLET_POWER_FLAGS.map((f) => [f, featureDepth(r.owner_entitlements, f)])),
+});
 
 export async function GET(req: NextRequest) {
   const s = await scope(req); if (!s.ok) return s.resp;

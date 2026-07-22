@@ -1711,6 +1711,55 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .add-dish-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 11px 13px; margin: 4px 0; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 14.5px; cursor: pointer; }
 .add-dish-row:hover { border-color: var(--gold); background: rgba(212,165,116,.1); }
 
+/* ── Take-order builder (＋ Take order) — a wide two-column modal: dish browser on
+   the left, the "This order" cart on the right; stacks on a phone. Matches the
+   editor's dark theme + .btn/.chip conventions. (2026-07-22) */
+.to-modal { width: min(920px, calc(100vw - 32px)); max-height: 88vh; display: flex; flex-direction: column; }
+.to-body { display: flex; min-height: 0; flex: 1 1 auto; overflow: hidden; }
+.to-menu { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+.to-search { margin: 12px 14px 8px; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 15px; }
+.to-search:focus { outline: none; border-color: var(--gold); }
+.to-cats { display: flex; gap: 7px; padding: 0 14px 10px; overflow-x: auto; flex-wrap: nowrap; }
+.to-cat { flex: 0 0 auto; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.to-cat:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
+.to-cat.on { background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold-strong); border-color: var(--gold); }
+.to-list { flex: 1 1 auto; overflow: auto; padding: 4px 10px 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; align-content: start; }
+.to-dish { position: relative; display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 11px 12px; border-radius: 11px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer; min-height: 62px; }
+.to-dish:hover { border-color: var(--gold); background: rgba(212,165,116,.1); }
+.to-dish.has { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 14%, transparent); }
+.to-dish-t { font-size: 13.5px; font-weight: 600; line-height: 1.25; }
+.to-dish-p { font-size: 12.5px; color: var(--muted); }
+.to-badge { position: absolute; top: 6px; right: 8px; background: var(--gold); color: #2a1d0c; font-size: 11px; font-weight: 800; padding: 1px 7px; border-radius: 999px; }
+.to-cart { flex: 0 0 320px; display: flex; flex-direction: column; min-width: 0; background: var(--panel); }
+.to-cart-h { padding: 14px 16px 8px; font-weight: 800; font-size: 14px; color: var(--gold); }
+.to-lines { flex: 1 1 auto; overflow: auto; padding: 0 12px; min-height: 80px; }
+.to-line { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.to-line-t { flex: 1 1 auto; min-width: 0; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.to-qty { display: inline-flex; align-items: center; gap: 8px; }
+.to-q { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 15px; cursor: pointer; line-height: 1; }
+.to-q:hover { border-color: var(--gold); }
+.to-line-p { font-size: 13px; color: var(--muted); min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+.to-rm { background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 14px; }
+.to-rm:hover { color: var(--red, #e0607a); }
+.to-extras { padding: 10px 14px; border-top: 1px solid var(--line); }
+.to-lbl { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.to-alg { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.to-alg-chip { cursor: pointer; }
+.to-note { width: 100%; box-sizing: border-box; padding: 9px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; font-size: 13.5px; resize: vertical; }
+.to-note:focus { outline: none; border-color: var(--gold); }
+.to-foot { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); }
+.to-total { font-size: 14px; color: var(--muted); }
+.to-total b { color: var(--text); font-size: 16px; }
+.to-send { margin-left: auto; }
+@media (max-width: 760px) {
+  .to-modal { width: calc(100vw - 18px); max-height: 92vh; }
+  .to-body { flex-direction: column; overflow: auto; }
+  .to-menu { border-right: none; border-bottom: 1px solid var(--line); }
+  .to-list { max-height: 42vh; }
+  .to-cart { flex: 1 1 auto; }
+  .to-lines { max-height: 28vh; }
+}
+
 /* ---- bill breakdown card ---- */
 .tp-bill { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px; }
 .tp-bl { display: flex; justify-content: space-between; font-size: 13.5px; padding: 3px 0; color: var(--muted); }
