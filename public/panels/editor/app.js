@@ -637,12 +637,14 @@ async function bulkDeleteDishes() {
   for (const id of ids) { try { await api("DELETE", "/items/" + encodeURIComponent(id)); done++; } catch (e) { /* keep going */ } }
   state.bulkMode = false; state.bulkSel.clear(); syncBulkBtn();
   await loadAll(); renderList(); renderEditor();
-  toast(`Deleted ${done} dish${done === 1 ? "" : "es"}`, "ok", { label: "Undo", fn: async () => {
+  const undoDelete = async () => {
     let r = 0;
     for (const s of snaps) { try { const p = { ...s }; delete p.created_at; delete p.updated_at; p.__create = true; await api("POST", "/items", p); r++; } catch (e) {} }
     toast(`Restored ${r}`, "ok");
     await loadAll(); renderList(); renderEditor();
-  } }, 8000);
+  };
+  if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted ${done} dish${done === 1 ? "" : "es"}`, sub: "Tap undo to bring them back", icon: "🗑️", seconds: 6, onUndo: undoDelete });
+  else toast(`Deleted ${done} dish${done === 1 ? "" : "es"}`, "ok", { label: "Undo", fn: undoDelete }, 8000);
 }
 
 // ---------- select / new ----------
@@ -4092,15 +4094,17 @@ async function removeRecord() {
     state.isNew = false;
     await loadAll();
     renderEditor();
-    // 6s Undo — re-creates the record from the snapshot (safety net for a misclick).
-    toast(`Deleted "${recLabel(restored)}"`, "ok", { label: "Undo", fn: async () => {
+    // Undo — re-creates the record from the snapshot (safety net for a misclick).
+    const undoRec = async () => {
       try {
         const payload = { ...restored }; delete payload.created_at; delete payload.updated_at; payload.__create = true;
         await api("POST", "/" + kind, payload);
         toast("Restored ✓", "ok");
         if (state.tab === kind) { await loadAll(); renderList(); renderEditor(); }
       } catch (e) { toast("Couldn't undo: " + e.message, "err"); }
-    } }, 6000);
+    };
+    if (window.LFH_UNDO) LFH_UNDO.show({ message: `Deleted "${recLabel(restored)}"`, sub: "Tap undo to restore it", icon: "🗑️", seconds: 6, onUndo: undoRec });
+    else toast(`Deleted "${recLabel(restored)}"`, "ok", { label: "Undo", fn: undoRec }, 6000);
   } catch (e) {
     toast("Delete failed: " + e.message, "err");
   }
@@ -4587,14 +4591,14 @@ async function closeAllTables() {
     // Gmail-style 8s action: REOPEN the tables we just closed (as fresh, empty tables). Close-all only
     // ever closes fully-SETTLED tables, so there's no party or unpaid bill left to restore — hence
     // "Reopen", not "Undo" (which wrongly implied the old party/orders would come back). (B26)
-    toast(skipped ? `Closed ${closed}, left ${skipped} (unpaid/cooking)` : `Closed ${closed} table${closed > 1 ? "s" : ""}`, skipped ? "err" : "ok", closedTables.length ? {
-      label: "Reopen",
-      fn: async () => {
-        await Promise.allSettled(closedTables.map((tb) => api("POST", "/sessions/open", { table: tb })));
-        await loadSessions();
-        toast(`Reopened ${closedTables.length} table${closedTables.length > 1 ? "s" : ""}`, "ok");
-      },
-    } : undefined, 8000);
+    const reopenClosed = async () => {
+      await Promise.allSettled(closedTables.map((tb) => api("POST", "/sessions/open", { table: tb })));
+      await loadSessions();
+      toast(`Reopened ${closedTables.length} table${closedTables.length > 1 ? "s" : ""}`, "ok");
+    };
+    const closedMsg = skipped ? `Closed ${closed}, left ${skipped} (unpaid/cooking)` : `Closed ${closed} table${closed > 1 ? "s" : ""}`;
+    if (closedTables.length && window.LFH_UNDO) LFH_UNDO.show({ message: closedMsg, sub: `Tap undo to reopen ${closedTables.length} table${closedTables.length > 1 ? "s" : ""}`, icon: "🔓", undoLabel: "Reopen", seconds: 6, onUndo: reopenClosed });
+    else toast(closedMsg, skipped ? "err" : "ok", closedTables.length ? { label: "Reopen", fn: reopenClosed } : undefined, 8000);
   } catch (e) {
     floorOpsInFlight--;
     await loadSessions(); // reconcile back to truth on failure
