@@ -1176,6 +1176,9 @@ const ACCESS_CAPS = [
   // from both Access cards when the feature itself is off (no dead UI).
   { key: "tablet_table_tags", label: "Mark table types (VIP/Family/Guest)" },
   { key: "tablet_khata", label: "Park pay-later (khata) bills" },
+  // KOT ▾ menu, the ladder's manager→tablet rung (mig 164→167) — only shown when the
+  // admin's depth knob reaches 'tablet' (whoami.tableOpsDepth; no dead UI below that).
+  { key: "tablet_table_ops", label: "Table & KOT operations" },
 ];
 // The Access cards' cap list, minus modules this restaurant doesn't have.
 function accessCapsFor() {
@@ -1184,6 +1187,7 @@ function accessCapsFor() {
   return ACCESS_CAPS.filter((c) => {
     if (c.key === "tablet_banquet") return !!s.banquet_allowed;
     if (c.key === "tablet_table_tags" || c.key === "tablet_khata") return tagsOn;
+    if (c.key === "tablet_table_ops") return !!(XRAY_WHO && XRAY_WHO.tableOpsDepth === "tablet");
     return true;
   });
 }
@@ -6171,7 +6175,15 @@ function tablePanelParts(t) {
   // ONE sticky action bar holds every table-wide action: the primary action + pay +
   // discount on the LEFT, then table-management (shift/print/restart/close) on the RIGHT.
   const tagBtn = tagActionAllowed("table_tags") ? `<button class="btn" id="sxTag" title="Mark this table VIP / Family / Owner's guest">${TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷"} Type</button>` : "";
-  const foot = `${primaryBtn}${payAllBtn}${discBtn}${splitBtn}<span class="tp-foot-spacer"></span>${tagBtn}${sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : ""}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
+  // Table-move actions: when the KOT ▾ menu (Table & KOT operations, mig 164→167) is on
+  // for this viewer it REPLACES the plain ⇄ Shift — one menu holding every table/KOT
+  // operation. When the ladder says off, today's plain Shift renders exactly as before.
+  const tableOpsBtn = sess
+    ? (tableOpsOn()
+        ? `<button class="btn" id="sxKot" title="Table &amp; KOT operations — change table, move a KOT, and more">🧾 KOT ▾</button>`
+        : `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>`)
+    : "";
+  const foot = `${primaryBtn}${payAllBtn}${discBtn}${splitBtn}<span class="tp-foot-spacer"></span>${tagBtn}${tableOpsBtn}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
 
   return { sess, os, canFree, headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot };
 }
@@ -6236,6 +6248,94 @@ function openShiftPicker(t, sess) {
       toast(`Shifted to table ${to}`, "ok");
       followShiftedTable(t, to); // follow the party to its new home in docked OR popup mode
     } catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+}
+
+// ── KOT ▾ — Table & KOT operations (PetPooja-style unified menu; owner 2026-07-22) ──
+// ONE menu on the table detail for every table/bill operation. Ladder-gated (mig 164):
+// admin depth knob → owner grants manager → (tablet has its own rung). Ops arrive in
+// phases — the menu lists only what's built, so it grows without UI rework.
+// Whether to render the KOT ▾ menu for THIS viewer. A real manager needs the owner's
+// table_ops grant (whoami effectivePowers); admin/owner higherView sees it whenever the
+// depth knob isn't 'off' (X-ray tints it when the manager grant is off). Before whoami
+// resolves we render the plain Shift fallback — never a button that would 403.
+function tableOpsOn() {
+  const w = XRAY_WHO;
+  if (!w || (w.tableOpsDepth || "off") === "off") return false;
+  return w.higherView ? true : !!(w.effectivePowers && w.effectivePowers.table_ops);
+}
+
+function openKotMenu(t, sess) {
+  document.querySelector(".kotmenu-overlay")?.remove();
+  // Movable KOTs = this table's orders that aren't paid or cancelled (same rule the
+  // server's RPC enforces — the row is disabled rather than surprising with a 409).
+  const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  const rows = [
+    { id: "shift", icon: "⇄", label: "Change table", sub: "Move this party — orders, calls & bill — to a free table", on: !!sess },
+    { id: "movekot", icon: "🧾", label: "Move a KOT to another table", sub: "Send ONE order (one KOT) to a different table's bill", on: movable.length > 0 },
+  ];
+  const rowHtml = (r) => `<button class="btn kotmenu-row" data-kotop="${r.id}" ${r.on ? "" : "disabled"}
+    style="display:flex;align-items:center;gap:12px;width:100%;justify-content:flex-start;padding:12px 14px;margin:0 0 8px">
+    <span style="font-size:18px">${r.icon}</span>
+    <span style="text-align:left"><b>${r.label}</b><br><span class="muted" style="font-size:12px">${r.sub}</span></span></button>`;
+  const wrap = el(`<div class="sx-modal-overlay kotmenu-overlay"><div class="sx-modal" style="max-width:440px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🧾 Table ${esc(t)} — KOT &amp; table operations</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body" style="padding:14px">${rows.map(rowHtml).join("")}</div></div></div>`);
+  document.body.appendChild(wrap);
+  const closeM = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = closeM;
+  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
+  wrap.querySelectorAll("[data-kotop]").forEach((b) => (b.onclick = () => {
+    const op = b.dataset.kotop; closeM();
+    if (op === "shift" && sess) openShiftPicker(t, sess);
+    if (op === "movekot") openMoveKotPicker(t);
+  }));
+}
+
+// Move ONE order (a single KOT) to another table — two steps in one modal: pick the
+// KOT, then pick the target table. Unlike Change-table, the target may be OCCUPIED
+// (the KOT joins that party's bill) or free (a fresh session opens for it).
+function openMoveKotPicker(t) {
+  document.querySelector(".movekot-overlay")?.remove();
+  const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  if (!movable.length) { toast("No movable KOTs on this table", "err"); return; }
+  const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+  const kotRow = (o) => {
+    const items = orderItemRows(o);
+    const nd = items.reduce((s, r) => s + (parseInt(r.qty, 10) || 1), 0);
+    return `<button class="btn kotpick" data-kot="${esc(o.id)}" style="display:flex;justify-content:space-between;width:100%;margin:0 0 8px;padding:11px 14px">
+      <span><b>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</b> · ${nd} dish${nd === 1 ? "" : "es"}</span><span>${inr(parseFloat(o.total) || 0)}</span></button>`;
+  };
+  const wrap = el(`<div class="sx-modal-overlay movekot-overlay"><div class="sx-modal" style="max-width:440px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🧾 Move a KOT from Table ${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="muted small" style="padding:0 14px 8px">Step 1 · which KOT should move?</div>
+    <div class="dish-edit-body movekot-body" style="padding:6px 14px 14px">${movable.map(kotRow).join("")}</div></div></div>`);
+  document.body.appendChild(wrap);
+  const closeM = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = closeM;
+  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
+  const body = wrap.querySelector(".movekot-body");
+  const hint = wrap.querySelector(".muted.small");
+  wrap.querySelectorAll("[data-kot]").forEach((b) => (b.onclick = () => {
+    const orderId = b.dataset.kot;
+    const o = movable.find((x) => x.id === orderId);
+    hint.textContent = `Step 2 · move KOT #${o && o.kot_no != null ? o.kot_no : "—"} to which table?`;
+    const tiles = [];
+    for (let i = 1; i <= n; i++) {
+      if (String(i) === String(t)) continue;
+      const open = summaryTableOpen(i);
+      tiles.push(`<button class="btn shiftpick" data-moveto="${i}">Table ${i}<br><span class="muted" style="font-size:11px">${open ? "joins that bill" : "free"}</span></button>`);
+    }
+    body.innerHTML = `<div class="shiftgrid">${tiles.join("")}</div>`;
+    body.querySelectorAll("[data-moveto]").forEach((tb) => (tb.onclick = async () => {
+      const to = tb.dataset.moveto; closeM();
+      try {
+        const r = await api("POST", `/orders/${orderId}/move`, { to });
+        if (r && r.ok === false) { toast("Couldn't move: " + (r.reason || "rejected"), "err"); return; }
+        toast(`KOT moved to table ${to}`, "ok");
+        // Both tables repaint via the RPC's breadcrumbs (targeted refetch) — no manual reload.
+      } catch (e) { toast("Failed: " + e.message, "err"); }
+    }));
   }));
 }
 
@@ -6400,6 +6500,9 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // Shift the whole party (orders + calls move along) to an EMPTY table.
   const sh = root.querySelector("#sxShift");
   if (sh && sess) sh.onclick = () => openShiftPicker(t, sess);
+  // KOT ▾ — the unified Table & KOT operations menu (replaces Shift when the ladder is on).
+  const kb = root.querySelector("#sxKot");
+  if (kb && sess) kb.onclick = () => openKotMenu(t, sess);
   // Print bill: a clean printable window with KOT numbers, discounts and totals.
   const pr = root.querySelector("#sxPrint");
   if (pr) pr.onclick = () => printBill(t, sess, os);
@@ -7809,6 +7912,7 @@ const XRAY_TABS = [
 const XRAY_CONTROLS = [
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
+  { selector: "#sxKot", flag: "table_ops", label: "Table & KOT operations" },
   { selector: '.list-item[data-settings-section="users"]', flag: "manage_staff", label: "User settings" },
   { selector: '.list-item[data-settings-section="access"]', flag: "manage_staff", label: "Access settings" },
 ];

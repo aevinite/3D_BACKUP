@@ -960,9 +960,10 @@ function renderPanel() {
     <div class="dacts">
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
       <button class="btn primary big" id="takeOrder">＋ Take order</button>
-      ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
+      ${s && kotOpsOn() ? `<button class="btn${txray("tablet_table_ops")}" id="kotMenuBtn">🧾 KOT ▾</button>` : ""}
+      ${s && !kotOpsOn() ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
       ${tabletTagsOn() && tshow("tablet_table_tags") ? `<button class="btn${txray("tablet_table_tags")}" id="tagTable">${TABLE_TAG_INFO[ttagOf(t)] ? TABLE_TAG_INFO[ttagOf(t)].emoji : "🏷"} Table type</button>` : ""}
-      ${s && os.length ? `<button class="btn" id="moveOrderBtn">⇄ Move an order</button>` : ""}
+      ${s && os.length && !kotOpsOn() ? `<button class="btn" id="moveOrderBtn">⇄ Move an order</button>` : ""}
       ${s && os.length ? `<button class="btn" id="restartTable">↻ Restart</button>` : ""}
       ${s && os.length && tshow("tablet_discount") ? `<button class="btn${txray("tablet_discount")}" id="billDiscountBtn">${Number(s.discount) > 0 ? `− Edit bill discount (${inr(s.discount)})` : "− Discount whole bill"}</button>` : ""}
       ${s && os.length && !invoiced && tshow("tablet_invoice") ? `<button class="btn${txray("tablet_invoice")}" id="genInvoiceBtn">🧾 Generate invoice</button>` : ""}
@@ -1056,6 +1057,7 @@ function renderPanel() {
   const ob = $("#openTable"); if (ob) ob.onclick = () => optimisticOpen(t);
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
   const mob = $("#moveOrderBtn"); if (mob && s) mob.onclick = () => renderMoveOrderPicker(t);   // was dead: renderMoveOrderPicker/Target existed but nothing opened them (fixed 2026-07-06)
+  const kmb = $("#kotMenuBtn"); if (kmb && s) kmb.onclick = () => renderKotMenu(t, s);
   // Restart: clear this round's orders off the floor (they stay served+archived in
   // records) but keep the table OPEN for a fresh round. Mirrors the manager.
   const rsb = $("#restartTable"); if (rsb && s) rsb.onclick = async () => {
@@ -1311,6 +1313,31 @@ function renderPickerShell(titleHtml, bodyHtml, layerId, onBack) {
   p.onclick = (e) => { if (e.target === p) go(); };
   // Fire an action AND drop this picker's back layer + flag first (renderPanel replaces the DOM).
   return { dropLayer: drop };
+}
+
+// ── KOT ▾ — Table & KOT operations (PetPooja-style unified menu; owner 2026-07-22) ──
+// The ladder's tablet rung (mig 164): the KOT button REPLACES the separate Move-table /
+// Move-an-order buttons when the manager's Access grant (settings.tablet_table_ops,
+// forced 'off' server-side below 'tablet' depth) says on. When off, the two classic
+// buttons render exactly as before — zero regression. Ops arrive in phases.
+function kotOpsOn() {
+  const set = state.data.settings || {};
+  return !!set.table_ops_tablet_allowed && tshow("tablet_table_ops");
+}
+function renderKotMenu(t, s) {
+  const movable = ordersOf(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled");
+  const row = (id, icon, label, sub, on) => `<button class="btn" data-kotop="${id}" ${on ? "" : "disabled"}
+    style="display:flex;align-items:center;gap:12px;width:100%;justify-content:flex-start;text-align:left;margin-bottom:8px;padding:12px 14px">
+    <span style="font-size:18px">${icon}</span><span><b>${label}</b><br><span class="muted small">${sub}</span></span></button>`;
+  const body =
+    row("shift", "⇄", "Change table", "Move this party — orders &amp; calls included — to a free table", !!s) +
+    row("movekot", "🧾", "Move a KOT to another table", "Send ONE order (one KOT) to a different table's bill", movable.length > 0);
+  const { dropLayer } = renderPickerShell(`Table ${esc(t)} — KOT &amp; table operations`, `<div class="pactions">${body}</div>`, "tablet-kot-menu", renderPanel);
+  document.querySelectorAll("[data-kotop]").forEach((b) => (b.onclick = () => {
+    dropLayer(); // drop this step's back layer before advancing (same rule as move-order's step 1)
+    if (b.dataset.kotop === "shift" && s) renderShiftPicker(t, s);
+    if (b.dataset.kotop === "movekot") renderMoveOrderPicker(t);
+  }));
 }
 
 function renderShiftPicker(t, s) {
@@ -2756,6 +2783,7 @@ const XRAY_CAPS = [
   { key: "tablet_mark_paid", label: "Mark bill paid" },
   { key: "tablet_invoice", label: "Generate invoice" },
   { key: "tablet_banquet", label: "Banquet billing" },
+  { key: "tablet_table_ops", label: "Table & KOT operations" },
 ];
 (function injectXrayStyles() {
   const css = `
@@ -2794,7 +2822,13 @@ function closeXrayZones() {
 function renderXrayRibbon() {
   let rb = document.getElementById("xrayRibbon");
   if (!tHigher()) { if (rb) rb.remove(); return; }
-  const zones = XRAY_CAPS.filter((c) => (c.key === "tablet_banquet" ? !!(state.data.settings || {}).banquet_allowed : true) && tperm(c.key) === "off");
+  const zones = XRAY_CAPS.filter((c) => {
+    // Module caps only count as "zones" when the module exists for this restaurant at
+    // all (banquet entitlement / KOT-menu depth) — otherwise it's not a grantable thing.
+    if (c.key === "tablet_banquet" && !(state.data.settings || {}).banquet_allowed) return false;
+    if (c.key === "tablet_table_ops" && !(state.data.settings || {}).table_ops_tablet_allowed) return false;
+    return tperm(c.key) === "off";
+  });
   const rest = (state.data.restaurant && state.data.restaurant.name) || "";
   const sig = `${rest}|${zones.map((z) => z.key).join(",")}`; // skip identical rebuilds
   if (rb && rb.dataset.sig === sig) return;
@@ -2923,7 +2957,7 @@ window.addEventListener("online", () => load().catch(() => {}));
     // #5: clock lives here on phones (moved off the cramped top bar; desktop keeps it on the bar).
     '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
     // Build tag: lets the owner confirm at a glance he's on the latest code (rules out a stale cache). (audit 2026-07-09)
-    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260720safe1</span></div>' +
+    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260722kot1</span></div>' +
     // Banquet module (mig 130): shown only when the admin entitlement AND the
     // waiter's tablet_banquet capability allow it (openDrawer re-checks each open).
     '<button class="dw-btn" id="dwBanquet" type="button" hidden style="margin-top:auto;margin-bottom:10px">🎪 Banquet billing</button>' +

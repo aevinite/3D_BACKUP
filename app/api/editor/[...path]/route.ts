@@ -23,7 +23,7 @@ import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
+import { MANAGER_POWER_FLAGS, powerEntitlementKey, tableOpsDepth } from "@/lib/ownerEntitlements";
 import { isTableTag, tableTagsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic"; // always live, never cached
@@ -57,10 +57,39 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   if (!u || u.role === "owner") return true;
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-  if (r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
+  // table_ops' admin rung is the depth knob (mig 164, ABSENT = off), not a stored
+  // power_ boolean — the owner may grant it only when the depth reaches 'manager'.
+  const entitled = flag === "table_ops"
+    ? ["manager", "tablet"].includes(tableOpsDepth(r?.owner_entitlements))
+    : r?.owner_entitlements?.[powerEntitlementKey(flag)] !== false;
+  if (!entitled) return false;
   return !!r?.manager_permissions?.[flag];
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
+
+// Gate for the KOT ▾ menu (Table & KOT operations — the 4-rung ladder, mig 164).
+// Rung 1: the admin's depth knob must not be 'off' — this stops EVERYONE, owner and
+// admin view included (the feature simply doesn't exist for this restaurant).
+// Rung 2: a plain manager additionally needs the owner's table_ops grant (managerCan;
+// owner/admin pass that rung automatically). Returns a response to short-circuit, or
+// null to proceed.
+async function tableOpsGate(g: { user: StaffUser | null }, rid: string): Promise<NextResponse | null> {
+  const r = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data as
+    { owner_entitlements?: Record<string, unknown> } | null;
+  if (tableOpsDepth(r?.owner_entitlements) === "off") return err("Table & KOT operations aren't enabled for this restaurant.", 403);
+  if (!(await managerCan(g, rid, "table_ops"))) return permDenied("use table & KOT operations");
+  return null;
+}
+
+// Friendly message for the move/merge RPCs' { ok:false, reason } (migs 165+).
+const moveErrMsg = (reason?: string) =>
+  reason === "no_order" ? "That order isn't there anymore — refresh."
+  : reason === "order_paid" ? "Won't move a PAID order — mark it unpaid first."
+  : reason === "bad_table" ? "Pick a valid table."
+  : reason === "same_table" ? "That order is already on that table."
+  : reason === "source_invoiced" ? "This bill is already invoiced — void or regenerate its invoice before moving an order off it."
+  : reason === "target_invoiced" ? "The target table's bill is already invoiced — void or regenerate its invoice before moving an order onto it."
+  : (reason || "Couldn't move the order.");
 
 // Friendly message for the banquet RPC's { ok:false, reason } (mig 130).
 const banquetErrMsg = (reason?: string) =>
@@ -172,8 +201,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const ents = r?.owner_entitlements || {};
       const effectivePowers: Record<string, boolean> = {};
       const offByAdmin: Record<string, boolean> = {};
+      const depth = tableOpsDepth(ents);
       for (const flag of MANAGER_POWER_FLAGS) {
-        const entitled = ents[powerEntitlementKey(flag)] !== false;
+        // table_ops' admin rung is the depth knob (absent = OFF), not a power_ boolean.
+        const entitled = flag === "table_ops" ? ["manager", "tablet"].includes(depth) : ents[powerEntitlementKey(flag)] !== false;
         effectivePowers[flag] = entitled && perms[flag] === true;
         offByAdmin[flag] = !entitled;
       }
@@ -192,6 +223,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         effectivePowers,
         offByAdmin,
         features: { table_tags: lad.effective, khata: lad.effective },
+        // The KOT ▾ menu ladder knob: 'off' hides the menu for EVERYONE (plain ⇄ Shift
+        // renders instead); 'tablet' additionally surfaces the tablet grant in Access.
+        tableOpsDepth: depth,
       });
     }
 
@@ -1359,6 +1393,27 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
       await log("editor", "table_shift", { restaurant_id: rid, detail: "→ table " + to, device_id: dev });
+      return ok(data);
+    }
+
+    // orders/:id/move — move ONE order (a single KOT) and its dish rows to another
+    // table, leaving the rest of the party's bill behind. Part of the KOT ▾ menu
+    // (ladder-gated, mig 164); the whole-party variant is sessions/:id/shift above.
+    // The RPC (mig 165) is atomic, re-splits both bills' discounts and nudges BOTH
+    // tables' tiles — the same shared implementation the tablet route calls.
+    if (a === "orders" && c === "move") {
+      const gateResp = await tableOpsGate(g, rid); if (gateResp) return gateResp;
+      const to = String((body && body.to) || "").trim();
+      if (!/^\d+$/.test(to) || Number(to) < 1) return err("Pick a valid table to move to.", 400);
+      // Reject a target table that doesn't exist (1..table_count) — the RPC checks
+      // digits/occupancy but doesn't know the restaurant's table count.
+      const setRowMv = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const tableCountMv = Number((must(setRowMv) || {}).table_count) || 0;
+      if (tableCountMv && Number(to) > tableCountMv) return err("That table number is out of range.", 400);
+      const { data, error } = await sb.rpc("lfh_staff_move_order", { p_order: b, p_to: to, p_rid: rid });
+      if (error) throw new Error(error.message);
+      if (data && (data as { ok?: boolean }).ok === false) return err(moveErrMsg((data as { reason?: string }).reason), 409);
+      await log("editor", "order_move", { restaurant_id: rid, order_id: b, detail: "KOT → table " + to, device_id: dev });
       return ok(data);
     }
 
