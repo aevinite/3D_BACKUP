@@ -24,7 +24,9 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 //  · view_ratings   — see + handle guest ratings in the manager panel (mig 138).
 //  · table_tags      — mark tables VIP/Family/Owner's-Guest + settle "on the house" (mig 166).
 //  · khata           — park a bill on a person to collect later + manage the khata book (mig 166).
-export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata"] as const;
+//  · banquet         — the Banquet tab / banquet billing (mig 130; rung added mig 167,
+//                      BACKFILLED true so pre-existing behaviour is unchanged).
+export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet"] as const;
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
 export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [

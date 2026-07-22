@@ -1182,7 +1182,7 @@ function accessCapsFor() {
   const s = state.data.settings || {};
   const tagsOn = s.table_tags_allowed === true && (s.table_tags_owner_control !== true || s.table_tags_enabled !== false);
   return ACCESS_CAPS.filter((c) => {
-    if (c.key === "tablet_banquet") return !!s.banquet_allowed;
+    if (c.key === "tablet_banquet") return s.banquet_allowed === true && (s.banquet_owner_control !== true || s.banquet_enabled !== false);
     if (c.key === "tablet_table_tags" || c.key === "tablet_khata") return tagsOn;
     return true;
   });
@@ -7807,9 +7807,15 @@ function bindBanquet() {
 function syncBanquetTab() {
   const btn = document.querySelector('.tabs .tab[data-tab="banquet"]');
   if (!btn) return;
-  const allowed = !!(state.data.settings || {}).banquet_allowed;
-  btn.hidden = !allowed;
-  if (!allowed && state.tab === "banquet") setTab("items");
+  // Full ladder (mig 167): admin switch AND (owner's toggle when transferred) AND —
+  // for a real manager — the owner->manager grant (higher roles see it regardless,
+  // matching the server's managerCan pass-through for admin/owner).
+  const s = state.data.settings || {};
+  const eff = s.banquet_allowed === true && (s.banquet_owner_control !== true || s.banquet_enabled !== false);
+  const granted = !XRAY_WHO || XRAY_WHO.higherView || xrayGrantedForManager("banquet");
+  const show = eff && granted;
+  btn.hidden = !show;
+  if (!show && state.tab === "banquet") setTab("items");
 }
 
 // Extend XRAY_TABS as more tabs become permission-gated. Grant rule matches the
