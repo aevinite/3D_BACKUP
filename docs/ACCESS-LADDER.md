@@ -50,10 +50,11 @@ Per laddered module the admin has exactly TWO switches (settings columns):
 | Panels (manager/kitchen/tablet/owner) | admin only (access = the panel itself) | Access → Panels |
 | Guest menu features (11 switches) | admin only (guests aren't staff) | Access → Guest menu features |
 | Owner-panel sections (6) | admin → owner | Access → Owner panel sections |
-| Manager powers: manage_staff · edit_menu · give_discounts · view_dashboard · void_bills · edit_settings · view_ratings · table_tags · khata · banquet | admin "exists" + owner "granted" | Access → Manager powers / Owner → Staff & powers |
-| Tablet caps: discount · mark_paid · invoice · banquet · table_tags · khata | manager tri-state + per-user | Access → Tablet / Manager → Settings → Access |
+| Manager powers: manage_staff · edit_menu · give_discounts · view_dashboard · void_bills · edit_settings · view_ratings · table_tags · khata · banquet · table_ops | admin "exists" + owner "granted" | Access → Manager powers / Owner → Staff & powers |
+| Tablet caps: discount · mark_paid · invoice · banquet · table_tags · khata · table_ops | manager tri-state + per-user | Access → Tablet / Manager → Settings → Access |
 | Module: table types + khata (mig 166) | FULL ladder (reference implementation) | Access → Modules |
 | Module: banquet (migs 130 + 167) | FULL ladder | Access → Modules |
+| Module: Table & KOT operations — the KOT ▾ menu: change table, merge tables, move a KOT/dish, split bill, reprint (migs 172-177) | FULL ladder; when off, the classic ⇄ Shift renders instead | Access → Modules |
 | Auto-print KOT (mig 107) | admin `allowed` + restaurant toggle `auto_print_kot` (owner/manager via edit_settings) — transfer permanently on by design | Manager → Settings → Kitchen |
 | Serve/Ready/Pay undo bar | inherits the underlying action's permission | — |
 

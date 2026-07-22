@@ -1177,7 +1177,7 @@ const ACCESS_CAPS = [
   { key: "tablet_table_tags", label: "Mark table types (VIP/Family/Guest)" },
   { key: "tablet_khata", label: "Park pay-later (khata) bills" },
   // KOT ▾ menu, the ladder's manager→tablet rung (mig 172) — only shown when the
-  // admin's depth knob reaches 'tablet' (whoami.tableOpsDepth; no dead UI below that).
+  // module itself is effective (canonical ladder, migs 172-177; no dead UI otherwise).
   { key: "tablet_table_ops", label: "Table & KOT operations" },
 ];
 // The Access cards' cap list, minus modules this restaurant doesn't have.
@@ -1187,7 +1187,7 @@ function accessCapsFor() {
   return ACCESS_CAPS.filter((c) => {
     if (c.key === "tablet_banquet") return s.banquet_allowed === true && (s.banquet_owner_control !== true || s.banquet_enabled !== false);
     if (c.key === "tablet_table_tags" || c.key === "tablet_khata") return tagsOn;
-    if (c.key === "tablet_table_ops") return !!(XRAY_WHO && XRAY_WHO.tableOpsDepth === "tablet");
+    if (c.key === "tablet_table_ops") return s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
     return true;
   });
 }
@@ -6266,13 +6266,15 @@ function openShiftPicker(t, sess) {
 // ONE menu on the table detail for every table/bill operation. Ladder-gated (mig 172):
 // admin depth knob → owner grants manager → (tablet has its own rung). Ops arrive in
 // phases — the menu lists only what's built, so it grows without UI rework.
-// Whether to render the KOT ▾ menu for THIS viewer. A real manager needs the owner's
-// table_ops grant (whoami effectivePowers); admin/owner higherView sees it whenever the
-// depth knob isn't 'off' (X-ray tints it when the manager grant is off). Before whoami
-// resolves we render the plain Shift fallback — never a button that would 403.
+// Whether to render the KOT ▾ menu for THIS viewer. The MODULE must be effective
+// (whoami.features.table_ops — the canonical ladder: admin switch AND, when
+// transferred, the owner's toggle); a real manager additionally needs the owner's
+// table_ops grant (effectivePowers), while admin/owner higherView sees it tinted by
+// the X-ray when the grant is off. Before whoami resolves we render the plain Shift
+// fallback — never a button that would 403.
 function tableOpsOn() {
   const w = XRAY_WHO;
-  if (!w || (w.tableOpsDepth || "off") === "off") return false;
+  if (!w || !(w.features && w.features.table_ops)) return false;
   return w.higherView ? true : !!(w.effectivePowers && w.effectivePowers.table_ops);
 }
 

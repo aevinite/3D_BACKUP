@@ -23,8 +23,8 @@ import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { MANAGER_POWER_FLAGS, powerEntitlementKey, tableOpsDepth } from "@/lib/ownerEntitlements";
-import { isTableTag, tableTagsLadder, banquetLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
+import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -57,26 +57,19 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   if (!u || u.role === "owner") return true;
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-  // table_ops' admin rung is the depth knob (mig 172, ABSENT = off), not a stored
-  // power_ boolean — the owner may grant it only when the depth reaches 'manager'.
-  const entitled = flag === "table_ops"
-    ? ["manager", "tablet"].includes(tableOpsDepth(r?.owner_entitlements))
-    : r?.owner_entitlements?.[powerEntitlementKey(flag)] !== false;
-  if (!entitled) return false;
+  if (r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
   return !!r?.manager_permissions?.[flag];
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
 
-// Gate for the KOT ▾ menu (Table & KOT operations — the 4-rung ladder, mig 172).
-// Rung 1: the admin's depth knob must not be 'off' — this stops EVERYONE, owner and
-// admin view included (the feature simply doesn't exist for this restaurant).
+// Gate for the KOT ▾ menu (Table & KOT operations — canonical module ladder, mig 177).
+// Rung 1: the module must be effective (admin's allowed switch AND, when transferred,
+// the owner's toggle) — this stops EVERYONE, owner and admin view included.
 // Rung 2: a plain manager additionally needs the owner's table_ops grant (managerCan;
 // owner/admin pass that rung automatically). Returns a response to short-circuit, or
 // null to proceed.
 async function tableOpsGate(g: { user: StaffUser | null }, rid: string): Promise<NextResponse | null> {
-  const r = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data as
-    { owner_entitlements?: Record<string, unknown> } | null;
-  if (tableOpsDepth(r?.owner_entitlements) === "off") return err("Table & KOT operations aren't enabled for this restaurant.", 403);
+  if (!(await tableOpsLadder(rid)).effective) return err("Table & KOT operations aren't enabled for this restaurant.", 403);
   if (!(await managerCan(g, rid, "table_ops"))) return permDenied("use table & KOT operations");
   return null;
 }
@@ -215,10 +208,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const ents = r?.owner_entitlements || {};
       const effectivePowers: Record<string, boolean> = {};
       const offByAdmin: Record<string, boolean> = {};
-      const depth = tableOpsDepth(ents);
       for (const flag of MANAGER_POWER_FLAGS) {
-        // table_ops' admin rung is the depth knob (absent = OFF), not a power_ boolean.
-        const entitled = flag === "table_ops" ? ["manager", "tablet"].includes(depth) : ents[powerEntitlementKey(flag)] !== false;
+        const entitled = ents[powerEntitlementKey(flag)] !== false;
         effectivePowers[flag] = entitled && perms[flag] === true;
         offByAdmin[flag] = !entitled;
       }
@@ -229,6 +220,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (!lad.effective) { effectivePowers.table_tags = false; effectivePowers.khata = false; }
       const bq = await banquetLadder(rid);
       if (!bq.effective) effectivePowers.banquet = false;
+      // KOT ▾ menu (mig 177): same canonical module rule — module off = power dead.
+      const tOps = await tableOpsLadder(rid);
+      if (!tOps.effective) effectivePowers.table_ops = false;
       return ok({
         actor,
         role: actor,
@@ -238,10 +232,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         managerPermissions: perms,
         effectivePowers,
         offByAdmin,
-        features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective },
-        // The KOT ▾ menu ladder knob: 'off' hides the menu for EVERYONE (plain ⇄ Shift
-        // renders instead); 'tablet' additionally surfaces the tablet grant in Access.
-        tableOpsDepth: depth,
+        features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective, table_ops: tOps.effective },
       });
     }
 

@@ -26,23 +26,14 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 //  · khata           — park a bill on a person to collect later + manage the khata book (mig 166).
 //  · banquet         — the Banquet tab / banquet billing (mig 130; rung added mig 167,
 //                      BACKFILLED true so pre-existing behaviour is unchanged).
-//  · table_ops      — the KOT ▾ menu (merge tables, move a KOT, move an item, split
-//                     bill). Its admin rung is NOT a power_ boolean: it's DERIVED from
-//                     table_ops_depth (below), so it can never disagree with the depth.
+//  · table_ops      — the KOT ▾ menu (merge tables, move a KOT/dish, split bill,
+//                     reprint; migs 172-177). CANONICAL module ladder (docs/
+//                     ACCESS-LADDER.md): the module rung lives on settings
+//                     (table_ops_allowed / _owner_control / _enabled →
+//                     tableOpsLadder() in lib/tableTags.ts); this power is the
+//                     plain manager rung on top of it.
 export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops"] as const;
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
-
-// Table & KOT operations — the admin's ONE knob for the 4-rung ladder: is the feature
-// on at all, and how deep may it go (owner panel only / +manager / +tablet). Stored as
-// owner_entitlements.table_ops_depth. ABSENT = 'off' — a deliberate dark-launch
-// exception to the "absent = on" convention above (mig 172), so no restaurant gets the
-// new menu until the admin switches it on.
-export const TABLE_OPS_DEPTHS = ["off", "owner", "manager", "tablet"] as const;
-export type TableOpsDepth = (typeof TABLE_OPS_DEPTHS)[number];
-export function tableOpsDepth(raw: unknown): TableOpsDepth {
-  const v = raw && typeof raw === "object" ? (raw as Record<string, unknown>).table_ops_depth : null;
-  return TABLE_OPS_DEPTHS.includes(v as TableOpsDepth) ? (v as TableOpsDepth) : "off";
-}
 
 export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [
   ...OWNER_SECTION_KEYS,
@@ -61,9 +52,6 @@ export function mergeOwnerEntitlements(raw: unknown): OwnerEntitlements {
       if (typeof v === "boolean") out[k] = v;
     }
   }
-  // power_table_ops is DERIVED from the depth knob (never stored): the owner may grant
-  // the manager only when the admin's depth reaches at least the manager rung.
-  out[powerEntitlementKey("table_ops")] = ["manager", "tablet"].includes(tableOpsDepth(raw));
   return out;
 }
 

@@ -1,4 +1,8 @@
--- 172_table_ops_ladder.sql (ran on the live DB 2026-07-22 under earlier numbering — same content, renumbered around parallel PRs)
+-- 172_table_ops_ladder.sql (ran on the live DB 2026-07-22 under earlier numbering)
+-- NOTE: the owner_entitlements.table_ops_depth knob this migration's comments describe
+-- was SUPERSEDED the same day by mig 177 (canonical module ladder — table_ops_allowed /
+-- _owner_control / _enabled on settings, per docs/ACCESS-LADDER.md). What survives from
+-- here is the tablet tri-state column below.
 -- "Table & KOT operations" feature (KOT ▾ menu: change table / merge tables / move a
 -- KOT / move an item / split bill) gets the full 4-rung access ladder:
 --

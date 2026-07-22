@@ -11,7 +11,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
-import { OWNER_ENTITLEMENT_KEYS, mergeOwnerEntitlements, MANAGER_POWER_FLAGS, TABLE_OPS_DEPTHS, tableOpsDepth, powerEntitlementKey } from "@/lib/ownerEntitlements";
+import { OWNER_ENTITLEMENT_KEYS, mergeOwnerEntitlements, MANAGER_POWER_FLAGS } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +28,11 @@ const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: tr
 // tablet_khata are normally the MANAGER's rung (manager settings), but the admin
 // console shows every access bit of the ladder, so they're editable here too (mig 166).
 // tablet_table_ops (mig 172) is the ladder's manager→tablet rung for the KOT ▾ menu;
-// it only takes effect when table_ops_depth reaches 'tablet'.
+// it only takes effect while the module itself is effective (mig 177).
 const TABLET_CAPS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops"] as const;
 // Feature-ladder switches on settings (mig 166): the feature itself + the admin's
 // "power transfer" (may the OWNER toggle it). Booleans, default OFF via the migration.
-const FEATURE_SWITCHES = ["table_tags_allowed", "table_tags_owner_control", "banquet_allowed", "banquet_owner_control"] as const;
+const FEATURE_SWITCHES = ["table_tags_allowed", "table_tags_owner_control", "banquet_allowed", "banquet_owner_control", "table_ops_allowed", "table_ops_owner_control"] as const;
 const isTri = (v: unknown): v is "off" | "on" | "pin" => v === "off" || v === "on" || v === "pin";
 
 const bad = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
   if (rq.error) return bad(rq.error.message, 500);
   if (!rq.data) return bad("Restaurant not found.", 404);
   const r = rq.data;
-  const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice, tablet_banquet, tablet_table_tags, tablet_khata, tablet_table_ops, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled").eq("restaurant_id", rid).maybeSingle()).data as Record<string, unknown> | null;
+  const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice, tablet_banquet, tablet_table_tags, tablet_khata, tablet_table_ops, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled").eq("restaurant_id", rid).maybeSingle()).data as Record<string, unknown> | null;
   const manager = { ...MP_DEFAULT, ...(r?.manager_permissions && typeof r.manager_permissions === "object" ? r.manager_permissions : {}) };
   const tablet: Record<string, string> = {};
   for (const k of TABLET_CAPS) tablet[k] = isTri(s?.[k]) ? (s![k] as string) : "off";
@@ -59,11 +59,8 @@ export async function GET(req: NextRequest) {
   for (const k of FEATURE_SWITCHES) features[k] = s?.[k] === true;
   features.table_tags_enabled = s?.table_tags_enabled !== false; // the owners' toggles, shown read-only
   features.banquet_enabled = s?.banquet_enabled !== false;
-  return NextResponse.json({
-    manager, tablet, owner: mergeOwnerEntitlements(r?.owner_entitlements), features,
-    // The KOT ▾ menu's one admin knob (mig 172): feature on/off + how deep it may go.
-    tableOpsDepth: tableOpsDepth(r?.owner_entitlements),
-  });
+  features.table_ops_enabled = s?.table_ops_enabled !== false;
+  return NextResponse.json({ manager, tablet, owner: mergeOwnerEntitlements(r?.owner_entitlements), features });
 }
 
 export async function POST(req: NextRequest) {
@@ -88,21 +85,7 @@ export async function POST(req: NextRequest) {
   if (body.owner && typeof body.owner === "object") {
     const cur = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data?.owner_entitlements || {};
     const next: Record<string, boolean> = { ...(typeof cur === "object" ? cur : {}) };
-    // power_table_ops is DERIVED from table_ops_depth (never stored) — skip it here.
-    for (const k of OWNER_ENTITLEMENT_KEYS) if (k in (body.owner as object) && k !== powerEntitlementKey("table_ops")) next[k] = (body.owner as Record<string, unknown>)[k] === true;
-    const up = await sb.from("restaurants").update({ owner_entitlements: next }).eq("id", rid);
-    if (up.error) return bad(up.error.message, 500);
-  }
-
-  // KOT ▾ menu depth knob → owner_entitlements.table_ops_depth (mig 164). Written as a
-  // string alongside the boolean keys; power_table_ops is DERIVED from it at read time
-  // (mergeOwnerEntitlements), so the two can never disagree.
-  if ("tableOpsDepth" in body) {
-    const d = body.tableOpsDepth;
-    if (!TABLE_OPS_DEPTHS.includes(d as (typeof TABLE_OPS_DEPTHS)[number])) return bad("tableOpsDepth must be off | owner | manager | tablet.");
-    const cur = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data?.owner_entitlements || {};
-    const next: Record<string, unknown> = { ...(typeof cur === "object" ? cur : {}), table_ops_depth: d };
-    delete next[powerEntitlementKey("table_ops")]; // never persist the derived key
+    for (const k of OWNER_ENTITLEMENT_KEYS) if (k in (body.owner as object)) next[k] = (body.owner as Record<string, unknown>)[k] === true;
     const up = await sb.from("restaurants").update({ owner_entitlements: next }).eq("id", rid);
     if (up.error) return bad(up.error.message, 500);
   }

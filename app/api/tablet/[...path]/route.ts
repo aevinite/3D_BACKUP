@@ -16,8 +16,7 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { isTableTag, tableTagsLadder, banquetLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
-import { tableOpsDepth } from "@/lib/ownerEntitlements";
+import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { effectiveTaxRate } from "@/lib/tax";
 
 export const dynamic = "force-dynamic";
@@ -70,12 +69,16 @@ const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName 
 // managerPinGate as before.
 const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops"] as const;
 const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
-// The KOT ▾ menu's admin depth knob (mig 172): the tablet rung only exists at depth
-// 'tablet'. One tiny single-row select on a rare path (a merge/move tap, not a poll).
+// The KOT ▾ menu's module rung (canonical ladder, mig 177): admin's allowed switch
+// AND, when transferred, the owner's toggle. One tiny single-row select on a rare
+// path (a merge/move tap, not a poll); the tri-state gate runs separately after it.
 async function tableOpsTabletAllowed(rid: string): Promise<boolean> {
-  const r = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data as { owner_entitlements?: unknown } | null;
-  return tableOpsDepth(r?.owner_entitlements) === "tablet";
+  return (await tableOpsLadder(rid)).effective;
 }
+// The same rule computed from an ALREADY-FETCHED settings row (the board GETs) — no
+// extra query on the hot path.
+const tableOpsEffectiveFromRow = (s: Record<string, unknown> | null) =>
+  !!s && s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   // Admin super-user (no staff cookie — the gate already vetted the admin token):
   // never blocked by a waiter tri-state. This is what makes the X-ray's tinted
@@ -196,29 +199,25 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const [settings, categories, restaurant] = await Promise.all([
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
-        // owner_entitlements rides the SAME single-row lookup (no extra round trip) so the
-        // ladder's depth knob can be resolved server-side below; it's stripped before send.
-        sb.from("restaurants").select("id, slug, name, logo_text, accent_color, owner_entitlements").eq("id", rid).maybeSingle(),
+        sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
       ]);
-      const restRow = must(restaurant) || null;
-      // Ladder rung 1+2 resolved server-side (mig 172): unless the admin's depth knob
-      // reaches 'tablet', the tri-state ships as 'off' — the client needs zero ladder
-      // logic and a stale manager grant can't surface the menu (same server-resolution
-      // trick as overlayUserPerms). Applied AFTER the per-user overlay on purpose.
+      // KOT ▾ module rung resolved server-side from the settings row itself (canonical
+      // ladder, mig 177 — no extra query): when the module isn't effective the tri-state
+      // ships 'off', so the client needs zero ladder logic and a stale manager grant
+      // can't surface the menu (same server-resolution trick as overlayUserPerms).
+      // Applied AFTER the per-user overlay on purpose. table_ops_tablet_allowed is the
+      // synthetic client flag (like banquet_allowed): module off = no dead UI/X-ray zone.
       const setOut = overlayUserPerms(must(settings), g.user);
-      const tOpsOk = tableOpsDepth(restRow?.owner_entitlements) === "tablet";
       if (setOut) {
+        const tOpsOk = tableOpsEffectiveFromRow(setOut);
         if (!tOpsOk) setOut.tablet_table_ops = "off";
-        // Synthetic client flag (like banquet_allowed): does the KOT menu exist for the
-        // tablet AT ALL here? Below 'tablet' depth the panel shows no dead UI/X-ray zone.
         setOut.table_ops_tablet_allowed = tOpsOk;
       }
-      if (restRow) delete restRow.owner_entitlements;
       const body: Record<string, unknown> = {
         ...summary,
         // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
         settings: setOut, categories: must(categories),
-        restaurant: restRow,
+        restaurant: must(restaurant) || null,
       };
       // Only attach dishes on a FULL load. On nomenu the key is ABSENT (not []), so the client
       // can tell "menu not sent, keep the cached one" apart from "menu is genuinely empty".
@@ -295,25 +294,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid).order("created_at"),
         // THIS restaurant's identity, so the tablet header shows which restaurant the
         // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
-        // owner_entitlements rides along for the ladder depth check; stripped before send.
-        sb.from("restaurants").select("id, slug, name, logo_text, accent_color, owner_entitlements").eq("id", rid).maybeSingle(),
+        sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
       ]);
-      const restRowSt = must(restaurant) || null;
-      // Same server-side ladder resolution as /summary: below 'tablet' depth the
-      // tri-state ships 'off', so the KOT menu can never render (mig 172).
+      // Same server-side KOT-menu module resolution as /summary (canonical ladder, mig 177).
       const setSt = overlayUserPerms(must(settings), g.user);
-      const tOpsOkSt = tableOpsDepth(restRowSt?.owner_entitlements) === "tablet";
       if (setSt) {
+        const tOpsOkSt = tableOpsEffectiveFromRow(setSt);
         if (!tOpsOkSt) setSt.tablet_table_ops = "off";
         setSt.table_ops_tablet_allowed = tOpsOkSt; // synthetic flag, see /summary
       }
-      if (restRowSt) delete restRowSt.owner_entitlements;
       return ok({
         // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
         settings: setSt, sessions: must(sessions), members: must(members),
         orders: live.orders, items: live.items, calls: must(calls), dishes: must(dishes),
         categories: must(categories), requests: must(requests),
-        restaurant: restRowSt,
+        restaurant: must(restaurant) || null,
       });
     }
     return err("unknown GET endpoint", 404);

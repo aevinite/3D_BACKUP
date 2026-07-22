@@ -21,8 +21,9 @@ const MANAGER_POWERS: [string, string][] = [
   // Keep in sync with MANAGER_POWER_FLAGS in lib/ownerEntitlements.ts — these two were
   // missing, so the admin couldn't gate them at all (audit 2026-07-08).
   ["edit_settings", "Edit settings"], ["view_ratings", "See & handle ratings"],
-  // Table types + khata module (mig 166) · banquet rung (mig 167, backfilled ON).
-  ["table_tags", "Mark table types + on-the-house"], ["khata", "Pay later (khata) book"], ["banquet", "Banquet billing"],
+  // Table types + khata module (mig 166) · banquet rung (mig 167, backfilled ON) ·
+  // KOT ▾ menu (migs 172-177, defaults OFF).
+  ["table_tags", "Mark table types + on-the-house"], ["khata", "Pay later (khata) book"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT operations"],
 ];
 // Owner-panel SECTIONS the admin can remove per restaurant (mig 133). Off = the
 // section disappears from the real owner's panel (admin act-as still sees it, tinted).
@@ -40,13 +41,9 @@ const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], 
 const LADDER_MODULES: { app: string; transfer: string; label: string; hint: string }[] = [
   { app: "table_tags_allowed", transfer: "table_tags_owner_control", label: "Table types (VIP / Family / Guest) + Khata", hint: "Special table marks, on-the-house settle, and the pay-later book." },
   { app: "banquet_allowed", transfer: "banquet_owner_control", label: "Banquet billing", hint: "Fixed-plate banquet bills (per-plate menu, bill-only)." },
+  { app: "table_ops_allowed", transfer: "table_ops_owner_control", label: "Table & KOT operations (KOT ▾ menu)", hint: "Change table, merge tables, move a KOT or a single dish, split the bill, reprint a KOT." },
 ];
 const TRI: [string, string][] = [["off", "Off"], ["on", "On"], ["pin", "On · PIN"]];
-// The KOT ▾ menu's single admin knob (mig 164): feature on/off AND how far down the
-// ladder it may go. Each deeper rung still needs the rung above it to grant it on.
-const TABLE_OPS_DEPTHS: [string, string][] = [
-  ["off", "Off (nobody)"], ["owner", "Owner panel only"], ["manager", "Owner + Manager"], ["tablet", "Owner + Manager + Tablet"],
-];
 
 // Small pure UI atoms — hoisted to module scope (defining them inside the page
 // body recreated them every render; the react-hooks/static-components lint
@@ -93,7 +90,6 @@ export default function AccessPage() {
   const [owner, setOwner] = useState<Record<string, boolean>>({});
   const [tablet, setTablet] = useState<Record<string, string>>({});
   const [ladder, setLadder] = useState<Record<string, boolean>>({}); // module switches (access route `features`, mig 166)
-  const [tableOpsDepth, setTableOpsDepth] = useState<string>("off"); // KOT ▾ menu depth knob (mig 164→167)
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -145,7 +141,6 @@ export default function AccessPage() {
       setOwner(a.owner || {});
       setTablet(a.tablet || {});
       setLadder(a.features || {});
-      setTableOpsDepth(a.tableOpsDepth || "off");
       setStaff((s.staff || []).filter((u: Staff) => u.restaurant_id === id && u.role !== "owner"));
     } catch { setLoadErr(true); }
     finally { setLoading(false); }
@@ -183,11 +178,6 @@ export default function AccessPage() {
   const saveOwner = async (key: string, value: boolean) => {
     setOwner((x) => ({ ...x, [key]: value }));
     const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, owner: { [key]: value } }) });
-    if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
-  };
-  const saveTableOpsDepth = async (value: string) => {
-    setTableOpsDepth(value);
-    const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, tableOpsDepth: value }) });
     if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
   };
   const saveTablet = async (key: string, value: string) => {
@@ -272,22 +262,7 @@ export default function AccessPage() {
               );
             })}
           </Card>
-          <Card id="ac-table-ops" title="Table & KOT operations (KOT menu)"
-            hint="The KOT ▾ menu on a table: change table, merge tables, move a KOT or a single dish, split the bill. ONE knob sets whether the feature exists and how deep it may go; each deeper rung still needs the rung above to switch it on (owner grants the manager below; the MANAGER grants the tablet from their panel's Access settings — or you can flip it in the tablet card).">
-            <Row label="Who may have it">
-              <select value={tableOpsDepth} onChange={(e) => saveTableOpsDepth(e.target.value)}
-                style={{ padding: "9px 10px", borderRadius: 8, border: "1px solid var(--ac-line,#d8cdb8)", background: "var(--ac-card,#fff)", color: "inherit", fontSize: 13.5, cursor: "pointer" }}>
-                {TABLE_OPS_DEPTHS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </Row>
-            <Row label="Granted to managers (owner's rung)">
-              <span style={{ opacity: ["manager", "tablet"].includes(tableOpsDepth) ? 1 : 0.45 }}
-                title={["manager", "tablet"].includes(tableOpsDepth) ? "What the owner granted their managers" : "Raise the depth to Owner + Manager first"}>
-                <Toggle on={manager.table_ops === true} onChange={(v) => saveManager("table_ops", v)} />
-              </span>
-            </Row>
-          </Card>
-          <Card id="ac-tablet" title="Tablet (waiter) billing" hint="What the waiter tablet may do to a bill. 'On · PIN' requires a manager PIN each time. 'Table & KOT operations' only takes effect when its ladder knob above reaches Owner + Manager + Tablet.">
+          <Card id="ac-tablet" title="Tablet (waiter) billing" hint="What the waiter tablet may do to a bill. 'On · PIN' requires a manager PIN each time. 'Table & KOT operations' only takes effect while its module (Modules card above) is on.">
             {TABLET_CAPS.map(([k, l]) => <Row key={k} label={l}><Tri val={tablet[k] || "off"} onChange={(v) => saveTablet(k, v)} /></Row>)}
           </Card>
           <Card title="Guest menu features" hint="Which features guests see on this restaurant's menu.">
