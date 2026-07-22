@@ -18,6 +18,7 @@ import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { isTableTag, tableTagsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableOpsDepth } from "@/lib/ownerEntitlements";
+import { effectiveTaxRate } from "@/lib/tax";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,12 @@ const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName 
 // managerPinGate as before.
 const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops"] as const;
 const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
+// The KOT ▾ menu's admin depth knob (mig 167): the tablet rung only exists at depth
+// 'tablet'. One tiny single-row select on a rare path (a merge/move tap, not a poll).
+async function tableOpsTabletAllowed(rid: string): Promise<boolean> {
+  const r = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data as { owner_entitlements?: unknown } | null;
+  return tableOpsDepth(r?.owner_entitlements) === "tablet";
+}
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   // Admin super-user (no staff cookie — the gate already vetted the admin token):
   // never blocked by a waiter tri-state. This is what makes the X-ray's tinted
@@ -669,6 +676,61 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(data);
     }
 
+    // sessions/:id/merge — MERGE this party into an OCCUPIED table (one bill). Part of
+    // the KOT ▾ menu: ladder-gated by the admin depth knob + the manager's tri-state
+    // (tabletPerm handles off/pin/on + per-waiter overrides + the admin bypass).
+    if (a === "sessions" && c === "merge") {
+      if (!(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      const gm = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gm.allow) return gm.resp;
+      const to = String((body && body.to) || "").trim();
+      if (!/^\d+$/.test(to)) return err("valid target table required");
+      const mtc2 = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const tc2 = Number((mtc2.data as { table_count?: number } | null)?.table_count) || 0;
+      if (tc2 > 0 && (Number(to) < 1 || Number(to) > tc2)) return err(`Table ${to} doesn't exist (this place has ${tc2} tables).`, 400);
+      // Session ownership is enforced INSIDE the RPC via p_rid (returns no_session otherwise).
+      const { data: mg, error: mgErr } = await sb.rpc("lfh_staff_merge_tables", { p_session: b, p_to: to, p_rid: rid });
+      if (mgErr) throw new Error(mgErr.message);
+      if (mg && (mg as any).ok === false) {
+        const reason = (mg as any).reason;
+        const msg = reason === "target_not_open" ? "That table has no party — use Move table instead."
+          : reason === "session_closed" ? "This table is already closed — nothing to merge."
+          : reason === "source_invoiced" ? "This bill is already invoiced — a manager must void it before merging."
+          : reason === "target_invoiced" ? `Table ${to}'s bill is already invoiced — a manager must void it before merging.`
+          : reason === "same_table" ? "That's the same table."
+          : "Couldn't merge: " + (reason || "refused");
+        return err(msg, 409);
+      }
+      await log("table_merge", { table_number: to, detail: `T${(mg as any).from} → T${to} (one bill)${byNote(gm)}`, device_id: dev });
+      return ok(mg);
+    }
+
+    // order-items/:id/move — move ONE dish line to another table's bill (KOT ▾ menu).
+    // Same ladder gate as merge; the RPC (mig 170) reprices both KOTs server-side.
+    if (a === "order-items" && c === "move") {
+      if (!(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      const gi = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gi.allow) return gi.resp;
+      const to = String((body && body.to) || "").trim();
+      if (!/^\d+$/.test(to)) return err("valid target table required");
+      const mtc3 = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const tc3 = Number((mtc3.data as { table_count?: number } | null)?.table_count) || 0;
+      if (tc3 > 0 && (Number(to) < 1 || Number(to) > tc3)) return err(`Table ${to} doesn't exist (this place has ${tc3} tables).`, 400);
+      const { data: im, error: imErr } = await sb.rpc("lfh_staff_move_order_item", { p_item: b, p_to: to, p_rid: rid });
+      if (imErr) throw new Error(imErr.message);
+      if (im && (im as any).ok === false) {
+        const reason = (im as any).reason;
+        const msg = reason === "order_paid" ? "Won't move a dish off a PAID bill."
+          : reason === "item_not_found" ? "That dish is no longer on the order."
+          : reason === "order_cancelled" ? "This order was cancelled — nothing to move."
+          : reason === "source_invoiced" ? "This bill is already invoiced — a manager must void it before moving a dish off it."
+          : reason === "target_invoiced" ? `Table ${to}'s bill is already invoiced — a manager must void it first.`
+          : reason === "same_table" ? "That dish is already on that table."
+          : "Couldn't move the dish: " + (reason || "refused");
+        return err(msg, 409);
+      }
+      await log("order_item_move", { table_number: to, detail: `dish → table ${to} (new KOT)${byNote(gi)}`, device_id: dev });
+      return ok(im);
+    }
+
     // items/:id/status — advance ONE dish (received→preparing→served) from the
     // tablet, then roll the parent order's overall status up. Mirrors the kitchen
     // endpoint exactly so kitchen + tablet stay perfectly consistent.
@@ -908,7 +970,36 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // in the payment-method breakdown. paid_at starts the 30-min "restore to floor" grace
       // window (migration 112 + the editor's PATCH /orders handler, which enforces + clears it).
       const payUpdate: Record<string, unknown> = { payment_status: "paid", paid_at: new Date().toISOString() };
-      if (body && body.payment_method !== undefined) {
+      // SPLIT settle (KOT ▾ menu, mig 171): several payment legs against the one bill.
+      // Ladder-gated on top of tablet_mark_paid; Σ legs is re-checked server-side.
+      const splits = Array.isArray(body?.splits) ? body.splits : null;
+      if (splits) {
+        if (!(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+        const gs = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gs.allow) return gs.resp;
+        if (splits.length < 2 || splits.length > 12) return err("Give at least two split shares (max 12).");
+        for (const s of splits) {
+          if (!(Number(s?.amount) > 0)) return err("Every split share needs an amount above zero.");
+          if (!PAYMENT_METHODS.includes(s?.method)) return err("invalid payment method in a split share");
+        }
+        let dq = sb.from("orders").select("id,total,discount,session_id")
+          .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
+        dq = openSess ? dq.eq("session_id", openSess.id) : dq.eq("table_number", t).eq("archived", false);
+        const drows = (must(await dq.limit(200)) as { id: string; total: number; discount: number; session_id: string | null }[]) || [];
+        const sidSp = openSess?.id || drows.find((o) => o.session_id)?.session_id;
+        if (!drows.length || !sidSp) return err("This table has no live bill to split.", 409);
+        const setSp = (await sb.from("settings").select("tax_components, tax_rate").eq("restaurant_id", rid).maybeSingle()).data || {};
+        const rateSp = effectiveTaxRate(setSp);
+        const dueSp = drows.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rateSp), 0);
+        const sumSp = splits.reduce((s: number, x: { amount: number }) => s + Number(x.amount), 0);
+        if (Math.abs(sumSp - dueSp) > 0.02) return err(`The shares add up to ₹${sumSp.toFixed(2)} but the bill due is ₹${dueSp.toFixed(2)} — they must match.`, 409);
+        const insSp = await sb.from("session_payments").insert(splits.map((s: { amount: number; method: string; note?: string }) => ({
+          session_id: sidSp, restaurant_id: rid, amount: Math.round(Number(s.amount) * 100) / 100,
+          method: String(s.method), note: String(s.note || "").slice(0, 200) || null,
+        })));
+        if (insSp.error) return err(insSp.error.message, 500);
+        payUpdate.payment_method = "Split";
+        payUpdate.payment_note = (`${splits.length}-way split: ` + splits.map((s: { amount: number; method: string }) => `₹${Number(s.amount).toFixed(0)} ${s.method}`).join(" + ")).slice(0, 200);
+      } else if (body && body.payment_method !== undefined) {
         if (!PAYMENT_METHODS.includes(body.payment_method)) return err("invalid payment_method");
         payUpdate.payment_method = body.payment_method;
         payUpdate.payment_note = String(body.payment_note || "").slice(0, 200) || null;
@@ -917,7 +1008,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t).eq("archived", false);
       const rows = must(await q.select());
-      await log("bill_paid", { table_number: t, device_id: dev, detail: body?.payment_method ? `via ${body.payment_method}` : undefined });
+      await log(splits ? "bill_split" : "bill_paid", { table_number: t, device_id: dev, detail: splits ? String(payUpdate.payment_note || "").slice(0, 120) : (body?.payment_method ? `via ${body.payment_method}` : undefined) });
       await maybeAutoSettle(openSess?.id, { panel: "tablet", deviceId: dev }); // auto close/restart if paid + all served
       return ok({ ok: true, count: rows.length });
     }
