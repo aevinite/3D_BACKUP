@@ -1414,7 +1414,7 @@ function renderSplitSettle(t) {
     dropLayer();
     actGated("POST", `/tables/${t}/pay`, { splits }, {
       message: "Enter a manager PIN to split-settle this bill.",
-      toast: `Paid in ${splits.length} parts 💳`,
+      onSuccess: () => offerPayUndo(t, { message: `Paid in ${splits.length} parts` }),
     });
   };
 }
@@ -1661,7 +1661,7 @@ function optimisticPay(t, method, note) {
       patchTileFromSlice(t);   // flip the UN-selected floor tile to paid/no-due now, not after reconcile
     },
     () => api("POST", `/tables/${t}/pay`, method ? { payment_method: method, payment_note: note || "" } : null),
-    () => offerPayUndo(t, method),
+    () => offerPayUndo(t, { message: method ? `Bill paid via ${method}` : "Bill paid" }),
   );
 }
 // Settle a table's bill respecting the manager's tablet_mark_paid setting: 'on' →
@@ -1671,7 +1671,7 @@ function optimisticPay(t, method, note) {
 function payBill(t, method, note) {
   const body = method ? { payment_method: method, payment_note: note || "" } : null;
   if (tperm("tablet_mark_paid") === "pin") {
-    actGated("POST", `/tables/${t}/pay`, body, { message: "Enter a manager PIN to mark this bill paid.", onSuccess: () => offerPayUndo(t, method) });
+    actGated("POST", `/tables/${t}/pay`, body, { message: "Enter a manager PIN to mark this bill paid.", onSuccess: () => offerPayUndo(t, { message: method ? `Bill paid via ${method}` : "Bill paid" }) });
   } else {
     optimisticPay(t, method, note);
   }
@@ -1681,16 +1681,20 @@ function payBill(t, method, note) {
 // (auto_table_action), an in-place undo can't cleanly reopen it, so we just confirm and
 // leave the heavier "restore to floor" to the manager panel. The undo goes through
 // actGated so a PIN-gated restaurant is asked for a PIN to reverse a payment too.
-function offerPayUndo(t, method) {
-  const msg = method ? `Bill paid via ${method}` : "Bill paid";
+// o = { message, icon } — lets the different settle flows (plain pay, split, on-the-house)
+// share ONE takeback. They all reverse through /tables/:t/unpay, which un-pays the open
+// session's just-settled orders (and strips split legs + the on-the-house 100% discount).
+function offerPayUndo(t, o) {
+  o = o || {};
+  const msg = o.message || "Bill paid";
   const stillOpen = !!sessionOf(t);
   if (stillOpen && window.LFH_UNDO) {
     LFH_UNDO.show({
       message: msg,
       sub: `Table ${t} · tap undo to reopen the bill`,
-      icon: "💳",
+      icon: o.icon || "💳",
       seconds: 5,
-      onUndo: () => actGated("POST", `/tables/${t}/unpay`, null, { message: "Enter a manager PIN to undo this payment.", toast: "Payment undone" }),
+      onUndo: () => actGated("POST", `/tables/${t}/unpay`, null, { message: "Enter a manager PIN to undo this settle.", toast: "Settle undone" }),
     });
   } else {
     toast(msg);
@@ -1779,7 +1783,7 @@ async function payBillWithMethod(t, a) {
   if (picked.special === "onhouse") {
     // actGated handles BOTH modes: direct when 'on', and the PIN round-trip when the
     // server answers "manager pin" ('pin' mode) — same as every other gated action.
-    actGated("POST", `/tables/${t}/on-the-house`, {}, { message: "Enter a manager PIN to settle this bill on the house.", toast: "On the house 🏠 — settled at no charge" });
+    actGated("POST", `/tables/${t}/on-the-house`, {}, { message: "Enter a manager PIN to settle this bill on the house.", onSuccess: () => offerPayUndo(t, { message: "On the house — settled free", icon: "🏠" }) });
     return;
   }
   if (picked.special === "khata") { await tabletKhataFlow(t, a.due); return; }
