@@ -12,6 +12,13 @@ import { USER_COOKIE, userFromCookie, hashSecret, verifySecret } from "@/lib/use
 
 export const dynamic = "force-dynamic";
 
+// The laddered modules an admin can hand to an owner (…_owner_control). The PATCH
+// below only accepts these keys, and only while the transfer is on.
+const MODULE_DEFS = [
+  { key: "table_tags", label: "Table types (VIP / Family / Guest) + pay later", allowed: "table_tags_allowed", control: "table_tags_owner_control", enabled: "table_tags_enabled" },
+  { key: "banquet", label: "Banquet billing", allowed: "banquet_allowed", control: "banquet_owner_control", enabled: "banquet_enabled" },
+] as const;
+
 export async function GET(req: NextRequest) {
   const scope = await ownerScope(req);
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -37,20 +44,25 @@ export async function GET(req: NextRequest) {
   // restaurant without the transfer never appears here (admin keeps the switch).
   const modIds = scope.all ? restaurants.map((r) => r.id) : scope.ids;
   let modules: { restaurant_id: string; name: string; key: string; label: string; enabled: boolean }[] = [];
+  // One row per (restaurant, transferred module) — generalised for every laddered
+  // module (mig 166 table_tags, mig 167 banquet); add new modules to MODULE_DEFS.
   if (modIds.length) {
     const rows = (await sb.from("settings")
-      .select("restaurant_id, table_tags_allowed, table_tags_owner_control, table_tags_enabled")
+      .select("restaurant_id, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled")
       .in("restaurant_id", modIds).limit(200)).data || [];
     const nameOf = new Map(restaurants.map((r) => [r.id, r.name]));
-    modules = rows
-      .filter((s: Record<string, unknown>) => s.table_tags_allowed === true && s.table_tags_owner_control === true)
-      .map((s: Record<string, unknown>) => ({
-        restaurant_id: String(s.restaurant_id),
-        name: nameOf.get(String(s.restaurant_id)) || "",
-        key: "table_tags",
-        label: "Table types (VIP / Family / Guest) + pay later",
-        enabled: s.table_tags_enabled !== false,
-      }));
+    for (const s of rows as Record<string, unknown>[]) {
+      for (const def of MODULE_DEFS) {
+        if (s[def.allowed] !== true || s[def.control] !== true) continue;
+        modules.push({
+          restaurant_id: String(s.restaurant_id),
+          name: nameOf.get(String(s.restaurant_id)) || "",
+          key: def.key,
+          label: def.label,
+          enabled: s[def.enabled] !== false,
+        });
+      }
+    }
   }
   return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules });
 }
@@ -62,17 +74,17 @@ export async function PATCH(req: NextRequest) {
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const rid = String(body?.restaurant_id || "");
-  const key = String(body?.key || "");
+  const def = MODULE_DEFS.find((d) => d.key === String(body?.key || ""));
   const enabled = body?.enabled;
-  if (!rid || key !== "table_tags" || typeof enabled !== "boolean")
+  if (!rid || !def || typeof enabled !== "boolean")
     return NextResponse.json({ error: "restaurant_id, key and enabled (true/false) required." }, { status: 400 });
   if (!scope.all && !scope.ids.includes(rid))
     return NextResponse.json({ error: "That restaurant isn't yours." }, { status: 403 });
   // The toggle only works while the admin has transferred control (and the feature exists).
-  const s = (await sb.from("settings").select("table_tags_allowed, table_tags_owner_control").eq("restaurant_id", rid).maybeSingle()).data as Record<string, boolean> | null;
-  if (!s?.table_tags_allowed) return NextResponse.json({ error: "This feature isn't enabled for that restaurant." }, { status: 403 });
-  if (!s.table_tags_owner_control) return NextResponse.json({ error: "The admin hasn't handed you this switch." }, { status: 403 });
-  const { error } = await sb.from("settings").update({ table_tags_enabled: enabled }).eq("restaurant_id", rid);
+  const s = (await sb.from("settings").select(`${def.allowed}, ${def.control}`).eq("restaurant_id", rid).maybeSingle()).data as Record<string, boolean> | null;
+  if (!s?.[def.allowed]) return NextResponse.json({ error: "This feature isn't enabled for that restaurant." }, { status: 403 });
+  if (!s[def.control]) return NextResponse.json({ error: "The admin hasn't handed you this switch." }, { status: 403 });
+  const { error } = await sb.from("settings").update({ [def.enabled]: enabled }).eq("restaurant_id", rid);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

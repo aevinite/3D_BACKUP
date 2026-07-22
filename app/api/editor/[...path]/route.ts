@@ -24,7 +24,7 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
-import { isTableTag, tableTagsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -182,6 +182,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // above are the owner→manager rung, this is the admin(/owner) application rung.
       const lad = await tableTagsLadder(rid);
       if (!lad.effective) { effectivePowers.table_tags = false; effectivePowers.khata = false; }
+      const bq = await banquetLadder(rid);
+      if (!bq.effective) effectivePowers.banquet = false;
       return ok({
         actor,
         role: actor,
@@ -191,7 +193,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         managerPermissions: perms,
         effectivePowers,
         offByAdmin,
-        features: { table_tags: lad.effective, khata: lad.effective },
+        features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective },
       });
     }
 
@@ -200,10 +202,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // place RPC re-checks server-side anyway). Includes inactive rows so the
     // manager can toggle them back on.
     if (p === "banquet/items") {
-      const flags = await sb.from("settings").select("banquet_allowed").eq("restaurant_id", rid).maybeSingle();
-      if (!(flags.data as { banquet_allowed?: boolean } | null)?.banquet_allowed) {
-        return err("Banquet isn't enabled for this restaurant.", 403);
-      }
+      // Full ladder (mig 167): admin switch AND (owner's toggle when transferred)
+      // AND the owner->manager grant (backfilled true, so nothing changed by itself).
+      if (!(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
       const items = must(await sb.from("banquet_items")
         .select("id,title,price,unit,sort_order,active").eq("restaurant_id", rid)
         .order("sort_order").limit(200));
@@ -1077,10 +1079,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // entitlement is re-checked here (and again inside the place RPC) so a
     // restaurant without the module can't be driven even by a forged client.
     if (a === "banquet") {
-      const flags = await sb.from("settings").select("banquet_allowed").eq("restaurant_id", rid).maybeSingle();
-      if (!(flags.data as { banquet_allowed?: boolean } | null)?.banquet_allowed) {
-        return err("Banquet isn't enabled for this restaurant.", 403);
-      }
+      // Full ladder (mig 167) — see the GET gate above; the place RPC still re-checks
+      // the admin switch inside SQL as the final backstop.
+      if (!(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
       // banquet/item-save — create/update one banquet line ({ id?, title, price, unit, active, sort_order })
       if (b === "item-save") {
         if (!(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the banquet menu");

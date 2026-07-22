@@ -16,7 +16,7 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { isTableTag, tableTagsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic";
 
@@ -225,8 +225,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (path.join("/") === "banquet-items") {
       const flags = await sb.from("settings").select("banquet_allowed, tablet_banquet").eq("restaurant_id", rid).maybeSingle();
       const f = overlayUserPerms((flags.data as Record<string, any> | null), g.user);
-      if (!f?.banquet_allowed) return err("Banquet billing isn't enabled for this restaurant.", 403);
-      if ((f.tablet_banquet || "off") === "off" && g.user) return err("Banquet billing is off for the tablet — ask a manager.", 403);
+      // Full ladder (mig 167): the owner's toggle counts too, not just the admin switch.
+      if (!(await banquetLadder(rid)).effective) return err("Banquet billing isn't enabled for this restaurant.", 403);
+      if ((f?.tablet_banquet || "off") === "off" && g.user) return err("Banquet billing is off for the tablet — ask a manager.", 403);
       const items = must(await sb.from("banquet_items")
         .select("id,title,price,unit,sort_order,active").eq("restaurant_id", rid).eq("active", true)
         .order("sort_order").limit(200));
@@ -410,6 +411,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // tablet needs the tablet_banquet capability (tri-state + per-user override,
     // same gate family as discount/mark-paid — 'pin' rides the actGated PIN flow).
     if (a === "banquet" && b === "place") {
+      // Full ladder (mig 167): owner's toggle counts; the RPC re-checks the admin
+      // switch in SQL as the backstop.
+      if (!(await banquetLadder(rid)).effective) return err("Banquet billing isn't enabled for this restaurant.", 403);
       const gate2 = await tabletPerm("tablet_banquet", req, body, rid, actor);
       if (!gate2.allow) return gate2.resp;
       // Table is OPTIONAL (mig 132): blank → a standalone walk-in-style bill the

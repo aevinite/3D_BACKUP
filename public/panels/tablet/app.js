@@ -2805,7 +2805,7 @@ function closeXrayZones() {
 function renderXrayRibbon() {
   let rb = document.getElementById("xrayRibbon");
   if (!tHigher()) { if (rb) rb.remove(); return; }
-  const zones = XRAY_CAPS.filter((c) => (c.key === "tablet_banquet" ? !!(state.data.settings || {}).banquet_allowed : true) && tperm(c.key) === "off");
+  const zones = XRAY_CAPS.filter((c) => (c.key === "tablet_banquet" ? ((state.data.settings || {}).banquet_allowed === true && ((state.data.settings || {}).banquet_owner_control !== true || (state.data.settings || {}).banquet_enabled !== false)) : true) && tperm(c.key) === "off");
   const rest = (state.data.restaurant && state.data.restaurant.name) || "";
   const sig = `${rest}|${zones.map((z) => z.key).join(",")}`; // skip identical rebuilds
   if (rb && rb.dataset.sig === sig) return;
@@ -2950,7 +2950,8 @@ window.addEventListener("online", () => load().catch(() => {}));
       // Ladder rule for the banquet entry too: hidden from the real waiter when its
       // tri-state is off, tinted for the admin view. banquet_allowed (the admin
       // entitlement) still hides it for EVERYONE when the restaurant lacks the module.
-      const allowed = !!(state.data.settings || {}).banquet_allowed;
+      const sset = state.data.settings || {};
+      const allowed = sset.banquet_allowed === true && (sset.banquet_owner_control !== true || sset.banquet_enabled !== false);
       bqBtn.hidden = !(allowed && tshow("tablet_banquet"));
       bqBtn.classList.toggle("xray-off", allowed && !!txray("tablet_banquet"));
     }
