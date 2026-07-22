@@ -683,3 +683,28 @@ body:has(.detail-pop) #tabletClose { display: none; }
 
 /* detail popup: open/closed status never collides with the pinned close X (audit 2026-07-08) */
 .detail-pop .phead .live,.detail-pop .phead .off{ white-space:nowrap; }
+
+/* ── Special table types (VIP / Family / Owner's Guest) — mig 166 ──────────────
+   APPROVED design (docs/superpowers/specs/2026-07-22-table-tags-mockup.html):
+   coloured border + rotated corner ribbon + diagonal-stripe/radial tint + pill
+   badge, layered OVER the state look. VIP purple+gold · Family crimson · Guest platinum. */
+:root { --tag-vip: #8b5cf6; --tag-family: #e11d48; --tag-guest: #aab4c4; }
+.tile.t-tag { overflow: hidden; position: relative; border-width: 2px; }
+.tile.t-tag::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background:
+    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--tagc) 30%, transparent), transparent 55%),
+    repeating-linear-gradient(-45deg, color-mix(in srgb, var(--tagc) 9%, transparent) 0 10px, transparent 10px 22px); }
+.tile.t-tag { border-color: color-mix(in srgb, var(--tagc) 80%, transparent); box-shadow: 0 0 16px color-mix(in srgb, var(--tagc) 22%, transparent); }
+.tile.tag-vip    { --tagc: var(--tag-vip); border-color: #d4a574; box-shadow: 0 0 18px color-mix(in srgb, var(--tag-vip) 30%, transparent); }
+.tile.tag-family { --tagc: var(--tag-family); }
+.tile.tag-guest  { --tagc: var(--tag-guest); }
+.t-ribbon { position: absolute; top: 8px; right: -32px; transform: rotate(38deg); z-index: 2;
+  background: var(--tagc); color: #fff; font-size: 9.5px; font-weight: 800; letter-spacing: .6px;
+  padding: 3px 34px; text-transform: uppercase; box-shadow: 0 2px 8px rgba(0,0,0,.45); white-space: nowrap; pointer-events: none; }
+.tile.tag-vip .t-ribbon { color: #2a1d0c; background: linear-gradient(90deg, #e8b884, #f2d29a); }
+.tile.tag-guest .t-ribbon { color: #1c2230; background: linear-gradient(90deg, #e5eaf2, #9aa6ba); }
+.t-tagbadge { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 4px; align-self: flex-start;
+  margin: 2px 0; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--tagc) 26%, transparent); color: color-mix(in srgb, var(--tagc) 65%, #fff);
+  border: 1px solid color-mix(in srgb, var(--tagc) 55%, transparent); }
+.tile.t-tag > * { position: relative; z-index: 1; }
