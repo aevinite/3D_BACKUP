@@ -6266,15 +6266,20 @@ function openShiftPicker(t, sess) {
 // ONE menu on the table detail for every table/bill operation. Ladder-gated (mig 172):
 // admin depth knob → owner grants manager → (tablet has its own rung). Ops arrive in
 // phases — the menu lists only what's built, so it grows without UI rework.
-// Whether to render the KOT ▾ menu for THIS viewer. The MODULE must be effective
-// (whoami.features.table_ops — the canonical ladder: admin switch AND, when
-// transferred, the owner's toggle); a real manager additionally needs the owner's
-// table_ops grant (effectivePowers), while admin/owner higherView sees it tinted by
-// the X-ray when the grant is off. Before whoami resolves we render the plain Shift
-// fallback — never a button that would 403.
+// Whether to render the KOT ▾ menu for THIS viewer — the ADMIN X-RAY rule (owner,
+// 2026-07-22): from the admin console EVERY feature renders, greyed (xray-off tint via
+// XRAY_CONTROLS) when it's not actually on for the real staff, and it genuinely works
+// when the admin taps it (the server's tableOpsGate lets the admin super-user through).
+// Everyone else follows the ladder: the MODULE must be effective (whoami
+// features.table_ops — admin switch AND, when transferred, the owner's toggle); a real
+// manager additionally needs the owner's table_ops grant (effectivePowers), while the
+// OWNER's higherView sees it tinted when the manager grant is off. Before whoami
+// resolves we render the plain Shift fallback — never a button that would 403.
 function tableOpsOn() {
   const w = XRAY_WHO;
-  if (!w || !(w.features && w.features.table_ops)) return false;
+  if (!w) return false;
+  if (w.actor === "admin") return true; // admin view: always visible, tinted when off-for-staff
+  if (!(w.features && w.features.table_ops)) return false; // module off: gone for owner + manager
   return w.higherView ? true : !!(w.effectivePowers && w.effectivePowers.table_ops);
 }
 

@@ -63,12 +63,16 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
 
 // Gate for the KOT ▾ menu (Table & KOT operations — canonical module ladder, mig 177).
+// ADMIN X-RAY rule (owner, 2026-07-22): the admin super-user (no staff cookie) passes
+// every rung — from the admin console the greyed-out button must genuinely work, the
+// same bypass tabletPerm gives the admin. Everyone else follows the ladder:
 // Rung 1: the module must be effective (admin's allowed switch AND, when transferred,
-// the owner's toggle) — this stops EVERYONE, owner and admin view included.
+// the owner's toggle) — stops the OWNER and managers alike (the admin caps the reach).
 // Rung 2: a plain manager additionally needs the owner's table_ops grant (managerCan;
-// owner/admin pass that rung automatically). Returns a response to short-circuit, or
+// the owner passes that rung automatically). Returns a response to short-circuit, or
 // null to proceed.
 async function tableOpsGate(g: { user: StaffUser | null }, rid: string): Promise<NextResponse | null> {
+  if (!g.user) return null; // admin super-user: X-ray honesty — visible = usable
   if (!(await tableOpsLadder(rid)).effective) return err("Table & KOT operations aren't enabled for this restaurant.", 403);
   if (!(await managerCan(g, rid, "table_ops"))) return permDenied("use table & KOT operations");
   return null;

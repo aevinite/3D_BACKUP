@@ -24,6 +24,36 @@ Per laddered module the admin has exactly TWO switches (settings columns):
 **Effective = allowed AND (NOT owner_control OR enabled).** Server helper:
 `moduleLadder()` in `lib/tableTags.ts`.
 
+## The ADMIN X-RAY rule (owner, 2026-07-22 — apply to EVERY feature)
+
+Two different worlds, never mixed up:
+
+- **Coming from the ADMIN console (act-as view):** EVERY feature renders. When it's
+  not actually on for the real staff (module off / grant off / tri-state off), it
+  shows **GREYED (amber x-ray tint)** — never hidden — and it must **genuinely work**
+  when the admin taps it (server bypass for the admin super-user; a tinted button
+  that 403s is a lie). This is what lets the admin see exactly what staff experience
+  while keeping full power.
+- **Coming from a real LOGIN (owner / manager / waiter):** the ladder decides — they
+  simply **see it or don't**. The OWNER's higher-view inside the manager panel tints
+  grant-level switches (they can use those), but a module the admin turned off is
+  gone for the owner too (the admin caps the reach).
+
+Implementations: manager panel `XRAY_CONTROLS` + `applyHierarchyView` (tint) with the
+feature's `xxxOn()` check letting `actor === "admin"` through; tablet `tshow()/txray()`
+(higherView is admin-only there on purpose); server gates skip the module rung for the
+admin super-user (`!g.user` in the editor API, `!actor` in the tablet API) — the same
+bypass `tabletPerm`/`managerPinGate` always gave the admin.
+
+**Status per feature (flag + fix any feature that doesn't comply):**
+- ✅ table_ops (KOT ▾ menu) — admin always sees it (tinted when off), server bypasses
+  the module rung for the admin, real logins follow the ladder.
+- ✅ grant-level powers (discounts, void, ratings…) — tinted + usable for higher roles.
+- ⚠️ **table_tags / khata / banquet at MODULE-off currently hide from the admin view
+  too** (whoami zeroes their powers with no admin exception, and the banquet/tags
+  endpoints 403 the admin when the module is off). Grant-level tinting works; the
+  module rung doesn't yet follow this rule — bring them in line on the next touch.
+
 ## The defaults rule (apply to EVERY new feature, everywhere)
 
 - **Brand-new module:** `allowed` OFF · `owner_control` OFF · `enabled` ON (so a later
