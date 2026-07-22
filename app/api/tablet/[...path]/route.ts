@@ -631,7 +631,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const status = body && body.status;
       if (!["received", "preparing", "ready", "served"].includes(status)) return err("invalid status");
       const patch: any = { status };
-      if (status === "served") patch.served_at = nowIso();
+      // Serving stamps served_at; sending a dish BACK (undo a mis-tap) must clear it
+      // again, or the row keeps a stale "served at" time (owner undo bar, 2026-07-22).
+      patch.served_at = status === "served" ? nowIso() : null;
       // Only order_id + session_id are needed below; the client discards the body → no full row.
       // .eq(restaurant_id, rid) on every by-id write: sb is service-role (RLS bypassed), so
       // this is the only tenant boundary — stops a foreign dish/order id being advanced.
@@ -890,6 +892,31 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const rows = must(await q.select());
       await log("bill_paid", { table_number: t, device_id: dev, detail: body?.payment_method ? `via ${body.payment_method}` : undefined });
       await maybeAutoSettle(openSess?.id, { panel: "tablet", deviceId: dev }); // auto close/restart if paid + all served
+      return ok({ ok: true, count: rows.length });
+    }
+
+    // tables/:t/unpay — take back a just-made "Mark paid" (owner undo bar, 2026-07-22).
+    // Reverts the CURRENT open session's paid orders back to pending within the same
+    // 30-minute grace window the manager's "restore to floor" uses (migration 112), and
+    // clears paid_at. Deliberately narrow: it will NOT reopen a session that already
+    // auto-closed (the client only offers the undo while the table is still open) — that
+    // heavier restore stays the manager panel's job. Gated by the same tablet_mark_paid
+    // permission as pay, so a mistaken revert is no easier than a mistaken payment.
+    if (a === "tables" && c === "unpay") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      const g = await tabletPerm("tablet_mark_paid", req, body, rid, actor); if (!g.allow) return g.resp;
+      const openSess = (await sb.from("sessions").select("id")
+        .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
+        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+      if (!openSess) return err("This table's bill is already closed — reopen it from the manager panel.", 409);
+      const GRACE_MS = 30 * 60 * 1000;
+      const cutoff = new Date(Date.now() - GRACE_MS).toISOString();
+      // Only revert orders paid within the grace window; older paid orders are left alone.
+      const rows = must(await sb.from("orders").update({ payment_status: "pending", paid_at: null })
+        .eq("session_id", openSess.id).eq("restaurant_id", rid)
+        .eq("payment_status", "paid").gte("paid_at", cutoff).select("id"));
+      await log("payment_revert", { table_number: t, device_id: dev, detail: "undo mark-paid (within grace)" });
       return ok({ ok: true, count: rows.length });
     }
 
