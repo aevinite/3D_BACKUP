@@ -1421,7 +1421,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!["received", "preparing", "served"].includes(status)) return err("invalid status");
        
       const patch: any = { status };
-      if (status === "served") patch.served_at = nowIso();
+      // Serving stamps served_at; an undo that sends the dish back must clear it
+      // again so the row never keeps a stale served time (owner undo bar, 2026-07-22).
+      patch.served_at = status === "served" ? nowIso() : null;
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select());
       const item = updated[0];
       if (item && item.order_id) {

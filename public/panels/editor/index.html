@@ -100,8 +100,10 @@
   <!-- Shared "Report an issue" widget (subject + photo + live voice note). Must load
        BEFORE app.js so openIssueModal() can call it. -->
   <script src="/panels/issue-raise.js?v=1"></script>
+  <!-- undobar: the shared "take it back" bar after a Serve/Settle mis-tap. -->
+  <script src="/panels/undobar.js?v=1"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=20260721print3"></script>
+  <script src="/panels/editor/app.js?v=20260722undo1"></script>
 </body>
 </html>

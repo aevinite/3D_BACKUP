@@ -2179,7 +2179,10 @@ async function setOrderPayment(id, paid, opts = {}) {
   // (the server logs it). Routine "mark unpaid" on a never-paid order is free.
   let revertReason = null;
   if (!paid && prev === "paid") {
-    revertReason = ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true })) || "").trim();
+    // The undo bar passes a canned reason so a mis-tap can be taken back in one tap
+    // without a prompt; it's still logged as a payment_revert for the audit trail.
+    revertReason = (opts.revertReason || "").trim()
+      || ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true })) || "").trim();
     if (!revertReason) { toast("Revert cancelled — a reason is required.", "err"); return false; }
   }
   if (o) o.payment_status = paid ? "paid" : "pending"; // flip the screen NOW
@@ -2192,9 +2195,13 @@ async function setOrderPayment(id, paid, opts = {}) {
       ...(revertReason ? { revert_reason: revertReason } : {}),
       ...(paid && opts.method ? { payment_method: opts.method, payment_note: opts.note || "" } : {}),
     });
-    // The bulk "settle whole table" path passes quiet:true so we toast once at the
-    // end instead of once per order.
-    if (!opts.quiet) toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
+    // The bulk "settle whole table" path passes quiet:true so we toast/undo once at the
+    // end instead of once per order. For a single-order pay, the undo bar is the
+    // confirmation + a few-second takeback (owner, 2026-07-22).
+    if (!opts.quiet) {
+      if (paid && window.LFH_UNDO) LFH_UNDO.show({ message: "Marked paid 💳", seconds: 5, onUndo: () => editorUndoPay([id]) });
+      else toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
+    }
     return true;
   } catch (e) {
     if (o && prev !== null) o.payment_status = prev;   // undo on failure
@@ -2317,10 +2324,29 @@ async function payOrdersWithMethod(orders, label) {
   // Best-effort — a tip failing to save must not undo a completed payment.
   if (paidIds.length && Number(picked.tip) > 0) { try { await api("POST", "/orders/" + paidIds[0] + "/tip", { amount: Number(picked.tip) }); } catch { /* tip is non-critical */ } }
   // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
-  if (okCount && !failCount) toast(skipped ? `Marked paid via ${picked.method} — ${skipped} new order still needs accepting.` : `Marked paid via ${picked.method} 💳`, "ok");
+  if (okCount && !failCount) {
+    const msg = skipped ? `Paid via ${picked.method} — ${skipped} new order still to accept` : `Marked paid via ${picked.method}`;
+    // The undo bar is the confirmation + a few-second takeback (owner, 2026-07-22). The
+    // revert goes through the SAME 30-min grace + audit-logged path as "restore to floor".
+    if (paidIds.length && window.LFH_UNDO) LFH_UNDO.show({ message: msg, seconds: 5, onUndo: () => editorUndoPay(paidIds) });
+    else toast(msg + " 💳", "ok");
+  }
   else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
   else toast("Couldn't settle the payment — check the order.", "err");
   return okCount > 0;
+}
+// Take back a just-made payment: revert each order we settled back to unpaid, within the
+// same 30-minute grace window the manual "restore to floor" uses, with a canned (still
+// logged) reason so no prompt interrupts the one-tap undo (owner undo bar, 2026-07-22).
+// Note: if paying auto-closed/archived the table (auto_table_action), this reverts payment
+// but the fuller un-archive stays the manual "Restore to floor" tool's job.
+async function editorUndoPay(paidIds) {
+  let n = 0;
+  for (const id of paidIds) {
+    if (await setOrderPayment(id, false, { skipConfirm: true, quiet: true, revertReason: "Undo — mis-tap (within grace)" })) n++;
+  }
+  await loadSessions();
+  toast(n ? "Payment undone" : "Couldn't undo — the 30-minute window may have passed.", n ? "ok" : "err");
 }
 
 // markTablePaid: settle the WHOLE table in one go — mark every unpaid (non-
@@ -4387,6 +4413,10 @@ async function itemStatus(id, status) {
   scheduleServeFlush();         // sets the guard so the poll won't repaint under the finger; reconciles after the last click
   try {
     await api("POST", "/items/" + id + "/status", { status });   // persist in the background
+    // Serving a dish is easy to mis-tap — offer a few-second takeback (owner, 2026-07-22).
+    if (status === "served" && prev && prev !== "served" && window.LFH_UNDO) {
+      LFH_UNDO.show({ message: `${(it && it.title) || "Dish"} served`, onUndo: () => editorUndoServe([{ kind: "session", id, prev }]) });
+    }
   } catch (e) {
     if (it && prev != null) { it.status = prev; refreshTableDetail(); } // revert the optimistic change on failure
     toast("Failed: " + e.message, "err");
@@ -6186,12 +6216,18 @@ function renderTablePanel() {
 
 // Advance ONE dish in a legacy order (items stored in the order's JSON).
 async function legacyItemStatus(orderId, index, status) {
+  const o0 = (state.data.orders || []).find((x) => x.id === orderId);
+  const prev = (o0 && Array.isArray(o0.items) && o0.items[index]) ? (o0.items[index].status || "received") : null;
+  const name = (o0 && Array.isArray(o0.items) && o0.items[index] && o0.items[index].title) || "Dish";
   try {
     await api("POST", "/orders/" + orderId + "/item", { index: Number(index), status }); // persist now
     const o = (state.data.orders || []).find((x) => x.id === orderId);                    // optimistic local update
     if (o && Array.isArray(o.items) && o.items[index]) o.items[index].status = status;
     refreshTableDetail();                                                                 // instant redraw from local state (modal OR in-panel detail)
     scheduleServeFlush();                                                                 // one real refresh after you stop clicking
+    if (status === "served" && prev && prev !== "served" && window.LFH_UNDO) {
+      LFH_UNDO.show({ message: `${name} served`, onUndo: () => editorUndoServe([{ kind: "legacy", orderId, idx: Number(index), prev }]) });
+    }
   } catch (e) { toast("Failed: " + e.message, "err"); }
 }
 
@@ -6208,14 +6244,53 @@ async function acceptOrder(orderId) {
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
 }
 // Serve every dish on an order at once → order complete. Optimistic + shielded.
+// Snapshot the dishes an order is about to serve (their prior status), so a mis-tapped
+// serve can be sent back exactly where each dish was (owner undo bar, 2026-07-22).
+// Works for both session order_items (id) and legacy JSON items (orderId + idx).
+function snapServable(o) {
+  return orderItemRows(o)
+    .filter((r) => r.status !== "served")
+    .map((r) => (r.kind === "session"
+      ? { kind: "session", id: r.id, prev: r.status }
+      : { kind: "legacy", orderId: r.orderId, idx: r.idx, prev: r.status }));
+}
+// Take back a serve: restore each dish's prior status locally + on the server, then
+// reconcile. The item-status endpoint only accepts received/preparing/served, so a dish
+// that was "ready" (cooked, not yet served) comes back as "preparing".
+async function editorUndoServe(snap) {
+  if (!snap || !snap.length) return;
+  const clamp = (s) => (s === "ready" ? "preparing" : (["received", "preparing", "served"].includes(s) ? s : "preparing"));
+  snap.forEach((s) => {
+    const to = clamp(s.prev);
+    if (s.kind === "session") { const it = (state.board.items || []).find((x) => x.id === s.id); if (it) it.status = to; }
+    else { const o = (state.data.orders || []).find((x) => x.id === s.orderId); if (o && Array.isArray(o.items) && o.items[s.idx]) o.items[s.idx].status = to; }
+  });
+  refreshTableDetail();
+  scheduleServeFlush();
+  try {
+    for (const s of snap) {
+      if (s.kind === "session") await api("POST", "/items/" + s.id + "/status", { status: clamp(s.prev) });
+      else await api("POST", "/orders/" + s.orderId + "/item", { index: s.idx, status: clamp(s.prev) });
+    }
+    await loadSessions();
+  } catch (e) { toast("Undo failed: " + e.message, "err"); await loadSessions(); }
+}
+
 async function serveAllOrder(orderId) {
   const o = (state.data.orders || []).find((x) => x.id === orderId);
+  const snap = o ? snapServable(o) : [];
   if (o) { o.status = "served"; flipOrderItems(o, null, "served"); opBegin(o.id); }
   floorOpsInFlight++;
   loadSessions(true); renderTablePanel();
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; if (o) opEnd(o.id); } };
-  try { await api("POST", "/orders/" + orderId + "/serve-all"); release(); await loadSessions(); toast("All items served", "ok"); }
+  try {
+    await api("POST", "/orders/" + orderId + "/serve-all"); release(); await loadSessions();
+    // The undo bar IS the confirmation now (message + a few-second takeback line),
+    // so it replaces the old plain "served" toast.
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: o ? `Table ${o.table_number} · all served` : "All items served", onUndo: () => editorUndoServe(snap) });
+    else toast("All items served", "ok");
+  }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
 }
 // Quick action: accept ALL new orders on a table in one tap. Used by BOTH the
@@ -6280,6 +6355,7 @@ async function serveAllOrders(t) {
   await ensureTableSlice(t); // see acceptTableOrders: the table may not be selected
   const orders = ordersForTable(t);
   if (!orders.length) return;
+  const snap = orders.flatMap((o) => snapServable(o));
   orders.forEach((o) => { o.status = "served"; flipOrderItems(o, null, "served"); opBegin(o.id); });
   floorOpsInFlight++;
   loadSessions(true);
@@ -6289,8 +6365,9 @@ async function serveAllOrders(t) {
   const release = () => { if (!released) { released = true; floorOpsInFlight--; orders.forEach((o) => opEnd(o.id)); } };
   try {
     for (const o of orders) await api("POST", "/orders/" + o.id + "/serve-all");
-    toast("All orders served", "ok");
     release(); await pollTables([String(t)]);
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: `Table ${t} · all served`, onUndo: () => editorUndoServe(snap) });
+    else toast("All orders served", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await pollTables([String(t)]); }
   finally { release(); }

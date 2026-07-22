@@ -197,7 +197,8 @@ async function actGated(method, path, body, opts = {}) {
     }
     if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: saved offline — skip the offline GET + the success toast
     await load();
-    if (opts.toast) toast(opts.toast);
+    if (typeof opts.onSuccess === "function") { try { opts.onSuccess(); } catch (e) {} }
+    else if (opts.toast) toast(opts.toast);
   } catch (e) {
     toast("Failed: " + e.message, false);
   }
@@ -1091,6 +1092,7 @@ async function advanceDish(id, cur, forceNext) {
   // the edit modal passes "preparing" to un-serve a dish); otherwise follow the forward flow.
   const next = forceNext || NEXT_STATUS[cur] || "preparing";
   const it = (state.data.items || []).find((x) => x.id === id);
+  const dishName = (it && (it.title || it.name)) || "Dish";
   if (it) it.status = next;            // optimistic — the pill flips instantly
   // #8: re-sync THIS table's slim summary tile from the slice so the floor counts + the tile's
   // "x/y served · ₹z due" meta update instantly too — before this, serving the last dish left
@@ -1103,7 +1105,14 @@ async function advanceDish(id, cur, forceNext) {
   if (!state.ordering) renderPanel();
   // Fire-and-forget; reconcile once after the taps stop (not per tap).
   api("POST", `/items/${id}/status`, { status: next })
-    .then(() => scheduleServeReconcile())
+    .then(() => {
+      scheduleServeReconcile();
+      // Only when this tap actually SERVED a dish (not an accept-to-cooking, and not
+      // the "send back to kitchen" un-serve which passes forceNext) offer a takeback.
+      if (next === "served" && cur !== "served" && window.LFH_UNDO) {
+        LFH_UNDO.show({ message: `${dishName} served`, onUndo: () => undoServe([{ id, prev: cur }]) });
+      }
+    })
     .catch((e) => { toast("Failed: " + e.message, false); load(); });
 }
 
@@ -1169,6 +1178,40 @@ function patchTileFromSlice(t) {
   state.summary = Object.assign({}, state.summary, { tiles });
 }
 
+// Take back a serve (owner undo bar, 2026-07-22). snap = [{ id, prev }] captured
+// BEFORE the dishes were flipped to "served". Restore each dish to its prior status
+// locally + on the server, recompute the parent orders, and reconcile from the truth.
+// Covers session order_items (the common path); legacy JSON-item rows have no per-dish
+// id so they aren't reverted here (they're vanishingly rare now).
+function undoServe(snap) {
+  if (!snap || !snap.length) return Promise.resolve();
+  const items = state.data.items || [];
+  const orderIds = new Set();
+  snap.forEach((s) => {
+    const it = items.find((x) => x.id === s.id);
+    if (it) { it.status = s.prev; orderIds.add(it.order_id); }
+  });
+  // Roll each touched order's coarse status back down, exactly like the server does.
+  const tables = new Set();
+  (state.data.orders || []).forEach((o) => {
+    if (!orderIds.has(o.id)) return;
+    const rows = items.filter((i) => i.order_id === o.id);
+    if (rows.length) {
+      const served = rows.filter((r) => r.status === "served").length;
+      const anyActive = rows.some((r) => ["preparing", "ready", "served"].includes(r.status));
+      o.status = served === rows.length ? "served" : anyActive ? "preparing" : "received";
+    }
+    tables.add(String(o.table_number));
+  });
+  tables.forEach((t) => patchTileFromSlice(t));
+  lastSig = boardSig(state);
+  renderFloor();
+  if (!state.ordering) renderPanel();
+  return Promise.all(snap.map((s) => api("POST", `/items/${s.id}/status`, { status: s.prev })))
+    .then(() => scheduleServeReconcile())
+    .catch((e) => { toast("Undo failed: " + e.message, false); load(); });
+}
+
 function flipOrders(orderIds, { from, to, orderStatus }) {
   const items = state.data.items || [];
   const touched = new Set();
@@ -1192,9 +1235,20 @@ function optimisticAccept(orderIds) {
 }
 function optimisticServeAll(orderIds) {
   if (!orderIds.length) return;
+  // Snapshot each not-yet-served dish's prior status BEFORE the flip, so "Serve all"
+  // can be taken back to exactly where each dish was (owner undo bar, 2026-07-22).
+  const snap = (state.data.items || [])
+    .filter((it) => orderIds.includes(it.order_id) && it.status !== "served")
+    .map((it) => ({ id: it.id, prev: it.status }));
   flipOrders(orderIds, { from: null, to: "served", orderStatus: "served" });
   Promise.all(orderIds.map((oid) => api("POST", `/orders/${oid}/serve-all`)))
-    .then(() => scheduleServeReconcile())
+    .then(() => {
+      scheduleServeReconcile();
+      if (snap.length && window.LFH_UNDO) {
+        const o = (state.data.orders || []).find((x) => x.id === orderIds[0]);
+        LFH_UNDO.show({ message: o ? `Table ${o.table_number} · all served` : "All served", onUndo: () => undoServe(snap) });
+      }
+    })
     .catch((e) => { toast("Failed: " + e.message, false); load(); });
 }
 
@@ -1287,15 +1341,17 @@ function renderMoveOrderTarget(t, orderId) {
 
 // Apply a local change, repaint instantly, then persist and reconcile from the
 // server. On failure we toast and reload so the screen can't lie.
-async function runOptimistic(mutate, fn) {
+async function runOptimistic(mutate, fn, onSuccess) {
   // Remember which table we were viewing: a shift optimistically repoints state.table to the
   // TARGET, so if the move is refused (target just got taken) we must snap back to the source
   // table — otherwise the waiter is left staring at the wrong, empty table. (audit 2026-07-08 round2)
   const prevTable = state.table;
+  let done = false;   // true only on a real ONLINE success (not queued, not failed)
   try {
     mutate(); renderFloor(); renderPanel();
     const r = await fn();
     if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: saved offline — not a failure, and load() would no-op
+    done = true;
   }
   // On failure the optimistic mutate() must be REVERTED by the reconciling load() below. But if the
   // write never reached the server (e.g. a 409 refusal — target already invoiced), the server state
@@ -1304,6 +1360,9 @@ async function runOptimistic(mutate, fn) {
   // load() to re-apply server truth and repaint immediately. (audit 2026-07-09)
   catch (e) { state.table = prevTable; lastSig = null; toast("Failed: " + e.message, false); }
   await load();   // load() already repaints if anything changed — no second render (that was the extra flash)
+  // Run the success hook AFTER reconcile, so it can read the freshly-loaded state
+  // (e.g. the settle-undo bar checks whether the table auto-closed on pay).
+  if (done && typeof onSuccess === "function") { try { onSuccess(); } catch (e) {} }
 }
 
 const act = async (fn) => {
@@ -1413,6 +1472,7 @@ function optimisticPay(t, method, note) {
       patchTileFromSlice(t);   // flip the UN-selected floor tile to paid/no-due now, not after reconcile
     },
     () => api("POST", `/tables/${t}/pay`, method ? { payment_method: method, payment_note: note || "" } : null),
+    () => offerPayUndo(t, method),
   );
 }
 // Settle a table's bill respecting the manager's tablet_mark_paid setting: 'on' →
@@ -1422,9 +1482,27 @@ function optimisticPay(t, method, note) {
 function payBill(t, method, note) {
   const body = method ? { payment_method: method, payment_note: note || "" } : null;
   if (tperm("tablet_mark_paid") === "pin") {
-    actGated("POST", `/tables/${t}/pay`, body, { message: "Enter a manager PIN to mark this bill paid.", toast: method ? `Bill paid via ${method}` : "Bill paid" });
+    actGated("POST", `/tables/${t}/pay`, body, { message: "Enter a manager PIN to mark this bill paid.", onSuccess: () => offerPayUndo(t, method) });
   } else {
     optimisticPay(t, method, note);
+  }
+}
+// After a successful "Mark paid", give a few-second takeback (owner undo bar, 2026-07-22).
+// Only while the table is STILL open — if paying the last dish auto-closed the table
+// (auto_table_action), an in-place undo can't cleanly reopen it, so we just confirm and
+// leave the heavier "restore to floor" to the manager panel. The undo goes through
+// actGated so a PIN-gated restaurant is asked for a PIN to reverse a payment too.
+function offerPayUndo(t, method) {
+  const msg = method ? `Bill paid via ${method}` : "Bill paid";
+  const stillOpen = !!sessionOf(t);
+  if (stillOpen && window.LFH_UNDO) {
+    LFH_UNDO.show({
+      message: msg,
+      seconds: 5,
+      onUndo: () => actGated("POST", `/tables/${t}/unpay`, null, { message: "Enter a manager PIN to undo this payment.", toast: "Payment undone" }),
+    });
+  } else {
+    toast(msg);
   }
 }
 // openPaymentMethodModal(due, label): "how did they pay?" — UPI/Cash/Card, or Other

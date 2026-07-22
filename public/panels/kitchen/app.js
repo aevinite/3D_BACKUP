@@ -424,6 +424,7 @@ function setLocalReady(matches) {
 function markItemReady(id, btn) {
   const it = (state.items || []).find((x) => x.id === id);
   if (!it || it.status === "served") return;
+  const prev = it.status; // remember where it was so a mis-tap can be taken back
   it.status = "ready"; pendingReady.add(id);
   if (btn) { const line = btn.closest(".line"); if (line) { line.classList.add("line-ready"); btn.outerHTML = '<span class="done rdy">ready</span>'; } }
   // Adopt the optimistic state as the baseline so a poll/realtime refetch carrying the
@@ -434,7 +435,32 @@ function markItemReady(id, btn) {
   // ✓ buttons survive and the cook's next rapid tap isn't eaten. (owner, 2026-06-19)
   const o = (state.orders || []).find((x) => x.id === it.order_id);
   if (o && orderPhase(o) === "ready") moveCardToReady(o);
-  api("POST", `/items/${id}/status`, { status: "ready" }).then(scheduleReadyReconcile).catch((e) => { toast("Failed: " + e.message); load(); });
+  api("POST", `/items/${id}/status`, { status: "ready" }).then(() => {
+    scheduleReadyReconcile();
+    // A ✓ is easy to mis-tap in a rush — give the cook a few seconds to send the
+    // dish back to where it was (owner undo bar, 2026-07-22).
+    if (window.LFH_UNDO) LFH_UNDO.show({ message: `${it.title || "Dish"} marked ready`, onUndo: () => undoReady([{ id, prev }]) });
+  }).catch((e) => { toast("Failed: " + e.message); load(); });
+}
+
+// Take back a "marked ready": drop the optimistic overlay, restore each dish's
+// prior status locally + on the server, then reconcile from the truth. Shared by
+// the single-✓ and ALL-READY paths. Reverting is a rare manual tap, so a full
+// load() at the end (instead of surgical patching) is fine and keeps state honest.
+async function undoReady(snap, orderId) {
+  if (orderId != null) pendingReadyOrders.delete(orderId);
+  snap.forEach((s) => {
+    pendingReady.delete(s.id);
+    const it = (state.items || []).find((x) => x.id === s.id);
+    if (it && it.status !== "served") it.status = s.prev;
+  });
+  render();
+  try {
+    for (const s of snap) await api("POST", `/items/${s.id}/status`, { status: s.prev });
+  } catch (e) {
+    toast("Undo failed: " + e.message);
+  }
+  load();
 }
 // Move ONE fully-ready ticket into the Ready column without a whole-board rebuild:
 // re-render just that card (now shows "ready — waiter serving", no buttons), drop it
@@ -470,6 +496,11 @@ function moveCardToReady(o) {
 // re-buckets/rebuilds every ticket and eats a cook's concurrent tap on another card. Same
 // surgical approach as the single-✓ path (markItemReady → moveCardToReady).
 function markOrderReady(orderId) {
+  // Snapshot each dish's prior status BEFORE we flip it, so an accidental "ALL READY"
+  // can be taken back to exactly where each dish was (owner undo bar, 2026-07-22).
+  const snap = (state.items || [])
+    .filter((i) => i.order_id === orderId && i.status !== "served")
+    .map((i) => ({ id: i.id, prev: i.status }));
   pendingReadyOrders.add(orderId); // legacy-order overlay so a slow-DB reconcile can't revert it
   setLocalReady((i) => i.order_id === orderId);
   const o = (state.orders || []).find((x) => x.id === orderId);
@@ -480,7 +511,15 @@ function markOrderReady(orderId) {
       if (card) { const html = ticketHtml(o); const tmp = document.createElement("div"); tmp.innerHTML = html; const fresh = tmp.firstElementChild; if (fresh) { fresh.__kdsHtml = html; card.replaceWith(fresh); } }
     }
   }
-  api("POST", `/orders/${orderId}/ready`).then(scheduleReadyReconcile).catch((e) => { toast("Failed: " + e.message); load(); });
+  api("POST", `/orders/${orderId}/ready`).then(() => {
+    scheduleReadyReconcile();
+    // Offer a takeback only when we captured per-dish rows to revert (session
+    // orders); legacy JSON-item orders have no per-dish id, so we skip the bar there.
+    if (snap.length && window.LFH_UNDO) {
+      const label = o ? `Table ${o.table_number} · all ready` : "Order marked ready";
+      LFH_UNDO.show({ message: label, onUndo: () => undoReady(snap, orderId) });
+    }
+  }).catch((e) => { toast("Failed: " + e.message); load(); });
 }
 
 // Manual REPRINT (owner 2026-07-07): re-run the KOT print for ONE order's current dishes on
