@@ -16,6 +16,7 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
+import { isTableTag, tableTagsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +66,7 @@ const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName 
 // is re-read from the DB on every request by userFromCookie, so revoking someone's
 // access takes effect on their very next tap (no re-login needed). Admin bypasses via
 // managerPinGate as before.
-const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet"] as const;
+const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata"] as const;
 const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   // Admin super-user (no staff cookie — the gate already vetted the admin token):
@@ -205,6 +206,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // when the waiter opens the banquet screen (no polling, scoped, slim columns).
     // Server-gated the same as placing: entitlement + the tablet_banquet capability
     // ('pin' may still READ the list — the PIN protects the billing action itself).
+    // khata/customers?q= — the "Collect later" person picker's search (mig 166). Read-only,
+    // scoped + limited. Available whenever the manager's tablet_khata rung isn't off (the
+    // park action itself re-runs the full tri-state gate incl. PIN mode).
+    if (path.join("/") === "khata/customers") {
+      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      const kperm = (g.user?.permissions ?? {})[`tablet_khata`];
+      let kmode: string;
+      if (kperm === "on" || kperm === "pin" || kperm === "off") kmode = kperm;
+      else kmode = String(((await sb.from("settings").select("tablet_khata").eq("restaurant_id", rid).maybeSingle()).data as Record<string, string> | null)?.tablet_khata || "off");
+      if (kmode === "off" && g.user) return err("This isn't enabled for you — ask a manager.", 403);
+      const q = (new URL(req.url).searchParams.get("q") || "").trim().slice(0, 60);
+      let sel = sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(8);
+      if (q) sel = sel.or(`name.ilike.%${q.replace(/[%,()]/g, "")}%,phone.ilike.%${q.replace(/[%,()]/g, "")}%`);
+      return ok({ customers: must(await sel) });
+    }
+
     if (path.join("/") === "banquet-items") {
       const flags = await sb.from("settings").select("banquet_allowed, tablet_banquet").eq("restaurant_id", rid).maybeSingle();
       const f = overlayUserPerms((flags.data as Record<string, any> | null), g.user);
@@ -893,6 +910,107 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       await log("bill_paid", { table_number: t, device_id: dev, detail: body?.payment_method ? `via ${body.payment_method}` : undefined });
       await maybeAutoSettle(openSess?.id, { panel: "tablet", deviceId: dev }); // auto close/restart if paid + all served
       return ok({ ok: true, count: rows.length });
+    }
+
+    // ── Table types (VIP / Family / Owner's Guest) + khata — mig 166 ─────────────
+    // tables/:t/tag — the waiter marks/clears a table's special type. Feature-laddered
+    // + the manager's tablet_table_tags tri-state (off default | on | pin).
+    if (a === "tables" && c === "tag") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      if (!(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
+      const tg = await tabletPerm("tablet_table_tags", req, body, rid, actor); if (!tg.allow) return tg.resp;
+      const tag = body?.tag ?? null;
+      if (tag === null || tag === "") {
+        must(await sb.from("table_tags").delete().eq("restaurant_id", rid).eq("table_number", t).select());
+        await log("table_tag_clear", { table_number: t, device_id: dev });
+        return ok({ ok: true, tag: "" });
+      }
+      if (!isTableTag(tag)) return err("invalid tag");
+      must(await sb.from("table_tags")
+        .upsert({ restaurant_id: rid, table_number: t, tag, tagged_by: actor?.name || actor?.username || "waiter", tagged_at: nowIso() }, { onConflict: "restaurant_id,table_number" })
+        .select());
+      await log("table_tag_set", { table_number: t, detail: tag, device_id: dev });
+      return ok({ ok: true, tag });
+    }
+
+    // tables/:t/on-the-house — settle a Family / Owner's-Guest table at no charge.
+    // The table's mark (set by a manager or a permitted waiter) is the authorization;
+    // the money-side gate is the same tablet_mark_paid tri-state as a normal settle.
+    // Stored as a 100% pre-tax discount + the reserved "On the house" method, so every
+    // money view (net-of-discount, paid-only) reads ₹0 — identical to the manager path.
+    if (a === "tables" && c === "on-the-house") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      if (!(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
+      const hg = await tabletPerm("tablet_mark_paid", req, body, rid, actor); if (!hg.allow) return hg.resp;
+      const tagRow = (await sb.from("table_tags").select("tag").eq("restaurant_id", rid).eq("table_number", t).maybeSingle()).data as { tag?: TableTag } | null;
+      if (!tagRow?.tag || !COMP_TAGS.includes(tagRow.tag)) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
+      const openSess = (await sb.from("sessions").select("id")
+        .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
+        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+      let oq = sb.from("orders").select("id,subtotal,status,payment_status").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled");
+      oq = openSess ? oq.eq("session_id", openSess.id) : oq.eq("table_number", t);
+      const orders = must(await oq) as { id: string; subtotal: number; status: string; payment_status: string }[];
+      const unpaid = orders.filter((o) => o.payment_status !== "paid");
+      if (!unpaid.length) return err("Nothing to settle on this table.", 409);
+      if (unpaid.some((o) => o.status === "received")) return err("Accept the order first — a bill can only be settled once the order is accepted.", 409);
+      for (const o of unpaid) {
+        must(await sb.from("orders").update({
+          discount: Number(o.subtotal) || 0, discount_note: "On the house",
+          payment_status: "paid", paid_at: nowIso(), payment_method: ON_THE_HOUSE_METHOD,
+        }).eq("id", o.id).eq("restaurant_id", rid).select("id"));
+      }
+      await log("on_the_house", { table_number: t, device_id: dev, detail: `${unpaid.length} order(s) · ${tagRow.tag}` });
+      if (openSess) await maybeAutoSettle(openSess.id, { panel: "tablet", deviceId: dev });
+      return ok({ ok: true, count: unpaid.length });
+    }
+
+    // tables/:t/khata — "Collect later": park the unpaid bill on a person and free the
+    // table (same flow as the manager's; see the editor route). Gated by the manager's
+    // tablet_khata tri-state. body { customer_id } OR { name, phone?, note? }.
+    if (a === "tables" && c === "khata") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      const kg = await tabletPerm("tablet_khata", req, body, rid, actor); if (!kg.allow) return kg.resp;
+      const openSess = (await sb.from("sessions").select("id")
+        .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
+        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+      let kq = sb.from("orders").select("id,status,payment_status").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled");
+      kq = openSess ? kq.eq("session_id", openSess.id) : kq.eq("table_number", t);
+      const korders = must(await kq) as { id: string; status: string; payment_status: string }[];
+      const kunpaid = korders.filter((o) => o.payment_status !== "paid");
+      if (!kunpaid.length) return err("Nothing unpaid to park on this table.", 409);
+      if (korders.some((o) => o.status === "received" || o.status === "preparing"))
+        return err("This table still has orders cooking — serve them first, then park the bill.", 409);
+      let customer: { id: string; name: string; phone: string | null } | null = null;
+      if (body?.customer_id) {
+        customer = (await sb.from("khata_customers").select("id,name,phone").eq("restaurant_id", rid).eq("id", String(body.customer_id)).maybeSingle()).data as any;
+        if (!customer) return err("That person isn't in this restaurant's khata book.", 404);
+      } else {
+        const name = String(body?.name || "").trim().slice(0, 80);
+        if (!name) return err("A name is required to park a bill.");
+        const phone = String(body?.phone || "").trim().slice(0, 20) || null;
+        const note = String(body?.note || "").trim().slice(0, 200) || null;
+        if (phone) customer = (await sb.from("khata_customers").select("id,name,phone").eq("restaurant_id", rid).eq("phone", phone).maybeSingle()).data as any;
+        if (!customer) {
+          const ins = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone, note }).select("id,name,phone");
+          if (ins.error) return err(ins.error.message, 500);
+          customer = (ins.data as any[])[0];
+        }
+      }
+      const stamp = nowIso();
+      must(await sb.from("orders").update({ khata_at: stamp, khata_customer_id: customer!.id, archived: true, archived_at: stamp })
+        .in("id", kunpaid.map((o) => o.id)).eq("restaurant_id", rid).select("id"));
+      if (openSess) {
+        const closed = await closeSession(openSess.id, { force: true }, { panel: "tablet", deviceId: dev, restaurantId: rid });
+        if (!closed.ok) return err(closed.message, closed.status);
+      } else {
+        await clearTableSignals(rid, t);
+      }
+      await log("khata_park", { table_number: t, device_id: dev, detail: `${kunpaid.length} order(s) → ${customer!.name}` });
+      return ok({ ok: true, customer, count: kunpaid.length });
     }
 
     // tables/:t/unpay — take back a just-made "Mark paid" (owner undo bar, 2026-07-22).
