@@ -1,4 +1,4 @@
--- 163_auto_accept_followup_orders.sql
+-- 164_auto_accept_followup_orders.sql
 -- Owner request (2026-07-22): once a table's FIRST order has been accepted by staff,
 -- every LATER guest order from the same seating goes straight to the kitchen pass as
 -- 'preparing' — no second "Accept" tap. The kitchen already shows/prints every new
@@ -47,7 +47,7 @@ BEGIN
   v_priced := lfh_price_order(p_items, v_rid);
   IF NOT (v_priced->>'ok')::boolean THEN RETURN v_priced::json; END IF;
 
-  -- AUTO-ACCEPT FOLLOW-UPS (163): staff already accepted an order for this seating,
+  -- AUTO-ACCEPT FOLLOW-UPS (164): staff already accepted an order for this seating,
   -- so this one skips straight to the pass — exactly what the Accept button writes.
   SELECT EXISTS (
     SELECT 1 FROM orders
@@ -97,7 +97,7 @@ BEGIN
   v_priced := lfh_price_order(p_items, v_rid);
   IF NOT (v_priced->>'ok')::boolean THEN RETURN v_priced::json; END IF;
 
-  -- AUTO-ACCEPT FOLLOW-UPS (163). No session here, so "same seating" = this table
+  -- AUTO-ACCEPT FOLLOW-UPS (164). No session here, so "same seating" = this table
   -- has an accepted order that's still unpaid and recent. A paid/settled bill (or a
   -- stale 3h+ order) means a NEW party — their first order needs an Accept again.
   -- NULLIF: an order with no table can never match (comparison stays NULL/false).
