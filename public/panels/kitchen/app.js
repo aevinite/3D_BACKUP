@@ -680,11 +680,16 @@ async function loadTables(tables) {
   const freshOrders = dedupeById(slices.flatMap((s) => (s && s.orders) || []));
   const freshItems = dedupeById(slices.flatMap((s) => (s && s.items) || []));
 
-  // CHIME — detect a brand-new dine-in 'received' order in the slice BEFORE touching
+  // CHIME — detect a brand-new dine-in order in the slice BEFORE touching
   // knownIds, then ADD each fresh order's id to the baseline (never reassign it — a
   // reassign would make the next targeted event for a DIFFERENT table false-chime its
   // existing orders as "new"). Platform tickets only arrive on the FULL path (load()).
-  const newReceived = freshOrders.filter((o) => o.status === "received" && !state.knownIds.has(o.id));
+  // Rings for 'received' (awaiting accept) AND for a GUEST order born 'preparing'
+  // (member_id set) — follow-up orders auto-accept since mig 163, so they'd otherwise
+  // land on the pass silently. Waiter orders (member_id null) stay chime-free: the
+  // waiter is standing at the table. An accepted first order can't double-chime — its
+  // id entered knownIds while it was still 'received'.
+  const newReceived = freshOrders.filter((o) => (o.status === "received" || (o.status === "preparing" && o.member_id)) && !state.knownIds.has(o.id));
   if (newReceived.length) chime();
   // Auto-print via the shared helper (printedIds-tracked, hidden-tab-safe, serialized).
   autoPrintNew(state.autoPrintKot, freshOrders, freshItems, state.restaurant);
@@ -847,10 +852,12 @@ async function load() {
   const data = await api("GET", "/board");
   if (seq !== loadSeq) return; // a newer refresh started — drop this stale response
   // Chime only for orders we have NEVER seen (not on the very first load) — dine-in
-  // 'received' OR a brand-new platform order.
+  // 'received', a GUEST order born 'preparing' (auto-accepted follow-up, mig 163 —
+  // member_id set; waiter orders have member_id null and stay silent), OR a
+  // brand-new platform order.
   const ids = new Set([...data.orders.map((o) => o.id), ...((data.platform || []).map((p) => p.id))]);
   if (state.knownIds) {
-    const newReceived = data.orders.filter((o) => o.status === "received" && !state.knownIds.has(o.id));
+    const newReceived = data.orders.filter((o) => (o.status === "received" || (o.status === "preparing" && o.member_id)) && !state.knownIds.has(o.id));
     const freshPlat = (data.platform || []).some((p) => p.status === "new" && !state.knownIds.has(p.id));
     if (newReceived.length || freshPlat) chime();
     // Auto-print via the shared helper (printedIds-tracked, hidden-tab-safe, serialized)
