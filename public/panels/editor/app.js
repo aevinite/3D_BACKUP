@@ -3168,7 +3168,11 @@ function printBill(t, sess, os) {
   tr.ex td{font-size:10px;font-style:italic;color:#777;padding:1px 0 5px 10px;border-bottom:1px dotted #eee}
   .t{display:flex;justify-content:space-between;font-size:11.5px;padding:3px 0;color:#333}
   .t.tx{border-top:1px dashed #aaa;margin-top:4px;padding-top:6px;color:#111;font-weight:700}
-  .g{display:flex;justify-content:space-between;border-top:2px solid #111;margin-top:7px;padding-top:7px;font-weight:700;font-size:14px}
+  /* Totals section: a solid medium-dark rule separates the items from the money
+     summary. #555 is dark enough to actually print on thermal (light greys like the
+     dotted row lines fade out). The bold 2px black rule above TOTAL stays the anchor. */
+  .totals{margin-top:8px;border-top:1px solid #555;padding-top:8px}
+  .g{display:flex;justify-content:space-between;border-top:2px solid #111;margin-top:8px;padding-top:8px;font-weight:700;font-size:14px}
   .foot{text-align:center;color:#555;font-size:10px;margin-top:13px}
 </style>
 ${isDefault ? '<img class="logo" src="https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png" onerror="this.style.display=\'none\'"/>' : ""}
@@ -3181,7 +3185,7 @@ ${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}
 <div class="kv"><span>Date · Time</span><b>${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b></div>
 <div class="dash"></div>
 <table><thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
-<div style="margin-top:8px">
+<div class="totals">
   <div class="t"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
   ${m.disc > 0 ? `<div class="t"><span>Discount</span><span>− ${inr(m.disc)}</span></div><div class="t tx"><span>Taxable value</span><span>${inr(m.taxable)}</span></div>` : ""}
   ${taxRows}
