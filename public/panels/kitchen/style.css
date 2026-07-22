@@ -203,3 +203,6 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
   /* Bigger reprint tap target on a phone/greasy tablet. */
   .reprint { min-height: 40px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
+
+/* special table-type badge on the ticket head (mig 166) */
+.ttag { font-size: 10px; font-weight: 800; letter-spacing: .5px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }

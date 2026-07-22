@@ -186,8 +186,13 @@ function ticketHtml(o, rows) {
   // admin entitlement + owner toggle (autoPrintKot). Independent of the auto-print
   // tracking (printedIds) — it just runs printKot for this order's current dishes.
   const reprintBtn = `<button class="reprint" data-reprint="${esc(o.id)}" title="Print this kitchen ticket" aria-label="Print kitchen ticket">🖨</button>`;
+  // Special table type (mig 166): a small coloured badge next to the table number so
+  // cooks know to prioritise (👑 VIP · 🏠 Family · 🤝 Owner's guest). Read-only here.
+  const TAG_BADGE = { vip: ["👑 VIP", "#8b5cf6"], family: ["🏠 FAMILY", "#e11d48"], guest: ["🤝 GUEST", "#aab4c4"] };
+  const tb = TAG_BADGE[o.tag];
+  const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${o.tag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span><span class="age">${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span>${tagBadge}<span class="age">${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${lines}${action}</div>`;
 }
 
