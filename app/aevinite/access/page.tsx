@@ -21,8 +21,9 @@ const MANAGER_POWERS: [string, string][] = [
   // Keep in sync with MANAGER_POWER_FLAGS in lib/ownerEntitlements.ts — these two were
   // missing, so the admin couldn't gate them at all (audit 2026-07-08).
   ["edit_settings", "Edit settings"], ["view_ratings", "See & handle ratings"],
-  // Table types + khata module (mig 166) · banquet rung (mig 167, backfilled ON).
-  ["table_tags", "Mark table types + on-the-house"], ["khata", "Pay later (khata) book"], ["banquet", "Banquet billing"],
+  // Table types + khata module (mig 166) · banquet rung (mig 167, backfilled ON) ·
+  // KOT ▾ menu (migs 172-177, defaults OFF).
+  ["table_tags", "Mark table types + on-the-house"], ["khata", "Pay later (khata) book"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT operations"],
 ];
 // Owner-panel SECTIONS the admin can remove per restaurant (mig 133). Off = the
 // section disappears from the real owner's panel (admin act-as still sees it, tinted).
@@ -33,13 +34,14 @@ const OWNER_SECTIONS: [string, string][] = [
   // off for a restaurant even though the backend supports it (audit 2026-07-08).
   ["ratings", "Ratings"], ["customers", "Customers list"], ["settings", "Settings (appearance & password)"],
 ];
-const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"], ["tablet_banquet", "Banquet billing"], ["tablet_table_tags", "Mark table types"], ["tablet_khata", "Park pay-later (khata) bills"]];
+const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"], ["tablet_banquet", "Banquet billing"], ["tablet_table_tags", "Mark table types"], ["tablet_khata", "Park pay-later (khata) bills"], ["tablet_table_ops", "Table & KOT operations"]];
 // The feature LADDER's two admin switches per module (owner rule 2026-07-22):
 // "application" = the feature on/off itself; "power transfer" = may the OWNER
 // toggle it from their own panel. Keys = settings columns (mig 166).
 const LADDER_MODULES: { app: string; transfer: string; label: string; hint: string }[] = [
   { app: "table_tags_allowed", transfer: "table_tags_owner_control", label: "Table types (VIP / Family / Guest) + Khata", hint: "Special table marks, on-the-house settle, and the pay-later book." },
   { app: "banquet_allowed", transfer: "banquet_owner_control", label: "Banquet billing", hint: "Fixed-plate banquet bills (per-plate menu, bill-only)." },
+  { app: "table_ops_allowed", transfer: "table_ops_owner_control", label: "Table & KOT operations (KOT ▾ menu)", hint: "Change table, merge tables, move a KOT or a single dish, split the bill, reprint a KOT." },
 ];
 const TRI: [string, string][] = [["off", "Off"], ["on", "On"], ["pin", "On · PIN"]];
 
@@ -260,7 +262,7 @@ export default function AccessPage() {
               );
             })}
           </Card>
-          <Card id="ac-tablet" title="Tablet (waiter) billing" hint="What the waiter tablet may do to a bill. 'On · PIN' requires a manager PIN each time.">
+          <Card id="ac-tablet" title="Tablet (waiter) billing" hint="What the waiter tablet may do to a bill. 'On · PIN' requires a manager PIN each time. 'Table & KOT operations' only takes effect while its module (Modules card above) is on.">
             {TABLET_CAPS.map(([k, l]) => <Row key={k} label={l}><Tri val={tablet[k] || "off"} onChange={(v) => saveTablet(k, v)} /></Row>)}
           </Card>
           <Card title="Guest menu features" hint="Which features guests see on this restaurant's menu.">

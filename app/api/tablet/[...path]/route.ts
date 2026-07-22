@@ -16,7 +16,8 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { isTableTag, tableTagsLadder, banquetLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { effectiveTaxRate } from "@/lib/tax";
 
 export const dynamic = "force-dynamic";
 
@@ -66,8 +67,18 @@ const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName 
 // is re-read from the DB on every request by userFromCookie, so revoking someone's
 // access takes effect on their very next tap (no re-login needed). Admin bypasses via
 // managerPinGate as before.
-const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata"] as const;
+const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops"] as const;
 const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
+// The KOT ▾ menu's module rung (canonical ladder, mig 177): admin's allowed switch
+// AND, when transferred, the owner's toggle. One tiny single-row select on a rare
+// path (a merge/move tap, not a poll); the tri-state gate runs separately after it.
+async function tableOpsTabletAllowed(rid: string): Promise<boolean> {
+  return (await tableOpsLadder(rid)).effective;
+}
+// The same rule computed from an ALREADY-FETCHED settings row (the board GETs) — no
+// extra query on the hot path.
+const tableOpsEffectiveFromRow = (s: Record<string, unknown> | null) =>
+  !!s && s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   // Admin super-user (no staff cookie — the gate already vetted the admin token):
   // never blocked by a waiter tri-state. This is what makes the X-ray's tinted
@@ -190,10 +201,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
       ]);
+      // KOT ▾ module rung resolved server-side from the settings row itself (canonical
+      // ladder, mig 177 — no extra query): when the module isn't effective the tri-state
+      // ships 'off', so the client needs zero ladder logic and a stale manager grant
+      // can't surface the menu (same server-resolution trick as overlayUserPerms).
+      // Applied AFTER the per-user overlay on purpose. table_ops_tablet_allowed is the
+      // synthetic client flag (like banquet_allowed): module off = no dead UI/X-ray zone.
+      const setOut = overlayUserPerms(must(settings), g.user);
+      if (setOut) {
+        const tOpsOk = tableOpsEffectiveFromRow(setOut);
+        if (!tOpsOk) setOut.tablet_table_ops = "off";
+        setOut.table_ops_tablet_allowed = tOpsOk;
+      }
       const body: Record<string, unknown> = {
         ...summary,
         // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
-        settings: overlayUserPerms(must(settings), g.user), categories: must(categories),
+        settings: setOut, categories: must(categories),
         restaurant: must(restaurant) || null,
       };
       // Only attach dishes on a FULL load. On nomenu the key is ABSENT (not []), so the client
@@ -273,9 +296,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
       ]);
+      // Same server-side KOT-menu module resolution as /summary (canonical ladder, mig 177).
+      const setSt = overlayUserPerms(must(settings), g.user);
+      if (setSt) {
+        const tOpsOkSt = tableOpsEffectiveFromRow(setSt);
+        if (!tOpsOkSt) setSt.tablet_table_ops = "off";
+        setSt.table_ops_tablet_allowed = tOpsOkSt; // synthetic flag, see /summary
+      }
       return ok({
         // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
-        settings: overlayUserPerms(must(settings), g.user), sessions: must(sessions), members: must(members),
+        settings: setSt, sessions: must(sessions), members: must(members),
         orders: live.orders, items: live.items, calls: must(calls), dishes: must(dishes),
         categories: must(categories), requests: must(requests),
         restaurant: must(restaurant) || null,
@@ -645,6 +675,61 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(data);
     }
 
+    // sessions/:id/merge — MERGE this party into an OCCUPIED table (one bill). Part of
+    // the KOT ▾ menu: ladder-gated by the admin depth knob + the manager's tri-state
+    // (tabletPerm handles off/pin/on + per-waiter overrides + the admin bypass).
+    if (a === "sessions" && c === "merge") {
+      if (!(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      const gm = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gm.allow) return gm.resp;
+      const to = String((body && body.to) || "").trim();
+      if (!/^\d+$/.test(to)) return err("valid target table required");
+      const mtc2 = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const tc2 = Number((mtc2.data as { table_count?: number } | null)?.table_count) || 0;
+      if (tc2 > 0 && (Number(to) < 1 || Number(to) > tc2)) return err(`Table ${to} doesn't exist (this place has ${tc2} tables).`, 400);
+      // Session ownership is enforced INSIDE the RPC via p_rid (returns no_session otherwise).
+      const { data: mg, error: mgErr } = await sb.rpc("lfh_staff_merge_tables", { p_session: b, p_to: to, p_rid: rid });
+      if (mgErr) throw new Error(mgErr.message);
+      if (mg && (mg as any).ok === false) {
+        const reason = (mg as any).reason;
+        const msg = reason === "target_not_open" ? "That table has no party — use Move table instead."
+          : reason === "session_closed" ? "This table is already closed — nothing to merge."
+          : reason === "source_invoiced" ? "This bill is already invoiced — a manager must void it before merging."
+          : reason === "target_invoiced" ? `Table ${to}'s bill is already invoiced — a manager must void it before merging.`
+          : reason === "same_table" ? "That's the same table."
+          : "Couldn't merge: " + (reason || "refused");
+        return err(msg, 409);
+      }
+      await log("table_merge", { table_number: to, detail: `T${(mg as any).from} → T${to} (one bill)${byNote(gm)}`, device_id: dev });
+      return ok(mg);
+    }
+
+    // order-items/:id/move — move ONE dish line to another table's bill (KOT ▾ menu).
+    // Same ladder gate as merge; the RPC (mig 175) reprices both KOTs server-side.
+    if (a === "order-items" && c === "move") {
+      if (!(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      const gi = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gi.allow) return gi.resp;
+      const to = String((body && body.to) || "").trim();
+      if (!/^\d+$/.test(to)) return err("valid target table required");
+      const mtc3 = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const tc3 = Number((mtc3.data as { table_count?: number } | null)?.table_count) || 0;
+      if (tc3 > 0 && (Number(to) < 1 || Number(to) > tc3)) return err(`Table ${to} doesn't exist (this place has ${tc3} tables).`, 400);
+      const { data: im, error: imErr } = await sb.rpc("lfh_staff_move_order_item", { p_item: b, p_to: to, p_rid: rid });
+      if (imErr) throw new Error(imErr.message);
+      if (im && (im as any).ok === false) {
+        const reason = (im as any).reason;
+        const msg = reason === "order_paid" ? "Won't move a dish off a PAID bill."
+          : reason === "item_not_found" ? "That dish is no longer on the order."
+          : reason === "order_cancelled" ? "This order was cancelled — nothing to move."
+          : reason === "source_invoiced" ? "This bill is already invoiced — a manager must void it before moving a dish off it."
+          : reason === "target_invoiced" ? `Table ${to}'s bill is already invoiced — a manager must void it first.`
+          : reason === "same_table" ? "That dish is already on that table."
+          : "Couldn't move the dish: " + (reason || "refused");
+        return err(msg, 409);
+      }
+      await log("order_item_move", { table_number: to, detail: `dish → table ${to} (new KOT)${byNote(gi)}`, device_id: dev });
+      return ok(im);
+    }
+
     // items/:id/status — advance ONE dish (received→preparing→served) from the
     // tablet, then roll the parent order's overall status up. Mirrors the kitchen
     // endpoint exactly so kitchen + tablet stay perfectly consistent.
@@ -839,41 +924,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const mtc = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
       const mTableCount = Number((mtc.data as { table_count?: number } | null)?.table_count) || 0;
       if (mTableCount > 0 && (Number(to) < 1 || Number(to) > mTableCount)) return err(`Table ${to} doesn't exist (this place has ${mTableCount} tables).`, 400);
-      // Never re-home a PAID order — it's settled revenue on a closed bill; moving it onto
-      // another party's live bill would double-count / corrupt the money trail. (rid-scoped.)
-      const src = must(await sb.from("orders").select("payment_status, table_number, session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
-      if (!src) return err("That order isn't for this restaurant.", 404);
-      if (src.payment_status === "paid") return err("Won't move a PAID order — mark it unpaid first.", 409);
-      if (String(src.table_number) === to) return err("That order is already on that table.", 400);
-      // Don't pull an order OFF a bill whose invoice is already generated (and unpaid): the guest
-      // holds a printed invoice that would now OVERSTATE the total (#5, source side — the target
-      // side is guarded below). A voided invoice doesn't block (it's being re-billed anyway).
-      if (src.session_id) {
-        const ss = (await sb.from("sessions").select("invoice_no, invoice_voided").eq("id", src.session_id).eq("restaurant_id", rid).maybeSingle()).data as { invoice_no?: number | null; invoice_voided?: boolean } | null;
-        if (ss && ss.invoice_no != null && !ss.invoice_voided) return err(`Table ${src.table_number}'s bill is already invoiced — void or regenerate its invoice before moving an order off it.`, 409);
-      }
-      // Find (or open) the target table's session, then re-home the order onto it.
-      let target = (must(await sb.from("sessions").select("id, invoice_no, invoice_voided").eq("table_number", to).eq("restaurant_id", rid).neq("status", "closed").limit(1)))[0];
-      // Don't add an order onto a bill whose invoice has ALREADY been generated/printed (#5):
-      // the guest holds a printed invoice that would no longer match the new total. Block it —
-      // staff should void/regenerate that invoice first. "Invoiced/locked" = invoice_no set AND
-      // NOT voided (mig 073), so a voided invoice does NOT block (it's being re-billed anyway).
-      if (target && target.invoice_no != null && !target.invoice_voided) return err(`Table ${to}'s bill is already invoiced — void or regenerate its invoice before moving an order onto it.`, 409);
-      if (!target) target = (must(await sb.from("sessions").insert({ table_number: to, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select()))[0];
-      // Scope the SOURCE order by rid (target session is already rid-scoped above): without
-      // it a foreign order id could be re-homed onto this restaurant's table (service-role
-      // bypasses RLS). 0 rows moved on a foreign id → guarded below.
-      const moved = must(await sb.from("orders").update({ table_number: to, session_id: target.id }).eq("id", b).eq("restaurant_id", rid).select());
-      if (!moved.length) return err("That order isn't for this restaurant.", 404);
-      await sb.from("order_items").update({ session_id: target.id }).eq("order_id", b).eq("restaurant_id", rid);
-      // The target now has an order, so make sure it has a bill number (the bill
-      // trigger only fires on INSERT, not on this move — assign it if missing).
-      const tb = (must(await sb.from("sessions").select("bill_no").eq("id", target.id).limit(1)))[0];
-      if (tb && tb.bill_no == null) {
-        try { const { data: bn } = await sb.rpc("lfh_next_counter", { p_rid: rid, p_key: "bill" }); if (bn != null) await sb.from("sessions").update({ bill_no: bn }).eq("id", target.id).eq("restaurant_id", rid).is("bill_no", null); } catch { /* bill stays lazy if the counter isn't callable */ }
+      // All the move logic lives in the shared RPC (mig 173) — atomic, tenant-checked
+      // against rid, re-splits both bills' discounts, and nudges BOTH tables' tiles
+      // (the old inline version here forgot the SOURCE-table breadcrumb, so the moved
+      // ticket lingered on the old tile for up to 60s). Editor shares the same RPC.
+      const { data: mv, error: mvErr } = await sb.rpc("lfh_staff_move_order", { p_order: b, p_to: to, p_rid: rid });
+      if (mvErr) throw new Error(mvErr.message);
+      if (mv && (mv as any).ok === false) {
+        const reason = (mv as any).reason;
+        if (reason === "no_order") return err("That order isn't for this restaurant.", 404);
+        if (reason === "order_paid") return err("Won't move a PAID order — mark it unpaid first.", 409);
+        if (reason === "same_table") return err("That order is already on that table.", 400);
+        if (reason === "source_invoiced") return err("This bill is already invoiced — void or regenerate its invoice before moving an order off it.", 409);
+        if (reason === "target_invoiced") return err(`Table ${to}'s bill is already invoiced — void or regenerate its invoice before moving an order onto it.`, 409);
+        return err(reason || "Couldn't move the order.", 400);
       }
       await log("order_move", { order_id: b, table_number: to, device_id: dev });
-      return ok(moved[0] || null);
+      return ok(mv);
     }
 
     // tables/:t/pay — settle the WHOLE bill: mark every unpaid, non-cancelled
@@ -902,7 +969,36 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // in the payment-method breakdown. paid_at starts the 30-min "restore to floor" grace
       // window (migration 112 + the editor's PATCH /orders handler, which enforces + clears it).
       const payUpdate: Record<string, unknown> = { payment_status: "paid", paid_at: new Date().toISOString() };
-      if (body && body.payment_method !== undefined) {
+      // SPLIT settle (KOT ▾ menu, mig 176): several payment legs against the one bill.
+      // Ladder-gated on top of tablet_mark_paid; Σ legs is re-checked server-side.
+      const splits = Array.isArray(body?.splits) ? body.splits : null;
+      if (splits) {
+        if (!(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+        const gs = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gs.allow) return gs.resp;
+        if (splits.length < 2 || splits.length > 12) return err("Give at least two split shares (max 12).");
+        for (const s of splits) {
+          if (!(Number(s?.amount) > 0)) return err("Every split share needs an amount above zero.");
+          if (!PAYMENT_METHODS.includes(s?.method)) return err("invalid payment method in a split share");
+        }
+        let dq = sb.from("orders").select("id,total,discount,session_id")
+          .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
+        dq = openSess ? dq.eq("session_id", openSess.id) : dq.eq("table_number", t).eq("archived", false);
+        const drows = (must(await dq.limit(200)) as { id: string; total: number; discount: number; session_id: string | null }[]) || [];
+        const sidSp = openSess?.id || drows.find((o) => o.session_id)?.session_id;
+        if (!drows.length || !sidSp) return err("This table has no live bill to split.", 409);
+        const setSp = (await sb.from("settings").select("tax_components, tax_rate").eq("restaurant_id", rid).maybeSingle()).data || {};
+        const rateSp = effectiveTaxRate(setSp);
+        const dueSp = drows.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rateSp), 0);
+        const sumSp = splits.reduce((s: number, x: { amount: number }) => s + Number(x.amount), 0);
+        if (Math.abs(sumSp - dueSp) > 0.02) return err(`The shares add up to ₹${sumSp.toFixed(2)} but the bill due is ₹${dueSp.toFixed(2)} — they must match.`, 409);
+        const insSp = await sb.from("session_payments").insert(splits.map((s: { amount: number; method: string; note?: string }) => ({
+          session_id: sidSp, restaurant_id: rid, amount: Math.round(Number(s.amount) * 100) / 100,
+          method: String(s.method), note: String(s.note || "").slice(0, 200) || null,
+        })));
+        if (insSp.error) return err(insSp.error.message, 500);
+        payUpdate.payment_method = "Split";
+        payUpdate.payment_note = (`${splits.length}-way split: ` + splits.map((s: { amount: number; method: string }) => `₹${Number(s.amount).toFixed(0)} ${s.method}`).join(" + ")).slice(0, 200);
+      } else if (body && body.payment_method !== undefined) {
         if (!PAYMENT_METHODS.includes(body.payment_method)) return err("invalid payment_method");
         payUpdate.payment_method = body.payment_method;
         payUpdate.payment_note = String(body.payment_note || "").slice(0, 200) || null;
@@ -911,7 +1007,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t).eq("archived", false);
       const rows = must(await q.select());
-      await log("bill_paid", { table_number: t, device_id: dev, detail: body?.payment_method ? `via ${body.payment_method}` : undefined });
+      await log(splits ? "bill_split" : "bill_paid", { table_number: t, device_id: dev, detail: splits ? String(payUpdate.payment_note || "").slice(0, 120) : (body?.payment_method ? `via ${body.payment_method}` : undefined) });
       await maybeAutoSettle(openSess?.id, { panel: "tablet", deviceId: dev }); // auto close/restart if paid + all served
       return ok({ ok: true, count: rows.length });
     }

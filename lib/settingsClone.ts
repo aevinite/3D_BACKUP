@@ -69,6 +69,11 @@ export function cleanClonedSettings(
   base.table_tags_enabled = true;
   base.tablet_table_tags = "off";
   base.tablet_khata = "off";
+  // Table & KOT operations — the KOT ▾ menu (migs 172-177): same fresh-start ladder.
+  base.table_ops_allowed = false;
+  base.table_ops_owner_control = false;
+  base.table_ops_enabled = true;
+  base.tablet_table_ops = "off";
   // The auto-print-KOT capability itself (not just its entitlement) must also start OFF, so a
   // later entitlement grant doesn't immediately auto-print KOTs without the owner choosing to. (mig 107.)
   base.auto_print_kot = false;

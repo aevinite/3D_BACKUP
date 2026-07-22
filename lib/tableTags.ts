@@ -50,3 +50,8 @@ export const tableTagsLadder = (rid: string) =>
 // Banquet's ladder (mig 130 + 167).
 export const banquetLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "banquet_allowed", control: "banquet_owner_control", enabled: "banquet_enabled" });
+
+// Table & KOT operations — the KOT ▾ menu (merge tables, move a KOT/dish, split
+// bill, reprint; migs 172-177).
+export const tableOpsLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "table_ops_allowed", control: "table_ops_owner_control", enabled: "table_ops_enabled" });

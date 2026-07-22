@@ -26,7 +26,13 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 //  · khata           — park a bill on a person to collect later + manage the khata book (mig 166).
 //  · banquet         — the Banquet tab / banquet billing (mig 130; rung added mig 167,
 //                      BACKFILLED true so pre-existing behaviour is unchanged).
-export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet"] as const;
+//  · table_ops      — the KOT ▾ menu (merge tables, move a KOT/dish, split bill,
+//                     reprint; migs 172-177). CANONICAL module ladder (docs/
+//                     ACCESS-LADDER.md): the module rung lives on settings
+//                     (table_ops_allowed / _owner_control / _enabled →
+//                     tableOpsLadder() in lib/tableTags.ts); this power is the
+//                     plain manager rung on top of it.
+export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops"] as const;
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
 export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [

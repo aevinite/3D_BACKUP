@@ -20,7 +20,10 @@ export const dynamic = "force-dynamic";
 // enforced by the editor route (managerCan(…, "edit_settings")) but had no toggle here,
 // so it was permanently off — added so the owner can actually grant it. New powers just
 // append to this whitelist (the owner page maps over it — no fixed count anywhere).
-const FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet"] as const;
+// table_ops = the KOT ▾ menu (merge tables, move a KOT/item, split bill); its admin
+// rung is the table_ops_depth knob — mergeOwnerEntitlements derives power_table_ops
+// from it, so the existing entitlement guard below applies unchanged.
+const FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops"] as const;
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 

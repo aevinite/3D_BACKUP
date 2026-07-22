@@ -17,6 +17,7 @@ export const dynamic = "force-dynamic";
 const MODULE_DEFS = [
   { key: "table_tags", label: "Table types (VIP / Family / Guest) + pay later", allowed: "table_tags_allowed", control: "table_tags_owner_control", enabled: "table_tags_enabled" },
   { key: "banquet", label: "Banquet billing", allowed: "banquet_allowed", control: "banquet_owner_control", enabled: "banquet_enabled" },
+  { key: "table_ops", label: "Table & KOT operations (KOT menu)", allowed: "table_ops_allowed", control: "table_ops_owner_control", enabled: "table_ops_enabled" },
 ] as const;
 
 export async function GET(req: NextRequest) {
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
   // module (mig 166 table_tags, mig 167 banquet); add new modules to MODULE_DEFS.
   if (modIds.length) {
     const rows = (await sb.from("settings")
-      .select("restaurant_id, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled")
+      .select("restaurant_id, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled")
       .in("restaurant_id", modIds).limit(200)).data || [];
     const nameOf = new Map(restaurants.map((r) => [r.id, r.name]));
     for (const s of rows as Record<string, unknown>[]) {

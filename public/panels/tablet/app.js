@@ -960,9 +960,10 @@ function renderPanel() {
     <div class="dacts">
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
       <button class="btn primary big" id="takeOrder">＋ Take order</button>
-      ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
+      ${s && kotOpsOn() ? `<button class="btn${txray("tablet_table_ops")}" id="kotMenuBtn">🧾 KOT ▾</button>` : ""}
+      ${s && !kotOpsOn() ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
       ${tabletTagsOn() && tshow("tablet_table_tags") ? `<button class="btn${txray("tablet_table_tags")}" id="tagTable">${TABLE_TAG_INFO[ttagOf(t)] ? TABLE_TAG_INFO[ttagOf(t)].emoji : "🏷"} Table type</button>` : ""}
-      ${s && os.length ? `<button class="btn" id="moveOrderBtn">⇄ Move an order</button>` : ""}
+      ${s && os.length && !kotOpsOn() ? `<button class="btn" id="moveOrderBtn">⇄ Move an order</button>` : ""}
       ${s && os.length ? `<button class="btn" id="restartTable">↻ Restart</button>` : ""}
       ${s && os.length && tshow("tablet_discount") ? `<button class="btn${txray("tablet_discount")}" id="billDiscountBtn">${Number(s.discount) > 0 ? `− Edit bill discount (${inr(s.discount)})` : "− Discount whole bill"}</button>` : ""}
       ${s && os.length && !invoiced && tshow("tablet_invoice") ? `<button class="btn${txray("tablet_invoice")}" id="genInvoiceBtn">🧾 Generate invoice</button>` : ""}
@@ -1056,6 +1057,7 @@ function renderPanel() {
   const ob = $("#openTable"); if (ob) ob.onclick = () => optimisticOpen(t);
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
   const mob = $("#moveOrderBtn"); if (mob && s) mob.onclick = () => renderMoveOrderPicker(t);   // was dead: renderMoveOrderPicker/Target existed but nothing opened them (fixed 2026-07-06)
+  const kmb = $("#kotMenuBtn"); if (kmb && s) kmb.onclick = () => renderKotMenu(t, s);
   // Restart: clear this round's orders off the floor (they stay served+archived in
   // records) but keep the table OPEN for a fresh round. Mirrors the manager.
   const rsb = $("#restartTable"); if (rsb && s) rsb.onclick = async () => {
@@ -1320,6 +1322,150 @@ function renderPickerShell(titleHtml, bodyHtml, layerId, onBack) {
   p.onclick = (e) => { if (e.target === p) go(); };
   // Fire an action AND drop this picker's back layer + flag first (renderPanel replaces the DOM).
   return { dropLayer: drop };
+}
+
+// ── KOT ▾ — Table & KOT operations (PetPooja-style unified menu; owner 2026-07-22) ──
+// The ladder's tablet rung (mig 172): the KOT button REPLACES the separate Move-table /
+// Move-an-order buttons when the manager's Access grant (settings.tablet_table_ops,
+// forced 'off' server-side below 'tablet' depth) says on. When off, the two classic
+// buttons render exactly as before — zero regression. Ops arrive in phases.
+function kotOpsOn() {
+  const set = state.data.settings || {};
+  return !!set.table_ops_tablet_allowed && tshow("tablet_table_ops");
+}
+function renderKotMenu(t, s) {
+  const movable = ordersOf(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled");
+  const row = (id, icon, label, sub, on) => `<button class="btn" data-kotop="${id}" ${on ? "" : "disabled"}
+    style="display:flex;align-items:center;gap:12px;width:100%;justify-content:flex-start;text-align:left;margin-bottom:8px;padding:12px 14px">
+    <span style="font-size:18px">${icon}</span><span><b>${label}</b><br><span class="muted small">${sub}</span></span></button>`;
+  let occupiedOthers = 0;
+  for (let i = 1, n = tableCount(); i <= n; i++) if (String(i) !== String(t) && tileIsOpen(i)) occupiedOthers++;
+  const body =
+    row("shift", "⇄", "Change table", "Move this party — orders &amp; calls included — to a free table", !!s) +
+    row("merge", "🪢", "Merge tables", "Join another table's party — one table, one bill", !!s && occupiedOthers > 0) +
+    row("movekot", "🧾", "Move a KOT to another table", "Send ONE order (one KOT) to a different table's bill", movable.length > 0) +
+    row("moveitem", "🍛", "Move a single dish", "Send one dish to another table — new KOT there", movable.some((o) => dishRowsOf(o).some((r) => r.fromDb))) +
+    row("split", "🍴", "Split the bill", "Collect one bill as several payments — equal, custom, or by dish", tshow("tablet_mark_paid") && movable.some((o) => o.status !== "received"));
+  const { dropLayer } = renderPickerShell(`Table ${esc(t)} — KOT &amp; table operations`, `<div class="pactions">${body}</div>`, "tablet-kot-menu", renderPanel);
+  document.querySelectorAll("[data-kotop]").forEach((b) => (b.onclick = () => {
+    dropLayer(); // drop this step's back layer before advancing (same rule as move-order's step 1)
+    if (b.dataset.kotop === "shift" && s) renderShiftPicker(t, s);
+    if (b.dataset.kotop === "merge" && s) renderMergePicker(t, s);
+    if (b.dataset.kotop === "movekot") renderMoveOrderPicker(t);
+    if (b.dataset.kotop === "moveitem") renderMoveItemPicker(t);
+    if (b.dataset.kotop === "split") renderSplitSettle(t);
+  }));
+}
+
+// SPLIT-SETTLE (mig 176) — collect ONE bill as several payment legs (equal / custom /
+// by dish). Mirrors the manager's flow; the server re-computes the due and refuses
+// shares that don't add up, and the ladder + tablet_mark_paid gates apply server-side.
+function renderSplitSettle(t) {
+  const payable = ordersOf(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled" && o.status !== "received");
+  if (!payable.length) { toast("Nothing to split — accept the order first, or it's already paid.", false); return; }
+  const rate = effRate();
+  const due = Math.round(payable.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate), 0) * 100) / 100;
+  const METHODS = ["UPI", "Cash", "Card", "Other"];
+  let mode = "equal", n = 2;
+  const dishes = [];
+  payable.forEach((o) => dishRowsOf(o).forEach((r) => dishes.push({ title: r.title, amt: (Number(r.price) || 0) * (r.qty || 1), qty: r.qty || 1, person: 1 })));
+  const dishSubtotal = dishes.reduce((s, d) => s + d.amt, 0) || 1;
+  const bodyShell = `<div class="ss-tabs" style="display:flex;gap:6px;margin-bottom:10px">
+      <button class="btn ss-tab" data-mode="equal">Equal</button><button class="btn ss-tab" data-mode="custom">Custom</button><button class="btn ss-tab" data-mode="dish">By dish</button>
+    </div><div class="ss-body"></div><div class="ss-sum muted small" style="margin:10px 0 8px"></div>
+    <button class="btn primary ss-go" style="width:100%">💳 Collect ${inr(due)} in parts</button>`;
+  const { dropLayer } = renderPickerShell(`Split Table ${esc(t)}'s bill · ${inr(due)}`, bodyShell, "tablet-split-settle", renderPanel);
+  const p = $("#panel");
+  const bodyEl = p.querySelector(".ss-body"), sumEl = p.querySelector(".ss-sum");
+  const methodSel = (i) => `<select class="ss-method" data-leg="${i}" style="padding:8px;border-radius:8px">${METHODS.map((m) => `<option${m === "Cash" ? " selected" : ""}>${m}</option>`).join("")}</select>`;
+  const equalLegs = () => { const base = Math.floor((due / n) * 100) / 100; const legs = Array.from({ length: n }, () => base); legs[n - 1] = Math.round((due - base * (n - 1)) * 100) / 100; return legs; };
+  const personAmounts = () => { const per = Array.from({ length: n }, () => 0); dishes.forEach((d) => { per[Math.min(d.person, n) - 1] += d.amt; }); const scaled = per.map((a) => Math.round((a / dishSubtotal) * due * 100) / 100); const drift = Math.round((due - scaled.reduce((s, x) => s + x, 0)) * 100) / 100; scaled[scaled.length - 1] = Math.round((scaled[scaled.length - 1] + drift) * 100) / 100; return scaled; };
+  const legRow = (i, amount, editable) => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span class="muted" style="min-width:60px">Person ${i + 1}</span><input type="number" step="0.01" min="0" class="ss-amt" data-leg="${i}" value="${amount.toFixed(2)}" ${editable ? "" : "readonly"} style="width:96px;padding:8px;border-radius:8px">${methodSel(i)}</div>`;
+  const nStepper = () => `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span class="muted small">Split between</span><button class="btn ss-n" data-d="-1">−</button><b>${n}</b><button class="btn ss-n" data-d="1">＋</button><span class="muted small">people</span></div>`;
+  const refreshSum = () => {
+    const s = [...bodyEl.querySelectorAll(".ss-amt")].reduce((a, x) => a + (Number(x.value) || 0), 0);
+    const diff = Math.round((s - due) * 100) / 100;
+    sumEl.textContent = diff === 0 ? `✓ Shares add up to ${inr(due)}` : `⚠️ Shares total ${inr(s)} — ${diff > 0 ? inr(diff) + " too much" : inr(-diff) + " short"}`;
+  };
+  const render = () => {
+    p.querySelectorAll(".ss-tab").forEach((b) => b.classList.toggle("primary", b.dataset.mode === mode));
+    if (mode === "equal") bodyEl.innerHTML = nStepper() + equalLegs().map((a, i) => legRow(i, a, false)).join("");
+    else if (mode === "custom") bodyEl.innerHTML = nStepper() + equalLegs().map((a, i) => legRow(i, a, true)).join("");
+    else bodyEl.innerHTML = nStepper() + `<div class="muted small" style="margin-bottom:6px">Tap a dish to hand it to the next person:</div>` +
+      dishes.map((d, i) => `<button class="btn" data-dish="${i}" style="display:flex;justify-content:space-between;width:100%;margin-bottom:4px"><span>${d.qty > 1 ? d.qty + "× " : ""}${esc(d.title)}</span><span>P${d.person} · ${inr(d.amt)}</span></button>`).join("") +
+      `<div style="margin-top:10px">${personAmounts().map((a, i) => legRow(i, a, false)).join("")}</div>`;
+    bodyEl.querySelectorAll(".ss-n").forEach((b) => (b.onclick = () => { n = Math.max(2, Math.min(12, n + Number(b.dataset.d))); dishes.forEach((d) => { if (d.person > n) d.person = 1; }); render(); }));
+    bodyEl.querySelectorAll("[data-dish]").forEach((b) => (b.onclick = () => { const d = dishes[Number(b.dataset.dish)]; d.person = d.person >= n ? 1 : d.person + 1; render(); }));
+    bodyEl.querySelectorAll(".ss-amt").forEach((x) => (x.oninput = refreshSum));
+    refreshSum();
+  };
+  p.querySelectorAll(".ss-tab").forEach((b) => (b.onclick = () => { mode = b.dataset.mode; render(); }));
+  render();
+  p.querySelector(".ss-go").onclick = () => {
+    const splits = [...bodyEl.querySelectorAll(".ss-amt")].map((x) => ({ amount: Number(x.value) || 0, method: bodyEl.querySelector(`.ss-method[data-leg="${x.dataset.leg}"]`).value }));
+    const s = splits.reduce((a, b2) => a + b2.amount, 0);
+    if (Math.abs(s - due) > 0.011) { toast("The shares must add up to exactly " + inr(due), false); return; }
+    if (splits.some((x) => !(x.amount > 0))) { toast("Every share needs an amount above zero.", false); return; }
+    dropLayer();
+    actGated("POST", `/tables/${t}/pay`, { splits }, {
+      message: "Enter a manager PIN to split-settle this bill.",
+      toast: `Paid in ${splits.length} parts 💳`,
+    });
+  };
+}
+
+// Move ONE dish line to another table's bill — pick the dish (grouped by KOT), then
+// the target table. The dish gets a fresh KOT there; both bills re-price server-side.
+function renderMoveItemPicker(t) {
+  const orders = ordersOf(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled");
+  const groups = orders.map((o) => {
+    const items = dishRowsOf(o).filter((r) => r.fromDb);
+    if (!items.length) return "";
+    return `<div class="muted small" style="margin:8px 2px 4px">KOT #${esc(o.kot_no ?? "—")}</div>` +
+      items.map((r) => `<button class="btn" style="text-align:left;display:flex;justify-content:space-between;width:100%" data-mvitem="${esc(r.id)}"><span>${r.qty > 1 ? r.qty + "× " : ""}${esc(r.title)}</span><span>${inr(r.price * (r.qty || 1))}</span></button>`).join("");
+  }).join("");
+  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Pick the dish to move off Table ${esc(t)} (a multi-plate line moves whole):</div><div class="pactions">${groups || `<div class="muted">No movable dishes.</div>`}</div>`;
+  const { dropLayer } = renderPickerShell("Move a dish", bodyHtml, "tablet-moveitem-picker", renderPanel);
+  document.querySelectorAll("[data-mvitem]").forEach((b) => (b.onclick = () => { dropLayer(); renderMoveItemTarget(t, b.dataset.mvitem); }));
+}
+function renderMoveItemTarget(t, itemId) {
+  const tiles = [];
+  for (let i = 1, n = tableCount(); i <= n; i++) {
+    if (String(i) === String(t)) continue;
+    tiles.push(`<button class="btn shiftpick" data-mvto="${i}">Table ${i}<br><span class="muted small">${tileState(i).label}</span></button>`);
+  }
+  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Send this dish to which table? (it gets its own new KOT there)</div><div class="shiftgrid">${tiles.join("")}</div>`;
+  const { dropLayer } = renderPickerShell("Move dish →", bodyHtml, "tablet-moveitem-target", () => renderMoveItemPicker(t));
+  document.querySelectorAll("[data-mvto]").forEach((b) => (b.onclick = () => {
+    const to = b.dataset.mvto;
+    dropLayer();
+    actGated("POST", `/order-items/${itemId}/move`, { to }, {
+      message: "Enter a manager PIN to move this dish.",
+      toast: `Dish moved to table ${to} (new KOT)`,
+    });
+  }));
+}
+
+// MERGE picker — the opposite of the shift picker: only OCCUPIED tables show, and the
+// party JOINS that table's bill (one bill; this table frees up). Confirms first.
+// PIN mode rides the normal actGated round-trip (the server's tabletPerm challenges).
+function renderMergePicker(t, s) {
+  const occ = [];
+  for (let i = 1, n = tableCount(); i <= n; i++) { if (String(i) !== String(t) && tileIsOpen(i)) occ.push(i); }
+  const btns = occ.length
+    ? occ.map((i) => `<button class="btn shiftpick" data-mergeto="${i}">Table ${i}<br><span class="muted small">${tileState(i).label}</span></button>`).join("")
+    : `<div class="muted">No other open tables to merge with.</div>`;
+  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Everything — orders, guests &amp; bill — joins the other table as ONE bill. Table ${esc(t)} then frees up:</div><div class="shiftgrid">${btns}</div>`;
+  const { dropLayer } = renderPickerShell(`Merge Table ${esc(t)} into →`, bodyHtml, "tablet-merge-picker", renderPanel);
+  document.querySelectorAll("[data-mergeto]").forEach((b) => (b.onclick = async () => {
+    const to = b.dataset.mergeto;
+    if (!(await confirmDialog(`Merge Table ${t} into Table ${to}? Both parties become ONE bill on Table ${to}.`, "Merge"))) return;
+    dropLayer();
+    actGated("POST", `/sessions/${s.id}/merge`, { to }, {
+      message: "Enter a manager PIN to merge these tables.",
+      onSuccess: () => { state.table = String(to); toast(`Merged into table ${to} — one bill`); renderFloor(); renderPanel(); },
+    });
+  }));
 }
 
 function renderShiftPicker(t, s) {
@@ -2767,6 +2913,7 @@ const XRAY_CAPS = [
   { key: "tablet_mark_paid", label: "Mark bill paid" },
   { key: "tablet_invoice", label: "Generate invoice" },
   { key: "tablet_banquet", label: "Banquet billing" },
+  { key: "tablet_table_ops", label: "Table & KOT operations" },
 ];
 (function injectXrayStyles() {
   const css = `
@@ -2805,7 +2952,14 @@ function closeXrayZones() {
 function renderXrayRibbon() {
   let rb = document.getElementById("xrayRibbon");
   if (!tHigher()) { if (rb) rb.remove(); return; }
-  const zones = XRAY_CAPS.filter((c) => (c.key === "tablet_banquet" ? ((state.data.settings || {}).banquet_allowed === true && ((state.data.settings || {}).banquet_owner_control !== true || (state.data.settings || {}).banquet_enabled !== false)) : true) && tperm(c.key) === "off");
+  const zones = XRAY_CAPS.filter((c) => {
+    // Module caps only count as "zones" when the module exists for this restaurant at
+    // all (banquet full ladder / KOT-menu depth) — otherwise it's not a grantable thing.
+    const s2 = state.data.settings || {};
+    if (c.key === "tablet_banquet" && !(s2.banquet_allowed === true && (s2.banquet_owner_control !== true || s2.banquet_enabled !== false))) return false;
+    if (c.key === "tablet_table_ops" && !s2.table_ops_tablet_allowed) return false;
+    return tperm(c.key) === "off";
+  });
   const rest = (state.data.restaurant && state.data.restaurant.name) || "";
   const sig = `${rest}|${zones.map((z) => z.key).join(",")}`; // skip identical rebuilds
   if (rb && rb.dataset.sig === sig) return;
@@ -2934,7 +3088,7 @@ window.addEventListener("online", () => load().catch(() => {}));
     // #5: clock lives here on phones (moved off the cramped top bar; desktop keeps it on the bar).
     '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
     // Build tag: lets the owner confirm at a glance he's on the latest code (rules out a stale cache). (audit 2026-07-09)
-    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260720safe1</span></div>' +
+    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260722kot1</span></div>' +
     // Banquet module (mig 130): shown only when the admin entitlement AND the
     // waiter's tablet_banquet capability allow it (openDrawer re-checks each open).
     '<button class="dw-btn" id="dwBanquet" type="button" hidden style="margin-top:auto;margin-bottom:10px">🎪 Banquet billing</button>' +
