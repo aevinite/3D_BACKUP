@@ -22,8 +22,13 @@ export const dynamic = "force-dynamic";
 const MANAGER_POWERS = MANAGER_POWER_FLAGS;
 // take_orders defaults OFF (opt-in) — an owner must deliberately grant it, like void_bills.
 const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, take_orders: false };
-// The three tablet billing capabilities (settings.*), tri-state off|on|pin.
-const TABLET_CAPS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice"] as const;
+// The tablet capabilities (settings.*), tri-state off|on|pin. tablet_table_tags /
+// tablet_khata are normally the MANAGER's rung (manager settings), but the admin
+// console shows every access bit of the ladder, so they're editable here too (mig 166).
+const TABLET_CAPS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_table_tags", "tablet_khata"] as const;
+// Feature-ladder switches on settings (mig 166): the feature itself + the admin's
+// "power transfer" (may the OWNER toggle it). Booleans, default OFF via the migration.
+const FEATURE_SWITCHES = ["table_tags_allowed", "table_tags_owner_control"] as const;
 const isTri = (v: unknown): v is "off" | "on" | "pin" => v === "off" || v === "on" || v === "pin";
 const isDepth = (v: unknown): v is FeatureDepth => v === "owner" || v === "manager" || v === "tablet";
 
@@ -43,15 +48,18 @@ export async function GET(req: NextRequest) {
   if (rq.error) return bad(rq.error.message, 500);
   if (!rq.data) return bad("Restaurant not found.", 404);
   const r = rq.data;
-  const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice").eq("restaurant_id", rid).maybeSingle()).data as Record<string, string> | null;
+  const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice, tablet_table_tags, tablet_khata, table_tags_allowed, table_tags_owner_control, table_tags_enabled").eq("restaurant_id", rid).maybeSingle()).data as Record<string, unknown> | null;
   const manager = { ...MP_DEFAULT, ...(r?.manager_permissions && typeof r.manager_permissions === "object" ? r.manager_permissions : {}) };
   const tablet: Record<string, string> = {};
   for (const k of TABLET_CAPS) tablet[k] = isTri(s?.[k]) ? (s![k] as string) : "off";
+  const features: Record<string, boolean> = {};
+  for (const k of FEATURE_SWITCHES) features[k] = s?.[k] === true;
+  features.table_tags_enabled = s?.table_tags_enabled !== false; // the owner's toggle, shown read-only
   // Rung 1b — how far each ladder feature may reach (owner|manager|tablet), for the
   // features that HAVE a tablet rung. Absent = "tablet" (full reach).
   const depths: Record<string, FeatureDepth> = {};
   for (const flag of TABLET_POWER_FLAGS) depths[flag] = featureDepth(r?.owner_entitlements, flag);
-  return NextResponse.json({ manager, tablet, owner: mergeOwnerEntitlements(r?.owner_entitlements), depths });
+  return NextResponse.json({ manager, tablet, owner: mergeOwnerEntitlements(r?.owner_entitlements), features, depths });
 }
 
 export async function POST(req: NextRequest) {
@@ -91,10 +99,13 @@ export async function POST(req: NextRequest) {
     if (up.error) return bad(up.error.message, 500);
   }
 
-  // Tablet caps → settings tri-states (upsert; clone #1's row cleanly if this restaurant has none).
-  if (body.tablet && typeof body.tablet === "object") {
-    const patch: Record<string, string> = {};
-    for (const k of TABLET_CAPS) { const v = (body.tablet as Record<string, unknown>)[k]; if (isTri(v)) patch[k] = v; }
+  // Tablet caps + feature-ladder switches → settings (upsert; clone #1's row cleanly if none).
+  if ((body.tablet && typeof body.tablet === "object") || (body.features && typeof body.features === "object")) {
+    const patch: Record<string, string | boolean> = {};
+    if (body.tablet && typeof body.tablet === "object")
+      for (const k of TABLET_CAPS) { const v = (body.tablet as Record<string, unknown>)[k]; if (isTri(v)) patch[k] = v; }
+    if (body.features && typeof body.features === "object")
+      for (const k of FEATURE_SWITCHES) { const v = (body.features as Record<string, unknown>)[k]; if (typeof v === "boolean") patch[k] = v; }
     if (Object.keys(patch).length) {
       const existing = (await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle()).data;
       if (existing) {

@@ -6,7 +6,7 @@
   <title>Waiter tablet</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=20260720safe1">
+  <link rel="stylesheet" href="style.css?v=20260722tags">
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js"></script>
 </head>
@@ -80,6 +80,8 @@
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
   <script src="/panels/errlog.js?v=1"></script>
   <script src="/panels/issue-raise.js?v=1"></script>
-  <script src="app.js?v=20260722takeorder1"></script>
+  <!-- undobar: the shared "take it back" bar after a Serve/Ready/Settle mis-tap. -->
+  <script src="/panels/undobar.js?v=2"></script>
+  <script src="app.js?v=20260722tags2-takeorder"></script>
 </body>
 </html>

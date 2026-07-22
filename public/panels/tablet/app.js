@@ -197,7 +197,8 @@ async function actGated(method, path, body, opts = {}) {
     }
     if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: saved offline — skip the offline GET + the success toast
     await load();
-    if (opts.toast) toast(opts.toast);
+    if (typeof opts.onSuccess === "function") { try { opts.onSuccess(); } catch (e) {} }
+    else if (opts.toast) toast(opts.toast);
   } catch (e) {
     toast("Failed: " + e.message, false);
   }
@@ -391,6 +392,27 @@ const tHigher = () => !!(TABLET_WHO && TABLET_WHO.higherView);
 const tshow = (k) => tperm(k) !== "off" || tHigher();
 const txray = (k) => (tperm(k) === "off" && tHigher() ? " xray-off" : "");
 
+// ── Special table types (VIP / Family / Owner's Guest) + khata — mig 166 ──────
+// Mirrors the manager panel. The tile look is the APPROVED design
+// (docs/superpowers/specs/2026-07-22-table-tags-mockup.html).
+const TABLE_TAG_INFO = {
+  vip:    { label: "VIP",           emoji: "👑", ribbon: "👑 VIP" },
+  family: { label: "Family",        emoji: "🏠", ribbon: "FAMILY" },
+  guest:  { label: "Owner's guest", emoji: "🤝", ribbon: "GUEST" },
+};
+// The feature ladder's application rung (settings, mig 166): admin's switch AND
+// (the owner's toggle, only while the admin transferred control to them).
+function tabletTagsOn() {
+  const s = state.data.settings || {};
+  return s.table_tags_allowed === true && (s.table_tags_owner_control !== true || s.table_tags_enabled !== false);
+}
+// This table's mark ('' when none) — the slim summary carries it for every tile.
+function ttagOf(t) {
+  if (!tabletTagsOn()) return "";
+  const tile = (state.summary.tiles || {})[String(t)];
+  return (tile && tile.tag) || "";
+}
+
 // selectTable(t): open table t's DETAIL. The grid only had the slim summary, so we pull table t's
 // FULL slice (orders/items/members/calls/…) before the detail can show real rows. Render once
 // immediately for instant feedback (the panel shows what's cached — often a quick skeleton), then
@@ -475,9 +497,15 @@ function tileHtml(i) {
     else if (st.cls === "bill" && tshow("tablet_mark_paid")) quick = `<span class="tpay${txray("tablet_mark_paid")}" data-quick="pay" data-qt="${i}">💳 Mark paid</span>`;
     body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${esc(sub)}</span>${strip}${pills}${quick}`;
   }
-  return `<button class="tile t-${st.cls} ${payCls} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
+  // Special table type (mig 166): a corner ribbon + pill badge layered OVER the state
+  // look — strip/pills/pay ring keep working, the tag is unmistakable on top.
+  const ttag = ttagOf(i);
+  const tinfo = TABLE_TAG_INFO[ttag];
+  return `<button class="tile t-${st.cls} ${payCls}${tinfo ? ` t-tag tag-${ttag}` : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
+      ${tinfo ? `<span class="t-ribbon" aria-hidden="true">${tinfo.ribbon}</span>` : ""}
       <span class="tbadges">${calls.length ? `<em class="b-call" title="${esc(calls.map((c) => c.note || "call").join(", "))}">${[...new Set(calls.map((c) => callIcon(c.note)))].join("")}</em>` : ""}${reqsN ? `<em class="b-req">📨${reqsN}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
       <span class="tnum" ${tname(i) ? `title="T${i}"` : ""}>${esc(tname(i) || i)}</span>
+      ${tinfo ? `<span class="t-tagbadge">${tinfo.emoji} ${esc(tinfo.label)}</span>` : ""}
       <span class="tlabel">${st.label}</span>
       ${body}
     </button>`;
@@ -933,6 +961,7 @@ function renderPanel() {
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
       ${tshow("tablet_take_orders") ? `<button class="btn primary big${txray("tablet_take_orders")}" id="takeOrder">＋ Take order</button>` : ""}
       ${s ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
+      ${tabletTagsOn() && tshow("tablet_table_tags") ? `<button class="btn${txray("tablet_table_tags")}" id="tagTable">${TABLE_TAG_INFO[ttagOf(t)] ? TABLE_TAG_INFO[ttagOf(t)].emoji : "🏷"} Table type</button>` : ""}
       ${s && os.length ? `<button class="btn" id="moveOrderBtn">⇄ Move an order</button>` : ""}
       ${s && os.length ? `<button class="btn" id="restartTable">↻ Restart</button>` : ""}
       ${s && os.length && tshow("tablet_discount") ? `<button class="btn${txray("tablet_discount")}" id="billDiscountBtn">${Number(s.discount) > 0 ? `− Edit bill discount (${inr(s.discount)})` : "− Discount whole bill"}</button>` : ""}
@@ -1043,6 +1072,7 @@ function renderPanel() {
     await load(); // reconcile (also reverts the optimistic clear if the PIN was cancelled)
   };
   const pb = $("#payBill"); if (pb) pb.onclick = () => payBillWithMethod(t, a);
+  const tgb = $("#tagTable"); if (tgb) tgb.onclick = () => openTagSheet(t);
   const gib = $("#genInvoiceBtn"); if (gib && s) gib.onclick = () => genInvoice(s.id);
   const bdb = $("#billDiscountBtn"); if (bdb && s) bdb.onclick = () => tabletBillDiscount(t);
   const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
@@ -1091,6 +1121,7 @@ async function advanceDish(id, cur, forceNext) {
   // the edit modal passes "preparing" to un-serve a dish); otherwise follow the forward flow.
   const next = forceNext || NEXT_STATUS[cur] || "preparing";
   const it = (state.data.items || []).find((x) => x.id === id);
+  const dishName = (it && (it.title || it.name)) || "Dish";
   if (it) it.status = next;            // optimistic — the pill flips instantly
   // #8: re-sync THIS table's slim summary tile from the slice so the floor counts + the tile's
   // "x/y served · ₹z due" meta update instantly too — before this, serving the last dish left
@@ -1103,7 +1134,14 @@ async function advanceDish(id, cur, forceNext) {
   if (!state.ordering) renderPanel();
   // Fire-and-forget; reconcile once after the taps stop (not per tap).
   api("POST", `/items/${id}/status`, { status: next })
-    .then(() => scheduleServeReconcile())
+    .then(() => {
+      scheduleServeReconcile();
+      // Only when this tap actually SERVED a dish (not an accept-to-cooking, and not
+      // the "send back to kitchen" un-serve which passes forceNext) offer a takeback.
+      if (next === "served" && cur !== "served" && window.LFH_UNDO) {
+        LFH_UNDO.show({ message: `${dishName} served`, onUndo: () => undoServe([{ id, prev: cur }]) });
+      }
+    })
     .catch((e) => { toast("Failed: " + e.message, false); load(); });
 }
 
@@ -1169,6 +1207,40 @@ function patchTileFromSlice(t) {
   state.summary = Object.assign({}, state.summary, { tiles });
 }
 
+// Take back a serve (owner undo bar, 2026-07-22). snap = [{ id, prev }] captured
+// BEFORE the dishes were flipped to "served". Restore each dish to its prior status
+// locally + on the server, recompute the parent orders, and reconcile from the truth.
+// Covers session order_items (the common path); legacy JSON-item rows have no per-dish
+// id so they aren't reverted here (they're vanishingly rare now).
+function undoServe(snap) {
+  if (!snap || !snap.length) return Promise.resolve();
+  const items = state.data.items || [];
+  const orderIds = new Set();
+  snap.forEach((s) => {
+    const it = items.find((x) => x.id === s.id);
+    if (it) { it.status = s.prev; orderIds.add(it.order_id); }
+  });
+  // Roll each touched order's coarse status back down, exactly like the server does.
+  const tables = new Set();
+  (state.data.orders || []).forEach((o) => {
+    if (!orderIds.has(o.id)) return;
+    const rows = items.filter((i) => i.order_id === o.id);
+    if (rows.length) {
+      const served = rows.filter((r) => r.status === "served").length;
+      const anyActive = rows.some((r) => ["preparing", "ready", "served"].includes(r.status));
+      o.status = served === rows.length ? "served" : anyActive ? "preparing" : "received";
+    }
+    tables.add(String(o.table_number));
+  });
+  tables.forEach((t) => patchTileFromSlice(t));
+  lastSig = boardSig(state);
+  renderFloor();
+  if (!state.ordering) renderPanel();
+  return Promise.all(snap.map((s) => api("POST", `/items/${s.id}/status`, { status: s.prev })))
+    .then(() => scheduleServeReconcile())
+    .catch((e) => { toast("Undo failed: " + e.message, false); load(); });
+}
+
 function flipOrders(orderIds, { from, to, orderStatus }) {
   const items = state.data.items || [];
   const touched = new Set();
@@ -1192,9 +1264,20 @@ function optimisticAccept(orderIds) {
 }
 function optimisticServeAll(orderIds) {
   if (!orderIds.length) return;
+  // Snapshot each not-yet-served dish's prior status BEFORE the flip, so "Serve all"
+  // can be taken back to exactly where each dish was (owner undo bar, 2026-07-22).
+  const snap = (state.data.items || [])
+    .filter((it) => orderIds.includes(it.order_id) && it.status !== "served")
+    .map((it) => ({ id: it.id, prev: it.status }));
   flipOrders(orderIds, { from: null, to: "served", orderStatus: "served" });
   Promise.all(orderIds.map((oid) => api("POST", `/orders/${oid}/serve-all`)))
-    .then(() => scheduleServeReconcile())
+    .then(() => {
+      scheduleServeReconcile();
+      if (snap.length && window.LFH_UNDO) {
+        const o = (state.data.orders || []).find((x) => x.id === orderIds[0]);
+        LFH_UNDO.show({ message: o ? `Table ${o.table_number} · all served` : "All served", onUndo: () => undoServe(snap) });
+      }
+    })
     .catch((e) => { toast("Failed: " + e.message, false); load(); });
 }
 
@@ -1287,15 +1370,17 @@ function renderMoveOrderTarget(t, orderId) {
 
 // Apply a local change, repaint instantly, then persist and reconcile from the
 // server. On failure we toast and reload so the screen can't lie.
-async function runOptimistic(mutate, fn) {
+async function runOptimistic(mutate, fn, onSuccess) {
   // Remember which table we were viewing: a shift optimistically repoints state.table to the
   // TARGET, so if the move is refused (target just got taken) we must snap back to the source
   // table — otherwise the waiter is left staring at the wrong, empty table. (audit 2026-07-08 round2)
   const prevTable = state.table;
+  let done = false;   // true only on a real ONLINE success (not queued, not failed)
   try {
     mutate(); renderFloor(); renderPanel();
     const r = await fn();
     if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: saved offline — not a failure, and load() would no-op
+    done = true;
   }
   // On failure the optimistic mutate() must be REVERTED by the reconciling load() below. But if the
   // write never reached the server (e.g. a 409 refusal — target already invoiced), the server state
@@ -1304,6 +1389,9 @@ async function runOptimistic(mutate, fn) {
   // load() to re-apply server truth and repaint immediately. (audit 2026-07-09)
   catch (e) { state.table = prevTable; lastSig = null; toast("Failed: " + e.message, false); }
   await load();   // load() already repaints if anything changed — no second render (that was the extra flash)
+  // Run the success hook AFTER reconcile, so it can read the freshly-loaded state
+  // (e.g. the settle-undo bar checks whether the table auto-closed on pay).
+  if (done && typeof onSuccess === "function") { try { onSuccess(); } catch (e) {} }
 }
 
 const act = async (fn) => {
@@ -1413,6 +1501,7 @@ function optimisticPay(t, method, note) {
       patchTileFromSlice(t);   // flip the UN-selected floor tile to paid/no-due now, not after reconcile
     },
     () => api("POST", `/tables/${t}/pay`, method ? { payment_method: method, payment_note: note || "" } : null),
+    () => offerPayUndo(t, method),
   );
 }
 // Settle a table's bill respecting the manager's tablet_mark_paid setting: 'on' →
@@ -1422,9 +1511,27 @@ function optimisticPay(t, method, note) {
 function payBill(t, method, note) {
   const body = method ? { payment_method: method, payment_note: note || "" } : null;
   if (tperm("tablet_mark_paid") === "pin") {
-    actGated("POST", `/tables/${t}/pay`, body, { message: "Enter a manager PIN to mark this bill paid.", toast: method ? `Bill paid via ${method}` : "Bill paid" });
+    actGated("POST", `/tables/${t}/pay`, body, { message: "Enter a manager PIN to mark this bill paid.", onSuccess: () => offerPayUndo(t, method) });
   } else {
     optimisticPay(t, method, note);
+  }
+}
+// After a successful "Mark paid", give a few-second takeback (owner undo bar, 2026-07-22).
+// Only while the table is STILL open — if paying the last dish auto-closed the table
+// (auto_table_action), an in-place undo can't cleanly reopen it, so we just confirm and
+// leave the heavier "restore to floor" to the manager panel. The undo goes through
+// actGated so a PIN-gated restaurant is asked for a PIN to reverse a payment too.
+function offerPayUndo(t, method) {
+  const msg = method ? `Bill paid via ${method}` : "Bill paid";
+  const stillOpen = !!sessionOf(t);
+  if (stillOpen && window.LFH_UNDO) {
+    LFH_UNDO.show({
+      message: msg,
+      seconds: 5,
+      onUndo: () => actGated("POST", `/tables/${t}/unpay`, null, { message: "Enter a manager PIN to undo this payment.", toast: "Payment undone" }),
+    });
+  } else {
+    toast(msg);
   }
 }
 // openPaymentMethodModal(due, label): "how did they pay?" — UPI/Cash/Card, or Other
@@ -1434,7 +1541,7 @@ function payBill(t, method, note) {
 // other self-contained modals (openDishEditModal, openDiscountModal, pinPrompt).
 // (owner, 2026-07-01)
 let payModalOpen = false;
-function openPaymentMethodModal(due, label) {
+function openPaymentMethodModal(due, label, opts = {}) {
   // #18: a fast double-tap on "💳 Mark paid" used to build a SECOND modal — the first's DOM
   // was removed but its back-stack layer + promise leaked (one dead Back press). Re-entrancy
   // guard: while one is open, a second call resolves null (treated as "cancelled") instead.
@@ -1455,6 +1562,8 @@ function openPaymentMethodModal(due, label) {
           <button type="button" class="pay-method-btn" data-method="Cash" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">💵</span>Cash</button>
           <button type="button" class="pay-method-btn" data-method="Card" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">💳</span>Card</button>
           <button type="button" class="pay-method-btn" data-method="Other" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">⋯</span>Other</button>
+          ${opts.onHouse ? `<button type="button" class="pay-method-btn" data-special="onhouse" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid #e11d48;background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">🏠</span>On the house</button>` : ""}
+          ${opts.khata ? `<button type="button" class="pay-method-btn" data-special="khata" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid #0ea5e9;background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">📒</span>Collect later</button>` : ""}
         </div>
         <div class="pay-other-field" style="display:none;margin-top:12px">
           <div style="font-size:13px;font-weight:700;margin:0 0 8px">What kind?</div>
@@ -1474,6 +1583,9 @@ function openPaymentMethodModal(due, label) {
     ov.querySelector(".pay-cancel-btn").onclick = cancel;
     ov.onclick = (e) => { if (e.target === ov) cancel(); };
     ov.querySelectorAll(".pay-method-btn").forEach((b) => (b.onclick = () => {
+      // The two special settles (mig 166): resolve with a marker — the CALLER runs the
+      // dedicated flow (person picker / no-charge settle); no payment method involved.
+      if (b.dataset.special) { resolved = true; close(); resolve({ special: b.dataset.special }); return; }
       const m = b.dataset.method;
       if (m === "Other") {
         ov.querySelector(".pay-other-field").style.display = "";
@@ -1493,9 +1605,152 @@ function openPaymentMethodModal(due, label) {
 // plain confirmDialog on BOTH entry points (the floor-tile quick pay + the table
 // detail's Mark paid button) with one that also records HOW the money came in.
 async function payBillWithMethod(t, a) {
-  const picked = await openPaymentMethodModal(a.due, `Mark bill ${a.billNo ? `#${a.billNo} ` : ""}paid for table ${t}`);
+  // The two special settles (mig 166) ride the same popup as extra buttons: "On the
+  // house" only on a Family/Owner's-Guest table (the mark is the authorization; money
+  // side still runs under tablet_mark_paid), "Collect later" under tablet_khata.
+  const opts = {
+    onHouse: ["family", "guest"].includes(ttagOf(t)),
+    khata: tabletTagsOn() && tshow("tablet_khata"),
+  };
+  const picked = await openPaymentMethodModal(a.due, `Mark bill ${a.billNo ? `#${a.billNo} ` : ""}paid for table ${t}`, opts);
   if (!picked) return;
+  if (picked.special === "onhouse") {
+    // actGated handles BOTH modes: direct when 'on', and the PIN round-trip when the
+    // server answers "manager pin" ('pin' mode) — same as every other gated action.
+    actGated("POST", `/tables/${t}/on-the-house`, {}, { message: "Enter a manager PIN to settle this bill on the house.", toast: "On the house 🏠 — settled at no charge" });
+    return;
+  }
+  if (picked.special === "khata") { await tabletKhataFlow(t, a.due); return; }
   payBill(t, picked.method, picked.note);
+}
+
+// tabletKhataFlow(t, due): "Collect later" — pick (or add) the person, then park the
+// bill: the table frees up and the bill lives in the manager's Bills → Khata book.
+async function tabletKhataFlow(t, due) {
+  const who = await openKhataPersonSheet(due, t);
+  if (!who) return;
+  await actGated("POST", `/tables/${t}/khata`, who, { message: "Enter a manager PIN to park this bill.", toast: "📒 Parked — collect later from the manager's Khata book" });
+  state.table = null; renderFloor(); renderPanel(); // the table just closed
+}
+
+// openKhataPersonSheet(due, t): the person picker — search the khata book by name or
+// mobile (scoped, LIMIT 8 server-side) or add a new person. Resolves
+// { customer_id } | { name, phone, note } | null. Same inline-modal style as the pay sheet.
+function openKhataPersonSheet(due, t) {
+  return new Promise((resolve) => {
+    document.querySelector(".khata-overlay")?.remove();
+    const ov = document.createElement("div");
+    ov.className = "khata-overlay";
+    Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+    const inputCss = "width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px";
+    ov.innerHTML = `<div style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+      <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Collect later — whose khata?</h3><button class="kp-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
+      <div style="padding:16px 18px">
+        <div style="display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted);margin-bottom:10px"><span>Table ${esc(t)} bill</span><b style="color:var(--text)">${inr(due)}</b></div>
+        <input type="text" class="kp-search" maxlength="60" placeholder="🔍 Search name or mobile…" autocomplete="off" style="${inputCss};margin-bottom:8px">
+        <div class="kp-list" style="border:1px solid var(--line);border-radius:10px;max-height:180px;overflow-y:auto"><div style="padding:10px 12px;color:var(--muted);font-size:13px">Type to search, or add a new person below.</div></div>
+        <div style="font-size:12.5px;color:var(--muted);margin:10px 0 6px">— or add a new person —</div>
+        <input type="text" class="kp-name" maxlength="80" placeholder="Full name *" autocomplete="off" style="${inputCss};margin-bottom:6px">
+        <input type="tel" class="kp-phone" maxlength="20" placeholder="Mobile number (optional)" autocomplete="off" style="${inputCss};margin-bottom:6px">
+        <input type="text" class="kp-note" maxlength="200" placeholder="Note (optional)" autocomplete="off" style="${inputCss}">
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid var(--line)"><button class="btn kp-cancel">Cancel</button><button class="btn primary kp-go">📒 Park bill</button></div>
+    </div>`;
+    document.body.appendChild(ov);
+    let resolved = false, pickedId = null;
+    let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-khata", () => cancel()) : null;
+    const close = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); };
+    const cancel = () => { close(); if (!resolved) resolve(null); };
+    ov.querySelector(".kp-close").onclick = cancel;
+    ov.querySelector(".kp-cancel").onclick = cancel;
+    ov.onclick = (e) => { if (e.target === ov) cancel(); };
+    const list = ov.querySelector(".kp-list");
+    const search = ov.querySelector(".kp-search");
+    const rowCss = "display:block;width:100%;text-align:left;padding:10px 12px;background:transparent;border:0;border-bottom:1px solid var(--line);color:var(--text);font-size:13.5px;cursor:pointer";
+    const renderList = (customers) => {
+      list.innerHTML = customers.length
+        ? customers.map((cst) => `<button type="button" class="kp-row" data-cid="${esc(cst.id)}" style="${rowCss}"><b>${esc(cst.name)}</b><br><small style="color:var(--muted)">${esc(cst.phone || "no mobile")}${cst.note ? " · " + esc(cst.note) : ""}</small></button>`).join("")
+        : `<div style="padding:10px 12px;color:var(--muted);font-size:13px">No one found — add them below.</div>`;
+      list.querySelectorAll(".kp-row").forEach((row) => (row.onclick = () => {
+        pickedId = row.dataset.cid;
+        list.querySelectorAll(".kp-row").forEach((x) => (x.style.background = x === row ? "rgba(14,165,233,.18)" : "transparent"));
+      }));
+    };
+    let seq = 0, timer = null;
+    const doSearch = async () => {
+      const mySeq = ++seq;
+      try {
+        const r = await api("GET", "/khata/customers?q=" + encodeURIComponent(search.value.trim()));
+        if (mySeq === seq) renderList(r.customers || []); // latest-wins
+      } catch { /* best-effort — add-new still works */ }
+    };
+    search.oninput = () => { pickedId = null; clearTimeout(timer); timer = setTimeout(doSearch, 250); };
+    doSearch();
+    ov.querySelector(".kp-go").onclick = () => {
+      if (pickedId) { resolved = true; close(); resolve({ customer_id: pickedId }); return; }
+      const name = ov.querySelector(".kp-name").value.trim();
+      if (!name) { toast("Pick a person from the list, or type a name to add them.", false); return; }
+      resolved = true; close();
+      resolve({ name, phone: ov.querySelector(".kp-phone").value.trim(), note: ov.querySelector(".kp-note").value.trim() });
+    };
+  });
+}
+
+// openTagSheet(t): mark / clear this table's special type (mig 166). One tap each;
+// PIN mode (tablet_table_tags='pin') is enforced by actGated + the server.
+function openTagSheet(t) {
+  document.querySelector(".tag-overlay")?.remove();
+  const cur = ttagOf(t);
+  const colors = { vip: "#8b5cf6", family: "#e11d48", guest: "#aab4c4" };
+  const subs = { vip: "Priority service · pays normally", family: `"On the house" offered at billing`, guest: `"On the house" offered at billing` };
+  const ov = document.createElement("div");
+  ov.className = "tag-overlay";
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  const opt = (tag) => `<button type="button" class="tag-pick" data-tag="${tag}" style="display:flex;align-items:center;gap:12px;width:100%;padding:12px;margin-bottom:8px;border-radius:12px;border:1.5px solid ${colors[tag]};background:linear-gradient(120deg, color-mix(in srgb, ${colors[tag]} 18%, var(--panel)), var(--panel));color:var(--text);font-size:14px;font-weight:600;text-align:left;cursor:pointer${cur === tag ? ";outline:2px solid var(--gold, #d4a574)" : ""}"><span style="font-size:19px">${TABLE_TAG_INFO[tag].emoji}</span><span>${TABLE_TAG_INFO[tag].label}<small style="display:block;font-weight:400;font-size:11.5px;color:var(--muted)">${subs[tag]}</small></span></button>`;
+  ov.innerHTML = `<div style="width:min(94vw,380px);background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Mark table ${esc(t)}</h3><button class="tg-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
+    <div style="padding:16px 18px">
+      <p style="margin:0 0 10px;font-size:12.5px;color:var(--muted)">How should staff treat this table? The mark clears itself when the table closes.</p>
+      ${opt("vip")}${opt("family")}${opt("guest")}
+      ${cur ? `<button type="button" class="tag-pick" data-tag="" style="display:flex;justify-content:center;width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--line);background:var(--panel-2);color:var(--muted);font-size:14px;cursor:pointer">✕ &nbsp;Remove mark</button>` : ""}
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-tag", () => close()) : null;
+  const close = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); };
+  ov.querySelector(".tg-close").onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  ov.querySelectorAll(".tag-pick").forEach((b) => (b.onclick = () => {
+    const tag = b.dataset.tag || null;
+    close();
+    // Optimistic: paint the tile NOW; the breadcrumb-driven refetch confirms it.
+    const tile = (state.summary.tiles || {})[String(t)];
+    const prev = tile ? tile.tag : undefined;
+    if (tile) { tile.tag = tag || ""; renderFloor(); renderPanel(); }
+    const done = tag ? `Marked ${TABLE_TAG_INFO[tag].emoji} ${TABLE_TAG_INFO[tag].label}` : "Mark removed";
+    const revert = () => { if (tile) { tile.tag = prev || ""; renderFloor(); renderPanel(); } };
+    (async () => {
+      try {
+        try {
+          await api("POST", `/tables/${t}/tag`, { tag });
+        } catch (e) {
+          // 'pin' mode: the server asks for a manager PIN — same round-trip as actGated.
+          if (!/manager pin/i.test(String(e && e.message))) throw e;
+          let pin = await pinPrompt("Enter a manager PIN to mark this table.");
+          let okd = false;
+          while (pin) {
+            try { await api("POST", `/tables/${t}/tag`, { tag, managerPin: pin }); okd = true; break; }
+            catch (e2) {
+              if (/manager pin/i.test(String(e2 && e2.message))) { pin = await pinPrompt("Enter a manager PIN to mark this table.", "That PIN didn't match — try again."); continue; }
+              throw e2;
+            }
+          }
+          if (!okd) { revert(); return; } // PIN cancelled
+        }
+        toast(done);
+      } catch (e) { revert(); toast("Failed: " + e.message, false); }
+    })();
+  }));
 }
 // Generate this table's invoice number, respecting tablet_invoice: 'on' → direct;
 // 'pin' → manager-PIN-gated (server enforces it too). Independent of Mark bill paid —

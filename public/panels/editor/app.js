@@ -471,6 +471,9 @@ function renderList() {
     ul.appendChild(mk("live", '<i class="fas fa-circle" style="color:#7ec88a"></i>', "Live", live.length));
     ul.appendChild(mk("daybills", '<i class="fas fa-calendar-day"></i>', "Today", today.length));
     ul.appendChild(mk("previous", '<i class="fas fa-receipt"></i>', "Previous", previous.length));
+    // Pay later (mig 166): the parked-bills book, grouped by person. Count = people
+    // with something outstanding (from the last book fetch; refreshed on open).
+    if (tagActionAllowed("khata")) ul.appendChild(mk("khata", "📒", "Khata", (state.khataBook && state.khataBook.customers || []).length));
     ul.appendChild(mk("calls", "🔔", "Calls", callCount));
     return;
   }
@@ -1169,11 +1172,20 @@ const ACCESS_CAPS = [
   // Banquet module (mig 130) — only meaningful when the admin entitlement is on;
   // accessCapsFor() drops it from both Access cards otherwise (no dead UI).
   { key: "tablet_banquet", label: "Banquet billing" },
+  // Table types + khata (mig 166) — the manager→tablet rung of the ladder; dropped
+  // from both Access cards when the feature itself is off (no dead UI).
+  { key: "tablet_table_tags", label: "Mark table types (VIP/Family/Guest)" },
+  { key: "tablet_khata", label: "Park pay-later (khata) bills" },
 ];
 // The Access cards' cap list, minus modules this restaurant doesn't have.
 function accessCapsFor() {
   const s = state.data.settings || {};
-  return ACCESS_CAPS.filter((c) => c.key !== "tablet_banquet" || !!s.banquet_allowed);
+  const tagsOn = s.table_tags_allowed === true && (s.table_tags_owner_control !== true || s.table_tags_enabled !== false);
+  return ACCESS_CAPS.filter((c) => {
+    if (c.key === "tablet_banquet") return !!s.banquet_allowed;
+    if (c.key === "tablet_table_tags" || c.key === "tablet_khata") return tagsOn;
+    return true;
+  });
 }
 const ACCESS_MODE_LABEL = { on: "On", pin: "On — needs PIN", off: "Off" };
 
@@ -1707,8 +1719,14 @@ function ordersViewKey() {
   const v = state.ordersView;
   if (v === "today") return "live";      // legacy: the old Live row stored the key "today"
   if (v === "bills") return "previous";  // legacy alias
-  return ["live", "daybills", "previous", "calls"].includes(v) ? v : "live";
+  if (v === "khata" && !tagActionAllowed("khata")) return "live"; // feature/power got switched off
+  return ["live", "daybills", "previous", "calls", "khata"].includes(v) ? v : "live";
 }
+// A bill parked "collect later" (mig 166): unpaid + khata-marked. These live ONLY in
+// the Khata view (the owner's "other section, other than live") — never in Live (they
+// are archived) and not in Today/Previous either, so nobody double-collects from a
+// normal list. Once collected they're paid and show as normal bill records again.
+function isParkedKhata(o) { return !!o.khata_at && o.payment_status !== "paid" && o.status !== "cancelled"; }
 
 // Split orders by DAY: TODAY's (live AND already-served, shown together) vs
 // PREVIOUS (anything archived, cancelled, or older than today — the bill records),
@@ -1749,8 +1767,13 @@ function ordersBuckets() {
   // RECORDS = archived (freed) OR cancelled OR fully-paid — split by day into
   // TODAY (this business day) and PREVIOUS (older). "Restore to floor" (within its
   // 30-min window — migration 112) returns a bill from here back to Live.
-  const live = all.filter((o) => !o.archived && o.status !== "cancelled" && !paidKeys.has(sessKey(o)));
-  const records = all.filter((o) => o.archived || o.status === "cancelled" || paidKeys.has(sessKey(o)));
+  const live = all.filter((o) => !o.archived && o.status !== "cancelled" && !paidKeys.has(sessKey(o)) && !isParkedKhata(o));
+  // "Show on-the-house bills in the normal lists" toggle (mig 166; default ON). When off,
+  // comp bills live only in the On-the-house report — never counted or listed here.
+  const hideOnHouse = lsGet("lfh_show_onhouse", "1") === "0";
+  const records = all.filter((o) => (o.archived || o.status === "cancelled" || paidKeys.has(sessKey(o)))
+    && !isParkedKhata(o)
+    && !(hideOnHouse && o.payment_method === "On the house"));
   const dayStart = businessDayStartMs();
   const today = records.filter((o) => new Date(o.created_at || 0).getTime() >= dayStart);
   const previous = records.filter((o) => new Date(o.created_at || 0).getTime() < dayStart);
@@ -1769,6 +1792,7 @@ function ordersHtml() {
   if (view === "previous") main = ordersPreviousHtml(previous, "previous");
   else if (view === "daybills") main = ordersPreviousHtml(today, "today");
   else if (view === "calls") main = ordersCallsHtml();
+  else if (view === "khata") main = ordersKhataHtml();
   else main = ordersLiveHtml(live);
 
   const head = `<div class="ed-head">
@@ -2016,6 +2040,69 @@ function ordersCallsHtml() {
   return callsHtml();
 }
 
+// ── Bills → Khata (pay later) + the On-the-house report — mig 166 ─────────────
+// loadKhataBook(): fetch the person-grouped outstanding book + the comp-bill report
+// in parallel. Cached on state; refreshed every time the view is opened (rare path,
+// two scoped+limited reads — no polling).
+const fmtDate = (ts) => ts ? new Date(ts).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+let _khataLoading = false;
+async function loadKhataBook() {
+  if (_khataLoading) return;
+  _khataLoading = true;
+  try {
+    const [book, oh] = await Promise.all([
+      api("GET", "/khata"),
+      api("GET", "/onhouse?days=30").catch(() => null), // report is view_dashboard-gated; book may still be allowed
+    ]);
+    state.khataBook = book;
+    state.onhouseReport = oh;
+    state.khataLoadedAt = Date.now();
+  } catch (e) {
+    state.khataBook = { error: e.message, customers: [] };
+  } finally {
+    _khataLoading = false;
+    if (state.tab === "orders" && ordersViewKey() === "khata") { renderList(); renderEditor(); }
+  }
+}
+
+function ordersKhataHtml() {
+  // (Re)load on open — stale after 30s or never loaded. The render below uses
+  // whatever's cached meanwhile, so opening the tab never blanks the screen.
+  if (!state.khataLoadedAt || Date.now() - state.khataLoadedAt > 30000) loadKhataBook();
+  const book = state.khataBook;
+  if (!book) return `<div class="empty">Loading the khata book…</div>`;
+  if (book.error) return `<div class="empty">Couldn't load the khata book: ${esc(book.error)}</div>`;
+  const customers = book.customers || [];
+  const bookHtml = customers.length ? customers.map((cst) => `
+    <div class="card khata-group">
+      <div class="khata-ghead"><b>${esc(cst.name)}</b><small>${esc(cst.phone || "no mobile")}${cst.note ? " · " + esc(cst.note) : ""}</small><span class="khata-due">${inr(cst.outstanding)}</span></div>
+      ${cst.bills.map((bl) => `<div class="khata-bill">
+        <span>${bl.bill_no != null ? `Bill #${esc(String(bl.bill_no))} · ` : ""}${esc(fmtDate(bl.khata_at))} · T${esc(String(bl.table_number || "?"))}</span>
+        <b>${inr(bl.amount)}</b>
+        <button class="btn small primary" data-khata-collect="${esc(bl.key)}" data-khata-session="${esc(bl.session_id || "")}" data-khata-order="${esc(bl.session_id ? "" : bl.key)}" data-khata-amount="${bl.amount}" data-khata-name="${esc(cst.name)}">Mark paid</button>
+      </div>`).join("")}
+    </div>`).join("")
+    : `<div class="empty">No pay-later bills right now. Settle a table with 📒 "Collect later" and it lands here.</div>`;
+  const head = customers.length
+    ? `<div class="ord-note">📒 <b>Khata:</b> ${customers.length} ${customers.length === 1 ? "person owes" : "people owe"} ${inr(book.total || 0)} in total.</div>`
+    : "";
+  // On-the-house report (last 30 days) + the "show in main lists" toggle. Report data
+  // needs the dashboard power; the card explains itself when that's off.
+  const oh = state.onhouseReport;
+  const showOnHouse = lsGet("lfh_show_onhouse", "1") !== "0";
+  const ohRows = oh && oh.bills && oh.bills.length
+    ? `<table class="khata-oh-table"><tr><th>When</th><th>Table</th><th>Items</th><th>Would-be amount</th></tr>
+       ${oh.bills.map((bl) => `<tr><td>${esc(fmtDate(bl.paid_at))}</td><td>T${esc(String(bl.table_number || "?"))}</td><td>${bl.items || "—"}</td><td class="khata-strike">${inr(bl.would_be)}</td></tr>`).join("")}</table>
+       <div class="muted small" style="margin-top:8px">Last 30 days: <b>${oh.count} bill${oh.count === 1 ? "" : "s"} · ${inr(oh.total)}</b> given on the house.</div>`
+    : `<div class="muted small">${oh ? "No on-the-house bills in the last 30 days." : "The on-the-house report needs the dashboard permission."}</div>`;
+  const ohCard = `<div class="card khata-oh">
+    <h3>🏠 On the house <span class="sub">· no-charge bills</span></h3>
+    ${ohRows}
+    <label class="khata-oh-toggle"><input type="checkbox" id="khataOhToggle" ${showOnHouse ? "checked" : ""}> Also show these bills inside Today / Previous lists</label>
+  </div>`;
+  return head + bookHtml + ohCard;
+}
+
 // freeTable: clear a settled table off the floor by archiving all its orders
 // (they stay in the records, just hidden from the live view). Asks first.
 async function freeTable(t) {
@@ -2215,7 +2302,10 @@ async function setOrderPayment(id, paid, opts = {}) {
   // (the server logs it). Routine "mark unpaid" on a never-paid order is free.
   let revertReason = null;
   if (!paid && prev === "paid") {
-    revertReason = ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true })) || "").trim();
+    // The undo bar passes a canned reason so a mis-tap can be taken back in one tap
+    // without a prompt; it's still logged as a payment_revert for the audit trail.
+    revertReason = (opts.revertReason || "").trim()
+      || ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true })) || "").trim();
     if (!revertReason) { toast("Revert cancelled — a reason is required.", "err"); return false; }
   }
   if (o) o.payment_status = paid ? "paid" : "pending"; // flip the screen NOW
@@ -2228,9 +2318,13 @@ async function setOrderPayment(id, paid, opts = {}) {
       ...(revertReason ? { revert_reason: revertReason } : {}),
       ...(paid && opts.method ? { payment_method: opts.method, payment_note: opts.note || "" } : {}),
     });
-    // The bulk "settle whole table" path passes quiet:true so we toast once at the
-    // end instead of once per order.
-    if (!opts.quiet) toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
+    // The bulk "settle whole table" path passes quiet:true so we toast/undo once at the
+    // end instead of once per order. For a single-order pay, the undo bar is the
+    // confirmation + a few-second takeback (owner, 2026-07-22).
+    if (!opts.quiet) {
+      if (paid && window.LFH_UNDO) LFH_UNDO.show({ message: "Marked paid 💳", seconds: 5, onUndo: () => editorUndoPay([id]) });
+      else toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
+    }
     return true;
   } catch (e) {
     if (o && prev !== null) o.payment_status = prev;   // undo on failure
@@ -2248,7 +2342,7 @@ async function setOrderPayment(id, paid, opts = {}) {
 // sure?" step — the old confirmDialog is folded into this one tap). Resolves
 // { method, note } once staff pick one, or null if they cancel; talks to nothing
 // itself — payOrdersWithMethod below does the actual save. (owner, 2026-07-01)
-function openPaymentMethodModal(due, label) {
+function openPaymentMethodModal(due, label, opts = {}) {
   return new Promise((resolve) => {
     const r2 = (n) => Math.round(n * 100) / 100; let tip = 0;
     document.querySelector(".pay-overlay")?.remove();
@@ -2271,6 +2365,8 @@ function openPaymentMethodModal(due, label) {
           <button type="button" class="pay-method-btn" data-method="Cash"><span class="pmi">💵</span>Cash</button>
           <button type="button" class="pay-method-btn" data-method="Card"><span class="pmi">💳</span>Card</button>
           <button type="button" class="pay-method-btn" data-method="Other"><span class="pmi">⋯</span>Other</button>
+          ${opts.onHouse ? `<button type="button" class="pay-method-btn pay-special-onhouse" data-special="onhouse"><span class="pmi">🏠</span>On the house</button>` : ""}
+          ${opts.khata ? `<button type="button" class="pay-method-btn pay-special-khata" data-special="khata"><span class="pmi">📒</span>Collect later</button>` : ""}
         </div>
         <div class="pay-other-field" style="display:none">
           <label class="dish-edit-lbl">What kind?</label>
@@ -2293,6 +2389,9 @@ function openPaymentMethodModal(due, label) {
     wrap.querySelector(".dish-edit-cancel").onclick = cancel;
     wrap.onclick = (e) => { if (e.target === wrap) cancel(); };
     wrap.querySelectorAll(".pay-method-btn").forEach((b) => (b.onclick = () => {
+      // The two special settles (mig 166): resolve with a marker — the CALLER runs the
+      // dedicated flow (person picker / no-charge settle); no payment method involved.
+      if (b.dataset.special) { resolved = true; close(); resolve({ special: b.dataset.special }); return; }
       const m = b.dataset.method;
       if (m === "Other") {
         wrap.querySelector(".pay-method-grid").style.display = "none";
@@ -2321,7 +2420,7 @@ function openPaymentMethodModal(due, label) {
 // session card), so a bill is never settled without a method recorded. The smaller
 // PER-ORDER correction toggle (data-pay) stays a plain flip via setOrderPayment's
 // own confirm — that's a fix-a-mistake action, not a new payment being collected.
-async function payOrdersWithMethod(orders, label) {
+async function payOrdersWithMethod(orders, label, opts = {}) {
   if (!orders.length) { toast("Nothing to settle — already paid", "ok"); return false; }
   // NEVER try to settle an order that hasn't been ACCEPTED yet: the server refuses to pay a
   // 'received' order (accept-before-pay), so including it inflated the "amount collected"
@@ -2338,8 +2437,11 @@ async function payOrdersWithMethod(orders, label) {
   // BEFORE tax. The old Σ(total − discount) taxed the pre-discount amount and told
   // staff to collect discount×rate too much on any discounted bill (2026-07-05 fix).
   const due = billMath(payable).total;
-  const picked = await openPaymentMethodModal(due, label);
+  const picked = await openPaymentMethodModal(due, label, opts);
   if (!picked) return false; // cancelled
+  // A special settle (khata / on-the-house, mig 166): hand the marker back — the caller
+  // runs the dedicated table-level flow; nothing gets marked paid here.
+  if (picked.special) return picked;
   let okCount = 0, failCount = 0;
   const paidIds = [];
   for (const o of payable) {
@@ -2353,10 +2455,29 @@ async function payOrdersWithMethod(orders, label) {
   // Best-effort — a tip failing to save must not undo a completed payment.
   if (paidIds.length && Number(picked.tip) > 0) { try { await api("POST", "/orders/" + paidIds[0] + "/tip", { amount: Number(picked.tip) }); } catch { /* tip is non-critical */ } }
   // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
-  if (okCount && !failCount) toast(skipped ? `Marked paid via ${picked.method} — ${skipped} new order still needs accepting.` : `Marked paid via ${picked.method} 💳`, "ok");
+  if (okCount && !failCount) {
+    const msg = skipped ? `Paid via ${picked.method} — ${skipped} new order still to accept` : `Marked paid via ${picked.method}`;
+    // The undo bar is the confirmation + a few-second takeback (owner, 2026-07-22). The
+    // revert goes through the SAME 30-min grace + audit-logged path as "restore to floor".
+    if (paidIds.length && window.LFH_UNDO) LFH_UNDO.show({ message: msg, seconds: 5, onUndo: () => editorUndoPay(paidIds) });
+    else toast(msg + " 💳", "ok");
+  }
   else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
   else toast("Couldn't settle the payment — check the order.", "err");
   return okCount > 0;
+}
+// Take back a just-made payment: revert each order we settled back to unpaid, within the
+// same 30-minute grace window the manual "restore to floor" uses, with a canned (still
+// logged) reason so no prompt interrupts the one-tap undo (owner undo bar, 2026-07-22).
+// Note: if paying auto-closed/archived the table (auto_table_action), this reverts payment
+// but the fuller un-archive stays the manual "Restore to floor" tool's job.
+async function editorUndoPay(paidIds) {
+  let n = 0;
+  for (const id of paidIds) {
+    if (await setOrderPayment(id, false, { skipConfirm: true, quiet: true, revertReason: "Undo — mis-tap (within grace)" })) n++;
+  }
+  await loadSessions();
+  toast(n ? "Payment undone" : "Couldn't undo — the 30-minute window may have passed.", n ? "ok" : "err");
 }
 
 // markTablePaid: settle the WHOLE table in one go — mark every unpaid (non-
@@ -2366,8 +2487,145 @@ async function payOrdersWithMethod(orders, label) {
 async function markTablePaid(t) {
   await ensureTableSlice(t); // a non-selected table's orders aren't cached otherwise
   const os = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
-  if (!(await payOrdersWithMethod(os, `Mark table ${t} paid`))) return;
+  // The two special settles (mig 166) ride the SAME payment popup as extra buttons:
+  // "On the house" only on a Family/Owner's-Guest table, "Collect later" whenever khata
+  // is on for this viewer. Server re-checks both regardless of what the UI offered.
+  const opts = {
+    onHouse: ["family", "guest"].includes(tagForTable(t)) && tagActionAllowed("table_tags"),
+    khata: tagActionAllowed("khata"),
+  };
+  const r = await payOrdersWithMethod(os, `Mark table ${t} paid`, opts);
+  if (r && r.special === "khata") { await khataParkFlow(t, os); return; }
+  if (r && r.special === "onhouse") { await onHouseSettle(t); return; }
+  if (!r) return;
   await pollTables([String(t)]); // refresh this tile's summary → green pay ring / "Cleared"
+}
+
+// onHouseSettle(t): no-charge settle for a Family / Owner's-Guest table (mig 166).
+// The server stores it as a 100% pre-tax discount + the reserved "On the house"
+// method, so every money view reads ₹0 for it automatically.
+async function onHouseSettle(t) {
+  try {
+    const r = await api("POST", `/tables/${t}/on-the-house`, {});
+    toast(`On the house 🏠 — ${r.count} order${r.count === 1 ? "" : "s"} settled at no charge`, "ok");
+    await pollTables([String(t)]);
+  } catch (e) { toast("Couldn't settle on the house: " + e.message, "err"); }
+}
+
+// khataParkFlow(t, orders): "Collect later" — pick (or add) the PERSON this bill is
+// on, then park it: the table frees up and the bill lives in Bills → Khata until
+// collected. The picker searches the restaurant's khata book by name or mobile.
+async function khataParkFlow(t, orders) {
+  const due = billMath((orders || []).filter((o) => o.status !== "received")).total;
+  const who = await openKhataPersonPicker(due, t);
+  if (!who) return; // cancelled
+  try {
+    const r = await api("POST", `/tables/${t}/khata`, who);
+    toast(`📒 Parked on ${r.customer && r.customer.name ? r.customer.name : "their khata"} — collect later from Bills → Khata`, "ok");
+    state.selectedTable = null; // the table just closed
+    await loadSessions();
+  } catch (e) { toast("Couldn't park the bill: " + e.message, "err"); }
+}
+
+// openKhataPersonPicker(due, t): search existing people (name/mobile, scoped + LIMIT 8
+// server-side) or add a new one. Resolves { customer_id } | { name, phone, note } | null.
+function openKhataPersonPicker(due, t) {
+  return new Promise((resolve) => {
+    document.querySelector(".khata-overlay")?.remove();
+    const wrap = el(`<div class="sx-modal-overlay khata-overlay"><div class="sx-modal pay-modal">
+      <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Collect later — whose khata?</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+      <div class="dish-edit-body">
+        <div class="disc-bill-row"><span>Table ${esc(t)} bill</span><b>${inr(due)}</b></div>
+        <input type="text" class="dish-edit-custominput" id="khataSearch" maxlength="60" placeholder="🔍 Search name or mobile…" autocomplete="off" style="margin:8px 0 6px">
+        <div class="khata-pick-list" id="khataPickList"><div class="sx-empty">Type to search, or add a new person below.</div></div>
+        <div class="dish-edit-lbl" style="margin-top:10px">— or add a new person —</div>
+        <input type="text" class="dish-edit-custominput" id="khataName" maxlength="80" placeholder="Full name *" autocomplete="off" style="margin:4px 0 6px">
+        <input type="tel" class="dish-edit-custominput" id="khataPhone" maxlength="20" placeholder="Mobile number (optional)" autocomplete="off" style="margin-bottom:6px">
+        <input type="text" class="dish-edit-custominput" id="khataNote" maxlength="200" placeholder="Note (optional — e.g. neighbour, supplier)" autocomplete="off">
+      </div>
+      <div class="dish-edit-foot">
+        <button type="button" class="btn dish-edit-cancel">Cancel</button>
+        <button type="button" class="btn primary" id="khataParkBtn">📒 Park bill on this person</button>
+      </div>
+    </div></div>`);
+    document.body.appendChild(wrap);
+    let resolved = false;
+    let pickedId = null;
+    const close = () => wrap.remove();
+    const cancel = () => { close(); if (!resolved) resolve(null); };
+    wrap.__lfhClose = cancel; // hardware back closes THIS sheet and resolves null
+    wrap.querySelector(".tbl-modal-close").onclick = cancel;
+    wrap.querySelector(".dish-edit-cancel").onclick = cancel;
+    wrap.onclick = (e) => { if (e.target === wrap) cancel(); };
+    const list = wrap.querySelector("#khataPickList");
+    const search = wrap.querySelector("#khataSearch");
+    const renderList = (customers) => {
+      list.innerHTML = customers.length
+        ? customers.map((cst) => `<button type="button" class="khata-pick-row${pickedId === cst.id ? " sel" : ""}" data-cid="${esc(cst.id)}"><b>${esc(cst.name)}</b><small>${esc(cst.phone || "no mobile")}${cst.note ? " · " + esc(cst.note) : ""}</small></button>`).join("")
+        : `<div class="sx-empty">No one found — add them below.</div>`;
+      list.querySelectorAll(".khata-pick-row").forEach((row) => (row.onclick = () => {
+        pickedId = row.dataset.cid;
+        list.querySelectorAll(".khata-pick-row").forEach((x) => x.classList.toggle("sel", x === row));
+      }));
+    };
+    let seq = 0, timer = null;
+    const doSearch = async () => {
+      const mySeq = ++seq;
+      try {
+        const r = await api("GET", "/khata/customers?q=" + encodeURIComponent(search.value.trim()));
+        if (mySeq === seq) renderList(r.customers || []); // latest-wins — a slow older reply never overwrites
+      } catch { /* search is best-effort; the add-new fields still work */ }
+    };
+    search.oninput = () => { pickedId = null; clearTimeout(timer); timer = setTimeout(doSearch, 250); };
+    doSearch(); // show the most recent people immediately
+    wrap.querySelector("#khataParkBtn").onclick = () => {
+      if (pickedId) { resolved = true; close(); resolve({ customer_id: pickedId }); return; }
+      const name = wrap.querySelector("#khataName").value.trim();
+      if (!name) { toast("Pick a person from the list, or type a name to add them.", "err"); return; }
+      resolved = true; close();
+      resolve({ name, phone: wrap.querySelector("#khataPhone").value.trim(), note: wrap.querySelector("#khataNote").value.trim() });
+    };
+  });
+}
+
+// openTagModal(t): mark / clear this table's special type (mig 166). One tap each.
+function openTagModal(t) {
+  document.querySelector(".tag-overlay")?.remove();
+  const cur = tagForTable(t);
+  const opt = (tag) => {
+    const info = TABLE_TAG_INFO[tag];
+    const subs = { vip: "Priority service · pays normally", family: `"On the house" offered at billing`, guest: `"On the house" offered at billing` };
+    return `<button type="button" class="tag-opt tag-opt-${tag}${cur === tag ? " sel" : ""}" data-tag="${tag}"><span class="tago-ico">${info.emoji}</span><span>${esc(info.label)}<small>${esc(subs[tag])}</small></span></button>`;
+  };
+  const wrap = el(`<div class="sx-modal-overlay tag-overlay"><div class="sx-modal pay-modal">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Mark table ${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body">
+      <p class="muted small" style="margin:0 0 10px">How should staff treat this table? The mark clears itself when the table closes.</p>
+      ${opt("vip")}${opt("family")}${opt("guest")}
+      ${cur ? `<button type="button" class="tag-opt tag-opt-clear" data-tag=""><span class="tago-ico">✕</span><span>Remove mark</span></button>` : ""}
+    </div>
+  </div></div>`);
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.__lfhClose = close;
+  wrap.querySelector(".tbl-modal-close").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  wrap.querySelectorAll(".tag-opt").forEach((b) => (b.onclick = async () => {
+    const tag = b.dataset.tag || null;
+    close();
+    // Optimistic: paint the tile NOW; the breadcrumb-driven refetch confirms it.
+    const tile = (state.summary.tiles || {})[String(t)];
+    const prev = tile ? tile.tag : undefined;
+    if (tile) { tile.tag = tag || ""; renderEditor(); }
+    try {
+      await api("POST", `/tables/${t}/tag`, { tag });
+      toast(tag ? `Marked ${TABLE_TAG_INFO[tag].emoji} ${TABLE_TAG_INFO[tag].label}` : "Mark removed", "ok");
+      await pollTables([String(t)]);
+    } catch (e) {
+      if (tile) { tile.tag = prev || ""; renderEditor(); }
+      toast("Couldn't mark the table: " + e.message, "err");
+    }
+  }));
 }
 
 // resolveCall: mark a waiter call as attended and drop it from the list.
@@ -3452,6 +3710,28 @@ function renderEditor() {
         await payOrdersWithMethod(orders, "Mark this bill paid");
       };
     });
+    // Khata view (mig 166): collect a parked bill — normal payment popup, then the
+    // khata endpoint marks that bill's orders paid and it leaves the book.
+    ed.querySelectorAll("[data-khata-collect]").forEach((btn) => {
+      btn.onclick = async () => {
+        const amount = Number(btn.dataset.khataAmount) || 0;
+        const picked = await openPaymentMethodModal(amount, `Collect from ${btn.dataset.khataName}`);
+        if (!picked) return;
+        try {
+          const payload = { method: picked.method, note: picked.note };
+          if (btn.dataset.khataSession) payload.session_id = btn.dataset.khataSession;
+          else payload.order_id = btn.dataset.khataOrder;
+          await api("POST", "/khata/pay", payload);
+          toast(`Collected ${inr(amount)} from ${btn.dataset.khataName} 📒→💳`, "ok");
+          state.khataLoadedAt = 0; // force a fresh book
+          await loadKhataBook();
+          loadSessions(); // the paid orders re-enter the normal records
+        } catch (e) { toast("Couldn't collect: " + e.message, "err"); }
+      };
+    });
+    // On-the-house display toggle (mig 166): purely client-side list preference.
+    const ohT = document.getElementById("khataOhToggle");
+    if (ohT) ohT.onchange = () => { lsSet("lfh_show_onhouse", ohT.checked ? "1" : "0"); renderList(); renderEditor(); };
     const updateSel = () => {
       const ids = [...ed.querySelectorAll(".ord-select:checked")].map((c) => c.dataset.sel);
       const cnt = document.getElementById("ordSelCount");
@@ -4423,6 +4703,10 @@ async function itemStatus(id, status) {
   scheduleServeFlush();         // sets the guard so the poll won't repaint under the finger; reconciles after the last click
   try {
     await api("POST", "/items/" + id + "/status", { status });   // persist in the background
+    // Serving a dish is easy to mis-tap — offer a few-second takeback (owner, 2026-07-22).
+    if (status === "served" && prev && prev !== "served" && window.LFH_UNDO) {
+      LFH_UNDO.show({ message: `${(it && it.title) || "Dish"} served`, onUndo: () => editorUndoServe([{ kind: "session", id, prev }]) });
+    }
   } catch (e) {
     if (it && prev != null) { it.status = prev; refreshTableDetail(); } // revert the optimistic change on failure
     toast("Failed: " + e.message, "err");
@@ -4548,6 +4832,34 @@ function callEmoji(note) {
 // and optimistic flips stay pixel-identical; every OTHER tile reads the pre-computed
 // summary tile. The summary is produced by lfh_table_view_summary, which mirrors
 // tableTileStateFromBoard's rules EXACTLY (parity verified DB-side, mig 101).
+// ── Special table types (VIP / Family / Owner's Guest) + khata — mig 166 ──────
+// The tile look for each mark. APPROVED design (docs/superpowers/specs/
+// 2026-07-22-table-tags-mockup.html) — VIP + Family ship exactly as the mockup.
+const TABLE_TAG_INFO = {
+  vip:    { label: "VIP",           emoji: "👑", ribbon: "👑 VIP" },
+  family: { label: "Family",        emoji: "🏠", ribbon: "FAMILY" },
+  guest:  { label: "Owner's guest", emoji: "🤝", ribbon: "GUEST" },
+};
+// The feature ladder's application rung, resolved from settings (mig 166):
+// admin's switch AND (owner's toggle, only while the admin transferred control).
+function tableTagsOn() {
+  const s = state.data.settings || {};
+  return s.table_tags_allowed === true && (s.table_tags_owner_control !== true || s.table_tags_enabled !== false);
+}
+// May the CURRENT viewer use a tag/khata action? Admin + owner always (higherView);
+// a real manager needs the owner-granted power (whoami.effectivePowers).
+function tagActionAllowed(flag) {
+  if (!tableTagsOn()) return false;
+  if (XRAY_WHO && XRAY_WHO.higherView) return true;
+  return xrayGrantedForManager(flag);
+}
+// This table's mark ('' when none) — the slim summary carries it for every tile.
+function tagForTable(t) {
+  if (!tableTagsOn()) return "";
+  const tile = (state.summary.tiles || {})[String(t)];
+  return (tile && tile.tag) || "";
+}
+
 function tableTileState(t) {
   // SELECTED table → live-from-board (we have its full slice; keeps detail + optimism exact).
   if (state.selectedTable != null && String(state.selectedTable) === String(t) && state.board && (state.board.sessions || []).length >= 0) {
@@ -4707,9 +5019,14 @@ function floorTileHtml(i) {
   // Display name (mig 131): the tile badge shows the name when one is set — the
   // number stays in the tooltip (and everywhere data lives).
   const tnm = ((s.table_names || {})[String(i)] || "").trim();
-  return `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0">
-        ${offIcon}
+  // Special table type (mig 166): a corner ribbon + pill badge layered OVER the state
+  // look — the strip/label/pay ring keep working, the tag is unmistakable on top.
+  const tag = tagForTable(i);
+  const tinfo = TABLE_TAG_INFO[tag];
+  return `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0">
+        ${offIcon}${tinfo ? `<div class="ft-ribbon" aria-hidden="true">${tinfo.ribbon}</div>` : ""}
         <div class="ft-top"><span class="ft-num" ${tnm ? `title="T${i}"` : ""}>${esc(tnm || i)}</span>${badges ? `<span class="ft-badges">${badges}</span>` : ""}</div>
+        ${tinfo ? `<span class="ft-tagbadge">${tinfo.emoji} ${esc(tinfo.label)}</span>` : ""}
         <div class="ft-label">${esc(label)}</div><div class="ft-meta">${esc(meta)}</div>${strip}
         ${quick ? `<div class="ft-quick">${quick}</div>` : ""}</div>`;
 }
@@ -5893,7 +6210,8 @@ function tablePanelParts(t) {
   // Gated by the take_orders power: XRAY_CONTROLS hides it for a manager without the
   // power (and tints it for an admin/owner looking in); the server re-checks too.
   const takeOrderBtn = `<button class="btn primary tp-take-order" data-take-order="${esc(t)}">＋ Take order</button>`;
-  const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${splitBtn}<span class="tp-foot-spacer"></span>${sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : ""}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
+  const tagBtn = tagActionAllowed("table_tags") ? `<button class="btn" id="sxTag" title="Mark this table VIP / Family / Owner's guest">${TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷"} Type</button>` : "";
+  const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${splitBtn}<span class="tp-foot-spacer"></span>${tagBtn}${sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : ""}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
 
   return { sess, os, canFree, headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot };
 }
@@ -6252,6 +6570,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   const pr = root.querySelector("#sxPrint");
   if (pr) pr.onclick = () => printBill(t, sess, os);
   const payAll = root.querySelector("#sxPayAll"); if (payAll) payAll.onclick = () => markTablePaid(t);
+  const tagB = root.querySelector("#sxTag"); if (tagB) tagB.onclick = () => openTagModal(t);
   root.querySelectorAll("[data-split]").forEach((b) => (b.onclick = () => openSplitBill(parseFloat(b.dataset.split) || 0)));
   // Per-dish DELETE: confirm, then call the server, which deletes the order_item
   // AND recomputes the order's total from the survivors (lfh_delete_order_item) so
@@ -6354,12 +6673,18 @@ function renderTablePanel() {
 
 // Advance ONE dish in a legacy order (items stored in the order's JSON).
 async function legacyItemStatus(orderId, index, status) {
+  const o0 = (state.data.orders || []).find((x) => x.id === orderId);
+  const prev = (o0 && Array.isArray(o0.items) && o0.items[index]) ? (o0.items[index].status || "received") : null;
+  const name = (o0 && Array.isArray(o0.items) && o0.items[index] && o0.items[index].title) || "Dish";
   try {
     await api("POST", "/orders/" + orderId + "/item", { index: Number(index), status }); // persist now
     const o = (state.data.orders || []).find((x) => x.id === orderId);                    // optimistic local update
     if (o && Array.isArray(o.items) && o.items[index]) o.items[index].status = status;
     refreshTableDetail();                                                                 // instant redraw from local state (modal OR in-panel detail)
     scheduleServeFlush();                                                                 // one real refresh after you stop clicking
+    if (status === "served" && prev && prev !== "served" && window.LFH_UNDO) {
+      LFH_UNDO.show({ message: `${name} served`, onUndo: () => editorUndoServe([{ kind: "legacy", orderId, idx: Number(index), prev }]) });
+    }
   } catch (e) { toast("Failed: " + e.message, "err"); }
 }
 
@@ -6376,14 +6701,53 @@ async function acceptOrder(orderId) {
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
 }
 // Serve every dish on an order at once → order complete. Optimistic + shielded.
+// Snapshot the dishes an order is about to serve (their prior status), so a mis-tapped
+// serve can be sent back exactly where each dish was (owner undo bar, 2026-07-22).
+// Works for both session order_items (id) and legacy JSON items (orderId + idx).
+function snapServable(o) {
+  return orderItemRows(o)
+    .filter((r) => r.status !== "served")
+    .map((r) => (r.kind === "session"
+      ? { kind: "session", id: r.id, prev: r.status }
+      : { kind: "legacy", orderId: r.orderId, idx: r.idx, prev: r.status }));
+}
+// Take back a serve: restore each dish's prior status locally + on the server, then
+// reconcile. The item-status endpoint only accepts received/preparing/served, so a dish
+// that was "ready" (cooked, not yet served) comes back as "preparing".
+async function editorUndoServe(snap) {
+  if (!snap || !snap.length) return;
+  const clamp = (s) => (s === "ready" ? "preparing" : (["received", "preparing", "served"].includes(s) ? s : "preparing"));
+  snap.forEach((s) => {
+    const to = clamp(s.prev);
+    if (s.kind === "session") { const it = (state.board.items || []).find((x) => x.id === s.id); if (it) it.status = to; }
+    else { const o = (state.data.orders || []).find((x) => x.id === s.orderId); if (o && Array.isArray(o.items) && o.items[s.idx]) o.items[s.idx].status = to; }
+  });
+  refreshTableDetail();
+  scheduleServeFlush();
+  try {
+    for (const s of snap) {
+      if (s.kind === "session") await api("POST", "/items/" + s.id + "/status", { status: clamp(s.prev) });
+      else await api("POST", "/orders/" + s.orderId + "/item", { index: s.idx, status: clamp(s.prev) });
+    }
+    await loadSessions();
+  } catch (e) { toast("Undo failed: " + e.message, "err"); await loadSessions(); }
+}
+
 async function serveAllOrder(orderId) {
   const o = (state.data.orders || []).find((x) => x.id === orderId);
+  const snap = o ? snapServable(o) : [];
   if (o) { o.status = "served"; flipOrderItems(o, null, "served"); opBegin(o.id); }
   floorOpsInFlight++;
   loadSessions(true); renderTablePanel();
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; if (o) opEnd(o.id); } };
-  try { await api("POST", "/orders/" + orderId + "/serve-all"); release(); await loadSessions(); toast("All items served", "ok"); }
+  try {
+    await api("POST", "/orders/" + orderId + "/serve-all"); release(); await loadSessions();
+    // The undo bar IS the confirmation now (message + a few-second takeback line),
+    // so it replaces the old plain "served" toast.
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: o ? `Table ${o.table_number} · all served` : "All items served", onUndo: () => editorUndoServe(snap) });
+    else toast("All items served", "ok");
+  }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
 }
 // Quick action: accept ALL new orders on a table in one tap. Used by BOTH the
@@ -6448,6 +6812,7 @@ async function serveAllOrders(t) {
   await ensureTableSlice(t); // see acceptTableOrders: the table may not be selected
   const orders = ordersForTable(t);
   if (!orders.length) return;
+  const snap = orders.flatMap((o) => snapServable(o));
   orders.forEach((o) => { o.status = "served"; flipOrderItems(o, null, "served"); opBegin(o.id); });
   floorOpsInFlight++;
   loadSessions(true);
@@ -6457,8 +6822,9 @@ async function serveAllOrders(t) {
   const release = () => { if (!released) { released = true; floorOpsInFlight--; orders.forEach((o) => opEnd(o.id)); } };
   try {
     for (const o of orders) await api("POST", "/orders/" + o.id + "/serve-all");
-    toast("All orders served", "ok");
     release(); await pollTables([String(t)]);
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: `Table ${t} · all served`, onUndo: () => editorUndoServe(snap) });
+    else toast("All orders served", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await pollTables([String(t)]); }
   finally { release(); }

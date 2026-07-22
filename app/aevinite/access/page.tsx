@@ -21,9 +21,10 @@ const MANAGER_POWERS: [string, string][] = [
   // Keep in sync with MANAGER_POWER_FLAGS in lib/ownerEntitlements.ts — these two were
   // missing, so the admin couldn't gate them at all (audit 2026-07-08).
   ["edit_settings", "Edit settings"], ["view_ratings", "See & handle ratings"],
+  // Table types + khata module (mig 166).
+  ["table_tags", "Mark table types + on-the-house"], ["khata", "Pay later (khata) book"],
   // Take a brand-new dine-in order from the manager panel, like the waiter tablet
-  // (2026-07-22). Defaults "exists" OFF (ENTITLEMENT_DEFAULT_OFF) — the owner can't see
-  // or grant it until you turn "exists" on here for this restaurant.
+  // (2026-07-22). Has a tablet rung, so it also gets a "reach" selector (REACH_FLAGS).
   ["take_orders", "Take orders"],
 ];
 // Owner-panel SECTIONS the admin can remove per restaurant (mig 133). Off = the
@@ -35,7 +36,13 @@ const OWNER_SECTIONS: [string, string][] = [
   // off for a restaurant even though the backend supports it (audit 2026-07-08).
   ["ratings", "Ratings"], ["customers", "Customers list"], ["settings", "Settings (appearance & password)"],
 ];
-const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"]];
+const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"], ["tablet_table_tags", "Mark table types"], ["tablet_khata", "Park pay-later (khata) bills"]];
+// The feature LADDER's two admin switches per module (owner rule 2026-07-22):
+// "application" = the feature on/off itself; "power transfer" = may the OWNER
+// toggle it from their own panel. Keys = settings columns (mig 166).
+const LADDER_MODULES: { app: string; transfer: string; label: string; hint: string }[] = [
+  { app: "table_tags_allowed", transfer: "table_tags_owner_control", label: "Table types (VIP / Family / Guest) + Khata", hint: "Special table marks, on-the-house settle, and the pay-later book." },
+];
 const TRI: [string, string][] = [["off", "Off"], ["on", "On"], ["pin", "On · PIN"]];
 // Powers that have a tablet rung → the admin also picks how FAR the feature may reach
 // (rung 1b). Keep in sync with TABLET_POWER_FLAGS in lib/tabletPermissions.ts.
@@ -87,6 +94,7 @@ export default function AccessPage() {
   const [owner, setOwner] = useState<Record<string, boolean>>({});
   const [tablet, setTablet] = useState<Record<string, string>>({});
   const [depths, setDepths] = useState<Record<string, string>>({});
+  const [ladder, setLadder] = useState<Record<string, boolean>>({}); // module switches (access route `features`, mig 166)
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -138,6 +146,7 @@ export default function AccessPage() {
       setOwner(a.owner || {});
       setTablet(a.tablet || {});
       setDepths(a.depths || {});
+      setLadder(a.features || {});
       setStaff((s.staff || []).filter((u: Staff) => u.restaurant_id === id && u.role !== "owner"));
     } catch { setLoadErr(true); }
     finally { setLoading(false); }
@@ -188,6 +197,11 @@ export default function AccessPage() {
     const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, tablet: { [key]: value } }) });
     if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
   };
+  const saveLadder = async (key: string, value: boolean) => {
+    setLadder((x) => ({ ...x, [key]: value }));
+    const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, features: { [key]: value } }) });
+    if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
+  };
   const saveStaffPerm = async (userId: string, key: string, value: string) => {
     setStaff((list) => list.map((u) => u.id === userId ? { ...u, permissions: { ...(u.permissions || {}), [key]: value } } : u));
     // "default" clears the override (null) so the user inherits the restaurant-wide setting.
@@ -226,6 +240,21 @@ export default function AccessPage() {
           </Card>
           <Card id="ac-owner-panel" title="Owner panel sections" hint="Which sections exist in this restaurant's OWNER panel. Off = the section disappears for the real owner (you still see it, tinted, when viewing as admin).">
             {OWNER_SECTIONS.map(([k, l]) => <Row key={k} label={l}><Toggle on={owner[k] !== false} onChange={(v) => saveOwner(k, v)} /></Row>)}
+          </Card>
+          <Card id="ac-modules" title="Modules — the feature ladder" hint="Per module, the admin's TWO switches (owner rule): 'on' = the feature exists for this restaurant at all; 'owner controls' = hand the on/off power to the owner (the toggle then appears in their panel). Below that, the owner→manager and manager→tablet rungs still apply.">
+            {LADDER_MODULES.map((m) => (
+              <Row key={m.app} label={m.label}>
+                <span style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ac-muted,#857655)" }}>
+                    on <Toggle on={ladder[m.app] === true} onChange={(v) => saveLadder(m.app, v)} />
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ac-muted,#857655)", opacity: ladder[m.app] === true ? 1 : 0.45 }}
+                    title="Transfer the on/off power to the owner — their panel gains the toggle">
+                    owner controls <Toggle on={ladder[m.transfer] === true} onChange={(v) => saveLadder(m.transfer, v)} />
+                  </label>
+                </span>
+              </Row>
+            ))}
           </Card>
           <Card id="ac-manager-powers" title="Manager powers" hint="The ladder, per power: 'exists' = you allow this restaurant the power AT ALL (off = the toggle disappears from the owner's panel and the power dies for managers). 'granted' = what the owner has currently given their managers.">
             {MANAGER_POWERS.map(([k, l]) => {

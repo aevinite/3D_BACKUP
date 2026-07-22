@@ -1,21 +1,23 @@
 "use client";
-// Admin · Repair kit — emergency data surgery during live service. Pick a restaurant, pick a
-// tool, pick the target, type a reason, confirm. Every action is logged (warn-level, repair_*)
-// and shows up in the Activity log + Bill audit. NO earnings are shown here (admin rule).
+// Admin · Repair — the one-stop "something's wrong, fix it" hub (redesigned 2026-07-22).
+// Top-to-bottom it answers: what's broken right now? → jump into that panel OR hand it to
+// Claude (now on the Mac / overnight) → what's queued → hands-on data tools → what Claude did.
 //
-// Backed by /api/admin/repair (GET targets, POST one op). Destructive ops require a typed reason
-// and go through a confirm modal (useAdminModal → phone Back + Escape + focus-trap).
+// Live errors come from /api/admin/oplog?level=error (the same rows the dashboard's red button
+// counts). Data surgery is backed by /api/admin/repair. Sending to Claude = /api/admin/fix-request
+// (action_id bundles the error's context; mode picks instant vs the 02:30 robot). NO earnings shown.
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
+import { openRestaurantPanel, PANEL_COLOR, ACT_LABEL, timeAgo, type Action } from "@/components/admin/shared";
 
 type Restaurant = { id: string; name: string };
 type Session = { id: string; table_number: string; status: string; bill_no: number | null; invoice_no: number | null; invoice_voided: boolean };
 type Order = { id: string; table_number: string; kot_no: number | null; status: string; payment_status: string; created_at: string; session_id: string | null };
 type RepairData = { sessions: Session[]; orders: Order[] };
-type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; summary: string; pr_url: string | null };
+type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; mode?: string | null; summary: string; pr_url: string | null };
 type AgentRun = { id: string; kind: "live" | "nightly" | "audit"; title: string; status: "running" | "done" | "closed" | "failed"; report: string | null; started_at: string; ended_at: string | null };
 
 type Op = "void_bill" | "delete_order" | "refire_order" | "unstick_table" | "edit_time";
@@ -30,6 +32,33 @@ const TOOLS: { op: Op; label: string; icon: string; desc: string; danger?: boole
   { op: "delete_order", label: "Delete an order", icon: "fa-trash-can", desc: "Permanently remove a stuck order/bill. Can't be undone.", danger: true },
 ];
 
+// Which staff panel an error came from → where "Go to that panel" opens, and a friendly name.
+const PANEL_JUMP: Record<string, { route: string; label: string }> = {
+  editor: { route: "/manager", label: "Manager panel" },
+  manager: { route: "/manager", label: "Manager panel" },
+  kitchen: { route: "/kitchen", label: "Kitchen panel" },
+  tablet: { route: "/tablet", label: "Waiter tablet" },
+  owner: { route: "/owner", label: "Owner panel" },
+};
+const PANEL_NAME: Record<string, string> = {
+  editor: "Manager", manager: "Manager", kitchen: "Kitchen", tablet: "Tablet",
+  owner: "Owner", admin: "Admin", guest: "Guest menu", menu: "Guest menu", db: "Database",
+};
+
+// Roll repeats of the SAME error into one row with a ×N badge, so a printer firing 8 times
+// isn't 8 rows. Keyed by panel + restaurant + action + the first chunk of the message.
+type ErrGroup = { key: string; sample: Action; count: number; latest: string };
+function groupErrors(rows: Action[]): ErrGroup[] {
+  const map = new Map<string, ErrGroup>();
+  for (const a of rows) {
+    const key = `${a.panel}|${a.restaurant_id || ""}|${a.action}|${(a.detail || "").slice(0, 90)}`;
+    const ex = map.get(key);
+    if (ex) { ex.count++; if (a.created_at > ex.latest) ex.latest = a.created_at; }
+    else map.set(key, { key, sample: a, count: 1, latest: a.created_at });
+  }
+  return Array.from(map.values()).sort((x, y) => y.latest.localeCompare(x.latest));
+}
+
 export default function AdminRepair() {
   const toast = useToast();
   const [rid, setRid] = useState("");
@@ -37,13 +66,21 @@ export default function AdminRepair() {
   const [data, setData] = useState<RepairData | null>(null);
   const [dataErr, setDataErr] = useState(false);
   const [tool, setTool] = useState<Op | null>(null);
-  // "Describe a problem to Claude" + the open fix-request queue.
+
+  // Live problems (error-level log rows) + local view state.
+  const [errors, setErrors] = useState<Action[]>([]);
+  const [errLoading, setErrLoading] = useState(true);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [sent, setSent] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  // "Describe a problem" box + the queue + Claude session history.
   const [note, setNote] = useState("");
   const [sending, setSending] = useState(false);
   const [requests, setRequests] = useState<FixRequest[]>([]);
-  // Session history (agent_runs): every Claude run — pop-up terminal, night robot, audits.
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [openRun, setOpenRun] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -52,6 +89,7 @@ export default function AdminRepair() {
     })();
   }, []);
 
+  // Hands-on tools need a restaurant's live tables/orders.
   const load = useCallback(async () => {
     if (!rid) { setData(null); return; }
     setData(null); setDataErr(false);
@@ -60,77 +98,208 @@ export default function AdminRepair() {
   }, [rid]);
   useEffect(() => { load(); }, [load]);
 
-  const loadRequests = useCallback(async () => {
-    const r = await adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open");
-    if (r.ok) setRequests(r.data.requests || []);
-    const h = await adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs");
+  // Everything that isn't restaurant-scoped: the live errors, the queue, the history. ONE
+  // refresh function so the top Refresh button re-pulls all three (no background polling —
+  // click-to-refresh keeps egress low, matching the rest of admin).
+  const loadHub = useCallback(async () => {
+    setErrLoading(true);
+    const [e, q, h] = await Promise.all([
+      adminFetch<{ actions: Action[] }>("/api/admin/oplog?level=error&limit=50"),
+      adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open"),
+      adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
+    ]);
+    if (e.ok) setErrors(e.data.actions || []);
+    if (q.ok) setRequests(q.data.requests || []);
     if (h.ok) setRuns(h.data.runs || []);
+    setErrLoading(false);
   }, []);
-  useEffect(() => { loadRequests(); }, [loadRequests]);
+  useEffect(() => { loadHub(); }, [loadHub]);
 
-  const uuidLocal = () => (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now());
-  const sendDescribed = async () => {
+  const refreshAll = () => { setRefreshing(true); Promise.all([loadHub(), load()]).finally(() => setTimeout(() => setRefreshing(false), 500)); };
+
+  // Two Claudes (owner 2026-07-22): 'instant' pops a terminal on the Mac now; 'overnight' waits
+  // for the 02:30 robot. Used by both the describe box and the per-error buttons.
+  const sendDescribed = async (mode: "instant" | "overnight") => {
     if (!note.trim()) { toast("Type what's happening first.", "err"); return; }
     setSending(true);
     const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuidLocal() },
-      body: JSON.stringify({ note: note.trim(), restaurant_id: rid || null }),
+      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
+      body: JSON.stringify({ note: note.trim(), restaurant_id: rid || null, mode }),
     });
     setSending(false);
-    if (r.ok) { setNote(""); toast("Sent — a Claude window pops up on the Mac within a minute (or it's handled overnight)."); loadRequests(); }
-    else toast(r.error || "Couldn't send that.", "err");
+    if (r.ok) {
+      setNote("");
+      toast(mode === "instant" ? "Sent — a Claude window opens on the Mac within a minute." : "Queued — the night robot takes it at 2:30 AM.");
+      loadHub();
+    } else toast(r.error || "Couldn't send that.", "err");
   };
+
+  // Hand a specific error to Claude, bundling its surrounding log rows as context.
+  const sendError = async (g: ErrGroup, mode: "instant" | "overnight") => {
+    setSent((prev) => new Set(prev).add(g.key));
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
+      body: JSON.stringify({ action_id: g.sample.id, restaurant_id: g.sample.restaurant_id || null, mode }),
+    });
+    if (r.ok) { toast(mode === "instant" ? "Sent to Claude — window opens on the Mac shortly." : "Queued for the 2:30 AM robot."); loadHub(); }
+    else { toast(r.error || "Couldn't send that.", "err"); setSent((prev) => { const n = new Set(prev); n.delete(g.key); return n; }); }
+  };
+
+  const jumpTo = (a: Action) => {
+    const j = PANEL_JUMP[a.panel];
+    if (j && a.restaurant_id) { openRestaurantPanel(a.restaurant_id, j.route); return; }
+    if ((a.panel === "guest" || a.panel === "menu") && a.restaurant_slug) window.open(`/r/${a.restaurant_slug}/menu`, "_blank");
+  };
+  const jumpLabel = (a: Action): string | null => {
+    if (PANEL_JUMP[a.panel] && a.restaurant_id) return `Go to ${PANEL_JUMP[a.panel].label}`;
+    if ((a.panel === "guest" || a.panel === "menu") && a.restaurant_slug) return "Open guest menu";
+    return null;
+  };
+
   const dismissRequest = async (id: string) => {
-    setRequests((prev) => prev.filter((x) => x.id !== id)); // optimistic
+    setRequests((prev) => prev.filter((x) => x.id !== id));
     const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, status: "dismissed" }),
     });
-    if (!r.ok) { toast(r.error || "Couldn't update that.", "err"); loadRequests(); }
+    if (!r.ok) { toast(r.error || "Couldn't update that.", "err"); loadHub(); }
   };
 
   const scopedName = restaurants.find((r) => r.id === rid)?.name || null;
+  const groups = groupErrors(errors).filter((g) => !hidden.has(g.key));
 
   return (
     <>
-      <h1 className="adm-page-h">Repair kit</h1>
-      <p className="adm-page-sub">Fix a live problem in seconds — then Claude fixes the real cause. Every repair is logged.</p>
-
-      {/* Restaurant picker */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-        <label className="adm-ret">
-          <i className="fas fa-store" aria-hidden="true" style={{ opacity: 0.7 }} /> Restaurant
-          <select value={rid} onChange={(e) => setRid(e.target.value)} aria-label="Choose a restaurant to repair">
-            <option value="">Choose a restaurant…</option>
-            {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
-        </label>
-        {rid && <button className="adm-btn" onClick={load}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h1 className="adm-page-h" style={{ marginBottom: 4 }}>Repair</h1>
+          <p className="adm-page-sub" style={{ margin: 0 }}>See what&rsquo;s broken, jump straight into the panel to fix it by hand, or hand it to Claude — now on the Mac or overnight.</p>
+        </div>
+        <button className="adm-btn" onClick={refreshAll} disabled={refreshing} title="Reload problems, queue and history">
+          <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
+        </button>
       </div>
 
-      {/* Describe a problem to Claude — for issues with no matching error row. */}
-      <div className="adm-card" style={{ marginBottom: 14 }}>
-        <h2 style={{ margin: "0 0 6px" }}><i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 8, opacity: 0.85 }} />Report a problem to Claude</h2>
+      {/* Status strip */}
+      <div className="rp-strip">
+        <div className={`rp-pill${groups.length ? " alert" : " ok"}`}>
+          <i className={`fas ${groups.length ? "fa-triangle-exclamation" : "fa-circle-check"}`} aria-hidden="true" />
+          <span className="n">{errLoading ? "…" : errors.length}</span><span>problem{errors.length === 1 ? "" : "s"} (24h)</span>
+        </div>
+        <div className="rp-pill">
+          <i className="fas fa-robot" aria-hidden="true" /><span className="n">{requests.length}</span><span>waiting for Claude</span>
+        </div>
+        <div className="rp-pill">
+          <i className="fas fa-screwdriver-wrench" aria-hidden="true" /><span className="n">{TOOLS.length}</span><span>hands-on tools</span>
+        </div>
+      </div>
+
+      {/* ── Problems right now ─────────────────────────────────────────── */}
+      <div className="rp-sec-h">
+        <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: groups.length ? "var(--adm-danger)" : "var(--muted)" }} />
+        <h2>Problems right now</h2>
+        {groups.length ? <span className="rp-chip danger">{groups.length}</span> : null}
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>all restaurants · last 24h</span>
+      </div>
+
+      {errLoading ? (
+        <div className="adm-empty">Checking for problems…</div>
+      ) : groups.length === 0 ? (
+        <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> All clear — nothing has errored in the last 24 hours.</div>
+      ) : (
+        <div style={{ marginBottom: 6 }}>
+          {groups.map((g) => {
+            const a = g.sample;
+            const color = PANEL_COLOR[a.panel] || "var(--adm-danger)";
+            const title = ACT_LABEL[a.action] || a.action;
+            const jl = jumpLabel(a);
+            const isOpen = expanded.has(g.key);
+            const wasSent = sent.has(g.key);
+            return (
+              <div key={g.key} className="rp-err">
+                <span className="rp-err-bar" style={{ background: color }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
+                    <b style={{ fontSize: 13.5 }}>{title}</b>
+                    {g.count > 1 ? <span className="rp-chip danger">×{g.count}</span> : null}
+                    <span className="rp-panel" style={{ color, borderColor: color }}>{PANEL_NAME[a.panel] || a.panel}</span>
+                    {a.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{a.restaurant_name}</span> : null}
+                    <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(g.latest)}{a.table_number ? ` · table ${a.table_number}` : ""}</span>
+                  </div>
+                  {a.detail ? (
+                    <div className="rp-detail" style={{ maxHeight: isOpen ? 240 : 34 }}>{a.detail}</div>
+                  ) : <div className="adm-muted" style={{ fontSize: 12 }}>No further detail was recorded.</div>}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>
+                    {jl ? (
+                      <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => jumpTo(a)} title="Open that panel for this restaurant to fix it by hand">
+                        <i className="fas fa-arrow-up-right-from-square" aria-hidden="true" style={{ marginRight: 6 }} />{jl}
+                      </button>
+                    ) : null}
+                    {wasSent ? (
+                      <span className="adm-muted" style={{ fontSize: 12 }}><i className="fas fa-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 5 }} />Sent to Claude</span>
+                    ) : (
+                      <>
+                        <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => sendError(g, "instant")} title="A Claude window opens on the office Mac within a minute">
+                          <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-accent, #e8a13c)" }} />Fix now
+                        </button>
+                        <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => sendError(g, "overnight")} title="The 2:30 AM robot fixes it and leaves a morning report">
+                          <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />Overnight
+                        </button>
+                      </>
+                    )}
+                    {a.detail && a.detail.length > 90 ? (
+                      <button className="rp-link" onClick={() => setExpanded((p) => { const n = new Set(p); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}>{isOpen ? "less" : "more"}</button>
+                    ) : null}
+                    <button className="rp-x" title="Hide (I've handled this)" onClick={() => setHidden((p) => new Set(p).add(g.key))}><i className="fas fa-xmark" aria-hidden="true" /></button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Report anything else ───────────────────────────────────────── */}
+      <div className="rp-sec-h">
+        <i className="fas fa-comment-dots" aria-hidden="true" style={{ color: "var(--muted)" }} />
+        <h2>Report a problem</h2>
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>for anything the list above didn&rsquo;t catch</span>
+      </div>
+      <div className="adm-card" style={{ marginBottom: 6 }}>
         <p className="adm-muted" style={{ fontSize: 12.5, lineHeight: 1.5, margin: "0 0 10px" }}>
-          Describe what&rsquo;s going wrong (printer, a button, a wrong total…). A Claude window opens on the office Mac within a minute if it&rsquo;s on — otherwise the night robot takes it. {rid ? <>Tagged to <b>{scopedName}</b>.</> : <>Pick a restaurant above to tag it, or leave it general.</>}
+          Describe what&rsquo;s going wrong in your own words — a printer, a button, a wrong total. {rid ? <>Tagged to <b>{scopedName}</b>.</> : <>Pick a restaurant in the tools below to tag it, or leave it general.</>}
         </p>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} rows={3}
           placeholder="e.g. The bill button on table 12 does nothing during rush; happens on the waiter tablet."
           style={{ width: "100%", padding: "9px 11px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13.5, resize: "vertical" }} />
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-          <button className="adm-btn primary" disabled={sending} onClick={sendDescribed}>{sending ? "Sending…" : "Send to Claude"}</button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+          <span className="adm-muted" style={{ fontSize: 11.5, display: "flex", alignItems: "center", gap: 5 }}>
+            <i className="fas fa-bolt" aria-hidden="true" style={{ color: "var(--adm-accent, #e8a13c)" }} /> Now = a window on the Mac &nbsp;·&nbsp; <i className="fas fa-moon" aria-hidden="true" style={{ opacity: 0.8 }} /> Overnight = the 2:30 robot
+          </span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="adm-btn" disabled={sending} onClick={() => sendDescribed("overnight")} title="The night robot fixes it at 2:30 AM and leaves a morning report">
+              <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 7, opacity: 0.8 }} />{sending ? "Sending…" : "Fix overnight"}
+            </button>
+            <button className="adm-btn primary" disabled={sending} onClick={() => sendDescribed("instant")} title="A Claude terminal opens on the office Mac within a minute">
+              <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 7 }} />{sending ? "Sending…" : "Fix NOW on the Mac"}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Open fix requests queue */}
+      {/* ── Waiting for Claude ─────────────────────────────────────────── */}
       {requests.length > 0 && (
-        <div className="adm-card" style={{ marginBottom: 14 }}>
-          <h2 style={{ margin: "0 0 8px" }}>Waiting for Claude <span className="adm-muted" style={{ fontWeight: 400 }}>· {requests.length}</span></h2>
-          <div style={{ display: "flex", flexDirection: "column" }}>
+        <>
+          <div className="rp-sec-h">
+            <i className="fas fa-robot" aria-hidden="true" style={{ color: "var(--muted)" }} />
+            <h2>Waiting for Claude</h2><span className="rp-chip">{requests.length}</span>
+          </div>
+          <div className="adm-card" style={{ marginBottom: 6 }}>
             {requests.map((q) => (
               <div key={q.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
-                <i className={`fas ${q.source === "error_row" ? "fa-triangle-exclamation" : "fa-comment-dots"}`} aria-hidden="true" style={{ marginTop: 2, opacity: 0.7 }} />
+                <i className={`fas ${q.mode === "overnight" ? "fa-moon" : q.source === "error_row" ? "fa-triangle-exclamation" : "fa-bolt"}`} aria-hidden="true" title={q.mode === "overnight" ? "Waiting for the 2:30 AM robot" : "Instant — pops on the Mac"} style={{ marginTop: 2, opacity: 0.7 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.summary}</div>
                   <div className="adm-muted" style={{ fontSize: 11.5 }}>{new Date(q.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>fix ready →</a></> : ""}</div>
@@ -139,14 +308,68 @@ export default function AdminRepair() {
               </div>
             ))}
           </div>
-        </div>
+        </>
       )}
 
-      {/* Claude session history — every run: pop-up terminals (live), night robot, audits. */}
+      {/* ── Hands-on tools ─────────────────────────────────────────────── */}
+      <div className="rp-sec-h">
+        <i className="fas fa-screwdriver-wrench" aria-hidden="true" style={{ color: "var(--muted)" }} />
+        <h2>Hands-on tools</h2>
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>fix a table or order yourself — pick a restaurant</span>
+      </div>
+      <div className="adm-card" style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <label className="adm-ret">
+            <i className="fas fa-store" aria-hidden="true" style={{ opacity: 0.7 }} /> Restaurant
+            <select value={rid} onChange={(e) => setRid(e.target.value)} aria-label="Choose a restaurant to repair">
+              <option value="">Choose a restaurant…</option>
+              {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </label>
+          {rid && <button className="adm-btn" onClick={load}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>}
+        </div>
+      </div>
+
+      {!rid ? (
+        <div className="adm-empty">Pick a restaurant above to unlock its table &amp; order tools.</div>
+      ) : dataErr ? (
+        <div className="adm-empty">Couldn&rsquo;t load that restaurant. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>
+      ) : data === null ? (
+        <div className="adm-empty">Loading…</div>
+      ) : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12, marginBottom: 14 }}>
+            {TOOLS.map((t) => (
+              <button key={t.op} className="adm-card" onClick={() => setTool(t.op)}
+                style={{ textAlign: "left", cursor: "pointer", border: t.danger ? "1px solid color-mix(in srgb, var(--adm-danger) 45%, transparent)" : undefined }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                  <i className={`fas ${t.icon}`} aria-hidden="true" style={{ fontSize: 18, color: t.danger ? "var(--adm-danger)" : "var(--adm-accent, #e8a13c)" }} />
+                  <b>{t.label}</b>
+                </div>
+                <div className="adm-muted" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{t.desc}</div>
+              </button>
+            ))}
+          </div>
+
+          <div className="adm-card" style={{ marginBottom: 12 }}>
+            <h2 style={{ margin: "0 0 8px", fontSize: 14 }}>Other quick levers</h2>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <Link className="adm-btn" href={`/aevinite/restaurants?focus=${rid}`}><i className="fas fa-toggle-on" aria-hidden="true" /> Feature switches</Link>
+              <Link className="adm-btn" href="/aevinite/settings"><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Maintenance mode</Link>
+              <Link className="adm-btn" href={`/aevinite/logs?restaurant_id=${rid}`}><i className="fas fa-scroll" aria-hidden="true" /> Full activity log</Link>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Claude session history ─────────────────────────────────────── */}
       {runs.length > 0 && (
-        <div className="adm-card" style={{ marginBottom: 14 }}>
-          <h2 style={{ margin: "0 0 8px" }}><i className="fas fa-clock-rotate-left" aria-hidden="true" style={{ marginRight: 8, opacity: 0.85 }} />Claude session history <span className="adm-muted" style={{ fontWeight: 400 }}>· {runs.length}</span></h2>
-          <div style={{ display: "flex", flexDirection: "column" }}>
+        <>
+          <div className="rp-sec-h">
+            <i className="fas fa-clock-rotate-left" aria-hidden="true" style={{ color: "var(--muted)" }} />
+            <h2>Claude session history</h2><span className="rp-chip">{runs.length}</span>
+          </div>
+          <div className="adm-card" style={{ marginBottom: 8 }}>
             {runs.map((s) => {
               const mins = s.ended_at ? Math.max(1, Math.round((new Date(s.ended_at).getTime() - new Date(s.started_at).getTime()) / 60000)) : null;
               const kindLabel = s.kind === "live" ? "LIVE" : s.kind === "nightly" ? "NIGHT" : "AUDIT";
@@ -157,10 +380,10 @@ export default function AdminRepair() {
                 failed: { label: "failed", color: "var(--adm-danger)" },
               };
               const st = statusInfo[s.status];
-              const expanded = openRun === s.id;
+              const isOpen = openRun === s.id;
               return (
                 <div key={s.id} style={{ padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
-                  <button onClick={() => setOpenRun(expanded ? "" : s.id)} aria-expanded={expanded}
+                  <button onClick={() => setOpenRun(isOpen ? "" : s.id)} aria-expanded={isOpen}
                     style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", background: "none", border: "none", padding: 0, color: "inherit", font: "inherit", textAlign: "left", cursor: s.report ? "pointer" : "default", minHeight: 40 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, padding: "2px 6px", borderRadius: 5, marginTop: 1, background: "color-mix(in srgb, var(--adm-accent, #e8a13c) 18%, transparent)", color: "var(--adm-accent, #e8a13c)" }}>{kindLabel}</span>
                     <span style={{ flex: 1, minWidth: 0 }}>
@@ -168,69 +391,50 @@ export default function AdminRepair() {
                       <span className="adm-muted" style={{ fontSize: 11.5 }}>
                         {new Date(s.started_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                         {mins !== null ? <> · {mins} min</> : null} · <span style={{ color: st.color }}>{st.label}</span>
-                        {s.report ? <> · {expanded ? "hide" : "read what it did"}</> : null}
+                        {s.report ? <> · {isOpen ? "hide" : "read what it did"}</> : null}
                       </span>
                     </span>
-                    {s.report ? <i className={`fas fa-chevron-${expanded ? "up" : "down"}`} aria-hidden="true" style={{ marginTop: 4, opacity: 0.5, fontSize: 11 }} /> : null}
+                    {s.report ? <i className={`fas fa-chevron-${isOpen ? "up" : "down"}`} aria-hidden="true" style={{ marginTop: 4, opacity: 0.5, fontSize: 11 }} /> : null}
                   </button>
-                  {expanded && s.report ? (
+                  {isOpen && s.report ? (
                     <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: 12, lineHeight: 1.55, margin: "8px 0 0", padding: "10px 12px", borderRadius: 8, background: "color-mix(in srgb, var(--card) 60%, transparent)", border: "var(--border)", maxHeight: 320, overflowY: "auto", fontFamily: "inherit" }}>{s.report}</pre>
                   ) : null}
                 </div>
               );
             })}
           </div>
-        </div>
-      )}
-
-      {!rid ? (
-        <div className="adm-empty">Pick a restaurant to use the repair tools on its tables and orders.</div>
-      ) : dataErr ? (
-        <div className="adm-empty">Couldn&rsquo;t load that restaurant. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>
-      ) : data === null ? (
-        <div className="adm-empty">Loading…</div>
-      ) : (
-        <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12, marginBottom: 18 }}>
-            {TOOLS.map((t) => (
-              <button
-                key={t.op}
-                className="adm-card"
-                onClick={() => setTool(t.op)}
-                style={{ textAlign: "left", cursor: "pointer", border: t.danger ? "1px solid color-mix(in srgb, var(--adm-danger) 45%, transparent)" : undefined }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-                  <i className={`fas ${t.icon}`} aria-hidden="true" style={{ fontSize: 18, color: t.danger ? "var(--adm-danger)" : "var(--adm-accent, #e8a13c)" }} />
-                  <b>{t.label}</b>
-                </div>
-                <div className="adm-muted" style={{ fontSize: 12.5, lineHeight: 1.5 }}>{t.desc}</div>
-              </button>
-            ))}
-          </div>
-
-          {/* Links to the other levers the owner already has. */}
-          <div className="adm-card">
-            <h2 style={{ margin: "0 0 8px" }}>Other quick levers</h2>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Link className="adm-btn" href={`/aevinite/restaurants?focus=${rid}`}><i className="fas fa-toggle-on" aria-hidden="true" /> Feature switches</Link>
-              <Link className="adm-btn" href="/aevinite/settings"><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Maintenance mode</Link>
-              <Link className="adm-btn" href={`/aevinite/logs?restaurant_id=${rid}`}><i className="fas fa-scroll" aria-hidden="true" /> Activity log</Link>
-            </div>
-          </div>
         </>
       )}
 
       {tool && data && (
-        <RepairModal
-          op={tool}
-          rid={rid}
-          scopeName={scopedName}
-          data={data}
+        <RepairModal op={tool} rid={rid} scopeName={scopedName} data={data}
           onClose={() => setTool(null)}
           onDone={(msg) => { setTool(null); toast(msg); load(); }}
-          onError={(msg) => toast(msg, "err")}
-        />
+          onError={(msg) => toast(msg, "err")} />
       )}
+
+      <style>{`
+        .rp-strip{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 4px}
+        .rp-pill{display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:12px;border:var(--border);background:var(--card);font-size:12.5px;color:var(--muted)}
+        .rp-pill .n{font-size:18px;font-weight:800;color:var(--text)}
+        .rp-pill.alert{background:color-mix(in srgb,var(--adm-danger) 13%,var(--card));border-color:color-mix(in srgb,var(--adm-danger) 45%,transparent);color:var(--adm-danger)}
+        .rp-pill.alert .n{color:var(--adm-danger)}
+        .rp-pill.ok{border-color:color-mix(in srgb,var(--adm-ok,#4caf82) 40%,transparent)}
+        .rp-sec-h{display:flex;align-items:center;gap:9px;margin:24px 0 11px}
+        .rp-sec-h h2{margin:0;font-size:16px}
+        .rp-chip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,var(--adm-accent,#e8a13c) 16%,transparent);color:var(--adm-accent,#e8a13c)}
+        .rp-chip.danger{background:color-mix(in srgb,var(--adm-danger) 16%,transparent);color:var(--adm-danger)}
+        .rp-clear{display:flex;align-items:center;gap:9px;padding:16px;border-radius:12px;border:1px solid color-mix(in srgb,var(--adm-ok,#4caf82) 35%,transparent);background:color-mix(in srgb,var(--adm-ok,#4caf82) 8%,var(--card));color:var(--text);font-size:13.5px}
+        .rp-clear i{color:var(--adm-ok,#4caf82)}
+        .rp-err{position:relative;display:flex;gap:12px;padding:13px 14px 13px 16px;border-radius:12px;border:var(--border);background:var(--card);margin-bottom:10px;overflow:hidden}
+        .rp-err-bar{position:absolute;left:0;top:0;bottom:0;width:3px}
+        .rp-panel{font-size:10.5px;font-weight:700;letter-spacing:.3px;padding:1px 7px;border-radius:6px;border:1px solid;background:transparent;text-transform:uppercase}
+        .rp-rest{font-size:11.5px;color:var(--muted)}
+        .rp-detail{font-size:12px;line-height:1.5;color:var(--muted);white-space:pre-wrap;word-break:break-word;overflow:hidden;transition:max-height .18s ease;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+        .rp-link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0 2px}
+        .rp-x{margin-left:auto;background:none;border:none;color:var(--muted);opacity:.5;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px}
+        .rp-x:hover{opacity:1;background:color-mix(in srgb,var(--text) 8%,transparent)}
+      `}</style>
     </>
   );
 }

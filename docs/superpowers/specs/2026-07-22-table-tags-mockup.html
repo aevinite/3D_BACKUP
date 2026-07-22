@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Table Tags — UI Preview (VIP · Family · Owner's Guest · Khata)</title>
+<style>
+  :root {
+    --bg: #14110d;
+    --panel: #1e1913;
+    --panel-2: #262019;
+    --line: #3a3226;
+    --text: #f5ecdd;
+    --muted: #a89a84;
+    --gold: #d4a574;
+    --gold-strong: #e8b884;
+    --red: #e5484d;
+    /* tag colors */
+    --vip: #8b5cf6;
+    --family: #e11d48;
+    --guest: #aab4c4; /* platinum silver — owner asked for a new guest colour */
+    --khata: #0ea5e9;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif; padding: 28px 20px 80px; }
+  h1 { font-size: 26px; margin: 0 0 6px; color: var(--gold-strong); }
+  .sub { color: var(--muted); margin: 0 0 34px; font-size: 14px; max-width: 720px; line-height: 1.5; }
+  h2 { font-size: 19px; margin: 46px 0 4px; color: var(--gold); }
+  .hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; max-width: 720px; line-height: 1.5; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+
+  /* ===== floor tiles (copied from the real manager panel recipe) ===== */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .ftile { --c: #6b6253; position: relative; min-height: 110px; display: flex; flex-direction: column;
+    padding: 13px 14px; border-radius: 15px; overflow: hidden;
+    border: 1.5px solid color-mix(in srgb, var(--c) 55%, var(--line));
+    background: linear-gradient(157deg, color-mix(in srgb, var(--c) 16%, var(--panel)), var(--panel) 78%); }
+  .ft-num { font-size: 28px; font-weight: 800; line-height: 1; color: color-mix(in srgb, var(--c) 78%, var(--text)); }
+  .ft-lbl { margin-top: auto; font-size: 12.5px; font-weight: 600; color: color-mix(in srgb, var(--c) 70%, var(--text)); }
+  .ft-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .ft-strip { position: absolute; left: 0; top: 0; height: 4px; width: 60%; background: var(--c); opacity: .85; }
+  .st-free { --c: #6b6253; } .st-seated { --c: #2dd4bf; } .st-prep { --c: #4f9dff; }
+  .st-ready { --c: #ec4899; } .st-bill { --c: #f5c451; }
+  .st-bill { background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
+  .pay-red { border-color: #ef4444 !important; }
+
+  /* ===== the TAG layer ===== */
+  .tag { border-width: 2px; }
+  .tag::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: 13px;
+    background:
+      radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--tagc) 34%, transparent), transparent 55%),
+      repeating-linear-gradient(-45deg, color-mix(in srgb, var(--tagc) 10%, transparent) 0 10px, transparent 10px 22px); }
+  .tag { border-color: color-mix(in srgb, var(--tagc) 80%, var(--line)); box-shadow: 0 0 18px color-mix(in srgb, var(--tagc) 22%, transparent); }
+  .ribbon { position: absolute; top: 9px; right: -32px; transform: rotate(38deg); z-index: 2;
+    background: var(--tagc); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: .6px;
+    padding: 3px 36px; text-transform: uppercase; box-shadow: 0 2px 8px rgba(0,0,0,.45); }
+  .tag-vip    { --tagc: var(--vip); }
+  .tag-vip    { border-color: var(--gold); box-shadow: 0 0 20px color-mix(in srgb, var(--vip) 30%, transparent); }
+  .tag-vip .ribbon { color: #2a1d0c; background: linear-gradient(90deg, var(--gold-strong), #f2d29a); }
+  .tag-family { --tagc: var(--family); }
+  .tag-guest  { --tagc: var(--guest); }
+  .tag-guest .ribbon { color: #1c2230; background: linear-gradient(90deg, #e5eaf2, #9aa6ba); }
+  .tag-khata  { --tagc: var(--khata); }
+  .pick { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 16px; }
+  .pick .ftile { width: 170px; flex: none; }
+  .pick-lbl { position: relative; z-index: 2; font-size: 11px; font-weight: 800; color: var(--muted); letter-spacing: 1px; }
+  .badge { position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
+    margin-top: 6px; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+    background: color-mix(in srgb, var(--tagc) 26%, var(--panel)); color: color-mix(in srgb, var(--tagc) 60%, var(--text));
+    border: 1px solid color-mix(in srgb, var(--tagc) 55%, transparent); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 16px; font-size: 12.5px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 13px; height: 13px; border-radius: 4px; display: inline-block; }
+
+  /* ===== mark-table popup ===== */
+  .popup { max-width: 340px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 18px; padding: 18px; }
+  .popup h3 { margin: 0 0 4px; font-size: 16px; }
+  .popup p { margin: 0 0 14px; font-size: 12.5px; color: var(--muted); }
+  .opt { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; margin-bottom: 8px;
+    border-radius: 12px; border: 1.5px solid color-mix(in srgb, var(--tagc) 55%, var(--line));
+    background: linear-gradient(120deg, color-mix(in srgb, var(--tagc) 20%, var(--panel)), var(--panel));
+    color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; }
+  .opt small { display: block; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+  .opt .ico { font-size: 19px; }
+  .opt.clear { --tagc: #6b6253; justify-content: center; font-weight: 500; color: var(--muted); }
+
+  /* ===== kitchen ticket ===== */
+  .ticket { max-width: 300px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  .ticket .head { display: flex; align-items: center; gap: 8px; border-bottom: 1px dashed var(--line); padding-bottom: 9px; margin-bottom: 9px; }
+  .ticket .tbl { font-weight: 800; font-size: 17px; }
+  .ticket .kot { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .kbadge { font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px; color: #fff; }
+  .ticket ul { margin: 0; padding: 0 0 0 2px; list-style: none; font-size: 13.5px; line-height: 1.9; }
+  .ticket .st { margin-top: 9px; font-size: 11.5px; color: #f59e0b; font-weight: 700; }
+
+  /* ===== admin mini tiles ===== */
+  .mini { display: flex; gap: 10px; flex-wrap: wrap; }
+  .mtile { width: 84px; height: 64px; border-radius: 11px; border: 1.5px solid color-mix(in srgb, var(--c, #6b6253) 55%, var(--line));
+    background: linear-gradient(157deg, color-mix(in srgb, var(--c, #6b6253) 18%, var(--panel)), var(--panel));
+    display: flex; flex-direction: column; justify-content: center; align-items: center; font-size: 12px; position: relative; }
+  .mtile b { font-size: 16px; }
+  .mtile .dot { position: absolute; top: 5px; right: 6px; font-size: 11px; }
+
+  /* ===== khata ===== */
+  .row2 { display: grid; grid-template-columns: 1fr 1.3fr; gap: 22px; align-items: start; }
+  @media (max-width: 760px) { .row2 { grid-template-columns: 1fr; } }
+  .field { width: 100%; background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    border-radius: 10px; padding: 10px 12px; font-size: 13.5px; margin-bottom: 9px; }
+  .plist { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+  .prow { display: flex; justify-content: space-between; padding: 10px 12px; font-size: 13.5px; border-bottom: 1px solid var(--line); }
+  .prow:last-child { border-bottom: 0; }
+  .prow small { color: var(--muted); }
+  .prow.sel { background: color-mix(in srgb, var(--khata) 14%, var(--panel)); }
+  .btn { border: 0; border-radius: 11px; padding: 11px 16px; font-weight: 700; font-size: 13.5px; cursor: pointer; }
+  .btn.primary { background: var(--gold); color: #2a1d0c; }
+  .btn.ghost { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+  .btn.khata { background: var(--khata); color: #04283a; }
+  .kgroup { border: 1px solid var(--line); border-radius: 14px; margin-bottom: 12px; overflow: hidden; }
+  .kghead { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: color-mix(in srgb, var(--khata) 10%, var(--panel-2)); }
+  .kghead .due { margin-left: auto; font-weight: 800; color: #7dd3fc; }
+  .kbill { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font-size: 13px; border-top: 1px solid var(--line); color: var(--muted); }
+  .kbill b { color: var(--text); }
+  .kbill .btn { margin-left: auto; padding: 6px 12px; font-size: 12px; }
+
+  /* ===== report table ===== */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 9px 10px; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+  .strike { text-decoration: line-through; color: var(--muted); }
+  .pill { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; }
+  .pill.family { background: color-mix(in srgb, var(--family) 22%, transparent); color: #fda4af; }
+  .pill.guest { background: color-mix(in srgb, var(--guest) 22%, transparent); color: #6ee7b7; }
+  .toggle-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 13px; color: var(--muted); }
+
+  /* ===== ladder ===== */
+  .ladder { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .lcard { background: var(--panel-2); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+  .lcard .who { font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--gold); margin-bottom: 10px; }
+  .switchrow { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; font-size: 13.5px; }
+  .switchrow small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .sw-toggle { width: 40px; height: 22px; border-radius: 999px; background: var(--gold); position: relative; flex: none; margin-left: 12px; }
+  .sw-toggle.off { background: var(--line); }
+  .sw-toggle::after { content: ""; position: absolute; top: 2px; left: 20px; width: 18px; height: 18px; border-radius: 50%; background: #fff; }
+  .sw-toggle.off::after { left: 2px; }
+  .depth { display: flex; gap: 6px; margin-top: 8px; }
+  .depth span { flex: 1; text-align: center; padding: 8px 4px; font-size: 12px; border-radius: 9px; border: 1px solid var(--line); color: var(--muted); }
+  .depth .on { background: color-mix(in srgb, var(--gold) 20%, transparent); border-color: var(--gold); color: var(--gold-strong); font-weight: 700; }
+  .arrow { text-align: center; color: var(--muted); font-size: 20px; padding-top: 60px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Special Table Types — UI Preview</h1>
+  <p class="sub">This is a <b>design mockup</b> (nothing is built yet), drawn with your real manager-panel
+  colors so tiles look like your actual floor. Scroll through: floor tiles → mark-table popup →
+  tablet/kitchen/admin looks → Khata (pay-later person ledger) → On-the-house report → the permission ladder.</p>
+
+  <!-- ============ 1. MANAGER FLOOR ============ -->
+  <h2>1 · Manager floor — normal tiles vs tagged tiles</h2>
+  <p class="hint">First row = today's normal tiles. Second row = the four special types. A tagged tile keeps its
+  status strip + label (waiters still see Preparing / Ready / Served) but gets a corner ribbon, glow and patterned
+  tint that no normal state uses — impossible to confuse.</p>
+  <div class="card">
+    <div class="grid">
+      <div class="ftile st-free"><div class="ft-strip"></div><div class="ft-num">1</div><div class="ft-lbl">Free</div><div class="ft-meta">4 seats</div></div>
+      <div class="ftile st-seated"><div class="ft-strip"></div><div class="ft-num">2</div><div class="ft-lbl">Seated</div><div class="ft-meta">2 guests</div></div>
+      <div class="ftile st-prep"><div class="ft-strip"></div><div class="ft-num">3</div><div class="ft-lbl">Preparing</div><div class="ft-meta">2 orders</div></div>
+      <div class="ftile st-bill pay-red"><div class="ft-strip"></div><div class="ft-num">4</div><div class="ft-lbl">Served · to pay</div><div class="ft-meta">₹1,240 due</div></div>
+    </div>
+    <div style="height:18px"></div>
+    <div class="grid">
+      <div class="ftile st-prep tag tag-vip"><div class="ft-strip"></div><div class="ribbon">👑 VIP</div><div class="ft-num">5</div><span class="badge">👑 VIP guest</span><div class="ft-lbl">Preparing</div><div class="ft-meta">3 orders</div></div>
+      <div class="ftile st-seated tag tag-family"><div class="ft-strip"></div><div class="ribbon">Family</div><div class="ft-num">6</div><span class="badge">🏠 Family</span><div class="ft-lbl">Seated</div><div class="ft-meta">4 guests</div></div>
+      <div class="ftile st-ready tag tag-guest"><div class="ft-strip"></div><div class="ribbon">Guest</div><div class="ft-num">7</div><span class="badge">🤝 Owner's guest</span><div class="ft-lbl">Ready to serve</div><div class="ft-meta">1 order</div></div>
+      <div class="ftile st-bill tag tag-khata pay-red"><div class="ft-strip"></div><div class="ribbon">Khata</div><div class="ft-num">8</div><span class="badge">📒 Pay later</span><div class="ft-lbl">Served · to pay</div><div class="ft-meta">₹860 due</div></div>
+    </div>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--vip)"></i> VIP — pays normally, priority service</span>
+      <span><i class="sw" style="background:var(--family)"></i> Family — "on the house" offered</span>
+      <span><i class="sw" style="background:var(--guest)"></i> Owner's guest — "on the house" offered</span>
+      <span><i class="sw" style="background:var(--khata)"></i> Khata — bill parks on a person, paid later</span>
+    </div>
+    <div style="margin-top:22px;font-weight:700;font-size:14px">Pick the Owner's Guest colour (VIP + Family stay EXACTLY as above):</div>
+    <div class="pick">
+      <div class="ftile st-ready tag tag-guest"><div class="ft-strip"></div><div class="ribbon">Guest</div><div class="pick-lbl">A · PLATINUM ★ my pick</div><div class="ft-num">7</div><span class="badge">🤝 Owner's guest</span><div class="ft-lbl">Ready to serve</div></div>
+      <div class="ftile st-ready tag" style="--tagc:#f97316"><div class="ft-strip"></div><div class="ribbon">Guest</div><div class="pick-lbl">B · SUNSET ORANGE</div><div class="ft-num">7</div><span class="badge">🤝 Owner's guest</span><div class="ft-lbl">Ready to serve</div></div>
+      <div class="ftile st-ready tag" style="--tagc:#d946ef"><div class="ft-strip"></div><div class="ribbon">Guest</div><div class="pick-lbl">C · FUCHSIA</div><div class="ft-num">7</div><span class="badge">🤝 Owner's guest</span><div class="ft-lbl">Ready to serve</div></div>
+    </div>
+  </div>
+
+  <!-- ============ 2. MARK POPUP ============ -->
+  <h2>2 · "Mark table" popup (manager + waiter tablet)</h2>
+  <p class="hint">Opens from the tile's quick-menu. One tap to mark, one tap to clear. The mark also clears
+  itself automatically when the table closes, so the next party never inherits it.
+  <b>Note:</b> if you pick Khata Option B below (bill-time only), the 📒 row disappears from this popup —
+  only VIP / Family / Owner's Guest stay as table marks.</p>
+  <div class="popup">
+    <h3>Mark table 6</h3>
+    <p>How should staff treat this table?</p>
+    <button class="opt" style="--tagc:var(--vip)"><span class="ico">👑</span><span>VIP<small>Priority service · pays normally</small></span></button>
+    <button class="opt" style="--tagc:var(--family)"><span class="ico">🏠</span><span>Family<small>"On the house" offered at billing</small></span></button>
+    <button class="opt" style="--tagc:var(--guest)"><span class="ico">🤝</span><span>Owner's guest<small>"On the house" offered at billing</small></span></button>
+    <button class="opt" style="--tagc:var(--khata)"><span class="ico">📒</span><span>Pay later (Khata)<small>Bill parks on a person, collect later</small></span></button>
+    <button class="opt clear">✕ &nbsp;Remove mark</button>
+  </div>
+
+  <!-- ============ 3. KITCHEN + ADMIN ============ -->
+  <h2>3 · Kitchen ticket &amp; admin live floor</h2>
+  <p class="hint">Kitchen sees a colored badge next to the table number (read-only — cooks just know to prioritise).
+  Your admin live floor gets the same tint + a corner icon, still money-free.</p>
+  <div class="row2">
+    <div class="ticket">
+      <div class="head"><span class="tbl">T5</span><span class="kbadge" style="background:var(--vip)">👑 VIP</span><span class="kot">KOT #12 · 7:42 pm</span></div>
+      <ul><li>2 × Paneer Tikka</li><li>1 × Dal Makhani</li><li>3 × Butter Naan <small style="color:var(--muted)">(no garlic)</small></li></ul>
+      <div class="st">● COOKING</div>
+    </div>
+    <div class="card">
+      <div class="mini">
+        <div class="mtile" style="--c:#4f9dff"><b>3</b>Preparing</div>
+        <div class="mtile" style="--c:var(--vip)"><span class="dot">👑</span><b>5</b>VIP</div>
+        <div class="mtile" style="--c:var(--family)"><span class="dot">🏠</span><b>6</b>Family</div>
+        <div class="mtile" style="--c:var(--guest)"><span class="dot">🤝</span><b>7</b>Guest</div>
+        <div class="mtile" style="--c:var(--khata)"><span class="dot">📒</span><b>8</b>Khata</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 4. KHATA PLACEMENT ============ -->
+  <h2>4 · Where should the Khata option live? — pick one</h2>
+  <p class="hint">You asked where "pay later" should sit. Three honest options:</p>
+  <div class="ladder" style="margin-bottom:20px">
+    <div class="lcard">
+      <div class="who">Option A · Table mark</div>
+      <div style="font-size:13px;line-height:1.6">Khata stays one of the 4 table marks (like the blue tile above). Waiters know from the START the party pays later.<br><small style="color:var(--muted)">Weak spot: many khata moments are decided only at the END, when the bill comes.</small></div>
+    </div>
+    <div class="lcard" style="border-color:var(--gold)">
+      <div class="who">Option B · At bill time ★ my pick</div>
+      <div style="font-size:13px;line-height:1.6">NO khata table mark. The normal payment popup simply gets a 4th button: <b>📒 Collect later</b> (see mockup below). Works for ANY table, decided in the moment — which is how khata really happens.<br><small style="color:var(--muted)">Weak spot: no early signal to waiters — but khata guests rarely need special treatment, just special billing.</small></div>
+    </div>
+    <div class="lcard">
+      <div class="who">Option C · Both</div>
+      <div style="font-size:13px;line-height:1.6">The bill-time button ALWAYS exists, plus an optional khata table mark for known regulars.<br><small style="color:var(--muted)">Weak spot: two ways to do one thing — more buttons, more staff confusion, more code to maintain.</small></div>
+    </div>
+  </div>
+  <div class="popup" style="max-width:340px;margin-bottom:20px">
+    <h3>Take payment — Table 8</h3>
+    <p>₹860 due · this popup already exists; khata just adds the blue button</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <button class="btn ghost">💵 Cash</button>
+      <button class="btn ghost">📱 UPI</button>
+      <button class="btn ghost">💳 Card</button>
+      <button class="btn khata">📒 Collect later</button>
+    </div>
+  </div>
+  <p class="hint">Whichever option you pick, tapping <b>Collect later</b> opens this person picker: search an existing
+  person by name or mobile, or add a new one (name required, mobile optional). Right side: the new <b>Bills → Khata</b>
+  view, grouped by person with their outstanding total — mark each bill paid whenever they pay, or settle all at once.</p>
+  <div class="row2">
+    <div class="popup" style="max-width:none">
+      <h3>Collect later — who is this bill on?</h3>
+      <p>Table 8 · ₹860</p>
+      <input class="field" placeholder="🔍 Search name or mobile…" value="ra">
+      <div class="plist">
+        <div class="prow sel"><span><b>Rakesh bhai</b><br><small>98765 43210</small></span><span style="color:#7dd3fc;font-weight:700">₹2,340 due</span></div>
+        <div class="prow"><span><b>Ramesh Patel</b><br><small>91234 56780</small></span><span style="color:var(--muted)">clear</span></div>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin:4px 0 8px">— or add a new person —</div>
+      <input class="field" placeholder="Full name *">
+      <input class="field" placeholder="Mobile number (optional)">
+      <input class="field" placeholder="Note (optional — e.g. neighbour, supplier)">
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <button class="btn khata" style="flex:1">📒 Park bill on this person</button>
+        <button class="btn ghost">Cancel</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="font-weight:700;margin-bottom:12px">Bills → <span style="color:#7dd3fc">Khata / Pay later</span> <span style="color:var(--muted);font-weight:400;font-size:12px">· 3 people · ₹4,050 outstanding</span></div>
+      <div class="kgroup">
+        <div class="kghead"><b>Rakesh bhai</b><small style="color:var(--muted)">98765 43210</small><span class="due">₹3,200</span></div>
+        <div class="kbill"><span>Bill #41 · 18 Jul · T3</span><b>₹2,340</b><button class="btn primary">Mark paid</button></div>
+        <div class="kbill"><span>Bill #58 · today · T8</span><b>₹860</b><button class="btn primary">Mark paid</button></div>
+        <div class="kbill" style="justify-content:flex-end"><button class="btn khata">Settle all ₹3,200</button></div>
+      </div>
+      <div class="kgroup">
+        <div class="kghead"><b>Sunita ben</b><small style="color:var(--muted)">no mobile</small><span class="due">₹850</span></div>
+        <div class="kbill"><span>Bill #22 · 12 Jul · T1</span><b>₹850</b><button class="btn primary">Mark paid</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 5. REPORT ============ -->
+  <h2>5 · "On the house" report (owner + manager dashboards)</h2>
+  <p class="hint">Every no-charge bill lands here with the amount it <i>would</i> have been and who marked it —
+  so free meals are always visible, never invisible money. The toggle only changes what the main bill lists show;
+  revenue math is untouched (comp bills are already ₹0 there).</p>
+  <div class="card">
+    <table>
+      <tr><th>Date</th><th>Table</th><th>Type</th><th>Items</th><th>Would-be amount</th><th>Marked by</th></tr>
+      <tr><td>22 Jul, 8:14 pm</td><td>T6</td><td><span class="pill family">🏠 Family</span></td><td>6 items</td><td class="strike">₹1,480</td><td>Manager</td></tr>
+      <tr><td>21 Jul, 9:02 pm</td><td>T2</td><td><span class="pill guest">🤝 Owner's guest</span></td><td>3 items</td><td class="strike">₹620</td><td>Owner</td></tr>
+      <tr><td>19 Jul, 1:30 pm</td><td>T6</td><td><span class="pill family">🏠 Family</span></td><td>9 items</td><td class="strike">₹2,110</td><td>Manager</td></tr>
+    </table>
+    <div class="toggle-row"><div class="sw-toggle off"></div> Show on-the-house bills inside the main bill lists too (off = they live only in this report)</div>
+    <div class="toggle-row" style="margin-top:8px"><b style="color:var(--text)">This week: 3 comp bills · ₹4,210 given on the house</b></div>
+  </div>
+
+  <!-- ============ 6. LADDER ============ -->
+  <h2>6 · The permission ladder — admin → owner → manager → tablet</h2>
+  <p class="hint">Your rule, applied here (and to every future feature): admin switches the feature on per restaurant
+  AND sets how deep it may reach; then owner controls the manager, manager controls the waiters. Any rung off =
+  everything below disappears instantly and the server refuses it too.</p>
+  <div class="ladder">
+    <div class="lcard">
+      <div class="who">Admin · /aevinite</div>
+      <div class="switchrow"><span>Table types feature<small>for this restaurant</small></span><div class="sw-toggle"></div></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">Maximum reach:</div>
+      <div class="depth"><span>Owner only</span><span>+ Manager</span><span class="on">+ Tablet</span></div>
+    </div>
+    <div class="lcard">
+      <div class="who">Owner panel</div>
+      <div class="switchrow"><span>Manager can mark tables<small>VIP / Family / Guest / Khata</small></span><div class="sw-toggle"></div></div>
+      <div class="switchrow"><span>Manager sees on-the-house report<small>comp bills + amounts</small></span><div class="sw-toggle"></div></div>
+    </div>
+    <div class="lcard">
+      <div class="who">Manager panel</div>
+      <div class="switchrow"><span>Waiters can mark tables<small>from the tablet</small></span><div class="sw-toggle"></div></div>
+      <div class="switchrow"><span>Waiters can park Khata bills<small>attach bill to a person</small></span><div class="sw-toggle off"></div></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

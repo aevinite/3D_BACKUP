@@ -3160,6 +3160,12 @@ a:focus:not(:focus-visible) { outline: none; }
   font: inherit; text-align: left; cursor: pointer;
 }
 .order-tracker:hover { border-color: color-mix(in srgb, var(--ot-accent) 55%, transparent); }
+/* While the "View bill" pill (MiniCart) is on screen, the strip slides ABOVE it —
+   the two share the bottom-left corner and the strip's higher z-index buried the
+   pill, which read as "my cart vanished after ordering". MiniCart sets/clears the
+   body flag; `transition` animates both the rise and the drop back down. */
+body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+.order-tracker { transition: bottom 0.25s ease; }
 .order-tracker.status-received { --ot-accent: #e8a13c; } /* amber — NOT accepted yet (distinct from blue preparing) */
 .order-tracker.status-preparing { --ot-accent: #4f9dff; } /* blue — accepted & cooking */
 .order-tracker.status-served { --ot-accent: #4ade80; }

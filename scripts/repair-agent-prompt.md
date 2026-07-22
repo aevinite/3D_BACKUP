@@ -35,6 +35,14 @@ one-line "nothing to repair" report and STOP.
 - Anything touching a migration, money/tax, or login/permissions: LEAVE the PR open and clearly
   flag it in the report as "needs the owner's OK in the morning". When unsure, DON'T auto-merge.
 
+## NEVER BLINDLY CHANGE (owner 2026-07-22 — overrides everything above when they conflict)
+- If you are UNSURE what to change, what NOT to touch, or what the owner actually meant by a
+  request: DON'T change anything for that request. You run at night and can't ask — so leave the
+  request OPEN and put ONE plain question in the report as its `You:` line (e.g. "You: did you
+  mean the kitchen screen or the waiter tablet?"). A skipped fix costs a day; a wrong guess on
+  the live app costs trust.
+- Never widen a request's scope ("while I'm here…"). Fix exactly what was asked, nothing beside it.
+
 ## Output
 Write a COMPACT plain-language report to `.claude/audits/repair-<today>.md` — the owner reads it
 under admin → Repair → History and wants ONLY "what was wrong + what was done" (owner 2026-07-21).

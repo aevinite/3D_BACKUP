@@ -31,7 +31,50 @@ export async function GET(req: NextRequest) {
   // Only a REAL logged-in owner (not the admin act-as, which has no password row here) may
   // change their password from this page.
   const canChangePassword = !!owner && owner.role === "owner";
-  return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants });
+
+  // Feature ladder (mig 166): modules whose on/off the admin TRANSFERRED to this owner
+  // (table_tags_owner_control) — those get a toggle on the owner's settings page. A
+  // restaurant without the transfer never appears here (admin keeps the switch).
+  const modIds = scope.all ? restaurants.map((r) => r.id) : scope.ids;
+  let modules: { restaurant_id: string; name: string; key: string; label: string; enabled: boolean }[] = [];
+  if (modIds.length) {
+    const rows = (await sb.from("settings")
+      .select("restaurant_id, table_tags_allowed, table_tags_owner_control, table_tags_enabled")
+      .in("restaurant_id", modIds).limit(200)).data || [];
+    const nameOf = new Map(restaurants.map((r) => [r.id, r.name]));
+    modules = rows
+      .filter((s: Record<string, unknown>) => s.table_tags_allowed === true && s.table_tags_owner_control === true)
+      .map((s: Record<string, unknown>) => ({
+        restaurant_id: String(s.restaurant_id),
+        name: nameOf.get(String(s.restaurant_id)) || "",
+        key: "table_tags",
+        label: "Table types (VIP / Family / Guest) + pay later",
+        enabled: s.table_tags_enabled !== false,
+      }));
+  }
+  return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules });
+}
+
+// PATCH — the owner flips a module the admin transferred to them (mig 166).
+//   { restaurant_id, key: "table_tags", enabled: boolean }
+export async function PATCH(req: NextRequest) {
+  const scope = await ownerScope(req);
+  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const body = await req.json().catch(() => ({}));
+  const rid = String(body?.restaurant_id || "");
+  const key = String(body?.key || "");
+  const enabled = body?.enabled;
+  if (!rid || key !== "table_tags" || typeof enabled !== "boolean")
+    return NextResponse.json({ error: "restaurant_id, key and enabled (true/false) required." }, { status: 400 });
+  if (!scope.all && !scope.ids.includes(rid))
+    return NextResponse.json({ error: "That restaurant isn't yours." }, { status: 403 });
+  // The toggle only works while the admin has transferred control (and the feature exists).
+  const s = (await sb.from("settings").select("table_tags_allowed, table_tags_owner_control").eq("restaurant_id", rid).maybeSingle()).data as Record<string, boolean> | null;
+  if (!s?.table_tags_allowed) return NextResponse.json({ error: "This feature isn't enabled for that restaurant." }, { status: 403 });
+  if (!s.table_tags_owner_control) return NextResponse.json({ error: "The admin hasn't handed you this switch." }, { status: 403 });
+  const { error } = await sb.from("settings").update({ table_tags_enabled: enabled }).eq("restaurant_id", rid);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
 }
 
 export async function POST(req: NextRequest) {

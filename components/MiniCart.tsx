@@ -78,10 +78,23 @@ export default function MiniCart() {
   // against B's cart — otherwise A's pill lingered over B (audit fix 2026-07-06).
   useEffect(() => { sync(); }, [pathname]);
 
-  // Don't show the pill if the cart is empty or the full cart panel is already open.
-  if (count === 0 || cartOpen) return null;
-  // Also hide it on the 3D viewer page, which has its own bottom bar.
-  if (pathname && pathname.startsWith("/view")) return null;
+  // Is the pill actually on screen? (cart has items, panel closed, not the 3D viewer
+  // — the viewer has its own bottom bar.)
+  const visible = count > 0 && !cartOpen && !(pathname && pathname.startsWith("/view"));
+
+  // While the pill is up, mark <body> so the floating live-status strip
+  // (OrderTracker) slides ABOVE it (see globals.css). Without this the strip —
+  // same bottom-left spot, higher z-index — sat ON TOP of the pill, so after
+  // placing an order and adding more dishes the "View bill" pill looked gone and
+  // the only thing left to tap was the strip, which opens Live status instead of
+  // the new bill. (owner bug report, 2026-07-22)
+  useEffect(() => {
+    if (visible) document.body.setAttribute("data-lfh-minicart", "1");
+    else document.body.removeAttribute("data-lfh-minicart");
+    return () => document.body.removeAttribute("data-lfh-minicart");
+  }, [visible]);
+
+  if (!visible) return null;
 
   // Sum the lines in the DISPLAY currency (each converted + snapped first,
   // add-ons minor-rounded) — this matches the bill's subtotal to the rupee.

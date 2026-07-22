@@ -27,6 +27,10 @@ const PERMS: [string, string, string][] = [
   ["void_bills", "Void bills", "Cancel / void an invoiced bill"],
   ["edit_settings", "Change settings", "Edit restaurant settings & preferences"],
   ["view_ratings", "Guest ratings", "See & handle guest star-ratings"],
+  // Table types + khata module (mig 166) — only shown when the admin entitles the
+  // power (power_<flag>), same as every row here (the `exists` check below).
+  ["table_tags", "Mark table types", "Mark tables VIP / Family / Owner's guest + settle on the house"],
+  ["khata", "Pay later (khata)", "Park bills on a person & collect later"],
   ["take_orders", "Take orders", "Start a new dine-in order at a table, like the waiter tablet"],
 ];
 const ROLES = ["manager", "kitchen", "tablet"];

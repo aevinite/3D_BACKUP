@@ -22,13 +22,15 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 // manager's effective power is off no matter what the owner granted before.
 //  · edit_settings  — enforced in the editor (mig, route:1203) but had no owner toggle.
 //  · view_ratings   — see + handle guest ratings in the manager panel (mig 138).
+//  · table_tags      — mark tables VIP/Family/Owner's-Guest + settle "on the house" (mig 166).
+//  · khata           — park a bill on a person to collect later + manage the khata book (mig 166).
 //  · take_orders    — take a brand-new dine-in order from the manager panel, exactly
 //    like the waiter tablet does (2026-07-22). Part of the full 4-rung ladder (see
 //    below): the FEATURE is entitled by default (taking orders is the tablet's existing
 //    core function — turning the entitlement off would stop every live tablet), but the
 //    owner→manager GRANT (manager_permissions.take_orders) defaults OFF, so a manager
 //    only gets it when the owner deliberately hands it over.
-export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "take_orders"] as const;
+export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "take_orders"] as const;
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
 // The authoritative "is this feature available for this restaurant AT ALL?" check

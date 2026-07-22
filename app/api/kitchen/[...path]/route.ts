@@ -172,7 +172,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!["received", "preparing", "ready", "served"].includes(status)) return err("invalid status");
 
       const patch: any = { status };
-      if (status === "served") patch.served_at = nowIso();
+      // Serving stamps served_at; sending a dish back to a pre-served state (undo a
+      // mis-tap) must clear it again so the row never keeps a stale time (2026-07-22).
+      patch.served_at = status === "served" ? nowIso() : null;
       // Only need order_id to roll the parent up; the client discards the body → no full row.
       // Scoped by rid so a foreign dish id can't be advanced (service-role bypasses RLS).
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id"));
