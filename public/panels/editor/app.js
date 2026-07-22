@@ -3148,7 +3148,7 @@ function printBill(t, sess, os) {
      · Content ≤66mm CENTERED: the 80mm head only prints ~70mm, offset ~5mm from the
        left paper edge — a full-width 80mm body loses ~8mm of every line on the right. */
   @page{margin:0}
-  @media print{body{width:66mm;margin:0 auto;padding:2mm 0}
+  @media print{body{width:80mm;margin:0 auto;padding:2mm 0}
     /* a bill spanning several 65mm printer pages: print the ITEM header ONCE (browsers
        otherwise repeat <thead> on every page — it showed up mid-bill), and never split
        a row across a page boundary (a fragmented flex row shifted every amount one
@@ -3412,7 +3412,7 @@ async function printZReport() {
   /* Same thermal recipe as printBill: margin:0 (no browser header/footer), no @page
      size, content ≤66mm centered so the 70mm printable head never clips it. */
   @page{margin:0}
-  @media print{body{width:66mm;margin:0 auto;padding:2mm 0}
+  @media print{body{width:80mm;margin:0 auto;padding:2mm 0}
     .zr,.grand,.sec{break-inside:avoid;page-break-inside:avoid}}
   body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:20px;color:#111}
   h2{font-family:Georgia,serif;font-size:18px;margin:0;text-align:center}
@@ -6345,7 +6345,7 @@ function printKotTicket(o) {
       .kl{font-size:14px;padding:4px 0;border-bottom:1px dotted #999}.kl .q{font-weight:700;margin-right:6px}.kl i{font-style:italic;color:#333;font-size:12px}
       .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}
       @page{margin:0}
-      @media print{body{width:66mm;margin:0 auto;padding:2mm 0 4mm}.kl,.meta,.al{break-inside:avoid;page-break-inside:avoid}}
+      @media print{body{width:80mm;margin:0 auto;padding:2mm 0 4mm}.kl,.meta,.al{break-inside:avoid;page-break-inside:avoid}}
     </style></head><body>
       <div class="h">${esc(rname)}<br>KITCHEN TICKET · REPRINT</div>
       <div class="meta"><span>KOT #${esc(String(kot))}</span><span>Table ${esc(String(o.table_number ?? "?"))}</span></div>
