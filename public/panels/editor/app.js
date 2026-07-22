@@ -1244,21 +1244,37 @@ function accessUsersCardHtml(s) {
 // their waiters' tablet. Only shown when the admin has ENTITLED order-taking AND capped
 // its reach at the tablet (whoami.tabletGrantable.take_orders). A higher role (admin/
 // owner looking in) sees it disabled + noted when not grantable, for visibility.
-function waiterOrderTakingCardHtml() {
+//
+// It lives on the TABLES floor (not Settings/Access): those sections are hidden behind
+// the edit_settings / manage_staff powers, so a manager without them could never reach
+// the rung they're supposed to own — caught in live verification 2026-07-22. Tables is
+// ungated and is where floor/waiter decisions belong anyway.
+function waiterOrderTakingBarHtml() {
   const who = XRAY_WHO || {};
   const grantable = !!(who.tabletGrantable && who.tabletGrantable.take_orders);
   if (!grantable && !who.higherView) return "";
   const on = !!(who.tabletPermissions && who.tabletPermissions.take_orders);
-  return `<div class="card"><h3>Waiter order-taking</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
-      Let your waiters start new orders from their tablet (the ＋ Take order button). Turn
-      it off and waiters can still run tables, but only a manager takes new orders.
-      ${grantable ? "" : `<br><b style="color:var(--gold-strong)">Not available:</b> the admin hasn't extended order-taking to the waiter tablet for this restaurant.`}
-    </p>
-    <label class="toggle" style="${grantable ? "" : "opacity:.6"}"><input type="checkbox" id="waiterTakeOrders" ${on ? "checked" : ""} ${grantable ? "" : "disabled"}/>
-      <span>Waiters can take orders on the tablet</span></label>
+  const note = grantable
+    ? `<span class="wto-note">Waiters ${on ? "can" : "can’t"} start new orders on their tablet</span>`
+    : `<span class="wto-note wto-off">Not available — the admin hasn’t extended order-taking to the waiter tablet</span>`;
+  return `<div class="wto-bar${grantable ? "" : " wto-dim"}">
+    <label class="toggle"><input type="checkbox" id="waiterTakeOrders" ${on ? "checked" : ""} ${grantable ? "" : "disabled"}/>
+      <span>Waiter order-taking</span></label>${note}
   </div>`;
 }
+// Delegated + registered ONCE: the floor re-renders on every live poll, so a per-render
+// binding would be lost. Optimistic; reverts the checkbox if the server refuses.
+document.addEventListener("change", async (e) => {
+  const box = e.target;
+  if (!box || box.id !== "waiterTakeOrders") return;
+  const value = box.checked;
+  try {
+    const d = await api("POST", "/tablet-permissions", { permissions: { take_orders: value } });
+    if (XRAY_WHO) XRAY_WHO.tabletPermissions = d.tablet_permissions || XRAY_WHO.tabletPermissions;
+    toast(`Waiter order-taking ${value ? "on" : "off"}`, "ok");
+    renderEditor();
+  } catch (err) { box.checked = !value; toast("Failed: " + err.message, "err"); }
+});
 
 // formGeneral: the site-wide Settings form, now split into SECTIONS (see
 // SETTINGS_SECTIONS). Every card is unchanged in behaviour — the split is purely
@@ -1296,7 +1312,7 @@ function formGeneral(s) {
     return userSettingCardHtml();
   }
   if (sec === "access") {
-    return waiterOrderTakingCardHtml() + accessDefaultsCardHtml(s) + accessUsersCardHtml(s);
+    return accessDefaultsCardHtml(s) + accessUsersCardHtml(s);
   }
   if (sec === "billing") {
     // TWO stacked sections (owner, 2026-07-05 — "manager bill and printable bill, up/down,
@@ -3572,17 +3588,6 @@ function bindEditor() {
       renderEditor(); // refresh the "· custom" marker + Default(...) labels
     } catch (e) { toast("Failed: " + e.message, "err"); renderEditor(); }
   }));
-  // Manager → tablet: grant/revoke order-taking for waiters (POST /tablet-permissions;
-  // the server re-checks the admin entitlement + reach). Optimistic; reverts on failure.
-  const wto = ed.querySelector("#waiterTakeOrders");
-  if (wto) wto.onchange = async () => {
-    const value = wto.checked;
-    try {
-      const d = await api("POST", "/tablet-permissions", { permissions: { take_orders: value } });
-      if (XRAY_WHO) XRAY_WHO.tabletPermissions = d.tablet_permissions || XRAY_WHO.tabletPermissions;
-      toast(`Waiter order-taking ${value ? "on" : "off"}`, "ok");
-    } catch (e) { wto.checked = !value; toast("Failed: " + e.message, "err"); }
-  };
   const usrAdd = $("#usrAddStaff");
   if (usrAdd) usrAdd.onclick = async () => {
     const name = ($("#usrNewName")?.value || "").trim();
@@ -4881,7 +4886,7 @@ function floorHtml() {
   // 2026-06-30). Simplest correct fix: don't show density controls while collapsed —
   // that corner is already spoken for there, and re-expanding is one click away.
   const collapsedNow = isPhoneLayout() || state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null);
-  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${collapsedNow ? "" : densityBtnsHtml()}</div>${statsStrip}${legend}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${tiles}</div></div>`;
+  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${collapsedNow ? "" : densityBtnsHtml()}</div>${statsStrip}${legend}${waiterOrderTakingBarHtml()}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${tiles}</div></div>`;
 
   // side panel — everyday things FIRST (whole-floor open/close, requests, needs),
   // rarely-touched feature switches + café location LAST (owner, 2026-06-12:
