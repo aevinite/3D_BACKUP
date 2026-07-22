@@ -592,16 +592,22 @@ function renderDishes() {
     try {
       await api("POST", `/dishes/${id}/sold-out`, { value: nowOut });
       const dish = state.dishes.find((d) => d.id === id);
-      // No confirm — kitchens move fast — but always an UNDO escape hatch. The UNDO
-      // targets the dish by ID (re-querying the live button), so it works even after a
-      // background refresh rebuilt the list. The server toggle is an explicit set, so a
-      // double-tap is harmless — no disabled-guard needed on the undo path.
-      toast(`${dish ? dish.title : "Dish"} ${wasOut ? "back on the menu" : "marked SOLD OUT"}`,
-        async () => {
-          set86(id, wasOut);
-          try { await api("POST", `/dishes/${id}/sold-out`, { value: wasOut }); }
-          catch (e) { set86(id, nowOut); toast("Undo failed: " + e.message); }
-        });
+      // No confirm — kitchens move fast — but always an UNDO escape hatch, now the shared
+      // ring-card bar (owner, 2026-07-22). The UNDO targets the dish by ID (re-querying the
+      // live button), so it works even after a background refresh rebuilt the list. The
+      // server toggle is an explicit set, so a double-tap is harmless.
+      const undo86 = async () => {
+        set86(id, wasOut);
+        try { await api("POST", `/dishes/${id}/sold-out`, { value: wasOut }); }
+        catch (e) { set86(id, nowOut); toast("Undo failed: " + e.message); }
+      };
+      if (window.LFH_UNDO) LFH_UNDO.show({
+        message: `${dish ? dish.title : "Dish"} ${wasOut ? "back on the menu" : "marked sold out"}`,
+        sub: "Tap undo to change it back",
+        icon: "🚫",
+        onUndo: undo86,
+      });
+      else toast(`${dish ? dish.title : "Dish"} ${wasOut ? "back on the menu" : "marked SOLD OUT"}`, undo86);
     } catch (e) {
       set86(id, wasOut); // roll back the optimistic flip
       toast("Failed: " + e.message);

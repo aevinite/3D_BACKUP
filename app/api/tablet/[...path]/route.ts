@@ -1135,12 +1135,27 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!openSess) return err("This table's bill is already closed — reopen it from the manager panel.", 409);
       const GRACE_MS = 30 * 60 * 1000;
       const cutoff = new Date(Date.now() - GRACE_MS).toISOString();
-      // Only revert orders paid within the grace window; older paid orders are left alone.
-      const rows = must(await sb.from("orders").update({ payment_status: "pending", paid_at: null })
+      // The orders settled within the grace window — the ones this undo can take back.
+      // We read payment_method too so we can reverse the settle type correctly.
+      const paid = must(await sb.from("orders").select("id, payment_method")
         .eq("session_id", openSess.id).eq("restaurant_id", rid)
-        .eq("payment_status", "paid").gte("paid_at", cutoff).select("id"));
-      await log("payment_revert", { table_number: t, device_id: dev, detail: "undo mark-paid (within grace)" });
-      return ok({ ok: true, count: rows.length });
+        .eq("payment_status", "paid").gte("paid_at", cutoff)) as { id: string; payment_method: string | null }[];
+      if (!paid.length) return ok({ ok: true, count: 0 });
+      // Common revert: unpaid again + clear the paid stamp and HOW it was paid.
+      const base = { payment_status: "pending", paid_at: null, payment_method: null, payment_note: null };
+      // "On the house" ALSO stamped a 100% discount (discount = subtotal); reversing the
+      // settle must strip that too, or the bill would read ₹0 due yet unpaid. Regular /
+      // split settles keep whatever discount they had.
+      const onHouseIds = paid.filter((o) => o.payment_method === ON_THE_HOUSE_METHOD).map((o) => o.id);
+      const otherIds = paid.filter((o) => o.payment_method !== ON_THE_HOUSE_METHOD).map((o) => o.id);
+      if (otherIds.length) must(await sb.from("orders").update(base).in("id", otherIds).eq("restaurant_id", rid).select("id"));
+      if (onHouseIds.length) must(await sb.from("orders").update({ ...base, discount: 0, discount_note: null }).in("id", onHouseIds).eq("restaurant_id", rid).select("id"));
+      // A split settle recorded payment LEGS in session_payments — drop the ones from the
+      // settle we just undid so the money trail doesn't double-count. A plain pay has none;
+      // older legs are outside the grace window and left alone.
+      await sb.from("session_payments").delete().eq("session_id", openSess.id).eq("restaurant_id", rid).gte("created_at", cutoff);
+      await log("payment_revert", { table_number: t, device_id: dev, detail: "undo settle (within grace)" });
+      return ok({ ok: true, count: paid.length });
     }
 
     // sessions/:id/close — free the table (end the dining session). Uses the SHARED
