@@ -983,7 +983,22 @@ function renderPanel() {
   // wire it up
   document.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqApprove}/resolve`, { status: "approved" }))));
   document.querySelectorAll("[data-req-deny]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqDeny}/resolve`, { status: "denied" }))));
-  document.querySelectorAll("[data-attend]").forEach((b) => (b.onclick = () => act(() => api("POST", `/calls/${b.dataset.attend}/attend`))));
+  document.querySelectorAll("[data-attend]").forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.attend;
+    const c = (state.data.calls || []).find((x) => x.id === id);
+    try {
+      const r = await api("POST", `/calls/${id}/attend`);
+      if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }
+      await load();
+      // A mis-tapped "Done" silently drops a real guest call — offer a takeback (2026-07-22).
+      if (window.LFH_UNDO) LFH_UNDO.show({
+        message: "Call attended",
+        sub: c ? `Table ${c.table_number} · ${c.note || "call"} — tap undo` : "Tap undo to put the call back",
+        icon: "🔔",
+        onUndo: () => api("POST", `/calls/${id}/reopen`).then(() => load()).catch((e) => { toast("Undo failed: " + e.message, false); load(); }),
+      });
+    } catch (e) { toast("Failed: " + e.message, false); }
+  }));
   document.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.approve}/approve`))));
   document.querySelectorAll("[data-makehead]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.makehead}/make-head`))));
   // Kick a guest off the table (table stays open). Confirm first — it ends access.
@@ -998,9 +1013,21 @@ function renderPanel() {
   }));
   // Auto-approve toggle: future joiners are approved automatically (no staff review).
   // Attend every waiter call on the table in one tap.
-  document.querySelectorAll("[data-attend-all-calls]").forEach((b) => (b.onclick = () => act(async () => {
-    for (const c of callsOf(b.dataset.attendAllCalls)) await api("POST", `/calls/${c.id}/attend`);
-  })));
+  document.querySelectorAll("[data-attend-all-calls]").forEach((b) => (b.onclick = async () => {
+    const tbl = b.dataset.attendAllCalls;
+    const ids = callsOf(tbl).map((c) => c.id);
+    if (!ids.length) return;
+    try {
+      for (const id of ids) await api("POST", `/calls/${id}/attend`);
+      await load();
+      if (window.LFH_UNDO) LFH_UNDO.show({
+        message: `${ids.length} call${ids.length > 1 ? "s" : ""} attended`,
+        sub: `Table ${tbl} · tap undo to put them back`,
+        icon: "🔔",
+        onUndo: () => Promise.all(ids.map((id) => api("POST", `/calls/${id}/reopen`))).then(() => load()).catch((e) => { toast("Undo failed: " + e.message, false); load(); }),
+      });
+    } catch (e) { toast("Failed: " + e.message, false); }
+  }));
   // Discount: shown only when the manager enables it for the tablet (General settings
   // → tablet_discount = on/pin; default off = no button). tabletDiscount() applies
   // the on/pin rule; the server enforces it too.
@@ -1268,9 +1295,26 @@ function flipOrders(orderIds, { from, to, orderStatus }) {
 }
 function optimisticAccept(orderIds) {
   if (!orderIds.length) return;
+  // Snapshot the dishes that were still "received" (the ones this accept sends to the
+  // kitchen) so an accidental Accept can be taken back to the new-order queue. Reuses the
+  // serve-undo revert with prev:"received" (owner undo bar, 2026-07-22).
+  const snap = (state.data.items || [])
+    .filter((it) => orderIds.includes(it.order_id) && it.status === "received")
+    .map((it) => ({ id: it.id, prev: "received" }));
   flipOrders(orderIds, { from: "received", to: "preparing", orderStatus: "preparing" });
   Promise.all(orderIds.map((oid) => api("POST", `/orders/${oid}/accept`)))
-    .then(() => scheduleServeReconcile())
+    .then(() => {
+      scheduleServeReconcile();
+      if (snap.length && window.LFH_UNDO) {
+        const o = (state.data.orders || []).find((x) => x.id === orderIds[0]);
+        LFH_UNDO.show({
+          message: orderIds.length > 1 ? "Orders accepted" : "Order accepted",
+          sub: o ? `Table ${o.table_number} · tap undo to unsend` : "Tap undo to unsend",
+          icon: "✋",
+          onUndo: () => undoServe(snap),
+        });
+      }
+    })
     .catch((e) => { toast("Failed: " + e.message, false); load(); });
 }
 function optimisticServeAll(orderIds) {
