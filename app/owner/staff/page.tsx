@@ -11,10 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Perms = Record<string, boolean>;
-type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms; featureDepths?: Record<string, string> };
-// Powers with a tablet rung: the admin caps how far they reach. If capped at "owner",
-// the owner can't grant it to their manager, so hide it (like an unentitled power).
-const REACH_FLAGS = new Set<string>(["take_orders"]);
+type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms };
 type Staff = { id: string; username: string; role: string; name: string | null; phone: string | null; active: boolean; restaurant_id: string; hasPin: boolean; last_seen_at?: string | null };
 
 // [flag, label, hint]. Rendered by mapping — add a new power here (and to the API
@@ -31,6 +28,8 @@ const PERMS: [string, string, string][] = [
   // power (power_<flag>), same as every row here (the `exists` check below).
   ["table_tags", "Mark table types", "Mark tables VIP / Family / Owner's guest + settle on the house"],
   ["khata", "Pay later (khata)", "Park bills on a person & collect later"],
+  ["banquet", "Banquet billing", "Create fixed-plate banquet bills"],
+  ["table_ops", "Table & KOT operations", "Merge tables, move KOTs/items, split bills"],
   ["take_orders", "Take orders", "Start a new dine-in order at a table, like the waiter tablet"],
 ];
 const ROLES = ["manager", "kitchen", "tablet"];
@@ -238,9 +237,7 @@ export default function OwnerStaffPage() {
                 // The ladder (mig 133): a power the ADMIN removed doesn't exist here.
                 // Hidden from the real owner; the admin act-as sees it amber-tinted,
                 // and clicking it jumps to the admin Access hub instead of toggling.
-                // Reaches the manager unless the admin capped this feature at "owner only".
-                const reachesManager = !REACH_FLAGS.has(key) || (r.featureDepths?.[key] ?? "tablet") !== "owner";
-                const exists = (r.ownerEntitlements?.[`power_${key}`] !== false) && reachesManager;
+                const exists = r.ownerEntitlements?.[`power_${key}`] !== false;
                 if (!exists && actor !== "admin") return null;
                 const on = !!r.managerPermissions?.[key];
                 if (!exists) {

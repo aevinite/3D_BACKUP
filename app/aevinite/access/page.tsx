@@ -21,10 +21,12 @@ const MANAGER_POWERS: [string, string][] = [
   // Keep in sync with MANAGER_POWER_FLAGS in lib/ownerEntitlements.ts — these two were
   // missing, so the admin couldn't gate them at all (audit 2026-07-08).
   ["edit_settings", "Edit settings"], ["view_ratings", "See & handle ratings"],
-  // Table types + khata module (mig 166).
-  ["table_tags", "Mark table types + on-the-house"], ["khata", "Pay later (khata) book"],
+  // Table types + khata module (mig 166) · banquet rung (mig 167, backfilled ON) ·
+  // KOT ▾ menu (migs 172-177, defaults OFF).
+  ["table_tags", "Mark table types + on-the-house"], ["khata", "Pay later (khata) book"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT operations"],
   // Take a brand-new dine-in order from the manager panel, like the waiter tablet
-  // (2026-07-22). Has a tablet rung, so it also gets a "reach" selector (REACH_FLAGS).
+  // (2026-07-22). Standard manager power (exists + granted); its tablet rung is the
+  // tablet_take_orders tri-state in the Tablet card below.
   ["take_orders", "Take orders"],
 ];
 // Owner-panel SECTIONS the admin can remove per restaurant (mig 133). Off = the
@@ -36,18 +38,16 @@ const OWNER_SECTIONS: [string, string][] = [
   // off for a restaurant even though the backend supports it (audit 2026-07-08).
   ["ratings", "Ratings"], ["customers", "Customers list"], ["settings", "Settings (appearance & password)"],
 ];
-const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"], ["tablet_table_tags", "Mark table types"], ["tablet_khata", "Park pay-later (khata) bills"]];
+const TABLET_CAPS: [string, string][] = [["tablet_discount", "Apply discount"], ["tablet_mark_paid", "Mark bill paid"], ["tablet_invoice", "Generate invoice"], ["tablet_banquet", "Banquet billing"], ["tablet_table_tags", "Mark table types"], ["tablet_khata", "Park pay-later (khata) bills"], ["tablet_table_ops", "Table & KOT operations"], ["tablet_take_orders", "Take orders"]];
 // The feature LADDER's two admin switches per module (owner rule 2026-07-22):
 // "application" = the feature on/off itself; "power transfer" = may the OWNER
 // toggle it from their own panel. Keys = settings columns (mig 166).
 const LADDER_MODULES: { app: string; transfer: string; label: string; hint: string }[] = [
   { app: "table_tags_allowed", transfer: "table_tags_owner_control", label: "Table types (VIP / Family / Guest) + Khata", hint: "Special table marks, on-the-house settle, and the pay-later book." },
+  { app: "banquet_allowed", transfer: "banquet_owner_control", label: "Banquet billing", hint: "Fixed-plate banquet bills (per-plate menu, bill-only)." },
+  { app: "table_ops_allowed", transfer: "table_ops_owner_control", label: "Table & KOT operations (KOT ▾ menu)", hint: "Change table, merge tables, move a KOT or a single dish, split the bill, reprint a KOT." },
 ];
 const TRI: [string, string][] = [["off", "Off"], ["on", "On"], ["pin", "On · PIN"]];
-// Powers that have a tablet rung → the admin also picks how FAR the feature may reach
-// (rung 1b). Keep in sync with TABLET_POWER_FLAGS in lib/tabletPermissions.ts.
-const REACH_FLAGS = new Set<string>(["take_orders"]);
-const REACH: [string, string][] = [["owner", "Owner only"], ["manager", "+ Manager"], ["tablet", "+ Waiter tablet"]];
 
 // Small pure UI atoms — hoisted to module scope (defining them inside the page
 // body recreated them every render; the react-hooks/static-components lint
@@ -93,7 +93,6 @@ export default function AccessPage() {
   const [manager, setManager] = useState<Record<string, boolean>>({});
   const [owner, setOwner] = useState<Record<string, boolean>>({});
   const [tablet, setTablet] = useState<Record<string, string>>({});
-  const [depths, setDepths] = useState<Record<string, string>>({});
   const [ladder, setLadder] = useState<Record<string, boolean>>({}); // module switches (access route `features`, mig 166)
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
@@ -145,7 +144,6 @@ export default function AccessPage() {
       setManager(a.manager || {});
       setOwner(a.owner || {});
       setTablet(a.tablet || {});
-      setDepths(a.depths || {});
       setLadder(a.features || {});
       setStaff((s.staff || []).filter((u: Staff) => u.restaurant_id === id && u.role !== "owner"));
     } catch { setLoadErr(true); }
@@ -184,12 +182,6 @@ export default function AccessPage() {
   const saveOwner = async (key: string, value: boolean) => {
     setOwner((x) => ({ ...x, [key]: value }));
     const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, owner: { [key]: value } }) });
-    if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
-  };
-  // Reach (rung 1b) is stored as depth_<flag> in owner_entitlements → reuse the owner saver's route.
-  const saveDepth = async (flag: string, value: string) => {
-    setDepths((x) => ({ ...x, [flag]: value }));
-    const r = await fetch("/api/admin/restaurants/access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, owner: { [`depth_${flag}`]: value } }) });
     if (r.ok) toast("Saved"); else { toast("Failed"); loadRestaurant(rid); }
   };
   const saveTablet = async (key: string, value: string) => {
@@ -265,15 +257,6 @@ export default function AccessPage() {
                     <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ac-muted,#857655)" }}>
                       exists <Toggle on={exists} onChange={(v) => saveOwner(`power_${k}`, v)} />
                     </label>
-                    {REACH_FLAGS.has(k) && (
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ac-muted,#857655)", opacity: exists ? 1 : 0.45 }}
-                        title="How far this feature may reach: owner only, down to the manager, or all the way to the waiter tablet">
-                        reach <select value={depths[k] || "tablet"} disabled={!exists} onChange={(e) => saveDepth(k, e.target.value)}
-                          style={{ padding: "7px 9px", borderRadius: 8, border: "1px solid var(--ac-line,#d8cdb8)", background: "var(--ac-card,#fff)", color: "inherit", fontSize: 12.5, cursor: "pointer" }}>
-                          {REACH.map(([v, lab]) => <option key={v} value={v}>{lab}</option>)}
-                        </select>
-                      </label>
-                    )}
                     <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--ac-muted,#857655)", opacity: exists ? 1 : 0.45 }}
                       title={exists ? "What the owner granted their managers" : "Removed by admin — the owner can't see or grant this power"}>
                       granted <Toggle on={manager[k] === true} onChange={(v) => saveManager(k, v)} />
@@ -283,7 +266,8 @@ export default function AccessPage() {
               );
             })}
           </Card>
-          <Card id="ac-tablet" title="Tablet (waiter) billing" hint="What the waiter tablet may do to a bill. 'On · PIN' requires a manager PIN each time. (Order-taking is controlled by the ladder above — set its Reach to 'Waiter tablet'.)">
+          <Card id="ac-tablet" title="Tablet (waiter) billing" hint="What the waiter tablet may do to a bill. 'On · PIN' requires a manager PIN each time. 'Table & KOT operations' only takes effect while its module (Modules card above) is on.">
+
             {TABLET_CAPS.map(([k, l]) => <Row key={k} label={l}><Tri val={tablet[k] || "off"} onChange={(v) => saveTablet(k, v)} /></Row>)}
           </Card>
           <Card title="Guest menu features" hint="Which features guests see on this restaurant's menu.">

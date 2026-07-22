@@ -25,14 +25,33 @@ export type TableTagsLadder = {
   effective: boolean;     // what everything below the owner actually gets
 };
 
-export async function tableTagsLadder(rid: string): Promise<TableTagsLadder> {
+// Generic module-ladder read (the mig-166 pattern, generalised for the 2026-07-22
+// ladder audit): three settings columns per module — <x>_allowed (admin switch 1),
+// <x>_owner_control (admin switch 2, power transfer), <x>_enabled (the owner's own
+// toggle, consulted only while transferred). Effective = allowed AND (!control OR enabled).
+export async function moduleLadder(
+  rid: string,
+  cols: { allowed: string; control: string; enabled: string },
+): Promise<TableTagsLadder> {
   const s = (await sb
     .from("settings")
-    .select("table_tags_allowed, table_tags_owner_control, table_tags_enabled")
+    .select(`${cols.allowed}, ${cols.control}, ${cols.enabled}`)
     .eq("restaurant_id", rid)
     .maybeSingle()).data as Record<string, boolean> | null;
-  const allowed = s?.table_tags_allowed === true;
-  const ownerControl = s?.table_tags_owner_control === true;
-  const enabled = s?.table_tags_enabled !== false;
+  const allowed = s?.[cols.allowed] === true;
+  const ownerControl = s?.[cols.control] === true;
+  const enabled = s?.[cols.enabled] !== false;
   return { allowed, ownerControl, enabled, effective: allowed && (!ownerControl || enabled) };
 }
+
+export const tableTagsLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "table_tags_allowed", control: "table_tags_owner_control", enabled: "table_tags_enabled" });
+
+// Banquet's ladder (mig 130 + 167).
+export const banquetLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "banquet_allowed", control: "banquet_owner_control", enabled: "banquet_enabled" });
+
+// Table & KOT operations — the KOT ▾ menu (merge tables, move a KOT/dish, split
+// bill, reprint; migs 172-177).
+export const tableOpsLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "table_ops_allowed", control: "table_ops_owner_control", enabled: "table_ops_enabled" });

@@ -48,6 +48,9 @@ export function cleanClonedSettings(
   base.tablet_discount = "off";
   base.tablet_mark_paid = "off";
   base.tablet_invoice = "off";
+  // Order-taking is the tablet's core function, so a NEW restaurant's waiters start able
+  // to take orders (default 'on' — mig 178). It's still a manager-controlled tri-state.
+  base.tablet_take_orders = "on";
   // The banquet tablet capability is a tri-state cap like the three above — same rule: a new
   // restaurant starts OFF and never inherits #1's, so a later `banquet_allowed` grant doesn't
   // arrive with waiters already able to create banquet bills. (mig 130.)
@@ -57,6 +60,10 @@ export function cleanClonedSettings(
   // billing or auto-print-KOT switched on, a brand-new restaurant was born with them enabled
   // (e.g. the manager panel showed the 🎪 Banquet tab) with no admin grant. (migs 130/107.)
   base.banquet_allowed = false;
+  // Banquet's full ladder (mig 167): a new restaurant starts with the admin holding
+  // the switch (no transfer) and the owner toggle at its neutral ON.
+  base.banquet_owner_control = false;
+  base.banquet_enabled = true;
   base.auto_print_kot_allowed = false;
   // Table types (VIP/Family/Guest) + khata (mig 166): the whole ladder starts at the
   // admin's feet for a new restaurant — feature off, no owner transfer, tablet rungs off.
@@ -65,6 +72,11 @@ export function cleanClonedSettings(
   base.table_tags_enabled = true;
   base.tablet_table_tags = "off";
   base.tablet_khata = "off";
+  // Table & KOT operations — the KOT ▾ menu (migs 172-177): same fresh-start ladder.
+  base.table_ops_allowed = false;
+  base.table_ops_owner_control = false;
+  base.table_ops_enabled = true;
+  base.tablet_table_ops = "off";
   // The auto-print-KOT capability itself (not just its entitlement) must also start OFF, so a
   // later entitlement grant doesn't immediately auto-print KOTs without the owner choosing to. (mig 107.)
   base.auto_print_kot = false;

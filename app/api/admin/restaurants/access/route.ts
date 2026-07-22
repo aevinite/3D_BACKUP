@@ -11,8 +11,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
-import { OWNER_ENTITLEMENT_KEYS, mergeOwnerEntitlements, MANAGER_POWER_FLAGS, featureDepth, featureDepthKey, type FeatureDepth } from "@/lib/ownerEntitlements";
-import { TABLET_POWER_FLAGS } from "@/lib/tabletPermissions";
+import { OWNER_ENTITLEMENT_KEYS, mergeOwnerEntitlements, MANAGER_POWER_FLAGS } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -20,17 +19,25 @@ export const dynamic = "force-dynamic";
 // never drift again: edit_settings + view_ratings were missing here, so the admin's grant/revoke
 // of those two silently never persisted (audit 2026-07-09).
 const MANAGER_POWERS = MANAGER_POWER_FLAGS;
-// take_orders defaults OFF (opt-in) — an owner must deliberately grant it, like void_bills.
-const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, take_orders: false };
+// table_tags/khata default OFF (new module); banquet defaults ON (rung backfilled true in
+// mig 167 so pre-existing behaviour is unchanged); table_ops defaults OFF (KOT ▾ menu).
+// take_orders defaults OFF as a manager GRANT (owner grants deliberately) — its tablet
+// cap defaults 'on' separately (mig 178), taking orders being the tablet's core function.
+// Keep these matching the migrations — enforcement (managerCan) reads an ABSENT key as
+// false, so display and truth must agree.
+const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: true, table_ops: false, take_orders: false };
 // The tablet capabilities (settings.*), tri-state off|on|pin. tablet_table_tags /
 // tablet_khata are normally the MANAGER's rung (manager settings), but the admin
 // console shows every access bit of the ladder, so they're editable here too (mig 166).
-const TABLET_CAPS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_table_tags", "tablet_khata"] as const;
+// tablet_table_ops (mig 172) is the ladder's manager→tablet rung for the KOT ▾ menu;
+// it only takes effect while the module itself is effective (mig 177).
+// tablet_take_orders (mig 178) is the manager→tablet rung for order-taking; unlike the
+// others it defaults 'on' (the tablet already takes orders).
+const TABLET_CAPS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders"] as const;
 // Feature-ladder switches on settings (mig 166): the feature itself + the admin's
 // "power transfer" (may the OWNER toggle it). Booleans, default OFF via the migration.
-const FEATURE_SWITCHES = ["table_tags_allowed", "table_tags_owner_control"] as const;
+const FEATURE_SWITCHES = ["table_tags_allowed", "table_tags_owner_control", "banquet_allowed", "banquet_owner_control", "table_ops_allowed", "table_ops_owner_control"] as const;
 const isTri = (v: unknown): v is "off" | "on" | "pin" => v === "off" || v === "on" || v === "pin";
-const isDepth = (v: unknown): v is FeatureDepth => v === "owner" || v === "manager" || v === "tablet";
 
 const bad = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
 
@@ -48,18 +55,16 @@ export async function GET(req: NextRequest) {
   if (rq.error) return bad(rq.error.message, 500);
   if (!rq.data) return bad("Restaurant not found.", 404);
   const r = rq.data;
-  const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice, tablet_table_tags, tablet_khata, table_tags_allowed, table_tags_owner_control, table_tags_enabled").eq("restaurant_id", rid).maybeSingle()).data as Record<string, unknown> | null;
+  const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice, tablet_banquet, tablet_table_tags, tablet_khata, tablet_table_ops, tablet_take_orders, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled").eq("restaurant_id", rid).maybeSingle()).data as Record<string, unknown> | null;
   const manager = { ...MP_DEFAULT, ...(r?.manager_permissions && typeof r.manager_permissions === "object" ? r.manager_permissions : {}) };
   const tablet: Record<string, string> = {};
   for (const k of TABLET_CAPS) tablet[k] = isTri(s?.[k]) ? (s![k] as string) : "off";
   const features: Record<string, boolean> = {};
   for (const k of FEATURE_SWITCHES) features[k] = s?.[k] === true;
-  features.table_tags_enabled = s?.table_tags_enabled !== false; // the owner's toggle, shown read-only
-  // Rung 1b — how far each ladder feature may reach (owner|manager|tablet), for the
-  // features that HAVE a tablet rung. Absent = "tablet" (full reach).
-  const depths: Record<string, FeatureDepth> = {};
-  for (const flag of TABLET_POWER_FLAGS) depths[flag] = featureDepth(r?.owner_entitlements, flag);
-  return NextResponse.json({ manager, tablet, owner: mergeOwnerEntitlements(r?.owner_entitlements), features, depths });
+  features.table_tags_enabled = s?.table_tags_enabled !== false; // the owners' toggles, shown read-only
+  features.banquet_enabled = s?.banquet_enabled !== false;
+  features.table_ops_enabled = s?.table_ops_enabled !== false;
+  return NextResponse.json({ manager, tablet, owner: mergeOwnerEntitlements(r?.owner_entitlements), features });
 }
 
 export async function POST(req: NextRequest) {
@@ -85,16 +90,6 @@ export async function POST(req: NextRequest) {
     const cur = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data?.owner_entitlements || {};
     const next: Record<string, unknown> = { ...(typeof cur === "object" ? cur : {}) };
     for (const k of OWNER_ENTITLEMENT_KEYS) if (k in (body.owner as object)) next[k] = (body.owner as Record<string, unknown>)[k] === true;
-    // Rung 1b — the admin's max-reach per feature, stored as a STRING under depth_<flag>
-    // (owner|manager|tablet) in the same bag. Only accepted for features with a tablet rung.
-    for (const flag of TABLET_POWER_FLAGS) {
-      const dk = featureDepthKey(flag);
-      if (dk in (body.owner as object)) {
-        const dv = (body.owner as Record<string, unknown>)[dk];
-        if (!isDepth(dv)) return bad(`"${dk}" must be owner, manager or tablet.`);
-        next[dk] = dv;
-      }
-    }
     const up = await sb.from("restaurants").update({ owner_entitlements: next }).eq("id", rid);
     if (up.error) return bad(up.error.message, 500);
   }

@@ -24,13 +24,21 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 //  · view_ratings   — see + handle guest ratings in the manager panel (mig 138).
 //  · table_tags      — mark tables VIP/Family/Owner's-Guest + settle "on the house" (mig 166).
 //  · khata           — park a bill on a person to collect later + manage the khata book (mig 166).
-//  · take_orders    — take a brand-new dine-in order from the manager panel, exactly
-//    like the waiter tablet does (2026-07-22). Part of the full 4-rung ladder (see
-//    below): the FEATURE is entitled by default (taking orders is the tablet's existing
-//    core function — turning the entitlement off would stop every live tablet), but the
-//    owner→manager GRANT (manager_permissions.take_orders) defaults OFF, so a manager
-//    only gets it when the owner deliberately hands it over.
-export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "take_orders"] as const;
+//  · banquet         — the Banquet tab / banquet billing (mig 130; rung added mig 167,
+//                      BACKFILLED true so pre-existing behaviour is unchanged).
+//  · table_ops      — the KOT ▾ menu (merge tables, move a KOT/dish, split bill,
+//                     reprint; migs 172-177). CANONICAL module ladder (docs/
+//                     ACCESS-LADDER.md): the module rung lives on settings
+//                     (table_ops_allowed / _owner_control / _enabled →
+//                     tableOpsLadder() in lib/tableTags.ts); this power is the
+//                     plain manager rung on top of it.
+//  · take_orders    — take a brand-new dine-in order from the manager panel, like the
+//                     waiter tablet (2026-07-22). A plain manager POWER (admin exists +
+//                     owner grant) PLUS a tablet CAP (settings.tablet_take_orders
+//                     tri-state) — the same two-rail shape as discount/mark_paid, NOT a
+//                     module. The tablet cap defaults 'on' (mig 178) because taking
+//                     orders is the tablet's existing core function.
+export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops", "take_orders"] as const;
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
 // The authoritative "is this feature available for this restaurant AT ALL?" check
@@ -41,24 +49,6 @@ export function powerEntitled(rawEntitlements: unknown, flag: string): boolean {
   const key = powerEntitlementKey(flag);
   const v = rawEntitlements && typeof rawEntitlements === "object" ? (rawEntitlements as Record<string, unknown>)[key] : undefined;
   return typeof v === "boolean" ? v : true;
-}
-
-// ── Rung 1b: admin MAX-DEPTH / reach (owner rule, 2026-07-22) ──────────────────
-// Per feature the admin caps HOW FAR the ladder may reach: owner-only, owner+manager,
-// or owner+manager+tablet. Stored as a STRING under "depth_<flag>" in the SAME
-// owner_entitlements JSONB (the boolean merge ignores it; dedicated helpers below read
-// it). Absent = "tablet" (full reach) so nothing is silently narrowed for existing
-// restaurants — the admin deliberately restricts it.
-export type FeatureDepth = "owner" | "manager" | "tablet";
-export const DEPTH_ORDER: FeatureDepth[] = ["owner", "manager", "tablet"];
-export const featureDepthKey = (flag: string) => `depth_${flag}`;
-export function featureDepth(rawEntitlements: unknown, flag: string): FeatureDepth {
-  const v = rawEntitlements && typeof rawEntitlements === "object" ? (rawEntitlements as Record<string, unknown>)[featureDepthKey(flag)] : undefined;
-  return v === "owner" || v === "manager" || v === "tablet" ? v : "tablet";
-}
-// Does the admin's chosen reach for this feature extend down to `level`?
-export function depthAllows(depth: FeatureDepth, level: FeatureDepth): boolean {
-  return DEPTH_ORDER.indexOf(depth) >= DEPTH_ORDER.indexOf(level);
 }
 
 export const OWNER_ENTITLEMENT_KEYS: readonly string[] = [

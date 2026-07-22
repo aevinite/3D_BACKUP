@@ -23,9 +23,8 @@ import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { MANAGER_POWER_FLAGS, powerEntitled, featureDepth, depthAllows } from "@/lib/ownerEntitlements";
-import { TABLET_POWER_FLAGS, mergeTabletPermissions } from "@/lib/tabletPermissions";
-import { isTableTag, tableTagsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
+import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -58,13 +57,50 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   if (!u || u.role === "owner") return true;
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-  // The ladder for a MANAGER: admin must (1) entitle the feature AND (2) let its reach
-  // extend to the manager level, AND (3) the owner must have granted it.
-  if (!powerEntitled(r?.owner_entitlements, flag)) return false;
-  if (!depthAllows(featureDepth(r?.owner_entitlements, flag), "manager")) return false;
+  if (r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
   return !!r?.manager_permissions?.[flag];
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
+
+// Gate for the KOT ▾ menu (Table & KOT operations — canonical module ladder, mig 177).
+// ADMIN X-RAY rule (owner, 2026-07-22): the admin super-user (no staff cookie) passes
+// every rung — from the admin console the greyed-out button must genuinely work, the
+// same bypass tabletPerm gives the admin. Everyone else follows the ladder:
+// Rung 1: the module must be effective (admin's allowed switch AND, when transferred,
+// the owner's toggle) — stops the OWNER and managers alike (the admin caps the reach).
+// Rung 2: a plain manager additionally needs the owner's table_ops grant (managerCan;
+// the owner passes that rung automatically). Returns a response to short-circuit, or
+// null to proceed.
+async function tableOpsGate(g: { user: StaffUser | null }, rid: string): Promise<NextResponse | null> {
+  if (!g.user) return null; // admin super-user: X-ray honesty — visible = usable
+  if (!(await tableOpsLadder(rid)).effective) return err("Table & KOT operations aren't enabled for this restaurant.", 403);
+  if (!(await managerCan(g, rid, "table_ops"))) return permDenied("use table & KOT operations");
+  return null;
+}
+
+// Friendly message for the move/merge RPCs' { ok:false, reason } (migs 173/175).
+const moveErrMsg = (reason?: string) =>
+  reason === "no_order" ? "That order isn't there anymore — refresh."
+  : reason === "item_not_found" ? "That dish is no longer on the order."
+  : reason === "order_not_found" ? "That order no longer exists."
+  : reason === "order_cancelled" ? "This order was cancelled — nothing to move."
+  : reason === "order_paid" ? "Won't move a PAID order — mark it unpaid first."
+  : reason === "bad_table" ? "Pick a valid table."
+  : reason === "same_table" ? "That order is already on that table."
+  : reason === "source_invoiced" ? "This bill is already invoiced — void or regenerate its invoice before moving an order off it."
+  : reason === "target_invoiced" ? "The target table's bill is already invoiced — void or regenerate its invoice before moving an order onto it."
+  : (reason || "Couldn't move the order.");
+
+// Friendly message for lfh_staff_merge_tables' { ok:false, reason } (mig 174).
+const mergeErrMsg = (reason?: string) =>
+  reason === "no_session" ? "That table's session isn't there anymore — refresh."
+  : reason === "session_closed" ? "This table is already closed — nothing to merge."
+  : reason === "bad_table" ? "Pick a valid table."
+  : reason === "same_table" ? "That's the same table."
+  : reason === "target_not_open" ? "That table has no party — use Change table to move there instead."
+  : reason === "source_invoiced" ? "This bill is already invoiced — void its invoice before merging."
+  : reason === "target_invoiced" ? "The target table's bill is already invoiced — void its invoice before merging."
+  : (reason || "Couldn't merge the tables.");
 
 // Friendly message for the banquet RPC's { ok:false, reason } (mig 130).
 const banquetErrMsg = (reason?: string) =>
@@ -168,32 +204,29 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // server still enforces every capability (managerCan) regardless of what the UI shows.
     if (p === "whoami") {
       const actor = g.user ? g.user.role : "admin"; // no staff user cookie = admin super-user
-      const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, tablet_permissions").eq("id", rid).maybeSingle()).data as
-        { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean>; tablet_permissions?: Record<string, boolean> } | null;
-      // The ladder, resolved per power (mig 133 + depth, 2026-07-22): a manager's
-      // effective power = admin entitles it AND the reach extends to the manager AND the
+      const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
+        { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
+      // The ladder, resolved per power (mig 133): effective = admin entitles it AND the
       // owner granted it. The X-ray tints on !effective and can say WHO turned it off.
       const perms = r?.manager_permissions || {};
       const ents = r?.owner_entitlements || {};
       const effectivePowers: Record<string, boolean> = {};
       const offByAdmin: Record<string, boolean> = {};
-      // What the manager may GRANT to the tablet: only when the admin entitles the
-      // feature AND caps its reach at the tablet. Drives the "Waiter permissions" card.
-      const tabletGrantable: Record<string, boolean> = {};
       for (const flag of MANAGER_POWER_FLAGS) {
-        const entitled = powerEntitled(ents, flag);
-        const toManager = depthAllows(featureDepth(ents, flag), "manager");
-        effectivePowers[flag] = entitled && toManager && perms[flag] === true;
-        offByAdmin[flag] = !entitled || !toManager;
-      }
-      for (const flag of TABLET_POWER_FLAGS) {
-        tabletGrantable[flag] = powerEntitled(ents, flag) && depthAllows(featureDepth(ents, flag), "tablet");
+        const entitled = ents[powerEntitlementKey(flag)] !== false;
+        effectivePowers[flag] = entitled && perms[flag] === true;
+        offByAdmin[flag] = !entitled;
       }
       // Feature ladder (mig 166): table_tags/khata render nothing anywhere in the
       // panel unless the FEATURE itself is on for this restaurant — the power flags
       // above are the owner→manager rung, this is the admin(/owner) application rung.
       const lad = await tableTagsLadder(rid);
       if (!lad.effective) { effectivePowers.table_tags = false; effectivePowers.khata = false; }
+      const bq = await banquetLadder(rid);
+      if (!bq.effective) effectivePowers.banquet = false;
+      // KOT ▾ menu (mig 177): same canonical module rule — module off = power dead.
+      const tOps = await tableOpsLadder(rid);
+      if (!tOps.effective) effectivePowers.table_ops = false;
       return ok({
         actor,
         role: actor,
@@ -203,10 +236,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         managerPermissions: perms,
         effectivePowers,
         offByAdmin,
-        features: { table_tags: lad.effective, khata: lad.effective },
-        // manager→tablet rung: which caps the manager may grant + what's currently granted.
-        tabletGrantable,
-        tabletPermissions: mergeTabletPermissions(r?.tablet_permissions),
+        features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective, table_ops: tOps.effective },
       });
     }
 
@@ -215,10 +245,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // place RPC re-checks server-side anyway). Includes inactive rows so the
     // manager can toggle them back on.
     if (p === "banquet/items") {
-      const flags = await sb.from("settings").select("banquet_allowed").eq("restaurant_id", rid).maybeSingle();
-      if (!(flags.data as { banquet_allowed?: boolean } | null)?.banquet_allowed) {
-        return err("Banquet isn't enabled for this restaurant.", 403);
-      }
+      // Full ladder (mig 167): admin switch AND (owner's toggle when transferred)
+      // AND the owner->manager grant (backfilled true, so nothing changed by itself).
+      if (!(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
       const items = must(await sb.from("banquet_items")
         .select("id,title,price,unit,sort_order,active").eq("restaurant_id", rid)
         .order("sort_order").limit(200));
@@ -1009,9 +1039,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // ── order — take a BRAND-NEW dine-in order from the manager panel ───────────
     // Same behaviour as the waiter tablet's POST /order (server-priced via
     // lfh_staff_place_order — never trusts client prices), so the manager can run a
-    // table the same way a waiter does. Gated by the take_orders power (admin must
-    // entitle it AND the owner must grant it; 2026-07-22). Wrapped by withIdempotency
-    // like every editor write, so a replayed offline action places at most once.
+    // table the same way a waiter does. Gated by the take_orders manager power (admin
+    // entitles it AND the owner grants it; managerCan, 2026-07-22). Wrapped by
+    // withIdempotency like every editor write, so a replayed offline action places once.
     if (a === "order" && path.length === 1) {
       if (!(await managerCan(g, rid, "take_orders"))) return permDenied("take new orders");
       const { table, items, allergies, note } = body || {};
@@ -1026,7 +1056,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!Array.isArray(items) || !items.length) return err("items required");
       // Overridable double-tap guard: refuse an IDENTICAL order for the same table within
       // 3s unless confirmDuplicate:true (two guests ordering the same drink is legitimate).
-      // Signature folds id/qty/options/removed + order-level allergies, matching the tablet.
       const optSig = (opts: any) => (Array.isArray(opts) && opts.length)
         ? opts.map((o: any) => ({ group: o?.group ?? null, label: o?.label ?? null })) : null;
       const remSig = (r: any) => (Array.isArray(r) ? r.map((x: any) => String(x).toLowerCase()).sort() : []);
@@ -1047,9 +1076,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         p_restaurant_id: rid,
       });
       if (error) throw new Error(error.message);
-      // A manager placed this on the panel, so it's already confirmed — skip the kitchen
-      // "accept" step and push it straight onto the pass as "preparing" (same as the
-      // tablet; guest/head orders still arrive as "received" and need accepting).
+      // A manager placed this, so it's already confirmed — skip the kitchen "accept" step
+      // and push it straight onto the pass as "preparing" (same as the tablet).
       const placedId = (data as any)?.order_id;
       if (placedId) {
         const cur = (await sb.from("orders").select("items").eq("id", placedId).eq("restaurant_id", rid).single()).data as { items?: any[] } | null;
@@ -1059,34 +1087,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       await log("editor", "order_place", { restaurant_id: rid, table_number: t, device_id: dev });
       return ok(data);
-    }
-
-    // ── tablet-permissions — the MANAGER → TABLET rung (2026-07-22) ─────────────
-    // The manager switches a capability on/off for their waiters' tablet. Server-gated
-    // by the two rungs above: the admin must ENTITLE the feature AND let its reach
-    // extend to the tablet. Body: { permissions: { take_orders?: boolean } }.
-    if (a === "tablet-permissions" && path.length === 1) {
-      const incoming = (body && typeof body.permissions === "object" && body.permissions) ? body.permissions as Record<string, unknown> : {};
-      const row = (await sb.from("restaurants").select("owner_entitlements, tablet_permissions").eq("id", rid).maybeSingle()).data as
-        { owner_entitlements?: Record<string, boolean>; tablet_permissions?: Record<string, boolean> } | null;
-      const ents = row?.owner_entitlements;
-      const patch: Record<string, boolean> = {};
-      for (const flag of TABLET_POWER_FLAGS) {
-        if (!(flag in incoming)) continue;
-        if (typeof incoming[flag] !== "boolean") return err(`"${flag}" must be true or false.`);
-        // Refuse a grant the admin hasn't allowed down to the tablet — the toggle is
-        // hidden in that case, so a request naming it is hand-crafted.
-        if (!(powerEntitled(ents, flag) && depthAllows(featureDepth(ents, flag), "tablet"))) {
-          return err(`"${flag}" can't be given to the tablet for this restaurant.`, 403);
-        }
-        patch[flag] = incoming[flag] as boolean;
-      }
-      if (!Object.keys(patch).length) return err("No valid tablet permissions given.");
-      const merged = { ...(row?.tablet_permissions && typeof row.tablet_permissions === "object" ? row.tablet_permissions : {}), ...patch };
-      const up = await sb.from("restaurants").update({ tablet_permissions: merged }).eq("id", rid);
-      if (up.error) throw new Error(up.error.message);
-      await log("editor", "tablet_permissions", { restaurant_id: rid, detail: Object.entries(patch).map(([k, v]) => `${k}=${v ? "on" : "off"}`).join(", "), device_id: dev });
-      return ok({ ok: true, tablet_permissions: merged });
     }
 
     // ── Handle a guest rating (mig 140) — mark handled / add an internal note ──
@@ -1175,10 +1175,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // entitlement is re-checked here (and again inside the place RPC) so a
     // restaurant without the module can't be driven even by a forged client.
     if (a === "banquet") {
-      const flags = await sb.from("settings").select("banquet_allowed").eq("restaurant_id", rid).maybeSingle();
-      if (!(flags.data as { banquet_allowed?: boolean } | null)?.banquet_allowed) {
-        return err("Banquet isn't enabled for this restaurant.", 403);
-      }
+      // Full ladder (mig 167) — see the GET gate above; the place RPC still re-checks
+      // the admin switch inside SQL as the final backstop.
+      if (!(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
       // banquet/item-save — create/update one banquet line ({ id?, title, price, unit, active, sort_order })
       if (b === "item-save") {
         if (!(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the banquet menu");
@@ -1457,6 +1457,115 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_shift_table", { p_session: b, p_to: to });
       if (error) throw new Error(error.message);
       await log("editor", "table_shift", { restaurant_id: rid, detail: "→ table " + to, device_id: dev });
+      return ok(data);
+    }
+
+    // orders/:id/move — move ONE order (a single KOT) and its dish rows to another
+    // table, leaving the rest of the party's bill behind. Part of the KOT ▾ menu
+    // (ladder-gated, mig 172); the whole-party variant is sessions/:id/shift above.
+    // The RPC (mig 173) is atomic, re-splits both bills' discounts and nudges BOTH
+    // tables' tiles — the same shared implementation the tablet route calls.
+    if (a === "orders" && c === "move") {
+      const gateResp = await tableOpsGate(g, rid); if (gateResp) return gateResp;
+      const to = String((body && body.to) || "").trim();
+      if (!/^\d+$/.test(to) || Number(to) < 1) return err("Pick a valid table to move to.", 400);
+      // Reject a target table that doesn't exist (1..table_count) — the RPC checks
+      // digits/occupancy but doesn't know the restaurant's table count.
+      const setRowMv = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const tableCountMv = Number((must(setRowMv) || {}).table_count) || 0;
+      if (tableCountMv && Number(to) > tableCountMv) return err("That table number is out of range.", 400);
+      const { data, error } = await sb.rpc("lfh_staff_move_order", { p_order: b, p_to: to, p_rid: rid });
+      if (error) throw new Error(error.message);
+      if (data && (data as { ok?: boolean }).ok === false) return err(moveErrMsg((data as { reason?: string }).reason), 409);
+      await log("editor", "order_move", { restaurant_id: rid, order_id: b, detail: "KOT → table " + to, device_id: dev });
+      return ok(data);
+    }
+
+    // sessions/:id/merge — MERGE this table's party into an OCCUPIED table: one table,
+    // one bill (KOT ▾ menu; the complement of shift, which needs a FREE target).
+    // The RPC (mig 174) moves orders/items/calls/members/cart, sums + re-splits the
+    // discounts, closes the source session, and nudges both tables' tiles.
+    if (a === "sessions" && c === "merge") {
+      const gateResp = await tableOpsGate(g, rid); if (gateResp) return gateResp;
+      const to = String((body && body.to) || "").trim();
+      if (!/^\d+$/.test(to) || Number(to) < 1) return err("Pick a valid table to merge into.", 400);
+      const [ownsMerge, setRowMg] = await Promise.all([
+        sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle(),
+      ]);
+      if (!must(ownsMerge)) return err("That table isn't for this restaurant.", 404);
+      const tableCountMg = Number((must(setRowMg) || {}).table_count) || 0;
+      if (tableCountMg && Number(to) > tableCountMg) return err("That table number is out of range.", 400);
+      const { data, error } = await sb.rpc("lfh_staff_merge_tables", { p_session: b, p_to: to, p_rid: rid });
+      if (error) throw new Error(error.message);
+      if (data && (data as { ok?: boolean }).ok === false) return err(mergeErrMsg((data as { reason?: string }).reason), 409);
+      await log("editor", "table_merge", { restaurant_id: rid, detail: `T${(data as { from?: string }).from} → T${to} (one bill)`, device_id: dev });
+      return ok(data);
+    }
+
+    // tables/:t/pay-split — settle the whole bill as SEVERAL payment legs (equal /
+    // custom / by-dish shares computed client-side; KOT ▾ menu, mig 176). The bill
+    // stays ONE bill: orders are marked paid once (method 'Split'), the legs land in
+    // session_payments for the money trail. Σ legs must equal the due (±2p) — the
+    // server recomputes the due itself, never trusting the client's number.
+    if (a === "tables" && c === "pay-split") {
+      const gateResp = await tableOpsGate(g, rid); if (gateResp) return gateResp;
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      const splits = Array.isArray(body?.splits) ? body.splits : [];
+      if (splits.length < 2 || splits.length > 12) return err("Give at least two split shares (max 12).");
+      for (const s of splits) {
+        if (!(Number(s?.amount) > 0)) return err("Every split share needs an amount above zero.");
+        if (!PAYMENT_METHODS.includes(s?.method)) return err("invalid payment method in a split share");
+        if (s?.note != null && String(s.note).length > 200) return err("split note too long");
+      }
+      // Same scoping as a normal settle: the table's OPEN session's orders (fallback:
+      // active table orders), only accepted+unpaid+non-cancelled ones count.
+      const openSessSp = (await sb.from("sessions").select("id")
+        .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
+        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
+      let oq = sb.from("orders").select("id,total,discount,status,payment_status,session_id")
+        .neq("status", "cancelled").neq("payment_status", "paid").eq("restaurant_id", rid);
+      oq = openSessSp ? oq.eq("session_id", openSessSp.id) : oq.eq("table_number", t).eq("archived", false);
+      const rowsSp = (must(await oq.limit(200)) as { id: string; total: number; discount: number; status: string; session_id: string | null }[]) || [];
+      if (rowsSp.some((o) => o.status === "received")) return err("Accept the order first — a bill can only be paid once the order is accepted.", 409);
+      if (!rowsSp.length) return err("Nothing to settle — already paid.", 409);
+      const sidSp = openSessSp?.id || rowsSp.find((o) => o.session_id)?.session_id;
+      if (!sidSp) return err("This table has no live bill session — settle it normally instead.", 409);
+      // Due = Σ(total − discount×(1+rate)) — discount-before-tax, same as every money view.
+      const setSp = (await sb.from("settings").select("tax_components, tax_rate").eq("restaurant_id", rid).maybeSingle()).data || {};
+      const rateSp = effectiveTaxRate(setSp);
+      const dueSp = rowsSp.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rateSp), 0);
+      const sumSp = splits.reduce((s: number, x: { amount: number }) => s + Number(x.amount), 0);
+      if (Math.abs(sumSp - dueSp) > 0.02) return err(`The shares add up to ₹${sumSp.toFixed(2)} but the bill due is ₹${dueSp.toFixed(2)} — they must match.`, 409);
+      const legs = splits.map((s: { amount: number; method: string; note?: string }) => ({
+        session_id: sidSp, restaurant_id: rid, amount: Math.round(Number(s.amount) * 100) / 100,
+        method: String(s.method), note: String(s.note || "").slice(0, 200) || null,
+      }));
+      const insSp = await sb.from("session_payments").insert(legs);
+      if (insSp.error) return err(insSp.error.message, 500);
+      const noteSp = `${splits.length}-way split: ` + splits.map((s: { amount: number; method: string }) => `₹${Number(s.amount).toFixed(0)} ${s.method}`).join(" + ");
+      must(await sb.from("orders").update({ payment_status: "paid", paid_at: nowIso(), payment_method: "Split", payment_note: noteSp.slice(0, 200) })
+        .in("id", rowsSp.map((o) => o.id)).eq("restaurant_id", rid));
+      await log("editor", "bill_split", { restaurant_id: rid, table_number: t, detail: noteSp.slice(0, 120), device_id: dev });
+      await maybeAutoSettle(sidSp, { panel: "editor", deviceId: dev });
+      return ok({ ok: true, count: rowsSp.length, due: dueSp });
+    }
+
+    // order-items/:id/move — move ONE dish line to another table (KOT ▾ menu; the
+    // finest-grained transfer). Lands under a FRESH KOT on the target; both bills
+    // re-price server-side (mig 175).
+    if (a === "order-items" && c === "move") {
+      const gateResp = await tableOpsGate(g, rid); if (gateResp) return gateResp;
+      const to = String((body && body.to) || "").trim();
+      if (!/^\d+$/.test(to) || Number(to) < 1) return err("Pick a valid table to move to.", 400);
+      const setRowIm = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+      const tableCountIm = Number((must(setRowIm) || {}).table_count) || 0;
+      if (tableCountIm && Number(to) > tableCountIm) return err("That table number is out of range.", 400);
+      const { data, error } = await sb.rpc("lfh_staff_move_order_item", { p_item: b, p_to: to, p_rid: rid });
+      if (error) throw new Error(error.message);
+      if (data && (data as { ok?: boolean }).ok === false) return err(moveErrMsg((data as { reason?: string }).reason), 409);
+      await log("editor", "order_item_move", { restaurant_id: rid, detail: `dish → table ${to} (new KOT)`, device_id: dev });
       return ok(data);
     }
 

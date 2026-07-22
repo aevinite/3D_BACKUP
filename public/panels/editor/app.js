@@ -1176,14 +1176,21 @@ const ACCESS_CAPS = [
   // from both Access cards when the feature itself is off (no dead UI).
   { key: "tablet_table_tags", label: "Mark table types (VIP/Family/Guest)" },
   { key: "tablet_khata", label: "Park pay-later (khata) bills" },
+  // KOT ▾ menu, the ladder's manager→tablet rung (mig 172) — only shown when the
+  // module itself is effective (canonical ladder, migs 172-177; no dead UI otherwise).
+  { key: "tablet_table_ops", label: "Table & KOT operations" },
+  // Order-taking (mig 178) — the manager→tablet rung for taking orders. Always shown
+  // (not module-gated); defaults 'on' so the tablet keeps taking orders out of the box.
+  { key: "tablet_take_orders", label: "Take orders" },
 ];
 // The Access cards' cap list, minus modules this restaurant doesn't have.
 function accessCapsFor() {
   const s = state.data.settings || {};
   const tagsOn = s.table_tags_allowed === true && (s.table_tags_owner_control !== true || s.table_tags_enabled !== false);
   return ACCESS_CAPS.filter((c) => {
-    if (c.key === "tablet_banquet") return !!s.banquet_allowed;
+    if (c.key === "tablet_banquet") return s.banquet_allowed === true && (s.banquet_owner_control !== true || s.banquet_enabled !== false);
     if (c.key === "tablet_table_tags" || c.key === "tablet_khata") return tagsOn;
+    if (c.key === "tablet_table_ops") return s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
     return true;
   });
 }
@@ -1251,42 +1258,6 @@ function accessUsersCardHtml(s) {
     <div style="display:flex;flex-direction:column;gap:8px">${rows}</div>
   </div>`;
 }
-
-// ── MANAGER → TABLET rung (2026-07-22): the manager switches order-taking on/off for
-// their waiters' tablet. Only shown when the admin has ENTITLED order-taking AND capped
-// its reach at the tablet (whoami.tabletGrantable.take_orders). A higher role (admin/
-// owner looking in) sees it disabled + noted when not grantable, for visibility.
-//
-// It lives on the TABLES floor (not Settings/Access): those sections are hidden behind
-// the edit_settings / manage_staff powers, so a manager without them could never reach
-// the rung they're supposed to own — caught in live verification 2026-07-22. Tables is
-// ungated and is where floor/waiter decisions belong anyway.
-function waiterOrderTakingBarHtml() {
-  const who = XRAY_WHO || {};
-  const grantable = !!(who.tabletGrantable && who.tabletGrantable.take_orders);
-  if (!grantable && !who.higherView) return "";
-  const on = !!(who.tabletPermissions && who.tabletPermissions.take_orders);
-  const note = grantable
-    ? `<span class="wto-note">Waiters ${on ? "can" : "can’t"} start new orders on their tablet</span>`
-    : `<span class="wto-note wto-off">Not available — the admin hasn’t extended order-taking to the waiter tablet</span>`;
-  return `<div class="wto-bar${grantable ? "" : " wto-dim"}">
-    <label class="toggle"><input type="checkbox" id="waiterTakeOrders" ${on ? "checked" : ""} ${grantable ? "" : "disabled"}/>
-      <span>Waiter order-taking</span></label>${note}
-  </div>`;
-}
-// Delegated + registered ONCE: the floor re-renders on every live poll, so a per-render
-// binding would be lost. Optimistic; reverts the checkbox if the server refuses.
-document.addEventListener("change", async (e) => {
-  const box = e.target;
-  if (!box || box.id !== "waiterTakeOrders") return;
-  const value = box.checked;
-  try {
-    const d = await api("POST", "/tablet-permissions", { permissions: { take_orders: value } });
-    if (XRAY_WHO) XRAY_WHO.tabletPermissions = d.tablet_permissions || XRAY_WHO.tabletPermissions;
-    toast(`Waiter order-taking ${value ? "on" : "off"}`, "ok");
-    renderEditor();
-  } catch (err) { box.checked = !value; toast("Failed: " + err.message, "err"); }
-});
 
 // formGeneral: the site-wide Settings form, now split into SECTIONS (see
 // SETTINGS_SECTIONS). Every card is unchanged in behaviour — the split is purely
@@ -2322,7 +2293,7 @@ async function setOrderPayment(id, paid, opts = {}) {
     // end instead of once per order. For a single-order pay, the undo bar is the
     // confirmation + a few-second takeback (owner, 2026-07-22).
     if (!opts.quiet) {
-      if (paid && window.LFH_UNDO) LFH_UNDO.show({ message: "Marked paid 💳", seconds: 5, onUndo: () => editorUndoPay([id]) });
+      if (paid && window.LFH_UNDO) LFH_UNDO.show({ message: "Marked paid", sub: "Tap undo to reopen this bill", icon: "💳", seconds: 5, onUndo: () => editorUndoPay([id]) });
       else toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
     }
     return true;
@@ -2459,7 +2430,13 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
     const msg = skipped ? `Paid via ${picked.method} — ${skipped} new order still to accept` : `Marked paid via ${picked.method}`;
     // The undo bar is the confirmation + a few-second takeback (owner, 2026-07-22). The
     // revert goes through the SAME 30-min grace + audit-logged path as "restore to floor".
-    if (paidIds.length && window.LFH_UNDO) LFH_UNDO.show({ message: msg, seconds: 5, onUndo: () => editorUndoPay(paidIds) });
+    if (paidIds.length && window.LFH_UNDO) LFH_UNDO.show({
+      message: `Marked paid via ${picked.method}`,
+      sub: skipped ? `${skipped} new order still to accept` : "Tap undo to reopen this bill",
+      icon: "💳",
+      seconds: 5,
+      onUndo: () => editorUndoPay(paidIds),
+    });
     else toast(msg + " 💳", "ok");
   }
   else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
@@ -3174,7 +3151,7 @@ function printBill(t, sess, os) {
      · Content ≤66mm CENTERED: the 80mm head only prints ~70mm, offset ~5mm from the
        left paper edge — a full-width 80mm body loses ~8mm of every line on the right. */
   @page{margin:0}
-  @media print{body{width:66mm;margin:0 auto;padding:2mm 0}
+  @media print{body{margin:0 !important;padding:2mm 5mm !important}
     /* a bill spanning several 65mm printer pages: print the ITEM header ONCE (browsers
        otherwise repeat <thead> on every page — it showed up mid-bill), and never split
        a row across a page boundary (a fragmented flex row shifted every amount one
@@ -3438,7 +3415,7 @@ async function printZReport() {
   /* Same thermal recipe as printBill: margin:0 (no browser header/footer), no @page
      size, content ≤66mm centered so the 70mm printable head never clips it. */
   @page{margin:0}
-  @media print{body{width:66mm;margin:0 auto;padding:2mm 0}
+  @media print{body{margin:0 !important;padding:2mm 5mm !important}
     .zr,.grand,.sec{break-inside:avoid;page-break-inside:avoid}}
   body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:20px;color:#111}
   h2{font-family:Georgia,serif;font-size:18px;margin:0;text-align:center}
@@ -4705,7 +4682,12 @@ async function itemStatus(id, status) {
     await api("POST", "/items/" + id + "/status", { status });   // persist in the background
     // Serving a dish is easy to mis-tap — offer a few-second takeback (owner, 2026-07-22).
     if (status === "served" && prev && prev !== "served" && window.LFH_UNDO) {
-      LFH_UNDO.show({ message: `${(it && it.title) || "Dish"} served`, onUndo: () => editorUndoServe([{ kind: "session", id, prev }]) });
+      const ord = it ? (state.data.orders || []).find((x) => x.id === it.order_id) : null;
+      LFH_UNDO.show({
+        message: `${(it && it.title) || "Dish"} served`,
+        sub: ord ? `Table ${ord.table_number} · tap undo to put it back` : "Tap undo to put it back",
+        onUndo: () => editorUndoServe([{ kind: "session", id, prev }]),
+      });
     }
   } catch (e) {
     if (it && prev != null) { it.status = prev; refreshTableDetail(); } // revert the optimistic change on failure
@@ -5203,7 +5185,7 @@ function floorHtml() {
   // 2026-06-30). Simplest correct fix: don't show density controls while collapsed —
   // that corner is already spoken for there, and re-expanding is one click away.
   const collapsedNow = isPhoneLayout() || state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null);
-  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${collapsedNow ? "" : densityBtnsHtml()}</div>${statsStrip}${legend}${waiterOrderTakingBarHtml()}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${tiles}</div></div>`;
+  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${collapsedNow ? "" : densityBtnsHtml()}</div>${statsStrip}${legend}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${tiles}</div></div>`;
 
   // side panel — everyday things FIRST (whole-floor open/close, requests, needs),
   // rarely-touched feature switches + café location LAST (owner, 2026-06-12:
@@ -6206,12 +6188,20 @@ function tablePanelParts(t) {
             : `<button class="btn tp-free" disabled>Settle bill to free</button>`);
   // ONE sticky action bar holds every table-wide action: the primary action + pay +
   // discount on the LEFT, then table-management (shift/print/restart/close) on the RIGHT.
-  // ＋ Take order — start a brand-new order for this table, like the waiter tablet.
-  // Gated by the take_orders power: XRAY_CONTROLS hides it for a manager without the
-  // power (and tints it for an admin/owner looking in); the server re-checks too.
-  const takeOrderBtn = `<button class="btn primary tp-take-order" data-take-order="${esc(t)}">＋ Take order</button>`;
   const tagBtn = tagActionAllowed("table_tags") ? `<button class="btn" id="sxTag" title="Mark this table VIP / Family / Owner's guest">${TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷"} Type</button>` : "";
-  const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${splitBtn}<span class="tp-foot-spacer"></span>${tagBtn}${sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : ""}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
+  // Table-move actions: when the KOT ▾ menu (Table & KOT operations, mig 172) is on
+  // for this viewer it REPLACES the plain ⇄ Shift — one menu holding every table/KOT
+  // operation. When the ladder says off, today's plain Shift renders exactly as before.
+  const tableOpsBtn = sess
+    ? (tableOpsOn()
+        ? `<button class="btn" id="sxKot" title="Table &amp; KOT operations — change table, move a KOT, and more">🧾 KOT ▾</button>`
+        : `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>`)
+    : "";
+  // ＋ Take order — start a brand-new order for this table, like the waiter tablet.
+  // Gated by the take_orders manager power: XRAY_CONTROLS hides it for a manager without
+  // the power (and tints it for an admin/owner looking in); the server re-checks too.
+  const takeOrderBtn = `<button class="btn primary tp-take-order" data-take-order="${esc(t)}">＋ Take order</button>`;
+  const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${splitBtn}<span class="tp-foot-spacer"></span>${tagBtn}${tableOpsBtn}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
 
   return { sess, os, canFree, headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot };
 }
@@ -6250,10 +6240,9 @@ function openAddDishModal(orderId, rerender) {
 
 // ── TAKE ORDER — start a BRAND-NEW dine-in order from the manager panel ─────────
 // Mirrors the waiter tablet's order-builder (open table → browse dishes → build a
-// cart → send to kitchen) but rendered with the editor's own components/styling and
-// posting to the manager's server-priced POST /order. Gated by the take_orders power:
-// the button that opens this only shows when the manager has it (see XRAY_CONTROLS)
-// and the server re-checks managerCan("take_orders") regardless. (2026-07-22)
+// cart → send to kitchen) rendered with the editor's own components/styling, posting
+// to the manager's server-priced POST /order. Gated by the take_orders manager power
+// (the button only shows when the manager has it; the server re-checks managerCan). (2026-07-22)
 function localizeCat(name, slug) {
   if (name && typeof name === "object") return name.en || Object.values(name).find((v) => v) || slug;
   return name || slug;
@@ -6262,13 +6251,11 @@ function openTakeOrder(table, rerender) {
   document.querySelector(".to-overlay")?.remove();
   const dishes = (state.data.items || []).filter((d) => !(d.tags || []).includes("sold-out"));
   const cats = (state.data.categories || []).filter((c) => dishes.some((d) => d.category === c.slug));
-  // Builder state (local to this modal — a background floor poll can redraw the detail
-  // underneath without ever touching what's being built here).
   const cart = [];               // [{ id, title, price, qty, note }]
-  const avoid = new Set();        // whole-order allergens to avoid (ALLERGEN slugs)
-  let note = "";                  // one kitchen note for the whole order
-  let cat = "";                   // active category filter ("" = all)
-  let q = "";                     // dish search text
+  const avoid = new Set();        // whole-order allergens (ALLERGEN slugs)
+  let note = "";
+  let cat = "";
+  let q = "";
 
   const qtyIn = (id) => { const l = cart.find((c) => c.id === id); return l ? l.qty : 0; };
   const addOne = (id) => { const l = cart.find((c) => c.id === id); if (l) l.qty = Math.min(99, l.qty + 1); else { const d = dishes.find((x) => x.id === id); if (d) cart.push({ id, title: d.title, price: parseFloat(d.price) || 0, qty: 1, note: "" }); } };
@@ -6317,8 +6304,7 @@ function openTakeOrder(table, rerender) {
   document.body.appendChild(wrap);
 
   const close = () => wrap.remove();
-  // Back/Esc closes THIS modal cleanly (wireOverlayBack prefers __lfhClose over remove()).
-  wrap.__lfhClose = close;
+  wrap.__lfhClose = close; // back/Esc closes THIS modal (wireOverlayBack prefers __lfhClose)
 
   const listEl = wrap.querySelector(".to-list");
   const linesEl = wrap.querySelector(".to-lines");
@@ -6356,13 +6342,11 @@ function openTakeOrder(table, rerender) {
     sendBtn.disabled = true;
     try {
       const r = await api("POST", "/order", { table: String(table), items, allergies, note: note || null, ...(confirmDuplicate ? { confirmDuplicate: true } : {}) });
-      // Offline: the outbox saved it on this device and will replay on reconnect.
       if (r && r.queued) { toast("Saved ✓ — it'll send to the kitchen when you're back online.", "ok"); close(); await loadSessions(); if (rerender) rerender(); return; }
       toast(r && r.kot_no != null ? `Sent! Kitchen ticket #${r.kot_no}` : "Order sent to the kitchen", "ok");
       close(); await loadSessions(); if (rerender) rerender();
     } catch (e) {
-      sendBtn.disabled = !cart.length ? true : false;
-      // Overridable double-tap guard (two guests can legitimately order the same thing).
+      sendBtn.disabled = false;
       if (e && e.status === 409 && e.data && e.data.duplicateWarning) {
         if (await confirmDialog("This looks identical to an order you just sent. Send it anyway?", "Send anyway")) return send(true);
         return;
@@ -6402,6 +6386,328 @@ function openShiftPicker(t, sess) {
       toast(`Shifted to table ${to}`, "ok");
       followShiftedTable(t, to); // follow the party to its new home in docked OR popup mode
     } catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+}
+
+// ── KOT ▾ — Table & KOT operations (PetPooja-style unified menu; owner 2026-07-22) ──
+// ONE menu on the table detail for every table/bill operation. Ladder-gated (mig 172):
+// admin depth knob → owner grants manager → (tablet has its own rung). Ops arrive in
+// phases — the menu lists only what's built, so it grows without UI rework.
+// Whether to render the KOT ▾ menu for THIS viewer — the ADMIN X-RAY rule (owner,
+// 2026-07-22): from the admin console EVERY feature renders, greyed (xray-off tint via
+// XRAY_CONTROLS) when it's not actually on for the real staff, and it genuinely works
+// when the admin taps it (the server's tableOpsGate lets the admin super-user through).
+// Everyone else follows the ladder: the MODULE must be effective (whoami
+// features.table_ops — admin switch AND, when transferred, the owner's toggle); a real
+// manager additionally needs the owner's table_ops grant (effectivePowers), while the
+// OWNER's higherView sees it tinted when the manager grant is off. Before whoami
+// resolves we render the plain Shift fallback — never a button that would 403.
+function tableOpsOn() {
+  const w = XRAY_WHO;
+  if (!w) return false;
+  if (w.actor === "admin") return true; // admin view: always visible, tinted when off-for-staff
+  if (!(w.features && w.features.table_ops)) return false; // module off: gone for owner + manager
+  return w.higherView ? true : !!(w.effectivePowers && w.effectivePowers.table_ops);
+}
+
+function openKotMenu(t, sess) {
+  document.querySelector(".kotmenu-overlay")?.remove();
+  // Movable KOTs = this table's orders that aren't paid or cancelled (same rule the
+  // server's RPC enforces — the row is disabled rather than surprising with a 409).
+  const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  // Other OPEN tables (a merge target must already have a party).
+  const nAll = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+  let occupiedOthers = 0;
+  for (let i = 1; i <= nAll; i++) if (String(i) !== String(t) && summaryTableOpen(i)) occupiedOthers++;
+  const rows = [
+    { id: "shift", icon: "⇄", label: "Change table", sub: "Move this party — orders, calls & bill — to a free table", on: !!sess },
+    { id: "merge", icon: "🪢", label: "Merge tables", sub: "Join this party with another table's party — one table, one bill", on: !!sess && occupiedOthers > 0 },
+    { id: "movekot", icon: "🧾", label: "Move a KOT to another table", sub: "Send ONE order (one KOT) to a different table's bill", on: movable.length > 0 },
+    // Only DB-backed dish rows (kind "session") can move — legacy JSON lines have no row id.
+    { id: "moveitem", icon: "🍛", label: "Move a single dish", sub: "Send one dish to another table — it gets its own new KOT there", on: movable.some((o) => orderItemRows(o).some((r) => r.kind === "session")) },
+    { id: "split", icon: "🍴", label: "Split the bill", sub: "Collect one bill as several payments — equal, custom amounts, or by dish", on: movable.some((o) => o.status !== "received") },
+    { id: "reprint", icon: "🖨️", label: "Reprint a KOT", sub: "Print one order's kitchen ticket again", on: ordersForTable(t).some((o) => o.status !== "cancelled") },
+  ];
+  const rowHtml = (r) => `<button class="btn kotmenu-row" data-kotop="${r.id}" ${r.on ? "" : "disabled"}
+    style="display:flex;align-items:center;gap:12px;width:100%;justify-content:flex-start;padding:12px 14px;margin:0 0 8px">
+    <span style="font-size:18px">${r.icon}</span>
+    <span style="text-align:left"><b>${r.label}</b><br><span class="muted" style="font-size:12px">${r.sub}</span></span></button>`;
+  const wrap = el(`<div class="sx-modal-overlay kotmenu-overlay"><div class="sx-modal" style="max-width:440px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🧾 Table ${esc(t)} — KOT &amp; table operations</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body" style="padding:14px">${rows.map(rowHtml).join("")}</div></div></div>`);
+  document.body.appendChild(wrap);
+  const closeM = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = closeM;
+  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
+  wrap.querySelectorAll("[data-kotop]").forEach((b) => (b.onclick = () => {
+    const op = b.dataset.kotop; closeM();
+    if (op === "shift" && sess) openShiftPicker(t, sess);
+    if (op === "merge" && sess) openMergePicker(t, sess);
+    if (op === "movekot") openMoveKotPicker(t);
+    if (op === "moveitem") openMoveItemPicker(t);
+    if (op === "split") openSplitSettle(t);
+    if (op === "reprint") openReprintKotPicker(t);
+  }));
+}
+
+// Reprint ONE order's kitchen ticket — same 66mm thermal template the kitchen's
+// auto-print uses (validated through the real CUPS/ESC-POS chain 2026-07-21; keep the
+// two in sync if the recipe ever changes). Local print only — no network, no state.
+function printKotTicket(o) {
+  try {
+    const rname = (state.data.restaurant || {}).name || "Kitchen";
+    const kot = o.kot_no != null ? o.kot_no : "—";
+    const when = o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    const rows = orderItemRows(o);
+    const linesHtml = rows.map((r) => {
+      const opts = Array.isArray(r.options) ? r.options.map((x) => (typeof x === "string" ? x : (x && x.label) || "")).filter(Boolean).join(", ") : "";
+      const rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
+      return `<div class="kl"><span class="q">${r.qty || 1}×</span><span class="n">${esc(r.title || "")}${opts ? ` <i>(${esc(opts)})</i>` : ""}${rem ? ` <i>— no ${esc(rem)}</i>` : ""}${r.note ? `<br><small>&raquo; ${esc(r.note)}</small>` : ""}</span></div>`;
+    }).join("");
+    const allerg = Array.isArray(o.allergies) && o.allergies.length ? `<div class="al">⚠ AVOID: ${esc(o.allergies.join(", "))}</div>` : "";
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>KOT ${esc(String(kot))}</title><style>
+      *{margin:0;padding:0;box-sizing:border-box}body{font-family:ui-monospace,monospace;width:280px;padding:8px;color:#000}
+      .h{text-align:center;font-weight:700;font-size:15px;border-bottom:2px dashed #000;padding-bottom:6px;margin-bottom:6px}
+      .meta{display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:4px}
+      .kl{font-size:14px;padding:4px 0;border-bottom:1px dotted #999}.kl .q{font-weight:700;margin-right:6px}.kl i{font-style:italic;color:#333;font-size:12px}
+      .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}
+      @page{margin:0}
+      @media print{body{margin:0 !important;padding:2mm 5mm 4mm !important}.kl,.meta,.al{break-inside:avoid;page-break-inside:avoid}}
+    </style></head><body>
+      <div class="h">${esc(rname)}<br>KITCHEN TICKET · REPRINT</div>
+      <div class="meta"><span>KOT #${esc(String(kot))}</span><span>Table ${esc(String(o.table_number ?? "?"))}</span></div>
+      <div class="meta"><span>${esc(when)}</span></div>
+      ${linesHtml || "<div>(no items)</div>"}
+      ${allerg}
+    </body></html>`;
+    const ifr = document.createElement("iframe");
+    ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+    document.body.appendChild(ifr);
+    const d = ifr.contentWindow.document; d.open(); d.write(html); d.close();
+    setTimeout(() => { try { ifr.contentWindow.focus(); ifr.contentWindow.print(); } catch (e) {} setTimeout(() => ifr.remove(), 1500); }, 250);
+  } catch (e) { /* printing must NEVER break the panel */ }
+}
+function openReprintKotPicker(t) {
+  document.querySelector(".reprint-overlay")?.remove();
+  const os = ordersForTable(t).filter((o) => o.status !== "cancelled");
+  if (!os.length) { toast("No KOTs on this table", "err"); return; }
+  const rowsH = os.map((o) => {
+    const nd = orderItemRows(o).reduce((s, r) => s + (parseInt(r.qty, 10) || 1), 0);
+    return `<button class="btn" data-reprint="${esc(o.id)}" style="display:flex;justify-content:space-between;width:100%;margin:0 0 8px;padding:11px 14px"><span><b>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</b> · ${nd} dish${nd === 1 ? "" : "es"}</span><span>🖨️</span></button>`;
+  }).join("");
+  const wrap = el(`<div class="sx-modal-overlay reprint-overlay"><div class="sx-modal" style="max-width:420px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🖨️ Reprint a KOT — Table ${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body" style="padding:10px 14px 14px">${rowsH}</div></div></div>`);
+  document.body.appendChild(wrap);
+  const closeM = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = closeM;
+  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
+  wrap.querySelectorAll("[data-reprint]").forEach((b) => (b.onclick = () => {
+    const o = os.find((x) => x.id === b.dataset.reprint);
+    closeM();
+    if (o) { printKotTicket(o); toast(`KOT #${o.kot_no ?? "—"} sent to print`, "ok"); }
+  }));
+}
+
+// SPLIT-SETTLE (mig 176) — collect ONE bill as several payment legs. Three ways to cut
+// it: equal N-way, custom amounts, or by dish (assign each dish line to a person; each
+// person's share scales to the real due, so tax + discount split proportionally). The
+// server re-computes the due and refuses shares that don't add up — this UI can't
+// under- or over-collect. Replaces the old share CALCULATOR when the KOT ladder is on.
+function openSplitSettle(t) {
+  document.querySelector(".splitsettle-overlay")?.remove();
+  const payable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && o.status !== "received");
+  if (!payable.length) { toast("Nothing to split — accept the order first, or it's already paid.", "err"); return; }
+  const due = billMath(payable).total;
+  const METHODS = ["UPI", "Cash", "Card", "Other"];
+  let mode = "equal", n = 2;
+  // By-dish state: every dish line (qty-priced) starts on person 1; tapping cycles 1→2→…→N.
+  const dishes = [];
+  payable.forEach((o) => orderItemRows(o).forEach((r) => dishes.push({ title: r.title, amt: (Number(r.price) || 0) * (r.qty || 1), qty: r.qty || 1, person: 1 })));
+  const dishSubtotal = dishes.reduce((s, d) => s + d.amt, 0) || 1;
+  const methodSel = (i, v) => `<select class="ss-method" data-leg="${i}" style="padding:8px;border-radius:8px">${METHODS.map((m) => `<option${m === (v || "Cash") ? " selected" : ""}>${m}</option>`).join("")}</select>`;
+  const wrap = el(`<div class="sx-modal-overlay splitsettle-overlay"><div class="sx-modal" style="max-width:460px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍴 Split Table ${esc(t)}'s bill · ${inr(due)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body" style="padding:12px 14px 14px">
+      <div class="ss-tabs" style="display:flex;gap:6px;margin-bottom:10px">
+        <button class="btn ss-tab" data-mode="equal">Equal</button>
+        <button class="btn ss-tab" data-mode="custom">Custom</button>
+        <button class="btn ss-tab" data-mode="dish">By dish</button>
+      </div>
+      <div class="ss-body"></div>
+      <div class="ss-sum muted small" style="margin:10px 0 8px"></div>
+      <button class="btn primary ss-go" style="width:100%">💳 Collect ${inr(due)} in parts</button>
+    </div></div></div>`);
+  document.body.appendChild(wrap);
+  const closeM = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = closeM;
+  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
+  const bodyEl = wrap.querySelector(".ss-body"), sumEl = wrap.querySelector(".ss-sum");
+  // Equal shares that sum EXACTLY to the due (last share absorbs the rounding).
+  const equalLegs = () => { const base = Math.floor((due / n) * 100) / 100; const legs = Array.from({ length: n }, () => base); legs[n - 1] = Math.round((due - base * (n - 1)) * 100) / 100; return legs; };
+  const personAmounts = () => { const per = Array.from({ length: n }, () => 0); dishes.forEach((d) => { per[Math.min(d.person, n) - 1] += d.amt; }); const scaled = per.map((a) => Math.round((a / dishSubtotal) * due * 100) / 100); const drift = Math.round((due - scaled.reduce((s, x) => s + x, 0)) * 100) / 100; scaled[scaled.length - 1] = Math.round((scaled[scaled.length - 1] + drift) * 100) / 100; return scaled; };
+  const legRow = (i, amount, editable, label) => `<div class="ss-leg" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span class="muted" style="min-width:64px">${label || `Person ${i + 1}`}</span>
+      <input type="number" step="0.01" min="0" class="ss-amt" data-leg="${i}" value="${amount.toFixed(2)}" ${editable ? "" : "readonly"} style="width:100px;padding:8px;border-radius:8px">
+      ${methodSel(i)}
+    </div>`;
+  const nStepper = () => `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><span class="muted small">Split between</span>
+      <button class="btn ss-n" data-d="-1">−</button><b class="ss-nval">${n}</b><button class="btn ss-n" data-d="1">＋</button><span class="muted small">people</span></div>`;
+  const refreshSum = () => {
+    const amts = [...bodyEl.querySelectorAll(".ss-amt")].map((x) => Number(x.value) || 0);
+    const s = amts.reduce((a, b) => a + b, 0);
+    const diff = Math.round((s - due) * 100) / 100;
+    sumEl.innerHTML = diff === 0 ? `✓ Shares add up to ${inr(due)}` : `⚠️ Shares total ${inr(s)} — ${diff > 0 ? inr(diff) + " too much" : inr(-diff) + " short"}`;
+    sumEl.style.color = diff === 0 ? "var(--ok, #22a06b)" : "#e5484d";
+  };
+  const render = () => {
+    wrap.querySelectorAll(".ss-tab").forEach((b) => b.classList.toggle("primary", b.dataset.mode === mode));
+    if (mode === "equal") bodyEl.innerHTML = nStepper() + equalLegs().map((a, i) => legRow(i, a, false)).join("");
+    else if (mode === "custom") bodyEl.innerHTML = nStepper() + equalLegs().map((a, i) => legRow(i, a, true)).join("");
+    else bodyEl.innerHTML = nStepper() +
+      `<div class="muted small" style="margin-bottom:6px">Tap a dish to hand it to the next person:</div>` +
+      dishes.map((d, i) => `<button class="btn ss-dish" data-dish="${i}" style="display:flex;justify-content:space-between;width:100%;margin-bottom:4px"><span>${d.qty > 1 ? d.qty + "× " : ""}${esc(d.title)}</span><span>P${d.person} · ${inr(d.amt)}</span></button>`).join("") +
+      `<div style="margin-top:10px">${personAmounts().map((a, i) => legRow(i, a, false)).join("")}</div>`;
+    bodyEl.querySelectorAll(".ss-n").forEach((b) => (b.onclick = () => { n = Math.max(2, Math.min(12, n + Number(b.dataset.d))); dishes.forEach((d) => { if (d.person > n) d.person = 1; }); render(); }));
+    bodyEl.querySelectorAll(".ss-dish").forEach((b) => (b.onclick = () => { const d = dishes[Number(b.dataset.dish)]; d.person = d.person >= n ? 1 : d.person + 1; render(); }));
+    bodyEl.querySelectorAll(".ss-amt").forEach((x) => (x.oninput = refreshSum));
+    refreshSum();
+  };
+  wrap.querySelectorAll(".ss-tab").forEach((b) => (b.onclick = () => { mode = b.dataset.mode; render(); }));
+  render();
+  wrap.querySelector(".ss-go").onclick = async () => {
+    const amts = [...bodyEl.querySelectorAll(".ss-amt")];
+    const splits = amts.map((x) => ({ amount: Number(x.value) || 0, method: bodyEl.querySelector(`.ss-method[data-leg="${x.dataset.leg}"]`).value }));
+    const s = splits.reduce((a, b) => a + b.amount, 0);
+    if (Math.abs(s - due) > 0.011) { toast("The shares must add up to exactly " + inr(due), "err"); return; }
+    if (splits.some((x) => !(x.amount > 0))) { toast("Every share needs an amount above zero.", "err"); return; }
+    closeM();
+    try {
+      const r = await api("POST", `/tables/${t}/pay-split`, { splits });
+      toast(`Paid in ${splits.length} parts 💳 — ${r.count} order${r.count === 1 ? "" : "s"} settled`, "ok");
+      await pollTables([String(t)]);
+    } catch (e) { toast("Couldn't split-settle: " + e.message, "err"); }
+  };
+}
+
+// Move ONE dish line to another table — two steps in one modal: pick the dish
+// (grouped under its KOT), then pick the target table. The dish lands under a fresh
+// KOT on the target and BOTH bills re-price server-side (mig 175).
+function openMoveItemPicker(t) {
+  document.querySelector(".moveitem-overlay")?.remove();
+  const orders = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  const groups = orders.map((o) => {
+    const items = orderItemRows(o).filter((r) => r.kind === "session");
+    if (!items.length) return "";
+    return `<div class="muted" style="font-size:11.5px;margin:8px 2px 4px">KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</div>` +
+      items.map((r) => `<button class="btn" data-mvitem="${esc(r.id)}" style="display:flex;justify-content:space-between;width:100%;margin:0 0 6px;padding:10px 14px"><span>${r.qty > 1 ? r.qty + "× " : ""}${esc(r.title)}</span><span>${inr(r.price * (r.qty || 1))}</span></button>`).join("");
+  }).join("");
+  if (!groups) { toast("No movable dishes on this table", "err"); return; }
+  const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+  const wrap = el(`<div class="sx-modal-overlay moveitem-overlay"><div class="sx-modal" style="max-width:440px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍛 Move a dish from Table ${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="muted small mvi-hint" style="padding:0 14px 8px">Step 1 · which dish should move? (a multi-plate line moves whole)</div>
+    <div class="dish-edit-body mvi-body" style="padding:6px 14px 14px">${groups}</div></div></div>`);
+  document.body.appendChild(wrap);
+  const closeM = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = closeM;
+  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
+  const body = wrap.querySelector(".mvi-body");
+  const hint = wrap.querySelector(".mvi-hint");
+  wrap.querySelectorAll("[data-mvitem]").forEach((b) => (b.onclick = () => {
+    const itemId = b.dataset.mvitem;
+    hint.textContent = "Step 2 · move it to which table? (it gets its own new KOT there)";
+    const tiles = [];
+    for (let i = 1; i <= n; i++) {
+      if (String(i) === String(t)) continue;
+      tiles.push(`<button class="btn shiftpick" data-mvto="${i}">Table ${i}<br><span class="muted" style="font-size:11px">${summaryTableOpen(i) ? "joins that bill" : "free"}</span></button>`);
+    }
+    body.innerHTML = `<div class="shiftgrid">${tiles.join("")}</div>`;
+    body.querySelectorAll("[data-mvto]").forEach((tb) => (tb.onclick = async () => {
+      const to = tb.dataset.mvto; closeM();
+      try {
+        const r = await api("POST", `/order-items/${itemId}/move`, { to });
+        if (r && r.ok === false) { toast("Couldn't move: " + (r.reason || "rejected"), "err"); return; }
+        toast(`Dish moved to table ${to} (new KOT)`, "ok");
+      } catch (e) { toast("Failed: " + e.message, "err"); }
+    }));
+  }));
+}
+
+// MERGE picker — a grid of the OCCUPIED tables (the opposite of the shift picker's
+// free-only grid): pick which party this table joins. Confirms first — a merge can't
+// be un-done with one tap (the source session closes; orders/guests move for good).
+function openMergePicker(t, sess) {
+  document.querySelector(".merge-overlay")?.remove();
+  const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+  const occ = [];
+  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && summaryTableOpen(i)) occ.push(i); }
+  const tileDue = (i) => { const tile = (state.summary && state.summary.tiles || {})[String(i)]; return tile && tile.due > 0 ? inr(tile.due) : ""; };
+  const grid = occ.length
+    ? occ.map((i) => `<button class="btn shiftpick" data-mergeto="${i}">Table ${i}${tileDue(i) ? `<br><span class="muted" style="font-size:11px">due ${tileDue(i)}</span>` : ""}</button>`).join("")
+    : `<div class="muted" style="padding:14px">No other open tables to merge with.</div>`;
+  const wrap = el(`<div class="sx-modal-overlay merge-overlay"><div class="sx-modal shift-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>🪢 Merge Table ${esc(t)} into →</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><div class="muted small" style="padding:0 14px 10px">Everything — orders, guests, calls &amp; bill — joins the other table as ONE bill. Table ${esc(t)} then frees up.</div><div class="shiftgrid">${grid}</div></div></div>`);
+  document.body.appendChild(wrap);
+  const closeM = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = closeM;
+  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
+  wrap.querySelectorAll("[data-mergeto]").forEach((b) => (b.onclick = async () => {
+    const to = b.dataset.mergeto;
+    if (!window.confirm(`Merge Table ${t} into Table ${to}? Both parties become ONE bill on Table ${to}.`)) return;
+    closeM();
+    try {
+      const r = await api("POST", `/sessions/${sess.id}/merge`, { to });
+      if (r && r.ok === false) { toast("Couldn't merge: " + (r.reason || "rejected"), "err"); return; }
+      toast(`Merged into table ${to} — one bill`, "ok");
+      followShiftedTable(t, to); // the detail follows the party to its combined home
+    } catch (e) { toast("Failed: " + e.message, "err"); }
+  }));
+}
+
+// Move ONE order (a single KOT) to another table — two steps in one modal: pick the
+// KOT, then pick the target table. Unlike Change-table, the target may be OCCUPIED
+// (the KOT joins that party's bill) or free (a fresh session opens for it).
+function openMoveKotPicker(t) {
+  document.querySelector(".movekot-overlay")?.remove();
+  const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  if (!movable.length) { toast("No movable KOTs on this table", "err"); return; }
+  const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+  const kotRow = (o) => {
+    const items = orderItemRows(o);
+    const nd = items.reduce((s, r) => s + (parseInt(r.qty, 10) || 1), 0);
+    return `<button class="btn kotpick" data-kot="${esc(o.id)}" style="display:flex;justify-content:space-between;width:100%;margin:0 0 8px;padding:11px 14px">
+      <span><b>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</b> · ${nd} dish${nd === 1 ? "" : "es"}</span><span>${inr(parseFloat(o.total) || 0)}</span></button>`;
+  };
+  const wrap = el(`<div class="sx-modal-overlay movekot-overlay"><div class="sx-modal" style="max-width:440px">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🧾 Move a KOT from Table ${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="muted small" style="padding:0 14px 8px">Step 1 · which KOT should move?</div>
+    <div class="dish-edit-body movekot-body" style="padding:6px 14px 14px">${movable.map(kotRow).join("")}</div></div></div>`);
+  document.body.appendChild(wrap);
+  const closeM = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = closeM;
+  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
+  const body = wrap.querySelector(".movekot-body");
+  const hint = wrap.querySelector(".muted.small");
+  wrap.querySelectorAll("[data-kot]").forEach((b) => (b.onclick = () => {
+    const orderId = b.dataset.kot;
+    const o = movable.find((x) => x.id === orderId);
+    hint.textContent = `Step 2 · move KOT #${o && o.kot_no != null ? o.kot_no : "—"} to which table?`;
+    const tiles = [];
+    for (let i = 1; i <= n; i++) {
+      if (String(i) === String(t)) continue;
+      const open = summaryTableOpen(i);
+      tiles.push(`<button class="btn shiftpick" data-moveto="${i}">Table ${i}<br><span class="muted" style="font-size:11px">${open ? "joins that bill" : "free"}</span></button>`);
+    }
+    body.innerHTML = `<div class="shiftgrid">${tiles.join("")}</div>`;
+    body.querySelectorAll("[data-moveto]").forEach((tb) => (tb.onclick = async () => {
+      const to = tb.dataset.moveto; closeM();
+      try {
+        const r = await api("POST", `/orders/${orderId}/move`, { to });
+        if (r && r.ok === false) { toast("Couldn't move: " + (r.reason || "rejected"), "err"); return; }
+        toast(`KOT moved to table ${to}`, "ok");
+        // Both tables repaint via the RPC's breadcrumbs (targeted refetch) — no manual reload.
+      } catch (e) { toast("Failed: " + e.message, "err"); }
+    }));
   }));
 }
 
@@ -6566,12 +6872,17 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // Shift the whole party (orders + calls move along) to an EMPTY table.
   const sh = root.querySelector("#sxShift");
   if (sh && sess) sh.onclick = () => openShiftPicker(t, sess);
+  // KOT ▾ — the unified Table & KOT operations menu (replaces Shift when the ladder is on).
+  const kb = root.querySelector("#sxKot");
+  if (kb && sess) kb.onclick = () => openKotMenu(t, sess);
   // Print bill: a clean printable window with KOT numbers, discounts and totals.
   const pr = root.querySelector("#sxPrint");
   if (pr) pr.onclick = () => printBill(t, sess, os);
   const payAll = root.querySelector("#sxPayAll"); if (payAll) payAll.onclick = () => markTablePaid(t);
   const tagB = root.querySelector("#sxTag"); if (tagB) tagB.onclick = () => openTagModal(t);
-  root.querySelectorAll("[data-split]").forEach((b) => (b.onclick = () => openSplitBill(parseFloat(b.dataset.split) || 0)));
+  // 🍴 Split: with the KOT ladder ON this is the REAL split-settle (several payment
+  // legs, mig 176); with it off it stays the old even-share calculator — no regression.
+  root.querySelectorAll("[data-split]").forEach((b) => (b.onclick = () => (tableOpsOn() ? openSplitSettle(t) : openSplitBill(parseFloat(b.dataset.split) || 0))));
   // Per-dish DELETE: confirm, then call the server, which deletes the order_item
   // AND recomputes the order's total from the survivors (lfh_delete_order_item) so
   // the bill can't keep charging for a removed dish. Reloads the live board after.
@@ -6745,7 +7056,11 @@ async function serveAllOrder(orderId) {
     await api("POST", "/orders/" + orderId + "/serve-all"); release(); await loadSessions();
     // The undo bar IS the confirmation now (message + a few-second takeback line),
     // so it replaces the old plain "served" toast.
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: o ? `Table ${o.table_number} · all served` : "All items served", onUndo: () => editorUndoServe(snap) });
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({
+      message: "All dishes served",
+      sub: o ? `Table ${o.table_number} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
+      onUndo: () => editorUndoServe(snap),
+    });
     else toast("All items served", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
@@ -6823,7 +7138,11 @@ async function serveAllOrders(t) {
   try {
     for (const o of orders) await api("POST", "/orders/" + o.id + "/serve-all");
     release(); await pollTables([String(t)]);
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: `Table ${t} · all served`, onUndo: () => editorUndoServe(snap) });
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({
+      message: "All dishes served",
+      sub: `Table ${t} · ${snap.length} dish${snap.length > 1 ? "es" : ""}`,
+      onUndo: () => editorUndoServe(snap),
+    });
     else toast("All orders served", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await pollTables([String(t)]); }
@@ -7956,9 +8275,15 @@ function bindBanquet() {
 function syncBanquetTab() {
   const btn = document.querySelector('.tabs .tab[data-tab="banquet"]');
   if (!btn) return;
-  const allowed = !!(state.data.settings || {}).banquet_allowed;
-  btn.hidden = !allowed;
-  if (!allowed && state.tab === "banquet") setTab("items");
+  // Full ladder (mig 167): admin switch AND (owner's toggle when transferred) AND —
+  // for a real manager — the owner->manager grant (higher roles see it regardless,
+  // matching the server's managerCan pass-through for admin/owner).
+  const s = state.data.settings || {};
+  const eff = s.banquet_allowed === true && (s.banquet_owner_control !== true || s.banquet_enabled !== false);
+  const granted = !XRAY_WHO || XRAY_WHO.higherView || xrayGrantedForManager("banquet");
+  const show = eff && granted;
+  btn.hidden = !show;
+  if (!show && state.tab === "banquet") setTab("items");
 }
 
 // Extend XRAY_TABS as more tabs become permission-gated. Grant rule matches the
@@ -7978,6 +8303,7 @@ const XRAY_CONTROLS = [
   { selector: "[data-take-order]", flag: "take_orders", label: "Take orders" },
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
+  { selector: "#sxKot", flag: "table_ops", label: "Table & KOT operations" },
   { selector: '.list-item[data-settings-section="users"]', flag: "manage_staff", label: "User settings" },
   { selector: '.list-item[data-settings-section="access"]', flag: "manage_staff", label: "Access settings" },
 ];
