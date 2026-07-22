@@ -77,7 +77,7 @@ const fmtAgo = (ts: number) => { const m = Math.floor((Date.now() - ts) / 60000)
 function SignalBars({ lit, color, big = false }: { lit: number; color: string; big?: boolean }) {
   const h = big ? [10, 15, 20] : [6, 9, 12];
   return (
-    <span className={`lfh-bars${big ? " big" : ""}`} aria-hidden="true">
+    <span className={`lfh-bars${big ? " lfh-big" : ""}`} aria-hidden="true">
       {[0, 1, 2].map((i) => (
         <span key={i} className="lfh-bar" style={{ height: h[i], background: i < lit ? color : "currentColor", opacity: i < lit ? 1 : 0.22 }} />
       ))}
@@ -99,7 +99,7 @@ function Sparkline({ history }: { history: number[] }) {
     <span className="lfh-spark-wrap" aria-hidden="true">
       <span className="lfh-spark-cap">Recent speed<span>{data.length < 4 ? "building history…" : `last ${data.length} updates`}</span></span>
       <span className="lfh-spark">
-        {Array.from({ length: pad }).map((_, i) => <span key={`e${i}`} className="lfh-spark-bar is-empty" />)}
+        {Array.from({ length: pad }).map((_, i) => <span key={`e${i}`} className="lfh-spark-bar lfh-empty" />)}
         {data.map((v, i) => {
           const t = latencyTier(v);
           return <span key={i} className="lfh-spark-bar" style={{ height: `${Math.max(14, Math.round((v / max) * 100))}%`, background: t ? t.color : "#22c55e" }} />;
@@ -192,9 +192,9 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
         .lfh-conn-badge:hover { filter: brightness(1.05); }
         .lfh-conn-badge:focus-visible { outline: 2px solid var(--accent, #6366f1); outline-offset: 2px; }
         .lfh-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; flex: 0 0 auto; }
-        .lfh-bars.big { height: 20px; gap: 3px; }
+        .lfh-bars.lfh-big { height: 20px; gap: 3px; }
         .lfh-bar { width: 3px; border-radius: 1.5px; }
-        .lfh-bars.big .lfh-bar { width: 4px; border-radius: 2px; }
+        .lfh-bars.lfh-big .lfh-bar { width: 4px; border-radius: 2px; }
         .is-pulse .lfh-bars .lfh-bar { animation: lfhBarPulse 1.1s ease-in-out infinite; }
         @keyframes lfhBarPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
         .lfh-conn-ms { font-variant-numeric: tabular-nums; font-weight: 800; }
@@ -227,7 +227,7 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
         .lfh-spark-cap span { font-weight: 600; text-transform: none; letter-spacing: 0; opacity: 0.85; }
         .lfh-spark { display: flex; align-items: flex-end; gap: 3px; height: 32px; }
         .lfh-spark-bar { flex: 1 1 0; min-width: 0; border-radius: 2px 2px 0 0; opacity: 0.9; }
-        .lfh-spark-bar.is-empty { height: 14%; background: currentColor; opacity: 0.1; }
+        .lfh-spark-bar.lfh-empty { height: 14%; background: currentColor; opacity: 0.1; }
 
         .lfh-conn-pop-sync { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line, rgba(127,127,127,.14)); padding-top: 10px; }
         .lfh-conn-pop-sub { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.6; }

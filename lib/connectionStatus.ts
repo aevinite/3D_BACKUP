@@ -43,7 +43,7 @@ let level: ConnLevel = "online";
 let everConnected = false;
 let latencyMs: number | null = null;
 let latencyAt = 0;
-let history: number[] = [];
+const history: number[] = [];
 let started = false;
 const listeners = new Set<() => void>();
 
