@@ -488,6 +488,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       await log("call_attend", { table_number: row[0]?.table_number ?? null, device_id: dev });
       return ok(row[0] || null);
     }
+    // calls/:id/reopen — take back an accidental "attend" (owner undo bar, 2026-07-22):
+    // put the guest's call back on the board so a mis-tap can't silently drop a real
+    // water/bill request. Just flips resolved back to false.
+    if (a === "calls" && c === "reopen") {
+      const row = must(await sb.from("waiter_calls").update({ resolved: false }).eq("id", b).eq("restaurant_id", rid).select());
+      return ok(row[0] || null);
+    }
 
     // members/:id/approve  (rid-scoped — service-role bypasses RLS, so this is the boundary)
     if (a === "members" && c === "approve") {

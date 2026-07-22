@@ -2484,11 +2484,36 @@ async function markTablePaid(t) {
 // The server stores it as a 100% pre-tax discount + the reserved "On the house"
 // method, so every money view reads ₹0 for it automatically.
 async function onHouseSettle(t) {
+  // Snapshot the orders being comped so a mis-tapped "on the house" can be taken back
+  // (parity with the tablet, owner undo bar 2026-07-22).
+  const ids = ordersForTable(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled").map((o) => o.id);
   try {
     const r = await api("POST", `/tables/${t}/on-the-house`, {});
-    toast(`On the house 🏠 — ${r.count} order${r.count === 1 ? "" : "s"} settled at no charge`, "ok");
     await pollTables([String(t)]);
+    if (ids.length && window.LFH_UNDO) LFH_UNDO.show({
+      message: "On the house — settled free",
+      sub: `Table ${t} · tap undo to reopen the bill`,
+      icon: "🏠",
+      seconds: 5,
+      onUndo: () => editorUndoOnHouse(ids),
+    });
+    else toast(`On the house 🏠 — ${r.count} order${r.count === 1 ? "" : "s"} settled at no charge`, "ok");
   } catch (e) { toast("Couldn't settle on the house: " + e.message, "err"); }
+}
+// Take back an "on the house": un-pay each comped order AND strip its 100% comp discount
+// (discount was set to the subtotal), so the bill returns to a normal unpaid bill — not a
+// ₹0-yet-unpaid one. Uses the same 30-min audited revert as mark-unpaid, plus the discount
+// endpoint to clear the comp. (owner undo bar, 2026-07-22)
+async function editorUndoOnHouse(ids) {
+  let n = 0;
+  for (const id of ids) {
+    try {
+      const ok = await setOrderPayment(id, false, { skipConfirm: true, quiet: true, revertReason: "Undo on-the-house (within grace)" });
+      if (ok) { await api("POST", "/orders/" + id + "/discount", { amount: 0, note: "" }); n++; }
+    } catch (e) { /* keep going; the reconcile shows truth */ }
+  }
+  await loadSessions();
+  toast(n ? "On-the-house undone — bill reopened" : "Couldn't undo — the 30-minute window may have passed.", n ? "ok" : "err");
 }
 
 // khataParkFlow(t, orders): "Collect later" — pick (or add) the PERSON this bill is
@@ -4738,7 +4763,14 @@ async function attendCall(id) {
     await api("PATCH", "/calls/" + id, { resolved: true });
     floorOpsInFlight--;
     if (target && target.table_number) await pollTables([String(target.table_number)]); else await loadSessions();
-    toast("Marked attended", "ok");
+    // A mis-tapped "Done" silently drops a real guest call — offer a takeback (2026-07-22).
+    if (window.LFH_UNDO) LFH_UNDO.show({
+      message: "Call attended",
+      sub: target ? `Table ${target.table_number} · ${target.note || "call"} — tap undo` : "Tap undo to put the call back",
+      icon: "🔔",
+      onUndo: async () => { try { await api("PATCH", "/calls/" + id, { resolved: false }); await loadSessions(); } catch (e) { toast("Undo failed: " + e.message, "err"); await loadSessions(); } },
+    });
+    else toast("Marked attended", "ok");
   }
   catch (e) { floorOpsInFlight--; state.summary = Object.assign({}, state.summary, { calls: before }); loadSessions(true); toast("Failed: " + e.message, "err"); }
 }
@@ -7053,14 +7085,28 @@ async function legacyItemStatus(orderId, index, status) {
 
 // Accept a whole order (received -> preparing). Flips the order AND its dishes,
 // optimistically + poll-shielded so it can't flicker back mid-accept.
+// Snapshot the still-"received" dishes an accept is about to send to the kitchen, so an
+// accidental Accept can be taken back to the new-order queue (owner undo bar, 2026-07-22).
+function snapReceived(o) {
+  return orderItemRows(o)
+    .filter((r) => r.status === "received")
+    .map((r) => (r.kind === "session"
+      ? { kind: "session", id: r.id, prev: "received" }
+      : { kind: "legacy", orderId: r.orderId, idx: r.idx, prev: "received" }));
+}
 async function acceptOrder(orderId) {
   const o = (state.data.orders || []).find((x) => x.id === orderId);
+  const snap = o ? snapReceived(o) : [];
   if (o) { o.status = "preparing"; flipOrderItems(o, "received", "preparing"); opBegin(o.id); }
   floorOpsInFlight++;
   loadSessions(true); renderTablePanel();
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; if (o) opEnd(o.id); } };
-  try { await api("POST", "/orders/" + orderId + "/accept"); release(); await loadSessions(); toast("Order accepted → preparing", "ok"); }
+  try {
+    await api("POST", "/orders/" + orderId + "/accept"); release(); await loadSessions();
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: "Order accepted", sub: o ? `Table ${o.table_number} · tap undo to unsend` : "Tap undo to unsend", icon: "✋", onUndo: () => editorUndoServe(snap) });
+    else toast("Order accepted → preparing", "ok");
+  }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
 }
 // Serve every dish on an order at once → order complete. Optimistic + shielded.
@@ -7157,6 +7203,7 @@ async function acceptTableOrders(t) {
   // item rows → preparing regardless of order status, so this is safe. (2026-06-26)
   const recv = ordersForTable(t).filter((o) => o.status !== "cancelled" && orderItemRows(o).some((r) => r.status === "received"));
   if (!recv.length) return;
+  const snap = recv.flatMap((o) => snapReceived(o)); // for the takeback
   // OPTIMISTIC: tile flips to "Preparing" instantly, server told in background.
   recv.forEach((o) => { o.status = "preparing"; flipOrderItems(o, "received", "preparing"); opBegin(o.id); });
   floorOpsInFlight++;
@@ -7167,8 +7214,9 @@ async function acceptTableOrders(t) {
   const release = () => { if (!released) { released = true; floorOpsInFlight--; recv.forEach((o) => opEnd(o.id)); } };
   try {
     for (const o of recv) await api("POST", "/orders/" + o.id + "/accept");
-    toast(recv.length > 1 ? recv.length + " orders accepted → preparing" : "Order accepted → preparing", "ok");
     release(); await pollTables([String(t)]); // refresh THIS tile's summary so the grid reflects truth
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: recv.length > 1 ? `${recv.length} orders accepted` : "Order accepted", sub: `Table ${t} · tap undo to unsend`, icon: "✋", onUndo: () => editorUndoServe(snap) });
+    else toast(recv.length > 1 ? recv.length + " orders accepted → preparing" : "Order accepted → preparing", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await pollTables([String(t)]); } // reload truth on failure
   finally { release(); }
@@ -7215,8 +7263,15 @@ async function attendTableCalls(t) {
   loadSessions(true);
   try {
     for (const c of cs) await api("PATCH", "/calls/" + c.id, { resolved: true });
-    toast("Attended", "ok");
     floorOpsInFlight--; await pollTables([String(t)]); // clears the tile's call emoji from the summary
+    const callIds = [...ids];
+    if (window.LFH_UNDO) LFH_UNDO.show({
+      message: `${callIds.length} call${callIds.length > 1 ? "s" : ""} attended`,
+      sub: `Table ${t} · tap undo to put them back`,
+      icon: "🔔",
+      onUndo: async () => { try { await Promise.all(callIds.map((cid) => api("PATCH", "/calls/" + cid, { resolved: false }))); await loadSessions(); } catch (e) { toast("Undo failed: " + e.message, "err"); await loadSessions(); } },
+    });
+    else toast("Attended", "ok");
   }
   catch (e) { floorOpsInFlight--; state.data.calls = before; state.summary = beforeSummary; await pollTables([String(t)]); toast("Failed: " + e.message, "err"); }
 }
