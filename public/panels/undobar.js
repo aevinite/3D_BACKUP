@@ -124,25 +124,16 @@
 
     btnEl.onclick = function () {
       if (busy) return;                        // guard the double-tap
-      if (typeof opts.onUndo !== "function") { hide(false); return; }
       busy = true;
-      btnEl.disabled = true;
       clearTimer();                            // clicking undo cancels the auto-dismiss
-      // Freeze the line where it is so it doesn't keep shrinking while undoing.
-      var cs = getComputedStyle(lineEl).transform;
-      lineEl.style.transition = "none";
-      lineEl.style.transform = cs && cs !== "none" ? cs : "scaleX(0)";
-      Promise.resolve()
-        .then(function () { return opts.onUndo(); })
-        .then(function () { hide(false); })
-        .catch(function () {
-          // The revert call failed — let the caller's own error toast speak;
-          // just re-arm the bar briefly so the staff isn't left staring at a
-          // dead button, then fade out.
-          busy = false;
-          btnEl.disabled = false;
-          runCountdown(seconds, opts.onExpire);
-        });
+      // Hide the bar IMMEDIATELY so the tap feels instant — the revert applies
+      // optimistically on-screen and the network write runs in the background
+      // (callers each show their own error toast if it fails). On a slow link the
+      // old "wait for the round-trip, then hide" left the bar lingering for seconds.
+      hide(false);
+      if (typeof opts.onUndo === "function") {
+        try { Promise.resolve(opts.onUndo()).catch(function () {}); } catch (e) {}
+      }
     };
 
     // latest-wins: if a bar is ALREADY up, just swap its text/handlers and restart
