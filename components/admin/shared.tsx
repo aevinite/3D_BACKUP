@@ -9,6 +9,13 @@ export type Tile = {
   state: "free" | "seated" | "new" | "preparing" | "served" | "cleared";
   open: boolean; members: number; pending_members: number;
   has_new: boolean; has_call: boolean; due: number; pay: "" | "red" | "green";
+  tag?: "" | "vip" | "family" | "guest"; // special table type (mig 166)
+};
+// Special table types (mig 166): badge shown on the admin tile — still money-free.
+export const TILE_TAG: Record<string, { emoji: string; color: string; label: string }> = {
+  vip: { emoji: "👑", color: "#8b5cf6", label: "VIP" },
+  family: { emoji: "🏠", color: "#e11d48", label: "Family" },
+  guest: { emoji: "🤝", color: "#aab4c4", label: "Owner's guest" },
 };
 export type Overview = {
   maintenance: boolean; sessionsEnabled: boolean; tableCount: number;
@@ -173,21 +180,25 @@ export function FloorGrid({ tiles, err }: { tiles: Tile[]; err: string | null })
   if (tiles.length === 0) return <div className="adm-empty">No tables yet.</div>;
   return (
     <div className="adm-floor">
-      {tiles.map((t) => (
+      {tiles.map((t) => {
+        const tg = t.tag ? TILE_TAG[t.tag] : undefined;
+        return (
         <div key={t.table_number}
           className={`adm-tile ${t.state === "free" ? "free" : ""}`}
           style={{
             background: t.state === "free" ? undefined : STATE_COLOR[t.state],
-            borderColor: t.pay === "red" ? "#f87171" : t.pay === "green" ? "#34d399" : "transparent",
+            // Money state (unpaid red / paid green) beats the tag ring.
+            borderColor: t.pay === "red" ? "#f87171" : t.pay === "green" ? "#34d399" : tg ? tg.color : "transparent",
           }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span className="tnum">Table {t.table_number}</span>
-            <span style={{ fontSize: 16 }}>{t.has_call ? "🔔" : ""}{t.has_new ? "🆕" : ""}</span>
+            <span style={{ fontSize: 16 }}>{tg ? tg.emoji : ""}{t.has_call ? "🔔" : ""}{t.has_new ? "🆕" : ""}</span>
           </div>
-          <div className="tstate">{STATE_LABEL[t.state]}</div>
+          <div className="tstate">{STATE_LABEL[t.state]}{tg ? ` · ${tg.label}` : ""}</div>
           <div className="tsub">{t.open ? `${t.members} seated` : "—"}</div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -24,6 +24,7 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
+import { isTableTag, tableTagsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -176,6 +177,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         effectivePowers[flag] = entitled && perms[flag] === true;
         offByAdmin[flag] = !entitled;
       }
+      // Feature ladder (mig 166): table_tags/khata render nothing anywhere in the
+      // panel unless the FEATURE itself is on for this restaurant — the power flags
+      // above are the owner→manager rung, this is the admin(/owner) application rung.
+      const lad = await tableTagsLadder(rid);
+      if (!lad.effective) { effectivePowers.table_tags = false; effectivePowers.khata = false; }
       return ok({
         actor,
         role: actor,
@@ -185,6 +191,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         managerPermissions: perms,
         effectivePowers,
         offByAdmin,
+        features: { table_tags: lad.effective, khata: lad.effective },
       });
     }
 
@@ -201,6 +208,82 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         .select("id,title,price,unit,sort_order,active").eq("restaurant_id", rid)
         .order("sort_order").limit(200));
       return ok({ items });
+    }
+
+    // khata — the pay-later book, grouped by person (mig 166). Feature + khata power gated
+    // (admin/owner pass managerCan automatically). Outstanding bills only; a bill = the
+    // orders parked together (grouped by session, solo orders by their own id).
+    if (p === "khata") {
+      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "khata"))) return permDenied("see the khata book");
+      const rows = must(await sb.from("orders")
+        .select("id,session_id,khata_customer_id,khata_at,table_number,subtotal,tax,total,discount,created_at")
+        .eq("restaurant_id", rid).not("khata_at", "is", null).neq("payment_status", "paid").neq("status", "cancelled")
+        .order("khata_at", { ascending: false }).limit(2000)) as any[];
+      // bill_no lives on SESSIONS (daily counter, mig 036) — one scoped lookup for the parked bills.
+      const sessIds = [...new Set(rows.map((o) => o.session_id).filter(Boolean))];
+      const billNos = new Map<string, number>();
+      if (sessIds.length) for (const srow of must(await sb.from("sessions").select("id,bill_no").in("id", sessIds)) as any[]) billNos.set(srow.id, srow.bill_no);
+      const custIds = [...new Set(rows.map((o) => o.khata_customer_id).filter(Boolean))];
+      const custs = custIds.length
+        ? (must(await sb.from("khata_customers").select("id,name,phone,note,created_at").eq("restaurant_id", rid).in("id", custIds)) as any[])
+        : [];
+      const byCust = new Map<string, any>();
+      for (const cst of custs) byCust.set(cst.id, { ...cst, outstanding: 0, bills: new Map<string, any>() });
+      for (const o of rows) {
+        const cst = byCust.get(o.khata_customer_id); if (!cst) continue;
+        // Same net-due math as everywhere else: discount is pre-tax, so owed drops by discount×(1+rate).
+        const sub = Number(o.subtotal) || 0, tax = Number(o.tax) || 0;
+        const rate = sub > 0 ? tax / sub : 0;
+        const due = Math.round(((Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate)) * 100) / 100;
+        const key = o.session_id || o.id;
+        const bill = cst.bills.get(key) || { key, session_id: o.session_id, order_ids: [], bill_no: o.session_id ? billNos.get(o.session_id) ?? null : null, table_number: o.table_number, khata_at: o.khata_at, amount: 0 };
+        bill.order_ids.push(o.id);
+        bill.amount = Math.round((bill.amount + due) * 100) / 100;
+        cst.bills.set(key, bill);
+        cst.outstanding = Math.round((cst.outstanding + due) * 100) / 100;
+      }
+      const customers = [...byCust.values()]
+        .map((cst) => ({ ...cst, bills: [...cst.bills.values()] }))
+        .filter((cst) => cst.bills.length)
+        .sort((x, y) => y.outstanding - x.outstanding);
+      return ok({ customers, total: Math.round(customers.reduce((s, cst) => s + cst.outstanding, 0) * 100) / 100 });
+    }
+
+    // khata/customers?q= — the person picker's search (scoped, limited, debounced client-side).
+    if (p === "khata/customers") {
+      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "khata"))) return permDenied("use the khata book");
+      const q = (new URL(req.url).searchParams.get("q") || "").trim().slice(0, 60);
+      let sel = sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(8);
+      if (q) sel = sel.or(`name.ilike.%${q.replace(/[%,()]/g, "")}%,phone.ilike.%${q.replace(/[%,()]/g, "")}%`);
+      return ok({ customers: must(await sel) });
+    }
+
+    // onhouse?days=N — the "On the house" report (comp bills; would-be amount = the bill's
+    // pre-discount value). Keyed on the reserved payment method, so it lists exactly the
+    // bills settled through the on-the-house button. Dashboard power gates it.
+    if (p === "onhouse") {
+      if (!(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
+      const days = Math.min(Math.max(Math.round(Number(new URL(req.url).searchParams.get("days"))) || 30, 1), 365);
+      const since = new Date(Date.now() - days * 86400000).toISOString();
+      const rows = must(await sb.from("orders")
+        .select("id,session_id,table_number,subtotal,tax,total,items,paid_at,payment_note")
+        .eq("restaurant_id", rid).eq("payment_method", ON_THE_HOUSE_METHOD).eq("payment_status", "paid")
+        .gte("paid_at", since).order("paid_at", { ascending: false }).limit(1000)) as any[];
+      // Group orders into bills by session (solo orders stand alone), like the bills views.
+      const bills = new Map<string, any>();
+      for (const o of rows) {
+        const key = o.session_id || o.id;
+        const items = Array.isArray(o.items) ? o.items.reduce((s: number, it: any) => s + (Number(it.qty) || 1), 0) : 0;
+        const bl = bills.get(key) || { key, table_number: o.table_number, paid_at: o.paid_at, note: o.payment_note || "", items: 0, would_be: 0 };
+        bl.items += items;
+        bl.would_be = Math.round((bl.would_be + (Number(o.total) || 0)) * 100) / 100; // pre-discount value
+        bills.set(key, bl);
+      }
+      const list = [...bills.values()];
+      return ok({ bills: list, count: list.length, total: Math.round(list.reduce((s, bl) => s + bl.would_be, 0) * 100) / 100 });
     }
 
     if (p === "all") {
@@ -1480,6 +1563,146 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true, count: rows.length });
     }
 
+    // ── Table types (VIP / Family / Owner's Guest) + khata — mig 166 ─────────────
+    // tables/:t/tag — mark or clear a table's special type. body { tag: 'vip'|'family'|
+    // 'guest' } to mark, { tag: null } to clear. Feature-laddered + table_tags power.
+    if (a === "tables" && c === "tag") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      if (!(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "table_tags"))) return permDenied("mark tables");
+      const tag = body?.tag ?? null;
+      if (tag === null || tag === "") {
+        must(await sb.from("table_tags").delete().eq("restaurant_id", rid).eq("table_number", t).select());
+        await log("manager", "table_tag_clear", { restaurant_id: rid, table_number: t, device_id: dev });
+        return ok({ ok: true, tag: "" });
+      }
+      if (!isTableTag(tag)) return err("invalid tag");
+      must(await sb.from("table_tags")
+        .upsert({ restaurant_id: rid, table_number: t, tag, tagged_by: actorName || "admin", tagged_at: nowIso() }, { onConflict: "restaurant_id,table_number" })
+        .select());
+      await log("manager", "table_tag_set", { restaurant_id: rid, table_number: t, detail: tag, device_id: dev });
+      return ok({ ok: true, tag });
+    }
+
+    // tables/:t/on-the-house — settle a Family / Owner's-Guest table at no charge:
+    // 100% pre-tax discount per order (the SAME stored shape as a whole-bill discount,
+    // so every money view — already net-of-discount, paid-only — reads ₹0 with no
+    // changes) + mark paid under the reserved "On the house" method (the report keys
+    // on it). Same accept rule as mark-paid: nothing still 'received'.
+    if (a === "tables" && c === "on-the-house") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      if (!(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "table_tags"))) return permDenied("settle a bill on the house");
+      const tagRow = (await sb.from("table_tags").select("tag").eq("restaurant_id", rid).eq("table_number", t).maybeSingle()).data as { tag?: TableTag } | null;
+      if (!tagRow?.tag || !COMP_TAGS.includes(tagRow.tag)) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
+      const openSess = (await sb.from("sessions").select("id").eq("table_number", t).eq("status", "open").eq("restaurant_id", rid).order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
+      let oq = sb.from("orders").select("id,subtotal,status,payment_status").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled");
+      oq = openSess ? oq.eq("session_id", openSess.id) : oq.eq("table_number", t);
+      const orders = must(await oq) as { id: string; subtotal: number; status: string; payment_status: string }[];
+      const unpaid = orders.filter((o) => o.payment_status !== "paid");
+      if (!unpaid.length) return err("Nothing to settle on this table.", 409);
+      if (unpaid.some((o) => o.status === "received")) return err("Accept the order first — a bill can only be settled once the order is accepted.", 409);
+      for (const o of unpaid) {
+        must(await sb.from("orders").update({
+          discount: Number(o.subtotal) || 0, discount_note: "On the house",
+          payment_status: "paid", paid_at: nowIso(), payment_method: ON_THE_HOUSE_METHOD,
+        }).eq("id", o.id).eq("restaurant_id", rid).select("id"));
+      }
+      await log("manager", "on_the_house", { restaurant_id: rid, table_number: t, detail: `${unpaid.length} order(s) · ${tagRow.tag}`, device_id: dev });
+      if (openSess) await maybeAutoSettle(openSess.id, { panel: "editor", deviceId: dev });
+      return ok({ ok: true, count: unpaid.length });
+    }
+
+    // tables/:t/khata — "Collect later": park the table's unpaid bill on a PERSON and
+    // free the table. body { customer_id } OR { name, phone?, note? } (adds the person).
+    // Orders keep payment_status='pending' but gain khata markers, so they leave the
+    // pending-bills warnings and live in the khata book until collected. The close
+    // itself reuses closeSession(force) — orders were archived here first, so nothing
+    // gets cancelled by the close's cook-guard.
+    if (a === "tables" && c === "khata") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "khata"))) return permDenied("park bills to collect later");
+      const openSess = (await sb.from("sessions").select("id").eq("table_number", t).eq("status", "open").eq("restaurant_id", rid).order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
+      let kq = sb.from("orders").select("id,status,payment_status").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled");
+      kq = openSess ? kq.eq("session_id", openSess.id) : kq.eq("table_number", t);
+      const korders = must(await kq) as { id: string; status: string; payment_status: string }[];
+      const kunpaid = korders.filter((o) => o.payment_status !== "paid");
+      if (!kunpaid.length) return err("Nothing unpaid to park on this table.", 409);
+      if (korders.some((o) => o.status === "received" || o.status === "preparing"))
+        return err("This table still has orders cooking — serve them first, then park the bill.", 409);
+      // Resolve the person: existing id, or create (a phone that already exists reuses
+      // that person — the picker's search should catch it, this is the race-safe net).
+      let customer: { id: string; name: string; phone: string | null } | null = null;
+      if (body?.customer_id) {
+        customer = (await sb.from("khata_customers").select("id,name,phone").eq("restaurant_id", rid).eq("id", String(body.customer_id)).maybeSingle()).data as any;
+        if (!customer) return err("That person isn't in this restaurant's khata book.", 404);
+      } else {
+        const name = String(body?.name || "").trim().slice(0, 80);
+        if (!name) return err("A name is required to park a bill.");
+        const phone = String(body?.phone || "").trim().slice(0, 20) || null;
+        const note = String(body?.note || "").trim().slice(0, 200) || null;
+        if (phone) customer = (await sb.from("khata_customers").select("id,name,phone").eq("restaurant_id", rid).eq("phone", phone).maybeSingle()).data as any;
+        if (!customer) {
+          const ins = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone, note }).select("id,name,phone");
+          if (ins.error) return err(ins.error.message, 500);
+          customer = (ins.data as any[])[0];
+        }
+      }
+      const stamp = nowIso();
+      // Mark + archive the unpaid orders in one update (archived = off the live floor;
+      // khata_at = in the book). Paid orders on the same bill just archive via the close.
+      must(await sb.from("orders").update({ khata_at: stamp, khata_customer_id: customer!.id, archived: true, archived_at: stamp })
+        .in("id", kunpaid.map((o) => o.id)).eq("restaurant_id", rid).select("id"));
+      if (openSess) {
+        const closed = await closeSession(openSess.id, { force: true }, { panel: "editor", deviceId: dev, restaurantId: rid });
+        if (!closed.ok) return err(closed.message, closed.status);
+      } else {
+        await clearTableSignals(rid, t);
+      }
+      await log("manager", "khata_park", { restaurant_id: rid, table_number: t, detail: `${kunpaid.length} order(s) → ${customer!.name}`, device_id: dev });
+      return ok({ ok: true, customer, count: kunpaid.length });
+    }
+
+    // khata/customers — add a person to the book directly (the picker's "add new").
+    if (a === "khata" && b === "customers" && !c) {
+      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "khata"))) return permDenied("use the khata book");
+      const name = String(body?.name || "").trim().slice(0, 80);
+      if (!name) return err("name required");
+      const phone = String(body?.phone || "").trim().slice(0, 20) || null;
+      const note = String(body?.note || "").trim().slice(0, 200) || null;
+      if (phone) {
+        const existing = (await sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).eq("phone", phone).maybeSingle()).data;
+        if (existing) return ok({ customer: existing, existed: true });
+      }
+      const ins = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone, note }).select("id,name,phone,note");
+      if (ins.error) return err(ins.error.message, 500);
+      return ok({ customer: (ins.data as any[])[0], existed: false });
+    }
+
+    // khata/pay — collect a parked bill. body { session_id } (a bill) or { order_id }
+    // (a solo parked order), + { method, note? }. Normal payment methods only.
+    if (a === "khata" && b === "pay") {
+      if (!(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "khata"))) return permDenied("collect khata payments");
+      const method = String(body?.method || "");
+      if (!PAYMENT_METHODS.includes(method as (typeof PAYMENT_METHODS)[number])) return err("invalid payment_method");
+      const note = String(body?.note || "").slice(0, 200) || null;
+      let pq = sb.from("orders").update({ payment_status: "paid", paid_at: nowIso(), payment_method: method, payment_note: note })
+        .eq("restaurant_id", rid).not("khata_at", "is", null).neq("payment_status", "paid").neq("status", "cancelled");
+      if (body?.session_id) pq = pq.eq("session_id", String(body.session_id));
+      else if (body?.order_id) pq = pq.eq("id", String(body.order_id));
+      else return err("session_id or order_id required");
+      const paidRows = must(await pq.select("id,table_number")) as { id: string; table_number: string }[];
+      if (!paidRows.length) return err("Nothing outstanding on that bill.", 409);
+      await log("manager", "khata_collect", { restaurant_id: rid, table_number: paidRows[0]?.table_number ?? null, detail: `${paidRows.length} order(s) · ${method}`, device_id: dev });
+      return ok({ ok: true, count: paidRows.length });
+    }
+
     if (a === "blocklist" && path.length === 1) {
       const table = body.table ? String(body.table).trim() : null;
       let phone = body.phone ? String(body.phone).trim() : null;
@@ -1541,6 +1764,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // from the admin panel (/aevinite). Strip them here so a manager/owner can't
         // self-grant an entitlement the admin controls. Any `*_allowed` flag is admin-only.
         for (const k of Object.keys(body)) if (/_allowed$/.test(k)) delete (body as Record<string, unknown>)[k];
+        // The feature ladder's higher rungs are not editable from this panel either:
+        // table_tags_owner_control is the ADMIN's power-transfer switch; table_tags_enabled
+        // is the OWNER's toggle (owner panel) — a manager must not flip rungs above them. (mig 166)
+        delete (body as Record<string, unknown>).table_tags_owner_control;
+        delete (body as Record<string, unknown>).table_tags_enabled;
         // settings is one row per restaurant (UNIQUE restaurant_id); matched by
         // restaurant_id at the upsert below — don't force the legacy id='site'
         // (that only ever matches restaurant #1's row).

@@ -16,7 +16,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Dropdown from "@/components/admin/Dropdown";
 import { openRestaurantPanel } from "@/components/admin/shared";
 
-type MiniTable = { n: string; s: string; p: string; c: boolean };
+type MiniTable = { n: string; s: string; p: string; c: boolean; g?: string };
+// Special table types (mig 166): tint + emoji on the mini tile — still money-free.
+const TAG_MINI: Record<string, { emoji: string; color: string; label: string }> = {
+  vip: { emoji: "👑", color: "#8b5cf6", label: "VIP" },
+  family: { emoji: "🏠", color: "#e11d48", label: "Family" },
+  guest: { emoji: "🤝", color: "#aab4c4", label: "Owner's guest" },
+};
 type RestFloor = {
   id: string; name: string; slug: string; active: boolean; tables: MiniTable[];
   ordersToday: number; activeOrders: number; unpaidOrders: number;
@@ -350,18 +356,23 @@ export default function AdminFloor() {
                   <div className="adm-empty" style={{ padding: 10, fontSize: 12 }}>No tables.</div>
                 ) : (
                   <div className="adm-minigrid">
-                    {r.tables.map((t) => (
+                    {r.tables.map((t) => {
+                      const tg = t.g ? TAG_MINI[t.g] : undefined;
+                      return (
                       <span key={t.n}
                         className="adm-minitile"
                         style={{
                           background: STATE_COLOR[t.s] || "var(--muted2, rgba(120,120,120,.25))",
-                          boxShadow: t.p === "red" ? "inset 0 0 0 2px #f87171" : t.p === "green" ? "inset 0 0 0 2px #34d399" : undefined,
+                          // A tagged table wears its tag colour as the ring; the unpaid-red ring
+                          // still wins (money state beats decoration).
+                          boxShadow: t.p === "red" ? "inset 0 0 0 2px #f87171" : t.p === "green" ? "inset 0 0 0 2px #34d399" : tg ? `inset 0 0 0 2px ${tg.color}` : undefined,
                           color: t.s === "free" ? "var(--muted)" : "#fff",
                         }}
-                        title={`Table ${t.n} — ${t.s}${t.p === "red" ? " · UNPAID" : t.p === "green" ? " · paid" : ""}${t.c ? " · waiter called" : ""}`}>
-                        {t.c ? "•" : t.n}
+                        title={`Table ${t.n} — ${t.s}${tg ? ` · ${tg.label}` : ""}${t.p === "red" ? " · UNPAID" : t.p === "green" ? " · paid" : ""}${t.c ? " · waiter called" : ""}`}>
+                        {t.c ? "•" : tg ? tg.emoji : t.n}
                       </span>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </section>

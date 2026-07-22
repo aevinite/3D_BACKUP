@@ -1980,3 +1980,67 @@ html[data-theme="light"] .op-tablet{ color:#1d4ed8; }
 .tax-row .tax-pct { color: var(--muted); font-weight: 700; margin-left: -4px; }
 .tax-total { margin-top: 10px; font-size: 13.5px; color: var(--muted); }
 .tax-total b { color: var(--text); }
+
+/* ── Special table types (VIP / Family / Owner's Guest) — mig 166 ──────────────
+   APPROVED design (docs/superpowers/specs/2026-07-22-table-tags-mockup.html):
+   2px coloured border + rotated corner ribbon + diagonal-stripe/radial tint +
+   pill badge, layered OVER the state tint — the strip/label/pay ring still show.
+   Colours: VIP purple+gold, Family crimson, Guest platinum (owner-picked). */
+:root { --tag-vip: #8b5cf6; --tag-family: #e11d48; --tag-guest: #aab4c4; }
+.ftile.ft-tag { overflow: hidden; border-width: 2px; }
+.ftile.ft-tag::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: 13px;
+  background:
+    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--tagc) 34%, transparent), transparent 55%),
+    repeating-linear-gradient(-45deg, color-mix(in srgb, var(--tagc) 10%, transparent) 0 10px, transparent 10px 22px); }
+.ftile.ft-tag { border-color: color-mix(in srgb, var(--tagc) 80%, var(--line)); box-shadow: 0 0 18px color-mix(in srgb, var(--tagc) 22%, transparent); }
+.ftile.tag-vip    { --tagc: var(--tag-vip); border-color: var(--gold); box-shadow: 0 0 20px color-mix(in srgb, var(--tag-vip) 30%, transparent); }
+.ftile.tag-family { --tagc: var(--tag-family); }
+.ftile.tag-guest  { --tagc: var(--tag-guest); }
+.ft-ribbon { position: absolute; top: 9px; right: -32px; transform: rotate(38deg); z-index: 2;
+  background: var(--tagc); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: .6px;
+  padding: 3px 36px; text-transform: uppercase; box-shadow: 0 2px 8px rgba(0,0,0,.45); white-space: nowrap; }
+.ftile.tag-vip .ft-ribbon { color: #2a1d0c; background: linear-gradient(90deg, var(--gold-strong), #f2d29a); }
+.ftile.tag-guest .ft-ribbon { color: #1c2230; background: linear-gradient(90deg, #e5eaf2, #9aa6ba); }
+.ft-tagbadge { position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
+  margin: 4px 0 2px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--tagc) 26%, var(--panel)); color: color-mix(in srgb, var(--tagc) 60%, var(--text));
+  border: 1px solid color-mix(in srgb, var(--tagc) 55%, transparent); }
+/* keep the tile's inner content above the tint overlay */
+.ftile.ft-tag .ft-top, .ftile.ft-tag .ft-label, .ftile.ft-tag .ft-meta, .ftile.ft-tag .ft-quick, .ftile.ft-tag .ft-strip { position: relative; z-index: 1; }
+
+/* the "Mark table" popup options */
+.tag-opt { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; margin-bottom: 8px;
+  border-radius: 12px; border: 1.5px solid color-mix(in srgb, var(--tagc, #6b6253) 55%, var(--line));
+  background: linear-gradient(120deg, color-mix(in srgb, var(--tagc, #6b6253) 20%, var(--panel)), var(--panel));
+  color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; text-align: left; }
+.tag-opt small { display: block; font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.tag-opt .tago-ico { font-size: 19px; }
+.tag-opt.sel { outline: 2px solid var(--gold); }
+.tag-opt-vip    { --tagc: var(--tag-vip); }
+.tag-opt-family { --tagc: var(--tag-family); }
+.tag-opt-guest  { --tagc: var(--tag-guest); }
+.tag-opt-clear  { --tagc: #6b6253; justify-content: center; font-weight: 500; color: var(--muted); }
+
+/* pay-popup special buttons (On the house / Collect later) */
+.pay-method-btn.pay-special-onhouse { border-color: color-mix(in srgb, var(--tag-family) 60%, var(--line)); }
+.pay-method-btn.pay-special-khata   { border-color: color-mix(in srgb, #0ea5e9 60%, var(--line)); }
+
+/* khata person picker + book */
+.khata-pick-list { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; max-height: 200px; overflow-y: auto; }
+.khata-pick-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: 10px 12px;
+  background: transparent; border: 0; border-bottom: 1px solid var(--line); color: var(--text); font-size: 13.5px; cursor: pointer; }
+.khata-pick-row:last-child { border-bottom: 0; }
+.khata-pick-row small { color: var(--muted); }
+.khata-pick-row.sel { background: color-mix(in srgb, #0ea5e9 16%, var(--panel)); }
+.khata-group { margin-bottom: 12px; }
+.khata-ghead { display: flex; align-items: baseline; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.khata-ghead small { color: var(--muted); }
+.khata-due { margin-left: auto; font-weight: 800; color: #7dd3fc; }
+.khata-bill { display: flex; align-items: center; gap: 10px; padding: 9px 0; font-size: 13px; color: var(--muted); border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+.khata-bill b { color: var(--text); }
+.khata-bill .btn { margin-left: auto; }
+.khata-oh-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.khata-oh-table th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.khata-oh-table td { padding: 7px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+.khata-strike { text-decoration: line-through; color: var(--muted); }
+.khata-oh-toggle { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--muted); cursor: pointer; }
