@@ -2286,7 +2286,7 @@ async function setOrderPayment(id, paid, opts = {}) {
     // end instead of once per order. For a single-order pay, the undo bar is the
     // confirmation + a few-second takeback (owner, 2026-07-22).
     if (!opts.quiet) {
-      if (paid && window.LFH_UNDO) LFH_UNDO.show({ message: "Marked paid 💳", seconds: 5, onUndo: () => editorUndoPay([id]) });
+      if (paid && window.LFH_UNDO) LFH_UNDO.show({ message: "Marked paid", sub: "Tap undo to reopen this bill", icon: "💳", seconds: 5, onUndo: () => editorUndoPay([id]) });
       else toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
     }
     return true;
@@ -2423,7 +2423,13 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
     const msg = skipped ? `Paid via ${picked.method} — ${skipped} new order still to accept` : `Marked paid via ${picked.method}`;
     // The undo bar is the confirmation + a few-second takeback (owner, 2026-07-22). The
     // revert goes through the SAME 30-min grace + audit-logged path as "restore to floor".
-    if (paidIds.length && window.LFH_UNDO) LFH_UNDO.show({ message: msg, seconds: 5, onUndo: () => editorUndoPay(paidIds) });
+    if (paidIds.length && window.LFH_UNDO) LFH_UNDO.show({
+      message: `Marked paid via ${picked.method}`,
+      sub: skipped ? `${skipped} new order still to accept` : "Tap undo to reopen this bill",
+      icon: "💳",
+      seconds: 5,
+      onUndo: () => editorUndoPay(paidIds),
+    });
     else toast(msg + " 💳", "ok");
   }
   else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
@@ -4669,7 +4675,12 @@ async function itemStatus(id, status) {
     await api("POST", "/items/" + id + "/status", { status });   // persist in the background
     // Serving a dish is easy to mis-tap — offer a few-second takeback (owner, 2026-07-22).
     if (status === "served" && prev && prev !== "served" && window.LFH_UNDO) {
-      LFH_UNDO.show({ message: `${(it && it.title) || "Dish"} served`, onUndo: () => editorUndoServe([{ kind: "session", id, prev }]) });
+      const ord = it ? (state.data.orders || []).find((x) => x.id === it.order_id) : null;
+      LFH_UNDO.show({
+        message: `${(it && it.title) || "Dish"} served`,
+        sub: ord ? `Table ${ord.table_number} · tap undo to put it back` : "Tap undo to put it back",
+        onUndo: () => editorUndoServe([{ kind: "session", id, prev }]),
+      });
     }
   } catch (e) {
     if (it && prev != null) { it.status = prev; refreshTableDetail(); } // revert the optimistic change on failure
@@ -6577,7 +6588,11 @@ async function serveAllOrder(orderId) {
     await api("POST", "/orders/" + orderId + "/serve-all"); release(); await loadSessions();
     // The undo bar IS the confirmation now (message + a few-second takeback line),
     // so it replaces the old plain "served" toast.
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: o ? `Table ${o.table_number} · all served` : "All items served", onUndo: () => editorUndoServe(snap) });
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({
+      message: "All dishes served",
+      sub: o ? `Table ${o.table_number} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
+      onUndo: () => editorUndoServe(snap),
+    });
     else toast("All items served", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
@@ -6655,7 +6670,11 @@ async function serveAllOrders(t) {
   try {
     for (const o of orders) await api("POST", "/orders/" + o.id + "/serve-all");
     release(); await pollTables([String(t)]);
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: `Table ${t} · all served`, onUndo: () => editorUndoServe(snap) });
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({
+      message: "All dishes served",
+      sub: `Table ${t} · ${snap.length} dish${snap.length > 1 ? "es" : ""}`,
+      onUndo: () => editorUndoServe(snap),
+    });
     else toast("All orders served", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await pollTables([String(t)]); }
