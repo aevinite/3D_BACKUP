@@ -6310,7 +6310,8 @@ function openTakeOrder(table, rerender) {
     if (!list.length) return `<div class="muted" style="padding:16px">No dishes match.</div>`;
     return list.map((d) => {
       const n = qtyIn(d.id);
-      return `<button class="to-dish ${n ? "has" : ""}" data-add="${esc(d.id)}">${n ? `<span class="to-badge">×${n}</span>` : ""}<span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></button>`;
+      const img = d.image ? `<span class="to-dish-img" style="background-image:url('${esc(d.image)}')"></span>` : `<span class="to-dish-img">🍽</span>`;
+      return `<button class="to-dish ${n ? "has" : ""}" data-add="${esc(d.id)}">${n ? `<span class="to-badge">×${n}</span>` : ""}${img}<span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></span></button>`;
     }).join("");
   };
   const catChips = () => `<button class="to-cat ${cat ? "" : "on"}" data-cat="">All</button>` +
@@ -6462,46 +6463,47 @@ function tableOpsOn() {
   .kotm-head { padding: 16px 18px 10px; }
   .kotm-title { display:flex; align-items:center; gap:10px; }
   .kotm-title h3 { margin:0; font-size:17px; }
-  .kotm-bill { color: var(--muted,#8a7a5c); font-size:12.5px; margin-top:3px; }
+  .kotm-bill { color: var(--muted); font-size:12.5px; margin-top:3px; }
   .kotm-list { padding: 6px 12px 14px; }
   .kotm-row { display:flex; align-items:center; gap:13px; width:100%; text-align:left;
-    background: var(--card, #fff); border:1px solid var(--line,#e6dcc9); border-radius:12px;
-    padding:12px 14px; margin:0 0 8px; cursor:pointer; font:inherit; color:inherit;
+    background: var(--panel-2); border:1px solid var(--line); border-radius:12px;
+    padding:14px 16px; margin:0 0 9px; cursor:pointer; font:inherit; color:inherit;
     transition: transform .06s, border-color .12s, background .12s; }
-  .kotm-row:hover:not(:disabled) { border-color: var(--gold,#c98f3f); background: color-mix(in srgb, var(--gold,#c98f3f) 6%, var(--card,#fff)); }
+  .kotm-row:hover:not(:disabled) { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 6%, var(--panel-2)); }
   .kotm-row:active:not(:disabled) { transform: scale(.985); }
   .kotm-row:disabled { opacity:.45; cursor:default; }
-  .kotm-ico { width:40px; height:40px; border-radius:11px; flex:none; display:flex; align-items:center;
-    justify-content:center; font-size:19px; background: color-mix(in srgb, var(--gold,#c98f3f) 13%, transparent);
-    border:1px solid color-mix(in srgb, var(--gold,#c98f3f) 30%, transparent); }
-  .kotm-txt b { font-size:14.5px; display:block; }
-  .kotm-txt small { color: var(--muted,#8a7a5c); font-size:12px; line-height:1.35; display:block; margin-top:1px; }
-  .kotm-chev { margin-left:auto; color: var(--muted,#8a7a5c); font-size:15px; flex:none; }
-  .kotm-off-why { font-size:10.5px; color: var(--muted,#8a7a5c); border:1px solid var(--line,#e6dcc9);
+  .kotm-ico { width:46px; height:46px; border-radius:11px; flex:none; display:flex; align-items:center;
+    justify-content:center; font-size:19px; background: color-mix(in srgb, var(--gold) 13%, transparent);
+    border:1px solid color-mix(in srgb, var(--gold) 30%, transparent); }
+  .kotm-txt b { font-size:15.5px; display:block; }
+  .kotm-txt small { color: var(--muted); font-size:12.5px; line-height:1.35; display:block; margin-top:1px; }
+  .kotm-chev { margin-left:auto; color: var(--muted); font-size:15px; flex:none; }
+  .kotm-off-why { font-size:10.5px; color: var(--muted); border:1px solid var(--line);
     border-radius:999px; padding:2px 8px; margin-left:auto; flex:none; }
   .tp-kot-head { font-weight:700; }
   .kotm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(88px,1fr)); gap:8px; padding:4px 0 6px; }
-  .kotm-tile { border:1px solid var(--line,#e6dcc9); border-radius:12px; background:var(--card,#fff);
+  .kotm-tile { border:1px solid var(--line); border-radius:12px; background:var(--panel-2);
     padding:10px 6px; text-align:center; cursor:pointer; font:inherit; color:inherit; }
   .kotm-tile b { display:block; font-size:15px; }
-  .kotm-tile small { display:block; color:var(--muted,#8a7a5c); font-size:10.5px; margin-top:2px; }
-  .kotm-tile.occ { border-color: color-mix(in srgb, var(--gold,#c98f3f) 45%, transparent);
-    background: color-mix(in srgb, var(--gold,#c98f3f) 8%, var(--card,#fff)); }
-  .kotm-tile:hover { border-color: var(--gold,#c98f3f); }
+  .kotm-tile small { display:block; color:var(--muted); font-size:10.5px; margin-top:2px; }
+  .kotm-tile.occ { border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+    background: color-mix(in srgb, var(--gold) 8%, var(--panel-2)); }
+  .kotm-tile:hover { border-color: var(--gold); }
   /* Miller columns (desktop, owner 2026-07-23): panels sit SIDE BY SIDE like the Mac
      Finder's column view — the card grows a column per step, selections stay lit. */
-  .kotm-colwrap { max-width: min(96vw, 1040px); width: auto; }
+  .kotm-colwrap { max-width: min(96vw, 1080px); width: fit-content; }
+  .kotm-head { display: block; }
   .kotm-cols { display: flex; align-items: stretch; padding: 6px 8px 14px; }
-  .kotm-col { width: 300px; flex: none; padding: 6px 10px; overflow-y: auto;
-    max-height: min(64vh, 560px); border-right: 1px solid var(--line,#e6dcc9);
+  .kotm-col { width: 360px; flex: none; padding: 6px 10px; overflow-y: auto;
+    max-height: min(64vh, 560px); border-right: 1px solid var(--line);
     animation: kotmColIn .16s ease-out; }
   .kotm-col:last-child { border-right: 0; }
   .kotm-col .kotm-grid { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }
-  .kotm-col-title { font-size: 12px; font-weight: 700; color: var(--muted,#8a7a5c);
+  .kotm-col-title { font-size: 12px; font-weight: 700; color: var(--muted);
     text-transform: uppercase; letter-spacing: .03em; margin: 4px 2px 10px; }
-  .kotm-row.sel { border-color: var(--gold,#c98f3f);
-    background: color-mix(in srgb, var(--gold,#c98f3f) 14%, var(--card,#fff)); }
-  .kotm-row.sel .kotm-chev { color: var(--gold,#c98f3f); font-weight: 800; }
+  .kotm-row.sel { border-color: var(--gold);
+    background: color-mix(in srgb, var(--gold) 14%, var(--panel-2)); }
+  .kotm-row.sel .kotm-chev { color: var(--gold); font-weight: 800; }
   @keyframes kotmColIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }`;
   const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
 })();
@@ -6512,6 +6514,39 @@ function tableOpsOn() {
 // where to move it. Each selection stays highlighted so the whole path reads at a
 // glance. Phones keep the step-by-step sheets (openKotMenu below). This is the
 // STANDING pattern for every future multi-step popup on desktop.
+// What each KOT operation actually does — shown as the hover tooltip on its row.
+const KOT_TIPS = {"shift": "Moves this whole party — every order, waiter call and the bill — onto an empty table. The old table frees up instantly and the guests' phones follow automatically.", "merge": "Joins this party with another table's party: everything combines into ONE bill on the other table (discounts add up too). Use it when two groups decide to sit together.", "movekot": "Sends ONE order (one kitchen ticket) to another table's bill — for when a single order was punched on the wrong table. Both bills recalculate themselves.", "moveitem": "Sends a single dish to another table. It gets its own new kitchen ticket there, and both bills re-price automatically. A 2-plate line moves both plates.", "split": "Collect one bill as several payments: equal shares, custom amounts, or assign dishes per person. The shares must add up to the bill — the system checks.", "reprint": "Prints an order's kitchen ticket again on the thermal printer — for a lost or unreadable ticket. Nothing changes on the bill."};
+
+// ── HOVER TOOLTIPS (owner, 2026-07-23): hovering ANY button that carries a title/
+// data-tip shows a styled bubble describing what it does ("how it works"). One host
+// element + document-level delegation, so every current AND future button is covered
+// with zero per-feature wiring — give a button a `title` and it just works.
+(function tipEngine() {
+  const host = document.createElement("div");
+  host.className = "lfh-tip";
+  document.body.appendChild(host);
+  let cur = null;
+  const hide = () => { cur = null; host.classList.remove("on"); };
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target.closest && e.target.closest("[data-tip], button[title], .btn[title]");
+    if (el === cur) return;
+    if (!el) { hide(); return; }
+    // Migrate a native title to data-tip once, so the browser's plain tooltip
+    // never doubles up with ours.
+    if (!el.dataset.tip && el.title) { el.dataset.tip = el.title; el.removeAttribute("title"); }
+    if (!el.dataset.tip) { hide(); return; }
+    cur = el;
+    host.textContent = el.dataset.tip;
+    host.classList.add("on");
+    const r = el.getBoundingClientRect();
+    const w = host.offsetWidth, h = host.offsetHeight;
+    host.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + "px";
+    host.style.top = (r.top - h - 9 > 6 ? r.top - h - 9 : r.bottom + 9) + "px";
+  });
+  document.addEventListener("scroll", hide, true);
+  document.addEventListener("click", hide, true);
+})();
+
 function openKotColumns(t, sess) {
   document.querySelector(".kotmenu-overlay")?.remove();
   const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
@@ -6584,7 +6619,7 @@ function openKotColumns(t, sess) {
     const c2 = sel1 ? col2() : null;
     const c3 = col3();
     colsEl.innerHTML =
-      `<div class="kotm-col">` + OPS.map((r) => `<button class="kotm-row${sel1 === r.id ? " sel" : ""}" data-op="${r.id}" ${r.on ? "" : "disabled"}>
+      `<div class="kotm-col">` + OPS.map((r) => `<button class="kotm-row${sel1 === r.id ? " sel" : ""}" data-op="${r.id}" data-tip="${esc(KOT_TIPS[r.id] || "")}" ${r.on ? "" : "disabled"}>
         <span class="kotm-ico">${r.icon}</span><span class="kotm-txt"><b>${r.label}</b><small>${r.sub}</small></span>
         ${r.on ? `<span class="kotm-chev">›</span>` : `<span class="kotm-off-why">${r.why}</span>`}</button>`).join("") + `</div>` +
       (c2 ? `<div class="kotm-col"><div class="kotm-col-title">${c2.title}</div>${c2.html}</div>` : "") +
@@ -6639,7 +6674,7 @@ function openKotMenu(t, sess) {
     { id: "split", icon: "🍴", label: "Split the bill", sub: "Equal · custom amounts · by dish", on: movable.some((o) => o.status !== "received"), why: "nothing settleable" },
     { id: "reprint", icon: "🖨️", label: "Reprint a KOT", sub: "Print an order's kitchen ticket again", on: ordersForTable(t).some((o) => o.status !== "cancelled"), why: "no KOTs" },
   ];
-  const rowHtml = (r) => `<button class="kotm-row" data-kotop="${r.id}" ${r.on ? "" : "disabled"}>
+  const rowHtml = (r) => `<button class="kotm-row" data-kotop="${r.id}" data-tip="${esc(KOT_TIPS[r.id] || "")}" ${r.on ? "" : "disabled"}>
     <span class="kotm-ico">${r.icon}</span>
     <span class="kotm-txt"><b>${r.label}</b><small>${r.sub}</small></span>
     ${r.on ? `<span class="kotm-chev">›</span>` : `<span class="kotm-off-why">${r.why}</span>`}</button>`;
@@ -6770,7 +6805,7 @@ function openSplitSettle(t) {
     const s = amts.reduce((a, b) => a + b, 0);
     const diff = Math.round((s - due) * 100) / 100;
     sumEl.innerHTML = diff === 0 ? `✓ Shares add up to ${inr(due)}` : `⚠️ Shares total ${inr(s)} — ${diff > 0 ? inr(diff) + " too much" : inr(-diff) + " short"}`;
-    sumEl.style.color = diff === 0 ? "var(--ok, #22a06b)" : "#e5484d";
+    sumEl.style.color = diff === 0 ? "var(--green)" : "var(--red)";
   };
   const render = () => {
     wrap.querySelectorAll(".ss-tab").forEach((b) => b.classList.toggle("primary", b.dataset.mode === mode));
