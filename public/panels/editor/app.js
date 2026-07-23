@@ -8651,12 +8651,14 @@ function xraySettingUrl(flag) {
   .xray-off { position: relative; color: var(--gold-strong, #b8860b) !important; opacity: .72; }
   .xray-off::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
     background: #d97706; margin-left: 6px; vertical-align: middle; }
-  /* A FILLED button (primary/gold or pay/green background) must KEEP its own text colour
-     when tinted — recolouring it gold made gold-on-gold text invisible in the admin
-     act-as view (owner 2026-07-24: the "+ Take order" button read blank). Cue "off" with
-     a dashed ring instead, not by killing the label. */
+  /* A FILLED button (primary/gold or pay/green) is ADMIN-USABLE when tinted, so it must
+     look ENABLED and READABLE — not washed out. The base .72 opacity + gold-on-gold text
+     made "+ Take order" look broken (owner 2026-07-24). Keep the full fill + dark label
+     at full opacity; mark "off for staff" with ONE subtle, intentional cue: a soft inset
+     ring + the amber dot after the label. Clean, not broken-looking. */
   .btn.primary.xray-off, .tp-take-order.xray-off, .btn.pay.xray-off, .btn.green.xray-off {
-    color: #2a1d0c !important; outline: 2px dashed color-mix(in srgb, #d97706 75%, transparent); outline-offset: 2px; }
+    color: #2a1d0c !important; opacity: 1 !important;
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, #7a4d12 60%, transparent); }
   .xray-pulse { animation: xrayPulse 1.1s ease-out 2; border-radius: 8px; }
   @keyframes xrayPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217,119,6,0); } 50% { box-shadow: 0 0 0 4px rgba(217,119,6,.55); } }
   /* Faded admin ribbon across the very top — flows above the sticky topbar. */
