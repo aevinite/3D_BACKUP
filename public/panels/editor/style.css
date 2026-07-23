@@ -1757,7 +1757,10 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .to-search:focus { outline: none; border-color: var(--gold); }
 /* Category strip — horizontal scroll-spy: all categories always shown; the active chip
    follows the dish-list scroll and tapping one jumps to that section (like the menu). */
-.to-cats { display: flex; gap: 7px; padding: 2px 14px 10px; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+/* flex:none + a definite min-height so the horizontal-scroll row can't be vertically
+   squished/clipped by the flex column (overflow-x:auto also auto's the y-axis, which was
+   cutting the chips' top — owner 2026-07-24). */
+.to-cats { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; min-height: 42px; padding: 4px 14px 10px; overflow-x: auto; overflow-y: hidden; flex-wrap: nowrap; scrollbar-width: none; }
 .to-cats::-webkit-scrollbar { display: none; }
 .to-cat { flex: 0 0 auto; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
 .to-cat:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
@@ -1767,7 +1770,19 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .to-sec-h { position: sticky; top: 0; z-index: 2; margin: 0 0 8px; padding: 8px 2px 6px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--gold-strong);
   background: linear-gradient(180deg, var(--panel) 70%, transparent); }
 .to-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-bottom: 6px; }
-.to-dish { position: relative; display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 11px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); min-height: 62px; transition: border-color .12s, background .12s; }
+.to-dish { position: relative; display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 11px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); min-height: 62px; cursor: pointer; transition: border-color .12s, background .12s, transform .08s; }
+.to-dish:hover { border-color: color-mix(in srgb, var(--gold) 55%, var(--line)); }
+.to-dish:active { transform: scale(.99); }
+.to-dish-edit { flex: none; width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; }
+.to-dish-edit:hover { border-color: var(--gold); color: var(--gold-strong); }
+/* Per-dish allergy/note popup from a tile's ✎ (mirrors the tablet). Sits over the modal. */
+.to-tileedit-overlay { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); border-radius: 18px; }
+.to-tileedit { width: min(420px, calc(100% - 40px)); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-md); padding: 16px 18px; }
+.to-te-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 15px; }
+.to-te-x { background: transparent; border: none; color: var(--muted); font-size: 16px; cursor: pointer; }
+.to-te-x:hover { color: var(--text); }
+.to-te-note { margin: 10px 0 14px; }
+.to-te-done { width: 100%; }
 .to-dish-img { width: 44px; height: 44px; flex: none; border-radius: 10px; background-size: cover; background-position: center; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 16px; }
 .to-dish-meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .to-dish.has { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 12%, var(--panel-2)); }
