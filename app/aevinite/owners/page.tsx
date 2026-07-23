@@ -236,8 +236,7 @@ export default function AdminOwners() {
           onClose={() => setDetailFor(null)}
           onChanged={load}
           onDeleted={() => { setDetailFor(null); load(); }}
-          onPatch={patch}
-          onReveal={(name, password) => setReveal({ name, password })} />
+          onPatch={patch} />
       )}
     </>
   );
@@ -349,9 +348,9 @@ type ActivityRow = { id: string; panel: string; action: string; actor: string | 
 
 const PANEL_COLOR: Record<string, string> = { owner: "#34d399", admin: "#60a5fa", manager: "#d4a574", kitchen: "#7ec88a", tablet: "#a78bfa", editor: "#d4a574" };
 
-function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch, onReveal }: {
+function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch }: {
   owner: Owner; rests: Rest[]; onClose: () => void; onChanged: () => void; onDeleted: () => void;
-  onPatch: (payload: object) => Promise<any>; onReveal: (name: string, password: string) => void;
+  onPatch: (payload: object) => Promise<any>;
 }) {
   const [activity, setActivity] = useState<ActivityRow[] | null>(null);
   const [created, setCreated] = useState<string | null>(owner.createdAt || null);
@@ -437,7 +436,7 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
                   href={`/api/admin/act-as/go?rid=${encodeURIComponent(owner.restaurants[0].id)}&to=/owner`} target="_blank" rel="noreferrer"><i className="fas fa-eye" style={ic} aria-hidden="true" />Open their screen</a>
               )}
               <button style={actBtn} disabled={busy}
-                onClick={() => { if (confirm(`Set a NEW password for ${owner.name}? They'll be logged out everywhere.`)) run(async () => { const j = await onPatch({ owner_id: owner.id, action: "reset_password" }); setPwReveal(j.password); onReveal(owner.name, j.password); }); }}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
+                onClick={() => { if (confirm(`Set a NEW password for ${owner.name}? They'll be logged out everywhere.`)) run(async () => { const j = await onPatch({ owner_id: owner.id, action: "reset_password" }); setPwReveal(j.password); }); }}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
               <button style={actBtn} disabled={busy}
                 onClick={() => { const nn = prompt(`New username for ${owner.name} (this is their login):`, owner.name); if (nn && nn.trim() && nn.trim() !== owner.name) run(async () => { await onPatch({ owner_id: owner.id, action: "rename", name: nn.trim() }); }); }}><i className="fas fa-pen" style={ic} aria-hidden="true" />Rename</button>
               <button style={{ ...actBtn, color: owner.active ? "#fca5a5" : "#86efac" }} disabled={busy}

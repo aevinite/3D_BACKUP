@@ -626,6 +626,14 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     let section = "";
     try { section = new URLSearchParams(window.location.search).get("section") || ""; } catch {}
     if (!section) return;
+    // Consume the param immediately so a LATER detail (open a different restaurant after
+    // going Back) doesn't re-read this stale section and auto-scroll unexpectedly. Strip
+    // only `section`, keeping `focus` and the path intact (replaceState = no history entry).
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.delete("section");
+      window.history.replaceState(history.state, "", u.pathname + u.search);
+    } catch {}
     const el = document.getElementById(`det-${section}`);
     if (el) requestAnimationFrame(() => el.scrollIntoView({ block: "start", behavior: "smooth" }));
   }, []);

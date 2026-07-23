@@ -191,7 +191,13 @@ export default function AdminCommand() {
               </span>
               <span className="num">{ovById.has(r.id) ? ovById.get(r.id) : "—"}</span>
               <span className="cmd-open">
-                <a className="obtn" href={`/r/${r.slug}/menu`} target="_blank" rel="noopener" title={`Open ${r.name}'s guest menu`}>Guest</a>
+                {r.active ? (
+                  <a className="obtn" href={`/r/${r.slug}/menu`} target="_blank" rel="noopener" title={`Open ${r.name}'s guest menu`}>Guest</a>
+                ) : (
+                  // Suspended → the guest menu is offline; show a disabled chip instead of a link
+                  // to a maintenance page (matches the detail view's EnterCard guard, audit 2026-07-23).
+                  <button className="obtn" disabled title={`${r.name}'s guest menu is offline while suspended`}>Guest</button>
+                )}
                 {PANEL_DEFS.map((p) => (
                   <button key={p.key} className="obtn" disabled={!panelOn(r, p.key) || busyRow === r.id}
                     onClick={() => openPanel(r, p.path)}
