@@ -58,14 +58,14 @@ export default function AdminSettings() {
           <div style={{ display: "grid", gap: 12 }}>
             <label className="adm-ret" style={{ justifyContent: "space-between" }}>
               <span>Operations log</span>
-              <select value={ret?.oplog_retention_days ?? 90} disabled={!ret} onChange={(e) => saveRet("oplog_retention_days", Number(e.target.value))}>
+              <select value={ret?.oplog_retention_days ?? 30} disabled={!ret} onChange={(e) => saveRet("oplog_retention_days", Number(e.target.value))}>
                 {RET_OPTS.map((o) => <option key={o.d} value={o.d}>{o.label}</option>)}
                 {ret && !RET_OPTS.some((o) => o.d === ret.oplog_retention_days) && <option value={ret.oplog_retention_days}>{ret.oplog_retention_days} days</option>}
               </select>
             </label>
             <label className="adm-ret" style={{ justifyContent: "space-between" }}>
               <span>Customer log</span>
-              <select value={ret?.custlog_retention_days ?? 90} disabled={!ret} onChange={(e) => saveRet("custlog_retention_days", Number(e.target.value))}>
+              <select value={ret?.custlog_retention_days ?? 30} disabled={!ret} onChange={(e) => saveRet("custlog_retention_days", Number(e.target.value))}>
                 {RET_OPTS.map((o) => <option key={o.d} value={o.d}>{o.label}</option>)}
                 {ret && !RET_OPTS.some((o) => o.d === ret.custlog_retention_days) && <option value={ret.custlog_retention_days}>{ret.custlog_retention_days} days</option>}
               </select>

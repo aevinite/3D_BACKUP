@@ -154,8 +154,8 @@ export default function AdminUsers() {
         </h2>
         <form onSubmit={create} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, alignItems: "end" }}>
           <label style={label}>
-            Name
-            <input value={nu.name} onChange={(e) => setNu({ ...nu, name: e.target.value })} placeholder="e.g. Raj" autoCapitalize="words" style={field} required />
+            Username
+            <input value={nu.name} onChange={(e) => setNu({ ...nu, name: e.target.value })} placeholder="e.g. raj (their login)" autoCapitalize="none" style={field} required />
           </label>
           {/* When scoped to one restaurant the target is locked (shown read-only) so a
               new user can't land in the wrong restaurant. Pick "All restaurants" above
@@ -201,7 +201,7 @@ export default function AdminUsers() {
           </button>
         </form>
         <p style={{ fontSize: 12, color: "var(--muted)", margin: "10px 0 0" }}>
-          The <b>Username</b> is what they sign in with (and how they appear everywhere) — it must be unique. They confirm their details once on first login and can edit their username/phone, change their password, and set a PIN in their profile.
+          The <b>Username</b> is what they sign in with (and how they appear everywhere) — it must be unique. They can change their password and set a PIN in their own profile after signing in.
         </p>
       </section>
 

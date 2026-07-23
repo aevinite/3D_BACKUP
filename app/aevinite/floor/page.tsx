@@ -37,7 +37,7 @@ const STATE_COLOR: Record<string, string> = {
 };
 const LEGEND: [string, string][] = [
   ["Free", "var(--muted2, rgba(120,120,120,.25))"], ["Seated", "#2dd4bf"], ["New order", "#f59e0b"],
-  ["Preparing", "#4f9dff"], ["Served", "#22c55e"],
+  ["Preparing", "#4f9dff"], ["Served", "#22c55e"], ["Cleared", "#6b6253"],
 ];
 
 const SORT_KEY = "lfh_admin_floor_sort";

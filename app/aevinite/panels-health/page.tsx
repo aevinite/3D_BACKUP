@@ -20,11 +20,17 @@ const STATUS = {
 } as const;
 
 function Cell({ p }: { p: Panel }) {
-  const s = STATUS[p.status];
+  // The OWNER panel is deliberately left OUT of the attention count (owners don't sit logged
+  // into a panel like operational staff), so painting an owner cell alarming danger-red for
+  // "never/quiet" was a false alarm the summary never backed up (audit 2026-07-23). Render the
+  // owner's quiet/never states as neutral muted instead of red.
+  const ownerQuiet = p.role === "owner" && (p.status === "never" || p.status === "offline");
+  const s = ownerQuiet ? { c: "var(--muted)", t: p.status === "never" ? "Not signed in" : "Quiet" } : STATUS[p.status];
+  const hollow = p.status === "never" && !ownerQuiet;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 }} title={p.on ? (p.lastSeen ? `Last active ${timeAgo(p.lastSeen)}` : "Never seen active") : "Panel disabled for this restaurant"}>
-      <span style={{ width: 8, height: 8, borderRadius: 999, background: s.c, flex: "0 0 auto", border: p.status === "never" ? `1px solid ${s.c}` : undefined, backgroundColor: p.status === "never" ? "transparent" : s.c }} aria-hidden="true" />
-      <span style={{ fontSize: 12.5, color: p.status === "off" ? "var(--muted)" : "var(--text)" }}>
+      <span style={{ width: 8, height: 8, borderRadius: 999, flex: "0 0 auto", border: hollow ? `1px solid ${s.c}` : undefined, backgroundColor: hollow ? "transparent" : s.c }} aria-hidden="true" />
+      <span style={{ fontSize: 12.5, color: p.status === "off" || ownerQuiet ? "var(--muted)" : "var(--text)" }}>
         {s.t}{p.on && p.lastSeen && (p.status === "idle" || p.status === "offline") ? ` · ${timeAgo(p.lastSeen)}` : ""}
       </span>
     </span>
@@ -73,13 +79,15 @@ export default function AdminPanelsHealth() {
         {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : d.rows.length === 0 ? (
           <div className="adm-empty">No restaurants yet.</div>
         ) : (
-          <div className="adm-logwrap" style={{ border: 0 }}>
-            <div className="adm-logrow head" style={{ gridTemplateColumns: "1.4fr repeat(4, minmax(120px, 1fr))" }}>
+          // Horizontal scroll on narrow screens: the 5-column grid is ~560px min (minWidth
+          // below), so on a phone it used to overflow the card silently (audit 2026-07-23).
+          <div className="adm-logwrap" style={{ border: 0, overflowX: "auto" }}>
+            <div className="adm-logrow head" style={{ gridTemplateColumns: "1.4fr repeat(4, minmax(120px, 1fr))", minWidth: 560 }}>
               <span>Restaurant</span>
               {d.roles.map((r) => <span key={r}>{ROLE_LABEL[r] || r}</span>)}
             </div>
             {d.rows.map((row) => (
-              <div key={row.id} className="adm-logrow" style={{ gridTemplateColumns: "1.4fr repeat(4, minmax(120px, 1fr))", alignItems: "center" }}>
+              <div key={row.id} className="adm-logrow" style={{ gridTemplateColumns: "1.4fr repeat(4, minmax(120px, 1fr))", minWidth: 560, alignItems: "center" }}>
                 <span style={{ minWidth: 0 }}>
                   <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{row.name}</span>
                   {!row.active && <span style={{ fontSize: 11, color: "var(--muted)" }}>suspended</span>}
