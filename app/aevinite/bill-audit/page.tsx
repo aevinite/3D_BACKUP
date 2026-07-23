@@ -86,14 +86,16 @@ export default function AdminBillAudit() {
         {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : d.rows.length === 0 ? (
           <div className="adm-empty">No bill changes recorded in this view.</div>
         ) : (
-          <div className="adm-logwrap" style={{ border: 0 }}>
-            <div className="adm-logrow head" style={{ gridTemplateColumns: "160px 1.3fr 70px 1fr 90px" }}>
-              <span>Change</span><span>Restaurant</span><span>Table</span><span>By</span><span style={{ textAlign: "right" }}>When</span>
+          // Reason column added 2026-07-23 (owner: "it should show WHY it was reverted").
+          // Horizontal scroll (minWidth below) so the 6 columns don't crush on a phone.
+          <div className="adm-logwrap" style={{ border: 0, overflowX: "auto" }}>
+            <div className="adm-logrow head" style={{ gridTemplateColumns: "150px 1.1fr 60px 0.9fr 1.4fr 84px", minWidth: 720 }}>
+              <span>Change</span><span>Restaurant</span><span>Table</span><span>By</span><span>Reason</span><span style={{ textAlign: "right" }}>When</span>
             </div>
             {d.rows.map((r) => {
               const a = ACT[r.action] || { t: r.action, risk: r.risk };
               return (
-                <div key={r.id} className="adm-logrow" style={{ gridTemplateColumns: "160px 1.3fr 70px 1fr 90px", alignItems: "center" }}>
+                <div key={r.id} className="adm-logrow" style={{ gridTemplateColumns: "150px 1.1fr 60px 0.9fr 1.4fr 84px", minWidth: 720, alignItems: "center" }}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
                     <span style={{ width: 7, height: 7, borderRadius: 999, background: a.risk ? "var(--adm-danger)" : "var(--muted)", flex: "0 0 auto" }} aria-hidden="true" />
                     <span style={{ fontWeight: 600, color: a.risk ? "var(--adm-danger)" : "var(--text)", fontSize: 12.5 }}>{a.t}</span>
@@ -101,6 +103,7 @@ export default function AdminBillAudit() {
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.restaurantName}</span>
                   <span className="adm-muted">{r.table ? `#${r.table}` : "—"}</span>
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="adm-muted">{r.actor}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="adm-muted" title={r.detail || undefined}>{r.detail || "—"}</span>
                   <span style={{ textAlign: "right" }} className="adm-muted" title={r.at}>{timeAgo(r.at)}</span>
                 </div>
               );
