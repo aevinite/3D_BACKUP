@@ -6748,7 +6748,19 @@ function printKotTicket(o) {
     ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
     document.body.appendChild(ifr);
     const d = ifr.contentWindow.document; d.open(); d.write(html); d.close();
-    setTimeout(() => { try { ifr.contentWindow.focus(); ifr.contentWindow.print(); } catch (e) {} setTimeout(() => ifr.remove(), 1500); }, 250);
+    // Remove the hidden print frame only AFTER the browser signals it finished printing.
+    // The old blind 1500ms timer often deleted the frame while Chrome's print preview was
+    // still open, dropping Chrome's internal print callback ("The provided callback is no
+    // longer runnable" — logged as a red client_error). onafterprint fires in both silent/
+    // kiosk and preview modes; the long fallback covers a preview the user just walks away from.
+    setTimeout(() => {
+      const w = ifr.contentWindow;
+      let done = false;
+      const cleanup = () => { if (done) return; done = true; try { ifr.remove(); } catch (e) {} };
+      try { w.onafterprint = cleanup; } catch (e) {}
+      try { w.focus(); w.print(); } catch (e) {}
+      setTimeout(cleanup, 60000);
+    }, 250);
   } catch (e) { /* printing must NEVER break the panel */ }
 }
 function openReprintKotPicker(t) {
