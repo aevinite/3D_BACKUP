@@ -469,18 +469,26 @@ function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChang
 function GoogleReviewCard({ restaurant }: { restaurant: Restaurant }) {
   const [url, setUrl] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [loaded, setLoaded] = useState(false);
+  // loadOk gates Save: it's true ONLY after a SUCCESSFUL load. Before this, a FAILED load
+  // set loaded=true too, so a network hiccup looked identical to "no link set" and pressing
+  // Save would overwrite the real, saved link with an empty string (mirrors BrandingCard's
+  // brandLoaded guard — audit 2026-07-23).
+  const [loadOk, setLoadOk] = useState(false);
+  const [loadErr, setLoadErr] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => {
-    let dead = false;
+  const loadReview = useCallback(() => {
+    setLoadErr(false);
     fetch(`/api/admin/restaurants/google-review?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((j) => { if (dead) return; if (typeof j.url !== "undefined") { setUrl(j.url || null); setDraft(j.url || ""); } setLoaded(true); })
-      .catch(() => { if (!dead) setLoaded(true); });
-    return () => { dead = true; };
+      .then((j) => {
+        if (j.error || typeof j.url === "undefined") { setLoadErr(true); return; }
+        setUrl(j.url || null); setDraft(j.url || ""); setLoadOk(true);
+      })
+      .catch(() => setLoadErr(true));
   }, [restaurant.id]);
+  useEffect(() => { loadReview(); }, [loadReview]);
   const save = async () => {
     setBusy(true); setErr(null); setMsg(null);
     try {
@@ -495,9 +503,10 @@ function GoogleReviewCard({ restaurant }: { restaurant: Restaurant }) {
       <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Google review link</div>
       <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Paste this restaurant&apos;s Google review URL. When set, a guest who rates a dish <b>4–5★</b> is invited to review you on Google (a low rating stays private). Leave blank to turn the nudge off.</p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <input className="adm-input" style={{ flex: 1, minWidth: 240 }} type="url" inputMode="url" placeholder="https://g.page/r/…/review" value={draft} maxLength={500} disabled={!loaded || busy} onChange={(e) => setDraft(e.target.value)} />
-        <button className="adm-btn primary" disabled={!loaded || busy || draft.trim() === (url || "")} onClick={save}>{busy ? "Saving…" : "Save"}</button>
+        <input className="adm-input" style={{ flex: 1, minWidth: 240 }} type="url" inputMode="url" placeholder="https://g.page/r/…/review" value={draft} maxLength={500} disabled={!loadOk || busy} onChange={(e) => setDraft(e.target.value)} />
+        <button className="adm-btn primary" disabled={!loadOk || busy || draft.trim() === (url || "")} onClick={save}>{busy ? "Saving…" : "Save"}</button>
       </div>
+      {loadErr && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>Couldn&rsquo;t load the current link — editing is locked so you don&rsquo;t overwrite it by mistake. <button className="adm-btn" style={{ marginLeft: 6, padding: "3px 9px" }} onClick={loadReview}>Retry</button></div>}
       {msg && <div style={{ color: "var(--adm-ok,#16a34a)", fontSize: 12.5, marginTop: 8 }}>{msg}</div>}
       {err && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
     </div>
@@ -574,7 +583,13 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
   const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
   const [staffFeat, setStaffFeat] = useState<Record<string, boolean> | null>(null);
-  const [busy, setBusy] = useState(false);
+  // Per-switch in-flight set: toggling ONE switch disables only THAT switch. The old single
+  // `busy` boolean disabled EVERY grid (guest features + panels + staff features) while any
+  // one save was in flight, so flipping a guest feature froze the panel switches too (audit
+  // 2026-07-23). Keys are namespaced (f:/p:/s:) so the three grids never collide.
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const startPending = (id: string) => setPending((s) => new Set(s).add(id));
+  const endPending = (id: string) => setPending((s) => { const n = new Set(s); n.delete(id); return n; });
   // Which staff-feature help screenshot is zoomed full-size (null = none).
   const [zoomImg, setZoomImg] = useState<string | null>(null);
   // "Full report" (owner's words: "every single bit" of ONE restaurant) swaps the
@@ -643,7 +658,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // (matches lib/features.ts FEATURE_DEFAULTS — all ten default true).
   const on = (key: string) => { const v = features?.[key]; return v === undefined ? true : v === true; };
   const toggle = async (key: string, current: boolean) => {
-    setBusy(true);
+    const pid = `f:${key}`; startPending(pid);
     // Optimistic flip so the pill responds instantly; reconciled by load().
     setFeatures((f) => ({ ...(f || {}), [key]: !current }));
     try {
@@ -655,13 +670,13 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       if (!r.ok) throw new Error();
       await load();
     } catch { flash("Couldn't save that change — reverted."); await load(); }
-    finally { setBusy(false); }
+    finally { endPending(pid); }
   };
 
   const Toggle = ({ k, label }: { k: string; label: string }) => {
     const isOn = on(k);
     return (
-      <button className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!features || busy} onClick={() => toggle(k, isOn)}
+      <button className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!features || pending.has(`f:${k}`)} onClick={() => toggle(k, isOn)}
         title={isOn ? "On — tap to turn off" : "Off — tap to turn on"}>
         <span>{label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
       </button>
@@ -671,7 +686,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // Panels default ON unless this restaurant explicitly turned one off (mig 106).
   const onP = (key: string) => { const v = panels?.[key]; return v === undefined ? true : v === true; };
   const togglePanel = async (key: string, current: boolean) => {
-    setBusy(true);
+    const pid = `p:${key}`; startPending(pid);
     setPanels((p) => ({ ...(p || {}), [key]: !current })); // optimistic; reconciled by loadPanels()
     try {
       const r = await fetch("/api/admin/restaurants/panels", {
@@ -681,14 +696,14 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       if (!r.ok) throw new Error();
       await loadPanels();
     } catch { flash("Couldn't save that change — reverted."); await loadPanels(); }
-    finally { setBusy(false); }
+    finally { endPending(pid); }
   };
   // Plain render helper, NOT a component — defining a component inside render remounts
   // it on every parent render (and the lint rule rightly errors on it).
   const panelToggle = (k: string, label: string) => {
     const isOn = onP(k);
     return (
-      <button key={k} className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!panels || busy} onClick={() => togglePanel(k, isOn)}
+      <button key={k} className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!panels || pending.has(`p:${k}`)} onClick={() => togglePanel(k, isOn)}
         title={isOn ? "On — tap to turn off (blocks that login)" : "Off — tap to turn on"}>
         <span>{label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
       </button>
@@ -699,7 +714,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // Default OFF — the owner's own on/off lives in the manager settings; both must be on.
   const onS = (key: string) => staffFeat?.[key] === true;
   const toggleStaffFeat = async (key: string, current: boolean) => {
-    setBusy(true);
+    const pid = `s:${key}`; startPending(pid);
     setStaffFeat((s) => ({ ...(s || {}), [key]: !current }));
     try {
       const r = await fetch("/api/admin/restaurants/staff-features", {
@@ -709,12 +724,12 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       if (!r.ok) throw new Error();
       await loadStaffFeat();
     } catch { flash("Couldn't save that change — reverted."); await loadStaffFeat(); }
-    finally { setBusy(false); }
+    finally { endPending(pid); }
   };
   const staffToggle = (k: string, label: string) => {
     const isOn = onS(k);
     return (
-      <button key={k} className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!staffFeat || busy} onClick={() => toggleStaffFeat(k, isOn)}
+      <button key={k} className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!staffFeat || pending.has(`s:${k}`)} onClick={() => toggleStaffFeat(k, isOn)}
         title={isOn ? "Allowed — tap to disallow" : "Not allowed — tap to allow"}>
         <span>{label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
       </button>
