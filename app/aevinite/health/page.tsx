@@ -35,19 +35,58 @@ function latencyTier(ms: number): "good" | "warn" | "bad" {
   return "bad";
 }
 
+// ── Panels & devices — folded in from the old separate "Panel status" page (2026-07-23):
+// per-restaurant panel CONNECTIVITY (last-seen → online/idle/quiet/never), from
+// /api/admin/panels-health. Two health screens were one job; this is now a section here.
+type Panel = { role: string; on: boolean; lastSeen: string | null; status: "off" | "never" | "online" | "idle" | "offline" };
+type PRow = { id: string; name: string; slug: string; active: boolean; panels: Panel[] };
+type PData = { rows: PRow[]; roles: string[]; attention: number; generatedAt: string };
+
+const ROLE_LABEL: Record<string, string> = { manager: "Manager", kitchen: "Kitchen", tablet: "Tablet", owner: "Owner" };
+const PSTATUS = {
+  online: { c: "var(--adm-ok)", t: "Online" },
+  idle: { c: "#d4a574", t: "Idle" },
+  offline: { c: "var(--adm-danger)", t: "Quiet" },
+  never: { c: "var(--adm-danger)", t: "Never seen" },
+  off: { c: "var(--muted)", t: "Off" },
+} as const;
+
+function PanelCell({ p }: { p: Panel }) {
+  // The OWNER panel is left OUT of the attention count (owners don't sit logged in), so a
+  // red "never/quiet" owner cell was a false alarm — render it neutral instead.
+  const ownerQuiet = p.role === "owner" && (p.status === "never" || p.status === "offline");
+  const s = ownerQuiet ? { c: "var(--muted)", t: p.status === "never" ? "Not signed in" : "Quiet" } : PSTATUS[p.status];
+  const hollow = p.status === "never" && !ownerQuiet;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 7, minWidth: 0 }} title={p.on ? (p.lastSeen ? `Last active ${timeAgo(p.lastSeen)}` : "Never seen active") : "Panel disabled for this restaurant"}>
+      <span style={{ width: 8, height: 8, borderRadius: 999, flex: "0 0 auto", border: hollow ? `1px solid ${s.c}` : undefined, backgroundColor: hollow ? "transparent" : s.c }} aria-hidden="true" />
+      <span style={{ fontSize: 12.5, color: p.status === "off" || ownerQuiet ? "var(--muted)" : "var(--text)" }}>
+        {s.t}{p.on && p.lastSeen && (p.status === "idle" || p.status === "offline") ? ` · ${timeAgo(p.lastSeen)}` : ""}
+      </span>
+    </span>
+  );
+}
+
 export default function AdminHealth() {
   const [h, setH] = useState<Health | null>(null);
+  const [pd, setPd] = useState<PData | null>(null);
+  const [pErr, setPErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true); setErr(null);
-    try {
-      const res = await fetch("/api/admin/health", { cache: "no-store" });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || "Couldn't load health.");
-      setH(j);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); }
+    setLoading(true); setErr(null); setPErr(null);
+    // Both health checks in parallel; they're independent, so a panels failure never blocks
+    // the diagnostics above and vice-versa.
+    const [healthRes, panelsRes] = await Promise.allSettled([
+      fetch("/api/admin/health", { cache: "no-store" }).then((r) => r.json().then((j) => ({ ok: r.ok, j }))),
+      fetch("/api/admin/panels-health", { cache: "no-store" }).then((r) => r.json().then((j) => ({ ok: r.ok, j }))),
+    ]);
+    if (healthRes.status === "fulfilled" && healthRes.value.ok) setH(healthRes.value.j);
+    else setErr(healthRes.status === "fulfilled" ? (healthRes.value.j?.error || "Couldn't load health.") : "Couldn't load health.");
+    if (panelsRes.status === "fulfilled" && panelsRes.value.ok) setPd(panelsRes.value.j);
+    else setPErr(panelsRes.status === "fulfilled" ? (panelsRes.value.j?.error || "Couldn't load panel status.") : "Couldn't load panel status.");
+    setLoading(false);
   }, []);
   useEffect(() => { load(); }, [load]);
   useActiveAutoRefresh(load, 60000);
@@ -57,7 +96,7 @@ export default function AdminHealth() {
   return (
     <>
       <h1 className="adm-page-h">System health</h1>
-      <p className="adm-page-sub">Read-only platform diagnostics. {h ? <>Last checked {timeAgo(h.checkedAt)}.</> : null}</p>
+      <p className="adm-page-sub">Read-only platform diagnostics + per-restaurant panel status. {h ? <>Last checked {timeAgo(h.checkedAt)}.</> : null}</p>
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
         <button className="adm-btn" disabled={loading} onClick={load}>
@@ -128,6 +167,42 @@ export default function AdminHealth() {
           </div>
         </>
       )}
+
+      {/* Panels & devices (was the separate "Panel status" page) — per-restaurant connectivity. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 9, margin: "18px 0 11px" }}>
+        <i className="fas fa-signal" aria-hidden="true" style={{ color: "var(--muted)" }} />
+        <h2 style={{ margin: 0, fontSize: 16 }}>Panels &amp; devices</h2>
+        <span className="adm-muted" style={{ fontSize: 12 }}>which staff screens are connected, per restaurant</span>
+      </div>
+      {pErr && <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>{pErr} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></p>}
+      {pd && (
+        <div className="adm-card" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 10, borderColor: pd.attention > 0 ? "#d4a574" : undefined }}>
+          <i className={`fas ${pd.attention > 0 ? "fa-triangle-exclamation" : "fa-circle-check"}`} style={{ color: pd.attention > 0 ? "#d4a574" : "var(--adm-ok)" }} aria-hidden="true" />
+          <span style={{ fontSize: 13 }}>{pd.attention > 0 ? <><b>{pd.attention}</b> enabled panel{pd.attention === 1 ? "" : "s"} quiet or never seen — a device or login may be down.</> : "All enabled panels have been active recently."}</span>
+        </div>
+      )}
+      <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
+        {!pd ? <div className="adm-empty">{pErr ? "Couldn't load." : "Loading…"}</div> : pd.rows.length === 0 ? (
+          <div className="adm-empty">No restaurants yet.</div>
+        ) : (
+          // Horizontal scroll on narrow screens (the 5-col grid is ~560px min).
+          <div className="adm-logwrap" style={{ border: 0, overflowX: "auto" }}>
+            <div className="adm-logrow head" style={{ gridTemplateColumns: "1.4fr repeat(4, minmax(120px, 1fr))", minWidth: 560 }}>
+              <span>Restaurant</span>
+              {pd.roles.map((r) => <span key={r}>{ROLE_LABEL[r] || r}</span>)}
+            </div>
+            {pd.rows.map((row) => (
+              <div key={row.id} className="adm-logrow" style={{ gridTemplateColumns: "1.4fr repeat(4, minmax(120px, 1fr))", minWidth: 560, alignItems: "center" }}>
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{row.name}</span>
+                  {!row.active && <span style={{ fontSize: 11, color: "var(--muted)" }}>suspended</span>}
+                </span>
+                {row.panels.map((p) => <PanelCell key={p.role} p={p} />)}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </>
   );
 }
