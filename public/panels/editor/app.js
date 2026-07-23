@@ -6342,27 +6342,36 @@ function openTakeOrder(table, rerender) {
   const sections = cats.map((c) => ({ slug: c.slug, name: localizeCat(c.name, c.slug), items: dishes.filter((d) => d.category === c.slug) }))
     .concat(uncategorised.length ? [{ slug: "_other", name: "Other", items: uncategorised }] : []);
 
-  const cart = [];               // [{ id, title, price, qty, note, avoid:Set }]
+  // A cart line is one VARIANT of a dish: the same dish with different allergens/notes
+  // is a SEPARATE line (like the tablet). Each line has a stable uid so edits never
+  // reshuffle the DOM. Tap-to-add only ever touches the PLAIN variant.
+  const cart = [];               // [{ uid, id, title, price, qty, note, avoid:Set }]
   const orderAvoid = new Set();  // whole-order allergens
   let orderNote = "";
   let q = "";
-  const editing = new Set();     // cart-line ids whose per-dish editor is open
+  let uidSeq = 0;
+  const editing = new Set();     // cart-line UIDs whose per-dish editor is open
 
-  const line = (id) => cart.find((c) => c.id === id);
-  const qtyIn = (id) => { const l = line(id); return l ? l.qty : 0; };
-  const addOne = (id) => { const l = line(id); if (l) l.qty = Math.min(99, l.qty + 1); else { const d = dishes.find((x) => x.id === id); if (d) cart.push({ id, title: d.title, price: parseFloat(d.price) || 0, qty: 1, note: "", avoid: new Set() }); } };
-  const removeOne = (id) => { const i = cart.findIndex((c) => c.id === id); if (i < 0) return; if (cart[i].qty > 1) cart[i].qty--; else { cart.splice(i, 1); editing.delete(id); } };
+  const byUid = (uid) => cart.find((c) => c.uid === uid);
+  const sig = (l) => [...l.avoid].sort().join(",") + "|" + (l.note || "").trim();
+  const isPlain = (l) => !l.avoid.size && !(l.note || "").trim();
+  const plainLine = (id) => cart.find((c) => c.id === id && isPlain(c));
+  const qtyIn = (id) => cart.filter((c) => c.id === id).reduce((s, c) => s + c.qty, 0);
+  // Tapping a dish adds to its PLAIN line only — a line carrying an allergy or note is a
+  // distinct variant and is never grown by a tap (fixes "add plain → lands on the dairy one").
+  const addOne = (id) => { const l = plainLine(id); if (l) { l.qty = Math.min(99, l.qty + 1); return; } const d = dishes.find((x) => x.id === id); if (d) cart.push({ uid: ++uidSeq, id, title: d.title, price: parseFloat(d.price) || 0, qty: 1, note: "", avoid: new Set() }); };
+  const incUid = (uid) => { const l = byUid(uid); if (l) l.qty = Math.min(99, l.qty + 1); };
+  const decUid = (uid) => { const i = cart.findIndex((c) => c.uid === uid); if (i < 0) return; if (cart[i].qty > 1) cart[i].qty--; else { cart.splice(i, 1); editing.delete(uid); } };
+  // After an edit two lines can end up identical (same dish + allergy + note) — merge them.
+  const dedupe = () => { for (let i = 0; i < cart.length; i++) for (let j = cart.length - 1; j > i; j--) { if (cart[i].id === cart[j].id && sig(cart[i]) === sig(cart[j])) { cart[i].qty = Math.min(99, cart[i].qty + cart[j].qty); editing.delete(cart[j].uid); cart.splice(j, 1); } } };
 
-  // The right-hand control: a single "＋" when empty; once in the cart, the count
-  // (×N) on top with a −/＋ pair just below it — the layout the owner asked for.
-  const dishCtl = (id) => { const n = qtyIn(id);
-    return `<span class="to-dish-ctl ${n ? "has" : ""}">${n ? `<b class="to-dish-n">×${n}</b>` : ""}<span class="to-dish-btns">${n ? `<button class="to-q" data-dec="${esc(id)}" aria-label="One fewer">−</button>` : ""}<button class="to-add" data-inc="${esc(id)}" aria-label="Add one">＋</button></span></span>`; };
   const dishTile = (d) => {
+    const n = qtyIn(d.id);
     const img = d.image ? `<span class="to-dish-img" style="background-image:url('${esc(d.image)}')"></span>` : `<span class="to-dish-img">🍽</span>`;
-    // Clean tablet-style card: image + name/price, a ✎ pinned to the image corner
-    // (so it never overlaps the name), and the qty control on the right. The WHOLE
-    // tile is tap-to-add; the −/＋/✎ buttons stop the bubble so they act on their own.
-    return `<div class="to-dish ${qtyIn(d.id) ? "has" : ""}" data-dish="${esc(d.id)}" role="button" tabindex="0" title="Tap to add"><span class="to-dish-imgwrap">${img}<button class="to-dish-edit" data-tile-edit="${esc(d.id)}" title="Allergens & note for this dish">✎</button></span><span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></span>${dishCtl(d.id)}</div>`;
+    // Big image + name/price; the WHOLE tile taps to add (plain). The only button is a
+    // large ✎ on the right to set this dish's allergens/note — no +/− (add by tapping,
+    // reduce from the order list on the right). ×N shows the running count for this dish.
+    return `<div class="to-dish ${n ? "has" : ""}" data-dish="${esc(d.id)}" role="button" tabindex="0" title="Tap to add">${img}<span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></span><span class="to-dish-side">${n ? `<b class="to-dish-n">×${n}</b>` : ""}<button class="to-dish-edit" data-tile-edit="${esc(d.id)}" title="Allergens & note for this dish">✎</button></span></div>`;
   };
   const listHtml = () => {
     const ql = q.trim().toLowerCase();
@@ -6377,20 +6386,20 @@ function openTakeOrder(table, rerender) {
   const algChips = (set, kind, id) => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${set.has(a.slug) ? "on" : ""}" data-alg="${a.slug}" data-kind="${kind}"${id ? ` data-line="${esc(id)}"` : ""}>${esc(a.label)}</span>`).join("");
   const cartLines = () => cart.length
     ? cart.map((c) => {
-        const open = editing.has(c.id);
+        const open = editing.has(c.uid);
         const cues = [c.avoid.size ? `⚠ no ${[...c.avoid].join(", ")}` : "", c.note ? `📝 ${c.note}` : ""].filter(Boolean).join(" · ");
         return `<div class="to-line ${open ? "editing" : ""}">
           <div class="to-line-main">
             <span class="to-line-t">${esc(c.title)}${cues ? `<span class="to-line-cue">${esc(cues)}</span>` : ""}</span>
-            <span class="to-step"><button class="to-q" data-dec="${esc(c.id)}" aria-label="One fewer">−</button><b>${c.qty}</b><button class="to-q" data-inc="${esc(c.id)}" aria-label="One more">＋</button></span>
+            <span class="to-step"><button class="to-q" data-ldec="${c.uid}" aria-label="One fewer">−</button><b>${c.qty}</b><button class="to-q" data-linc="${c.uid}" aria-label="One more">＋</button></span>
             <span class="to-line-p">${inr((parseFloat(c.price) || 0) * c.qty)}</span>
-            <button class="to-edit ${open ? "on" : ""}" data-edit="${esc(c.id)}" title="Allergens & note for this dish">✎</button>
-            <button class="to-rm" data-rm="${esc(c.id)}" aria-label="Remove">🗑</button>
+            <button class="to-edit ${open ? "on" : ""}" data-edit="${c.uid}" title="Allergens & note for this dish">✎</button>
+            <button class="to-rm" data-rm="${c.uid}" aria-label="Remove">🗑</button>
           </div>
-          ${open ? `<div class="to-line-edit"><div class="to-lbl">Avoid in this dish</div><div class="to-alg">${algChips(c.avoid, "line", c.id)}</div><input class="to-line-note" data-line="${esc(c.id)}" maxlength="120" placeholder="Note for this dish (e.g. extra spicy)" value="${esc(c.note)}"></div>` : ""}
+          ${open ? `<div class="to-line-edit"><div class="to-lbl">Avoid in this dish</div><div class="to-alg">${algChips(c.avoid, "line", c.uid)}</div><input class="to-line-note" data-line="${c.uid}" maxlength="120" placeholder="Note for this dish (e.g. extra spicy)" value="${esc(c.note)}"></div>` : ""}
         </div>`;
       }).join("")
-    : `<div class="muted" style="padding:14px 4px">No dishes yet — tap the ＋ on a dish to add it.</div>`;
+    : `<div class="muted" style="padding:14px 4px">No dishes yet — tap a dish to add it.</div>`;
   // Estimate INCLUDES tax so the "≈ ₹" staff quote matches the server's bill.
   const estTotal = () => { const sub = cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0); const rate = (taxModel(state.data.settings) || {}).rate || 0; return inr(sub + Math.round(sub * rate * 100) / 100); };
 
@@ -6432,19 +6441,18 @@ function openTakeOrder(table, rerender) {
   const paintList = () => { listEl.innerHTML = listHtml(); bindList(); syncSpy(); };
 
   function bindList() {
-    // Stepper buttons — stop the click bubbling to the tile (which also adds).
-    listEl.querySelectorAll("[data-inc]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); addOne(b.dataset.inc); paintList(); paintCart(); }));
-    listEl.querySelectorAll("[data-dec]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); removeOne(b.dataset.dec); paintList(); paintCart(); }));
-    // ✎ on a tile — open the per-dish allergen/note editor (adds the dish first if needed).
+    // ✎ on a tile — set this dish's allergens/note (edits the plain line, creating it first).
     listEl.querySelectorAll("[data-tile-edit]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); openTileEdit(b.dataset.tileEdit); }));
-    // Whole tile is a tap-to-add target (ignore clicks that landed on a control above).
-    listEl.querySelectorAll(".to-dish").forEach((t) => (t.onclick = (e) => { if (e.target.closest("[data-inc],[data-dec],[data-tile-edit]")) return; addOne(t.dataset.dish); paintList(); paintCart(); }));
+    // Whole tile is a tap-to-add target (ignore a click that landed on the ✎).
+    listEl.querySelectorAll(".to-dish").forEach((t) => (t.onclick = (e) => { if (e.target.closest("[data-tile-edit]")) return; addOne(t.dataset.dish); paintList(); paintCart(); }));
   }
   // Per-dish allergen + note popup opened from a dish tile's ✎ — mirrors the tablet's
-  // per-item editor. Adds the dish to the order if it isn't there yet, then edits its line.
+  // per-item editor. Edits the PLAIN line (adds it first if needed); giving it an
+  // allergy/note turns it into its own variant, so a later tap starts a fresh plain line.
   function openTileEdit(id) {
-    if (!line(id)) { addOne(id); paintList(); paintCart(); }
-    const l = line(id); if (!l) return;
+    let l = plainLine(id);
+    if (!l) { addOne(id); l = plainLine(id); paintList(); paintCart(); }
+    if (!l) return;
     wrap.querySelector(".to-tileedit-overlay")?.remove();
     const chips = () => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${l.avoid.has(a.slug) ? "on" : ""}" data-alg="${a.slug}">${esc(a.label)}</span>`).join("");
     const ov = el(`<div class="to-tileedit-overlay"><div class="to-tileedit">
@@ -6454,7 +6462,7 @@ function openTakeOrder(table, rerender) {
       <button class="btn primary to-te-done">Done</button>
     </div></div>`);
     wrap.querySelector(".to-modal").appendChild(ov);
-    const done = () => { ov.remove(); paintCart(); paintList(); };
+    const done = () => { ov.remove(); dedupe(); paintCart(); paintList(); };
     ov.querySelector(".to-te-x").onclick = done;
     ov.querySelector(".to-te-done").onclick = done;
     ov.onclick = (e) => { if (e.target === ov) done(); };
@@ -6462,13 +6470,14 @@ function openTakeOrder(table, rerender) {
     ov.querySelector(".to-te-note").oninput = (e) => { l.note = e.target.value; };
   }
   function bindCart() {
-    linesEl.querySelectorAll("[data-inc]").forEach((b) => (b.onclick = () => { addOne(b.dataset.inc); paintList(); paintCart(); }));
-    linesEl.querySelectorAll("[data-dec]").forEach((b) => (b.onclick = () => { removeOne(b.dataset.dec); paintList(); paintCart(); }));
-    linesEl.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { const i = cart.findIndex((c) => c.id === b.dataset.rm); if (i >= 0) { editing.delete(b.dataset.rm); cart.splice(i, 1); } paintList(); paintCart(); }));
-    linesEl.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => { const id = b.dataset.edit; editing.has(id) ? editing.delete(id) : editing.add(id); paintCart(); }));
-    // per-dish allergen chips + per-dish note
-    linesEl.querySelectorAll('.to-alg-chip[data-kind="line"]').forEach((chip) => (chip.onclick = () => { const l = line(chip.dataset.line); if (!l) return; const s = chip.dataset.alg; l.avoid.has(s) ? l.avoid.delete(s) : l.avoid.add(s); paintCart(); }));
-    linesEl.querySelectorAll(".to-line-note").forEach((inp) => (inp.oninput = () => { const l = line(inp.dataset.line); if (l) l.note = inp.value; }));
+    linesEl.querySelectorAll("[data-linc]").forEach((b) => (b.onclick = () => { incUid(+b.dataset.linc); paintList(); paintCart(); }));
+    linesEl.querySelectorAll("[data-ldec]").forEach((b) => (b.onclick = () => { decUid(+b.dataset.ldec); paintList(); paintCart(); }));
+    linesEl.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { const uid = +b.dataset.rm; const i = cart.findIndex((c) => c.uid === uid); if (i >= 0) { editing.delete(uid); cart.splice(i, 1); } paintList(); paintCart(); }));
+    // Closing a line's editor de-dupes (in case its allergy/note now matches another line).
+    linesEl.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => { const uid = +b.dataset.edit; if (editing.has(uid)) { editing.delete(uid); dedupe(); } else editing.add(uid); paintList(); paintCart(); }));
+    // per-dish allergen chips + per-dish note (no de-dupe mid-edit so lines don't collapse under you)
+    linesEl.querySelectorAll('.to-alg-chip[data-kind="line"]').forEach((chip) => (chip.onclick = () => { const l = byUid(+chip.dataset.line); if (!l) return; const s = chip.dataset.alg; l.avoid.has(s) ? l.avoid.delete(s) : l.avoid.add(s); paintList(); paintCart(); }));
+    linesEl.querySelectorAll(".to-line-note").forEach((inp) => (inp.oninput = () => { const l = byUid(+inp.dataset.line); if (l) l.note = inp.value; }));
   }
 
   // ── Category scroll-spy: the strip's active chip follows the list scroll, and tapping
@@ -6502,6 +6511,7 @@ function openTakeOrder(table, rerender) {
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
 
   async function send(confirmDuplicate = false) {
+    dedupe();
     if (!cart.length) { toast("Add at least one dish first", "err"); return; }
     if (!confirmDuplicate && !(await confirmDialog(`Send this order for Table ${table} to the kitchen?`, "Yes, send it"))) return;
     // Per-dish avoid + note ride in each item's note (no server change): "⚠ no X, Y · note".
