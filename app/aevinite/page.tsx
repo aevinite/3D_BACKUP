@@ -1,7 +1,8 @@
 "use client";
 // Admin · Command — the restaurant-centric home of the ops console (redesign
 // 2026-07-04). Purpose: reach ANY restaurant and its panels in one click.
-//   1. Compact stat strip (counts only — NO revenue anywhere in the admin panel).
+//   1. Compact stat strip (counts only — NO food/earnings revenue in the admin panel; the
+//      only money shown anywhere is platform SUBSCRIPTION income on Billing/Revenue).
 //   2. The restaurant command table: one dense row per restaurant with panel
 //      chips (M K T O), live open-table count, quick-open buttons (act-as +
 //      new tab) and a Manage → link.
@@ -191,7 +192,13 @@ export default function AdminCommand() {
               </span>
               <span className="num">{ovById.has(r.id) ? ovById.get(r.id) : "—"}</span>
               <span className="cmd-open">
-                <a className="obtn" href={`/r/${r.slug}/menu`} target="_blank" rel="noopener" title={`Open ${r.name}'s guest menu`}>Guest</a>
+                {r.active ? (
+                  <a className="obtn" href={`/r/${r.slug}/menu`} target="_blank" rel="noopener" title={`Open ${r.name}'s guest menu`}>Guest</a>
+                ) : (
+                  // Suspended → the guest menu is offline; show a disabled chip instead of a link
+                  // to a maintenance page (matches the detail view's EnterCard guard, audit 2026-07-23).
+                  <button className="obtn" disabled title={`${r.name}'s guest menu is offline while suspended`}>Guest</button>
+                )}
                 {PANEL_DEFS.map((p) => (
                   <button key={p.key} className="obtn" disabled={!panelOn(r, p.key) || busyRow === r.id}
                     onClick={() => openPanel(r, p.path)}

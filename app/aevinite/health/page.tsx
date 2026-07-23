@@ -86,7 +86,9 @@ export default function AdminHealth() {
             <span className={`adx-pill ${h.dbOk ? tier : "bad"}`}><span className="dot" />{h.dbOk ? `Database ${h.latencyMs}ms` : "Database unreachable"}</span>
             <span className={`adx-pill ${h.restaurantsError ? "warn" : "good"}`}><span className="dot" />{h.restaurantsError ? "restaurants unreadable" : `${h.restaurants.active} restaurant${h.restaurants.active !== 1 ? "s" : ""} live`}</span>
             {h.restaurants.suspended > 0 && <span className="adx-pill warn"><span className="dot" />{h.restaurants.suspended} suspended</span>}
-            <span className={`adx-pill ${h.staffError ? "warn" : h.staffOnlineNow > 0 ? "good" : "warn"}`}><span className="dot" />{h.staffError ? "staff status unreadable" : `${h.staffOnlineNow} staff online now`}</span>
+            {/* 0 staff online is normal (e.g. overnight) — it's NOT a health warning; only a
+                failed READ is. Green when someone's on, neutral when nobody is (audit 2026-07-23). */}
+            <span className={`adx-pill ${h.staffError ? "warn" : h.staffOnlineNow > 0 ? "good" : ""}`}><span className="dot" />{h.staffError ? "staff status unreadable" : `${h.staffOnlineNow} staff online now`}</span>
             <span className={`adx-pill ${h.issuesFeedWired ? (h.openIssues ? "warn" : "good") : "warn"}`}><span className="dot" />{h.issuesFeedWired ? `${h.openIssues} open issue${h.openIssues === 1 ? "" : "s"}` : "issue feed unreachable"}</span>
           </div>
 

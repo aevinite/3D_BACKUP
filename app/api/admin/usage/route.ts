@@ -20,7 +20,12 @@ export async function GET(req: NextRequest) {
   if (anyErr) return NextResponse.json({ error: anyErr.message }, { status: 500 });
 
   const meta = new Map<string, { name: string; slug: string }>((restsQ.data || []).map((r) => [r.id, { name: r.name, slug: r.slug }]));
-  const rows = ((usageQ.data as { restaurant_id: string; orders_7d: number; orders_30d: number; staff_total: number; table_count: number }[]) || []).map((u) => ({
+  const rows = ((usageQ.data as { restaurant_id: string; orders_7d: number; orders_30d: number; staff_total: number; table_count: number }[]) || [])
+    // Keep only LIVE restaurants: if the RPC ever returns a binned tenant it would otherwise
+    // show as a nameless "—" row AND inflate the totals below (every sibling route filters to
+    // live ids — usage was trusting the RPC; audit 2026-07-23).
+    .filter((u) => meta.has(u.restaurant_id))
+    .map((u) => ({
     id: u.restaurant_id,
     name: meta.get(u.restaurant_id)?.name || "—",
     slug: meta.get(u.restaurant_id)?.slug || "",

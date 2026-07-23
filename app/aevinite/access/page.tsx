@@ -271,10 +271,10 @@ export default function AccessPage() {
 
             {TABLET_CAPS.map(([k, l]) => <Row key={k} label={l}><Tri val={tablet[k] || "off"} onChange={(v) => saveTablet(k, v)} /></Row>)}
           </Card>
-          <Card title="Guest menu features" hint="Which features guests see on this restaurant's menu.">
+          <Card id="ac-guest" title="Guest menu features" hint="Which features guests see on this restaurant's menu.">
             {FEATURES.map(([k, l]) => <Row key={k} label={l}><Toggle on={features[k] !== false} onChange={(v) => saveFeature(k, v)} /></Row>)}
           </Card>
-          <Card title="Per-person overrides" hint="Override the tablet billing caps for one staff member. 'Default' = inherit the restaurant setting above.">
+          <Card id="ac-overrides" title="Per-person overrides" hint="Override the tablet billing caps for one staff member. 'Default' = inherit the restaurant setting above.">
             {staff.length === 0 && <p style={{ color: "var(--ac-muted,#857655)", fontSize: 14, margin: 0 }}>No manager/kitchen/tablet staff for this restaurant yet.</p>}
             {staff.map((u) => (
               <div key={u.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--ac-line,#f0e9dc)" }}>

@@ -13,7 +13,7 @@ import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
 import { openRestaurantPanel, PANEL_COLOR, ACT_LABEL, timeAgo, type Action } from "@/components/admin/shared";
 
-type Restaurant = { id: string; name: string };
+type Restaurant = { id: string; name: string; slug: string };
 type Session = { id: string; table_number: string; status: string; bill_no: number | null; invoice_no: number | null; invoice_voided: boolean };
 type Order = { id: string; table_number: string; kot_no: number | null; status: string; payment_status: string; created_at: string; session_id: string | null };
 type RepairData = { sessions: Session[]; orders: Order[] };
@@ -103,8 +103,9 @@ export default function AdminRepair() {
   // click-to-refresh keeps egress low, matching the rest of admin).
   const loadHub = useCallback(async () => {
     setErrLoading(true);
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const [e, q, h] = await Promise.all([
-      adminFetch<{ actions: Action[] }>("/api/admin/oplog?level=error&limit=50"),
+      adminFetch<{ actions: Action[] }>(`/api/admin/oplog?level=error&limit=50&since=${encodeURIComponent(since24h)}`),
       adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open"),
       adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
     ]);
@@ -167,7 +168,9 @@ export default function AdminRepair() {
     if (!r.ok) { toast(r.error || "Couldn't update that.", "err"); loadHub(); }
   };
 
-  const scopedName = restaurants.find((r) => r.id === rid)?.name || null;
+  const scoped = restaurants.find((r) => r.id === rid);
+  const scopedName = scoped?.name || null;
+  const scopedSlug = scoped?.slug || "";
   const groups = groupErrors(errors).filter((g) => !hidden.has(g.key));
 
   return (
@@ -186,7 +189,7 @@ export default function AdminRepair() {
       <div className="rp-strip">
         <div className={`rp-pill${groups.length ? " alert" : " ok"}`}>
           <i className={`fas ${groups.length ? "fa-triangle-exclamation" : "fa-circle-check"}`} aria-hidden="true" />
-          <span className="n">{errLoading ? "…" : errors.length}</span><span>problem{errors.length === 1 ? "" : "s"} (24h)</span>
+          <span className="n">{errLoading ? "…" : groups.length}</span><span>problem{groups.length === 1 ? "" : "s"} (24h)</span>
         </div>
         <div className="rp-pill">
           <i className="fas fa-robot" aria-hidden="true" /><span className="n">{requests.length}</span><span>waiting for Claude</span>
@@ -354,8 +357,11 @@ export default function AdminRepair() {
           <div className="adm-card" style={{ marginBottom: 12 }}>
             <h2 style={{ margin: "0 0 8px", fontSize: 14 }}>Other quick levers</h2>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Link className="adm-btn" href={`/aevinite/restaurants?focus=${rid}`}><i className="fas fa-toggle-on" aria-hidden="true" /> Feature switches</Link>
-              <Link className="adm-btn" href="/aevinite/settings"><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Maintenance mode</Link>
+              {/* Land ON the right section of THIS restaurant's detail (slug + ?section=), not just the
+                  restaurants list — the old links passed the UUID (focus matches by slug) so they
+                  opened nothing, and "Maintenance mode" pointed at Settings which has no such toggle. */}
+              <Link className="adm-btn" href={`/aevinite/restaurants?focus=${encodeURIComponent(scopedSlug)}&section=features`}><i className="fas fa-toggle-on" aria-hidden="true" /> Feature switches</Link>
+              <Link className="adm-btn" href={`/aevinite/restaurants?focus=${encodeURIComponent(scopedSlug)}&section=status`}><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Maintenance mode</Link>
               <Link className="adm-btn" href={`/aevinite/logs?restaurant_id=${rid}`}><i className="fas fa-scroll" aria-hidden="true" /> Full activity log</Link>
             </div>
           </div>

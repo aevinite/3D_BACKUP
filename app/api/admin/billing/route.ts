@@ -117,6 +117,9 @@ export const POST = withIdempotency(async (req: NextRequest) => {
     // Number("12,000") → NaN bug). Empty is allowed (it clears the amount).
     const amount = parseAmount(body.amount);
     if (body.amount !== "" && body.amount != null && amount == null) return bad("Amount isn't a valid number — e.g. 12000 or 12,000.");
+    // A plan can be 0 (free/comped) but never negative — a negative would flow straight into
+    // Revenue's MRR/ARR as a subtraction and quietly understate the platform's income.
+    if (amount != null && amount < 0) return bad("Amount can't be negative.");
     const patch = {
       restaurant_id: rid,
       plan: body.plan ? String(body.plan) : null,

@@ -4,7 +4,8 @@
 // Shows the subject/details, WHO raised it and from WHICH panel (raised_by + a
 // role chip), any attached PHOTO (thumbnail → opens full) and VOICE NOTE (inline
 // player), and a Resolve / Reopen button when onSetStatus is provided.
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useBackClose } from "@/lib/backStack";
 
 export type TicketLike = {
   id: string;
@@ -51,6 +52,18 @@ export default function TicketCard({
   const [imgOpen, setImgOpen] = useState(false);
   const resolved = issue.status === "resolved";
   const who = whoLine(issue);
+
+  // The photo lightbox is a full-screen overlay — register it with the back-stack so the
+  // phone's hardware Back closes the PHOTO first (before this it wasn't registered, so Back
+  // skipped it and closed the surrounding drawer/list instead — owner's back-button concern,
+  // audit 2026-07-23). Also close on Escape. Id includes the ticket id so two cards never clash.
+  useBackClose(`admin-ticket-photo-${issue.id}`, imgOpen, () => setImgOpen(false));
+  useEffect(() => {
+    if (!imgOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setImgOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [imgOpen]);
 
   return (
     <div className="adm-card" style={{ display: "flex", alignItems: "flex-start", gap: 12, opacity: resolved ? 0.72 : 1 }}>

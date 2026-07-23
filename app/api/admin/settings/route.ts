@@ -22,8 +22,11 @@ export async function GET(req: NextRequest) {
   if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
   const s = r.data?.[0] || {};
   return NextResponse.json({
-    oplog_retention_days: s.oplog_retention_days ?? 90,
-    custlog_retention_days: s.custlog_retention_days ?? 90,
+    // Default to the 30-day MAX (clampDays cap), not 90 — an unconfigured row used to report
+    // 90, which the UI then rendered as a phantom "90 days" option above its own "1-month
+    // maximum" that couldn't be reselected once changed (audit 2026-07-23).
+    oplog_retention_days: s.oplog_retention_days ?? 30,
+    custlog_retention_days: s.custlog_retention_days ?? 30,
   });
 }
 

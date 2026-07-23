@@ -157,8 +157,9 @@ export function useActiveAutoRefresh(fn: () => void, intervalMs = 60000, idleMs 
   }, [intervalMs, idleMs]);
 }
 
-// NO revenue anywhere in the admin panel (owner 2026-07-03: the admin sees no earnings —
-// no ₹ at all, including table "due" amounts).
+// NO food/earnings revenue in these stat cards (owner 2026-07-03: the admin sees no restaurant
+// earnings — no ₹ at all here, including table "due" amounts). Platform SUBSCRIPTION income
+// (what restaurants pay us) is a separate thing and does show on Billing/Revenue by design.
 export function StatCards({ ov }: { ov: Overview | null }) {
   const cells: [string, string | number][] = [
     ["Open tables", ov ? ov.openTables : "…"],
