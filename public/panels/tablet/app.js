@@ -447,7 +447,9 @@ function tabletTagsOn() {
 }
 // This table's mark ('' when none) — the slim summary carries it for every tile.
 function ttagOf(t) {
-  if (!tabletTagsOn()) return "";
+  // ADMIN X-RAY rule (owner 2026-07-23): the admin act-as view always shows the mark
+  // regardless of the restaurant's feature toggle; real waiters see it only when on.
+  if (!tHigher() && !tabletTagsOn()) return "";
   const tile = (state.summary.tiles || {})[String(t)];
   return (tile && tile.tag) || "";
 }
