@@ -1628,10 +1628,9 @@ function mergedOrderCardHtml(g) {
   const invoiced = !!sid && invNo != null && !invVoided;
   let billBtns;
   if (sid && !invoiced) {
-    // Running tab: Generate-invoice AND a plain Print, so staff can print the CURRENT
-    // bill for the guest without having to generate a tax invoice first (owner 2026-07-06).
-    billBtns = (anyUnpaid ? `<button class="ord-btn invoice" data-gen-invoice="${esc(sid)}">🧾 Generate invoice</button>` : "")
-      + `<button class="ord-btn ghost" data-print-group="${esc(sessKey)}">🖨 Print</button>`;
+    // Running tab: Generate-invoice ONLY — no direct Print until an invoice exists
+    // (owner 2026-07-24: print must not be available before the invoice is generated).
+    billBtns = anyUnpaid ? `<button class="ord-btn invoice" data-gen-invoice="${esc(sid)}">🧾 Generate invoice</button>` : "";
   } else if (sid && invoiced) {
     const pay = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "";
     billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">🖨 Print</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button>`;
@@ -2500,6 +2499,11 @@ async function markTablePaid(t) {
   if (r && r.special === "khata") { await khataParkFlow(t, os); return; }
   if (r && r.special === "onhouse") { await onHouseSettle(t); return; }
   if (!r) return;
+  // Every settled bill gets an invoice (owner 2026-07-24): auto-generate on settle if the
+  // session isn't invoiced yet, so a paid bill always shows Print (never "Generate invoice").
+  // Best-effort — a failed invoice must not undo the payment the staff just took.
+  const sid = os[0] && os[0].session_id;
+  if (sid) { try { const ss = (state.board.sessions || []).find((s) => s.id === sid); if (!ss || ss.invoice_no == null) await api("POST", `/sessions/${sid}/invoice`); } catch (e) { /* invoice stays generable from the bill */ } }
   await pollTables([String(t)]); // refresh this tile's summary → green pay ring / "Cleared"
 }
 
@@ -6230,7 +6234,13 @@ function tablePanelParts(t) {
   // Split-bill helper: tells staff each guest's even share of the bill total. Doesn't change the bill
   // or payment — the manager still marks the whole bill paid once collected.
   const splitBtn = os.length ? `<button class="btn" data-split="${esc(mBill.total)}" title="Split the bill evenly between guests">🍴 Split</button>` : "";
-  const printBtn = os.length ? `<button class="btn" id="sxPrint">🖨 Print</button>` : "";
+  // Invoice-first billing (owner 2026-07-24): NO direct Print on a running tab — show
+  // "Generate invoice" first; Print (+ Reopen) appears only once an invoice exists. A
+  // settled bill is always invoiced (markTablePaid auto-generates it), so it shows Print.
+  const invoicedNow = !!sess && sess.invoice_no != null && !sess.invoice_voided;
+  const printBtn = !os.length ? "" : (invoicedNow
+    ? `<button class="btn" id="sxPrint">🖨 Print</button><button class="btn" id="sxReopen" title="Void the invoice to change the bill again">↩ Reopen</button>`
+    : `<button class="btn" id="sxGenInv">🧾 Generate invoice</button>`);
   // The bill now shows a full BREAKDOWN (subtotal · discount · GST · total) summed
   // across the table's non-cancelled orders, not just a one-line "Due/Total".
   // Breakdown from billMath (same rate + discount-before-tax rule as the printed bill),
@@ -6327,34 +6337,58 @@ function openTakeOrder(table, rerender) {
   document.querySelector(".to-overlay")?.remove();
   const dishes = (state.data.items || []).filter((d) => !(d.tags || []).includes("sold-out"));
   const cats = (state.data.categories || []).filter((c) => dishes.some((d) => d.category === c.slug));
-  const cart = [];               // [{ id, title, price, qty, note }]
-  const avoid = new Set();        // whole-order allergens (ALLERGEN slugs)
-  let note = "";
-  let cat = "";
+  // Dishes with an unknown/empty category still need a home so "all shown" holds.
+  const uncategorised = dishes.filter((d) => !cats.some((c) => c.slug === d.category));
+  const sections = cats.map((c) => ({ slug: c.slug, name: localizeCat(c.name, c.slug), items: dishes.filter((d) => d.category === c.slug) }))
+    .concat(uncategorised.length ? [{ slug: "_other", name: "Other", items: uncategorised }] : []);
+
+  const cart = [];               // [{ id, title, price, qty, note, avoid:Set }]
+  const orderAvoid = new Set();  // whole-order allergens
+  let orderNote = "";
   let q = "";
+  const editing = new Set();     // cart-line ids whose per-dish editor is open
 
-  const qtyIn = (id) => { const l = cart.find((c) => c.id === id); return l ? l.qty : 0; };
-  const addOne = (id) => { const l = cart.find((c) => c.id === id); if (l) l.qty = Math.min(99, l.qty + 1); else { const d = dishes.find((x) => x.id === id); if (d) cart.push({ id, title: d.title, price: parseFloat(d.price) || 0, qty: 1, note: "" }); } };
-  const removeOne = (id) => { const i = cart.findIndex((c) => c.id === id); if (i < 0) return; if (cart[i].qty > 1) cart[i].qty--; else cart.splice(i, 1); };
+  const line = (id) => cart.find((c) => c.id === id);
+  const qtyIn = (id) => { const l = line(id); return l ? l.qty : 0; };
+  const addOne = (id) => { const l = line(id); if (l) l.qty = Math.min(99, l.qty + 1); else { const d = dishes.find((x) => x.id === id); if (d) cart.push({ id, title: d.title, price: parseFloat(d.price) || 0, qty: 1, note: "", avoid: new Set() }); } };
+  const removeOne = (id) => { const i = cart.findIndex((c) => c.id === id); if (i < 0) return; if (cart[i].qty > 1) cart[i].qty--; else { cart.splice(i, 1); editing.delete(id); } };
 
-  const dishTiles = () => {
-    const ql = q.trim().toLowerCase();
-    const list = dishes.filter((d) => (!cat || d.category === cat) && (!ql || (d.title || "").toLowerCase().includes(ql)));
-    if (!list.length) return `<div class="muted" style="padding:16px">No dishes match.</div>`;
-    return list.map((d) => {
-      const n = qtyIn(d.id);
-      const img = d.image ? `<span class="to-dish-img" style="background-image:url('${esc(d.image)}')"></span>` : `<span class="to-dish-img">🍽</span>`;
-      return `<button class="to-dish ${n ? "has" : ""}" data-add="${esc(d.id)}">${n ? `<span class="to-badge">×${n}</span>` : ""}${img}<span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></span></button>`;
-    }).join("");
+  // A tile's qty control: a "+ Add" when empty, a −/n/+ stepper once in the cart.
+  const tileStepper = (id) => { const n = qtyIn(id);
+    return n ? `<span class="to-step"><button class="to-q" data-dec="${esc(id)}" aria-label="One fewer">−</button><b>${n}</b><button class="to-q" data-inc="${esc(id)}" aria-label="One more">＋</button></span>`
+             : `<button class="to-add" data-inc="${esc(id)}" aria-label="Add">＋</button>`; };
+  const dishTile = (d) => {
+    const img = d.image ? `<span class="to-dish-img" style="background-image:url('${esc(d.image)}')"></span>` : `<span class="to-dish-img">🍽</span>`;
+    return `<div class="to-dish ${qtyIn(d.id) ? "has" : ""}" data-dish="${esc(d.id)}">${img}<span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></span>${tileStepper(d.id)}</div>`;
   };
-  const catChips = () => `<button class="to-cat ${cat ? "" : "on"}" data-cat="">All</button>` +
-    cats.map((c) => `<button class="to-cat ${cat === c.slug ? "on" : ""}" data-cat="${esc(c.slug)}">${esc(localizeCat(c.name, c.slug))}</button>`).join("");
-  const algChips = () => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${avoid.has(a.slug) ? "on" : ""}" data-alg="${a.slug}">${esc(a.label)}</span>`).join("");
+  const listHtml = () => {
+    const ql = q.trim().toLowerCase();
+    if (ql) { // searching → one flat grid of matches, no headers
+      const list = dishes.filter((d) => (d.title || "").toLowerCase().includes(ql));
+      return list.length ? `<div class="to-grid">${list.map(dishTile).join("")}</div>` : `<div class="muted" style="padding:16px">No dishes match "${esc(q)}".</div>`;
+    }
+    // not searching → every category shown, in order, each its own scroll-spy section
+    return sections.map((s) => `<section class="to-sec" data-sec="${esc(s.slug)}"><h4 class="to-sec-h">${esc(s.name)}</h4><div class="to-grid">${s.items.map(dishTile).join("")}</div></section>`).join("");
+  };
+  const catChips = () => sections.map((s, i) => `<button class="to-cat ${i === 0 ? "on" : ""}" data-jump="${esc(s.slug)}">${esc(s.name)}</button>`).join("");
+  const algChips = (set, kind, id) => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${set.has(a.slug) ? "on" : ""}" data-alg="${a.slug}" data-kind="${kind}"${id ? ` data-line="${esc(id)}"` : ""}>${esc(a.label)}</span>`).join("");
   const cartLines = () => cart.length
-    ? cart.map((c) => `<div class="to-line"><span class="to-line-t">${esc(c.title)}</span><span class="to-qty"><button class="to-q" data-dec="${esc(c.id)}" aria-label="Less">−</button><b>${c.qty}</b><button class="to-q" data-inc="${esc(c.id)}" aria-label="More">＋</button></span><span class="to-line-p">${inr((parseFloat(c.price) || 0) * c.qty)}</span><button class="to-rm" data-rm="${esc(c.id)}" aria-label="Remove">🗑</button></div>`).join("")
-    : `<div class="muted" style="padding:14px 4px">No dishes yet — tap dishes on the left to add them.</div>`;
-  // Estimate INCLUDES tax so the "≈ ₹" staff quote matches the bill the server produces
-  // (was subtotal-only, understating by the tax — owner deep-QA 2026-07-23).
+    ? cart.map((c) => {
+        const open = editing.has(c.id);
+        const cues = [c.avoid.size ? `⚠ no ${[...c.avoid].join(", ")}` : "", c.note ? `📝 ${c.note}` : ""].filter(Boolean).join(" · ");
+        return `<div class="to-line ${open ? "editing" : ""}">
+          <div class="to-line-main">
+            <span class="to-line-t">${esc(c.title)}${cues ? `<span class="to-line-cue">${esc(cues)}</span>` : ""}</span>
+            <span class="to-step"><button class="to-q" data-dec="${esc(c.id)}" aria-label="One fewer">−</button><b>${c.qty}</b><button class="to-q" data-inc="${esc(c.id)}" aria-label="One more">＋</button></span>
+            <span class="to-line-p">${inr((parseFloat(c.price) || 0) * c.qty)}</span>
+            <button class="to-edit ${open ? "on" : ""}" data-edit="${esc(c.id)}" title="Allergens & note for this dish">✎</button>
+            <button class="to-rm" data-rm="${esc(c.id)}" aria-label="Remove">🗑</button>
+          </div>
+          ${open ? `<div class="to-line-edit"><div class="to-lbl">Avoid in this dish</div><div class="to-alg">${algChips(c.avoid, "line", c.id)}</div><input class="to-line-note" data-line="${esc(c.id)}" maxlength="120" placeholder="Note for this dish (e.g. extra spicy)" value="${esc(c.note)}"></div>` : ""}
+        </div>`;
+      }).join("")
+    : `<div class="muted" style="padding:14px 4px">No dishes yet — tap the ＋ on a dish to add it.</div>`;
+  // Estimate INCLUDES tax so the "≈ ₹" staff quote matches the server's bill.
   const estTotal = () => { const sub = cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0); const rate = (taxModel(state.data.settings) || {}).rate || 0; return inr(sub + Math.round(sub * rate * 100) / 100); };
 
   const wrap = el(`<div class="sx-modal-overlay to-overlay"><div class="sx-modal to-modal">
@@ -6363,14 +6397,14 @@ function openTakeOrder(table, rerender) {
       <div class="to-menu">
         <input type="search" class="to-search" placeholder="🔎 Search dishes…">
         <div class="to-cats">${catChips()}</div>
-        <div class="to-list">${dishTiles()}</div>
+        <div class="to-list">${listHtml()}</div>
       </div>
       <div class="to-cart">
         <div class="to-cart-h">This order</div>
         <div class="to-lines">${cartLines()}</div>
         <div class="to-extras">
           <div class="to-lbl">⚠ Avoid (whole order)</div>
-          <div class="to-alg">${algChips()}</div>
+          <div class="to-alg">${algChips(orderAvoid, "order")}</div>
           <textarea class="to-note" rows="2" placeholder="Note for the kitchen (optional)"></textarea>
         </div>
         <div class="to-foot">
@@ -6383,7 +6417,7 @@ function openTakeOrder(table, rerender) {
   document.body.appendChild(wrap);
 
   const close = () => wrap.remove();
-  wrap.__lfhClose = close; // back/Esc closes THIS modal (wireOverlayBack prefers __lfhClose)
+  wrap.__lfhClose = close;
 
   const listEl = wrap.querySelector(".to-list");
   const linesEl = wrap.querySelector(".to-lines");
@@ -6392,23 +6426,46 @@ function openTakeOrder(table, rerender) {
   const sendBtn = wrap.querySelector(".to-send");
 
   const paintCart = () => { linesEl.innerHTML = cartLines(); bindCart(); totalEl.textContent = estTotal(); sendBtn.disabled = !cart.length; };
-  const paintList = () => { listEl.innerHTML = dishTiles(); bindList(); };
-  const paintCats = () => { catsEl.innerHTML = catChips(); catsEl.querySelectorAll("[data-cat]").forEach((b) => (b.onclick = () => { cat = b.dataset.cat; paintCats(); paintList(); })); };
+  const paintList = () => { listEl.innerHTML = listHtml(); bindList(); syncSpy(); };
 
-  function bindList() { listEl.querySelectorAll("[data-add]").forEach((b) => (b.onclick = () => { addOne(b.dataset.add); paintList(); paintCart(); })); }
+  function bindList() {
+    listEl.querySelectorAll("[data-inc]").forEach((b) => (b.onclick = () => { addOne(b.dataset.inc); paintList(); paintCart(); }));
+    listEl.querySelectorAll("[data-dec]").forEach((b) => (b.onclick = () => { removeOne(b.dataset.dec); paintList(); paintCart(); }));
+  }
   function bindCart() {
     linesEl.querySelectorAll("[data-inc]").forEach((b) => (b.onclick = () => { addOne(b.dataset.inc); paintList(); paintCart(); }));
     linesEl.querySelectorAll("[data-dec]").forEach((b) => (b.onclick = () => { removeOne(b.dataset.dec); paintList(); paintCart(); }));
-    linesEl.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { const i = cart.findIndex((c) => c.id === b.dataset.rm); if (i >= 0) cart.splice(i, 1); paintList(); paintCart(); }));
+    linesEl.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { const i = cart.findIndex((c) => c.id === b.dataset.rm); if (i >= 0) { editing.delete(b.dataset.rm); cart.splice(i, 1); } paintList(); paintCart(); }));
+    linesEl.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => { const id = b.dataset.edit; editing.has(id) ? editing.delete(id) : editing.add(id); paintCart(); }));
+    // per-dish allergen chips + per-dish note
+    linesEl.querySelectorAll('.to-alg-chip[data-kind="line"]').forEach((chip) => (chip.onclick = () => { const l = line(chip.dataset.line); if (!l) return; const s = chip.dataset.alg; l.avoid.has(s) ? l.avoid.delete(s) : l.avoid.add(s); paintCart(); }));
+    linesEl.querySelectorAll(".to-line-note").forEach((inp) => (inp.oninput = () => { const l = line(inp.dataset.line); if (l) l.note = inp.value; }));
   }
-  bindList(); bindCart(); paintCats();
 
+  // ── Category scroll-spy: the strip's active chip follows the list scroll, and tapping
+  //    a chip jumps to that section — exactly like the guest menu / tablet. ──
+  const jumpTo = (slug) => { const sec = listEl.querySelector(`.to-sec[data-sec="${CSS.escape(slug)}"]`); if (sec) listEl.scrollTo({ top: sec.offsetTop - listEl.offsetTop - 4, behavior: "smooth" }); };
+  const syncSpy = () => {
+    const secs = [...listEl.querySelectorAll(".to-sec")];
+    if (!secs.length) return; // searching (flat list) — no spy
+    const top = listEl.scrollTop + 8;
+    let active = secs[0].dataset.sec;
+    for (const s of secs) { if (s.offsetTop - listEl.offsetTop <= top) active = s.dataset.sec; }
+    catsEl.querySelectorAll("[data-jump]").forEach((b) => {
+      const on = b.dataset.jump === active; b.classList.toggle("on", on);
+      if (on) b.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+    });
+  };
+  catsEl.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => jumpTo(b.dataset.jump)));
+  listEl.addEventListener("scroll", () => { window.requestAnimationFrame(syncSpy); }, { passive: true });
+
+  bindList(); bindCart();
   const search = wrap.querySelector(".to-search");
   search.oninput = () => { q = search.value; paintList(); };
-  wrap.querySelector(".to-note").oninput = (e) => { note = e.target.value; };
-  wrap.querySelectorAll(".to-alg-chip").forEach((chip) => (chip.onclick = () => {
-    const s = chip.dataset.alg; if (avoid.has(s)) avoid.delete(s); else avoid.add(s);
-    chip.classList.toggle("on", avoid.has(s));
+  wrap.querySelector(".to-note").oninput = (e) => { orderNote = e.target.value; };
+  wrap.querySelectorAll('.to-alg-chip[data-kind="order"]').forEach((chip) => (chip.onclick = () => {
+    const s = chip.dataset.alg; orderAvoid.has(s) ? orderAvoid.delete(s) : orderAvoid.add(s);
+    chip.classList.toggle("on", orderAvoid.has(s));
   }));
   wrap.querySelector(".tbl-modal-close").onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
@@ -6416,11 +6473,15 @@ function openTakeOrder(table, rerender) {
   async function send(confirmDuplicate = false) {
     if (!cart.length) { toast("Add at least one dish first", "err"); return; }
     if (!confirmDuplicate && !(await confirmDialog(`Send this order for Table ${table} to the kitchen?`, "Yes, send it"))) return;
-    const items = cart.map((c) => ({ id: c.id, qty: c.qty, note: c.note || undefined }));
-    const allergies = [...avoid];
+    // Per-dish avoid + note ride in each item's note (no server change): "⚠ no X, Y · note".
+    const items = cart.map((c) => {
+      const parts = [c.avoid.size ? `⚠ no ${[...c.avoid].join(", ")}` : "", (c.note || "").trim()].filter(Boolean);
+      return { id: c.id, qty: c.qty, note: parts.join(" · ") || undefined };
+    });
+    const allergies = [...orderAvoid];
     sendBtn.disabled = true;
     try {
-      const r = await api("POST", "/order", { table: String(table), items, allergies, note: note || null, ...(confirmDuplicate ? { confirmDuplicate: true } : {}) });
+      const r = await api("POST", "/order", { table: String(table), items, allergies, note: orderNote || null, ...(confirmDuplicate ? { confirmDuplicate: true } : {}) });
       if (r && r.queued) { toast("Saved ✓ — it'll send to the kitchen when you're back online.", "ok"); close(); await loadSessions(); if (rerender) rerender(); return; }
       toast(r && r.kot_no != null ? `Sent! Kitchen ticket #${r.kot_no}` : "Order sent to the kitchen", "ok");
       close(); await loadSessions(); if (rerender) rerender();
@@ -6434,6 +6495,7 @@ function openTakeOrder(table, rerender) {
     }
   }
   sendBtn.onclick = () => send(false);
+  syncSpy();
   search.focus();
 }
 
@@ -7181,6 +7243,11 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // Print bill: a clean printable window with KOT numbers, discounts and totals.
   const pr = root.querySelector("#sxPrint");
   if (pr) pr.onclick = () => printBill(t, sess, os);
+  // Invoice-first billing (owner 2026-07-24): Generate invoice / Reopen (void) buttons.
+  const gi = root.querySelector("#sxGenInv");
+  if (gi && sess) gi.onclick = () => generateInvoice(sess.id);
+  const ro = root.querySelector("#sxReopen");
+  if (ro && sess) ro.onclick = () => voidInvoice(sess.id);
   const payAll = root.querySelector("#sxPayAll"); if (payAll) payAll.onclick = () => markTablePaid(t);
   const tagB = root.querySelector("#sxTag"); if (tagB) tagB.onclick = () => openTagModal(t);
   // 🍴 Split: with the KOT ladder ON this is the REAL split-settle (several payment
