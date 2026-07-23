@@ -1760,20 +1760,22 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 /* flex:none + a definite min-height so the horizontal-scroll row can't be vertically
    squished/clipped by the flex column (overflow-x:auto also auto's the y-axis, which was
    cutting the chips' top — owner 2026-07-24). */
-.to-cats { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; min-height: 42px; padding: 4px 14px 10px; overflow-x: auto; overflow-y: hidden; flex-wrap: nowrap; scrollbar-width: none; }
+.to-cats { flex: 0 0 auto; box-sizing: border-box; height: 46px; display: flex; align-items: center; gap: 7px; padding: 0 14px; overflow-x: auto; overflow-y: hidden; flex-wrap: nowrap; scrollbar-width: none; }
 .to-cats::-webkit-scrollbar { display: none; }
 .to-cat { flex: 0 0 auto; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
 .to-cat:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
 .to-cat.on { background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold-strong); border-color: var(--gold); }
-.to-list { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 0 12px 14px; }
+.to-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 12px 14px; }
 .to-sec { padding-top: 4px; }
 .to-sec-h { position: sticky; top: 0; z-index: 2; margin: 0 0 8px; padding: 8px 2px 6px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--gold-strong);
   background: linear-gradient(180deg, var(--panel) 70%, transparent); }
-.to-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-bottom: 6px; }
-.to-dish { position: relative; display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 11px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); min-height: 62px; cursor: pointer; transition: border-color .12s, background .12s, transform .08s; }
+.to-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 8px; margin-bottom: 6px; }
+.to-dish { position: relative; display: flex; align-items: center; gap: 10px; text-align: left; padding: 8px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); min-height: 64px; cursor: pointer; transition: border-color .12s, background .12s, transform .08s; }
 .to-dish:hover { border-color: color-mix(in srgb, var(--gold) 55%, var(--line)); }
 .to-dish:active { transform: scale(.99); }
-.to-dish-edit { flex: none; width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; }
+/* ✎ pinned to the image's top-left corner — a small dark chip, never in the name row */
+.to-dish-imgwrap { position: relative; flex: none; }
+.to-dish-edit { position: absolute; top: -6px; left: -6px; width: 22px; height: 22px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 11px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm); }
 .to-dish-edit:hover { border-color: var(--gold); color: var(--gold-strong); }
 /* Per-dish allergy/note popup from a tile's ✎ (mirrors the tablet). Sits over the modal. */
 .to-tileedit-overlay { position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); border-radius: 18px; }
@@ -1783,17 +1785,18 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .to-te-x:hover { color: var(--text); }
 .to-te-note { margin: 10px 0 14px; }
 .to-te-done { width: 100%; }
-.to-dish-img { width: 44px; height: 44px; flex: none; border-radius: 10px; background-size: cover; background-position: center; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 16px; }
+.to-dish-img { width: 46px; height: 46px; flex: none; border-radius: 10px; background-size: cover; background-position: center; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 16px; }
 .to-dish-meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .to-dish.has { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 12%, var(--panel-2)); }
-.to-dish-t { font-size: 13.5px; font-weight: 600; line-height: 1.25; }
+.to-dish-t { font-size: 13.5px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
 .to-dish-p { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
-/* Dish qty control (tablet-style): a "+" to add, a −/n/+ stepper once in the cart. */
+/* Right-hand control: ×N count on top, a −/＋ pair below (or a lone ＋ when empty). */
+.to-dish-ctl { flex: none; display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 5px; }
+.to-dish-n { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--gold-strong); }
+.to-dish-btns { display: inline-flex; gap: 5px; }
 .to-add { flex: none; width: 34px; height: 34px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--gold) 50%, var(--line)); background: color-mix(in srgb, var(--gold) 12%, var(--panel-2)); color: var(--gold-strong); font-size: 19px; font-weight: 700; line-height: 1; cursor: pointer; }
 .to-add:hover { background: var(--gold); color: #2a1d0c; border-color: var(--gold); }
-.to-step { flex: none; display: inline-flex; align-items: center; gap: 4px; }
-.to-step b { min-width: 18px; text-align: center; font-variant-numeric: tabular-nums; }
-.to-q { width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 16px; cursor: pointer; line-height: 1; }
+.to-q { width: 32px; height: 32px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 17px; cursor: pointer; line-height: 1; }
 .to-q:hover { border-color: var(--gold); color: var(--gold-strong); }
 .to-cart { flex: 0 0 330px; display: flex; flex-direction: column; min-width: 0; background: var(--panel); }
 .to-cart-h { padding: 14px 16px 8px; font-weight: 800; font-size: 14px; color: var(--gold); }
