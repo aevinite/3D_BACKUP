@@ -61,9 +61,18 @@ full access; everything done when I wake." Spec = memory `access-panel-BUILD.md`
       on dev server :4100 logged in as admin: GET 200 returns all keys w/ real pizza-palace data; POST 200
       persists (config round-trip). NOTE: worktree needed .env.local copied in (gitignored) to run its own
       dev server; dev server on :4100 (owner's is :4000).
-      TODO (part 3): build the React page at NEW /aevinite/access2 route (don't touch old page) porting the
-      rail+accordion prototype using admin tokens (purple/cyan, .adm-card/.adm-crumbs); wire to this route;
-      verify live as admin.
+      done (part 3): BUILT app/aevinite/access2/page.tsx — the full rail+accordion panel as a React client
+      component in the admin theme (cyan/dark, .adm-card/.adm-crumbs, var(--accent) NOT gold). General tab
+      (rail + accordion sections, guest switches, ladder cards w/ master toggle + reach Owner/+Manager/+Tablet
+      + Owner-can/Manager-can sub-tabs + M/O badges + conflict warning + discount cap + waiter On/On-PIN rung
+      + Who-has-this). Per-person tab (staff list sorted role, tri-state Default/On/Off + On-PIN for tablet,
+      Who-has-this list showing ALL relevant people w/ matching count). Reads GET access2, saves POST (patch
+      mirrors locally). Wires per-person to /api/owner/staff PATCH. VERIFIED LIVE as admin on :4100: renders
+      inside admin shell, 10 areas, all controls work, Who-list correct (2 of 4), 0 console errors, mobile
+      390px no h-scroll. LESSON: tsc passed but Next SWC rejected an `as` cast inside a spread — must LOAD the
+      page, not just type-check. P3 COMPLETE.
+      Minor flagged (not blocking): sub-options show 0/N when access_config empty (could default owner all-on);
+      entry button from restaurant-detail + breadcrumb back-to-origin not yet wired (small nav, next).
 - [ ] P4 — Write layer + server enforcement (cascade, mgr⊆owner, tablet⊆mgr, grant-only-what-you-hold)
 - [ ] P5 — Per-person overrides (Default/On/Off/On-with-PIN) + General→Person cross-link + fixed "Who has this" list
 - [ ] P6 — Owner panel per-restaurant privacy (grey-out + zero data for ungranted; no admin/owner clash)
