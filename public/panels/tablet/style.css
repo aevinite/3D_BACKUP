@@ -688,7 +688,7 @@ body:has(.detail-pop) #tabletClose { display: none; }
    APPROVED design (docs/superpowers/specs/2026-07-22-table-tags-mockup.html):
    coloured border + rotated corner ribbon + diagonal-stripe/radial tint + pill
    badge, layered OVER the state look. VIP purple+gold · Family crimson · Guest platinum. */
-:root { --tag-vip: #8b5cf6; --tag-family: #e11d48; --tag-guest: #aab4c4; }
+:root { --tag-vip: #8b5cf6; --tag-family: #e11d48; --tag-guest: #c2c7d0; }
 .tile.t-tag { overflow: hidden; position: relative; border-width: 2px; }
 .tile.t-tag::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
   background:
@@ -702,7 +702,12 @@ body:has(.detail-pop) #tabletClose { display: none; }
   background: var(--tagc); color: #fff; font-size: 9.5px; font-weight: 800; letter-spacing: .6px;
   padding: 3px 34px; text-transform: uppercase; box-shadow: 0 2px 8px rgba(0,0,0,.45); white-space: nowrap; pointer-events: none; }
 .tile.tag-vip .t-ribbon { color: #2a1d0c; background: linear-gradient(90deg, #e8b884, #f2d29a); }
-.tile.tag-guest .t-ribbon { color: #1c2230; background: linear-gradient(90deg, #e5eaf2, #9aa6ba); }
+/* Guest ribbon — DARK default = silver/white metallic (approved 2026-07-24). */
+.tile.tag-guest .t-ribbon { color: #1c2230; background: linear-gradient(135deg, #ffffff, #c9ced6 52%, #ffffff); border: 1px solid #e5eaf2; }
+/* LIGHT MODE: guest → BLACK metallic; VIP → deeper violet. */
+html[data-theme="light"] { --tag-guest: #3a4150; --tag-vip: #6d28d9; }
+html[data-theme="light"] .tile.tag-guest .t-ribbon { background: linear-gradient(135deg, #3a4150, #0d0f14 52%, #2b313d); color: #eef1f6; border: 1px solid #565d6d; }
+html[data-theme="light"] .tile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb, #6d28d9 40%, transparent); }
 .t-tagbadge { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 4px; align-self: flex-start;
   margin: 2px 0; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
   background: color-mix(in srgb, var(--tagc) 26%, transparent); color: color-mix(in srgb, var(--tagc) 65%, #fff);
