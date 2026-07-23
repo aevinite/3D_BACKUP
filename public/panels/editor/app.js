@@ -6084,7 +6084,13 @@ function tablePanelParts(t) {
   // dish-status PROGRESS BAR (how much of this table is served vs cooking vs new).
   // Both detail views (in-panel + legacy modal) render these so they stay identical.
   const tile = tableTileState(t);
-  const headPill = `<span class="tp-pill tp-pill-${esc(tile.st)}">● ${esc(tile.label)}</span>`;
+  // VIP / Family / Owner's-guest mark (mig 166) shown right in the detail HEADER so a
+  // marked table is unmistakable when opened — not only on the floor tile (owner
+  // 2026-07-23: "the mark is not showing in that table thing"). tagForTable already
+  // gates on the feature being on.
+  const hdrTag = TABLE_TAG_INFO[tagForTable(t)];
+  const headTagPill = hdrTag ? `<span class="tp-tagpill tag-${tagForTable(t)}">${hdrTag.emoji} ${esc(hdrTag.label)}</span>` : "";
+  const headPill = `<span class="tp-pill tp-pill-${esc(tile.st)}">● ${esc(tile.label)}</span>${headTagPill}`;
   const liveRowsAll = os.filter((o) => o.status !== "cancelled").flatMap((o) => orderItemRows(o));
   // Count dishes by QUANTITY (a "2× Cappuccino" row is 2 dishes), matching both the summary
   // tile and the floor tile's "0/3 served" — so the head's numbers stay identical whether
@@ -6523,27 +6529,35 @@ const KOT_TIPS = {"shift": "Moves this whole party — every order, waiter call 
 // element + document-level delegation, so every current AND future button is covered
 // with zero per-feature wiring — give a button a `title` and it just works.
 (function tipEngine() {
+  const HOLD_MS = 2000; // owner 2026-07-23: only show after the pointer rests ~2s (no flicker while sweeping)
   const host = document.createElement("div");
   host.className = "lfh-tip";
   document.body.appendChild(host);
-  let cur = null;
-  const hide = () => { cur = null; host.classList.remove("on"); };
-  document.addEventListener("mouseover", (e) => {
-    const el = e.target.closest && e.target.closest("[data-tip], button[title], .btn[title]");
-    if (el === cur) return;
-    if (!el) { hide(); return; }
-    // Migrate a native title to data-tip once, so the browser's plain tooltip
-    // never doubles up with ours.
-    if (!el.dataset.tip && el.title) { el.dataset.tip = el.title; el.removeAttribute("title"); }
-    if (!el.dataset.tip) { hide(); return; }
-    cur = el;
+  let cur = null, timer = null;
+  const hide = () => { cur = null; if (timer) { clearTimeout(timer); timer = null; } host.classList.remove("on"); };
+  const showFor = (el) => {
+    const r = el.getBoundingClientRect();
     host.textContent = el.dataset.tip;
     host.classList.add("on");
-    const r = el.getBoundingClientRect();
     const w = host.offsetWidth, h = host.offsetHeight;
     host.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + "px";
     host.style.top = (r.top - h - 9 > 6 ? r.top - h - 9 : r.bottom + 9) + "px";
+  };
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target.closest && e.target.closest("[data-tip], button[title], .btn[title]");
+    if (el === cur) return;
+    // Moving to a different (or no) target: drop the running timer + any shown bubble.
+    if (timer) { clearTimeout(timer); timer = null; }
+    host.classList.remove("on");
+    cur = el || null;
+    if (!el) return;
+    // Migrate a native title to data-tip once so the browser's own tooltip never doubles up.
+    if (!el.dataset.tip && el.title) { el.dataset.tip = el.title; el.removeAttribute("title"); }
+    if (!el.dataset.tip) { cur = null; return; }
+    // Only reveal once the pointer has RESTED on this element for HOLD_MS (a stable hover).
+    timer = setTimeout(() => { if (cur === el) showFor(el); }, HOLD_MS);
   });
+  document.addEventListener("mouseout", (e) => { const el = e.target.closest && e.target.closest("[data-tip]"); if (el && el === cur) hide(); });
   document.addEventListener("scroll", hide, true);
   document.addEventListener("click", hide, true);
 })();
