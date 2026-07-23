@@ -16,7 +16,7 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { effectiveTaxRate } from "@/lib/tax";
 
 export const dynamic = "force-dynamic";
@@ -79,6 +79,10 @@ async function tableOpsTabletAllowed(rid: string): Promise<boolean> {
 // extra query on the hot path.
 const tableOpsEffectiveFromRow = (s: Record<string, unknown> | null) =>
   !!s && s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
+// Order-taking module rung (mig 179), from an already-fetched settings row. Note the
+// _allowed side is backfilled true, so ordering stays on unless the admin turns it off.
+const takeOrdersEffectiveFromRow = (s: Record<string, unknown> | null) =>
+  !!s && s.take_orders_allowed === true && (s.take_orders_owner_control !== true || s.take_orders_enabled !== false);
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   // Admin super-user (no staff cookie — the gate already vetted the admin token):
   // never blocked by a waiter tri-state. This is what makes the X-ray's tinted
@@ -212,6 +216,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const tOpsOk = tableOpsEffectiveFromRow(setOut);
         if (!tOpsOk) setOut.tablet_table_ops = "off";
         setOut.table_ops_tablet_allowed = tOpsOk;
+        // Order-taking module off → the tablet's ＋Take order button hides (tri-state 'off').
+        if (!takeOrdersEffectiveFromRow(setOut)) setOut.tablet_take_orders = "off";
       }
       const body: Record<string, unknown> = {
         ...summary,
@@ -302,6 +308,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const tOpsOkSt = tableOpsEffectiveFromRow(setSt);
         if (!tOpsOkSt) setSt.tablet_table_ops = "off";
         setSt.table_ops_tablet_allowed = tOpsOkSt; // synthetic flag, see /summary
+        if (!takeOrdersEffectiveFromRow(setSt)) setSt.tablet_take_orders = "off";
       }
       return ok({
         // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
@@ -360,6 +367,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // order — server-side priced via lfh_staff_place_order (never trusts prices)
     if (a === "order" && path.length === 1) {
+      // Module rung (mig 179): ordering must be enabled for this restaurant at all. Admin
+      // super-user bypasses (actor === null) so its X-ray act-as still works.
+      if (actor && !(await takeOrdersLadder(rid)).effective) return err("Taking orders is switched off for this restaurant.", 403);
       // The manager→tablet rung (mig 178): a real waiter may take orders only when the
       // tablet_take_orders cap allows it (tri-state off/on/pin, default 'on'; per-user
       // override honoured). The admin super-user bypasses, like every other tablet cap.

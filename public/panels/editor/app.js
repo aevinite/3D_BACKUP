@@ -1193,6 +1193,7 @@ function accessCapsFor() {
     if (c.key === "tablet_banquet") return s.banquet_allowed === true && (s.banquet_owner_control !== true || s.banquet_enabled !== false);
     if (c.key === "tablet_table_tags" || c.key === "tablet_khata") return tagsOn;
     if (c.key === "tablet_table_ops") return s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
+    if (c.key === "tablet_take_orders") return s.take_orders_allowed === true && (s.take_orders_owner_control !== true || s.take_orders_enabled !== false);
     return true;
   });
 }

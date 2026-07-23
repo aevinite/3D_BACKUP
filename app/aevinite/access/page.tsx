@@ -46,6 +46,7 @@ const LADDER_MODULES: { app: string; transfer: string; label: string; hint: stri
   { app: "table_tags_allowed", transfer: "table_tags_owner_control", label: "Table types (VIP / Family / Guest) + Khata", hint: "Special table marks, on-the-house settle, and the pay-later book." },
   { app: "banquet_allowed", transfer: "banquet_owner_control", label: "Banquet billing", hint: "Fixed-plate banquet bills (per-plate menu, bill-only)." },
   { app: "table_ops_allowed", transfer: "table_ops_owner_control", label: "Table & KOT operations (KOT ▾ menu)", hint: "Change table, merge tables, move a KOT or a single dish, split the bill, reprint a KOT." },
+  { app: "take_orders_allowed", transfer: "take_orders_owner_control", label: "Order-taking", hint: "Taking new dine-in orders (manager ＋Take order + the waiter tablet). On by default; turn off for a menu-only / aggregator-only restaurant." },
 ];
 const TRI: [string, string][] = [["off", "Off"], ["on", "On"], ["pin", "On · PIN"]];
 
