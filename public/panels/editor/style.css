@@ -838,8 +838,14 @@ body {
 /* margin-right pulls the Dining-sessions panel closer to the right edge (the
    .editor has 28px side padding; -14px reclaims half of it on the right only,
    so the panel hugs the edge without overflowing). */
-.floor-wrap { display: flex; gap: 20px; align-items: flex-start; margin-right: -14px; }
+/* The old `margin-right:-14px` pushed the grid PAST the editor's right padding, so the
+   rightmost tile column was clipped and the whole panel scrolled sideways (owner
+   2026-07-23: "tables moving horizontally, half edges cutting"). Removed — the grid's
+   own gap handles spacing — and the editor clips any residual horizontal overflow so
+   the floor can ONLY ever scroll vertically. */
+.floor-wrap { display: flex; gap: 20px; align-items: flex-start; }
 .floor-main { flex: 1; min-width: 0; }
+.editor:has(.floor-wrap) { overflow-x: hidden; }
 /* margin-top gives the panel breathing room so its first card isn't jammed
    against the top / the floor legend line. */
 /* Sticky + its own scroll: the tile grid (.floor-main) and this panel used to share
@@ -1565,8 +1571,19 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
    own floating-ish popup, so it has nothing to pop out OF). */
 .tp-detail-float { flex: none; height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
 .tp-detail-float:hover { border-color: var(--gold); color: var(--text); }
+/* The KOT ▾ header button is a primary tool, not a subtle chrome control — give it a
+   gold-tinted look (both themes) so it stands out next to Float (owner 2026-07-23). */
+.tp-kot-head { background: color-mix(in srgb, var(--gold) 16%, var(--panel)); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); color: var(--gold-strong); }
+.tp-kot-head:hover { background: color-mix(in srgb, var(--gold) 26%, var(--panel)); color: var(--gold-strong); }
 
 .tp-pill { font-size: 11px; font-weight: 800; padding: 4px 11px; border-radius: 999px; white-space: nowrap; }
+/* VIP / Family / Guest mark shown in the detail header (owner 2026-07-23). Colour from
+   the shared --tag-* vars (defined for both themes) so it reads in light AND dark. */
+.tp-tagpill { font-size: 11px; font-weight: 800; padding: 4px 11px; border-radius: 999px; white-space: nowrap;
+  color: #fff; margin-left: 2px; }
+.tp-tagpill.tag-vip { background: var(--tag-vip); }
+.tp-tagpill.tag-family { background: var(--tag-family); }
+.tp-tagpill.tag-guest { background: var(--tag-guest); color: #1f2430; }
 .tp-pill-new  { background: rgba(245,158,11,.16); color: #f59e0b; }
 .tp-pill-prep { background: rgba(90,162,255,.16); color: #5aa2ff; }
 .tp-pill-ready{ background: rgba(236,72,153,.18); color: #f472b6; }
