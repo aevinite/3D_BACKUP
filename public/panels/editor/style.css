@@ -1576,6 +1576,17 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .tp-kot-head { background: color-mix(in srgb, var(--gold) 16%, var(--panel)); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); color: var(--gold-strong); }
 .tp-kot-head:hover { background: color-mix(in srgb, var(--gold) 26%, var(--panel)); color: var(--gold-strong); }
 
+/* Theme EVERY raw input/select/textarea inside a modal — several modals (split-settle,
+   etc.) create bare inputs with only sizing inline, so they fell back to the browser's
+   WHITE background in dark mode (owner 2026-07-23 UI sweep). This makes them follow the
+   theme everywhere without touching each call site. */
+.sx-modal input:not([type="checkbox"]):not([type="radio"]),
+.sx-modal select,
+.sx-modal textarea {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+}
+.sx-modal input:focus, .sx-modal select:focus, .sx-modal textarea:focus { outline: none; border-color: var(--gold); }
+
 .tp-pill { font-size: 11px; font-weight: 800; padding: 4px 11px; border-radius: 999px; white-space: nowrap; }
 /* VIP / Family / Guest mark shown in the detail header (owner 2026-07-23). Colour from
    the shared --tag-* vars (defined for both themes) so it reads in light AND dark. */
@@ -1986,6 +1997,26 @@ html[data-theme="light"] .op-admin,
 html[data-theme="light"] .tbl-unpaid .tbl-num, html[data-theme="light"] .tbl-unpaid .tbl-state{ color:#b45309; }
 html[data-theme="light"] .tbl-active .tbl-num, html[data-theme="light"] .tbl-active .tbl-state,
 html[data-theme="light"] .op-tablet{ color:#1d4ed8; }
+/* Status pills / tags / log labels: the dark-theme text colours (pale green/blue/amber/
+   yellow/sky) are ~1.6:1 on white — unreadable in the DEFAULT light theme. Deepen the
+   TEXT only (the translucent rgba backgrounds stay as a soft tint). Owner deep-QA
+   2026-07-23; the allergy warning is the safety-critical one. */
+html[data-theme="light"] .ord-allergy { color:#b91c1c; }
+html[data-theme="light"] .ord-pill.preparing,
+html[data-theme="light"] .pay-pill.pending,
+html[data-theme="light"] .sx-tag-access, html[data-theme="light"] .sx-tag-new,
+html[data-theme="light"] .logstat-waiting, html[data-theme="light"] .logdid.call,
+html[data-theme="light"] .tp-pill-bill,
+html[data-theme="light"] .tbl-unpaid .tbl-num, html[data-theme="light"] .tbl-unpaid .tbl-state{ color:#b45309; }
+html[data-theme="light"] .ord-pill.served,
+html[data-theme="light"] .pay-pill.paid,
+html[data-theme="light"] .avail-toggle.on,
+html[data-theme="light"] .logstat-in-session,
+html[data-theme="light"] .tbl-paid .tbl-num, html[data-theme="light"] .tbl-paid .tbl-state{ color:#15803d; }
+html[data-theme="light"] .ord-pill.new{ color:#b45309; }
+html[data-theme="light"] .tp-pill-prep, html[data-theme="light"] .sx-tag-open,
+html[data-theme="light"] .tbl-active .tbl-num, html[data-theme="light"] .tbl-active .tbl-state{ color:#1d4ed8; }
+html[data-theme="light"] .khata-due{ color:#0369a1; }
 
 /* ═══════════════════════════════════════════════════════════════════════
    MOBILE (phone) — make the manager panel usable on a small screen. The panel
@@ -2026,7 +2057,7 @@ html[data-theme="light"] .op-tablet{ color:#1d4ed8; }
   .tp-detail-floating .tp-detail-head { cursor: default; }
   /* Phone popups/modals reach the device bottom: keep the sticky action bar's buttons
      above the home indicator / 3-button nav (safe-area, audit 2026-07-20). */
-  .tp-detail-foot, .tbl-modal-foot { padding-bottom: calc(13px + var(--sab)); }
+  .tp-detail-foot, .tbl-modal-foot, .to-foot, .dish-edit-foot { padding-bottom: calc(13px + var(--sab)); }
   /* Dish rows: the price + status + serve/🗑 cluster no longer fits beside the name on a
      ~360px phone (the name was crushed to a sliver, Galaxy A36 audit 2026-07-20).
      Row 1 = qty · name · price; row 2 = the actions cluster, right-aligned. */

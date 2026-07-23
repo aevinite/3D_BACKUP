@@ -2685,7 +2685,7 @@ function dashTodayBox(s) {
 // the view_ratings power. Fetch + acknowledge/note; scoped to this restaurant server-side.
 const RCHIP = "display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(127,127,127,.12)";
 function ratingStars(n) {
-  return `<span style="color:#f5a623;letter-spacing:1px">${"★".repeat(n)}<span style="color:#ccc">${"★".repeat(5 - n)}</span></span>`;
+  return `<span style="color:#f5a623;letter-spacing:1px">${"★".repeat(n)}<span style="color:var(--line)">${"★".repeat(5 - n)}</span></span>`;
 }
 async function loadRatings() {
   const body = document.getElementById("ratingsBody");
@@ -2705,7 +2705,7 @@ function renderRatings(d) {
   const rows = d.ratings || [];
   const bars = [5, 4, 3, 2, 1].map((star) => {
     const c = s.dist[star - 1] || 0, pct = s.total ? Math.round((c / s.total) * 100) : 0;
-    return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12.5px"><span style="width:12px;text-align:right">${star}</span><span style="color:#f5a623">★</span><span style="flex:1;height:8px;background:#e5e7eb;border-radius:5px;overflow:hidden"><span style="display:block;height:100%;width:${pct}%;background:#f5a623"></span></span><span style="width:34px;text-align:right;color:#888">${c}</span></div>`;
+    return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12.5px"><span style="width:12px;text-align:right">${star}</span><span style="color:#f5a623">★</span><span style="flex:1;height:8px;background:var(--line);border-radius:5px;overflow:hidden"><span style="display:block;height:100%;width:${pct}%;background:#f5a623"></span></span><span style="width:34px;text-align:right;color:var(--muted)">${c}</span></div>`;
   }).join("");
   const summaryHtml = s.total
     ? `<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:16px"><div style="text-align:center;min-width:110px"><div style="font-size:40px;font-weight:800;line-height:1">${(s.avg || 0).toFixed(1)}</div><div style="font-size:18px">${ratingStars(Math.round(s.avg))}</div><div style="font-size:12.5px;color:#888;margin-top:2px">${s.total} rating${s.total === 1 ? "" : "s"}</div></div><div style="flex:1;min-width:200px">${bars}</div></div>`
@@ -2841,7 +2841,7 @@ async function loadDashboard(useCache) {
   body.innerHTML = `
     ${summary}
     <div class="dash-fresh"><i class="fa-solid fa-clock-rotate-left"></i> Updated ${freshT} · deltas ${cmpLabel}</div>
-    ${s.truncated ? `<div class="dash-fresh" style="background:#d9770622;color:#b45309;border:1px solid #d9770655" role="note"><i class="fa-solid fa-circle-info"></i> Showing the most recent ${Number(s.statsCap || 5000).toLocaleString()} orders — this range has more, so these totals (and the menu winners) read a little low for now. Penny-exact full-range totals are coming.</div>` : ""}
+    ${s.truncated ? `<div class="dash-fresh" style="background:color-mix(in srgb,var(--gold) 13%,transparent);color:var(--gold-strong);border:1px solid color-mix(in srgb,var(--gold) 33%,transparent)" role="note"><i class="fa-solid fa-circle-info"></i> Showing the most recent ${Number(s.statsCap || 5000).toLocaleString()} orders — this range has more, so these totals (and the menu winners) read a little low for now. Penny-exact full-range totals are coming.</div>` : ""}
     <div class="dash-cards">
       ${kpi("revenue", "fa-indian-rupee-sign", "#b97f35", `Revenue · ${rangeLabel}`, `<span data-cu="${s.revenue}" data-cu-fmt="inr">${inr(s.revenue)}</span>${deltaChip(s.revenue, prev.revenue)}${sparkSvg((s.series || []).map((p) => p.revenue), "#b97f35")}`, revSub)}
       ${kpi("orders", "fa-utensils", "#2a78d6", "Orders", `<span data-cu="${s.orderCount}">${s.orderCount}</span>${deltaChip(s.orderCount, prev.orders)}`, ordSub)}
@@ -3313,7 +3313,7 @@ async function openStaffRisk() {
     const list = (res && res.rows) || [];
     const maxT = list.length ? list[0].total : 0;
     const flag = (t) => t >= Math.max(8, maxT * 0.8) ? ` <span class="inv-chip voided">watch</span>` : "";
-    const trunc = res && res.truncated ? `<div class="muted small" style="margin-bottom:8px;color:#b45309"><i class="fa-solid fa-circle-info"></i> Very busy range — counts cover the most recent activity.</div>` : "";
+    const trunc = res && res.truncated ? `<div class="muted small" style="margin-bottom:8px;color:var(--gold-strong)"><i class="fa-solid fa-circle-info"></i> Very busy range — counts cover the most recent activity.</div>` : "";
     wrap.querySelector("#srBody").innerHTML = list.length
       ? trunc + `<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left;padding:4px">Staff</th><th style="text-align:right;padding:4px">Discounts</th><th style="text-align:right;padding:4px">Voids/Deletes</th><th style="text-align:right;padding:4px">Reverts</th><th style="text-align:right;padding:4px">Total</th></tr></thead><tbody>`
         + list.map((v) => `<tr style="border-top:1px solid var(--line)"><td style="padding:5px 4px"><b>${esc(v.who)}</b>${flag(v.total)}</td><td style="text-align:right">${v.disc}</td><td style="text-align:right">${v.void + v.del}</td><td style="text-align:right">${v.rev}</td><td style="text-align:right"><b>${v.total}</b></td></tr>`).join("")
@@ -3354,7 +3354,7 @@ async function openMenuMatrix() {
     const b = wrap.querySelector("#mmBody"); if (!b) return;
     // Same honesty note as the dashboard: if the range exceeded the row cap, the winners/losers
     // split is from the most recent orders only and can shift once full-range totals arrive. (review #2)
-    const note = s && s.truncated ? `<div class="muted small" style="margin-bottom:10px;color:#b45309"><i class="fa-solid fa-circle-info"></i> Based on the most recent ${Number(s.statsCap || 5000).toLocaleString()} orders — a longer range has more, so this split may shift once full-range totals arrive.</div>` : "";
+    const note = s && s.truncated ? `<div class="muted small" style="margin-bottom:10px;color:var(--gold-strong)"><i class="fa-solid fa-circle-info"></i> Based on the most recent ${Number(s.statsCap || 5000).toLocaleString()} orders — a longer range has more, so this split may shift once full-range totals arrive.</div>` : "";
     b.innerHTML = note + render(s && s.menuMatrix);
   };
   // Reuse the Dashboard's already-loaded stats for the current range if present (no extra fetch).
@@ -6327,7 +6327,9 @@ function openTakeOrder(table, rerender) {
   const cartLines = () => cart.length
     ? cart.map((c) => `<div class="to-line"><span class="to-line-t">${esc(c.title)}</span><span class="to-qty"><button class="to-q" data-dec="${esc(c.id)}" aria-label="Less">−</button><b>${c.qty}</b><button class="to-q" data-inc="${esc(c.id)}" aria-label="More">＋</button></span><span class="to-line-p">${inr((parseFloat(c.price) || 0) * c.qty)}</span><button class="to-rm" data-rm="${esc(c.id)}" aria-label="Remove">🗑</button></div>`).join("")
     : `<div class="muted" style="padding:14px 4px">No dishes yet — tap dishes on the left to add them.</div>`;
-  const estTotal = () => inr(cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0));
+  // Estimate INCLUDES tax so the "≈ ₹" staff quote matches the bill the server produces
+  // (was subtotal-only, understating by the tax — owner deep-QA 2026-07-23).
+  const estTotal = () => { const sub = cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0); const rate = (taxModel(state.data.settings) || {}).rate || 0; return inr(sub + Math.round(sub * rate * 100) / 100); };
 
   const wrap = el(`<div class="sx-modal-overlay to-overlay"><div class="sx-modal to-modal">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>＋ Take order · Table ${esc(table)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
@@ -6650,9 +6652,9 @@ function openKotColumns(t, sess) {
       const to = b.dataset.goshift;
       run("POST", `/sessions/${sess.id}/shift`, { to }, `Shifted to table ${to}`, () => followShiftedTable(t, to));
     }));
-    colsEl.querySelectorAll("[data-gomerge]").forEach((b) => (b.onclick = () => {
+    colsEl.querySelectorAll("[data-gomerge]").forEach((b) => (b.onclick = async () => {
       const to = b.dataset.gomerge;
-      if (!window.confirm(`Merge Table ${t} into Table ${to}? Both parties become ONE bill on Table ${to}.`)) return;
+      if (!(await confirmDialog(`Merge Table ${t} into Table ${to}? Both parties become ONE bill on Table ${to}.`, "Merge"))) return;
       run("POST", `/sessions/${sess.id}/merge`, { to }, `Merged into table ${to} — one bill`, () => followShiftedTable(t, to));
     }));
     colsEl.querySelectorAll("[data-pickkot]").forEach((b) => (b.onclick = () => { sel2 = b.dataset.pickkot; render(); }));
@@ -6916,7 +6918,7 @@ function openMergePicker(t, sess) {
   wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
   wrap.querySelectorAll("[data-mergeto]").forEach((b) => (b.onclick = async () => {
     const to = b.dataset.mergeto;
-    if (!window.confirm(`Merge Table ${t} into Table ${to}? Both parties become ONE bill on Table ${to}.`)) return;
+    if (!(await confirmDialog(`Merge Table ${t} into Table ${to}? Both parties become ONE bill on Table ${to}.`, "Merge"))) return;
     closeM();
     try {
       const r = await api("POST", `/sessions/${sess.id}/merge`, { to });

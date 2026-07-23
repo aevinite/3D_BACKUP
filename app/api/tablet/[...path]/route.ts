@@ -1002,15 +1002,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           if (!(Number(s?.amount) > 0)) return err("Every split share needs an amount above zero.");
           if (!PAYMENT_METHODS.includes(s?.method)) return err("invalid payment method in a split share");
         }
-        let dq = sb.from("orders").select("id,total,discount,session_id")
+        let dq = sb.from("orders").select("id,subtotal,total,discount,session_id")
           .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
         dq = openSess ? dq.eq("session_id", openSess.id) : dq.eq("table_number", t).eq("archived", false);
-        const drows = (must(await dq.limit(200)) as { id: string; total: number; discount: number; session_id: string | null }[]) || [];
+        const drows = (must(await dq.limit(200)) as { id: string; subtotal: number; total: number; discount: number; session_id: string | null }[]) || [];
         const sidSp = openSess?.id || drows.find((o) => o.session_id)?.session_id;
         if (!drows.length || !sidSp) return err("This table has no live bill to split.", 409);
         const setSp = (await sb.from("settings").select("tax_components, tax_rate").eq("restaurant_id", rid).maybeSingle()).data || {};
         const rateSp = effectiveTaxRate(setSp);
-        const dueSp = drows.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rateSp), 0);
+        // Aggregate rounding — match billMath / the printed bill (see editor route note).
+        const taxableSp = Math.max(0, drows.reduce((s, o) => s + (Number(o.subtotal) || 0), 0) - drows.reduce((s, o) => s + (Number(o.discount) || 0), 0));
+        const dueSp = Math.round((taxableSp + Math.round(taxableSp * rateSp * 100) / 100) * 100) / 100;
         const sumSp = splits.reduce((s: number, x: { amount: number }) => s + Number(x.amount), 0);
         if (Math.abs(sumSp - dueSp) > 0.02) return err(`The shares add up to ₹${sumSp.toFixed(2)} but the bill due is ₹${dueSp.toFixed(2)} — they must match.`, 409);
         const insSp = await sb.from("session_payments").insert(splits.map((s: { amount: number; method: string; note?: string }) => ({
