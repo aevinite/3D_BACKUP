@@ -10,8 +10,8 @@
 ============================================================================= */
 
 import {
-  state, PERM_BY_ID, GROUP_BY_ID, LEVELS, lad, gateOn, summary, conflicts,
-  setLevel, setSub, setGate, setSwitch, getSwitch, setWaiter, setLimit,
+  state, PERM_BY_ID, GROUP_BY_ID, lad, gateOn, summary, conflicts, maxReach,
+  setLevel, setMaster, setSub, setGate, setSwitch, getSwitch, setWaiter, setLimit,
   holdersOf, emit, onChange,
 } from "./data.js";
 import { icon, mockShot } from "./icons.js";
@@ -118,38 +118,34 @@ export function renderSwitch(perm) {
   </div>`;
 }
 
-/* -------------------------------------------------- the permanent power --- */
+/* --------------------------------------------- the reach control (Owner → …) */
 
-function renderLocked(perm) {
-  const l = lad(perm.id);
-  return `<div class="pbody-in">
-    <div class="hint">${icon("lock")}<span>This is the manager's core job, so it cannot be taken away by the owner. If a restaurant genuinely should not have it, switch it off here — that removes it from the manager panel entirely.</span></div>
-    <div class="limit" style="margin-top:0">
-      <span class="lbl">Manager<small>Always on. Not delegatable.</small></span>
-      <span class="pill pill--locked"><i class="led"></i>Always on</span>
-    </div>
-    ${renderWaiterRung(perm, l, true)}
-    ${renderWho(perm)}
+function reachControl(perm, l) {
+  const max = maxReach(perm);           // 2 = manager, 3 = tablet
+  const steps = [[1, "Owner", "crown"], [2, "+ Manager", "users"]];
+  if (max >= 3) steps.push([3, "+ Tablet", "user"]);
+  return `<div class="reach" role="radiogroup" aria-label="How far ${esc(perm.name)} reaches"
+      style="--cols:${steps.length}">
+    ${steps.map(([v, lbl, ic]) => `<button class="rstep" data-act="level" data-id="${perm.id}" data-v="${v}"
+      data-v="${v}" role="radio" aria-checked="${l.level === v}">${icon(ic, "ico ico-sm")}${lbl}</button>`).join("")}
   </div>`;
 }
 
 /* ------------------------------------------------------ the waiter rung --- */
 
-function renderWaiterRung(perm, l, force) {
-  if (!perm.waiter) return "";
-  if (!force && l.level < 2) return "";
-  const v = l.waiter || "off";
-  const opts = [
-    ["off", "Off", "minus"],
-    ["pin", "On, ask for PIN", "key"],
-    ["on", "On", "check"],
-  ];
+function renderWaiterRung(perm, l) {
+  // Only shown once the reach includes the tablet (level 3). At that point the
+  // tablet IS on — the only remaining question is whether it needs a PIN. So no
+  // "Off" here (owner's model: to switch waiters off, lower the reach instead).
+  if (!perm.waiter || l.level < 3) return "";
+  const v = l.waiter === "pin" ? "pin" : "on";
+  const opts = [["on", "Straight on", "check"], ["pin", "On, ask for a PIN", "key"]];
   return `<div class="waiterrow">
-    <span class="lbl">${icon("user")} Waiters (tablet)
-      <small>The restaurant-wide default. Override individual people on the Per person tab.</small></span>
+    <span class="lbl">${icon("user")} Every waiter, by default
+      <small>This is the restaurant-wide default. Change it for one person on the Per person tab.</small></span>
     <div class="tri" role="radiogroup" aria-label="Waiter default for ${esc(perm.name)}">
       ${opts.map(([val, lbl, ic]) => `<button data-act="waiter" data-id="${perm.id}" data-v="${val}"
-        role="radio" aria-checked="${v === val}" data-v="${val}">${icon(ic, "ico ico-sm")}${lbl}</button>`).join("")}
+        role="radio" aria-checked="${v === val}">${icon(ic, "ico ico-sm")}${lbl}</button>`).join("")}
     </div>
   </div>`;
 }
@@ -184,21 +180,17 @@ export function renderLadder(perm) {
     </div>`;
   }
 
-  const stepper = `<div class="stepper" role="radiogroup" aria-label="Who gets ${esc(perm.name)}">
-    ${LEVELS.map((lbl, i) => `<button class="step" data-act="level" data-id="${perm.id}" data-v="${i}"
-      role="radio" aria-checked="${l.level === i}">${i === 0 ? icon("minus", "ico ico-sm") : i === 1 ? icon("crown", "ico ico-sm") : icon("users", "ico ico-sm")}${lbl}</button>`).join("")}
-  </div>`;
-
+  // When off, the body is just the explanation — the master toggle in the header
+  // is what turns it on (→ Owner). No 3-segment stepper any more.
   if (l.level === 0) {
     return gateBar + `<div class="pbody-in">
-      ${stepper}
-      <div class="hint" style="margin-top:12px;margin-bottom:0">${icon("info")}<span>Nobody has this. Step it to <b>Owner</b> to give it to the owner only, or <b>Owner + Manager</b> to pass it down.</span></div>
+      <div class="hint" style="margin-bottom:0">${icon("info")}<span>Off — nobody has this. Flip the switch above to give it to the <b>owner</b>, then widen the reach to the manager or waiters below.</span></div>
     </div>`;
   }
 
   const nOwner = perm.sub ? perm.sub.filter((s) => l.owner[s.id]).length : 0;
   const nMgr = perm.sub ? perm.sub.filter((s) => l.manager[s.id]).length : 0;
-  const canMgr = l.level === 2;
+  const canMgr = l.level >= 2;
 
   const tabs = `<div class="sides" role="tablist">
     <button class="side" data-side="owner" data-act="side" data-id="${perm.id}" role="tab"
@@ -259,11 +251,15 @@ export function renderLadder(perm) {
       <button data-act="fixconflict" data-id="${perm.id}">Fix it</button>
     </div>` : "";
 
+  const reachHint = perm.sub ? "" :
+    `<div class="hint" style="margin:-2px 0 12px">${icon("info")}<span>${esc(perm.name)} has no extra options — just choose how far it reaches.</span></div>`;
+
   return gateBar + `<div class="pbody-in">
-    ${stepper}
+    ${reachControl(perm, l)}
     <div style="height:14px"></div>
-    ${tabs}
-    <div class="hint">${hint}</div>
+    ${reachHint}
+    ${perm.sub ? tabs : ""}
+    ${perm.sub ? `<div class="hint">${hint}</div>` : ""}
     ${chips}
     ${limit}
     ${renderWaiterRung(perm, l)}
@@ -275,27 +271,37 @@ export function renderLadder(perm) {
 /* Dispatch: gives any layout the right control for any permission. */
 export function renderFull(perm) {
   if (perm.kind === "switch") return `<div style="padding:8px">${renderSwitch(perm)}</div>`;
-  if (perm.kind === "locked") return renderLocked(perm);
   return renderLadder(perm);
 }
 
 /* A complete, self-contained expandable card — used by the layouts that edit
-   in place rather than in the drawer. */
+   in place rather than in the drawer. The header carries the MASTER TOGGLE
+   (owner's model: toggle on → Owner + open; toggle off → close + reset). */
 export function permCard(perm, opts = {}) {
   const open = openSet.has(perm.id);
   const g = GROUP_BY_ID[perm.group];
+  const l = lad(perm.id);
   const gated = perm.gate && !gateOn(perm);
-  return `<article class="pcard ${open ? "is-open" : ""} ${gated ? "is-gated" : ""}" data-perm="${perm.id}" id="card-${perm.id}">
-    <button class="phead2" data-act="toggle" data-id="${perm.id}" aria-expanded="${open}">
-      ${opts.icon !== false ? `<span class="gicon" style="--h:${g.hue}">${icon(g.icon)}</span>` : ""}
-      <span class="body">
-        <span class="nm">${esc(perm.name)}
-          ${perm.adminOnly ? `<span class="tag-admin">${icon("shield", "ico ico-sm")}Admin only</span>` : ""}
+  const on = l.level >= 1;
+  const reachTxt = !on ? "Off" : l.level === 1 ? "Owner only" : l.level === 2 ? "Owner + Manager" : "Owner + Mgr + Tablet";
+  return `<article class="pcard ${open ? "is-open" : ""} ${gated ? "is-gated" : ""} ${on ? "is-on" : ""}" data-perm="${perm.id}" id="card-${perm.id}">
+    <div class="phead2">
+      <button class="phbtn" data-act="toggle" data-id="${perm.id}" aria-expanded="${open}">
+        ${opts.icon !== false ? `<span class="gicon" style="--h:${g.hue}">${icon(g.icon)}</span>` : ""}
+        <span class="body">
+          <span class="nm">${esc(perm.name)}
+            ${perm.adminOnly ? `<span class="tag-admin">${icon("shield", "ico ico-sm")}Admin only</span>` : ""}
+          </span>
+          ${opts.blurb === false ? "" : `<span class="ds">${esc(perm.what)}</span>`}
         </span>
-        ${opts.blurb === false ? "" : `<span class="ds">${esc(perm.what)}</span>`}
+      </button>
+      <span class="phctl">
+        ${gated ? "" : `<span class="reachtag ${on ? "on" : ""}">${esc(reachTxt)}</span>
+        <button class="sw" data-act="master" data-id="${perm.id}" role="switch" aria-checked="${on}"
+          aria-label="Turn ${esc(perm.name)} on"></button>`}
+        <button class="chevbtn" data-act="toggle" data-id="${perm.id}" aria-label="Expand">${icon("chevron", "ico chev")}</button>
       </span>
-      <span class="row" style="gap:10px;flex:none">${pill(perm)}${icon("chevron", "ico chev")}</span>
-    </button>
+    </div>
     ${open ? `<div class="pbody">${renderFull(perm)}</div>` : ""}
   </article>`;
 }
@@ -324,9 +330,16 @@ function paintDrawer() {
   if (d.dataset.open !== "1" && !d.dataset.perm) return;
   const perm = PERM_BY_ID[d.dataset.perm];
   if (!perm) return;
+  const l = lad(perm.id);
+  const on = perm.kind !== "switch" && l.level >= 1;
+  const masterRow = perm.kind === "switch" ? "" : `<div class="drawer-master ${on ? "is-on" : ""}">
+      <span class="lbl">${on ? "This power is on" : "This power is off"}
+        <small>${on ? "Choose how far it reaches below." : "Turn it on to give it to the owner, then widen the reach."}</small></span>
+      <button class="sw" data-act="master" data-id="${perm.id}" role="switch" aria-checked="${on}" aria-label="Turn ${esc(perm.name)} on"></button>
+    </div>`;
   d.querySelector(".dbody").innerHTML =
     `<p style="margin:0 0 16px;font-size:13.4px;line-height:1.55;color:var(--tx2)">${esc(perm.what)}</p>` +
-    renderFull(perm);
+    masterRow + renderFull(perm);
 }
 
 export function closeDrawer() {
@@ -357,6 +370,13 @@ export function bindControls() {
       case "switch": setSwitch(id, !getSwitch(id)); break;
       case "gate": setGate(btn.dataset.gate, !state.r.gates[btn.dataset.gate]); break;
       case "level": setLevel(id, +btn.dataset.v); break;
+      case "master": {
+        const turningOn = !(lad(id).level >= 1);
+        // set open-state BEFORE setMaster (which emits and re-renders)
+        if (turningOn) openSet.add(id); else openSet.delete(id);
+        setMaster(id, turningOn);
+        break;
+      }
       case "side": sideOf.set(id, btn.dataset.side); emit(); break;
       case "sub": {
         const l = lad(id);

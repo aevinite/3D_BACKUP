@@ -133,9 +133,9 @@ export const PERMISSIONS = [
     requires: "ratings",
   },
   {
-    id: "model3d", group: "guest", kind: "switch", key: "features.model3d", adminOnly: true,
+    id: "model3d", group: "guest", kind: "switch", key: "features.model3d",
     name: "3D dish viewer",
-    what: "The rotating 3D model on dishes that have one. This is admin-only because the 3D files cost storage and bandwidth — the restaurant cannot switch it on for itself.",
+    what: "The rotating 3D model on dishes that have one. A normal guest feature — it shows on the menu for everyone. (Attaching a model is a separate admin-only job inside Edit the menu.)",
     shot: "guest-3d", shotNote: "The “View in 3D” button",
   },
   {
@@ -178,12 +178,7 @@ export const PERMISSIONS = [
     what: "Lets a guest see prices converted. Off means rupees only.",
     shot: "guest-menu", shotNote: "The ₹ selector in the top bar",
   },
-  {
-    id: "scrollspy", group: "guest", kind: "switch", key: "features.scrollspy",
-    name: "Sticky category bar",
-    what: "The category strip that follows the guest as they scroll and highlights the section they are in.",
-    shot: "guest-menu", shotNote: "The pinned category strip",
-  },
+  /* (Sticky category bar removed — it is always on, never a toggle.) */
 
   /* ================================ THE MENU ============================== */
   {
@@ -199,7 +194,6 @@ export const PERMISSIONS = [
       { id: "mark_86", name: "Mark sold out (86)", what: "Flips a dish to sold-out so guests cannot order it. Also reachable from the kitchen 86 board." },
       { id: "manage_categories", name: "Manage categories", what: "Add, rename, reorder and hide menu categories." },
       { id: "manage_filters", name: "Manage filters", what: "The dietary / preference chips guests filter by." },
-      { id: "reorder_menu", name: "Reorder dishes", what: "Drag dishes into a different order within a category." },
       { id: "edit_3d", name: "Attach a 3D model", adminOnly: true,
         what: "Uploading and positioning a dish's 3D model. Admin-only — it writes to shared storage, so it is never handed to a manager." },
     ],
@@ -213,20 +207,19 @@ export const PERMISSIONS = [
     shot: "manager-bill", shotNote: "The Discount button on a bill",
     limit: { label: "Most they can take off", unit: "%", options: [5, 10, 20, 50, 100] },
     sub: [
-      { id: "per_dish", name: "Discount one dish", what: "Takes money off a single line on the bill." },
       { id: "whole_bill", name: "Discount the whole bill", what: "A percentage or amount off the whole bill." },
       { id: "on_the_house", name: "Settle on the house", what: "Closes a bill at zero. The highest-risk one — keep it to the owner unless you trust the manager completely." },
     ],
   },
   {
-    id: "void_bills", group: "money", kind: "ladder", key: "power_void_bills",
-    name: "Void or delete a bill",
+    id: "void_bills", group: "money", kind: "ladder", key: "power_void_bills", waiter: true,
+    name: "Void, delete or close a bill",
     what: "Cancelling a bill after it has been generated. Every use is written to the activity log with the reason typed by the person.",
     shot: "manager-bill", shotNote: "The Void button in the bill header",
     sub: [
-      { id: "void_bill", name: "Void a bill", what: "Marks a bill cancelled but keeps it in the records." },
-      { id: "delete_bill", name: "Delete a bill", what: "Removes the bill. Kept apart from Void because it cannot be undone." },
-      { id: "close_unpaid", name: "Close a table unpaid", what: "Frees the table while marking the money as never collected." },
+      { id: "void_bill", name: "Void a bill", what: "Cancels a bill AFTER it was generated but KEEPS it in the records marked “voided” (nothing is collected, the number stays for the audit). Use this for a mistaken or abandoned bill." },
+      { id: "delete_bill", name: "Delete a bill", what: "Removes the bill entirely. Kept apart from Void because it cannot be undone and leaves no record." },
+      { id: "close_unpaid", name: "Close a table unpaid", what: "Frees the table while marking the money as never collected (a walk-out / write-off)." },
     ],
   },
   {
@@ -275,9 +268,9 @@ export const PERMISSIONS = [
 
   /* ============================ TABLES & FLOOR ============================ */
   {
-    id: "take_orders", group: "floor", kind: "locked", key: "power_take_orders", waiter: true,
+    id: "take_orders", group: "floor", kind: "ladder", key: "power_take_orders", waiter: true,
     name: "Take a new order",
-    what: "Punching in a dine-in order. This is the job — it is permanently on for the manager and cannot be taken away by the owner. Only the admin can remove it from the restaurant entirely.",
+    what: "Punching in a dine-in order. Waiters do this by default; you can hand it to the manager too, or pull it back — only the admin removes it from the restaurant entirely.",
     shot: "manager-takeorder", shotNote: "The Take order button on a table",
   },
   {
@@ -300,28 +293,21 @@ export const PERMISSIONS = [
     what: "Marking a table so the floor shows who is sitting there, and the on-the-house settle that goes with an owner's guest.",
     shot: "manager-floor", shotNote: "The ribbon on a table tile",
     sub: [
-      { id: "tag_set", name: "Mark a table's type", what: "Puts the VIP / Family / Owner's-guest ribbon on a table." },
-      { id: "tag_manage", name: "Add or rename types", what: "Editing the list of types the restaurant uses." },
-      { id: "tag_house", name: "Settle an owner's-guest table on the house", what: "Closes a marked table at zero and files it under the on-the-house report." },
+      { id: "tag_set", name: "Mark / remove a table's type", what: "Puts (or clears) the VIP / Family / Owner's-guest ribbon on a table." },
     ],
   },
 
   /* ================================ KITCHEN =============================== */
   {
-    id: "auto_print_kot", group: "kitchen", kind: "ladder", key: "auto_print_kot", gate: "auto_print_kot",
+    id: "auto_print_kot", group: "kitchen", kind: "switch", key: "auto_print_kot", adminOnly: true,
     name: "Auto-print kitchen tickets",
-    what: "Tickets print themselves on the kitchen printer as orders are accepted, instead of someone tapping print.",
+    what: "Tickets print themselves on the kitchen printer as orders come in, instead of someone tapping print. This is a main hardware setting — only the admin turns it on or off; it is not handed to the owner, manager or waiters.",
     shot: "kitchen-print", shotNote: "The Auto-print row in kitchen settings",
-    sub: [
-      { id: "print_on_accept", name: "Print when an order is accepted", what: "The normal mode." },
-      { id: "print_on_change", name: "Reprint when an order is changed", what: "Prints a follow-up ticket if a dish is added or removed." },
-      { id: "print_choose", name: "Choose the printer", what: "Picking which printer a station uses." },
-    ],
   },
 
   /* ============================ BANQUET & EVENTS ========================== */
   {
-    id: "banquet", group: "banquet", kind: "ladder", key: "power_banquet", waiter: true, gate: "banquet",
+    id: "banquet", group: "banquet", kind: "ladder", key: "power_banquet", gate: "banquet",
     name: "Banquet & events",
     what: "Per-plate event billing that runs without a table. A special feature — the admin allows it, then the owner decides who runs it.",
     shot: "manager-banquet", shotNote: "The Banquet tab",
@@ -379,8 +365,6 @@ export const PERMISSIONS = [
       { id: "log_orders", name: "Order changes", what: "Dishes added, removed, moved." },
       { id: "log_bills", name: "Bill actions", what: "Discounts, voids, refunds — with the reason that was typed." },
       { id: "log_staff", name: "Staff actions", what: "Logins, shift changes, power grants." },
-      { id: "log_admin", name: "Admin actions", locked: true,
-        what: "What the platform admin did inside this restaurant. Permanently off for restaurant staff — this is the audit trail that keeps the admin honest, so it is never delegated." },
     ],
   },
 
@@ -445,11 +429,11 @@ export const permsOf = (gid) => PERMISSIONS.filter((p) => p.group === gid);
    cannot use" on the Per person tab. */
 export const ROLE_RELEVANCE = {
   manager: ["edit_menu", "give_discounts", "void_bills", "revert_payment", "mark_paid", "print_invoice",
-    "khata", "take_orders", "table_ops", "table_tags", "auto_print_kot", "banquet",
+    "khata", "take_orders", "table_ops", "table_tags", "banquet",
     "view_dashboard", "view_ratings", "export_reports", "view_logs", "manage_staff", "edit_settings"],
   tablet: ["give_discounts", "revert_payment", "mark_paid", "print_invoice", "khata",
-    "take_orders", "table_ops", "table_tags", "banquet"],
-  kitchen: ["edit_menu", "auto_print_kot", "view_logs"],
+    "take_orders", "table_ops", "table_tags", "void_bills"],
+  kitchen: ["edit_menu", "view_logs"],
   owner: PERMISSIONS.filter((p) => p.kind !== "switch").map((p) => p.id),
 };
 
@@ -466,23 +450,23 @@ function frenchHouse() {
     switches: {
       ratings: true, reviews: true, model3d: true, allergies: true, allergies_other: true,
       favorites: true, waiter_calls: true, diet_filter: true, languages: true, currency: true, scrollspy: true,
+      auto_print_kot: true,
       panel_manager: true, panel_kitchen: true, panel_tablet: true, panel_owner: true,
       sec_reports: true, sec_staff: true, sec_issues: true, sec_ratings: true, sec_customers: true, sec_settings: true,
     },
     gates: { table_ops: true, table_tags: true, khata: true, banquet: true, auto_print_kot: true },
     ladder: {
       edit_menu: { level: 2, owner: ON(["add_dish", "edit_dish", "edit_price", "delete_dish", "mark_86", "manage_categories", "manage_filters", "reorder_menu"]), manager: ON(["edit_dish", "mark_86", "reorder_menu"]) },
-      give_discounts: { level: 2, owner: ON(["per_dish", "whole_bill", "on_the_house"]), manager: ON(["per_dish", "whole_bill"]), waiter: "pin", limit: { owner: 100, manager: 20, waiter: 5 } },
+      give_discounts: { level: 3, owner: ON(["whole_bill", "on_the_house"]), manager: ON(["whole_bill"]), waiter: "pin", limit: { owner: 100, manager: 20, waiter: 5 } },
       void_bills: { level: 2, owner: ON(["void_bill", "delete_bill", "close_unpaid"]), manager: ON(["void_bill"]) },
-      revert_payment: { level: 2, owner: ON(["undo_grace", "undo_any"]), manager: ON(["undo_grace"]), waiter: "off" },
-      mark_paid: { level: 2, owner: ON(["pay_cash", "pay_card", "pay_split"]), manager: ON(["pay_cash", "pay_card", "pay_split"]), waiter: "pin" },
-      print_invoice: { level: 2, owner: ON(["inv_generate", "inv_reprint"]), manager: ON(["inv_generate", "inv_reprint"]), waiter: "on" },
-      khata: { level: 2, owner: ON(["khata_add", "khata_settle", "khata_book", "khata_people"]), manager: ON(["khata_add", "khata_book"]), waiter: "off" },
-      take_orders: { level: 2, waiter: "on" },
-      table_ops: { level: 2, owner: ON(["change_table", "merge_tables", "move_kot", "move_dish", "split_bill", "reprint_kot"]), manager: ON(["change_table", "merge_tables", "move_dish", "reprint_kot"]), waiter: "pin" },
-      table_tags: { level: 2, owner: ON(["tag_set", "tag_manage", "tag_house"]), manager: ON(["tag_set"]), waiter: "off" },
-      auto_print_kot: { level: 2, owner: ON(["print_on_accept", "print_on_change", "print_choose"]), manager: ON(["print_on_accept", "print_on_change"]) },
-      banquet: { level: 1, owner: ON(["bq_create", "bq_plates", "bq_bill", "bq_reports"]), manager: {}, waiter: "off" },
+      revert_payment: { level: 2, owner: ON(["undo_grace", "undo_any"]), manager: ON(["undo_grace"]) },
+      mark_paid: { level: 3, owner: ON(["pay_cash", "pay_card", "pay_split"]), manager: ON(["pay_cash", "pay_card", "pay_split"]), waiter: "pin" },
+      print_invoice: { level: 3, owner: ON(["inv_generate", "inv_reprint"]), manager: ON(["inv_generate", "inv_reprint"]), waiter: "on" },
+      khata: { level: 2, owner: ON(["khata_add", "khata_settle", "khata_book", "khata_people"]), manager: ON(["khata_add", "khata_book"]) },
+      take_orders: { level: 3, waiter: "on" },
+      table_ops: { level: 3, owner: ON(["change_table", "merge_tables", "move_kot", "move_dish", "split_bill", "reprint_kot"]), manager: ON(["change_table", "merge_tables", "move_dish", "reprint_kot"]), waiter: "pin" },
+      table_tags: { level: 2, owner: ON(["tag_set"]), manager: ON(["tag_set"]) },
+      banquet: { level: 1, owner: ON(["bq_create", "bq_plates", "bq_bill", "bq_reports"]), manager: {} },
       view_dashboard: { level: 2, owner: ON(["rep_sales", "rep_items", "rep_tables", "rep_staff", "rep_tax", "rep_zclose"]), manager: ON(["rep_sales", "rep_items", "rep_zclose"]) },
       view_ratings: { level: 2, owner: ON(["rat_view", "rat_respond", "rat_delete"]), manager: ON(["rat_view", "rat_respond"]) },
       export_reports: { level: 1, owner: ON(["exp_csv", "exp_pdf", "exp_raw"]), manager: {} },
@@ -509,23 +493,23 @@ function pizzaPalace() {
     switches: {
       ratings: true, reviews: false, model3d: false, allergies: true, allergies_other: false,
       favorites: true, waiter_calls: true, diet_filter: false, languages: false, currency: true, scrollspy: true,
+      auto_print_kot: false,
       panel_manager: true, panel_kitchen: true, panel_tablet: true, panel_owner: false,
       sec_reports: true, sec_staff: true, sec_issues: false, sec_ratings: true, sec_customers: false, sec_settings: true,
     },
     gates: { table_ops: false, table_tags: true, khata: false, banquet: false, auto_print_kot: false },
     ladder: {
       edit_menu: { level: 1, owner: ON(["add_dish", "edit_dish", "edit_price", "mark_86", "manage_categories"]), manager: {} },
-      give_discounts: { level: 2, owner: ON(["per_dish", "whole_bill"]), manager: ON(["per_dish", "on_the_house"]), waiter: "off", limit: { owner: 50, manager: 10, waiter: 0 } },
+      give_discounts: { level: 2, owner: ON(["whole_bill"]), manager: ON(["on_the_house"]), limit: { owner: 50, manager: 10 } },
       void_bills: { level: 1, owner: ON(["void_bill", "close_unpaid"]), manager: {} },
-      revert_payment: { level: 0, owner: {}, manager: {}, waiter: "off" },
-      mark_paid: { level: 2, owner: ON(["pay_cash", "pay_card"]), manager: ON(["pay_cash", "pay_card"]), waiter: "on" },
-      print_invoice: { level: 2, owner: ON(["inv_generate"]), manager: ON(["inv_generate"]), waiter: "on" },
-      khata: { level: 0, owner: {}, manager: {}, waiter: "off" },
-      take_orders: { level: 2, waiter: "on" },
-      table_ops: { level: 0, owner: {}, manager: {}, waiter: "off" },
-      table_tags: { level: 1, owner: ON(["tag_set"]), manager: {}, waiter: "off" },
-      auto_print_kot: { level: 0, owner: {}, manager: {} },
-      banquet: { level: 0, owner: {}, manager: {}, waiter: "off" },
+      revert_payment: { level: 0, owner: {}, manager: {} },
+      mark_paid: { level: 3, owner: ON(["pay_cash", "pay_card"]), manager: ON(["pay_cash", "pay_card"]), waiter: "on" },
+      print_invoice: { level: 3, owner: ON(["inv_generate"]), manager: ON(["inv_generate"]), waiter: "on" },
+      khata: { level: 0, owner: {}, manager: {} },
+      take_orders: { level: 3, waiter: "on" },
+      table_ops: { level: 0, owner: {}, manager: {} },
+      table_tags: { level: 1, owner: ON(["tag_set"]), manager: {} },
+      banquet: { level: 0, owner: {}, manager: {} },
       view_dashboard: { level: 1, owner: ON(["rep_sales", "rep_items", "rep_zclose"]), manager: {} },
       view_ratings: { level: 2, owner: ON(["rat_view", "rat_respond"]), manager: ON(["rat_view"]) },
       export_reports: { level: 0, owner: {}, manager: {} },
@@ -566,7 +550,11 @@ export const emit = () => listeners.forEach((fn) => fn());
    Everything the controls do goes through here, so the rules (cascade, admin
    gate, manager-cannot-exceed-owner) live in exactly one place.              */
 
-export const LEVELS = ["Off", "Owner", "Owner + Manager"];
+export const LEVELS = ["Off", "Owner", "Owner + Manager", "Owner + Manager + Tablet"];
+/* How far a power may reach. Money / floor actions can go all the way to the
+   tablet; everything else stops at the manager. Drives the reach control's steps
+   and clamps setLevel so you can never delegate deeper than allowed. */
+export const maxReach = (perm) => (perm && perm.waiter ? 3 : 2);
 
 export function gateOn(perm) {
   if (!perm.gate) return true;
@@ -584,13 +572,21 @@ export function lad(permId) {
 
 export function setLevel(permId, level) {
   const l = lad(permId);
+  const perm = PERM_BY_ID[permId];
+  level = Math.max(0, Math.min(level, maxReach(perm)));
   l.level = level;
-  // Cascade down: dropping below Owner+Manager empties the manager side and the
-  // waiter rung, because a rung can never survive its parent being switched off.
-  if (level < 2) { l.manager = {}; if (l.waiter) l.waiter = "off"; }
+  // Cascade down: a rung can never survive its parent being switched off.
+  // Tablet lives at level 3; below that it is simply off (no separate flag).
+  if (level < 2) { l.manager = {}; }
   if (level < 1) { l.owner = {}; }
+  // Reaching the tablet rung with no default yet → default to plain On (never
+  // "off" — off is expressed by lowering the reach, per the owner's model).
+  if (level >= 3 && perm.waiter && (!l.waiter || l.waiter === "off")) l.waiter = "on";
   emit();
 }
+
+/* The master toggle in the header: on → Owner (level 1), off → nothing. */
+export function setMaster(permId, on) { setLevel(permId, on ? Math.max(1, lad(permId).level) : 0); }
 
 export function setSub(permId, side, subId, on) {
   const l = lad(permId);
@@ -642,11 +638,12 @@ export function resolvedFor(person, permId) {
   if (perm.kind === "locked") base = person.role !== "kitchen";
   else if (person.role === "owner") base = l.level >= 1;
   else if (person.role === "manager") base = l.level >= 2;
-  else if (person.role === "tablet") base = l.level >= 2 && l.waiter && l.waiter !== "off";
+  else if (person.role === "tablet") base = l.level >= 3 && perm.waiter;
   else base = false;
   if (perm.gate && !gateOn(perm)) base = false;
   const ov = person.overrides[permId] || "default";
-  return { base, effective: ov === "on" ? true : ov === "off" ? false : base, override: ov };
+  const effective = ov === "on" || ov === "pin" ? true : ov === "off" ? false : base;
+  return { base, effective, override: ov };
 }
 
 export function setOverride(person, permId, v) {
@@ -690,7 +687,8 @@ export function summary(perm) {
   const nOwner = perm.sub ? perm.sub.filter((s) => l.owner[s.id]).length : 0;
   const nMgr = perm.sub ? perm.sub.filter((s) => l.manager[s.id]).length : 0;
   if (l.level === 1) return { tone: "owner", label: "Owner only", detail: perm.sub ? `${nOwner}/${perm.sub.length}` : "" };
-  return { tone: "both", label: "Owner + Manager", detail: perm.sub ? `${nOwner} · ${nMgr}` : "" };
+  if (l.level === 2) return { tone: "both", label: "Owner + Manager", detail: perm.sub ? `${nOwner} · ${nMgr}` : "" };
+  return { tone: "both", label: "Owner + Mgr + Tablet", detail: perm.sub ? `${nOwner} · ${nMgr}` : "" };
 }
 
 export function groupStats(gid) {

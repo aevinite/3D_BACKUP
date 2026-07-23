@@ -5,8 +5,8 @@
 
 import {
   state, GROUPS, GROUP_BY_ID, PERMISSIONS, PERM_BY_ID, permsOf, summary, lad,
-  gateOn, getSwitch, groupStats, sortedPeople, ROLE_LABEL, capsFor, resolvedFor,
-  setOverride, holdersOf, allConflicts, LEVELS,
+  gateOn, getSwitch, groupStats, sortedPeople, ROLE_LABEL, ROLE_RELEVANCE, capsFor, resolvedFor,
+  setOverride, holdersOf, allConflicts,
 } from "./data.js";
 import { icon } from "./icons.js";
 import { pill, permCard, renderSwitch, switchRow, renderFull, openSet, openDrawer, infoBtn } from "./controls.js";
@@ -258,8 +258,8 @@ export function layoutMatrix() {
           owner = cell(l.level >= 1 ? "g" : "n", l.level >= 1 ? "YES" : "NO");
           mgr = cell(l.level >= 2 ? "y" : "n", l.level >= 2 ? "YES" : "NO");
           waiter = p.waiter
-            ? cell(l.level < 2 || l.waiter === "off" ? "n" : l.waiter === "pin" ? "p" : "y",
-                l.level < 2 ? "—" : (l.waiter || "off").toUpperCase())
+            ? (l.level < 3 ? cell("n", "—")
+                : cell(l.waiter === "pin" ? "p" : "y", l.waiter === "pin" ? "PIN" : "ON"))
             : cell("dash", "—", "Not a waiter capability");
         }
       }
@@ -313,30 +313,70 @@ export function layoutPerson() {
     </button>`;
   }).join("");
 
-  const caps = capsFor(person);
-  const filtered = state.personFilter ? caps.filter((c) => c.id === state.personFilter) : caps;
+  // Per-person override control (Default / On / Off, + On-with-PIN for a tablet
+  // person on a tablet-capable power).
+  const triFor = (subject, perm) => {
+    const { base, override } = resolvedFor(subject, perm.id);
+    const pinnable = subject.role === "tablet" && perm.waiter;
+    const opts = [
+      ["default", `Follows restaurant`, base ? "ON" : "OFF"],
+      ["on", "On", ""],
+      ...(pinnable ? [["pin", "On, PIN", ""]] : []),
+      ["off", "Off", ""],
+    ];
+    return `<div class="tri3" role="radiogroup" aria-label="${esc(perm.name)} for ${esc(subject.name)}">
+      ${opts.map(([v, lbl, res]) => `<button data-act="ov" data-p="${subject.id}" data-id="${perm.id}" data-v="${v}"
+        role="radio" aria-checked="${override === v || (v === "on" && override === "pin" && !pinnable)}" data-v="${v}">${
+        v === "on" ? icon("check", "ico ico-sm") : v === "off" ? icon("minus", "ico ico-sm") : v === "pin" ? icon("key", "ico ico-sm") : ""
+      }${lbl}${res ? ` <span class="res">${res}</span>` : ""}</button>`).join("")}
+    </div>`;
+  };
 
+  /* ---- "Who has this?" mode: EVERY relevant person listed for ONE capability --- */
+  if (state.personFilter) {
+    const perm = PERM_BY_ID[state.personFilter];
+    const relevant = people.filter((p) => (ROLE_RELEVANCE[p.role] || []).includes(perm.id));
+    const holders = relevant.filter((p) => resolvedFor(p, perm.id).effective);
+    const rows = relevant.map((p) => {
+      const { effective, override } = resolvedFor(p, perm.id);
+      return `<div class="caprow ${effective ? "is-hi" : ""}">
+        <span class="av" style="width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font:700 12px/1 var(--font);flex:none;background:var(--s3);border:1px solid var(--line2)">${esc(p.name.split(" ").map((w) => w[0]).join("").slice(0, 2))}</span>
+        <span class="body">
+          <span class="nm">${esc(p.name)} <span class="pill ${effective ? "pill--on" : "pill--off"}" style="height:20px"><i class="led"></i>${effective ? "Has it" : "Does not"}</span></span>
+          <span class="ds">${ROLE_LABEL[p.role]} · ${override === "default" ? "follows the restaurant setting" : `<b style="color:var(--gold-hi)">overridden to ${override.toUpperCase()}</b>`}</span>
+        </span>
+        ${triFor(p, perm)}
+      </div>`;
+    }).join("");
+    return `<div class="pp">
+      <nav class="plist" aria-label="Staff">
+        <div class="ph">${people.length} people · owner first</div>${list}
+      </nav>
+      <div class="pdetail">
+        <div class="filterbar">${icon("users", "ico ico-sm")}
+          Who has <b>${esc(perm.name)}</b> right now — <b>${holders.length}</b> of ${relevant.length} people
+          <button data-act="clearfilter">Back to a single person</button></div>
+        <div class="hint" style="padding:12px 20px;margin:0">${icon("info")}<span>This is the live list of everyone who can use this. Change the restaurant-wide default in <b>General</b>; use the buttons here to force it on or off for one person.</span></div>
+        ${rows || `<div class="emptyp">${icon("shield", "ico")}<p>Nobody can use this yet.</p></div>`}
+      </div>
+    </div>`;
+  }
+
+  /* ---- normal mode: one person, all their capabilities --- */
+  const caps = capsFor(person);
   let lastGroup = null;
-  const rows = filtered.length ? filtered.map((p) => {
-    const { base, effective, override } = resolvedFor(person, p.id);
+  const rows = caps.length ? caps.map((p) => {
+    const { base, override } = resolvedFor(person, p.id);
     const hd = p.group !== lastGroup ? `<div class="capgrp">${esc(GROUP_BY_ID[p.group].name)}</div>` : "";
     lastGroup = p.group;
-    const hi = state.personFilter === p.id;
-    return hd + `<div class="caprow ${hi ? "is-hi" : ""}">
+    return hd + `<div class="caprow">
       <span class="body">
         <span class="nm">${esc(p.name)} ${infoBtn(p.id)}</span>
         <span class="ds">${override === "default"
-          ? `Follows the restaurant setting — which is currently <b style="color:${base ? "var(--ok)" : "var(--tx2)"}">${base ? "on" : "off"}</b> for a ${ROLE_LABEL[person.role].toLowerCase()}.`
+          ? `Follows the restaurant setting — currently <b style="color:${base ? "var(--ok)" : "var(--tx2)"}">${base ? "on" : "off"}</b> for a ${ROLE_LABEL[person.role].toLowerCase()}. <button class="lnk" data-act="whofromperson" data-id="${p.id}">change the default →</button></span>`
           : `Overridden for ${esc(person.name.split(" ")[0])} — the restaurant setting says ${base ? "on" : "off"}.`}</span>
       </span>
-      <div class="tri3" role="radiogroup" aria-label="${esc(p.name)} for ${esc(person.name)}">
-        <button data-act="ov" data-p="${person.id}" data-id="${p.id}" data-v="default" role="radio"
-          aria-checked="${override === "default"}">Follows restaurant <span class="res">${base ? "ON" : "OFF"}</span></button>
-        <button data-act="ov" data-p="${person.id}" data-id="${p.id}" data-v="on" role="radio"
-          aria-checked="${override === "on"}" data-v="on">${icon("check", "ico ico-sm")} Force on</button>
-        <button data-act="ov" data-p="${person.id}" data-id="${p.id}" data-v="off" role="radio"
-          aria-checked="${override === "off"}" data-v="off">${icon("minus", "ico ico-sm")} Force off</button>
-      </div>
+      ${triFor(person, p)}
     </div>`;
   }).join("") : `<div class="emptyp">${icon("shield", "ico")}<p>Nothing here applies to a ${ROLE_LABEL[person.role].toLowerCase()}.</p></div>`;
 
@@ -349,12 +389,9 @@ export function layoutPerson() {
     <div class="pdetail">
       <div class="pdhead">
         <span class="av">${esc(person.name.split(" ").map((w) => w[0]).join("").slice(0, 2))}</span>
-        <span style="flex:1;min-width:0"><h3>${esc(person.name)}</h3><span class="mt">${esc(person.since)}</span></span>
+        <span style="flex:1;min-width:0"><h3>${esc(person.name)}</h3><span class="mt">${ROLE_LABEL[person.role]} · ${esc(person.since)}</span></span>
         ${nOv ? `<button class="reset" data-act="resetov" data-p="${person.id}">${icon("reset", "ico ico-sm")} Clear ${nOv} override${nOv > 1 ? "s" : ""}</button>` : `<span class="pill pill--off"><i class="led"></i>No overrides — follows the restaurant</span>`}
       </div>
-      ${state.personFilter ? `<div class="filterbar">${icon("search", "ico ico-sm")}
-        Showing only <b>${esc(PERM_BY_ID[state.personFilter].name)}</b> · ${holdersOf(state.personFilter).length} of ${people.length} people have it
-        <button data-act="clearfilter">Show everything</button></div>` : ""}
       ${rows}
     </div>
   </div>`;

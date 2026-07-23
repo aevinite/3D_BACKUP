@@ -156,6 +156,7 @@ function bindShell() {
       p.overrides = {}; emit(); return;
     }
     if (a === "clearfilter") { state.personFilter = null; paint(); return; }
+    if (a === "whofromperson") { state.personFilter = b.dataset.id; paint(); scrollTo({ top: 0, behavior: "smooth" }); return; }
   });
 }
 
