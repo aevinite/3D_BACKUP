@@ -1238,6 +1238,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && b === "delete") {
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("delete or clear bills");
       const { ids, all } = body || {};
+      // Reason the manager typed (owner 2026-07-23 — deletes must carry a why for the bill audit).
+      const delReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
       let deletable: string[]; let kept: number;
       if (all) {
         // Scoped read: fetch ONLY the deletable rows (unpaid OR cancelled) so a "clear all"
@@ -1253,7 +1255,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         kept = candidates.length - deletable.length;
       } else return err("no ids");
       if (deletable.length) must(await sb.from("orders").delete().eq("restaurant_id", rid).in("id", deletable));
-      await log("editor", "orders_delete", { restaurant_id: rid, detail: all ? `cleared all freed records (${deletable.length})` : `deleted ${deletable.length} bill(s)`, device_id: dev });
+      await log("editor", "orders_delete", { restaurant_id: rid, detail: (all ? `cleared all freed records (${deletable.length})` : `deleted ${deletable.length} bill(s)`) + (delReason ? ` — ${delReason}` : ""), device_id: dev });
       return ok({ ok: true, deleted: deletable.length, kept });
     }
 
@@ -2288,7 +2290,9 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       if (cur && cur.payment_status === "paid" && cur.status !== "cancelled")
         return err("Won't delete a PAID bill — it's a financial record. Mark it unpaid or void it first.", 409);
       must(await sb.from("orders").delete().eq("id", id).eq("restaurant_id", rid));
-      await log("editor", "order_delete", { restaurant_id: rid, order_id: id, device_id: deviceIdFrom(req) });
+      // Reason from the client (?reason=) → into the log detail so the bill audit shows WHY.
+      const delReason = (req.nextUrl.searchParams.get("reason") || "").trim().slice(0, 200);
+      await log("editor", "order_delete", { restaurant_id: rid, order_id: id, detail: delReason || undefined, device_id: deviceIdFrom(req) });
       return ok({ ok: true });
     }
 

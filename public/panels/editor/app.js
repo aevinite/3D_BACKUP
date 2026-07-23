@@ -250,13 +250,20 @@ function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
 // cancel/Escape/backdrop. required:true keeps the OK button from submitting an empty value. Mirrors
 // confirmDialog (fade-in, Escape, hardware-BACK __lfhClose, backdrop dismiss) + focuses the input.
 function promptDialog(message, opts = {}) {
-  const { confirmLabel = "OK", placeholder = "", defaultValue = "", required = false, danger = true } = opts;
+  const { confirmLabel = "OK", placeholder = "", defaultValue = "", required = false, danger = true, presets = [] } = opts;
   return new Promise((resolve) => {
     const wrap = document.createElement("div");
     wrap.className = "confirm-overlay";
+    // Quick-pick chips: one tap fills the reason so staff rarely have to type (owner
+    // 2026-07-23: "there could be a quick option — Misclick, mistake"). Tapping a chip
+    // fills the box; they can still edit or add detail before confirming.
+    const chips = (presets || []).length
+      ? `<div class="confirm-presets" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${presets.map((p) => `<button type="button" class="btn confirm-chip" style="padding:6px 11px;font-size:13px;border-radius:999px" data-v="${esc(p)}">${esc(p)}</button>`).join("")}</div>`
+      : "";
     wrap.innerHTML = `
       <div class="confirm-box">
         <div class="confirm-msg" style="margin-bottom:12px">${esc(message)}</div>
+        ${chips}
         <input class="confirm-input" type="text" placeholder="${esc(placeholder)}" value="${esc(defaultValue)}"
           style="width:100%;padding:10px 12px;border:1px solid var(--line,#ccc);border-radius:8px;font-size:15px;box-sizing:border-box;background:var(--panel,#fff);color:inherit" />
         <div class="confirm-actions" style="margin-top:14px">
@@ -266,6 +273,7 @@ function promptDialog(message, opts = {}) {
       </div>`;
     document.body.appendChild(wrap);
     const input = wrap.querySelector(".confirm-input");
+    wrap.querySelectorAll(".confirm-chip").forEach((c) => { c.onclick = () => { input.value = c.dataset.v; try { input.focus(); } catch {} }; });
     requestAnimationFrame(() => { wrap.classList.add("show"); try { input.focus(); } catch {} });
     function esc2(e) { if (e.key === "Escape") close(null); else if (e.key === "Enter") submit(); }
     const close = (val) => {
@@ -284,6 +292,12 @@ function promptDialog(message, opts = {}) {
     document.addEventListener("keydown", esc2);
   });
 }
+
+// Quick-pick reason chips for bill-affecting actions (owner 2026-07-23). Free text still
+// allowed; these just save typing for the common cases. Kept short so they fit on a phone.
+const REASONS_REVERT = ["Mis-tap / misclick", "Wrong amount", "Refund to customer", "Paid by mistake", "Redo the bill"];
+const REASONS_DELETE = ["Mis-tap / misclick", "Duplicate bill", "Test order", "Order cancelled", "Wrong table"];
+const REASONS_CLOSE = ["Customer left unpaid", "Mis-tap / misclick", "On the house", "Staff meal", "Moved to another bill"];
 
 // Manager (or any staff) raises an operational issue → the owner sees it on their
 // Issues page and the admin sees it as a platform complaint. The modal (subject +
@@ -2155,7 +2169,7 @@ async function restoreBill(orders) {
   const needsPaymentRevert = orders.some((o) => !o.archived && o.status !== "cancelled" && o.payment_status === "paid");
   let revertReason = null;
   if (needsPaymentRevert) {
-    revertReason = ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true })) || "").trim();
+    revertReason = ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true, presets: REASONS_REVERT })) || "").trim();
     if (!revertReason) { toast("Restore cancelled — a reason is required.", "err"); return; }
   }
   let okCount = 0, failCount = 0;
@@ -2225,7 +2239,7 @@ async function cancelOrder(id) {
 // every order (all=true). OPTIMISTIC: the cards vanish instantly; the server
 // catches up in the background (and the rows return + an error shows if it
 // fails). No more re-downloading all 200 orders just to delete one.
-async function deleteOrders(ids, all = false) {
+async function deleteOrders(ids, all = false, opts = {}) {
   const before = state.data.orders || [];
   // The server KEEPS settled (paid, not voided) bills — they're financial
   // records. Mirror that rule here so the optimistic view matches what actually
@@ -2233,6 +2247,14 @@ async function deleteOrders(ids, all = false) {
   const isRecord = (o) => o.payment_status === "paid" && o.status !== "cancelled";
   const targetIds = all ? before.map((o) => o.id) : (ids || []);
   const gone = before.filter((o) => targetIds.includes(o.id) && !isRecord(o)).map((o) => o.id);
+  if (!gone.length) { toast("Nothing to delete here (paid bills are kept as records).", "err"); return; }
+  // Deleting a bill is permanent — REQUIRE a reason (owner 2026-07-23), with quick chips.
+  // This prompt IS the confirmation (the callers no longer show a separate confirm dialog).
+  // A programmatic caller can pass opts.reason to skip the prompt.
+  const reason = (opts.reason
+    || (await promptDialog(`Delete ${gone.length > 1 ? gone.length + " orders" : "this order"} permanently? Reason?`,
+        { confirmLabel: "Delete", placeholder: "e.g. duplicate, mis-tap", required: true, danger: true, presets: REASONS_DELETE })) || "").trim();
+  if (!reason) { toast("Delete cancelled — a reason is required.", "err"); return; }
   const goneSet = new Set(gone);
   state.data.orders = before.filter((o) => !goneSet.has(o.id));
   // (lastOrderCount is owned solely by reconcileBoard now, derived from the summary's
@@ -2242,9 +2264,9 @@ async function deleteOrders(ids, all = false) {
   renderEditor();
   try {
     let r;
-    if (all) r = await api("POST", "/orders/delete", { all: true });
-    else if (ids && ids.length === 1) r = await api("DELETE", "/orders/" + ids[0]);
-    else r = await api("POST", "/orders/delete", { ids });
+    if (all) r = await api("POST", "/orders/delete", { all: true, reason });
+    else if (ids && ids.length === 1) r = await api("DELETE", "/orders/" + ids[0] + "?reason=" + encodeURIComponent(reason));
+    else r = await api("POST", "/orders/delete", { ids, reason });
     const kept = r && r.kept ? r.kept : 0;
     toast(kept
       ? `Cleared ${gone.length} · kept ${kept} paid bill${kept > 1 ? "s" : ""} as records`
@@ -2279,7 +2301,7 @@ async function setOrderPayment(id, paid, opts = {}) {
     // The undo bar passes a canned reason so a mis-tap can be taken back in one tap
     // without a prompt; it's still logged as a payment_revert for the audit trail.
     revertReason = (opts.revertReason || "").trim()
-      || ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true })) || "").trim();
+      || ((await promptDialog("This bill is PAID — reverting it to unpaid is a refund/correction. Reason?", { confirmLabel: "Revert to unpaid", placeholder: "e.g. refund, wrong entry", required: true, presets: REASONS_REVERT })) || "").trim();
     if (!revertReason) { toast("Revert cancelled — a reason is required.", "err"); return false; }
   }
   if (o) o.payment_status = paid ? "paid" : "pending"; // flip the screen NOW
@@ -3623,7 +3645,7 @@ function renderEditor() {
     });
     ed.querySelectorAll(".ord-del[data-del]").forEach((btn) => {
       btn.onclick = async () => {
-        if (await confirmDialog("Delete this order? It will be permanently removed.", "Delete")) deleteOrders([btn.dataset.del]);
+        deleteOrders([btn.dataset.del]); // reason prompt inside deleteOrders is the confirmation
       };
     });
     // Per-order allergen chips: optimistic toggle, then persist; the poll reconciles.
@@ -3690,7 +3712,7 @@ function renderEditor() {
     ed.querySelectorAll("[data-sess-del]").forEach((btn) => {
       btn.onclick = async () => {
         const ids = ordersInGroup(btn.dataset.sessDel).map((o) => o.id);
-        if (ids.length && await confirmDialog(`Delete this whole bill (${ids.length} order${ids.length > 1 ? "s" : ""})? Permanently removed.`, "Delete")) deleteOrders(ids);
+        if (ids.length) deleteOrders(ids); // reason prompt inside deleteOrders is the confirmation
       };
     });
     ed.querySelectorAll("[data-resolve]").forEach((btn) => {
@@ -3757,7 +3779,7 @@ function renderEditor() {
     if (delSel) delSel.onclick = async () => {
       const ids = [...ed.querySelectorAll(".ord-select:checked")].map((c) => c.dataset.sel);
       if (!ids.length) return;
-      if (await confirmDialog(`Delete ${ids.length} selected order${ids.length > 1 ? "s" : ""}? They'll be permanently removed.`, "Delete")) deleteOrders(ids);
+      deleteOrders(ids); // reason prompt inside deleteOrders is the confirmation
     };
     // Clear every freed/archived record in one go (the records you can't otherwise
     // reach with the active-orders bulk bar).
@@ -3765,7 +3787,7 @@ function renderEditor() {
     if (clearFreed) clearFreed.onclick = async () => {
       const ids = (state.data.orders || []).filter((o) => o.archived).map((o) => o.id);
       if (!ids.length) return;
-      if (await confirmDialog(`Permanently delete all ${ids.length} freed record${ids.length > 1 ? "s" : ""}?`, "Delete")) deleteOrders(ids);
+      deleteOrders(ids); // reason prompt inside deleteOrders is the confirmation
     };
     return;
   }
