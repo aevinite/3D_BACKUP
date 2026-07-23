@@ -24,7 +24,7 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
-import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -227,6 +227,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // KOT ▾ menu (mig 177): same canonical module rule — module off = power dead.
       const tOps = await tableOpsLadder(rid);
       if (!tOps.effective) effectivePowers.table_ops = false;
+      // Order-taking (mig 179): same canonical module rule — the ＋Take order button dies
+      // when the admin switches the module off for this restaurant.
+      const tOrd = await takeOrdersLadder(rid);
+      if (!tOrd.effective) effectivePowers.take_orders = false;
       return ok({
         actor,
         role: actor,
@@ -236,7 +240,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         managerPermissions: perms,
         effectivePowers,
         offByAdmin,
-        features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective, table_ops: tOps.effective },
+        features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective, table_ops: tOps.effective, take_orders: tOrd.effective },
       });
     }
 
@@ -1043,6 +1047,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // entitles it AND the owner grants it; managerCan, 2026-07-22). Wrapped by
     // withIdempotency like every editor write, so a replayed offline action places once.
     if (a === "order" && path.length === 1) {
+      // Module rung (mig 179): ordering must be enabled for this restaurant at all,
+      // then the manager needs the take_orders power (admin exists + owner grant).
+      if (!(await takeOrdersLadder(rid)).effective) return err("Order-taking isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "take_orders"))) return permDenied("take new orders");
       const { table, items, allergies, note } = body || {};
       const t = String(table || "").trim();

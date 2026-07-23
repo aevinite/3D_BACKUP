@@ -18,6 +18,7 @@ const MODULE_DEFS = [
   { key: "table_tags", label: "Table types (VIP / Family / Guest) + pay later", allowed: "table_tags_allowed", control: "table_tags_owner_control", enabled: "table_tags_enabled" },
   { key: "banquet", label: "Banquet billing", allowed: "banquet_allowed", control: "banquet_owner_control", enabled: "banquet_enabled" },
   { key: "table_ops", label: "Table & KOT operations (KOT menu)", allowed: "table_ops_allowed", control: "table_ops_owner_control", enabled: "table_ops_enabled" },
+  { key: "take_orders", label: "Order-taking", allowed: "take_orders_allowed", control: "take_orders_owner_control", enabled: "take_orders_enabled" },
 ] as const;
 
 export async function GET(req: NextRequest) {
@@ -44,12 +45,12 @@ export async function GET(req: NextRequest) {
   // (table_tags_owner_control) — those get a toggle on the owner's settings page. A
   // restaurant without the transfer never appears here (admin keeps the switch).
   const modIds = scope.all ? restaurants.map((r) => r.id) : scope.ids;
-  let modules: { restaurant_id: string; name: string; key: string; label: string; enabled: boolean }[] = [];
+  const modules: { restaurant_id: string; name: string; key: string; label: string; enabled: boolean }[] = [];
   // One row per (restaurant, transferred module) — generalised for every laddered
   // module (mig 166 table_tags, mig 167 banquet); add new modules to MODULE_DEFS.
   if (modIds.length) {
     const rows = (await sb.from("settings")
-      .select("restaurant_id, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled")
+      .select("restaurant_id, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled, take_orders_allowed, take_orders_owner_control, take_orders_enabled")
       .in("restaurant_id", modIds).limit(200)).data || [];
     const nameOf = new Map(restaurants.map((r) => [r.id, r.name]));
     for (const s of rows as Record<string, unknown>[]) {
