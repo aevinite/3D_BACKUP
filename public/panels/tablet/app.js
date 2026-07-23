@@ -174,6 +174,41 @@ const pinPrompt = (message, errText) => new Promise((resolve) => {
   ov.onclick = (e) => { if (e.target === ov) done(null); };
 });
 
+// reasonPrompt: a themed required text box (same shell as pinPrompt) — used when an
+// action needs a WHY, e.g. reversing a paid bill (a refund/correction that gets logged).
+// Resolves the trimmed reason, or null if cancelled / left blank.
+const reasonPrompt = (message, placeholder) => new Promise((resolve) => {
+  const ov = document.createElement("div");
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  const box = document.createElement("div");
+  Object.assign(box.style, { width: "min(92vw,360px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
+  box.innerHTML = `
+    <div style="font-size:16px;font-weight:800;margin:0 0 6px">↩ Reason required</div>
+    <div style="font-size:13px;color:var(--muted);margin:0 0 12px">${message || "Why are you making this change?"}</div>
+    <input class="rp-in" type="text" maxlength="120" placeholder="${placeholder || "e.g. refund, wrong entry"}" autocomplete="off"
+      style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;outline:none" />
+    <div class="rp-err" style="font-size:12px;color:#fca5a5;min-height:16px;margin:6px 2px 0"></div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button class="rp-cancel" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--panel-2);color:var(--text);cursor:pointer">Cancel</button>
+      <button class="rp-ok" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--gold);color:#14110d;cursor:pointer">Confirm</button>
+    </div>`;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  const input = box.querySelector(".rp-in");
+  const err = box.querySelector(".rp-err");
+  setTimeout(() => input.focus(), 50);
+  let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-reason", () => done(null)) : null;
+  const done = (val) => { if (backOff) { backOff(); backOff = null; } ov.remove(); resolve(val); };
+  box.querySelector(".rp-cancel").onclick = () => done(null);
+  box.querySelector(".rp-ok").onclick = () => {
+    const v = input.value.trim();
+    if (!v) { err.textContent = "A reason is required."; return; }
+    done(v);
+  };
+  input.onkeydown = (e) => { if (e.key === "Enter") box.querySelector(".rp-ok").click(); else if (e.key === "Escape") done(null); };
+  ov.onclick = (e) => { if (e.target === ov) done(null); };
+});
+
 // Run an action that MAY need a manager PIN: try it plainly first (so it stays
 // frictionless when no PIN is configured yet, or for the admin super-user); if the
 // server answers "manager PIN required", prompt once and retry with it. Reloads on
@@ -972,6 +1007,7 @@ function renderPanel() {
       ${s && os.length && tshow("tablet_discount") ? `<button class="btn${txray("tablet_discount")}" id="billDiscountBtn">${Number(s.discount) > 0 ? `− Edit bill discount (${inr(s.discount)})` : "− Discount whole bill"}</button>` : ""}
       ${s && os.length && !invoiced && tshow("tablet_invoice") ? `<button class="btn${txray("tablet_invoice")}" id="genInvoiceBtn">🧾 Generate invoice</button>` : ""}
       ${s && os.length && a.unpaid && tshow("tablet_mark_paid") ? `<button class="btn pay${txray("tablet_mark_paid")}" id="payBill"${os.some((o) => o.status === "received") ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
+      ${s && os.length && a.paid && tshow("tablet_mark_paid") ? `<button class="btn${txray("tablet_mark_paid")}" id="unpayBill" title="Reopen this paid bill (a refund/correction — asks for a reason)">↩ Mark unpaid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
     </div>
     ${foot}
@@ -1105,6 +1141,7 @@ function renderPanel() {
     await load(); // reconcile (also reverts the optimistic clear if the PIN was cancelled)
   };
   const pb = $("#payBill"); if (pb) pb.onclick = () => payBillWithMethod(t, a);
+  const ub = $("#unpayBill"); if (ub) ub.onclick = () => markBillUnpaid(t);
   const tgb = $("#tagTable"); if (tgb) tgb.onclick = () => openTagSheet(t);
   const gib = $("#genInvoiceBtn"); if (gib && s) gib.onclick = () => genInvoice(s.id);
   const bdb = $("#billDiscountBtn"); if (bdb && s) bdb.onclick = () => tabletBillDiscount(t);
@@ -1740,6 +1777,17 @@ function optimisticPay(t, method, note) {
 // instant optimistic pay; 'pin' → manager-PIN-gated (the server also enforces it).
 // method/note come from openPaymentMethodModal (payBillWithMethod below) — optional
 // so this still works if ever called without them.
+// Mark an ALREADY-PAID bill back to unpaid — a refund/correction (owner, 2026-07-23).
+// Confirm + a required reason (logged for accountability), then reverse through the same
+// /unpay path the undo bar uses (un-pays the session's paid orders within the 30-min
+// grace, strips split legs + any on-the-house comp). Gated by tablet_mark_paid (PIN in
+// pin-mode) exactly like paying. Only offered on a paid bill in the detail view.
+async function markBillUnpaid(t) {
+  if (!(await confirmDialog("Reopen this bill as UNPAID? This reverses the recorded payment — a refund or correction.", "Mark unpaid"))) return;
+  const reason = await reasonPrompt("Why are you reopening this paid bill?", "e.g. refund, wrong table, entered by mistake");
+  if (!reason) { toast("Cancelled — a reason is required.", false); return; }
+  actGated("POST", `/tables/${t}/unpay`, { reason }, { message: "Enter a manager PIN to mark this bill unpaid.", toast: "Bill reopened — marked unpaid" });
+}
 function payBill(t, method, note) {
   const body = method ? { payment_method: method, payment_note: note || "" } : null;
   if (tperm("tablet_mark_paid") === "pin") {

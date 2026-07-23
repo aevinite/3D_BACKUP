@@ -1171,7 +1171,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // settle we just undid so the money trail doesn't double-count. A plain pay has none;
       // older legs are outside the grace window and left alone.
       await sb.from("session_payments").delete().eq("session_id", openSess.id).eq("restaurant_id", rid).gte("created_at", cutoff);
-      await log("payment_revert", { table_number: t, device_id: dev, detail: "undo settle (within grace)" });
+      // The quick undo bar sends no reason; the explicit "Mark unpaid" button sends one
+      // (a refund/correction) — record it for the money-accountability trail either way.
+      const reason = String((body && body.reason) || "").trim().slice(0, 120);
+      await log("payment_revert", { table_number: t, device_id: dev, detail: reason ? `unpaid: ${reason}` : "undo settle (within grace)" });
       return ok({ ok: true, count: paid.length });
     }
 
