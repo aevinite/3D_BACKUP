@@ -891,7 +891,11 @@ body {
 @media (min-width: 1041px) {
   .editor:has(.floor-wrap) { overflow: hidden; display: flex; flex-direction: column; padding-bottom: 14px; }
   .floor-wrap { flex: 1 1 auto; min-height: 0; align-items: stretch; }
-  .floor-main { overflow-y: auto; min-height: 0; padding-bottom: 24px; }
+  /* overflow-x:hidden is REQUIRED alongside overflow-y:auto — per the CSS spec a
+     'visible' x-axis next to a scrolling y-axis computes to 'auto', which gave the floor
+     an ugly horizontal scrollbar at the bottom (owner 2026-07-23). The grid wraps; it
+     must never scroll sideways. */
+  .floor-main { overflow-y: auto; overflow-x: hidden; min-height: 0; padding-bottom: 24px; }
   /* Drop the sticky trick: the panel now stretches to full pane height and scrolls
      its OWN content, fully decoupled from the grid's scroll. */
   .floor-side { position: static; top: auto; margin-top: 0; max-height: none; }

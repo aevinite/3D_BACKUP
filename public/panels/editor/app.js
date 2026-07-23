@@ -4878,8 +4878,12 @@ function tagActionAllowed(flag) {
   return xrayGrantedForManager(flag);
 }
 // This table's mark ('' when none) — the slim summary carries it for every tile.
+// ADMIN X-RAY rule (owner 2026-07-23): the admin console sees/uses EVERY feature, so a
+// mark ALWAYS renders in the admin view regardless of the restaurant's feature toggle.
+// A real manager/waiter sees it only when the feature is actually on for them.
 function tagForTable(t) {
-  if (!tableTagsOn()) return "";
+  const adminView = XRAY_WHO && XRAY_WHO.actor === "admin";
+  if (!adminView && !tableTagsOn()) return "";
   const tile = (state.summary.tiles || {})[String(t)];
   return (tile && tile.tag) || "";
 }
