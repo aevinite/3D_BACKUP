@@ -601,6 +601,20 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     return () => window.removeEventListener("keydown", onKey);
   }, [zoomImg]);
 
+  // Deep-link to a section: arriving with ?section=features|status|… (e.g. from the Repair
+  // page's "Feature switches" / "Maintenance mode" quick levers) scrolls straight to that
+  // card instead of dumping the admin at the top of a long page and making them hunt for it
+  // (owner 2026-07-23: "Feature switches takes me to the restaurant, not to the features").
+  // The card headers render synchronously (only their inner data is async), so the anchor
+  // exists on first paint; rAF lets layout settle before we scroll.
+  useEffect(() => {
+    let section = "";
+    try { section = new URLSearchParams(window.location.search).get("section") || ""; } catch {}
+    if (!section) return;
+    const el = document.getElementById(`det-${section}`);
+    if (el) requestAnimationFrame(() => el.scrollIntoView({ block: "start", behavior: "smooth" }));
+  }, []);
+
   // These loaders now announce a failure (flash) instead of silently swallowing it — a failed
   // load leaves the switches disabled, so without a message you couldn't tell why (audit 2026-07-07).
   const load = useCallback(async () => {
@@ -752,17 +766,17 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
       <RestaurantTickets restaurantId={restaurant.id} />
 
-      <StatusCard restaurant={restaurant} onChanged={onChanged} />
+      <div id="det-status"><StatusCard restaurant={restaurant} onChanged={onChanged} /></div>
 
-      <GoogleReviewCard restaurant={restaurant} />
+      <div id="det-review"><GoogleReviewCard restaurant={restaurant} /></div>
 
-      <OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} />
+      <div id="det-owner"><OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} /></div>
 
-      <BrandingCard restaurant={restaurant} />
+      <div id="det-branding"><BrandingCard restaurant={restaurant} /></div>
 
-      <EnterCard restaurant={restaurant} panels={panels} />
+      <div id="det-enter"><EnterCard restaurant={restaurant} panels={panels} /></div>
 
-      <div className="adm-card" style={{ marginBottom: 14 }}>
+      <div id="det-panels" className="adm-card" style={{ marginBottom: 14 }}>
         <h2>Panels</h2>
         <p className="hint">Which panels <b>{restaurant.name}</b> has. Turning one OFF blocks that login and removes its Enter button above — e.g. a restaurant with no Owner panel.</p>
         {panels === null
@@ -770,7 +784,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
           : <div className="adm-togglegrid">{PANEL_OPTS.map((p) => panelToggle(p.key, p.label))}</div>}
       </div>
 
-      <div className="adm-card" style={{ marginBottom: 14 }}>
+      <div id="det-staff" className="adm-card" style={{ marginBottom: 14 }}>
         <h2>Staff features</h2>
         <p className="hint">Operational features you allow <b>{restaurant.name}</b> to use. The little picture shows what each one looks like (tap to enlarge).</p>
         {staffFeat === null
@@ -791,7 +805,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         </div>
       )}
 
-      <div className="adm-card" style={{ marginBottom: 14 }}>
+      <div id="det-features" className="adm-card" style={{ marginBottom: 14 }}>
         <h2>Guest features</h2>
         <p className="hint">Each switch shows or hides a feature across <b>{restaurant.name}</b>&apos;s guest menu.</p>
         {features === null

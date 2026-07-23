@@ -63,6 +63,22 @@ export default function AdminLogs() {
     })();
   }, []);
 
+  // Seed filters from the URL so deep-links land PRE-FILTERED (before this, the page
+  // ignored searchParams entirely): the notification bell links here with ?level=error
+  // and the Repair page's "Full activity log" links with ?restaurant_id=<id>. Read once
+  // on mount from location.search (no Suspense boundary needed, matching this page's style).
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const lv = p.get("level");
+      if (lv === "error" || lv === "warn" || lv === "info") setLevel(lv);
+      const r = p.get("restaurant_id");
+      if (r) setRid(r);
+      const query = p.get("q");
+      if (query) setQ(query);
+    } catch {}
+  }, []);
+
   const loadOps = useCallback(async () => {
     const qs = (rid ? `&restaurant_id=${rid}` : "") + (level ? `&level=${level}` : "") + (q.trim() ? `&q=${encodeURIComponent(q.trim())}` : "");
     try { const j = await (await fetch(`/api/admin/oplog?limit=200${qs}`, { cache: "no-store" })).json(); if (j.error) setOpsErr(true); else { setOps(j.actions || []); setOpsErr(false); } } catch { setOpsErr(true); }

@@ -26,12 +26,19 @@ export async function GET(req: NextRequest) {
   // what broke". ?q= is a free-text search over the action + detail (the incident hunt).
   const level = url.searchParams.get("level");
   const qText = (url.searchParams.get("q") || "").trim().slice(0, 80);
+  // ?since=<ISO> bounds the query to rows newer than a timestamp — the Repair hub asks for
+  // the last 24h so its "problems (24h)" label is TRUE (before this it fetched the latest N
+  // rows of ANY age and mislabelled them 24h, disagreeing with the 24h-bounded bell). Ignored
+  // if malformed so a bad value can never widen the result to the whole table.
+  const sinceRaw = url.searchParams.get("since");
+  const since = sinceRaw && !isNaN(Date.parse(sinceRaw)) ? new Date(sinceRaw).toISOString() : null;
   // Only the columns the activity feed actually renders — not select("*") — so we don't move
   // unused columns across the wire on every refresh (egress trim, 2026-07-07). `level` added
   // so the viewer can colour error rows red.
   let q = sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, level, created_at").order("created_at", { ascending: false }).limit(limit);
   if (restaurantId) q = q.eq("restaurant_id", restaurantId);
   if (level === "error" || level === "warn" || level === "info") q = q.eq("level", level);
+  if (since) q = q.gte("created_at", since);
   if (qText) {
     // Escape the PostgREST or-filter meta-characters (%,) so a search term can't break the filter.
     const safe = qText.replace(/[%,()]/g, " ");
