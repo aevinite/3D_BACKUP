@@ -36,7 +36,7 @@ const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: tr
 const TABLET_CAPS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders"] as const;
 // Feature-ladder switches on settings (mig 166): the feature itself + the admin's
 // "power transfer" (may the OWNER toggle it). Booleans, default OFF via the migration.
-const FEATURE_SWITCHES = ["table_tags_allowed", "table_tags_owner_control", "banquet_allowed", "banquet_owner_control", "table_ops_allowed", "table_ops_owner_control"] as const;
+const FEATURE_SWITCHES = ["table_tags_allowed", "table_tags_owner_control", "banquet_allowed", "banquet_owner_control", "table_ops_allowed", "table_ops_owner_control", "take_orders_allowed", "take_orders_owner_control"] as const;
 const isTri = (v: unknown): v is "off" | "on" | "pin" => v === "off" || v === "on" || v === "pin";
 
 const bad = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
   if (rq.error) return bad(rq.error.message, 500);
   if (!rq.data) return bad("Restaurant not found.", 404);
   const r = rq.data;
-  const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice, tablet_banquet, tablet_table_tags, tablet_khata, tablet_table_ops, tablet_take_orders, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled").eq("restaurant_id", rid).maybeSingle()).data as Record<string, unknown> | null;
+  const s = (await sb.from("settings").select("tablet_discount, tablet_mark_paid, tablet_invoice, tablet_banquet, tablet_table_tags, tablet_khata, tablet_table_ops, tablet_take_orders, table_tags_allowed, table_tags_owner_control, table_tags_enabled, banquet_allowed, banquet_owner_control, banquet_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled, take_orders_allowed, take_orders_owner_control, take_orders_enabled").eq("restaurant_id", rid).maybeSingle()).data as Record<string, unknown> | null;
   const manager = { ...MP_DEFAULT, ...(r?.manager_permissions && typeof r.manager_permissions === "object" ? r.manager_permissions : {}) };
   const tablet: Record<string, string> = {};
   for (const k of TABLET_CAPS) tablet[k] = isTri(s?.[k]) ? (s![k] as string) : "off";
@@ -64,6 +64,7 @@ export async function GET(req: NextRequest) {
   features.table_tags_enabled = s?.table_tags_enabled !== false; // the owners' toggles, shown read-only
   features.banquet_enabled = s?.banquet_enabled !== false;
   features.table_ops_enabled = s?.table_ops_enabled !== false;
+  features.take_orders_enabled = s?.take_orders_enabled !== false;
   return NextResponse.json({ manager, tablet, owner: mergeOwnerEntitlements(r?.owner_entitlements), features });
 }
 

@@ -54,6 +54,25 @@ bypass `tabletPerm`/`managerPinGate` always gave the admin.
   for real staff) and every module-rung server gate skips the admin super-user
   (`g.user &&` in the editor API, `actor &&`/`g.user &&` in the tablet API).
 
+## THE RULE (owner, restated 2026-07-23): every feature is a laddered on/off
+
+Any feature or **money/power** button we add gets the **full 4-rung ladder** wired from
+day one — admin application (`<x>_allowed`) + admin power-transfer (`<x>_owner_control`)
+→ owner on/off (`<x>_enabled`) → owner→manager grant (`power_<x>` + `manager_permissions
+.<x>`) → manager→tablet cap (`settings.tablet_<x>` tri-state). It is a MODULE (Access →
+Modules card + Owner → Features you control) whenever the whole feature can be switched
+on/off for a restaurant — which is the default expectation now. Copy an existing module
+end-to-end (`take_orders`, mig 179, is the latest worked example: `takeOrdersLadder`,
+the six touchpoints below). Everyday operational actions (accept/serve/open-close/attend)
+stay on the per-restaurant PANEL switch — see the carve-out in the defaults rule.
+
+The six touchpoints to wire for a new laddered feature (grep any of these to copy):
+`lib/tableTags.ts` (a `moduleLadder` alias) · migration (`_allowed`/`_owner_control`/
+`_enabled` + `lib/settingsClone.ts`) · editor `whoami` (`effectivePowers`+`features`) &
+its action gate · tablet route (GET overlay forces the cap off when the module's off +
+the POST gate) · admin `/aevinite/access` (`LADDER_MODULES` + the access route's
+`FEATURE_SWITCHES`/select) · owner `/api/owner/settings` (`MODULE_DEFS`).
+
 ## The defaults rule (apply to EVERY new feature, everywhere)
 
 - **Brand-new module:** `allowed` OFF · `owner_control` OFF · `enabled` ON (so a later
@@ -80,11 +99,12 @@ bypass `tabletPerm`/`managerPinGate` always gave the admin.
 | Panels (manager/kitchen/tablet/owner) | admin only (access = the panel itself) | Access → Panels |
 | Guest menu features (11 switches) | admin only (guests aren't staff) | Access → Guest menu features |
 | Owner-panel sections (6) | admin → owner | Access → Owner panel sections |
-| Manager powers: manage_staff · edit_menu · give_discounts · view_dashboard · void_bills · edit_settings · view_ratings · table_tags · khata · banquet · table_ops | admin "exists" + owner "granted" | Access → Manager powers / Owner → Staff & powers |
-| Tablet caps: discount · mark_paid · invoice · banquet · table_tags · khata · table_ops | manager tri-state + per-user | Access → Tablet / Manager → Settings → Access |
+| Manager powers: manage_staff · edit_menu · give_discounts · view_dashboard · void_bills · edit_settings · view_ratings · table_tags · khata · banquet · table_ops · take_orders | admin "exists" + owner "granted" | Access → Manager powers / Owner → Staff & powers |
+| Tablet caps: discount · mark_paid · invoice · banquet · table_tags · khata · table_ops · take_orders | manager tri-state + per-user | Access → Tablet / Manager → Settings → Access |
 | Module: table types + khata (mig 166) | FULL ladder (reference implementation) | Access → Modules |
 | Module: banquet (migs 130 + 167) | FULL ladder | Access → Modules |
 | Module: Table & KOT operations — the KOT ▾ menu: change table, merge tables, move a KOT/dish, split bill, reprint (migs 172-177) | FULL ladder; when off, the classic ⇄ Shift renders instead | Access → Modules |
+| Module: Order-taking — the manager ＋Take order builder + the waiter tablet's order button (migs 178-179) | FULL ladder; `_allowed` BACKFILLED on (ordering is core) — admin can switch a restaurant's ordering fully off | Access → Modules |
 | Auto-print KOT (mig 107) | admin `allowed` + restaurant toggle `auto_print_kot` (owner/manager via edit_settings) — transfer permanently on by design | Manager → Settings → Kitchen |
 | Serve/Ready/Pay undo bar | inherits the underlying action's permission | — |
 

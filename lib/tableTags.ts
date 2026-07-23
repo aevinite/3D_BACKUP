@@ -55,3 +55,10 @@ export const banquetLadder = (rid: string) =>
 // bill, reprint; migs 172-177).
 export const tableOpsLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "table_ops_allowed", control: "table_ops_owner_control", enabled: "table_ops_enabled" });
+
+// Order-taking — the manager panel's ＋Take order builder + the waiter tablet's order
+// button (mig 179). Same canonical module ladder as the others, but its _allowed is
+// BACKFILLED true (ordering is the app's core function — a new rung on a pre-existing
+// feature defaults to current behaviour, per docs/ACCESS-LADDER.md).
+export const takeOrdersLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "take_orders_allowed", control: "take_orders_owner_control", enabled: "take_orders_enabled" });

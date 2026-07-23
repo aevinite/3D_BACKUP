@@ -77,6 +77,12 @@ export function cleanClonedSettings(
   base.table_ops_owner_control = false;
   base.table_ops_enabled = true;
   base.tablet_table_ops = "off";
+  // Order-taking module (mig 179): unlike the modules above, _allowed starts ON for a NEW
+  // restaurant too — taking orders is the app's core function, not a premium add-on. The
+  // admin can still switch it off per restaurant. (Its tablet cap defaults 'on' above.)
+  base.take_orders_allowed = true;
+  base.take_orders_owner_control = false;
+  base.take_orders_enabled = true;
   // The auto-print-KOT capability itself (not just its entitlement) must also start OFF, so a
   // later entitlement grant doesn't immediately auto-print KOTs without the owner choosing to. (mig 107.)
   base.auto_print_kot = false;
