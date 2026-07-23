@@ -1377,22 +1377,22 @@ function renderPickerShell(titleHtml, bodyHtml, layerId, onBack) {
 (function injectKotMenuStyles() {
   const css = `
   .kotm-row { display:flex; align-items:center; gap:12px; width:100%; text-align:left;
-    background: var(--card,#151f31); border:1px solid var(--line,#26324a); border-radius:12px;
+    background: var(--panel-2); border:1px solid var(--line); border-radius:12px;
     padding:12px 14px; margin:0 0 8px; cursor:pointer; font:inherit; color:inherit; }
   .kotm-row:disabled { opacity:.45; cursor:default; }
   .kotm-ico { width:38px; height:38px; border-radius:10px; flex:none; display:flex; align-items:center;
-    justify-content:center; font-size:18px; background: color-mix(in srgb, var(--gold,#e3c06f) 14%, transparent);
-    border:1px solid color-mix(in srgb, var(--gold,#e3c06f) 30%, transparent); }
+    justify-content:center; font-size:18px; background: color-mix(in srgb, var(--gold) 14%, transparent);
+    border:1px solid color-mix(in srgb, var(--gold) 30%, transparent); }
   .kotm-txt b { font-size:14.5px; display:block; }
-  .kotm-txt small { color: var(--muted,#9fb0cc); font-size:11.5px; line-height:1.3; display:block; margin-top:1px; }
-  .kotm-chev { margin-left:auto; color: var(--muted,#9fb0cc); flex:none; }
+  .kotm-txt small { color: var(--muted); font-size:11.5px; line-height:1.3; display:block; margin-top:1px; }
+  .kotm-chev { margin-left:auto; color: var(--muted); flex:none; }
   .kotm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(84px,1fr)); gap:8px; }
-  .kotm-tile { border:1px solid var(--line,#26324a); border-radius:12px; background:var(--card,#151f31);
+  .kotm-tile { border:1px solid var(--line); border-radius:12px; background:var(--panel-2);
     padding:10px 6px; text-align:center; cursor:pointer; font:inherit; color:inherit; }
   .kotm-tile b { display:block; font-size:15px; }
-  .kotm-tile small { display:block; color:var(--muted,#9fb0cc); font-size:10.5px; margin-top:2px; }
-  .kotm-tile.occ { border-color: color-mix(in srgb, var(--gold,#e3c06f) 45%, transparent);
-    background: color-mix(in srgb, var(--gold,#e3c06f) 9%, var(--card,#151f31)); }`;
+  .kotm-tile small { display:block; color:var(--muted); font-size:10.5px; margin-top:2px; }
+  .kotm-tile.occ { border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+    background: color-mix(in srgb, var(--gold) 9%, var(--panel-2)); }`;
   const st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
 })();
 
