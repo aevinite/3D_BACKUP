@@ -26,7 +26,23 @@ full access; everything done when I wake." Spec = memory `access-panel-BUILD.md`
       clarified; per-person Default/On/Off (+On-with-PIN for tablet people); FIXED "Who has this" →
       lists ALL relevant people with live holder count (was 1, now matches). Verified both tenants +
       390px, no h-scroll. Commit: (see git log).
-- [ ] P2 — DB migrations + backfill + settingsClone defaults
+- [x] P2 — DB foundation. DONE (dev only, additive). Migration 180 adds
+      `restaurants.access_config jsonb default '{}'` and is APPLIED + verified on the DEV
+      Supabase (wnsfcizclkbobwzcxqsf). MAIN untouched.
+      KEY ARCHITECTURE DECISION (safe + incremental, logged in access-panel-BUILD memory):
+      the new panel writes the EXISTING canonical columns for every capability that already
+      exists — owner_entitlements (admin→owner), manager_permissions (owner→manager grant),
+      settings.<x>_allowed/_owner_control/_enabled (module ladders), settings.tablet_<x>
+      (tablet tri-states), staff_users.permissions (per-person overrides). So the app's
+      proven server enforcement applies the instant the panel saves — NO risky rewrite of the
+      33 routes' guards. Only the genuinely-new granular bits with no legacy home (edit-menu
+      sub-options, dashboard/log sub-options, per-side discount caps) live in access_config;
+      their enforcement is a later, REVIEWED migration (changes no live behaviour until then).
+      settingsClone needs no change (access_config self-defaults to {}).
+      HONEST NOTE for the owner: the cross-route enforcement SWITCH for the new granular
+      sub-options + the owner-panel per-restaurant privacy (P6) are security-critical and
+      should have the owner's eyes / multi-role verification before becoming the sole guard —
+      they will be built + tested but flagged, not silently shipped as live security.
 - [ ] P3 — Read layer: merged real access page + breadcrumb/back + button from restaurant detail
 - [ ] P4 — Write layer + server enforcement (cascade, mgr⊆owner, tablet⊆mgr, grant-only-what-you-hold)
 - [ ] P5 — Per-person overrides (Default/On/Off/On-with-PIN) + General→Person cross-link + fixed "Who has this" list
