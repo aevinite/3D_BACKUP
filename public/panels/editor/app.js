@@ -1635,12 +1635,14 @@ function mergedOrderCardHtml(g) {
     const pay = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "";
     billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">🖨 Print</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button>`;
   } else {
-    // legacy non-session order — keep the direct pay, plus Print (solo key so the handler
-    // resolves the single order).
-    billBtns = (anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "")
-      + `<button class="ord-btn ghost" data-print-group="${esc("solo:" + o0.id)}">🖨 Print</button>`;
+    // Legacy non-session order (no session to invoice): still honour invoice-first —
+    // Print only once the bill is SETTLED (paid = finalised). Before that, Mark paid only,
+    // so no naked Print appears next to a running tab (owner 2026-07-24).
+    billBtns = anyUnpaid
+      ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>`
+      : `<button class="ord-btn ghost" data-print-group="${esc("solo:" + o0.id)}">🖨 Print</button>`;
   }
-  const tableDue = live.filter((o) => o.payment_status !== "paid").reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0), 0);
+  const tableDue = billMath(live.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid")).total;
   const freeBtn = (tnum && paid)
     ? (tableDue === 0 ? `<button class="ord-btn free-table" data-free-table="${esc(tnum)}">🪑 Free table ${esc(tnum)}</button>` : "")
     : "";
@@ -1800,7 +1802,9 @@ function ordersLiveHtml(live) {
     String(a[0].table_number || "").localeCompare(String(b[0].table_number || ""), undefined, { numeric: true }));
   // "Pending bills" banner counts SESSIONS (merged bills) still unpaid, not orders.
   const unpaidGroups = groups.filter((g) => g.some((o) => o.status !== "cancelled" && o.payment_status !== "paid"));
-  const pendingTotal = unpaidGroups.reduce((s, g) => s + billMath(g).total, 0);
+  // Count ONLY the still-unpaid orders in each group — a session that's part-settled
+  // (one order paid, another not) must not add its already-paid order to the total.
+  const pendingTotal = unpaidGroups.reduce((s, g) => s + billMath(g.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid")).total, 0);
   const note = unpaidGroups.length
     ? `<div class="ord-note">⏳ <b>Pending bills:</b> ${unpaidGroups.length} bill${unpaidGroups.length !== 1 ? "s" : ""} · ${inr(pendingTotal)} unpaid — mark each "Paid" once the guest settles up.</div>`
     : "";
@@ -2347,10 +2351,10 @@ function openPaymentMethodModal(due, label, opts = {}) {
         <div class="disc-bill-row"><span>Bill</span><b>${inr(due)}</b></div>
         <div class="dish-edit-lbl" style="margin-top:6px">Add a tip? <span class="muted small">(optional — extra for staff, on top of the bill)</span></div>
         <div class="chips pay-tip-chips" style="margin:4px 0 6px">
-          <span class="chip pay-tip-pick" data-tip="0">None</span>
-          <span class="chip pay-tip-pick" data-tip="${r2(due * 0.05)}">5%</span>
-          <span class="chip pay-tip-pick" data-tip="${r2(due * 0.10)}">10%</span>
-          <span class="chip pay-tip-pick" data-tip="${r2(due * 0.15)}">15%</span>
+          <span class="chip pay-tip-pick" data-tip-amt="0">None</span>
+          <span class="chip pay-tip-pick" data-tip-amt="${r2(due * 0.05)}">5%</span>
+          <span class="chip pay-tip-pick" data-tip-amt="${r2(due * 0.10)}">10%</span>
+          <span class="chip pay-tip-pick" data-tip-amt="${r2(due * 0.15)}">15%</span>
         </div>
         <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput" id="payTipInput" placeholder="Custom tip ₹" style="margin-bottom:8px">
         <div class="disc-bill-row"><span><b>Total collected</b></span><b id="payTotal">${inr(due)}</b></div>
@@ -2400,7 +2404,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
     // "Total collected" figure updates live so staff know how much cash to take.
     const tipInput = wrap.querySelector("#payTipInput");
     const updTotal = () => { const el2 = wrap.querySelector("#payTotal"); if (el2) el2.textContent = inr(due + (Number(tip) || 0)); };
-    wrap.querySelectorAll(".pay-tip-pick").forEach((c) => (c.onclick = () => { tip = Number(c.dataset.tip) || 0; tipInput.value = tip ? String(tip) : ""; wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("active", x === c)); updTotal(); }));
+    wrap.querySelectorAll(".pay-tip-pick").forEach((c) => (c.onclick = () => { tip = Number(c.dataset.tipAmt) || 0; tipInput.value = tip ? String(tip) : ""; wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("active", x === c)); updTotal(); }));
     tipInput.oninput = () => { tip = Math.max(0, Number(tipInput.value) || 0); wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.remove("active")); updTotal(); };
     const otherInput = wrap.querySelector("#payOtherInput");
     const confirmOther = () => finish("Other", otherInput.value.trim());
@@ -6233,7 +6237,10 @@ function tablePanelParts(t) {
   const discBtn = discTarget ? `<button class="btn" data-disc="${esc(discTarget.id)}" data-disc-cur="${esc(Number(discTarget.discount) || 0)}" data-disc-max="${esc(discTarget.total)}" title="Give a discount on the bill">− Discount</button>` : "";
   // Split-bill helper: tells staff each guest's even share of the bill total. Doesn't change the bill
   // or payment — the manager still marks the whole bill paid once collected.
-  const splitBtn = os.length ? `<button class="btn" data-split="${esc(mBill.total)}" title="Split the bill evenly between guests">🍴 Split</button>` : "";
+  // Split among guests = what's still DUE (exclude any order already paid), not the
+  // whole historical total — matches the KOT-on split-settle path.
+  const splitDue = billMath(os.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid")).total || mBill.total;
+  const splitBtn = os.length ? `<button class="btn" data-split="${esc(splitDue)}" title="Split the bill evenly between guests">🍴 Split</button>` : "";
   // Invoice-first billing (owner 2026-07-24): NO direct Print on a running tab — show
   // "Generate invoice" first; Print (+ Reopen) appears only once an invoice exists. A
   // settled bill is always invoiced (markTablePaid auto-generates it), so it shows Print.
