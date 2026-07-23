@@ -23,7 +23,7 @@ const P: Record<string, string> = {
   user: "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8", check: "M20 6L9 17l-5-5", minus: "M5 12h14",
   chevron: "M6 9l6 6 6-6", chevronR: "M9 18l6-6-6-6", info: "M12 22a10 10 0 100-20 10 10 0 000 20M12 16v-5M12 8h.01",
   alert: "M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0zM12 9v4M12 17h.01", key: "M7.5 15.5a4.5 4.5 0 100-9 4.5 4.5 0 000 9M10.7 12.3L21 2M17 6l3 3",
-  shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", arrowR: "M5 12h14M12 5l7 7-7 7", lock: "M5 11h14v10H5zM8 11V7a4 4 0 018 0v4", x: "M18 6L6 18M6 6l12 12", reset: "M3 12a9 9 0 103-6.7L3 8M3 3v5h5",
+  shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", arrowR: "M5 12h14M12 5l7 7-7 7", arrowL: "M19 12H5M12 19l-7-7 7-7", lock: "M5 11h14v10H5zM8 11V7a4 4 0 018 0v4", x: "M18 6L6 18M6 6l12 12", reset: "M3 12a9 9 0 103-6.7L3 8M3 3v5h5",
 };
 const Icon = ({ n, s = 16 }: { n: string; s?: number }) => (
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.85} strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none" }}>
@@ -54,12 +54,19 @@ export default function Access2Page() {
   const [openCards, setOpenCards] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<"" | "saving" | "saved" | "err">("");
   const [info, setInfo] = useState<{ perm: Perm; sub?: string } | null>(null);
+  const [fromRest, setFromRest] = useState(false);
 
   useEffect(() => {
+    // Read ?rid / ?from off the URL directly (no useSearchParams → no Suspense
+    // boundary needed), matching how the restaurants page reads ?focus.
+    const q = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    const urlRid = q.get("rid") || "";
+    setFromRest(q.get("from") === "rest");
     fetch("/api/admin/restaurants").then((r) => r.json()).then((d) => {
       const list: Rest[] = (Array.isArray(d) ? d : d.restaurants || []).filter((x: Rest) => x.active !== false);
       setRests(list);
-      if (list[0]) setRid(list[0].id);
+      const pick = list.find((x) => x.id === urlRid) || list[0];
+      if (pick) setRid(pick.id);
     }).catch(() => {});
   }, []);
 
@@ -158,9 +165,17 @@ export default function Access2Page() {
       <nav className="adm-crumbs" style={{ marginBottom: 4 }}>
         <a href="/aevinite">Dashboard</a><span className="sep">›</span>
         <a href="/aevinite/restaurants">Restaurants</a><span className="sep">›</span>
-        <a href={`/aevinite/restaurants`}>{rest?.name || "Restaurant"}</a><span className="sep">›</span>
+        {/* Back to origin: if we arrived from a restaurant detail, this crumb reopens THAT
+            detail (?focus=<slug>); otherwise it just returns to the list. */}
+        <a href={rest ? `/aevinite/restaurants?focus=${rest.slug}` : "/aevinite/restaurants"}>{rest?.name || "Restaurant"}</a>
+        <span className="sep">›</span>
         <span className="cur">Access</span>
       </nav>
+      {fromRest && rest && (
+        <a className="adm-btn" href={`/aevinite/restaurants?focus=${rest.slug}`} style={{ margin: "10px 0 2px", display: "inline-flex", alignItems: "center", gap: 7 }}>
+          <Icon n="arrowL" s={14} /> Back to {rest.name}
+        </a>
+      )}
 
       <header className="acc2-head">
         <div>
