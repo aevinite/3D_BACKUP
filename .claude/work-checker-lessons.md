@@ -316,3 +316,12 @@ scope every assertion to that entity's own container (`#panel`), never the whole
 always run a CONTROL first (before-state must show the button) so a "0 found" proves the fix
 rather than a broken selector. Also: pre-existing rows from before a behaviour change still
 show the old behaviour — say so, or it reads as the fix not working.
+
+## 2026-07-23 — "take-order invisible in light mode" was the ADMIN X-RAY tint, not light mode
+Owner reported the take-order button invisible; I tested as a granted manager (button
+full-colour) and couldn't reproduce, so I wrongly attributed it to a stale cache. The
+real cause: the admin ACT-AS view ("4 zones off for staff") tints ungranted controls
+with .xray-off { color: gold !important }, and on a gold-FILLED .btn.primary that's
+gold-on-gold = invisible label. Lesson: when a screenshot shows the admin act-as chrome,
+reproduce IN that view (ungranted power) — and a generic tint that recolours text must
+never be applied blindly to filled buttons.

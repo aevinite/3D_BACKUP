@@ -8613,6 +8613,12 @@ function xraySettingUrl(flag) {
   .xray-off { position: relative; color: var(--gold-strong, #b8860b) !important; opacity: .72; }
   .xray-off::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
     background: #d97706; margin-left: 6px; vertical-align: middle; }
+  /* A FILLED button (primary/gold or pay/green background) must KEEP its own text colour
+     when tinted — recolouring it gold made gold-on-gold text invisible in the admin
+     act-as view (owner 2026-07-24: the "+ Take order" button read blank). Cue "off" with
+     a dashed ring instead, not by killing the label. */
+  .btn.primary.xray-off, .tp-take-order.xray-off, .btn.pay.xray-off, .btn.green.xray-off {
+    color: #2a1d0c !important; outline: 2px dashed color-mix(in srgb, #d97706 75%, transparent); outline-offset: 2px; }
   .xray-pulse { animation: xrayPulse 1.1s ease-out 2; border-radius: 8px; }
   @keyframes xrayPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217,119,6,0); } 50% { box-shadow: 0 0 0 4px rgba(217,119,6,.55); } }
   /* Faded admin ribbon across the very top — flows above the sticky topbar. */
