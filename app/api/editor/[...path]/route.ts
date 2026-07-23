@@ -1531,18 +1531,27 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const openSessSp = (await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
         .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
-      let oq = sb.from("orders").select("id,total,discount,status,payment_status,session_id")
-        .neq("status", "cancelled").neq("payment_status", "paid").eq("restaurant_id", rid);
+      // Exclude un-accepted (received) orders from the split scope — the same graceful rule
+      // as mark-paid and the client split modal: settle the ACCEPTED part in legs, leave a
+      // just-added order to be accepted + paid separately (was: reject the whole split with a
+      // 409 the client could never satisfy — owner deep-QA 2026-07-23).
+      let oq = sb.from("orders").select("id,subtotal,total,discount,status,payment_status,session_id")
+        .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
       oq = openSessSp ? oq.eq("session_id", openSessSp.id) : oq.eq("table_number", t).eq("archived", false);
-      const rowsSp = (must(await oq.limit(200)) as { id: string; total: number; discount: number; status: string; session_id: string | null }[]) || [];
-      if (rowsSp.some((o) => o.status === "received")) return err("Accept the order first — a bill can only be paid once the order is accepted.", 409);
-      if (!rowsSp.length) return err("Nothing to settle — already paid.", 409);
+      const rowsSp = (must(await oq.limit(200)) as { id: string; subtotal: number; total: number; discount: number; status: string; session_id: string | null }[]) || [];
+      if (!rowsSp.length) return err("Nothing to settle — already paid, or accept the order first.", 409);
       const sidSp = openSessSp?.id || rowsSp.find((o) => o.session_id)?.session_id;
       if (!sidSp) return err("This table has no live bill session — settle it normally instead.", 409);
-      // Due = Σ(total − discount×(1+rate)) — discount-before-tax, same as every money view.
+      // Due — computed with the SAME aggregate rounding as billMath (app.js) / the Z-report:
+      // taxable = Σsub − Σdisc, tax rounded ONCE over the whole bill. Summing each order's
+      // already-rounded stored total instead drifts ±½ paise per order and could 409-reject
+      // a split whose legs exactly equal the printed bill (owner deep-QA 2026-07-23).
       const setSp = (await sb.from("settings").select("tax_components, tax_rate").eq("restaurant_id", rid).maybeSingle()).data || {};
       const rateSp = effectiveTaxRate(setSp);
-      const dueSp = rowsSp.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rateSp), 0);
+      const subSp = rowsSp.reduce((s, o) => s + (Number(o.subtotal) || 0), 0);
+      const discSp = rowsSp.reduce((s, o) => s + (Number(o.discount) || 0), 0);
+      const taxableSp = Math.max(0, subSp - discSp);
+      const dueSp = Math.round((taxableSp + Math.round(taxableSp * rateSp * 100) / 100) * 100) / 100;
       const sumSp = splits.reduce((s: number, x: { amount: number }) => s + Number(x.amount), 0);
       if (Math.abs(sumSp - dueSp) > 0.02) return err(`The shares add up to ₹${sumSp.toFixed(2)} but the bill due is ₹${dueSp.toFixed(2)} — they must match.`, 409);
       const legs = splits.map((s: { amount: number; method: string; note?: string }) => ({
