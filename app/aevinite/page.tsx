@@ -1,7 +1,8 @@
 "use client";
 // Admin · Command — the restaurant-centric home of the ops console (redesign
 // 2026-07-04). Purpose: reach ANY restaurant and its panels in one click.
-//   1. Compact stat strip (counts only — NO revenue anywhere in the admin panel).
+//   1. Compact stat strip (counts only — NO food/earnings revenue in the admin panel; the
+//      only money shown anywhere is platform SUBSCRIPTION income on Billing/Revenue).
 //   2. The restaurant command table: one dense row per restaurant with panel
 //      chips (M K T O), live open-table count, quick-open buttons (act-as +
 //      new tab) and a Manage → link.
