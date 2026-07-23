@@ -19,7 +19,7 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 function rangeBounds(range: string): { from: Date; to: Date } {
   const now = new Date();
   // "today" starts at the 05:00-IST business-day rollover — the SAME boundary the Dashboard
-  // (/api/admin/overview) and the Live-floor RPC use, so "Orders today" can't disagree
+  // (/api/admin/dashboard) and the Live-floor RPC use, so "Orders today" can't disagree
   // between screens for orders placed 00:00–05:00 IST (audit 2026-07-07). Multi-day ranges
   // stay day-aligned (their buckets are whole IST days anyway).
   if (range === "today") return { from: new Date(businessDayStartIso(now)), to: now };
