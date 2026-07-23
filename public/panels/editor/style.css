@@ -894,8 +894,10 @@ body {
   /* overflow-x:hidden is REQUIRED alongside overflow-y:auto — per the CSS spec a
      'visible' x-axis next to a scrolling y-axis computes to 'auto', which gave the floor
      an ugly horizontal scrollbar at the bottom (owner 2026-07-23). The grid wraps; it
-     must never scroll sideways. */
-  .floor-main { overflow-y: auto; overflow-x: hidden; min-height: 0; padding-bottom: 24px; }
+     must never scroll sideways. The small inline padding gives the selected-tile ring +
+     tag glow room so overflow-x:hidden doesn't clip them at the left/right edge (owner
+     2026-07-24: rings were cut on the edge columns). */
+  .floor-main { overflow-y: auto; overflow-x: hidden; min-height: 0; padding: 4px 6px 24px; }
   /* Drop the sticky trick: the panel now stretches to full pane height and scrolls
      its OWN content, fully decoupled from the grid's scroll. */
   .floor-side { position: static; top: auto; margin-top: 0; max-height: none; }
