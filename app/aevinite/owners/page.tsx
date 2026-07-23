@@ -209,10 +209,16 @@ export default function AdminOwners() {
 
                 {/* Actions */}
                 <div style={{ display: "flex", gap: 7, borderTop: "var(--border)", paddingTop: 11, flexWrap: "wrap" }}>
-                  {o.restaurants.length > 0 && (
+                  {o.restaurants.length === 1 ? (
                     <a style={{ ...actBtn, textDecoration: "none" }} title="Open their owner panel exactly as they see it (no password, invisible to them)"
                       href={`/api/admin/act-as/go?rid=${encodeURIComponent(o.restaurants[0].id)}&to=/owner`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><i className="fas fa-eye" style={ic} aria-hidden="true" />View their panel</a>
-                  )}
+                  ) : o.restaurants.length > 1 ? (
+                    // Multi-restaurant owner: the old single link silently opened only the FIRST
+                    // restaurant. Open the detail modal instead, where each restaurant has its own
+                    // "open panel" link (audit 2026-07-23).
+                    <button style={actBtn} onClick={(e) => { e.stopPropagation(); setDetailFor(o.id); }} title="Choose which of their restaurants' panels to open">
+                      <i className="fas fa-eye" style={ic} aria-hidden="true" />View panels ({o.restaurants.length})</button>
+                  ) : null}
                   <button style={actBtn} disabled={busy}
                     onClick={(e) => { e.stopPropagation(); if (confirm(`Set a NEW password for ${o.name}? They'll be logged out everywhere.`)) act(async () => { const j = await patch({ owner_id: o.id, action: "reset_password" }); setReveal({ name: o.name, password: j.password }); }); }}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
                   <button style={{ ...actBtn, color: o.active ? "#fca5a5" : "#86efac" }} disabled={busy}
@@ -429,9 +435,11 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
           <div style={{ padding: 18, display: "grid", gap: 14 }}>
             {mErr ? <div style={{ ...card, padding: 12, borderColor: "#7f1d1d", color: "#fca5a5" }}>{mErr}</div> : null}
 
-            {/* Quick actions — "their screen" first, that's the owner's ask */}
+            {/* Quick actions — "their screen" first, that's the owner's ask. Only a direct link
+                when they own exactly ONE restaurant; for several, the per-restaurant eye links on
+                the chips below are the way in (so we don't silently open just the first). */}
             <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-              {owner.restaurants.length > 0 && (
+              {owner.restaurants.length === 1 && (
                 <a style={{ ...actBtn, textDecoration: "none", color: "#60a5fa" }} title="Open their owner panel exactly as they see it (no password, invisible to them)"
                   href={`/api/admin/act-as/go?rid=${encodeURIComponent(owner.restaurants[0].id)}&to=/owner`} target="_blank" rel="noreferrer"><i className="fas fa-eye" style={ic} aria-hidden="true" />Open their screen</a>
               )}
@@ -472,6 +480,11 @@ function OwnerDetailModal({ owner, rests, onClose, onChanged, onDeleted, onPatch
                   <span key={r.id} style={chip} title={r.primary ? "Primary owner of this restaurant" : undefined}>
                     {r.primary && <i className="fas fa-star" style={{ fontSize: 9, color: "#fbbf24" }} aria-hidden="true" />}
                     <span style={{ ...dot, background: chipColor(r.id) }} />{r.name}
+                    {/* Per-restaurant open: multi-restaurant owners can open ANY of their panels, not
+                        just the first (the card/modal buttons only ever opened restaurants[0]). */}
+                    <a aria-label={`Open ${r.name}'s owner panel`} title="Open this restaurant's owner panel (no password, invisible to them)"
+                      href={`/api/admin/act-as/go?rid=${encodeURIComponent(r.id)}&to=/owner`} target="_blank" rel="noreferrer"
+                      style={{ color: "#60a5fa", marginLeft: 2, display: "inline-flex" }}><i className="fas fa-eye" aria-hidden="true" /></a>
                     <button aria-label={`Remove ${r.name}`} disabled={busy} style={xBtn} onClick={() => detachRestaurant(r)}><i className="fas fa-xmark" aria-hidden="true" /></button>
                   </span>
                 ))}
