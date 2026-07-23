@@ -6359,7 +6359,9 @@ function openTakeOrder(table, rerender) {
              : `<button class="to-add" data-inc="${esc(id)}" aria-label="Add">＋</button>`; };
   const dishTile = (d) => {
     const img = d.image ? `<span class="to-dish-img" style="background-image:url('${esc(d.image)}')"></span>` : `<span class="to-dish-img">🍽</span>`;
-    return `<div class="to-dish ${qtyIn(d.id) ? "has" : ""}" data-dish="${esc(d.id)}">${img}<span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></span>${tileStepper(d.id)}</div>`;
+    // Whole tile is clickable to add (like the tablet). A ✎ opens the per-dish allergy/
+    // note editor; the −/n/+ stepper adjusts qty. All three live inside the tile.
+    return `<div class="to-dish ${qtyIn(d.id) ? "has" : ""}" data-dish="${esc(d.id)}" role="button" tabindex="0" title="Tap to add">${img}<span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></span><button class="to-dish-edit" data-tile-edit="${esc(d.id)}" title="Allergens & note for this dish">✎</button>${tileStepper(d.id)}</div>`;
   };
   const listHtml = () => {
     const ql = q.trim().toLowerCase();
@@ -6429,8 +6431,34 @@ function openTakeOrder(table, rerender) {
   const paintList = () => { listEl.innerHTML = listHtml(); bindList(); syncSpy(); };
 
   function bindList() {
-    listEl.querySelectorAll("[data-inc]").forEach((b) => (b.onclick = () => { addOne(b.dataset.inc); paintList(); paintCart(); }));
-    listEl.querySelectorAll("[data-dec]").forEach((b) => (b.onclick = () => { removeOne(b.dataset.dec); paintList(); paintCart(); }));
+    // Stepper buttons — stop the click bubbling to the tile (which also adds).
+    listEl.querySelectorAll("[data-inc]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); addOne(b.dataset.inc); paintList(); paintCart(); }));
+    listEl.querySelectorAll("[data-dec]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); removeOne(b.dataset.dec); paintList(); paintCart(); }));
+    // ✎ on a tile — open the per-dish allergen/note editor (adds the dish first if needed).
+    listEl.querySelectorAll("[data-tile-edit]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); openTileEdit(b.dataset.tileEdit); }));
+    // Whole tile is a tap-to-add target (ignore clicks that landed on a control above).
+    listEl.querySelectorAll(".to-dish").forEach((t) => (t.onclick = (e) => { if (e.target.closest("[data-inc],[data-dec],[data-tile-edit]")) return; addOne(t.dataset.dish); paintList(); paintCart(); }));
+  }
+  // Per-dish allergen + note popup opened from a dish tile's ✎ — mirrors the tablet's
+  // per-item editor. Adds the dish to the order if it isn't there yet, then edits its line.
+  function openTileEdit(id) {
+    if (!line(id)) { addOne(id); paintList(); paintCart(); }
+    const l = line(id); if (!l) return;
+    wrap.querySelector(".to-tileedit-overlay")?.remove();
+    const chips = () => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${l.avoid.has(a.slug) ? "on" : ""}" data-alg="${a.slug}">${esc(a.label)}</span>`).join("");
+    const ov = el(`<div class="to-tileedit-overlay"><div class="to-tileedit">
+      <div class="to-te-head"><b>${esc(l.title)}</b><button class="to-te-x" aria-label="Done">✕</button></div>
+      <div class="to-lbl">⚠ Avoid in this dish</div><div class="to-alg to-te-alg">${chips()}</div>
+      <input class="to-line-note to-te-note" maxlength="120" placeholder="Note for this dish (e.g. extra spicy)" value="${esc(l.note)}">
+      <button class="btn primary to-te-done">Done</button>
+    </div></div>`);
+    wrap.querySelector(".to-modal").appendChild(ov);
+    const done = () => { ov.remove(); paintCart(); paintList(); };
+    ov.querySelector(".to-te-x").onclick = done;
+    ov.querySelector(".to-te-done").onclick = done;
+    ov.onclick = (e) => { if (e.target === ov) done(); };
+    ov.querySelectorAll(".to-alg-chip").forEach((chip) => (chip.onclick = () => { const s = chip.dataset.alg; l.avoid.has(s) ? l.avoid.delete(s) : l.avoid.add(s); chip.classList.toggle("on", l.avoid.has(s)); }));
+    ov.querySelector(".to-te-note").oninput = (e) => { l.note = e.target.value; };
   }
   function bindCart() {
     linesEl.querySelectorAll("[data-inc]").forEach((b) => (b.onclick = () => { addOne(b.dataset.inc); paintList(); paintCart(); }));
@@ -8933,7 +8961,14 @@ document.addEventListener("click", (e) => {
   else window.prompt("Copy this table's link:", url);
 });
 
-api("GET", "/whoami").then((w) => { XRAY_WHO = w; applyHierarchyView(); }).catch(() => {});
+api("GET", "/whoami").then((w) => { XRAY_WHO = w; applyHierarchyView();
+  // Repaint the active view now that we know WHO is viewing — the floor first paints
+  // before whoami resolves, so admin-view-only cues (e.g. a VIP/guest tag when the
+  // feature is off for staff) were missing until a click forced a redraw (owner
+  // 2026-07-24: "tag not showing on the tile until I open the table"). tagForTable etc.
+  // depend on XRAY_WHO, so a single repaint here makes them correct on load.
+  try { if (typeof renderEditor === "function") renderEditor(); } catch (e) {}
+}).catch(() => {});
 
 // Then load all the data, refresh the current view in place, and start live polling.
 // If the very first load fails, show "connection failed" so it's obvious the local
