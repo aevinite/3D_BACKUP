@@ -6488,11 +6488,140 @@ function tableOpsOn() {
   .kotm-tile small { display:block; color:var(--muted,#8a7a5c); font-size:10.5px; margin-top:2px; }
   .kotm-tile.occ { border-color: color-mix(in srgb, var(--gold,#c98f3f) 45%, transparent);
     background: color-mix(in srgb, var(--gold,#c98f3f) 8%, var(--card,#fff)); }
-  .kotm-tile:hover { border-color: var(--gold,#c98f3f); }`;
+  .kotm-tile:hover { border-color: var(--gold,#c98f3f); }
+  /* Miller columns (desktop, owner 2026-07-23): panels sit SIDE BY SIDE like the Mac
+     Finder's column view — the card grows a column per step, selections stay lit. */
+  .kotm-colwrap { max-width: min(96vw, 1040px); width: auto; }
+  .kotm-cols { display: flex; align-items: stretch; padding: 6px 8px 14px; }
+  .kotm-col { width: 300px; flex: none; padding: 6px 10px; overflow-y: auto;
+    max-height: min(64vh, 560px); border-right: 1px solid var(--line,#e6dcc9);
+    animation: kotmColIn .16s ease-out; }
+  .kotm-col:last-child { border-right: 0; }
+  .kotm-col .kotm-grid { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }
+  .kotm-col-title { font-size: 12px; font-weight: 700; color: var(--muted,#8a7a5c);
+    text-transform: uppercase; letter-spacing: .03em; margin: 4px 2px 10px; }
+  .kotm-row.sel { border-color: var(--gold,#c98f3f);
+    background: color-mix(in srgb, var(--gold,#c98f3f) 14%, var(--card,#fff)); }
+  .kotm-row.sel .kotm-chev { color: var(--gold,#c98f3f); font-weight: 800; }
+  @keyframes kotmColIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }`;
   const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
 })();
 
+// ── MILLER COLUMNS (owner design pattern, 2026-07-23 — "like the Mac Finder") ──
+// On a DESKTOP the KOT flows drill ACROSS, not back-and-forth: panel 1 = the
+// operations, panel 2 = what to move (KOT / dish / target for 2-step ops), panel 3 =
+// where to move it. Each selection stays highlighted so the whole path reads at a
+// glance. Phones keep the step-by-step sheets (openKotMenu below). This is the
+// STANDING pattern for every future multi-step popup on desktop.
+function openKotColumns(t, sess) {
+  document.querySelector(".kotmenu-overlay")?.remove();
+  const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+  let occupiedOthers = 0;
+  for (let i = 1; i <= n; i++) if (String(i) !== String(t) && summaryTableOpen(i)) occupiedOthers++;
+  const bill = billMath(movable.filter((o) => o.status !== "received"));
+  const OPS = [
+    { id: "shift", icon: "⇄", label: "Change table", sub: "To a free table", on: !!sess, why: "table closed" },
+    { id: "merge", icon: "🪢", label: "Merge tables", sub: "One table, one bill", on: !!sess && occupiedOthers > 0, why: occupiedOthers ? "table closed" : "no other open table" },
+    { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "One order moves", on: movable.length > 0, why: "no movable KOT" },
+    { id: "moveitem", icon: "🍛", label: "Move a single dish", sub: "One dish moves", on: movable.some((o) => orderItemRows(o).some((r) => r.kind === "session")), why: "no movable dish" },
+    { id: "split", icon: "🍴", label: "Split the bill", sub: "Equal · custom · by dish", on: movable.some((o) => o.status !== "received"), why: "nothing settleable" },
+    { id: "reprint", icon: "🖨️", label: "Reprint a KOT", sub: "Kitchen ticket again", on: ordersForTable(t).some((o) => o.status !== "cancelled"), why: "no KOTs" },
+  ];
+  let sel1 = null, sel2 = null; // op id · chosen KOT/dish id
+  const wrap = el(`<div class="sx-modal-overlay kotmenu-overlay"><div class="sx-modal kotm-colwrap">
+    <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 Table ${esc(t)}</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
+    <div class="kotm-bill">KOT &amp; table operations${bill.total > 0 ? ` · bill due ${inr(bill.total)}` : ""}${sess && sess.bill_no != null ? ` · bill #${esc(sess.bill_no)}` : ""}</div></div>
+    <div class="kotm-cols"></div></div></div>`);
+  document.body.appendChild(wrap);
+  const closeM = () => wrap.remove();
+  wrap.querySelector(".tbl-modal-close").onclick = closeM;
+  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
+  const colsEl = wrap.querySelector(".kotm-cols");
+
+  const done = (msg) => { closeM(); toast(msg, "ok"); };
+  const fail = (m) => toast(m, "err");
+  const run = async (method, path, body, okMsg, after) => {
+    try {
+      const r = await api(method, path, body);
+      if (r && r.ok === false) { fail("Couldn't do that: " + (r.reason || "rejected")); return; }
+      done(okMsg); if (after) after(r);
+    } catch (e) { fail("Failed: " + e.message); }
+  };
+
+  // Tile grids per purpose. `mark` = the currently-selected tile (kept highlighted).
+  const tiles = (list, attr, subOf) => `<div class="kotm-grid">` +
+    list.map((i) => `<button class="kotm-tile${summaryTableOpen(i) ? " occ" : ""}" data-${attr}="${i}"><b>T${i}</b><small>${subOf(i)}</small></button>`).join("") + `</div>`;
+  const freeTables = () => { const reqT = new Set((state.summary && state.summary.requests || []).map((r) => String(r.table_number))); const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t) && !summaryTableOpen(i) && !reqT.has(String(i))) out.push(i); return out; };
+  const occTables = () => { const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t) && summaryTableOpen(i)) out.push(i); return out; };
+  const allTables = () => { const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t)) out.push(i); return out; };
+  const tileDue = (i) => { const tile = (state.summary && state.summary.tiles || {})[String(i)]; return tile && tile.due > 0 ? "due " + inr(tile.due) : "open"; };
+  const kotCard = (o, attr) => { const nd = orderItemRows(o).reduce((s2, r) => s2 + (parseInt(r.qty, 10) || 1), 0); return `<button class="kotm-row${sel2 === o.id ? " sel" : ""}" data-${attr}="${esc(o.id)}"><span class="kotm-txt"><b>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</b><small>${nd} dish${nd === 1 ? "" : "es"} · ${inr(parseFloat(o.total) || 0)}</small></span><span class="kotm-chev">›</span></button>`; };
+
+  // What panel 2 shows per operation; ops with a 3rd step mark their picks sel-able.
+  const col2 = () => {
+    if (sel1 === "shift") return { title: "Move to which free table?", html: freeTables().length ? tiles(freeTables(), "goshift", () => "free") : `<div class="muted" style="padding:10px">No free tables right now.</div>` };
+    if (sel1 === "merge") return { title: "Join which table's party?", html: tiles(occTables(), "gomerge", tileDue) };
+    if (sel1 === "movekot") return { title: "Which KOT moves?", html: movable.map((o) => kotCard(o, "pickkot")).join("") };
+    if (sel1 === "moveitem") {
+      const groups = movable.map((o) => {
+        const items = orderItemRows(o).filter((r) => r.kind === "session");
+        if (!items.length) return "";
+        return `<div class="muted" style="font-size:11px;margin:6px 2px 4px">KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</div>` +
+          items.map((r) => `<button class="kotm-row${sel2 === r.id ? " sel" : ""}" data-pickitem="${esc(r.id)}"><span class="kotm-txt"><b>${r.qty > 1 ? r.qty + "× " : ""}${esc(r.title)}</b><small>${inr(r.price * (r.qty || 1))}</small></span><span class="kotm-chev">›</span></button>`).join("");
+      }).join("");
+      return { title: "Which dish moves? (a multi-plate line moves whole)", html: groups };
+    }
+    if (sel1 === "reprint") return { title: "Reprint which KOT?", html: ordersForTable(t).filter((o) => o.status !== "cancelled").map((o) => kotCard(o, "goprint")).join("") };
+    return null;
+  };
+  const col3 = () => {
+    if (sel1 === "movekot" && sel2) return { title: "Send that KOT to which table?", html: tiles(allTables(), "gokot", (i) => (summaryTableOpen(i) ? "joins bill" : "free")) };
+    if (sel1 === "moveitem" && sel2) return { title: "Send that dish to which table? (new KOT there)", html: tiles(allTables(), "goitem", (i) => (summaryTableOpen(i) ? "joins bill" : "free")) };
+    return null;
+  };
+
+  const render = () => {
+    const c2 = sel1 ? col2() : null;
+    const c3 = col3();
+    colsEl.innerHTML =
+      `<div class="kotm-col">` + OPS.map((r) => `<button class="kotm-row${sel1 === r.id ? " sel" : ""}" data-op="${r.id}" ${r.on ? "" : "disabled"}>
+        <span class="kotm-ico">${r.icon}</span><span class="kotm-txt"><b>${r.label}</b><small>${r.sub}</small></span>
+        ${r.on ? `<span class="kotm-chev">›</span>` : `<span class="kotm-off-why">${r.why}</span>`}</button>`).join("") + `</div>` +
+      (c2 ? `<div class="kotm-col"><div class="kotm-col-title">${c2.title}</div>${c2.html}</div>` : "") +
+      (c3 ? `<div class="kotm-col"><div class="kotm-col-title">${c3.title}</div>${c3.html}</div>` : "");
+    // panel 1: pick an operation (split hands over to its form — it's a form, not a drill-down)
+    colsEl.querySelectorAll("[data-op]").forEach((b) => (b.onclick = () => {
+      const op = b.dataset.op;
+      if (op === "split") { closeM(); openSplitSettle(t); return; }
+      sel1 = op; sel2 = null; render();
+    }));
+    // panel 2 executors / selectors
+    colsEl.querySelectorAll("[data-goshift]").forEach((b) => (b.onclick = () => {
+      const to = b.dataset.goshift;
+      run("POST", `/sessions/${sess.id}/shift`, { to }, `Shifted to table ${to}`, () => followShiftedTable(t, to));
+    }));
+    colsEl.querySelectorAll("[data-gomerge]").forEach((b) => (b.onclick = () => {
+      const to = b.dataset.gomerge;
+      if (!window.confirm(`Merge Table ${t} into Table ${to}? Both parties become ONE bill on Table ${to}.`)) return;
+      run("POST", `/sessions/${sess.id}/merge`, { to }, `Merged into table ${to} — one bill`, () => followShiftedTable(t, to));
+    }));
+    colsEl.querySelectorAll("[data-pickkot]").forEach((b) => (b.onclick = () => { sel2 = b.dataset.pickkot; render(); }));
+    colsEl.querySelectorAll("[data-pickitem]").forEach((b) => (b.onclick = () => { sel2 = b.dataset.pickitem; render(); }));
+    colsEl.querySelectorAll("[data-goprint]").forEach((b) => (b.onclick = () => {
+      const o = ordersForTable(t).find((x) => x.id === b.dataset.goprint);
+      if (o) { printKotTicket(o); done(`KOT #${o.kot_no ?? "—"} sent to print`); }
+    }));
+    // panel 3 executors
+    colsEl.querySelectorAll("[data-gokot]").forEach((b) => (b.onclick = () => run("POST", `/orders/${sel2}/move`, { to: b.dataset.gokot }, `KOT moved to table ${b.dataset.gokot}`)));
+    colsEl.querySelectorAll("[data-goitem]").forEach((b) => (b.onclick = () => run("POST", `/order-items/${sel2}/move`, { to: b.dataset.goitem }, `Dish moved to table ${b.dataset.goitem} (new KOT)`)));
+  };
+  render();
+}
+
 function openKotMenu(t, sess) {
+  // Desktop → the Finder-style Miller columns above; phone keeps the step sheets.
+  if (!isPhoneLayout()) return openKotColumns(t, sess);
   document.querySelector(".kotmenu-overlay")?.remove();
   // Movable KOTs = this table's orders that aren't paid or cancelled (same rule the
   // server's RPC enforces — the row is disabled rather than surprising with a 409).
