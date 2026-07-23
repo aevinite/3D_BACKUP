@@ -38,6 +38,8 @@ export type Perm = {
   tablet?: string;             // settings.tablet_<x> tri-state column (the tablet rung)
   adminSwitch?: string;        // settings boolean the ADMIN alone flips (auto_print_kot_allowed)
   isNew?: boolean;             // power that has no legacy enforcement yet (revert_payment/export_reports/view_logs)
+  fixedTop?: boolean;          // owner+manager ALWAYS have it (only the tablet rung toggles) — mark_paid / invoice
+  tabletNew?: boolean;         // tablet rung has no settings column yet → stored in access_config, enforced later
   sub?: SubOpt[];              // granular options → access_config[id].{owner_opts,manager_opts}
   limit?: { label: string; unit: string; options: number[] }; // per-side cap → access_config[id].limit
 };
@@ -102,28 +104,28 @@ export const PERMISSIONS: Perm[] = [
       { id: "whole_bill", name: "Discount the whole bill", what: "A percentage or amount off the whole bill." },
       { id: "on_the_house", name: "Settle on the house", what: "Closes a bill at zero — the highest-risk one." },
     ] },
-  { id: "void_bills", group: "money", kind: "ladder", power: "void_bills", tablet: "tablet_void_bills", waiter: true, name: "Void, delete or close a bill",
+  { id: "void_bills", group: "money", kind: "ladder", power: "void_bills", tabletNew: true, waiter: true, name: "Void, delete or close a bill",
     what: "Cancelling a bill after it's generated. Every use is logged with the typed reason.",
     sub: [
       { id: "void_bill", name: "Void a bill", what: "Cancels a generated bill but KEEPS it in the records marked voided (nothing collected)." },
       { id: "delete_bill", name: "Delete a bill", what: "Removes the bill entirely — cannot be undone, leaves no record." },
       { id: "close_unpaid", name: "Close a table unpaid", what: "Frees the table, money marked never collected (walk-out / write-off)." },
     ] },
-  { id: "revert_payment", group: "money", kind: "ladder", power: "revert_payment", tablet: "tablet_revert_payment", waiter: true, isNew: true, name: "Undo a payment",
+  { id: "revert_payment", group: "money", kind: "ladder", power: "revert_payment", tabletNew: true, waiter: true, isNew: true, name: "Undo a payment",
     what: "Reversing a bill already marked paid — the refund path. 30-minute grace, then owner-only.",
     sub: [
       { id: "undo_grace", name: "Undo within 30 minutes", what: "The normal “wrong table” undo." },
       { id: "undo_any", name: "Undo any time", what: "Reverse a payment from any earlier point today — owner-level by default." },
     ] },
-  { id: "mark_paid", group: "money", kind: "ladder", power: "mark_paid_power", tablet: "tablet_mark_paid", waiter: true, isNew: true, name: "Mark a bill paid",
-    what: "The button that closes a table as paid — the classic “trust one waiter, not another” cap.",
+  { id: "mark_paid", group: "money", kind: "ladder", tablet: "tablet_mark_paid", waiter: true, fixedTop: true, name: "Mark a bill paid",
+    what: "The button that closes a table as paid. Owner & manager always have it (it's core to running the floor); the toggle is whether WAITERS get it — the classic “trust one waiter, not another” cap.",
     sub: [
       { id: "pay_cash", name: "Cash", what: "Settle as cash." },
       { id: "pay_card", name: "Card / UPI", what: "Settle as card/UPI." },
       { id: "pay_split", name: "Split across methods", what: "Part cash, part card." },
     ] },
-  { id: "print_invoice", group: "money", kind: "ladder", power: "invoice_power", tablet: "tablet_invoice", waiter: true, isNew: true, name: "Generate & print the invoice",
-    what: "Producing the tax invoice — carries a legal number that can't be reused.",
+  { id: "print_invoice", group: "money", kind: "ladder", tablet: "tablet_invoice", waiter: true, fixedTop: true, name: "Generate & print the invoice",
+    what: "Producing the tax invoice — carries a legal number that can't be reused. Owner & manager always have it; the toggle is whether waiters may issue invoices.",
     sub: [
       { id: "inv_generate", name: "Generate the invoice", what: "Assigns the next invoice number." },
       { id: "inv_reprint", name: "Reprint an invoice", what: "Prints a copy of an already-issued invoice." },
@@ -278,13 +280,22 @@ export function allowed(p: Perm, s: AccessState): boolean {
   return true;
 }
 
+// The tablet rung's tri-state ("off"|"on"|"pin"): a real settings column for the
+// existing caps, or access_config[id].tablet for the new ones (void/revert).
+export function tabletValue(p: Perm, s: AccessState): string {
+  if (p.tabletNew) return String(s.config?.[p.id]?.tablet || "off");
+  if (p.tablet) return s.tablet[p.tablet] || "off";
+  return "off";
+}
+
 // The reach level (0 off · 1 owner · 2 +manager · 3 +tablet) computed from live state.
 export function reachLevel(p: Perm, s: AccessState): number {
   if (p.kind !== "ladder") return 0;
   if (!allowed(p, s)) return 0;
   let lvl = 1;                                        // admin-allowed ⇒ owner has it
-  if (p.power && s.manager[p.power]) lvl = 2;         // owner granted manager
-  if (lvl >= 2 && p.tablet && s.tablet[p.tablet] && s.tablet[p.tablet] !== "off") lvl = 3;
+  if (p.fixedTop) lvl = 2;                             // mark_paid / invoice: owner+manager always
+  else if (p.power && s.manager[p.power]) lvl = 2;     // owner granted the manager
+  if (lvl >= 2 && p.waiter && tabletValue(p, s) !== "off") lvl = 3;
   return lvl;
 }
 

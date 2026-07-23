@@ -53,10 +53,17 @@ full access; everything done when I wake." Spec = memory `access-panel-BUILD.md`
       module/tablet/adminSwitch + sub-options; reachLevel/allowed/maxReach/subState helpers; NEW_POWER_FLAGS
       = revert_payment/mark_paid_power/invoice_power/export_reports/view_logs that need later enforcement).
       Type-checks clean. NOTE the model must be restyled to admin tokens (purple/cyan), NOT the gold prototype.
-      TODO next: (1) extend the access route to also return/accept features+panels+access_config+module _enabled
-      in ONE call; (2) build the React page at a NEW /aevinite route (don't touch the old one) porting the
-      rail+accordion prototype using admin tokens; (3) wire saves to canonical columns + access_config;
-      verify logged-in as diag admin.
+      done (part 2): built app/api/admin/restaurants/access2/route.ts — the SINGLE unified read/write
+      (features+panels+owner_entitlements+manager_permissions+tablet tri-states+module ladders+
+      auto_print_kot_allowed+access_config) via accessModel bindings. Corrected the model: mark_paid/invoice
+      = fixedTop (owner+manager always; only tablet toggles), void_bills/revert_payment = tabletNew
+      (tablet rung in access_config, no settings column). tsc CLEAN project-wide (0 errors). VERIFIED LIVE
+      on dev server :4100 logged in as admin: GET 200 returns all keys w/ real pizza-palace data; POST 200
+      persists (config round-trip). NOTE: worktree needed .env.local copied in (gitignored) to run its own
+      dev server; dev server on :4100 (owner's is :4000).
+      TODO (part 3): build the React page at NEW /aevinite/access2 route (don't touch old page) porting the
+      rail+accordion prototype using admin tokens (purple/cyan, .adm-card/.adm-crumbs); wire to this route;
+      verify live as admin.
 - [ ] P4 — Write layer + server enforcement (cascade, mgr⊆owner, tablet⊆mgr, grant-only-what-you-hold)
 - [ ] P5 — Per-person overrides (Default/On/Off/On-with-PIN) + General→Person cross-link + fixed "Who has this" list
 - [ ] P6 — Owner panel per-restaurant privacy (grey-out + zero data for ungranted; no admin/owner clash)
