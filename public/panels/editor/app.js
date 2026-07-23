@@ -6353,15 +6353,16 @@ function openTakeOrder(table, rerender) {
   const addOne = (id) => { const l = line(id); if (l) l.qty = Math.min(99, l.qty + 1); else { const d = dishes.find((x) => x.id === id); if (d) cart.push({ id, title: d.title, price: parseFloat(d.price) || 0, qty: 1, note: "", avoid: new Set() }); } };
   const removeOne = (id) => { const i = cart.findIndex((c) => c.id === id); if (i < 0) return; if (cart[i].qty > 1) cart[i].qty--; else { cart.splice(i, 1); editing.delete(id); } };
 
-  // A tile's qty control: a "+ Add" when empty, a −/n/+ stepper once in the cart.
-  const tileStepper = (id) => { const n = qtyIn(id);
-    return n ? `<span class="to-step"><button class="to-q" data-dec="${esc(id)}" aria-label="One fewer">−</button><b>${n}</b><button class="to-q" data-inc="${esc(id)}" aria-label="One more">＋</button></span>`
-             : `<button class="to-add" data-inc="${esc(id)}" aria-label="Add">＋</button>`; };
+  // The right-hand control: a single "＋" when empty; once in the cart, the count
+  // (×N) on top with a −/＋ pair just below it — the layout the owner asked for.
+  const dishCtl = (id) => { const n = qtyIn(id);
+    return `<span class="to-dish-ctl ${n ? "has" : ""}">${n ? `<b class="to-dish-n">×${n}</b>` : ""}<span class="to-dish-btns">${n ? `<button class="to-q" data-dec="${esc(id)}" aria-label="One fewer">−</button>` : ""}<button class="to-add" data-inc="${esc(id)}" aria-label="Add one">＋</button></span></span>`; };
   const dishTile = (d) => {
     const img = d.image ? `<span class="to-dish-img" style="background-image:url('${esc(d.image)}')"></span>` : `<span class="to-dish-img">🍽</span>`;
-    // Whole tile is clickable to add (like the tablet). A ✎ opens the per-dish allergy/
-    // note editor; the −/n/+ stepper adjusts qty. All three live inside the tile.
-    return `<div class="to-dish ${qtyIn(d.id) ? "has" : ""}" data-dish="${esc(d.id)}" role="button" tabindex="0" title="Tap to add">${img}<span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></span><button class="to-dish-edit" data-tile-edit="${esc(d.id)}" title="Allergens & note for this dish">✎</button>${tileStepper(d.id)}</div>`;
+    // Clean tablet-style card: image + name/price, a ✎ pinned to the image corner
+    // (so it never overlaps the name), and the qty control on the right. The WHOLE
+    // tile is tap-to-add; the −/＋/✎ buttons stop the bubble so they act on their own.
+    return `<div class="to-dish ${qtyIn(d.id) ? "has" : ""}" data-dish="${esc(d.id)}" role="button" tabindex="0" title="Tap to add"><span class="to-dish-imgwrap">${img}<button class="to-dish-edit" data-tile-edit="${esc(d.id)}" title="Allergens & note for this dish">✎</button></span><span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></span>${dishCtl(d.id)}</div>`;
   };
   const listHtml = () => {
     const ql = q.trim().toLowerCase();
@@ -6481,7 +6482,9 @@ function openTakeOrder(table, rerender) {
     for (const s of secs) { if (s.offsetTop - listEl.offsetTop <= top) active = s.dataset.sec; }
     catsEl.querySelectorAll("[data-jump]").forEach((b) => {
       const on = b.dataset.jump === active; b.classList.toggle("on", on);
-      if (on) b.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+      // Centre the active chip by nudging the strip's OWN horizontal scroll only —
+      // never scrollIntoView (it scrolls a vertical ancestor and hides the strip).
+      if (on) { const cr = catsEl.getBoundingClientRect(), br = b.getBoundingClientRect(); catsEl.scrollBy({ left: (br.left + br.width / 2) - (cr.left + cr.width / 2), behavior: "smooth" }); }
     });
   };
   catsEl.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => jumpTo(b.dataset.jump)));
