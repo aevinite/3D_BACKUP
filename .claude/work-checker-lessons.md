@@ -325,3 +325,5 @@ with .xray-off { color: gold !important }, and on a gold-FILLED .btn.primary tha
 gold-on-gold = invisible label. Lesson: when a screenshot shows the admin act-as chrome,
 reproduce IN that view (ungranted power) — and a generic tint that recolours text must
 never be applied blindly to filled buttons.
+
+- **A `const` helper used by a hoisted function inside a React component body = TDZ crash.** Moving permKey (const arrow) above resolved() looked fine, but resolved() (a hoisted `function`) runs during render via holders() BEFORE the const initialises → "ReferenceError: permKey is not defined" crashed the whole /aevinite/access panel. Define such pure helpers at MODULE scope. tsc + local build did NOT catch it (only the live interaction did). Load the page and click, don't just build. (2026-07-24)

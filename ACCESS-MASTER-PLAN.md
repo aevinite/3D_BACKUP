@@ -156,6 +156,24 @@ STAGE 9 — Info screenshots + bulletproof + ship
   greyed/absent for out-of-ceiling or role-irrelevant caps.
 - Stage 5-6 home: extend app/owner/staff/page.tsx (+ /api/owner/staff). Reuse lib/accessModel for the model.
 
+## STAGE 8-9 STATUS (2026-07-24)
+- 8(a) grant-only-what-you-hold: VERIFIED enforced — the editor consumes powers via managerCan
+  (admin-entitled AND owner-granted); the only GRANT paths (owner manager-permissions route =
+  owner-only, managers 403; set_permissions = managers can't grant on/pin) already block a
+  manager widening powers. No change needed.
+- 8(b) edit_menu SUB-OPTION enforcement: DEFERRED (needs owner input) — the editor gates the whole
+  edit_menu via managerCan; per-action sub-option gates (add_dish/edit_price/delete_dish/…) would
+  need careful per-endpoint wiring in the LIVE editor route reading access_config + a migration to
+  backfill sensible defaults. Auto-wiring risks blocking legit editing. The umbrella edit_menu
+  already enforces menu access; sub-options SAVE + DISPLAY in the panel. Do with owner + a migration.
+- 8(c) discount %-cap enforcement: DEFERRED — whole-bill discount already clamps (mig 148); the new
+  per-role % CAP (access_config.limit) needs a read+clamp in the discount endpoints. Small but
+  unverified; do next with a targeted test.
+- 9 real HD screenshots: DEFERRED (manual capture) — the (i) shows the plain-English description +
+  a labelled placeholder; real annotated shots into public/admin-help is laborious manual work.
+- 9 bulletproof: FINAL CONSOLIDATED CHECK PASSED 7/7 (admin access panel desktop+phone + owner
+  Staff page: loads, 0 console errors, no h-scroll). Per-stage live verifies passed throughout.
+
 ## 6. STATUS LOG:
 - Stage 7 IN PROGRESS: entitledSubset per-restaurant gating already covers reports/customers/issues/ratings. ADDED it to analytics (revenue = the 'bill' section the owner flagged). analytics gate VERIFIED live (reports off → analytics rid+group 403). ADDED overview gate: revenue zeroed + reportsOff flag for ungranted restaurants (build green). settings section NOW gated (GET filters restaurants to settings-entitled; PATCH refuses ungranted; admin unrestricted). Build green. STAGE 7 COMPLETE (reports/analytics/overview/customers/issues/ratings/settings all per-restaurant private).
 - GAP-A DONE+VERIFIED live (override stores under tablet_mark_paid, reverts clean).
