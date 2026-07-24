@@ -35,9 +35,13 @@ export async function GET(req: NextRequest) {
   // Only the columns the activity feed actually renders — not select("*") — so we don't move
   // unused columns across the wire on every refresh (egress trim, 2026-07-07). `level` added
   // so the viewer can colour error rows red.
+  // ?unresolved=1 — used by the Repair "Problems right now" list to hide errors the owner (or a
+  // fix) has already cleared. The full Logs page omits it, so it still shows resolved rows.
+  const unresolvedOnly = url.searchParams.get("unresolved") === "1";
   let q = sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, level, created_at").order("created_at", { ascending: false }).limit(limit);
   if (restaurantId) q = q.eq("restaurant_id", restaurantId);
   if (level === "error" || level === "warn" || level === "info") q = q.eq("level", level);
+  if (unresolvedOnly) q = q.is("resolved_at", null);
   if (since) q = q.gte("created_at", since);
   if (qText) {
     // Escape the PostgREST or-filter meta-characters (%,) so a search term can't break the filter.

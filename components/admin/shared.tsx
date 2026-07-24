@@ -53,7 +53,7 @@ export const ACT_LABEL: Record<string, string> = {
   alert_sent: "Alert sent",
   repair_void_bill: "Repair · voided bill", repair_delete_order: "Repair · deleted order",
   repair_refire_order: "Repair · re-fired order", repair_unstick_table: "Repair · unstuck table",
-  repair_edit_time: "Repair · edited time", fix_request: "Sent to Claude",
+  repair_edit_time: "Repair · edited time", fix_request: "Sent to Claude", error_resolved: "Marked resolved",
 };
 
 export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
