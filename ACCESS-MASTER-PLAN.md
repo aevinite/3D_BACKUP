@@ -140,6 +140,22 @@ STAGE 9 — Info screenshots + bulletproof + ship
 ## 4. VERIFY PROTOCOL (each stage): build green → deploy dev → headless admin login →
    exercise the changed controls (read→change→verify→revert) → 0 console errors → screenshot → tick.
 ## 5. DEFERRED (owner-approved, later): per-dish discount feature; owner's-guest on-the-house settle.
+## FINDINGS (2026-07-24, Stage 5-6 investigation — build against these)
+- Owner /api/owner/staff already: creates/deletes/edits users + sets manager_permissions (togglePerm),
+  scoped to owned restaurants. So Stage 6.2/6.3 (create/delete) largely EXIST.
+- GAP-A (BUG): set_permissions PERM_KEYS = only [tablet_discount,tablet_mark_paid,tablet_invoice,tablet_banquet].
+  The admin Per-person tab writes permissions:{[capabilityId]:v} (e.g. "mark_paid","give_discounts") — the
+  route REJECTS those as "Unknown permission", so per-person overrides silently fail. MUST align the key space:
+  decide ONE canonical per-user key (recommend the accessModel capability id) used by the panel write, the
+  owner route validation, AND the server enforcement read. (Stage 8.7 / do early — it's a live bug.)
+- GAP-B: set_permissions has NO CEILING check — an owner could grant a capability the ADMIN didn't allow them.
+  Add: on/pin grant allowed only if within owner_entitlements ceiling for that restaurant AND role-relevant
+  for the target user's role (banquet not for tablet, etc.). Reject otherwise. (Stage 6.4 — security-critical.)
+- GAP-C: owner panel has NO per-user override UI yet (only manager-wide grants). Stage 5 = add a capped,
+  role-relevant per-user editor (reuse accessModel + role-relevance map). Cap to owner_entitlements ceiling;
+  greyed/absent for out-of-ceiling or role-irrelevant caps.
+- Stage 5-6 home: extend app/owner/staff/page.tsx (+ /api/owner/staff). Reuse lib/accessModel for the model.
+
 ## 6. STATUS LOG:
 - 2026-07-24 master plan created; A/B live.
 - Stage 1 DONE+VERIFIED live (10/10: ratings unified, owner-sections area gone, writes both columns, 0 errors).
