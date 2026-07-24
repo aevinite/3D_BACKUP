@@ -398,19 +398,24 @@ export default function Access2Page() {
   function holders(p: Perm): Staff[] {
     return sortedStaff.filter((u) => (ROLE_RELEVANCE[u.role] || []).includes(p.id) && resolved(u, p).eff);
   }
+  // The per-user override is stored+enforced under the tablet_* column key (staff_users.permissions,
+  // mig 115, read by tabletPerm) — NOT the capability id. Use p.tablet where it exists; otherwise
+  // per-user override doesn't enforce yet (tabletNew void/revert have no column) so fall back to id.
+  const permKey = (p: Perm) => p.tablet || p.id;
   function resolved(u: Staff, p: Perm): { base: boolean; eff: boolean; ov: string } {
     const lvl = reachLevel(p, st!);
     let base = false;
     if (u.role === "owner") base = lvl >= 1;
     else if (u.role === "manager") base = lvl >= 2;
     else if (u.role === "tablet") base = lvl >= 3 && !!p.waiter;
-    const ov = u.permissions?.[p.id] || "default";
+    const ov = u.permissions?.[permKey(p)] || "default";
     const eff = ov === "on" || ov === "pin" ? true : ov === "off" ? false : base;
     return { base, eff, ov };
   }
   function setOverride(u: Staff, p: Perm, v: string) {
-    setStaff((prev) => prev.map((x) => x.id === u.id ? { ...x, permissions: { ...(x.permissions || {}), [p.id]: v } } : x));
-    fetch("/api/owner/staff", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id, action: "set_permissions", permissions: { [p.id]: v } }) }).catch(() => {});
+    const key = permKey(p);
+    setStaff((prev) => prev.map((x) => x.id === u.id ? { ...x, permissions: { ...(x.permissions || {}), [key]: v } } : x));
+    fetch("/api/owner/staff", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id, action: "set_permissions", permissions: { [key]: v } }) }).catch(() => {});
   }
 
   // ───────────────────────────── PER PERSON ──────────────────────────────────
