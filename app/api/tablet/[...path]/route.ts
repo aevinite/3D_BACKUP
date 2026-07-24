@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
+import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
@@ -587,6 +588,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Defense-in-depth — the modal already caps the UI, this guards a replay / hand-formed body.
       const base = Number(cur.subtotal) || 0;
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), base) : 0;
+      // Per-role %-cap (owner 2026-07-24): a waiter can't exceed their configured discount limit
+      // (non-breaking — no cap → no block; admin uncapped). actor?.role: tablet → waiter bucket.
+      { const cap = await discountCapPct(rid, discountRole(actor?.role)); if (overDiscountCap(amount, base, cap)) return err(`That's over your ${cap}% discount limit — ask a manager.`, 403); }
       const note = String((body && body.note) || "").slice(0, 200) || null;
       const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid).select());
       await log("order_discount", { order_id: b, detail: `₹${amount}` + byNote(g), device_id: dev });
