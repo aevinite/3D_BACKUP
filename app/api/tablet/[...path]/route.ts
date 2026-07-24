@@ -115,6 +115,23 @@ async function tabletPerm(key: string, req: NextRequest, body: any, rid: string,
   return { allow: true }; // 'on'
 }
 
+// Force-closing a table that still owes money on the TABLET (a walk-out / write-off) is
+// admin-laddered via the void_bills tablet tri-state (access_config.void_bills.tablet, set on
+// /aevinite → Access — the same tri-state the access screen already stores for this card).
+// DEFAULT 'pin': a walk-out must stay closable by a waiter WITH a manager's PIN — this keeps
+// the previous always-PIN behaviour while letting the admin switch it to direct 'on' or fully
+// 'off'. Admin super-user + 'on' pass; 'off' denies; 'pin' (and unset = default) require a PIN.
+// Owner/manager use the manager panel's own close, which is deliberately un-gated. (owner, 2026-07-24)
+async function closeUnpaidGate(req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
+  if (!user) return { allow: true, managerName: "admin" }; // admin super-user
+  const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
+    { void_bills?: { tablet?: string } } | null;
+  const mode = cfg?.void_bills?.tablet;
+  if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "Closing an unpaid table isn't enabled on the tablet — ask a manager.", disabled: true }, { status: 403 }) };
+  if (mode === "on") return { allow: true };
+  return managerPinGate(req, body, rid); // 'pin' or unset → manager PIN (the default)
+}
+
 // Overlay the logged-in waiter's per-user overrides ONTO the settings object the
 // board GETs send to the tablet client. The client's tperm() reads settings[key] to
 // show/hide the Mark-paid / Discount / Invoice buttons — resolving here means the
@@ -1209,7 +1226,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // "close anyway" override (force) for an unpaid/cooking table needs a manager PIN.
     if (a === "sessions" && c === "close") {
       const force = !!(body && body.force === true);
-      if (force) { const g = recordPin(await managerPinGate(req, body, rid)); if (!g.allow) return g.resp; } // override → manager PIN
+      if (force) { const g = recordPin(await closeUnpaidGate(req, body, rid, actor)); if (!g.allow) return g.resp; } // override → admin-laddered (default: manager PIN)
       const result = await closeSession(b, { force }, { panel: "tablet", deviceId: dev, restaurantId: rid });
       if (!result.ok) return err(result.message, result.status);
       return ok(result.session);
