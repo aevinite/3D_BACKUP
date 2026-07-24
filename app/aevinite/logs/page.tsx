@@ -39,8 +39,14 @@ export default function AdminLogs() {
   const [tab, setTab] = useState<"ops" | "cust">("ops");
   // "" = All restaurants; otherwise scope both tabs + the cleanup to this restaurant.
   const [rid, setRid] = useState("");
-  // Everything-Log filters (Operations tab): severity + free-text search.
-  const [level, setLevel] = useState<"" | "error" | "warn" | "info">("");
+  // Everything-Log filters (Operations tab): severity + free-text search. Seed the severity
+  // from the URL (?level=error) so the bell's "View log →" deep-link actually lands on Errors
+  // instead of All — the link used to be ignored (client component, searchParams never read).
+  const [level, setLevel] = useState<"" | "error" | "warn" | "info">(() => {
+    if (typeof window === "undefined") return "";
+    const l = new URLSearchParams(window.location.search).get("level");
+    return l === "error" || l === "warn" || l === "info" ? l : "";
+  });
   const [q, setQ] = useState("");
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [ops, setOps] = useState<Action[] | null>(null);
