@@ -54,25 +54,41 @@
   function injectStyles() {
     if (document.getElementById("lfh-set-style")) return;
     const css = `
-    .lfh-ov{position:fixed;inset:0;background:rgba(4,8,18,.6);backdrop-filter:blur(4px);z-index:99998;display:flex;justify-content:flex-end}
-    .lfh-dw{width:min(92vw,430px);height:100%;overflow:auto;background:var(--panel,#0f1830);color:var(--text,#e7eefc);box-shadow:-20px 0 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif;animation:lfhslide .2s cubic-bezier(.16,1,.3,1);padding-bottom:max(env(safe-area-inset-bottom,0px),var(--safe-b,0px))}
-    @keyframes lfhslide{from{transform:translateX(40px);opacity:.2}to{transform:none;opacity:1}}
+    /* centred popup: overlay scrim + dialog card (was a right-side drawer) */
+    .lfh-ov{position:fixed;inset:0;background:rgba(4,8,18,.72);backdrop-filter:blur(6px);z-index:99998;display:grid;place-items:center;padding:18px;overflow:auto}
+    /* solid panel bg + theme vars so the card adapts to a light OR dark panel */
+    .lfh-dw{width:min(94vw,400px);max-height:calc(100dvh - 36px);overflow:auto;background:var(--panel,#0f1830);color:var(--text,#e7eefc);border:1px solid var(--line,#263a63);border-radius:22px;box-shadow:0 30px 90px rgba(0,0,0,.45);font-family:system-ui,sans-serif;animation:lfhpop .24s cubic-bezier(.16,1,.3,1)}
+    /* hide the scrollbar (still scrolls) — the owner didn't want the white bar visible */
+    .lfh-dw{scrollbar-width:none;-ms-overflow-style:none}
+    .lfh-dw::-webkit-scrollbar{width:0;height:0;display:none}
+    @keyframes lfhpop{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}
     .lfh-dw h2{font-size:16px;margin:0;font-weight:800}
-    .lfh-sec{padding:16px 18px;border-bottom:1px solid var(--line,#1d2944)}
+    .lfh-sec{padding:16px 20px;border-bottom:1px solid var(--line,#1d2944)}
+    .lfh-sec:last-child{border-bottom:0}
     .lfh-sec h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted,#7e93bd);margin:0 0 10px}
-    .lfh-lab{display:block;font-size:12px;color:var(--muted,#8aa0c9);margin:0 0 4px}
-    .lfh-in{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:10px;border:1px solid var(--line,#2a3a5f);background:var(--bg,#0a1326);color:var(--text,#eaf1ff);font-size:14px;margin:0 0 10px;outline:none;transition:border-color .15s,box-shadow .15s}
-    .lfh-in:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.22)}
-    .lfh-bt{padding:11px 14px;border:0;border-radius:10px;font-weight:700;font-size:13.5px;cursor:pointer;color:#fff;transition:filter .15s,opacity .15s}
+    .lfh-hd{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line,#1d2944)}
+    .lfh-x{margin-left:auto;background:var(--line,#243049);color:#fff;border:0;border-radius:10px;padding:8px 12px;cursor:pointer;font-size:13px}
+    .lfh-x:hover{filter:brightness(1.15)}
+    .lfh-wrap{padding:26px 22px 4px;text-align:center}
+    .lfh-bigav{width:66px;height:66px;border-radius:999px;margin:0 auto 12px;display:grid;place-items:center;font-weight:800;font-size:28px;color:#0b1220;box-shadow:0 0 0 5px rgba(148,163,184,.18)}
+    .lfh-h1{font-size:20px;font-weight:800;margin:13px 0 6px}
+    .lfh-d{font-size:13px;color:var(--muted,#a8bce0);line-height:1.55;margin:0 auto;max-width:288px}
+    .lfh-lab{display:block;font-size:12.5px;color:var(--muted,#9fb2d8);margin:0 0 5px;font-weight:600}
+    .lfh-req{color:#f7a8b8;font-weight:800}
+    .lfh-in{width:100%;box-sizing:border-box;padding:12px 13px;border-radius:12px;border:1px solid var(--line,#2a3a5f);background:var(--bg,#0a1326);color:var(--text,#eaf1ff);font-size:15px;margin:0 0 10px;outline:none;transition:border-color .15s,box-shadow .15s}
+    .lfh-in:focus{border-color:#d4a574;box-shadow:0 0 0 3px rgba(212,165,116,.22)}
+    .lfh-help{font-size:11px;color:var(--muted,#6c80a8);margin:-6px 2px 13px;line-height:1.45}
+    .lfh-bt{padding:13px 14px;border:0;border-radius:12px;font-weight:700;font-size:14px;cursor:pointer;color:#fff;transition:filter .15s,opacity .15s}
     .lfh-bt:hover{filter:brightness(1.08)}
     .lfh-bt:disabled{opacity:.6;cursor:default}
-    .lfh-msg{font-size:12px;margin:2px 0 8px}
-    .lfh-note{font-size:12px;color:var(--muted,#8aa0c9)}
+    .lfh-cta{width:100%;background:linear-gradient(180deg,#4ade80,#22c55e);color:#08210f;font-weight:800;font-size:15px;box-shadow:0 8px 22px rgba(34,197,94,.28)}
+    .lfh-ghost{display:block;width:100%;background:transparent;border:0;color:var(--muted,#8aa0c9);font-size:12.5px;font-weight:600;cursor:pointer;padding:8px;text-align:center}
+    .lfh-ghost:hover{color:#fca5a5}
+    .lfh-foot{padding:2px 20px 20px;font-size:11px;color:var(--muted,#6c80a8);text-align:center}
+    .lfh-msg{font-size:12px;margin:6px 0 8px}
+    .lfh-note{font-size:12px;color:var(--muted,#8aa0c9);line-height:1.5}
     .lfh-av{width:46px;height:46px;border-radius:999px;display:grid;place-items:center;font-weight:800;font-size:20px;color:#0b1220;flex-shrink:0}
-    .lfh-chip{display:inline-block;font-size:11px;font-weight:700;color:#0b1220;padding:2px 9px;border-radius:999px}
-    .lfh-welcome{margin:14px 18px 0;padding:15px 16px;border-radius:14px;background:var(--panel-2,var(--bg,#0e1830));border:1px solid var(--line,#2a4474)}
-    .lfh-welcome .wt{font-size:15.5px;font-weight:800;color:var(--text,#eaf1ff);margin:0 0 5px}
-    .lfh-welcome .wd{font-size:12.5px;color:var(--muted,#a8bce0);line-height:1.5}`;
+    .lfh-chip{display:inline-block;font-size:11px;font-weight:700;color:#0b1220;padding:2px 9px;border-radius:999px}`;
     document.head.appendChild(el("style", { id: "lfh-set-style", html: css }));
   }
 
@@ -107,33 +123,35 @@
     const roleLabel = { manager: "Manager", editor: "Manager", kitchen: "Kitchen", tablet: "Tablet (waiter)" }[profile.role] || profile.role;
     const accent = ROLE_COLOR[profile.role] || "#9ca3af";
     const displayName = profile.name || profile.username;
+    const initial = (displayName || "?").charAt(0).toUpperCase();
     // PINs are a MANAGER concept (they unlock the tablet's gated actions). The
     // maintenance switch is manager-only too. A manager who is allowed to self-set
     // a PIN and doesn't have one yet must set it during first-login setup.
     const isManager = profile.role === "manager" || profile.role === "editor";
-    const pinRequiredAtSetup = !!(profile.needsProfile && isManager && profile.canSelfSetPin && !profile.hasPin);
+    const setup = !!profile.needsProfile;
+    const pinRequiredAtSetup = !!(setup && isManager && profile.canSelfSetPin && !profile.hasPin);
 
-    // — header: avatar + name + role chip (no "username" shown anywhere) —
-    const closeBtn = el("button", { class: "lfh-bt", style: { background: "var(--line,#243049)", padding: "8px 12px" }, onClick: closeDrawer, "aria-label": "Close", html: "✕" });
-    const header = el("div", { class: "lfh-sec", style: { display: "flex", alignItems: "center", gap: "12px", position: "sticky", top: "0", background: "var(--panel,#0f1830)", zIndex: "1" } }, [
-      el("div", { class: "lfh-av", style: { background: accent } }, [(displayName || "?").charAt(0).toUpperCase()]),
-      el("div", { style: { flex: "1", minWidth: "0" } }, [
-        el("h2", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, [displayName]),
-        el("div", { style: { marginTop: "5px" } }, [el("span", { class: "lfh-chip", style: { background: accent } }, [roleLabel])]),
-      ]),
-      closeBtn,
-    ]);
+    const sections = [];
 
-    const sections = [header];
-
-    // — first-login welcome card (one-time; polished, not a thin strip) —
-    if (profile.needsProfile) {
-      const hasBoth = !!(profile.name && profile.phone);
-      sections.push(el("div", { class: "lfh-welcome" }, [
-        el("div", { class: "wt" }, ["👋 Welcome" + (profile.name ? ", " + profile.name : "") + "!"]),
-        el("div", { class: "wd" }, [hasBoth
-          ? "Please take a second to confirm your details below — you'll only do this once."
-          : "Please add your phone number below to finish setting up your account. You'll only do this once."]),
+    // — TOP — onboarding gets a centred welcome (no dismiss); everyday gets a compact header + ✕ —
+    if (setup) {
+      sections.push(el("div", { class: "lfh-wrap" }, [
+        el("div", { class: "lfh-bigav", style: { background: accent } }, [initial]),
+        el("div", null, [el("span", { class: "lfh-chip", style: { background: accent } }, [roleLabel])]),
+        el("div", { class: "lfh-h1" }, ["Welcome, " + (profile.name || displayName) + " 👋"]),
+        el("div", { class: "lfh-d" }, [(profile.name && profile.phone)
+          ? "Confirm your details to finish setting up your account. You'll only do this once."
+          : "Add your details below to finish setting up your account. You'll only do this once."]),
+      ]));
+    } else {
+      const closeBtn = el("button", { class: "lfh-x", onClick: closeDrawer, "aria-label": "Close", html: "✕" });
+      sections.push(el("div", { class: "lfh-hd" }, [
+        el("div", { class: "lfh-av", style: { background: accent } }, [initial]),
+        el("div", { style: { flex: "1", minWidth: "0" } }, [
+          el("h2", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, [displayName]),
+          el("div", { style: { marginTop: "5px" } }, [el("span", { class: "lfh-chip", style: { background: accent } }, [roleLabel])]),
+        ]),
+        closeBtn,
       ]));
     }
 
@@ -145,7 +163,7 @@
       ? el("input", { class: "lfh-in", type: "password", placeholder: "4–8 digit manager PIN", inputmode: "numeric", maxlength: "8" })
       : null;
     const detMsg = el("div", { class: "lfh-msg" });
-    const saveDet = el("button", { class: "lfh-bt", style: { background: "#22c55e", width: "100%" }, onClick: async () => {
+    const saveDet = el("button", { class: "lfh-bt lfh-cta", onClick: async () => {
       const name = nameIn.value.trim(), phone = phoneIn.value.trim();
       if (!name || !phone) { setMsg(detMsg, "Both your username and phone are required.", false); return; }
       const payload = { name, phone };
@@ -164,106 +182,123 @@
         if (setupPinIn) profile.hasPin = true;
         setMsg(detMsg, wasSetup ? "All set — welcome aboard! 🎉" : "Saved.", true);
         const sb = document.getElementById("staffSettingsBtn"); if (sb) sb.textContent = "👤 Profile";
-        // Refresh the header (name/avatar) and drop the welcome card after setup.
+        // Re-render as the everyday profile card after first-login setup.
         if (wasSetup) setTimeout(openDrawer, 700);
       } catch { setMsg(detMsg, "Network error.", false); }
       finally { saveDet.disabled = false; }
-    } }, [profile.needsProfile ? "Save & continue" : "Save details"]);
-    sections.push(el("div", { class: "lfh-sec" }, [
-      el("h3", null, ["Your details"]),
-      el("label", { class: "lfh-lab" }, ["Username (this is your sign-in name)"]), nameIn,
-      el("label", { class: "lfh-lab" }, ["Phone"]), phoneIn,
-      ...(setupPinIn ? [el("label", { class: "lfh-lab" }, ["Manager PIN (unlocks sensitive tablet actions)"]), setupPinIn] : []),
-      detMsg, saveDet,
-    ]));
-
-    // — password (only if allowed) —
-    if (profile.canSelfReset) {
-      const curIn = el("input", { class: "lfh-in", type: "password", placeholder: "Current password", autocomplete: "current-password" });
-      const newIn = el("input", { class: "lfh-in", type: "password", placeholder: "New password (min 6)", autocomplete: "new-password" });
-      const pwMsg = el("div", { class: "lfh-msg" });
-      const savePw = el("button", { class: "lfh-bt", style: { background: "#3b82f6" }, onClick: async () => {
-        if (!curIn.value || !newIn.value) { setMsg(pwMsg, "Fill both fields.", false); return; }
-        savePw.disabled = true;
-        try {
-          const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: curIn.value, newPassword: newIn.value }) });
-          const j = await r.json();
-          if (!r.ok) { setMsg(pwMsg, j.error || "Could not change.", false); return; }
-          setMsg(pwMsg, "Password changed — signing you out…", true);
-          setTimeout(() => { location.href = "/login"; }, 900);
-        } catch { setMsg(pwMsg, "Network error.", false); }
-        finally { savePw.disabled = false; }
-      } }, ["Change password"]);
-      sections.push(el("div", { class: "lfh-sec" }, [
-        el("h3", null, ["Change password"]),
-        curIn, newIn, pwMsg, savePw,
-      ]));
-    } else {
-      sections.push(el("div", { class: "lfh-sec" }, [
-        el("h3", null, ["Password"]),
-        el("div", { class: "lfh-note" }, ["Your admin manages your password. Ask them to reset it if needed."]),
-      ]));
+    } }, [setup ? "Save & continue" : "Save details"]);
+    const detailKids = [];
+    if (!setup) detailKids.push(el("h3", null, ["Your details"]));
+    detailKids.push(el("label", { class: "lfh-lab" }, ["Username ", el("span", { class: "lfh-req" }, ["*"])]));
+    detailKids.push(nameIn);
+    detailKids.push(el("div", { class: "lfh-help" }, ["This is also your sign-in name."]));
+    detailKids.push(el("label", { class: "lfh-lab" }, ["Phone ", ...(setup ? [el("span", { class: "lfh-req" }, ["*"])] : [])]));
+    detailKids.push(phoneIn);
+    detailKids.push(el("div", { class: "lfh-help" }, ["Used so your team can reach you."]));
+    if (setupPinIn) {
+      detailKids.push(el("label", { class: "lfh-lab" }, ["Manager PIN ", el("span", { class: "lfh-req" }, ["*"])]));
+      detailKids.push(setupPinIn);
+      detailKids.push(el("div", { class: "lfh-help" }, ["Unlocks sensitive tablet actions (close a busy table, ban a guest, apply a discount)."]));
     }
+    detailKids.push(detMsg);
+    detailKids.push(saveDet);
+    sections.push(el("div", { class: "lfh-sec" }, detailKids));
 
-    // — PIN (MANAGERS only; the PIN unlocks the tablet's gated actions). Hidden
-    //   during first-login setup, where the inline field above captures it. —
-    if (isManager && !profile.needsProfile) {
-      if (profile.canSelfSetPin) {
-        const pinIn = el("input", { class: "lfh-in", type: "password", placeholder: "4–8 digit PIN", inputmode: "numeric", maxlength: "8" });
-        const pinMsg = el("div", { class: "lfh-msg" });
-        const savePin = el("button", { class: "lfh-bt", style: { background: "#8b5cf6" }, onClick: async () => {
-          if (!/^\d{4,8}$/.test(pinIn.value)) { setMsg(pinMsg, "PIN must be 4–8 digits.", false); return; }
-          savePin.disabled = true;
+    // — everyday-only sections: password / PIN / guest menu / log out (hidden during first-login) —
+    if (!setup) {
+      // — password (only if allowed) —
+      if (profile.canSelfReset) {
+        const curIn = el("input", { class: "lfh-in", type: "password", placeholder: "Current password", autocomplete: "current-password" });
+        const newIn = el("input", { class: "lfh-in", type: "password", placeholder: "New password (min 6)", autocomplete: "new-password" });
+        const pwMsg = el("div", { class: "lfh-msg" });
+        const savePw = el("button", { class: "lfh-bt", style: { background: "#3b82f6" }, onClick: async () => {
+          if (!curIn.value || !newIn.value) { setMsg(pwMsg, "Fill both fields.", false); return; }
+          savePw.disabled = true;
           try {
-            const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: pinIn.value }) });
+            const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: curIn.value, newPassword: newIn.value }) });
             const j = await r.json();
-            if (!r.ok) { setMsg(pinMsg, j.error || "Could not save.", false); return; }
-            profile.hasPin = true; pinIn.value = ""; setMsg(pinMsg, "PIN saved.", true);
-          } catch { setMsg(pinMsg, "Network error.", false); }
-          finally { savePin.disabled = false; }
-        } }, [profile.hasPin ? "Change PIN" : "Set PIN"]);
+            if (!r.ok) { setMsg(pwMsg, j.error || "Could not change.", false); return; }
+            setMsg(pwMsg, "Password changed — signing you out…", true);
+            setTimeout(() => { location.href = "/login"; }, 900);
+          } catch { setMsg(pwMsg, "Network error.", false); }
+          finally { savePw.disabled = false; }
+        } }, ["Change password"]);
         sections.push(el("div", { class: "lfh-sec" }, [
-          el("h3", null, [profile.hasPin ? "Change your PIN" : "Set a PIN"]),
-          el("div", { class: "lfh-note", style: { margin: "0 0 8px" } }, ["Your manager PIN authorises sensitive actions on the tablet (close/restart a busy table, ban a guest, apply a discount)."]),
-          pinIn, pinMsg, savePin,
+          el("h3", null, ["Change password"]),
+          curIn, newIn, pwMsg, savePw,
         ]));
       } else {
         sections.push(el("div", { class: "lfh-sec" }, [
-          el("h3", null, ["Your PIN"]),
-          el("div", { class: "lfh-note" }, ["Your admin manages your PIN. Ask them to set or change it."]),
+          el("h3", null, ["Password"]),
+          el("div", { class: "lfh-note" }, ["Your admin manages your password. Ask them to reset it if needed."]),
         ]));
       }
-    }
 
-    // — guest menu live/offline (MANAGERS only; kitchen/tablet never see this) —
-    if (isManager) {
-      const maintBtn = el("button", { class: "lfh-bt", style: { background: "var(--line,#243049)" } }, ["…"]);
-      const renderMaint = () => {
-        maintBtn.textContent = maintOn ? "🔴 Bring menu back online" : "🟢 Take guest menu offline";
-        maintBtn.style.background = maintOn ? "#7f1d1d" : "var(--line,#243049)";
-      };
-      maintBtn.addEventListener("click", async () => {
-        const turnOn = !maintOn;
-        const msg = turnOn ? "Take the guest menu OFFLINE (“we’ll be right back”)? Guests can’t browse or order until it’s back." : "Bring the guest menu back ONLINE?";
-        if (!confirm(msg)) return;
-        try { await setMaint(turnOn); renderMaint(); } catch (e) { alert("Couldn't change it: " + (e && e.message)); }
-      });
-      fetchMaint().then(renderMaint);
+      // — PIN (MANAGERS only; the PIN unlocks the tablet's gated actions) —
+      if (isManager) {
+        if (profile.canSelfSetPin) {
+          const pinIn = el("input", { class: "lfh-in", type: "password", placeholder: "4–8 digit PIN", inputmode: "numeric", maxlength: "8" });
+          const pinMsg = el("div", { class: "lfh-msg" });
+          const savePin = el("button", { class: "lfh-bt", style: { background: "#8b5cf6" }, onClick: async () => {
+            if (!/^\d{4,8}$/.test(pinIn.value)) { setMsg(pinMsg, "PIN must be 4–8 digits.", false); return; }
+            savePin.disabled = true;
+            try {
+              const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: pinIn.value }) });
+              const j = await r.json();
+              if (!r.ok) { setMsg(pinMsg, j.error || "Could not save.", false); return; }
+              profile.hasPin = true; pinIn.value = ""; setMsg(pinMsg, "PIN saved.", true);
+            } catch { setMsg(pinMsg, "Network error.", false); }
+            finally { savePin.disabled = false; }
+          } }, [profile.hasPin ? "Change PIN" : "Set PIN"]);
+          sections.push(el("div", { class: "lfh-sec" }, [
+            el("h3", null, [profile.hasPin ? "Change your PIN" : "Set a PIN"]),
+            el("div", { class: "lfh-note", style: { margin: "0 0 8px" } }, ["Your manager PIN authorises sensitive actions on the tablet (close/restart a busy table, ban a guest, apply a discount)."]),
+            pinIn, pinMsg, savePin,
+          ]));
+        } else {
+          sections.push(el("div", { class: "lfh-sec" }, [
+            el("h3", null, ["Your PIN"]),
+            el("div", { class: "lfh-note" }, ["Your admin manages your PIN. Ask them to set or change it."]),
+          ]));
+        }
+      }
+
+      // — guest menu live/offline (MANAGERS only; kitchen/tablet never see this) —
+      if (isManager) {
+        const maintBtn = el("button", { class: "lfh-bt", style: { background: "var(--line,#243049)", width: "100%" } }, ["…"]);
+        const renderMaint = () => {
+          maintBtn.textContent = maintOn ? "🔴 Bring menu back online" : "🟢 Take guest menu offline";
+          maintBtn.style.background = maintOn ? "#7f1d1d" : "var(--line,#243049)";
+        };
+        maintBtn.addEventListener("click", async () => {
+          const turnOn = !maintOn;
+          const msg = turnOn ? "Take the guest menu OFFLINE (“we’ll be right back”)? Guests can’t browse or order until it’s back." : "Bring the guest menu back ONLINE?";
+          if (!confirm(msg)) return;
+          try { await setMaint(turnOn); renderMaint(); } catch (e) { alert("Couldn't change it: " + (e && e.message)); }
+        });
+        fetchMaint().then(renderMaint);
+        sections.push(el("div", { class: "lfh-sec" }, [
+          el("h3", null, ["Guest menu"]),
+          maintBtn,
+        ]));
+      }
+
+      // — log out —
       sections.push(el("div", { class: "lfh-sec" }, [
-        el("h3", null, ["Guest menu"]),
-        maintBtn,
+        el("button", { class: "lfh-bt", style: { background: "#991b1b", width: "100%" }, onClick: () => { location.href = "/api/panel-logout"; } }, ["Log out"]),
       ]));
+    } else {
+      // — first-login: a quiet "not you?" escape + reassuring footer (no full menu) —
+      sections.push(el("div", { class: "lfh-sec", style: { paddingTop: "4px" } }, [
+        el("button", { class: "lfh-ghost", onClick: () => { if (confirm("Log out and sign in as someone else?")) location.href = "/api/panel-logout"; } }, ["Not you? Log out"]),
+      ]));
+      sections.push(el("div", { class: "lfh-foot" }, ["🔒 Visible only to you and your team"]));
     }
-
-    // — log out —
-    sections.push(el("div", { class: "lfh-sec" }, [
-      el("button", { class: "lfh-bt", style: { background: "#991b1b", width: "100%" }, onClick: () => { location.href = "/api/panel-logout"; } }, ["Log out"]),
-    ]));
 
     const drawer = el("div", { class: "lfh-dw" }, sections);
     overlay = el("div", { class: "lfh-ov", onClick: (e) => { if (e.target === overlay) closeDrawer(); } }, [drawer]);
     document.body.appendChild(overlay);
-    armBack(); // hardware BACK now closes this drawer instead of exiting the whole panel (B6)
+    armBack(); // hardware BACK now closes this popup instead of exiting the whole panel (B6)
   }
 
   // ── user: the ⚙️ Settings button in the top bar ────────────────────────────
