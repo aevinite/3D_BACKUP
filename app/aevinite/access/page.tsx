@@ -315,15 +315,18 @@ export default function Access2Page() {
               <p className="acc2-hint"><Icon n="shield" /> Switched off for this restaurant. Turn “Admin allows” on to open the settings.</p>
             ) : master ? (
               <>
-                {!p.fixedTop && (
+                {/* reach steps capped at the capability's max: owner-only caps (Issues/Customers)
+                    show just "Owner"; money/floor caps show up to "+ Tablet". */}
+                {!p.fixedTop && !p.ownerOnly && (
                   <div className="acc2-reach">
-                    {[1, 2, ...(maxReach(p) >= 3 ? [3] : [])].map((v) => (
+                    {Array.from({ length: maxReach(p) }, (_, i) => i + 1).map((v) => (
                       <button key={v} className={`rs r${v} ${lvl === v ? "on" : ""}`} onClick={() => setReach(p, v)}>
                         <Icon n={v === 1 ? "crown" : v === 2 ? "users" : "user"} s={14} />{v === 1 ? "Owner" : v === 2 ? "+ Manager" : "+ Tablet"}
                       </button>
                     ))}
                   </div>
                 )}
+                {p.ownerOnly && <p className="acc2-hint"><Icon n="crown" /> Owner-only — this is an owner-panel page; the toggle above turns it on or off.</p>}
                 {p.fixedTop && <p className="acc2-hint"><Icon n="info" /> Owner &amp; manager always have this — choose whether waiters get it below.</p>}
 
                 {p.sub && (
