@@ -142,6 +142,11 @@ export default function AdminFloor() {
   const [cancelledList, setCancelledList] = useState<CancelledRow[] | null>(null);
   const [cancelledLoading, setCancelledLoading] = useState(false);
   const [cancelledErr, setCancelledErr] = useState<string | null>(null);
+  // "Open tables" box at the top of the Live floor (folded in from the old hidden
+  // /aevinite/open-tables page, 2026-07-24). Collapsed by default; the occupied list
+  // only expands on click. Counts come from the ALREADY-loaded floor snapshot — NO extra
+  // fetch, no new query (egress-free; the whole floor is already behind the load gate).
+  const [openTablesOpen, setOpenTablesOpen] = useState(false);
   const seq = useRef(0); // latest-wins: a slow old response must never overwrite a newer one
 
   const load = useCallback(() => {
@@ -285,6 +290,44 @@ export default function AdminFloor() {
           <Stat icon="fa-bell" label="Waiter calls" value={waiterCalls} calculating={fetching} />
         </div>
       ) : null}
+
+      {rests && (() => {
+        const occ = rests.map((r) => ({ r, ts: r.tables.filter((t) => t.s !== "free") })).filter((x) => x.ts.length);
+        const total = occ.reduce((s, x) => s + x.ts.length, 0);
+        return (
+          <div className="adm-card" style={{ marginBottom: 14, padding: 0, overflow: "hidden" }}>
+            <button onClick={() => setOpenTablesOpen((o) => !o)} aria-expanded={openTablesOpen}
+              style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "transparent", border: 0, color: "var(--text)", cursor: "pointer", font: "inherit", textAlign: "left" }}>
+              <i className="fas fa-chair" style={{ color: "var(--accent)" }} aria-hidden="true" />
+              <b style={{ fontSize: 14 }}>Open tables</b>
+              <span className="adm-muted" style={{ fontSize: 12.5 }}>{total} occupied · {occ.length} restaurant{occ.length === 1 ? "" : "s"}</span>
+              <i className={`fas fa-chevron-${openTablesOpen ? "up" : "down"}`} style={{ marginLeft: "auto", opacity: 0.6, fontSize: 12 }} aria-hidden="true" />
+            </button>
+            {openTablesOpen && (
+              <div style={{ borderTop: "var(--border)", padding: "6px 14px 12px" }}>
+                {occ.length === 0 ? (
+                  <div className="adm-muted" style={{ fontSize: 13, padding: "8px 0" }}>No tables occupied right now.</div>
+                ) : occ.map(({ r, ts }) => (
+                  <div key={r.id} style={{ padding: "9px 0", borderBottom: "var(--border)" }}>
+                    <button onClick={() => openRestaurantPanel(r.id, "/manager")} title={`Open ${r.name}'s manager panel`}
+                      style={{ background: "none", border: 0, color: "var(--accent)", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 7 }}>
+                      {r.name} <span className="adm-muted" style={{ fontWeight: 400 }}>· {ts.length} open</span>
+                    </button>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {ts.map((t) => (
+                        <button key={t.n} onClick={() => openRestaurantPanel(r.id, "/manager")} title={`Table ${t.n} · ${t.s}${t.c ? " · waiter call" : ""}`}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "var(--border)", borderRadius: 8, padding: "4px 9px", background: "var(--card)", color: "var(--text)", fontSize: 12, cursor: "pointer" }}>
+                          <span style={{ width: 8, height: 8, borderRadius: 999, background: STATE_COLOR[t.s] || "var(--muted)" }} aria-hidden="true" />#{t.n}{t.c ? " •" : ""}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div className="adm-card" style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", padding: "10px 14px", marginBottom: 14, fontSize: 12 }}>
         {LEGEND.map(([label, color]) => (
