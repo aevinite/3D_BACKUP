@@ -62,6 +62,22 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
 
+// Granular Edit-the-menu sub-option gate (owner 2026-07-24). Only restricts a plain MANAGER:
+// admin (no cookie) + owner pass fully. NON-BREAKING: if the owner hasn't configured
+// access_config.edit_menu.manager_opts for this restaurant, allow everything (current behaviour
+// for every un-migrated restaurant). When configured, a sub-option is allowed only if explicitly
+// true. Caller must already have passed managerCan(edit_menu). Sub-actions: add_dish / edit_dish /
+// delete_dish / manage_categories / manage_filters / edit_3d (edit_price & mark_86 ride edit_dish).
+async function menuSubAllowed(g: { user: StaffUser | null }, rid: string, action: string): Promise<boolean> {
+  const u = g.user;
+  if (!u || u.role !== "manager") return true; // admin/owner: full menu editing
+  const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
+    { edit_menu?: { manager_opts?: Record<string, boolean> } } | null;
+  const mo = cfg?.edit_menu?.manager_opts;
+  if (!mo || typeof mo !== "object") return true; // not configured → non-breaking allow-all
+  return mo[action] === true;
+}
+
 // Gate for the KOT ▾ menu (Table & KOT operations — canonical module ladder, mig 177).
 // ADMIN X-RAY rule (owner, 2026-07-22): the admin super-user (no staff cookie) passes
 // every rung — from the admin console the greyed-out button must genuinely work, the
@@ -1964,6 +1980,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // to silently overwrite an existing row via the upsert's DO UPDATE arm.
       const isCreate = !!(body && typeof body === "object" && (body as Record<string, unknown>).__create === true);
       if (body && typeof body === "object") delete (body as Record<string, unknown>).__create;
+      // Granular edit-menu sub-option gate (non-breaking; only a restricted manager is stopped).
+      if (a === "items") { const act = isCreate ? "add_dish" : "edit_dish"; if (!(await menuSubAllowed(g, rid, act))) return permDenied(isCreate ? "add a new dish" : "edit dishes"); }
+      else if (a === "categories") { if (!(await menuSubAllowed(g, rid, "manage_categories"))) return permDenied("manage categories"); }
+      else if (a === "filters") { if (!(await menuSubAllowed(g, rid, "manage_filters"))) return permDenied("manage filters"); }
       // A new category/filter must not clobber an existing one with the same slug (the upsert
       // keys on (restaurant_id,slug), so a dup-slug create would DO UPDATE over it — silent
       // data loss, 2026-07-06). Tell the user instead.
@@ -2319,6 +2339,10 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       const t = TABLES[a];
       if (!t) return err("unknown kind", 404);
       if ((a === "items" || a === "categories" || a === "filters") && !(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the menu");
+      // Granular delete gate (non-breaking): a restricted manager can be blocked from deleting.
+      if (a === "items" && !(await menuSubAllowed(g, rid, "delete_dish"))) return permDenied("delete dishes");
+      if (a === "categories" && !(await menuSubAllowed(g, rid, "manage_categories"))) return permDenied("manage categories");
+      if (a === "filters" && !(await menuSubAllowed(g, rid, "manage_filters"))) return permDenied("manage filters");
       // slug is unique only PER restaurant now (categories/filters), so a delete by
       // key MUST also pin the restaurant or it would wipe that slug everywhere.
       must(await sb.from(t.name).delete().eq(t.key, id).eq("restaurant_id", rid));
