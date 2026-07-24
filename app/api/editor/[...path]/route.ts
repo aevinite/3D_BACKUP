@@ -58,7 +58,14 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   if (!u || u.role === "owner") return true;
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-  if (r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
+  if (r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false; // admin cap — nothing below re-grants
+  // Per-person override (access panel → Per person, mig 115 staff_users.permissions):
+  // an individual's setting WINS over the restaurant-wide owner→manager grant, but never
+  // over the admin cap above. 'on'/'pin' = allow this person, 'off' = deny them, absent/
+  // 'default' = fall through to the grant. Rides free on u.permissions (no extra query).
+  const ov = u.permissions?.[flag];
+  if (ov === "on" || ov === "pin") return true;
+  if (ov === "off") return false;
   return !!r?.manager_permissions?.[flag];
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
@@ -257,9 +264,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const ents = r?.owner_entitlements || {};
       const effectivePowers: Record<string, boolean> = {};
       const offByAdmin: Record<string, boolean> = {};
+      // The acting person's per-person overrides (mig 115) — so the manager UI hides a power
+      // pulled from THIS individual, matching what managerCan enforces. Only for a real staff
+      // login (admin/owner see the restaurant-wide picture; they bypass the gate anyway).
+      const myOv = (g.user && g.user.role !== "owner") ? (g.user.permissions || {}) : {};
       for (const flag of MANAGER_POWER_FLAGS) {
         const entitled = ents[powerEntitlementKey(flag)] !== false;
-        effectivePowers[flag] = entitled && perms[flag] === true;
+        let granted = perms[flag] === true;
+        const ov = myOv[flag];
+        if (ov === "on" || ov === "pin") granted = true;
+        else if (ov === "off") granted = false;
+        effectivePowers[flag] = entitled && granted;
         offByAdmin[flag] = !entitled;
       }
       // Feature ladder (mig 166): table_tags/khata render nothing anywhere in the

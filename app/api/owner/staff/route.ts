@@ -20,7 +20,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
-import { mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
+import { mergeOwnerEntitlements, MANAGER_POWER_FLAGS, powerEntitled } from "@/lib/ownerEntitlements";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, tableOpsLadder, takeOrdersLadder } from "@/lib/tableTags";
 
@@ -259,35 +259,48 @@ export async function PATCH(req: NextRequest) {
   // (inherits the restaurant-wide tri-state). Keys/values are strictly validated so a
   // buggy client can never write junk into the JSONB.
   if (action === "set_permissions") {
-    // Canonical per-user override keys = the tablet_* caps that tabletPerm actually enforces
-    // (mig 115 + the KOT/khata/take-orders additions). Keep in lockstep with TABLET_PERM_KEYS
-    // in app/api/tablet/[...path]/route.ts — a key the enforcer doesn't read would be a dead grant.
-    const PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders"];
-    const PERM_MODES = ["on", "pin", "off"];
+    // Per-user override keys come in TWO families, both stored in staff_users.permissions:
+    //   • TABLET caps (tablet_*) — the waiter rung, tri-state on|pin|off; enforced by
+    //     tabletPerm (keep in lockstep with TABLET_PERM_KEYS in the tablet route).
+    //   • MANAGER powers (the bare flag, e.g. give_discounts) — per-person override for a
+    //     MANAGER, two-state on|off; enforced by managerCan (Option B, 2026-07-24). A key
+    //     the enforcer doesn't read would be a dead grant, so both lists are the enforced set.
+    const TABLET_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders"];
+    const POWER_KEYS = MANAGER_POWER_FLAGS as readonly string[];
     const patch = body?.permissions;
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing permissions object.");
     const merged: Record<string, string> = { ...(u.permissions && typeof u.permissions === "object" ? u.permissions : {}) };
     const noted: string[] = [];
+    // Load this restaurant's admin entitlements once, only if an owner grants a manager power.
+    let entsCache: unknown; let entsLoaded = false;
+    const ents = async () => { if (!entsLoaded) { entsCache = (await sb.from("restaurants").select("owner_entitlements").eq("id", u.restaurant_id).maybeSingle()).data?.owner_entitlements ?? null; entsLoaded = true; } return entsCache; };
     for (const [k, v] of Object.entries(patch)) {
-      if (!PERM_KEYS.includes(k)) return bad(`Unknown permission "${k}".`);
+      const isTablet = TABLET_KEYS.includes(k);
+      const isPower = POWER_KEYS.includes(k);
+      if (!isTablet && !isPower) return bad(`Unknown permission "${k}".`);
       if (v === null || v === "" || v === "default") { delete merged[k]; noted.push(`${k}→default`); continue; }
-      if (!PERM_MODES.includes(String(v))) return bad(`Bad value for "${k}" — use on, pin, off, or null.`);
+      // Tablet caps allow the PIN state; manager-power overrides are plain on/off.
+      const modes = isTablet ? ["on", "pin", "off"] : ["on", "off"];
+      if (!modes.includes(String(v))) return bad(`Bad value for "${k}" — use ${modes.join(", ")}, or null.`);
       // Least-privilege (audit 2026-07-07): a MANAGER may REDUCE a junior's power (off) or
-      // reset it to default, but may NOT GRANT (on/pin) a capability — otherwise a manager
-      // given only "manage staff" could quietly hand a waiter discount/void/mark-paid powers
-      // the owner deliberately withheld from the manager. Only the owner/admin grants powers.
+      // reset it to default, but may NOT GRANT (on/pin) — only the owner/admin grants powers.
       if (s.actor === "manager" && (v === "on" || v === "pin"))
         return bad("Only the owner can grant extra powers to staff.", 403);
-      // GAP-B ceiling + role-relevance (owner actor granting on/pin): the admin super-user
-      // is unrestricted, but an OWNER may only grant a cap that (a) applies to the target's
-      // role — these tablet_* caps are for WAITER accounts — and (b) is within the ceiling the
-      // admin allowed for this restaurant (its module is effective). Server-refused, not just hidden.
+      // Owner actor granting on/pin: role-relevance + the admin ceiling. Server-refused, not
+      // just hidden. Admin super-user is unrestricted (skips this whole block).
       if (s.actor === "owner" && (v === "on" || v === "pin")) {
-        if (u.role !== "tablet")
-          return bad("These per-user powers apply to waiter (tablet) accounts only.", 400);
-        const gate = CAP_MODULE_GATE[k];
-        if (gate && !(await gate(u.restaurant_id)).effective)
-          return bad("That feature isn't enabled for this restaurant by the admin — you can't grant it.", 403);
+        if (isTablet) {
+          if (u.role !== "tablet")
+            return bad("These per-user caps apply to waiter (tablet) accounts only.", 400);
+          const gate = CAP_MODULE_GATE[k];
+          if (gate && !(await gate(u.restaurant_id)).effective)
+            return bad("That feature isn't enabled for this restaurant by the admin — you can't grant it.", 403);
+        } else { // manager-power override
+          if (u.role !== "manager")
+            return bad("These per-person powers apply to manager accounts.", 400);
+          if (!powerEntitled(await ents(), k))
+            return bad("The admin hasn't allowed this power for the restaurant — you can't grant it.", 403);
+        }
       }
       merged[k] = String(v); noted.push(`${k}→${v}`);
     }

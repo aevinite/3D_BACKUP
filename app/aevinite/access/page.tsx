@@ -112,6 +112,11 @@ export default function Access2Page() {
   const [tab, setTab] = useState<"general" | "person">("general");
   const [personId, setPersonId] = useState<string>("");
   const [personFilter, setPersonFilter] = useState<string>("");
+  // People-rail fast navigation (owner 2026-07-24 two-pane redesign): a search box + role
+  // filter chips so you jump to a person / a type of person without scanning. Parent-scoped
+  // because the render sub-components remount each pass (they hold no local state).
+  const [pQuery, setPQuery] = useState<string>("");
+  const [pRole, setPRole] = useState<string>("all");
   const [open, setOpen] = useState<Record<string, boolean>>({ guest: true });
   const [activeArea, setActiveArea] = useState<string>("guest"); // the ONE rail item highlighted (nav target)
   const [side, setSide] = useState<Record<string, Side>>({});
@@ -145,7 +150,7 @@ export default function Access2Page() {
       setStaff(Array.isArray(s) ? s : []);
     }).catch(() => setStaff([]));
   }, []);
-  useEffect(() => { load(rid); setPersonId(""); setPersonFilter(""); }, [rid, load]);
+  useEffect(() => { load(rid); setPersonId(""); setPersonFilter(""); setPQuery(""); setPRole("all"); }, [rid, load]);
 
   // Scroll-spy: as the sections scroll past, highlight the matching AREA in the left rail —
   // exactly like the guest menu's category strip. The scroll container is .adm-main.
@@ -360,7 +365,7 @@ export default function Access2Page() {
         {conf.length > 0 && (
           <div className="acc2-warn">
             <Icon n="alert" s={18} />
-            <span><b>{conf.length} power{conf.length > 1 ? "s have" : " has"} a manager set above the owner.</b> A manager can never hold something the owner doesn't — {conf.map((c) => c.name).join(", ")}.</span>
+            <span><b>{conf.length} power{conf.length > 1 ? "s have" : " has"} a manager set above the owner.</b> A manager can never hold something the owner doesn&rsquo;t — {conf.map((c) => c.name).join(", ")}.</span>
           </div>
         )}
         <div className="acc2-rail-wrap">
@@ -569,29 +574,58 @@ export default function Access2Page() {
 
   // ───────────────────────────── PER PERSON ──────────────────────────────────
   function PerPerson() {
-    const people = sortedStaff;
-    const person = people.find((p) => p.id === personId) || people[0];
+    const allPeople = sortedStaff;
+    const inits = (u: Staff) => (u.name || u.username).split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+    // role counts (only roles present) drive the filter chips
+    const roleCounts: Record<string, number> = {};
+    allPeople.forEach((u) => { roleCounts[u.role] = (roleCounts[u.role] || 0) + 1; });
+    const roleChips = ["all", ...Object.keys(ROLE_ORDER).filter((r) => roleCounts[r])];
+    const rolePlural = (r: string) => r === "all" ? "All" : r === "kitchen" ? "Kitchen" : ROLE_LABEL[r] + "s";
+    const q = pQuery.trim().toLowerCase();
+    const shown = allPeople.filter((u) => (pRole === "all" || u.role === pRole) && (!q || (u.name || u.username).toLowerCase().includes(q)));
+    // selected person stays valid even when filtered out of the list; fall back to the first shown
+    const person = allPeople.find((p) => p.id === personId) || shown[0] || allPeople[0];
     if (!person) return <div className="adm-card" style={{ padding: 24, color: "var(--muted)" }}>No staff for this restaurant.</div>;
+
+    const railHead = (
+      <div className="acc2-railhead">
+        <div className="acc2-search">
+          <Icon n="users" s={15} />
+          <input value={pQuery} onChange={(e) => setPQuery(e.target.value)} placeholder="Search staff by name…" aria-label="Search staff" />
+          {pQuery && <button className="clr" onClick={() => setPQuery("")} aria-label="Clear search"><Icon n="x" s={13} /></button>}
+        </div>
+        <div className="acc2-rolechips">
+          {roleChips.map((r) => (
+            <button key={r} className={pRole === r ? "on" : ""} onClick={() => setPRole(r)}>
+              {rolePlural(r)} <b>{r === "all" ? allPeople.length : roleCounts[r]}</b>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+
     let lastRole = "";
-    const list = people.map((u) => {
-      const hd = u.role !== lastRole ? <div className="prole" key={"h" + u.id}>{ROLE_LABEL[u.role]}{u.role === "tablet" ? "s" : ""}</div> : null;
-      lastRole = u.role;
-      const nOv = Object.keys(u.permissions || {}).length;
-      return (<div key={u.id}>{hd}
-        <button className={`prow ${u.id === person.id ? "on" : ""}`} onClick={() => setPersonId(u.id)}>
-          <span className="av">{(u.name || u.username).split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>
-          <span className="pi"><span className="nm">{u.name || u.username}</span><span className="mt">{ROLE_LABEL[u.role]}</span></span>
-          {nOv > 0 && <span className="ovr">{nOv}</span>}
-        </button></div>);
-    });
+    const list = shown.length === 0
+      ? <div className="acc2-noone">No one matches.</div>
+      : shown.map((u) => {
+        const hd = u.role !== lastRole ? <div className="prole" key={"h" + u.id}>{rolePlural(u.role)} · {roleCounts[u.role]}</div> : null;
+        lastRole = u.role;
+        const nOv = Object.keys(u.permissions || {}).length;
+        return (<div key={u.id}>{hd}
+          <button className={`prow ${u.id === person.id ? "on" : ""}`} onClick={() => setPersonId(u.id)}>
+            <span className="av">{inits(u)}</span>
+            <span className="pi"><span className="nm">{u.name || u.username}</span><span className="mt">{ROLE_LABEL[u.role]}</span></span>
+            {nOv > 0 && <span className="ovr" title={`${nOv} custom rule${nOv > 1 ? "s" : ""}`}>{nOv}</span>}
+          </button></div>);
+      });
 
     if (personFilter) {
       const p = PERM_BY_ID[personFilter];
-      const relevant = people.filter((u) => (ROLE_RELEVANCE[u.role] || []).includes(p.id));
+      const relevant = allPeople.filter((u) => (ROLE_RELEVANCE[u.role] || []).includes(p.id));
       const hs = relevant.filter((u) => resolved(u, p).eff);
       return (
         <div className="acc2-pp">
-          <nav className="acc2-plist adm-card">{list}</nav>
+          <nav className="acc2-plist adm-card">{railHead}{list}</nav>
           <div className="adm-card">
             <div className="acc2-filter"><Icon n="users" s={15} /> Who has <b>{p.name}</b> — <b>{hs.length}</b> of {relevant.length}
               <button onClick={() => setPersonFilter("")}>Back to one person</button></div>
@@ -602,14 +636,20 @@ export default function Access2Page() {
     }
 
     const caps = (ROLE_RELEVANCE[person.role] || []).map((id) => PERM_BY_ID[id]).filter((p) => p && !(p.module && !allowed(p, st!)));
+    const allowedN = caps.filter((p) => resolved(person, p).eff).length;
+    const customN = Object.keys(person.permissions || {}).length;
     let lastG = "";
     return (
       <div className="acc2-pp">
-        <nav className="acc2-plist adm-card">{list}</nav>
+        <nav className="acc2-plist adm-card">{railHead}{list}</nav>
         <div className="adm-card">
           <div className="acc2-pdh">
-            <span className="av">{(person.name || person.username).split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>
-            <div><h3>{person.name || person.username}</h3><span>{ROLE_LABEL[person.role]}</span></div>
+            <span className="av">{inits(person)}</span>
+            <div className="pdh-i"><h3>{person.name || person.username}</h3><span>{ROLE_LABEL[person.role]}{rest ? " · " + rest.name : ""}</span></div>
+            <div className="pdh-stats">
+              <div><b>{allowedN}<span className="dn">/{caps.length}</span></b><small>Allowed</small></div>
+              <div><b className={customN ? "cust" : ""}>{customN}</b><small>Custom</small></div>
+            </div>
           </div>
           {caps.length === 0 ? <p className="acc2-hint" style={{ padding: 20 }}>Nothing here applies to a {ROLE_LABEL[person.role].toLowerCase()}.</p> :
             caps.map((p) => { const hd = p.group !== lastG ? <div className="capg" key={"g" + p.id}>{PERM_BY_ID[p.id] && GROUPS.find((g) => g.id === p.group)?.name}</div> : null; lastG = p.group; return <div key={p.id}>{hd}<CapRow u={person} p={p} /></div>; })}
@@ -672,7 +712,20 @@ function Toggle({ checked, disabled, onChange }: { checked: boolean; disabled?: 
 
 function Style() {
   return <style jsx global>{`
-  .acc2 { max-width: 1180px; }
+  /* Access panel wears the BRAND GOLD accent (owner 2026-07-24) — scoped to .acc2 only,
+     so the rest of the admin console keeps its own accent. Every control reads var(--accent),
+     so this one override recolours the whole panel. */
+  .acc2 { max-width: 1180px; --accent:#d4af5a; --acc-ink:#3a2a08; }
+  /* Solid-gold surfaces need dark ink (the base rules hardcode #fff, unreadable on gold). */
+  .acc2 .acc2-tabs button.on,
+  .acc2 .prow.on .av,
+  .acc2 .acc2-pdh .av,
+  .acc2 .acc2-reach .rs.cur,
+  .acc2 .acc2-reach .rs.cur .rc,
+  .acc2 .acc2-limit .segs button.on,
+  .acc2 .tri3 button.on.v-pin,
+  .acc2 .acc2-chips .chip.on .box,
+  .acc2 .acc2-chips .chip .xb { color:var(--acc-ink); }
   .acc2-head { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:6px 0 18px; }
   .acc2-head-r { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .acc2-save { font-size:12px; font-weight:700; color:var(--muted); min-width:60px; }
@@ -814,6 +867,28 @@ function Style() {
   .acc2-shot { width:100%; margin-top:8px; border-radius:10px; border:var(--border); cursor:zoom-in; display:block; background:var(--bg); }
   .acc2-lightbox { position:fixed; inset:0; z-index:1100; background:rgba(0,0,0,.75); display:grid; place-items:center; padding:32px; cursor:zoom-out; }
   .acc2-lightbox img { max-width:96vw; max-height:92vh; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
-  @media (max-width:900px){ .acc2-rail-wrap,.acc2-pp{ grid-template-columns:1fr; } .acc2-rail,.acc2-plist{ position:static; } }
+  /* People rail: search + role-filter chips + a scrollable list with the search pinned
+     (the two-pane "find a person fast" bar, owner 2026-07-24). */
+  .acc2-plist { max-height:calc(100dvh - 96px); overflow-y:auto; scrollbar-width:thin; }
+  .acc2-railhead { position:sticky; top:0; z-index:2; background:var(--card); padding:2px 2px 9px; margin-bottom:2px; }
+  .acc2-search { display:flex; align-items:center; gap:8px; padding:9px 11px; border-radius:10px; background:var(--bg); border:var(--border); }
+  .acc2-search:focus-within { border-color:var(--accent); }
+  .acc2-search svg { color:var(--muted); flex:none; }
+  .acc2-search input { flex:1; min-width:0; border:none; background:none; outline:none; color:var(--text); font-size:13.5px; }
+  .acc2-search .clr { border:none; background:none; color:var(--muted); cursor:pointer; display:grid; place-items:center; padding:2px; flex:none; }
+  .acc2-rolechips { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+  .acc2-rolechips button { display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:8px; border:var(--border); background:var(--bg); color:var(--muted); font-weight:700; font-size:12px; cursor:pointer; }
+  .acc2-rolechips button b { font-family:ui-monospace,monospace; font-size:10.5px; opacity:.7; }
+  .acc2-rolechips button.on { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 14%,transparent); color:var(--text); }
+  .acc2-rolechips button.on b { opacity:1; color:var(--accent); }
+  .acc2-noone { padding:22px 12px; text-align:center; color:var(--muted); font-size:13px; }
+  .acc2-pdh .pdh-i { flex:1; min-width:0; }
+  .acc2-pdh .pdh-stats { display:flex; gap:16px; text-align:right; flex:none; }
+  .acc2-pdh .pdh-stats > div { display:flex; flex-direction:column; gap:1px; }
+  .acc2-pdh .pdh-stats b { font-size:19px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1; }
+  .acc2-pdh .pdh-stats b.cust { color:var(--accent); }
+  .acc2-pdh .pdh-stats b .dn { font-size:13px; color:var(--muted); font-weight:700; }
+  .acc2-pdh .pdh-stats small { font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:700; }
+  @media (max-width:900px){ .acc2-rail-wrap,.acc2-pp{ grid-template-columns:1fr; } .acc2-rail,.acc2-plist{ position:static; max-height:none; } .acc2-pdh .pdh-stats{ gap:12px; } }
   `}</style>;
 }
