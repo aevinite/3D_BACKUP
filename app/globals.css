@@ -3553,7 +3553,6 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   }
   .adm-body { margin-left: 76px; }            /* reserve the rail; body never reflows on hover */
   .adm.owx .adm-body { margin-left: 0; }      /* owner uses an in-flow 224px sidebar, not the admin icon-rail — the 76px reserve left a blank gap (2026-07-05) */
-  .adm.adx .adm-body { margin-left: 0; }      /* admin ops console ALSO uses the in-flow 224px .adx-side; the 76px was a stale reserve for the removed icon-rail → ~96px dead gap on every admin page (owner 2026-07-24) */
   .adm-side .lbl, .adm-side .who, .adm-side .navsoon {
     opacity: 0; transition: opacity .18s ease; white-space: nowrap;
   }
@@ -3707,16 +3706,17 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   --bg: #0a0c10; --card: #10141b; --border: 1px solid #1d2430; --border-c: #1d2430;
   --side: #0c0f15;
   --text: #e6ebf3; --muted: #8b94a7; --muted2: rgba(230,235,243,0.10);
-  /* Brand spectrum — the logo underline: blue → violet → coral-red. */
-  --accent: #8a7cff; --accent-dim: rgba(138,124,255,0.6);
+  /* Blue base (as before). The logo spectrum (blue → violet → red) is kept ONLY for
+     highlight accents — the brand line, the active-nav bar, page titles, glows. */
+  --accent: #3b82f6; --accent-dim: rgba(59,130,246,0.6);
   --accent-grad: linear-gradient(120deg, #0066ff 0%, #8b5cf6 50%, #ff5e7e 100%);
-  --accent-glow: rgba(124,92,255,0.38);
+  --accent-glow: rgba(59,130,246,0.32);
   --adm-cta: #d97706;
   --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24;
   --elev: 0 1px 0 rgba(255,255,255,.03); --elev-hi: 0 1px 0 rgba(255,255,255,.03);
   /* Access-control page tokens (it styles inline with --ac-* fallbacks). */
   --ac-line: #1d2430; --ac-card: #10141b; --ac-muted: #8b94a7;
-  --ac-accent: #8a7cff; --ac-off: #232b3a;
+  --ac-accent: #3b82f6; --ac-off: #232b3a;
   background:
     radial-gradient(760px 440px at 100% -8%, rgba(0,102,255,.18), transparent 60%),
     radial-gradient(680px 440px at 0% 4%, rgba(139,92,246,.15), transparent 60%),
@@ -3729,15 +3729,15 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   --bg: #f6f7f9; --card: #ffffff; --border: 1px solid #e5e8ee; --border-c: #e5e8ee;
   --side: #ffffff;
   --text: #111827; --muted: #6b7280; --muted2: rgba(17,24,39,0.08);
-  /* Premium light — indigo, with a touch of light red through the gradient. */
-  --accent: #4f46e5; --accent-dim: rgba(79,70,229,0.6);
+  /* Blue base (as before); spectrum kept for accents only (violet + a touch of light red). */
+  --accent: #2563eb; --accent-dim: rgba(37,99,235,0.6);
   --accent-grad: linear-gradient(120deg, #2563eb 0%, #7c3aed 52%, #fb7185 100%);
-  --accent-glow: rgba(124,58,237,0.16);
+  --accent-glow: rgba(37,99,235,0.18);
   --adm-cta: #d97706;
   --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-warn: #d97706;
   --elev: 0 1px 2px rgba(16,24,40,.04); --elev-hi: 0 1px 2px rgba(16,24,40,.04);
   --ac-line: #e5e8ee; --ac-card: #ffffff; --ac-muted: #6b7280;
-  --ac-accent: #4f46e5; --ac-off: #e5e8ee;
+  --ac-accent: #2563eb; --ac-off: #e5e8ee;
   background:
     radial-gradient(820px 460px at 100% -12%, rgba(124,58,237,.06), transparent 60%),
     radial-gradient(680px 460px at 50% 122%, rgba(251,113,133,.055), transparent 62%),
@@ -3762,29 +3762,27 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 /* Clickable brand — clicking "Aevidine" re-draws the blue → violet → red line. */
 .adx-brand { cursor: pointer; -webkit-tap-highlight-color: transparent; user-select: none; }
 .adx-brand .who { display: block; }
+/* The spectrum line stays HIDDEN and only draws in when you hover/focus the brand. */
 .adx-brand-line {
-  display: block; width: 100%; height: 3px; margin-top: 6px; border-radius: 3px;
+  display: block; width: 100%; height: 4px; margin-top: 6px; border-radius: 3px;
   background: var(--accent-grad);
-  transform-origin: left center;
+  transform: scaleX(0); opacity: 0; transform-origin: left center;
   box-shadow: 0 0 12px var(--accent-glow);
-  animation: adxBrandDraw .75s cubic-bezier(.2,.8,.2,1) both;
+  transition: transform .5s cubic-bezier(.2,.8,.2,1), opacity .3s ease;
 }
-@keyframes adxBrandDraw {
-  0%   { transform: scaleX(0); opacity: .2; }
-  60%  { opacity: 1; }
-  100% { transform: scaleX(1); opacity: 1; }
-}
+.adx-brand:hover .adx-brand-line,
+.adx-brand:focus-visible .adx-brand-line,
+.adx-brand:focus-within .adx-brand-line { transform: scaleX(1); opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .adx-brand-line { transition: opacity .2s ease; } }
 /* Gradient accent bar on the active nav item. */
 .adx-navlink.active { position: relative; }
 .adx-navlink.active::before {
   content: ""; position: absolute; left: 2px; top: 50%; transform: translateY(-50%);
   width: 3px; height: 62%; border-radius: 3px; background: var(--accent-grad);
 }
-@media (prefers-reduced-motion: reduce) { .adx-brand-line { animation: none; } }
 
-/* ═══ Energetic admin (adx): spectrum accents + hover life (blue → violet → red) ═══
+/* ═══ Energetic admin (adx): spectrum accents + hover life (blue base, violet/red accents) ═══
    Scoped to .adm.adx so ONLY the /aevinite console changes — guest menu & owner untouched. */
-.adx-brand-line { height: 4px; }
 /* Cards lift + glow on hover. */
 .adm.adx .adm-card { transition: transform .18s ease, box-shadow .22s ease, border-color .18s ease; }
 .adm.adx[data-skin="dark"] .adm-card:hover {
@@ -3879,7 +3877,7 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 .adx-switch-opt .sl { margin-left: auto; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; flex-shrink: 0; }
 .adx-switch-empty { padding: 14px 10px; font-size: 12.5px; color: var(--muted); text-align: center; }
 /* ── page container / headers ────────────────────────────────────────────── */
-.adx .adm-main { padding: 16px 18px calc(16px + env(safe-area-inset-bottom, 0px)); }
+.adx .adm-main { padding: 20px; }
 .adx-wrap { max-width: 1280px; margin: 0 auto; }
 .adx .adm-page-h { font-size: 18px; font-weight: 700; }
 .adx .adm-page-sub { font-size: 13px; margin-bottom: 16px; }
