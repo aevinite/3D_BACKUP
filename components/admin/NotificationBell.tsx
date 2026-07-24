@@ -58,7 +58,41 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
   useEffect(() => { setTickets(feed?.tickets || []); }, [feed]);
 
   const alerts = feed?.alerts || [];
-  const errors = feed?.errors || [];
+
+  // Errors: snapshot ONCE when the drawer opens so they stay readable on screen even though
+  // opening the bell marks them SEEN — which empties the live feed and clears the red badge
+  // (owner 2026-07-24: "stop showing in the notification when it has been seen"). A per-row
+  // "Mark unread" re-raises the badge for that one error so it shows again on purpose.
+  const [errs, setErrs] = useState<ErrRow[]>(feed?.errors || []);
+  const [unread, setUnread] = useState<Set<string>>(new Set());
+  const seenOnce = useRef(false);
+  const rand = () => (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now());
+  useEffect(() => {
+    if (seenOnce.current || !feed) return;
+    seenOnce.current = true;
+    setErrs(feed.errors || []);
+    const ids = (feed.errors || []).map((e) => e.id);
+    if (ids.length === 0) return;
+    fetch("/api/admin/oplog/ack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": rand() },
+      body: JSON.stringify({ action_ids: ids, seen: true }),
+    }).then(() => onChanged()).catch(() => { /* badge just won't clear this tick */ });
+  }, [feed, onChanged]);
+
+  // Toggle one error's seen state from the drawer. Marking unread re-raises the badge; the row
+  // stays visible in this session either way, just flagged.
+  const setSeen = async (id: string, seen: boolean) => {
+    setUnread((prev) => { const n = new Set(prev); if (seen) n.delete(id); else n.add(id); return n; });
+    try {
+      await fetch("/api/admin/oplog/ack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-LFH-Action-Id": rand() },
+        body: JSON.stringify({ action_ids: [id], seen }),
+      });
+    } catch { /* best-effort */ }
+    onChanged();
+  };
 
   const openRestaurant = (slug: string) => {
     onClose();
@@ -101,23 +135,33 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
           <section>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
               <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)" }}>
-                App errors (24h) {(feed?.errorCount || 0) > 0 && <span>· {feed?.errorCount}</span>}
+                App errors (24h) {errs.length > 0 && <span>· {errs.length}</span>}
               </div>
               <a href="/aevinite/logs?level=error" onClick={onClose} style={{ marginLeft: "auto", fontSize: 12, color: "var(--accent)", fontWeight: 700 }}>View log →</a>
             </div>
-            {errors.length === 0 ? (
-              <div className="adm-empty" style={{ padding: "14px 12px", fontSize: 13 }}>No errors in the last 24 hours. 🎉</div>
+            {errs.length === 0 ? (
+              <div className="adm-empty" style={{ padding: "14px 12px", fontSize: 13 }}>No new errors. 🎉</div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {errors.map((e) => (
-                  <div key={e.id} className="adm-card" style={{ display: "flex", alignItems: "flex-start", gap: 11, padding: "10px 12px", borderLeft: "3px solid var(--adm-danger, #e5484d)" }}>
-                    <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: "var(--adm-danger, #e5484d)", fontSize: 15, marginTop: 1 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.panel} · {e.detail || e.action}</div>
-                      <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{e.restaurantName} · {new Date(e.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+                {errs.map((e) => {
+                  const isUnread = unread.has(e.id);
+                  return (
+                    <div key={e.id} className="adm-card" style={{ display: "flex", alignItems: "flex-start", gap: 11, padding: "10px 12px", borderLeft: "3px solid var(--adm-danger, #e5484d)", opacity: isUnread ? 1 : 0.72 }}>
+                      <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: "var(--adm-danger, #e5484d)", fontSize: 15, marginTop: 1 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.panel} · {e.detail || e.action}</div>
+                        <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{e.restaurantName} · {new Date(e.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+                        <button
+                          onClick={() => setSeen(e.id, isUnread)}
+                          style={{ marginTop: 6, fontSize: 11, fontWeight: 700, background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--accent)" }}
+                        >
+                          <i className={`fas ${isUnread ? "fa-envelope-open" : "fa-envelope"}`} aria-hidden="true" style={{ marginRight: 5 }} />
+                          {isUnread ? "Mark read" : "Mark unread"}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>

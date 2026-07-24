@@ -22,8 +22,10 @@ export async function GET(req: NextRequest) {
 
   // Bounded, scoped reads only. Tickets: open, newest, capped, explicit columns.
   // A separate head-count gives the TRUE open total for the badge without pulling >30 rows.
-  // errorsQ/errorCountQ: recent app errors (Everything Log, mig 159) so the bell warns the
-  // admin something broke — cheap via the partial idx_staff_actions_error index.
+  // errorsQ/errorCountQ: recent UNSEEN app errors (Everything Log, mig 159 + seen_at, mig 179) so
+  // the bell warns the admin something broke — cheap via the partial idx_staff_actions_error_unseen
+  // index. Opening the bell marks the shown errors seen (POST /api/admin/oplog/ack), so the badge
+  // clears and only genuinely-new errors re-raise it; "mark unread" clears seen_at to re-surface one.
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const [ticketsQ, countQ, restQ, errorsQ, errorCountQ] = await Promise.all([
     sb.from("issues")
@@ -32,8 +34,8 @@ export async function GET(req: NextRequest) {
     sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open"),
     sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null),
     sb.from("staff_actions").select("id, panel, action, detail, restaurant_id, created_at")
-      .eq("level", "error").gte("created_at", since24h).order("created_at", { ascending: false }).limit(10),
-    sb.from("staff_actions").select("id", { count: "exact", head: true }).eq("level", "error").gte("created_at", since24h),
+      .eq("level", "error").is("seen_at", null).gte("created_at", since24h).order("created_at", { ascending: false }).limit(10),
+    sb.from("staff_actions").select("id", { count: "exact", head: true }).eq("level", "error").is("seen_at", null).gte("created_at", since24h),
   ]);
   // Surface a failed read — otherwise a broken tickets/restaurants query silently shows an
   // empty bell (no tickets, and NO suspended-restaurant alerts) as if everything's clear (audit).

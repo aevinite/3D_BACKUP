@@ -133,6 +133,22 @@ export default function AdminLogs() {
     if (r.ok) toast("Sent to Claude — it'll be looked at overnight."); else toast(r.error || "Couldn't send that.", "err");
   };
 
+  // Mark an error row resolved (stops it showing red) or reopen it. Optimistic: flip the local
+  // row instantly, revert by reloading if the server rejects it. Resolving also marks it seen so
+  // the notification bell stops nagging about an error that's been handled.
+  const markResolved = async (a: Action, resolved: boolean) => {
+    const now = new Date().toISOString();
+    setOps((prev) => prev ? prev.map((x) => x.id === a.id
+      ? { ...x, resolved_at: resolved ? now : null, seen_at: resolved ? (x.seen_at || now) : x.seen_at }
+      : x) : prev);
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/oplog/ack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now()) },
+      body: JSON.stringify({ action_ids: [a.id], resolved }),
+    });
+    if (r.ok) toast(resolved ? "Marked resolved." : "Reopened."); else { toast(r.error || "Couldn't update that.", "err"); loadOps(); }
+  };
+
   return (
     <>
       <h1 className="adm-page-h">Logs</h1>
@@ -197,7 +213,7 @@ export default function AdminLogs() {
       )}
 
       {tab === "ops"
-        ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} onSendToClaude={sendToClaude} />
+        ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} onSendToClaude={sendToClaude} onResolve={markResolved} />
         : <CustTable data={cust} err={custErr} onRetry={loadCust} />}
 
       {/* Cleanup confirm — a shared modal (phone Back + Escape + focus-trap via useAdminModal). */}
@@ -214,7 +230,7 @@ export default function AdminLogs() {
   );
 }
 
-function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude }: { rows: Action[] | null; err: boolean; onRetry: () => void; scopedName: string | null; onSendToClaude: (a: Action) => void }) {
+function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }: { rows: Action[] | null; err: boolean; onRetry: () => void; scopedName: string | null; onSendToClaude: (a: Action) => void; onResolve: (a: Action, resolved: boolean) => void }) {
   const cols = "92px 1fr auto";
   // Which row's full detail is expanded (errors + tap-batches carry long text worth reading).
   const [open, setOpen] = useState<string | null>(null);
@@ -227,6 +243,11 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude }: { rows: Ac
       {rows.map((a) => {
         const isErr = a.level === "error";
         const isWarn = a.level === "warn";
+        // A resolved error stops showing red (owner 2026-07-24) — it renders neutral/muted with a
+        // "Resolved" tag, and offers "Reopen" instead of "Mark resolved". `seen_at` is a separate
+        // state (drives the notification bell), never the log colour.
+        const isResolved = isErr && !!a.resolved_at;
+        const showRed = isErr && !isResolved;
         // A row is expandable when it carries detail longer than fits on one line, or is a
         // tap-batch / error worth reading in full.
         // Errors keep their raw text (stack/where matters); everything else (esp. tap batches)
@@ -242,14 +263,17 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude }: { rows: Ac
             style={{
               gridTemplateColumns: cols,
               cursor: expandable ? "pointer" : "default",
-              // Tint the whole row by severity so errors jump out.
-              background: isErr ? "color-mix(in srgb, var(--adm-danger) 12%, transparent)" : isWarn ? "color-mix(in srgb, var(--adm-warn) 8%, transparent)" : undefined,
-              borderLeft: isErr ? "3px solid var(--adm-danger)" : isWarn ? "3px solid var(--adm-warn)" : "3px solid transparent",
+              // Tint the whole row by severity so unresolved errors jump out; a resolved error
+              // (showRed=false) drops back to neutral so it no longer reads as a live problem.
+              background: showRed ? "color-mix(in srgb, var(--adm-danger) 12%, transparent)" : isWarn ? "color-mix(in srgb, var(--adm-warn) 8%, transparent)" : undefined,
+              borderLeft: showRed ? "3px solid var(--adm-danger)" : isWarn ? "3px solid var(--adm-warn)" : "3px solid transparent",
+              opacity: isResolved ? 0.62 : 1,
             }}
           >
             <div><span className="adm-chip" style={{ background: "color-mix(in srgb, " + (PANEL_COLOR[a.panel] || "#888") + " 22%, transparent)", color: PANEL_COLOR[a.panel] || "var(--muted)" }}>{a.panel}</span></div>
             <div style={{ minWidth: 0 }}>
-              <span style={{ color: isErr ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined }}>{ACT_LABEL[a.action] || a.action}</span>
+              <span style={{ color: showRed ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined, textDecoration: isResolved ? "line-through" : undefined }}>{ACT_LABEL[a.action] || a.action}</span>
+              {isResolved && <span className="adm-chip" style={{ marginLeft: 6, background: "color-mix(in srgb, var(--adm-ok, #16a34a) 20%, transparent)", color: "var(--adm-ok, #16a34a)", fontWeight: 700 }}><i className="fas fa-check" aria-hidden="true" style={{ marginRight: 4 }} />Resolved</span>}
               {a.actor ? <span className="adm-muted"> · {a.actor}</span> : a.table_number ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
               {det ? (
                 isOpen
@@ -258,13 +282,32 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude }: { rows: Ac
               ) : null}
               {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
               {isErr && (
-                <button
-                  className="adm-btn"
-                  onClick={(e) => { e.stopPropagation(); onSendToClaude(a); }}
-                  style={{ marginTop: 6, fontSize: 11.5, padding: "3px 9px" }}
-                >
-                  <i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 5 }} />Send to Claude
-                </button>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                  <button
+                    className="adm-btn"
+                    onClick={(e) => { e.stopPropagation(); onSendToClaude(a); }}
+                    style={{ fontSize: 11.5, padding: "3px 9px" }}
+                  >
+                    <i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 5 }} />Send to Claude
+                  </button>
+                  {isResolved ? (
+                    <button
+                      className="adm-btn"
+                      onClick={(e) => { e.stopPropagation(); onResolve(a, false); }}
+                      style={{ fontSize: 11.5, padding: "3px 9px" }}
+                    >
+                      <i className="fas fa-rotate-left" aria-hidden="true" style={{ marginRight: 5 }} />Reopen
+                    </button>
+                  ) : (
+                    <button
+                      className="adm-btn"
+                      onClick={(e) => { e.stopPropagation(); onResolve(a, true); }}
+                      style={{ fontSize: 11.5, padding: "3px 9px" }}
+                    >
+                      <i className="fas fa-check" aria-hidden="true" style={{ marginRight: 5 }} />Mark resolved
+                    </button>
+                  )}
+                </div>
               )}
             </div>
             <div className="adm-when">{timeAgo(a.created_at)}</div>
