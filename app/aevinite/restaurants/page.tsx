@@ -372,8 +372,7 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
 // resolver stops serving the guest menu; the admin still reaches every panel via
 // act-as. Suspending is confirmed first — flipping the LIVE client off by accident
 // would be an outage.
-function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChanged: () => void }) {
-  const [busy, setBusy] = useState(false);
+function StatusCard({ restaurant }: { restaurant: Restaurant }) {
   const [err, setErr] = useState<string | null>(null);
   // Per-restaurant "we'll be right back" maintenance (settings.service_mode). Moved here from
   // the platform Settings page so it works for EVERY restaurant, not just the flagship #1
@@ -393,18 +392,6 @@ function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChang
       .catch(() => { if (!dead) setMaintErr(true); });
     return () => { dead = true; };
   }, [restaurant.id, maintReload]);
-  const setActive = async (active: boolean) => {
-    if (!active && !window.confirm(`Suspend ${restaurant.name}?\n\nIts guest menu goes OFFLINE immediately (staff panels stay reachable to you via act-as). You can reactivate any time.`)) return;
-    setBusy(true); setErr(null);
-    try {
-      const r = await fetch("/api/admin/restaurants", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set_restaurant_active", restaurant_id: restaurant.id, active }),
-      });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't change the status.");
-      onChanged();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
-  };
   const toggleMaint = async () => {
     if (maint === null) return;
     const on = !maint;
@@ -440,9 +427,7 @@ function StatusCard({ restaurant, onChanged }: { restaurant: Restaurant; onChang
                   : "Checking the menu's status…"}
         </span>
         {err && <span style={{ color: "var(--adm-danger)", fontSize: 12.5 }}>{err}</span>}
-        {restaurant.active
-          ? <button className="adm-btn danger" disabled={busy} onClick={() => setActive(false)}><i className="fas fa-power-off" style={{ marginRight: 7 }} aria-hidden="true" />Suspend…</button>
-          : <button className="adm-btn primary" disabled={busy} onClick={() => setActive(true)}><i className="fas fa-play" style={{ marginRight: 7 }} aria-hidden="true" />Reactivate</button>}
+        {!restaurant.active && <span className="adm-muted" style={{ fontSize: 12 }}>Reactivate in the danger zone below.</span>}
       </div>
       {restaurant.active && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
@@ -547,6 +532,21 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
   const open = (tickets || []).filter((t) => t.status === "open");
   const resolved = (tickets || []).filter((t) => t.status === "resolved");
   const shown = showResolved ? [...open, ...resolved] : open;
+
+  // COMPACT when there's nothing to act on: no big empty "no tickets 🎉" box — just a slim
+  // all-clear line (owner 2026-07-24: "why is the empty box there"). The full card only
+  // appears when there ARE open tickets, or when the admin expands the resolved history.
+  if (tickets !== null && !err && open.length === 0 && !showResolved) {
+    return (
+      <div className="adm-card" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 10, padding: "12px 16px" }}>
+        <i className="fas fa-circle-check" style={{ color: "var(--adm-ok, #16a34a)" }} aria-hidden="true" />
+        <span style={{ fontSize: 13.5, fontWeight: 600 }}>No open issues</span>
+        {resolved.length > 0
+          ? <button className="adm-btn" style={{ marginLeft: "auto", padding: "5px 10px", fontSize: 12 }} onClick={() => setShowResolved(true)}>Show resolved ({resolved.length})</button>
+          : <span className="adm-muted" style={{ marginLeft: "auto", fontSize: 12 }}>staff reported nothing</span>}
+      </div>
+    );
+  }
 
   return (
     <div className="adm-card" style={{ marginBottom: 14 }}>
@@ -786,7 +786,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
           {/* Access & permissions is its OWN screen (owner 2026-07-23) reached by a button
               from here, not shown inline. Carries ?rid so access2 preselects this restaurant;
               &from=rest lets its breadcrumb come back to this detail view. */}
-          <a className="adm-btn primary" href={`/aevinite/access?rid=${restaurant.id}&from=rest`}
+          <a className="adm-btn" href={`/aevinite/access?rid=${restaurant.id}&from=rest`}
             title={`Manage who can do what at ${restaurant.name}`}>
             <i className="fas fa-user-shield" style={{ marginRight: 7 }} aria-hidden="true" />Access &amp; permissions
           </a>
@@ -798,7 +798,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
       <RestaurantTickets restaurantId={restaurant.id} />
 
-      <div id="det-status"><StatusCard restaurant={restaurant} onChanged={onChanged} /></div>
+      <div id="det-status"><StatusCard restaurant={restaurant} /></div>
 
       <div id="det-review"><GoogleReviewCard restaurant={restaurant} /></div>
 
@@ -808,44 +808,21 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
       <div id="det-enter"><EnterCard restaurant={restaurant} panels={panels} /></div>
 
-      <div id="det-panels" className="adm-card" style={{ marginBottom: 14 }}>
-        <h2>Panels</h2>
-        <p className="hint">Which panels <b>{restaurant.name}</b> has. Turning one OFF blocks that login and removes its Enter button above — e.g. a restaurant with no Owner panel.</p>
-        {panels === null
-          ? <div className="adm-empty">Loading panels…</div>
-          : <div className="adm-togglegrid">{PANEL_OPTS.map((p) => panelToggle(p.key, p.label))}</div>}
-      </div>
-
-      <div id="det-staff" className="adm-card" style={{ marginBottom: 14 }}>
-        <h2>Staff features</h2>
-        <p className="hint">Operational features you allow <b>{restaurant.name}</b> to use. The little picture shows what each one looks like (tap to enlarge).</p>
-        {staffFeat === null
-          ? <div className="adm-empty">Loading…</div>
-          : <div className="adm-featgrid">
-              {staffFeatCard("auto_print_kot_allowed", "Auto-print KOT (allow)",
-                "The kitchen screen prints the order ticket by itself the moment an order arrives. Allowing it only reveals the owner's own on/off in Manager → Settings → Kitchen.",
-                "/admin-help/auto-print-kot.png")}
-              {staffFeatCard("banquet_allowed", "Banquet billing (allow)",
-                "Gives the manager panel a 🎪 Banquet tab — a separate per-plate menu just for banquet bills (plates × price, no kitchen ticket). Waiter-tablet access stays a manager setting.",
-                "/admin-help/banquet.png")}
-            </div>}
-      </div>
-      {zoomImg && (
-        <div className="adm-imgzoom" onClick={() => setZoomImg(null)} role="button" title="Tap anywhere to close">
-          {/* eslint-disable-next-line @next/next/no-img-element -- local help screenshot lightbox */}
-          <img src={zoomImg} alt="Feature screenshot, enlarged" />
+      {/* Panels, guest features, auto-print/banquet allow, manager powers, tablet caps and
+          per-person overrides ALL live in the ONE Access & permissions panel now (owner
+          2026-07-24: "merge the two systems"). A single link = single source of truth, and no
+          stale duplicate toggles (the duplicates are what left scroll-spy showing after we removed it). */}
+      <div id="det-access-link" className="adm-card" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ fontWeight: 800, fontSize: 15 }}>Panels, features &amp; permissions</div>
+          <p className="hint" style={{ margin: "3px 0 0" }}>Which staff apps this restaurant has · its guest-menu features · special features (banquet, auto-print…) · manager powers · tablet capabilities · per-person overrides — all in one place.</p>
         </div>
-      )}
-
-      <div id="det-features" className="adm-card" style={{ marginBottom: 14 }}>
-        <h2>Guest features</h2>
-        <p className="hint">Each switch shows or hides a feature across <b>{restaurant.name}</b>&apos;s guest menu.</p>
-        {features === null
-          ? <div className="adm-empty">Loading switches…</div>
-          : <div className="adm-togglegrid">{FEATURES.map((f) => <Toggle key={f.key} k={f.key} label={f.label} />)}</div>}
+        <a className="adm-btn primary" href={`/aevinite/access?rid=${restaurant.id}&from=rest`}>
+          <i className="fas fa-user-shield" style={{ marginRight: 7 }} aria-hidden="true" />Open Access &amp; permissions
+        </a>
       </div>
 
-      <DangerCard restaurant={restaurant} onDeleted={onBack} />
+      <DangerCard restaurant={restaurant} onDeleted={onBack} onChanged={onChanged} />
     </>
   );
 }
@@ -856,15 +833,31 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 // starts a 90-day clock, after which it can be permanently purged from the bin. To
 // make an accidental delete near-impossible, the admin must TYPE the exact name to
 // confirm (the GitHub pattern). Restaurant #1 (default) can never be deleted.
-function DangerCard({ restaurant, onDeleted }: { restaurant: Restaurant; onDeleted: () => void }) {
+function DangerCard({ restaurant, onDeleted, onChanged }: { restaurant: Restaurant; onDeleted: () => void; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   const [confirmName, setConfirmName] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [susBusy, setSusBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const isDefault = restaurant.id === DEFAULT_RID;
   const nameMatches = confirmName.trim() === restaurant.name.trim();
+
+  // Suspend / reactivate lives here now (owner 2026-07-24: suspend belongs at the BOTTOM,
+  // not the top). Delete is gated behind a SUSPENDED restaurant — you must suspend first.
+  const setActive = async (active: boolean) => {
+    if (!active && !window.confirm(`Suspend ${restaurant.name}?\n\nIts guest menu goes OFFLINE immediately (staff panels stay reachable to you via act-as). You can reactivate any time.`)) return;
+    setSusBusy(true); setErr(null);
+    try {
+      const r = await fetch("/api/admin/restaurants", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_restaurant_active", restaurant_id: restaurant.id, active }),
+      });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't change the status.");
+      onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setSusBusy(false); }
+  };
 
   const del = async () => {
     if (!nameMatches) { setErr("Type the restaurant's exact name to confirm."); return; }
@@ -884,12 +877,34 @@ function DangerCard({ restaurant, onDeleted }: { restaurant: Restaurant; onDelet
   return (
     <div className="adm-card" style={{ marginTop: 14, borderColor: "var(--adm-danger)" }}>
       <h2 style={{ color: "var(--adm-danger)" }}>Danger zone</h2>
+
+      {/* 1) Suspend / reactivate — the reversible one, first. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", paddingBottom: 14, marginBottom: 14, borderBottom: "var(--border)" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{restaurant.active ? "Suspend this restaurant" : "Restaurant is suspended"}</div>
+          <p className="hint" style={{ margin: "3px 0 0" }}>{restaurant.active
+            ? "Takes the guest menu offline immediately. Staff panels stay reachable to you. Instantly reversible — nothing is erased."
+            : "The guest menu is offline and staff can't log in. Reactivate any time, or delete it below."}</p>
+        </div>
+        {restaurant.active
+          ? <button className="adm-btn danger" disabled={susBusy} onClick={() => setActive(false)}><i className="fas fa-power-off" style={{ marginRight: 7 }} aria-hidden="true" />{susBusy ? "Suspending…" : "Suspend…"}</button>
+          : <button className="adm-btn primary" disabled={susBusy} onClick={() => setActive(true)}><i className="fas fa-play" style={{ marginRight: 7 }} aria-hidden="true" />{susBusy ? "…" : "Reactivate"}</button>}
+      </div>
+
+      {/* 2) Delete — only after suspending (owner rule 2026-07-24). */}
       <p className="hint">
         Delete <b>{restaurant.name}</b> — it moves to the <b>recycle bin for 90 days</b>. Its guest menu goes offline and
         staff can&apos;t log in, but nothing is erased. You can <b>restore</b> it any time in those 90 days; only after that can it be
-        permanently removed. This is different from Suspend (which just hides the menu, instantly reversible).
+        permanently removed.
       </p>
-      {!open ? (
+      {restaurant.active ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button className="adm-btn danger" disabled title="Suspend the restaurant first" style={{ opacity: 0.5, cursor: "not-allowed" }}>
+            <i className="fas fa-trash-can" style={{ marginRight: 7 }} aria-hidden="true" />Delete restaurant…
+          </button>
+          <span className="adm-muted" style={{ fontSize: 12.5 }}>Suspend the restaurant first — then you can delete it.</span>
+        </div>
+      ) : !open ? (
         <button className="adm-btn danger" onClick={() => { setOpen(true); setErr(null); }}>
           <i className="fas fa-trash-can" style={{ marginRight: 7 }} aria-hidden="true" />Delete restaurant…
         </button>
@@ -1180,22 +1195,26 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
     } finally { setBusy(false); }
   };
 
+  const grpLabel: React.CSSProperties = { fontSize: 10.5, fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", margin: "0 0 8px" };
   return (
     <div className="adm-card" style={{ marginBottom: 14 }}>
-      <h2>View &amp; manage this restaurant</h2>
-      <p className="hint">See <b>{restaurant.name}</b> exactly as its guests and staff do, and manage its people. Each opens in a new tab.</p>
+      <h2>Open &amp; manage this restaurant</h2>
+      <p className="hint">Open <b>{restaurant.name}</b> exactly as its guests and staff see it, or manage its people. Each opens in a new tab.</p>
+
+      {/* Group 1 — open the restaurant's own screens (act-as). */}
+      <div style={grpLabel}>Open as this restaurant</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         {restaurant.active ? (
           <a className="adm-btn primary" href={`/r/${restaurant.slug}/menu`} target="_blank" rel="noopener" title={`Open ${restaurant.name}'s guest menu`}>
-            <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />View guest menu
+            <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />Guest menu
           </a>
         ) : (
-          <button className="adm-btn" disabled title="The guest menu is offline while this restaurant is suspended — reactivate it below to view.">
+          <button className="adm-btn" disabled title="The guest menu is offline while this restaurant is suspended — reactivate it in the danger zone below.">
             <i className="fas fa-utensils" style={{ marginRight: 7 }} aria-hidden="true" />Guest menu offline
           </button>
         )}
         {panelOn("owner") && (
-          <button className="adm-btn primary" disabled={busy} onClick={() => openPanel("/owner")} title={`Open ${restaurant.name}'s owner dashboard`}>
+          <button className="adm-btn" disabled={busy} onClick={() => openPanel("/owner")} title={`Open ${restaurant.name}'s owner dashboard`}>
             <i className="fas fa-crown" style={{ marginRight: 7 }} aria-hidden="true" />Owner dashboard
           </button>
         )}
@@ -1205,16 +1224,28 @@ function EnterCard({ restaurant, panels }: { restaurant: Restaurant; panels: Rec
           </button>
         ))}
       </div>
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 12, paddingTop: 12, borderTop: "var(--border)" }}>
+
+      {/* Group 2 — its people. */}
+      <div style={{ marginTop: 14, paddingTop: 14, borderTop: "var(--border)" }}>
+        <div style={grpLabel}>Its people</div>
         <a className="adm-btn" href="/aevinite/users" title="Create or manage staff, managers & owners">
           <i className="fas fa-user-plus" style={{ marginRight: 7 }} aria-hidden="true" />Manage staff &amp; create users
         </a>
-        <button className="adm-btn" disabled={busy} onClick={stop}>
-          <i className="fas fa-arrow-rotate-left" style={{ marginRight: 7 }} aria-hidden="true" />Stop viewing as this restaurant
-        </button>
-        {viewing && <span style={{ fontSize: 12, fontWeight: 700, color: "var(--adm-ok)" }}>Now viewing panels as {restaurant.name}.</span>}
-        {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
       </div>
+
+      {/* The "stop" control only appears once you're actually viewing panels as this
+          restaurant — otherwise it's a confusing button that seems to do nothing. */}
+      {viewing && (
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 14, paddingTop: 14, borderTop: "var(--border)" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--adm-ok)" }}>
+            <i className="fas fa-eye" style={{ marginRight: 6 }} aria-hidden="true" />You&apos;re viewing panels as {restaurant.name}.
+          </span>
+          <button className="adm-btn" disabled={busy} onClick={stop} title="Return to your normal admin view (already-open panel tabs stay pinned)">
+            <i className="fas fa-arrow-rotate-left" style={{ marginRight: 7 }} aria-hidden="true" />Stop viewing as this restaurant
+          </button>
+        </div>
+      )}
+      {msg && <div className="adm-muted" style={{ fontSize: 12, marginTop: 10 }}>{msg}</div>}
     </div>
   );
 }
