@@ -27,6 +27,13 @@ one-line "nothing to repair" report and STOP.
    and how you verified. End the PR body with the Claude Code footer.
 6. Stamp the request: set its row `status='fixed'`, `pr_url=<the PR url>`, `resolved_at=now()`
    (via the Management API SQL pattern in scripts/apply-migration.mjs — it's a plain UPDATE).
+   RULE (owner 2026-07-24): "whatever you fix, mark it resolved too." When you stamp a request
+   `fixed`/`dismissed`, the error it came from is cleared from admin → Repair "Problems right now"
+   AUTOMATICALLY — a DB trigger (mig 183) resolves the linked error row + its repeat-group off
+   `fix_requests.action_id`. So you don't hand-resolve the error separately. TWO things to keep true:
+   (a) don't NULL out `action_id` on an error_row request, or the trigger can't find the error;
+   (b) if you fix something that was filed WITHOUT an action_id (owner-described), and it maps to a
+   visible error, also resolve that error yourself (POST /api/admin/resolve-error) so it clears.
 
 ## MERGE POLICY (owner-confirmed 2026-07-21)
 - A fix may AUTO-MERGE overnight (`gh pr merge --squash`) ONLY if ALL are true: it changed NO

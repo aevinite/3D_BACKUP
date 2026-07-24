@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   const status = new URL(req.url).searchParams.get("status") || "open";
   if (!["open", "fixed", "dismissed"].includes(status)) return err("invalid status");
   const r = await sb.from("fix_requests")
-    .select("id, restaurant_id, created_at, status, source, mode, summary, note, pr_url, resolved_at")
+    .select("id, restaurant_id, created_at, status, source, mode, summary, note, pr_url, resolved_at, action_id, err_key")
     .eq("status", status).order("created_at", { ascending: false }).limit(50);
   if (r.error) return err(r.error.message, 500);
   return NextResponse.json({ requests: r.data ?? [] });
@@ -46,6 +46,10 @@ async function postHandler(req: NextRequest) {
   let summary = note;
   let source = "owner_described";
   let context: Record<string, unknown> | null = note ? { note } : null;
+  // The group key the Repair UI builds per error tile, stored so the panel can match a tile to
+  // its queued/fixed request across a refresh (kills the "keeps re-offering Fix now" bug). Same
+  // formula as groupErrors() in app/aevinite/repair/page.tsx — keep the two in lock-step.
+  let errKey: string | null = null;
 
   if (actionId) {
     // Find the error row, then grab the window of rows around it for the same restaurant.
@@ -67,12 +71,16 @@ async function postHandler(req: NextRequest) {
       error: { panel: row.panel, action: row.action, detail: redactMoney(row.detail), at: row.created_at },
       leading_up: around.map((a) => ({ panel: a.panel, action: a.action, detail: redactMoney(a.detail), level: a.level, at: a.created_at })).reverse(),
     };
+    // If the owner ALSO typed a hint ("Fix now with a note"), surface it up top so the agent reads
+    // it — the note column alone isn't in the bundled input file. redactMoney to match the rest.
+    if (note) (context as Record<string, unknown>).owner_note = redactMoney(note);
+    errKey = `${row.panel}|${row.restaurant_id || ""}|${row.action}|${(redactMoney(row.detail) as string || "").slice(0, 90)}`;
   }
 
   if (!summary) return err("Add a short description of the problem.");
   if (rid && !UUID.test(rid)) rid = null;
 
-  const ins = await sb.from("fix_requests").insert({ restaurant_id: rid, source, mode, summary: summary.slice(0, 300), note: note || null, context }).select("id").maybeSingle();
+  const ins = await sb.from("fix_requests").insert({ restaurant_id: rid, source, mode, summary: summary.slice(0, 300), note: note || null, context, action_id: actionId, err_key: errKey }).select("id").maybeSingle();
   if (ins.error) return err(ins.error.message, 500);
   await logAction("admin", "fix_request", { restaurant_id: rid ?? undefined, level: "info", detail: summary.slice(0, 120) });
 
