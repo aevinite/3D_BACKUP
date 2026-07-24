@@ -231,7 +231,10 @@ export async function PATCH(req: NextRequest) {
   // (inherits the restaurant-wide tri-state). Keys/values are strictly validated so a
   // buggy client can never write junk into the JSONB.
   if (action === "set_permissions") {
-    const PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet"];
+    // Canonical per-user override keys = the tablet_* caps that tabletPerm actually enforces
+    // (mig 115 + the KOT/khata/take-orders additions). Keep in lockstep with TABLET_PERM_KEYS
+    // in app/api/tablet/[...path]/route.ts — a key the enforcer doesn't read would be a dead grant.
+    const PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders"];
     const PERM_MODES = ["on", "pin", "off"];
     const patch = body?.permissions;
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing permissions object.");
