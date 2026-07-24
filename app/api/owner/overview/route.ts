@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
-import { getOwnerEntitlementsUnion, mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
+import { getOwnerEntitlementsUnion, mergeOwnerEntitlements, entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic"; // always fresh — these are live numbers
 
@@ -32,6 +32,7 @@ type Row = {
 type OutRow = {
   id: string; slug: string; name: string; active: boolean; accentColor: string;
   ordersToday: number; revenueToday: number; ordersAll: number; revenueAll: number; openTables: number;
+  reportsOff?: boolean;
 };
 
 export async function GET(req: NextRequest) {
@@ -49,18 +50,27 @@ export async function GET(req: NextRequest) {
   // Numerics arrive as strings over the wire — coerce once here so the client
   // gets clean numbers and the totals add up.
   const allow = scope.all ? null : new Set(scope.ids);
-  const restaurants: OutRow[] = (data ?? []).filter((r: Row) => !allow || allow.has(r.restaurant_id)).map((r: Row) => ({
-    id: r.restaurant_id,
-    slug: r.slug,
-    name: r.name,
-    active: r.active,
-    accentColor: r.accent_color || "#e3c06f",
-    ordersToday: Number(r.orders_today) || 0,
-    revenueToday: Math.round((Number(r.revenue_today) || 0) * 100) / 100,
-    ordersAll: Number(r.orders_all) || 0,
-    revenueAll: Math.round((Number(r.revenue_all) || 0) * 100) / 100,
-    openTables: Number(r.open_tables) || 0,
-  }));
+  // Per-restaurant privacy (Stage 7): a REAL owner only sees REVENUE for restaurants whose
+  // "reports" section the admin still grants. Ungranted restaurants stay in the list (so the
+  // owner knows they exist) but their revenue is ZEROED + flagged reportsOff, so the client
+  // greys them and no number leaks. Admin (scope.all / scope.admin) sees everything.
+  const repAllow = scope.all || scope.admin ? null : new Set(await entitledSubset(scope.ids, "reports"));
+  const restaurants: OutRow[] = (data ?? []).filter((r: Row) => !allow || allow.has(r.restaurant_id)).map((r: Row) => {
+    const repOff = !!repAllow && !repAllow.has(r.restaurant_id);
+    return {
+      id: r.restaurant_id,
+      slug: r.slug,
+      name: r.name,
+      active: r.active,
+      accentColor: r.accent_color || "#e3c06f",
+      ordersToday: repOff ? 0 : Number(r.orders_today) || 0,
+      revenueToday: repOff ? 0 : Math.round((Number(r.revenue_today) || 0) * 100) / 100,
+      ordersAll: repOff ? 0 : Number(r.orders_all) || 0,
+      revenueAll: repOff ? 0 : Math.round((Number(r.revenue_all) || 0) * 100) / 100,
+      openTables: Number(r.open_tables) || 0,
+      reportsOff: repOff,
+    };
+  });
 
   const totals = restaurants.reduce(
     (acc: { revenueToday: number; ordersToday: number; openTables: number }, r: OutRow) => {
