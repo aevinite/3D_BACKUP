@@ -42,6 +42,11 @@ export default function AdminLogs() {
   // Everything-Log filters (Operations tab): severity + free-text search.
   const [level, setLevel] = useState<"" | "error" | "warn" | "info">("");
   const [q, setQ] = useState("");
+  // Only the TYPED SEARCH is debounced (so typing doesn't fire a request per keystroke).
+  // Filter buttons (restaurant / severity) must apply INSTANTLY — debouncing them made a
+  // click on "Errors" feel like it did nothing for a beat, then jump (owner 2026-07-24).
+  const [qDebounced, setQDebounced] = useState("");
+  useEffect(() => { const t = setTimeout(() => setQDebounced(q), 300); return () => clearTimeout(t); }, [q]);
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [ops, setOps] = useState<Action[] | null>(null);
   const [cust, setCust] = useState<CustData | null>(null);
@@ -80,9 +85,9 @@ export default function AdminLogs() {
   }, []);
 
   const loadOps = useCallback(async () => {
-    const qs = (rid ? `&restaurant_id=${rid}` : "") + (level ? `&level=${level}` : "") + (q.trim() ? `&q=${encodeURIComponent(q.trim())}` : "");
+    const qs = (rid ? `&restaurant_id=${rid}` : "") + (level ? `&level=${level}` : "") + (qDebounced.trim() ? `&q=${encodeURIComponent(qDebounced.trim())}` : "");
     try { const j = await (await fetch(`/api/admin/oplog?limit=200${qs}`, { cache: "no-store" })).json(); if (j.error) setOpsErr(true); else { setOps(j.actions || []); setOpsErr(false); } } catch { setOpsErr(true); }
-  }, [rid, level, q]);
+  }, [rid, level, qDebounced]);
   const loadCust = useCallback(async () => {
     const qs = rid ? `?restaurant_id=${rid}` : "";
     try { const j = await (await fetch(`/api/admin/custlog${qs}`, { cache: "no-store" })).json(); if (j.error) setCustErr(true); else { setCust(j); setCustErr(false); } } catch { setCustErr(true); }
@@ -94,12 +99,12 @@ export default function AdminLogs() {
     if (r.ok) { setCount(r.data.count); setThreshold(r.data.threshold); } else setCount(null);
   }, [rid]);
 
-  // Re-load the active tab whenever the tab, restaurant filter, level or search changes.
-  // Debounced 300ms so typing in the search box doesn't fire a request per keystroke.
+  // Re-load the active tab whenever the tab, restaurant filter, severity or (debounced)
+  // search changes. No setTimeout here — the debounce lives in qDebounced above, so a
+  // severity/restaurant click fetches immediately (instant filter, no laggy "both blue").
   useEffect(() => {
     setOps(null); setCust(null);
-    const t = setTimeout(() => { if (tab === "ops") loadOps(); else loadCust(); }, 300);
-    return () => clearTimeout(t);
+    if (tab === "ops") loadOps(); else loadCust();
   }, [tab, loadOps, loadCust]);
   useEffect(() => { loadCount(); }, [loadCount]);
 
