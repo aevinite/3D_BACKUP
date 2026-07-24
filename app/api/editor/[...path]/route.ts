@@ -249,8 +249,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // server still enforces every capability (managerCan) regardless of what the UI shows.
     if (p === "whoami") {
       const actor = g.user ? g.user.role : "admin"; // no staff user cookie = admin super-user
-      const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
-        { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
+      const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle()).data as
+        { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean>; access_config?: { edit_menu?: { manager_opts?: Record<string, boolean> } } } | null;
       // The ladder, resolved per power (mig 133): effective = admin entitles it AND the
       // owner granted it. The X-ray tints on !effective and can say WHO turned it off.
       const perms = r?.manager_permissions || {};
@@ -276,6 +276,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // when the admin switches the module off for this restaurant.
       const tOrd = await takeOrdersLadder(rid);
       if (!tOrd.effective) effectivePowers.take_orders = false;
+      // Finer edit-menu sub-limits (owner 2026-07-24): mirror menuSubAllowed's resolution so
+      // the panel can HIDE a create/delete button a restricted MANAGER isn't allowed, instead
+      // of showing-then-refusing it. Same rule as the server: admin/owner get full menu editing
+      // (all true); a manager is limited only when the owner configured manager_opts, and then
+      // only an EXPLICIT true allows it (an absent/unconfigured key stays ALLOWED = default).
+      const MENU_SUB_KEYS = ["add_dish", "edit_dish", "delete_dish", "manage_categories", "manage_filters", "edit_3d"];
+      const mo = (g.user && g.user.role === "manager") ? r?.access_config?.edit_menu?.manager_opts : null;
+      const menuRestricted = !!(mo && typeof mo === "object");
+      const menuSub: Record<string, boolean> = {};
+      for (const k of MENU_SUB_KEYS) menuSub[k] = menuRestricted ? mo![k] === true : true;
       return ok({
         actor,
         role: actor,
@@ -285,6 +295,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         managerPermissions: perms,
         effectivePowers,
         offByAdmin,
+        menuSub,
         // Delete-a-bill sub-permission (default OFF) — lets the panel show the "🗑 Delete bill"
         // button only when the owner ticked it (admin/owner always true). (owner, 2026-07-24)
         canDeleteBill: await canDeleteBill(g, rid),

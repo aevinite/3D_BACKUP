@@ -870,7 +870,7 @@ function formItems(it) {
     </div>
   </div>
 
-  <div class="card"><h3>3D · 4D</h3>
+  ${(XRAY_WHO && XRAY_WHO.actor === "admin") ? `<div class="card"><h3>3D · 4D</h3>
     <div style="margin-bottom:14px">${toggle("4D mode — cyan glow outline + 3D preview", "is4d", it.is4d)}</div>
     <div class="grid cols-2">
       ${tf("Model folder", "model_folder", it.model_folder)}
@@ -879,7 +879,7 @@ function formItems(it) {
       ${tf("GLB — optimized (full quality)", "model_optimized_url", it.model_optimized_url, { span: true, ph: "https://…/model-optimized.glb" })}
     </div>
     <span class="hint">4D only appears on the menu when both GLB URLs are filled.</span>
-  </div>
+  </div>` : ""}
 
   <div class="card"><h3>Diet & filters</h3>
     <div style="margin-bottom:16px">${toggle("Vegetarian (green leaf icon)", "veg", it.veg)}</div>
@@ -8959,6 +8959,18 @@ function applyHierarchyView() {
       xraySetTint(el, true, `${entry.label}: off for staff (by the ${xrayOffBy(entry.flag)}) — you can still use it`);
       if (!counted) { zones.push({ ...entry, el }); counted = true; } // one zone per control type
     });
+  }
+  // Finer edit-menu sub-limits (owner 2026-07-24): the owner can restrict a MANAGER to only
+  // some menu actions. The server (menuSubAllowed) already refuses a disallowed create/delete;
+  // hide the matching button so it's never shown-then-refused. DEFAULT-ALLOW: whoami.menuSub is
+  // resolved per current user (admin/owner = all true; manager = only when the owner configured
+  // limits), and a flag that isn't EXPLICITLY false leaves the button visible — an unconfigured
+  // restaurant keeps every button, exactly as today. Re-applied each repaint (delBtn is rebuilt
+  // per record render), so a redraw can't resurrect a hidden button.
+  const msub = XRAY_WHO.menuSub || {};
+  for (const [sel, flag] of [["#newBtn", "add_dish"], ["#bulkBtn", "delete_dish"], ["#delBtn", "delete_dish"]]) {
+    const el = document.querySelector(sel);
+    if (el) xraySetHidden(el, msub[flag] === false);
   }
   renderXrayRibbon(higher, zones);
 }

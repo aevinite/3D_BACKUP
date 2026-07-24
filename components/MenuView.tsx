@@ -550,6 +550,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     catNameOf(i.category).includes(q) ||
     fold(i.searchAlias || "").includes(q);
 
+  // A stale saved "favourites on" / "veg on" must never keep filtering the grid
+  // once the restaurant switches that feature OFF. Derive effective values that
+  // fall back to "no filter" when the matching switch is off.
+  const favActive = favOnly && features.favorites !== false;
+  const dietActive = features.diet_filter === false ? "" : currentDiet;
+
   // Decide which dishes to show. The menu is always the full grouped view; the
   // filter chips (which STACK) narrow it. .filter keeps only the dishes where
   // this function returns true.
@@ -559,10 +565,10 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // Chef's Special filter: only dishes carrying the "chef-special" tag.
     if (chefOnly && !item.tags.includes("chef-special")) return false;
     // Favorites filter: only the dishes this guest hearted.
-    if (favOnly && !favorites.includes(item.id)) return false;
+    if (favActive && !favorites.includes(item.id)) return false;
     // Diet filter: hide non-veg when "veg" is on, and vice versa.
-    if (currentDiet === "veg" && !item.veg) return false;
-    if (currentDiet === "non-veg" && item.veg) return false;
+    if (dietActive === "veg" && !item.veg) return false;
+    if (dietActive === "non-veg" && item.veg) return false;
     return true;  // passed every check — show this dish
   });
 
@@ -576,9 +582,9 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         .filter((i) =>
           matchesSearch(i) &&
           !(chefOnly && !i.tags.includes("chef-special")) &&
-          !(favOnly && !favorites.includes(i.id)) &&
-          !(currentDiet === "veg" && !i.veg) &&
-          !(currentDiet === "non-veg" && i.veg)
+          !(favActive && !favorites.includes(i.id)) &&
+          !(dietActive === "veg" && !i.veg) &&
+          !(dietActive === "non-veg" && i.veg)
         )
         .sort((a, b) => {
           const aStarts = fold(a.title).startsWith(q) ? 0 : 1;
@@ -693,8 +699,8 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                   // (the scroll-spy), so the bar follows them Petpooja-style.
                   // The bar highlights the category you've SCROLLED into (the
                   // scroll-spy) — there's no "selected" category anymore.
-                  aria-selected={features.scrollspy && spyCat === cat.slug}
-                  className={`cat-card ${features.scrollspy && spyCat === cat.slug ? "active" : ""}`}
+                  aria-selected={spyCat === cat.slug}
+                  className={`cat-card ${spyCat === cat.slug ? "active" : ""}`}
                   style={{ ["--cat-color" as string]: cat.color }}
                   // Tapping a category just smooth-scrolls to its section — always
                   // the full grouped menu, never narrowing to one category.

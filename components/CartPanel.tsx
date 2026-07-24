@@ -741,7 +741,7 @@ export default function CartPanel() {
                     )}
                     {/* The guest's free-text note, in quotes. */}
                     {item.note && <div className="cart-item-opts">“{item.note}”</div>}
-                    {itemAllergens(item.id).length > 0 && (
+                    {features.allergies && itemAllergens(item.id).length > 0 && (
                       <div className="cart-item-allergens">
                         {itemAllergens(item.id).map((a) => (
                           <span
@@ -755,7 +755,7 @@ export default function CartPanel() {
                       </div>
                     )}
                     {/* A clear warning if this dish conflicts with an avoided allergen. */}
-                    {c.length > 0 && (
+                    {features.allergies && c.length > 0 && (
                       <div className="cart-item-warn">
                         <i className="fas fa-triangle-exclamation"></i> contains {c.map(allergenLabel).join(", ").toLowerCase()}
                       </div>

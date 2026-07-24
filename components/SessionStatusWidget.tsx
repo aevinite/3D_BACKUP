@@ -1,5 +1,6 @@
 "use client";
 import { useRestaurantId, useRestaurantMeta } from "@/lib/restaurant-context";
+import { useFeatures } from "@/lib/features";
 import { DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
 
 // SessionStatusWidget — a small, DRAGGABLE, collapsible status card that tells a
@@ -64,6 +65,7 @@ const toast = (message: string, kicker = "table", variant = "success") =>
 // a guest they're connected to a table and lets them leave or switch tables.
 export default function SessionStatusWidget() {
   const restaurantId = useRestaurantId();
+  const features = useFeatures(restaurantId); // hide the call-waiter button when waiter_calls is off
   // The current restaurant's slug, so "Change table" returns the guest to THIS
   // restaurant's menu (/r/<slug>/menu) instead of the bare /menu that always
   // meant restaurant #1 — the cross-tenant bounce the audit found (2026-07-06).
@@ -453,9 +455,11 @@ export default function SessionStatusWidget() {
             You can&apos;t leave this table while an order is in progress. To move to another table, ask a waiter to transfer you.
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <button type="button" className="btn btn-gold" onClick={() => { setBlocked(false); window.dispatchEvent(new CustomEvent("lfh:chef-call")); }}>
-              <i className="fas fa-bell" aria-hidden="true"></i> Call a waiter
-            </button>
+            {features.waiter_calls && (
+              <button type="button" className="btn btn-gold" onClick={() => { setBlocked(false); window.dispatchEvent(new CustomEvent("lfh:chef-call")); }}>
+                <i className="fas fa-bell" aria-hidden="true"></i> Call a waiter
+              </button>
+            )}
             <button type="button" className="ssw-btn" onClick={() => setBlocked(false)}>Stay at table</button>
           </div>
         </div>

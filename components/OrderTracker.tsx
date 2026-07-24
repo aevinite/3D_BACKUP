@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
 import { getOrderStatus, updateOrderTableNumber, getSettings, type OrderStatus } from "@/lib/menu";
 import { useRestaurantId } from "@/lib/restaurant-context";
+import { useFeatures } from "@/lib/features";
 import { getStoredSession, getSessionState } from "@/lib/session";
 import { tremove } from "@/lib/tenantStorage";
 import { toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
@@ -33,6 +34,7 @@ const broadcast = () => window.dispatchEvent(new Event("lfh:orders-updated"));
 // onto an X to hide it (the order stays alive in the cart's history).
 export default function OrderTracker() {
   const restaurantId = useRestaurantId();
+  const features = useFeatures(restaurantId); // hide the call-waiter button when waiter_calls is off
   // useState boxes (re-draw the strip when changed):
   const [orders, setOrders] = useState<ActiveOrder[]>([]); // all orders this device is following
   const [detailOpen, setDetailOpen] = useState(false); // is the details sheet open?
@@ -536,14 +538,16 @@ export default function OrderTracker() {
                 and offer a quick way to get a waiter — so the guest isn't stranded. */}
             {order.status === "cancelled" && (
               <div className="ot-cancelled-note">
-                <p>This table was closed, so your order was cancelled. Need a hand?</p>
-                <button
-                  type="button"
-                  className="btn btn-gold ot-call-waiter"
-                  onClick={() => { setDetailOpen(false); window.dispatchEvent(new CustomEvent("lfh:chef-call")); }}
-                >
-                  <i className="fas fa-bell"></i> Call a waiter
-                </button>
+                <p>This table was closed, so your order was cancelled.{features.waiter_calls ? " Need a hand?" : " Please ask a staff member for help."}</p>
+                {features.waiter_calls && (
+                  <button
+                    type="button"
+                    className="btn btn-gold ot-call-waiter"
+                    onClick={() => { setDetailOpen(false); window.dispatchEvent(new CustomEvent("lfh:chef-call")); }}
+                  >
+                    <i className="fas fa-bell"></i> Call a waiter
+                  </button>
+                )}
               </div>
             )}
 
