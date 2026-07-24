@@ -1989,6 +1989,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (a === "items") { const act = isCreate ? "add_dish" : "edit_dish"; if (!(await menuSubAllowed(g, rid, act))) return permDenied(isCreate ? "add a new dish" : "edit dishes"); }
       else if (a === "categories") { if (!(await menuSubAllowed(g, rid, "manage_categories"))) return permDenied("manage categories"); }
       else if (a === "filters") { if (!(await menuSubAllowed(g, rid, "manage_filters"))) return permDenied("manage filters"); }
+      // edit_3d is ADMIN-ONLY ("that 3D thing is mine" — owner 2026-07-24). A non-admin (owner OR
+      // manager) editing a dish may NOT change its 3D model — strip those fields so only the
+      // platform admin sets them. Non-breaking: a normal dish edit never carries these.
+      if (a === "items" && g.user) for (const k of ["model_folder", "model_small_url", "model_optimized_url"]) { if (body && typeof body === "object" && k in (body as Record<string, unknown>)) delete (body as Record<string, unknown>)[k]; }
       // A new category/filter must not clobber an existing one with the same slug (the upsert
       // keys on (restaurant_id,slug), so a dup-slug create would DO UPDATE over it — silent
       // data loss, 2026-07-06). Tell the user instead.
