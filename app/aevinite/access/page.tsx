@@ -197,6 +197,21 @@ export default function Access2Page() {
       .catch(() => { setSaving("err"); load(rid); });
   }, [rid, load]);
 
+  // Closing a fixed overlay by TAPPING its close button focuses that button; when the
+  // button then unmounts, the browser restores focus to <body> and NATIVELY scrolls the
+  // admin content container back to the top (verified on touch: 500 → 0, with no JS
+  // scroll call to intercept). So we snapshot the scroll position of whichever container
+  // is actually scrolled (.adm.adx on mobile, .adm-main on desktop) and put it back on
+  // the next frame — before paint, so it's imperceptible. Cheap, no egress.
+  const closeStay = (fn: () => void) => {
+    const els = ([document.querySelector<HTMLElement>(".adm.adx"), document.querySelector<HTMLElement>(".adm-main")].filter(Boolean) as HTMLElement[]);
+    const snap = els.map((e) => e.scrollTop);
+    const wy = window.scrollY;
+    fn();
+    const restore = () => { els.forEach((e, i) => { if (e.scrollTop !== snap[i]) e.scrollTop = snap[i]; }); if (window.scrollY !== wy) window.scrollTo(0, wy); };
+    requestAnimationFrame(() => { restore(); requestAnimationFrame(restore); });
+  };
+
   if (!st) return <div style={{ padding: 40, color: "var(--muted)" }}>Loading access…</div>;
 
   const rest = rests.find((r) => r.id === rid);
@@ -311,7 +326,7 @@ export default function Access2Page() {
 
       {info && <InfoPop />}
       {lightbox && (
-        <div className="acc2-lightbox" onClick={() => setLightbox(null)}>
+        <div className="acc2-lightbox" onClick={() => closeStay(() => setLightbox(null))}>
           {/* eslint-disable-next-line @next/next/no-img-element -- local help screenshot lightbox */}
           <img src={lightbox} alt="Where this appears in the app, enlarged" />
         </div>
@@ -616,9 +631,9 @@ export default function Access2Page() {
     const shot = SHOT_BY_GROUP[info.perm.group];
     const src = shot ? `/admin-help/${shot}.png` : null;
     return (
-      <div className="acc2-infowrap" onClick={() => setInfo(null)}>
+      <div className="acc2-infowrap" onClick={() => closeStay(() => setInfo(null))}>
         <div className="acc2-info" onClick={(e) => e.stopPropagation()}>
-          <button className="cl" onClick={() => setInfo(null)}><Icon n="x" s={16} /></button>
+          <button type="button" className="cl" onClick={() => closeStay(() => setInfo(null))}><Icon n="x" s={16} /></button>
           <h4>{sub ? sub.name : info.perm.name}{(sub?.adminOnly || info.perm.adminOnly) && <span className="tag">ADMIN ONLY</span>}</h4>
           <p>{sub ? sub.what : info.perm.what}</p>
           {src && <>
@@ -742,7 +757,8 @@ function Style() {
   .acc2-who { display:inline-flex; align-items:center; gap:8px; margin-top:14px; min-height:40px; padding:0 14px; border-radius:10px; border:1px dashed var(--muted); background:none; color:var(--muted); font-weight:700; font-size:12.5px; cursor:pointer; }
   .acc2-who:hover { border-style:solid; border-color:var(--accent); color:var(--accent); }
   .acc2-who b { color:var(--accent); font-family:ui-monospace,monospace; }
-  .acc2-ib { width:20px; height:20px; border-radius:99px; border:var(--border); background:none; color:var(--muted); display:inline-grid; place-items:center; cursor:pointer; }
+  .acc2-ib { width:20px; height:20px; padding:0; appearance:none; -webkit-appearance:none; border-radius:99px; border:var(--border); background:none; color:var(--muted); display:inline-grid; place-items:center; cursor:pointer; flex:none; line-height:0; }
+  .acc2-ib svg { display:block; }
   .acc2-pp { display:grid; grid-template-columns:270px 1fr; gap:20px; align-items:start; }
   .acc2-plist { padding:8px; position:sticky; top:12px; }
   .prole { padding:10px 12px 4px; font-size:10px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
