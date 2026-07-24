@@ -6374,7 +6374,12 @@ function openTakeOrder(table, rerender) {
 
   const dishTile = (d) => {
     const n = qtyIn(d.id);
-    const img = d.image ? `<span class="to-dish-img" style="background-image:url('${esc(d.image)}')"></span>` : `<span class="to-dish-img">🍽</span>`;
+    // No photo (or a dead image URL) → show a default image, not a blank box (owner 2026-07-24).
+    // An <img> (not a CSS background) so onerror can also swap a broken URL to the default; the
+    // Aevidine mark is a neutral placeholder shown contained + dimmed so it reads as "no photo".
+    const DEFAULT_DISH_IMG = "/brand/aevidine-mark.svg";
+    const hasImg = !!d.image;
+    const img = `<span class="to-dish-img"><img src="${esc(hasImg ? d.image : DEFAULT_DISH_IMG)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${DEFAULT_DISH_IMG}';this.style.objectFit='contain';this.style.opacity='.5';this.style.padding='16%';this.style.boxSizing='border-box'" style="width:100%;height:100%;display:block;box-sizing:border-box;object-fit:${hasImg ? "cover" : "contain"};${hasImg ? "" : "opacity:.5;padding:16%;"}" /></span>`;
     // Big image + name/price; the WHOLE tile taps to add (plain). The only button is a
     // large ✎ on the right to set this dish's allergens/note — no +/− (add by tapping,
     // reduce from the order list on the right). ×N shows the running count for this dish.
