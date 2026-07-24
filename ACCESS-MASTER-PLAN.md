@@ -157,6 +157,7 @@ STAGE 9 — Info screenshots + bulletproof + ship
 - Stage 5-6 home: extend app/owner/staff/page.tsx (+ /api/owner/staff). Reuse lib/accessModel for the model.
 
 ## 6. STATUS LOG:
+- Stage 7 IN PROGRESS: entitledSubset per-restaurant gating already covers reports/customers/issues/ratings. ADDED it to analytics (revenue = the 'bill' section the owner flagged). REMAINING: overview dashboard revenue tiles + settings still ungated (zero-out/grey ungranted restaurants) — next.
 - GAP-A DONE+VERIFIED live (override stores under tablet_mark_paid, reverts clean).
 - GAP-B DONE (build): owner set_permissions now ceiling+role-gated (owner grants on/pin only if target is a waiter AND the cap's module is effective; admin unrestricted). Owner-side live test with Stage 5.
 - Stage 5 (GAP-C) BUILT: owner Staff page now shows per-user Default/On/PIN/Off overrides for waiter accounts (tablet_* caps), greying caps whose admin module isn't effective; route GET returns module-effective per restaurant; writes via set_permissions. Build green.

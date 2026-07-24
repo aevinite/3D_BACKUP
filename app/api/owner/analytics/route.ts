@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
+import { entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -85,6 +86,15 @@ export async function GET(req: NextRequest) {
   // first load / range change (&records=1) and keeps its last value across auto-refreshes,
   // so the polled path no longer re-scans all-time bests each minute (audit 2026-07-07).
   const wantRecords = sp.get("records") === "1";
+  // Per-restaurant privacy (mig 133, Stage 7): revenue/analytics IS the "reports" section —
+  // a REAL owner only sees it for restaurants whose "reports" the admin still grants. Ungranted
+  // restaurants are dropped (zero data, no leak). Admin (scope.all / scope.admin) is never gated.
+  if (!scope.all && !scope.admin) {
+    const allowed = await entitledSubset(scope.ids, "reports");
+    if (rid && !allowed.includes(rid)) return NextResponse.json({ error: "Reports aren't enabled for this restaurant — contact Aevidine.", disabled: true }, { status: 403 });
+    if (!allowed.length) return NextResponse.json({ error: "Reports aren't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
+    scope.ids = allowed;
+  }
   const { from, to, bucket } = windowFor(range);
   const prevWin = compare ? prevWindowFor(range, from, to) : null;
 
