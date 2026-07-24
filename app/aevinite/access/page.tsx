@@ -58,8 +58,8 @@ const SHOT_BY_GROUP: Record<string, string> = {
 const ROLE_ORDER: Record<string, number> = { owner: 0, manager: 1, tablet: 2, kitchen: 3 };
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", manager: "Manager", tablet: "Waiter", kitchen: "Kitchen" };
 const ROLE_RELEVANCE: Record<string, string[]> = {
-  manager: ["edit_menu", "give_discounts", "void_bills", "revert_payment", "mark_paid", "print_invoice", "khata", "take_orders", "table_ops", "table_tags", "banquet", "view_dashboard", "view_ratings", "export_reports", "view_logs", "manage_staff", "edit_settings"],
-  tablet: ["give_discounts", "revert_payment", "mark_paid", "print_invoice", "khata", "take_orders", "table_ops", "table_tags", "void_bills"],
+  manager: ["edit_menu", "give_discounts", "void_bills", "mark_paid", "print_invoice", "khata", "take_orders", "table_ops", "table_tags", "banquet", "view_dashboard", "view_ratings", "view_logs", "manage_staff", "edit_settings"],
+  tablet: ["give_discounts", "mark_paid", "print_invoice", "khata", "take_orders", "table_ops", "table_tags", "void_bills"],
   kitchen: ["edit_menu", "view_logs"],
   owner: PERMISSIONS.filter((p) => p.kind === "ladder").map((p) => p.id),
 };
@@ -80,6 +80,8 @@ export default function Access2Page() {
   const [info, setInfo] = useState<{ perm: Perm; sub?: string } | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [fromRest, setFromRest] = useState(false);
+  const railRef = useRef<HTMLElement | null>(null);
+  const spyClick = useRef(0); // suppress the spy briefly after a rail click so it doesn't fight the smooth-scroll
 
   useEffect(() => {
     // Read ?rid / ?from off the URL directly (no useSearchParams → no Suspense
@@ -104,6 +106,45 @@ export default function Access2Page() {
     }).catch(() => setStaff([]));
   }, []);
   useEffect(() => { load(rid); setPersonId(""); setPersonFilter(""); }, [rid, load]);
+
+  // Scroll-spy: as the sections scroll past, highlight the matching AREA in the left rail —
+  // exactly like the guest menu's category strip. The scroll container is .adm-main.
+  useEffect(() => {
+    if (tab !== "general" || !st) return;
+    const scroller = document.querySelector(".adm-main");
+    if (!scroller) return;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (Date.now() < spyClick.current) return; // let a rail-click's smooth scroll settle first
+        const band = scroller.getBoundingClientRect().top + 96;
+        let best = GROUPS[0].id, bestTop = -Infinity;
+        for (const g of GROUPS) {
+          const el = document.getElementById("sec-" + g.id);
+          if (!el) continue;
+          const top = el.getBoundingClientRect().top;
+          if (top <= band && top > bestTop) { bestTop = top; best = g.id; }
+        }
+        setActiveArea(best);
+      });
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => { scroller.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); };
+  }, [tab, st, rid]);
+
+  // Keep the highlighted rail item in view WITHIN the rail (scrolls the rail only, never the page).
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    const btn = rail.querySelector<HTMLElement>(`[data-area="${activeArea}"]`);
+    if (!btn) return;
+    const bt = btn.offsetTop, bh = btn.offsetHeight, rt = rail.scrollTop, rh = rail.clientHeight;
+    if (bt < rt + 6) rail.scrollTo({ top: Math.max(0, bt - 10), behavior: "smooth" });
+    else if (bt + bh > rt + rh - 6) rail.scrollTo({ top: bt + bh - rh + 10, behavior: "smooth" });
+  }, [activeArea]);
 
   // apply a patch locally (mirror the server) + POST it
   const save = useCallback((patch: any) => {
@@ -247,15 +288,15 @@ export default function Access2Page() {
           </div>
         )}
         <div className="acc2-rail-wrap">
-          <nav className="acc2-rail">
+          <nav className="acc2-rail" ref={railRef}>
             <div className="rh">Areas</div>
             {GROUPS.map((g) => {
               const ps = permsOf(g.id);
               const on = ps.filter((p) => (p.kind === "switch" ? switchVal(p) : reachLevel(p, st!) > 0)).length;
               return (
-                <button key={g.id} className={activeArea === g.id ? "on" : ""} onClick={() => { setActiveArea(g.id); setOpen((s) => ({ ...s, [g.id]: true })); document.getElementById("sec-" + g.id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
+                <button key={g.id} data-area={g.id} className={activeArea === g.id ? "on" : ""} onClick={() => { spyClick.current = Date.now() + 750; setActiveArea(g.id); setOpen((s) => ({ ...s, [g.id]: true })); document.getElementById("sec-" + g.id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
                   <span className="acc2-gi"><Icon n={g.icon} s={15} /></span>
-                  <span className="nm">{g.name}</span><span className="ct">{on}/{ps.length}</span>
+                  <span className="nm">{g.name}</span><span className="ct"><b>{on}</b><i>/{ps.length}</i></span>
                 </button>
               );
             })}
@@ -550,7 +591,7 @@ function Style() {
   .acc2-warn { display:flex; gap:10px; align-items:flex-start; padding:12px 16px; margin:0 0 16px; border-radius:12px; background:color-mix(in srgb, var(--adm-danger) 12%, transparent); border:1px solid color-mix(in srgb, var(--adm-danger) 40%, transparent); color:var(--text); font-size:13.5px; }
   .acc2-warn svg { color:var(--adm-danger); margin-top:1px; }
   .acc2-rail-wrap { display:grid; grid-template-columns:250px 1fr; gap:20px; align-items:start; }
-  .acc2-rail { position:sticky; top:12px; background:var(--card); border:var(--border); border-radius:14px; padding:7px; }
+  .acc2-rail { position:sticky; top:12px; max-height:calc(100dvh - 96px); overflow-y:auto; background:var(--card); border:var(--border); border-radius:14px; padding:7px; scrollbar-width:thin; }
   .acc2-rail .rh { padding:9px 11px 6px; font-size:10.5px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
   .acc2-rail button { position:relative; display:flex; align-items:center; gap:11px; width:100%; min-height:46px; padding:8px 12px; border:none; background:transparent; border-radius:10px; cursor:pointer; color:var(--text); text-align:left; transition:background .14s; }
   .acc2-rail button:hover { background:color-mix(in srgb, var(--accent) 7%, transparent); }
@@ -566,7 +607,10 @@ function Style() {
   .acc2-gi { width:30px; height:30px; border-radius:9px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--accent) 11%, transparent); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
   .acc2-gi.lg { width:38px; height:38px; border-radius:11px; }
   .acc2-rail .nm { flex:1; font-size:13.5px; font-weight:700; }
-  .acc2-rail .ct { font-size:11px; font-weight:800; font-family:ui-monospace,monospace; color:var(--muted); background:var(--bg); padding:3px 6px; border-radius:6px; }
+  .acc2-rail .ct { display:inline-flex; align-items:baseline; font-size:11.5px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--muted); background:var(--bg); padding:2px 8px; border-radius:999px; letter-spacing:.01em; }
+  .acc2-rail .ct b { font-weight:750; color:var(--text); }
+  .acc2-rail .ct i { font-style:normal; font-weight:600; opacity:.55; margin-left:.5px; }
+  .acc2-rail button.on .ct b { color:var(--accent); }
   .acc2-main { display:flex; flex-direction:column; gap:14px; min-width:0; }
   .acc2-sect { padding:0; overflow:hidden; scroll-margin-top:12px; transition:box-shadow .15s, border-color .15s; }
   .acc2-sect:hover { border-color:color-mix(in srgb, var(--accent) 30%, var(--border)); }

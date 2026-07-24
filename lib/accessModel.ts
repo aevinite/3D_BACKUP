@@ -111,14 +111,8 @@ export const PERMISSIONS: Perm[] = [
       { id: "delete_bill", name: "Delete a bill", what: "Removes the bill entirely — cannot be undone, leaves no record." },
       { id: "close_unpaid", name: "Close a table unpaid", what: "Frees the table, money marked never collected (walk-out / write-off)." },
     ] },
-  { id: "revert_payment", group: "money", kind: "ladder", power: "revert_payment", tabletNew: true, waiter: true, isNew: true, name: "Undo a payment",
-    what: "Reversing a bill already marked paid — the refund path. 30-minute grace, then owner-only.",
-    sub: [
-      { id: "undo_grace", name: "Undo within 30 minutes", what: "The normal “wrong table” undo." },
-      { id: "undo_any", name: "Undo any time", what: "Reverse a payment from any earlier point today — owner-level by default." },
-    ] },
-  { id: "mark_paid", group: "money", kind: "ladder", tablet: "tablet_mark_paid", waiter: true, fixedTop: true, name: "Mark a bill paid",
-    what: "The button that closes a table as paid. Owner & manager always have it (it's core to running the floor); the toggle is whether WAITERS get it — the classic “trust one waiter, not another” cap.",
+  { id: "mark_paid", group: "money", kind: "ladder", tablet: "tablet_mark_paid", waiter: true, fixedTop: true, name: "Mark a bill paid (& undo)",
+    what: "The button that closes a table as paid — and the matching Undo that reopens a just-paid bill (they deliberately share ONE permission, so undoing is never easier than paying). Owner & manager always have it (it's core to running the floor); the toggle is whether WAITERS get it — the classic “trust one waiter, not another” cap.",
     sub: [
       { id: "pay_cash", name: "Cash", what: "Settle as cash." },
       { id: "pay_card", name: "Card / UPI", what: "Settle as card/UPI." },
@@ -191,14 +185,8 @@ export const PERMISSIONS: Perm[] = [
       { id: "rat_respond", name: "Mark a complaint handled", what: "Closing off an issue with a note." },
       { id: "rat_delete", name: "Delete a rating", what: "Removing a rating — owner-level by default." },
     ] },
-  { id: "export_reports", group: "reports", kind: "ladder", power: "export_reports", isNew: true, name: "Download & export",
-    what: "Taking the numbers out of the app as a file. Worth keeping tight.",
-    sub: [
-      { id: "exp_csv", name: "Export a spreadsheet", what: "CSV of the current report." },
-      { id: "exp_pdf", name: "Export a PDF", what: "A printable copy." },
-      { id: "exp_raw", name: "Export raw order data", what: "Every order line — the heaviest export; owner only by default." },
-    ] },
-  { id: "view_logs", group: "reports", kind: "ladder", power: "view_logs", isNew: true, name: "Activity log",
+  // (Download & export removed — the app has no export feature yet; it returns here when that's built. See access-panel-build memory, Part I.)
+  { id: "view_logs", group: "reports", kind: "ladder", power: "view_logs", name: "Activity log",
     what: "The record of who did what. Choose which logs each role may read. (Admin-action logs are never delegated.)",
     sub: [
       { id: "log_orders", name: "Order changes", what: "Dishes added, removed, moved." },
