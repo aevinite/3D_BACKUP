@@ -393,7 +393,7 @@ export default function AdminRepair() {
               {/* Land ON the right section of THIS restaurant's detail (slug + ?section=), not just the
                   restaurants list — the old links passed the UUID (focus matches by slug) so they
                   opened nothing, and "Maintenance mode" pointed at Settings which has no such toggle. */}
-              <Link className="adm-btn" href={`/aevinite/restaurants?focus=${encodeURIComponent(scopedSlug)}&section=features`}><i className="fas fa-toggle-on" aria-hidden="true" /> Feature switches</Link>
+              <Link className="adm-btn" href={`/aevinite/restaurants?focus=${encodeURIComponent(scopedSlug)}&section=access-link`}><i className="fas fa-toggle-on" aria-hidden="true" /> Feature switches</Link>
               <Link className="adm-btn" href={`/aevinite/restaurants?focus=${encodeURIComponent(scopedSlug)}&section=status`}><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Maintenance mode</Link>
               <Link className="adm-btn" href={`/aevinite/logs?restaurant_id=${rid}`}><i className="fas fa-scroll" aria-hidden="true" /> Full activity log</Link>
             </div>

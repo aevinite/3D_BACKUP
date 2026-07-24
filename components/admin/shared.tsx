@@ -23,7 +23,7 @@ export type Overview = {
   openTables: number; activeOrders: number; unpaidOrders: number;
   ordersToday: number;
 };
-export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string; restaurant_id?: string | null; restaurant_name?: string | null; restaurant_slug?: string | null; level?: "info" | "warn" | "error" };
+export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string; restaurant_id?: string | null; restaurant_name?: string | null; restaurant_slug?: string | null; level?: "info" | "warn" | "error"; seen_at?: string | null; resolved_at?: string | null };
 
 export const STATE_LABEL: Record<Tile["state"], string> = {
   free: "Free", seated: "Seated", new: "New order", preparing: "Preparing", served: "Served", cleared: "Cleared",

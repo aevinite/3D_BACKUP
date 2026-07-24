@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
   // ?unresolved=1 — used by the Repair "Problems right now" list to hide errors the owner (or a
   // fix) has already cleared. The full Logs page omits it, so it still shows resolved rows.
   const unresolvedOnly = url.searchParams.get("unresolved") === "1";
-  let q = sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, level, created_at").order("created_at", { ascending: false }).limit(limit);
+  let q = sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, level, seen_at, resolved_at, created_at").order("created_at", { ascending: false }).limit(limit);
   if (restaurantId) q = q.eq("restaurant_id", restaurantId);
   if (level === "error" || level === "warn" || level === "info") q = q.eq("level", level);
   if (unresolvedOnly) q = q.is("resolved_at", null);
