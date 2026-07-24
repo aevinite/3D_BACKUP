@@ -122,7 +122,11 @@ export default function Access2Page() {
     lvl = Math.max(0, Math.min(lvl, maxReach(p)));
     const patch: any = {};
     if (p.module) { patch.modules = { [moduleKey(p)]: { allowed: lvl >= 1 } }; }
-    else if (p.power && !p.fixedTop) { patch.owner = { [powerKey(p.power)]: lvl >= 1 }; }
+    // A section-linked capability's OWNER rung IS the owner-panel section: one control writes
+    // BOTH the section (page exists) AND power_<flag> (admin allows the manager grant). This is
+    // what links the old "Owner panel sections" to the powers so ratings etc. never diverge.
+    if (p.section) { patch.owner = { ...(patch.owner || {}), [p.section]: lvl >= 1 }; }
+    if (p.power && !p.fixedTop) { patch.owner = { ...(patch.owner || {}), [powerKey(p.power)]: lvl >= 1 }; }
     if (p.power) patch.manager = { ...(patch.manager || {}), [p.power]: lvl >= 2 };
     if (p.waiter) {
       const on = lvl >= 3;

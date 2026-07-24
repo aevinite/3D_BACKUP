@@ -40,6 +40,7 @@ export type Perm = {
   isNew?: boolean;             // power that has no legacy enforcement yet (revert_payment/export_reports/view_logs)
   fixedTop?: boolean;          // owner+manager ALWAYS have it (only the tablet rung toggles) — mark_paid / invoice
   tabletNew?: boolean;         // tablet rung has no settings column yet → stored in access_config, enforced later
+  ownerOnly?: boolean;         // owner-panel-only section (issues/customers): reach is just Off/Owner
   sub?: SubOpt[];              // granular options → access_config[id].{owner_opts,manager_opts}
   limit?: { label: string; unit: string; options: number[] }; // per-side cap → access_config[id].limit
 };
@@ -54,7 +55,6 @@ export const GROUPS: { id: string; name: string; blurb: string; icon: string }[]
   { id: "reports", name: "Reports & insights", blurb: "Numbers, ratings and the activity log.", icon: "chart" },
   { id: "staff", name: "Staff & settings", blurb: "Managing people and the restaurant's own settings.", icon: "users" },
   { id: "panels", name: "Staff apps", blurb: "Which of the four staff apps this restaurant has. Off refuses the login.", icon: "grid" },
-  { id: "ownersections", name: "Owner panel sections", blurb: "Which pages exist inside the owner's own panel.", icon: "sidebar" },
 ];
 
 const ON = true;
@@ -174,7 +174,7 @@ export const PERMISSIONS: Perm[] = [
     ] },
 
   // ─────────────────────────── REPORTS & INSIGHTS (ladder) ─────────────────
-  { id: "view_dashboard", group: "reports", kind: "ladder", power: "view_dashboard", name: "Dashboard & reports",
+  { id: "view_dashboard", group: "reports", kind: "ladder", power: "view_dashboard", section: "reports", name: "Dashboard & reports",
     what: "The numbers screen. Tick which reports each role may open.",
     sub: [
       { id: "rep_sales", name: "Sales summary", what: "Revenue, covers, average bill." },
@@ -184,7 +184,7 @@ export const PERMISSIONS: Perm[] = [
       { id: "rep_tax", name: "Tax report", what: "CGST / SGST breakdown." },
       { id: "rep_zclose", name: "Day close (Z report)", what: "The end-of-day cash-up." },
     ] },
-  { id: "view_ratings", group: "reports", kind: "ladder", power: "view_ratings", name: "Guest ratings & feedback",
+  { id: "view_ratings", group: "reports", kind: "ladder", power: "view_ratings", section: "ratings", name: "Guest ratings & feedback",
     what: "Reading what guests said and handling complaints.",
     sub: [
       { id: "rat_view", name: "Read ratings", what: "See the star ratings and comments." },
@@ -205,9 +205,13 @@ export const PERMISSIONS: Perm[] = [
       { id: "log_bills", name: "Bill actions", what: "Discounts, voids, refunds — with the typed reason." },
       { id: "log_staff", name: "Staff actions", what: "Logins, shift changes, power grants." },
     ] },
+  { id: "handle_issues", group: "reports", kind: "ladder", section: "issues", ownerOnly: true, name: "Issues & tickets",
+    what: "The Issues page — staff-raised tickets with photo/voice notes. An owner-panel page; not delegated to a waiter." },
+  { id: "view_customers", group: "reports", kind: "ladder", section: "customers", ownerOnly: true, name: "Customers list",
+    what: "The guest list built from past orders. An owner-panel page." },
 
   // ─────────────────────────── STAFF & SETTINGS (ladder) ───────────────────
-  { id: "manage_staff", group: "staff", kind: "ladder", power: "manage_staff", name: "Manage staff",
+  { id: "manage_staff", group: "staff", kind: "ladder", power: "manage_staff", section: "staff", name: "Manage staff",
     what: "Adding people, changing roles, resetting PINs.",
     sub: [
       { id: "st_add", name: "Add a person", what: "Creating a new staff login." },
@@ -216,7 +220,7 @@ export const PERMISSIONS: Perm[] = [
       { id: "st_pin", name: "Reset a PIN", what: "Issuing a new PIN when locked out." },
       { id: "st_grant", name: "Grant powers to others", what: "Handing capabilities onward — and ONLY powers this person already holds. Owner-level by default." },
     ] },
-  { id: "edit_settings", group: "staff", kind: "ladder", power: "edit_settings", name: "Restaurant settings",
+  { id: "edit_settings", group: "staff", kind: "ladder", power: "edit_settings", section: "settings", name: "Restaurant settings",
     what: "The restaurant's own configuration screens.",
     sub: [
       { id: "set_brand", name: "Branding & appearance", what: "Logo, colours, splash." },
@@ -233,19 +237,13 @@ export const PERMISSIONS: Perm[] = [
   { id: "panel_owner", group: "panels", kind: "switch", panel: "owner", name: "Owner panel", what: "The owner's own dashboard, staff and reports." },
 
   // ──────────────────────── OWNER PANEL SECTIONS (admin switch) ─────────────
-  { id: "sec_reports", group: "ownersections", kind: "switch", section: "reports", name: "Reports page", what: "The owner's revenue and performance pages." },
-  { id: "sec_staff", group: "ownersections", kind: "switch", section: "staff", name: "Staff & powers page", what: "Where the owner grants manager powers." },
-  { id: "sec_issues", group: "ownersections", kind: "switch", section: "issues", name: "Issues page", what: "Staff-raised tickets with photo/voice notes." },
-  { id: "sec_ratings", group: "ownersections", kind: "switch", section: "ratings", name: "Ratings page", what: "Guest feedback for the owner." },
-  { id: "sec_customers", group: "ownersections", kind: "switch", section: "customers", name: "Customers page", what: "The guest list from past orders." },
-  { id: "sec_settings", group: "ownersections", kind: "switch", section: "settings", name: "Settings page", what: "Appearance, password, and the features the admin handed the owner." },
 ];
 
 export const PERM_BY_ID: Record<string, Perm> = Object.fromEntries(PERMISSIONS.map((p) => [p.id, p]));
 export const GROUP_BY_ID = Object.fromEntries(GROUPS.map((g) => [g.id, g]));
 export const permsOf = (gid: string) => PERMISSIONS.filter((p) => p.group === gid);
 
-export const maxReach = (p: Perm) => (p.waiter ? 3 : 2);
+export const maxReach = (p: Perm) => (p.ownerOnly ? 1 : p.waiter ? 3 : 2);
 
 // Manager powers that DON'T exist in the legacy flag list yet — the read/write
 // route stores them, but their server enforcement is a later reviewed step.
@@ -276,6 +274,7 @@ export function moduleKey(p: Perm): string {
 //  • plain power    → owner_entitlements.power_<flag>, where ABSENT means allowed
 export function allowed(p: Perm, s: AccessState): boolean {
   if (p.module) return !!s.modules[moduleKey(p)]?.allowed;
+  if (p.section) return s.owner[p.section] !== false;   // the owner-panel section IS the owner gate (absent = on)
   if (p.power) return s.owner[powerKey(p.power)] !== false;
   return true;
 }
