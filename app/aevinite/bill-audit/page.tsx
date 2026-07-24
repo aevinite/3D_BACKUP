@@ -17,6 +17,9 @@ const ACT: Record<string, { t: string; risk: boolean }> = {
   order_discount: { t: "Discount applied", risk: false },
   order_move: { t: "Order moved", risk: false },
   table_shift: { t: "Table moved", risk: false },
+  invoice_void: { t: "Invoice voided (reopened)", risk: true },
+  table_restart: { t: "Table restarted", risk: false },
+  table_close: { t: "Table closed", risk: false },
   // Admin Repair-Kit surgery (the route returns these too) — without labels they showed as
   // raw snake_case; risk flags mirror the server's RISK set (audit 2026-07-23).
   repair_void_bill: { t: "Bill voided (repair)", risk: true },

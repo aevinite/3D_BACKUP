@@ -100,10 +100,15 @@ export async function closeSession(
       }, 0);
       await logAction(ctx.panel, "close_unpaid", { restaurant_id: sess.restaurant_id ?? undefined, table_number: sess.table_number ?? null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${Math.round(owed * 100) / 100} owed`, device_id: ctx.deviceId ?? undefined });
     }
-    // archived_at/cancelled_at start the 30-min "restore to floor" grace window
-    // (migration 112) — every path that archives/cancels an order stamps it.
+    // Force-closing a table that still owes money is a walk-out / write-off: CANCEL every
+    // unpaid order on the bill — not just the un-served ones — so the whole bill shows as
+    // ✕ Cancelled (a visible record, never a real sale). Previously only cooking orders
+    // (received/preparing) were cancelled and SERVED-but-unpaid food was merely archived,
+    // so an eaten walk-out left no cancelled record (owner, 2026-07-24). EXCLUDE khata
+    // orders (khata_at set) — a parked tab is money-to-collect-later, not a cancellation.
+    // archived_at/cancelled_at start the 30-min "restore to floor" grace window (mig 112).
     must(await sb.from("orders").update({ status: "cancelled", archived: true, archived_at: nowIso(), cancelled_at: nowIso() })
-      .eq("session_id", sessionId).eq("archived", false).neq("payment_status", "paid").in("status", ["received", "preparing"]).select());
+      .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid").is("khata_at", null).select());
     must(await sb.from("orders").update({ archived: true, archived_at: nowIso() })
       .eq("session_id", sessionId).eq("archived", false).select());
     // The round is over — RELEASE the head + every partner from this session, so the

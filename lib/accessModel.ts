@@ -40,6 +40,7 @@ export type Perm = {
   isNew?: boolean;             // power that has no legacy enforcement yet (revert_payment/export_reports/view_logs)
   fixedTop?: boolean;          // owner+manager ALWAYS have it (only the tablet rung toggles) — mark_paid / invoice
   tabletNew?: boolean;         // tablet rung has no settings column yet → stored in access_config, enforced later
+  tabletDefault?: string;      // tablet tri-state default when unset (off|on|pin). Default "off"; void_bills = "pin" (a walk-out stays closable WITH a manager PIN)
   ownerOnly?: boolean;         // owner-panel-only section (issues/customers): reach is just Off/Owner
   sub?: SubOpt[];              // granular options → access_config[id].{owner_opts,manager_opts}
   limit?: { label: string; unit: string; options: number[] }; // per-side cap → access_config[id].limit
@@ -104,7 +105,7 @@ export const PERMISSIONS: Perm[] = [
       { id: "whole_bill", name: "Discount the whole bill", what: "A percentage or amount off the whole bill." },
       { id: "on_the_house", name: "Settle on the house", what: "Closes a bill at zero — the highest-risk one." },
     ] },
-  { id: "void_bills", group: "money", kind: "ladder", power: "void_bills", tabletNew: true, waiter: true, name: "Void, delete or close a bill",
+  { id: "void_bills", group: "money", kind: "ladder", power: "void_bills", tabletNew: true, tabletDefault: "pin", waiter: true, name: "Void, delete or close a bill",
     what: "Cancelling a bill after it's generated. Every use is logged with the typed reason.",
     sub: [
       { id: "void_bill", name: "Void a bill", what: "Cancels a generated bill but KEEPS it in the records marked voided (nothing collected)." },
@@ -270,7 +271,7 @@ export function allowed(p: Perm, s: AccessState): boolean {
 // The tablet rung's tri-state ("off"|"on"|"pin"): a real settings column for the
 // existing caps, or access_config[id].tablet for the new ones (void/revert).
 export function tabletValue(p: Perm, s: AccessState): string {
-  if (p.tabletNew) return String(s.config?.[p.id]?.tablet || "off");
+  if (p.tabletNew) return String(s.config?.[p.id]?.tablet || p.tabletDefault || "off");
   if (p.tablet) return s.tablet[p.tablet] || "off";
   return "off";
 }

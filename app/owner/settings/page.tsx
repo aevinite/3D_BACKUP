@@ -114,7 +114,7 @@ export default function OwnerSettings() {
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>What&apos;s enabled</div>
         <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>The sections Aevidine has switched on for you. To change these, contact Aevidine.</p>
-        {!data ? <div className="adm-empty">Loading…</div> : (
+        {err ? <div className="adm-empty">Not available.</div> : !data ? <div className="adm-empty">Loading…</div> : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {Object.keys(SECTION_LABEL).map((k) => {
               const on = data.sections[k] !== false;
