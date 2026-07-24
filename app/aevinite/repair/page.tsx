@@ -17,8 +17,8 @@ type Restaurant = { id: string; name: string; slug: string };
 type Session = { id: string; table_number: string; status: string; bill_no: number | null; invoice_no: number | null; invoice_voided: boolean };
 type Order = { id: string; table_number: string; kot_no: number | null; status: string; payment_status: string; created_at: string; session_id: string | null };
 type RepairData = { sessions: Session[]; orders: Order[] };
-type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; mode?: string | null; summary: string; pr_url: string | null };
-type AgentRun = { id: string; kind: "live" | "nightly" | "audit"; title: string; status: "running" | "done" | "closed" | "failed"; report: string | null; started_at: string; ended_at: string | null };
+type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; mode?: string | null; summary: string; pr_url: string | null; status?: string; resolved_at?: string | null };
+type AgentRun = { id: string; kind: "live" | "nightly" | "audit"; title: string; request_id: string | null; status: "running" | "done" | "closed" | "failed"; report: string | null; started_at: string; ended_at: string | null };
 
 type Op = "void_bill" | "delete_order" | "refire_order" | "unstick_table" | "edit_time";
 
@@ -59,6 +59,18 @@ function groupErrors(rows: Action[]): ErrGroup[] {
   return Array.from(map.values()).sort((x, y) => y.latest.localeCompare(x.latest));
 }
 
+// What the POST tells us about where this request landed, so the toast is honest instead of
+// always promising "a window opens" (only ONE live window opens at a time — see the API note).
+type QueueInfo = { openCount?: number | null; liveRunning?: boolean };
+function queueToast(mode: "instant" | "overnight", d?: QueueInfo): string {
+  if (mode === "overnight") return "Queued — the night robot takes it at 2:30 AM.";
+  if (d?.liveRunning) {
+    const n = d.openCount ?? 0;
+    return `Added to the queue — a Claude window is already open and will pick this up${n ? ` (${n} now waiting)` : ""}.`;
+  }
+  return "Sent — a Claude window opens on the Mac within a minute.";
+}
+
 export default function AdminRepair() {
   const toast = useToast();
   const [rid, setRid] = useState("");
@@ -80,6 +92,7 @@ export default function AdminRepair() {
   const [note, setNote] = useState("");
   const [sending, setSending] = useState(false);
   const [requests, setRequests] = useState<FixRequest[]>([]);
+  const [fixed, setFixed] = useState<FixRequest[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [openRun, setOpenRun] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -106,13 +119,15 @@ export default function AdminRepair() {
   const loadHub = useCallback(async () => {
     setErrLoading(true);
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const [e, q, h] = await Promise.all([
+    const [e, q, f, h] = await Promise.all([
       adminFetch<{ actions: Action[] }>(`/api/admin/oplog?level=error&unresolved=1&limit=50&since=${encodeURIComponent(since24h)}`),
       adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open"),
+      adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=fixed"),
       adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
     ]);
     if (e.ok) setErrors(e.data.actions || []);
     if (q.ok) setRequests(q.data.requests || []);
+    if (f.ok) setFixed(f.data.requests || []);
     if (h.ok) setRuns(h.data.runs || []);
     setErrLoading(false);
   }, []);
@@ -125,7 +140,7 @@ export default function AdminRepair() {
   const sendDescribed = async (mode: "instant" | "overnight") => {
     if (!note.trim()) { toast("Type what's happening first.", "err"); return; }
     setSending(true);
-    const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
+    const r = await adminFetch<{ ok: boolean } & QueueInfo>("/api/admin/fix-request", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
       body: JSON.stringify({ note: note.trim(), restaurant_id: rid || null, mode }),
@@ -133,7 +148,7 @@ export default function AdminRepair() {
     setSending(false);
     if (r.ok) {
       setNote("");
-      toast(mode === "instant" ? "Sent — a Claude window opens on the Mac within a minute." : "Queued — the night robot takes it at 2:30 AM.");
+      toast(queueToast(mode, r.data));
       loadHub();
     } else toast(r.error || "Couldn't send that.", "err");
   };
@@ -141,12 +156,12 @@ export default function AdminRepair() {
   // Hand a specific error to Claude, bundling its surrounding log rows as context.
   const sendError = async (g: ErrGroup, mode: "instant" | "overnight") => {
     setSent((prev) => new Set(prev).add(g.key));
-    const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
+    const r = await adminFetch<{ ok: boolean } & QueueInfo>("/api/admin/fix-request", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
       body: JSON.stringify({ action_id: g.sample.id, restaurant_id: g.sample.restaurant_id || null, mode }),
     });
-    if (r.ok) { toast(mode === "instant" ? "Sent to Claude — window opens on the Mac shortly." : "Queued for the 2:30 AM robot."); loadHub(); }
+    if (r.ok) { toast(queueToast(mode, r.data)); loadHub(); }
     else { toast(r.error || "Couldn't send that.", "err"); setSent((prev) => { const n = new Set(prev); n.delete(g.key); return n; }); }
   };
 
@@ -189,6 +204,14 @@ export default function AdminRepair() {
   const scopedName = scoped?.name || null;
   const scopedSlug = scoped?.slug || "";
   const groups = groupErrors(errors).filter((g) => !hidden.has(g.key));
+
+  // Split the open queue into "being fixed now" vs "up next". A request is being fixed when a
+  // Claude session is running against it (agent_runs.request_id + status='running'). The rest
+  // are waiting — the open live window sweeps them, or the night robot picks them up.
+  const workingIds = new Set(runs.filter((r) => r.status === "running" && r.request_id).map((r) => r.request_id as string));
+  const liveWorking = runs.some((r) => r.status === "running" && r.kind === "live");
+  const beingFixed = requests.filter((q) => workingIds.has(q.id));
+  const upNext = requests.filter((q) => !workingIds.has(q.id));
 
   return (
     <>
@@ -325,25 +348,77 @@ export default function AdminRepair() {
         </div>
       </div>
 
-      {/* ── Waiting for Claude ─────────────────────────────────────────── */}
-      {requests.length > 0 && (
+      {/* ── Fix queue ──────────────────────────────────────────────────── */}
+      {(requests.length > 0 || fixed.length > 0) && (
         <>
           <div className="rp-sec-h">
-            <i className="fas fa-robot" aria-hidden="true" style={{ color: "var(--muted)" }} />
-            <h2>Waiting for Claude</h2><span className="rp-chip">{requests.length}</span>
+            <i className="fas fa-list-check" aria-hidden="true" style={{ color: "var(--muted)" }} />
+            <h2>Fix queue</h2>
+            {requests.length ? <span className="rp-chip">{requests.length} waiting</span> : null}
+            <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>what Claude is working on now, next, and just finished</span>
           </div>
-          <div className="adm-card" style={{ marginBottom: 6 }}>
-            {requests.map((q) => (
-              <div key={q.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
-                <i className={`fas ${q.mode === "overnight" ? "fa-moon" : q.source === "error_row" ? "fa-triangle-exclamation" : "fa-bolt"}`} aria-hidden="true" title={q.mode === "overnight" ? "Waiting for the 2:30 AM robot" : "Instant — pops on the Mac"} style={{ marginTop: 2, opacity: 0.7 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.summary}</div>
-                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{new Date(q.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>fix ready →</a></> : ""}</div>
+
+          {requests.length > 0 && (
+            <div className="adm-card" style={{ marginBottom: 6 }}>
+              {/* Being fixed now — a Claude session is live against this request. */}
+              {beingFixed.length > 0 && (
+                <div className="rpq-grp">
+                  <div className="rpq-head"><i className="fas fa-gear fa-spin" aria-hidden="true" style={{ color: "var(--adm-accent, #e8a13c)" }} /> Being fixed now</div>
+                  {beingFixed.map((q) => (
+                    <div key={q.id} className="rpq-row">
+                      <span className="rpq-dot working" title="Claude is on this now" />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="rpq-sum">{q.summary}</div>
+                        <div className="adm-muted" style={{ fontSize: 11.5 }}>working now · started {fmtTime(q.created_at)}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>see the fix →</a></> : ""}</div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <button className="adm-btn" onClick={() => dismissRequest(q.id)} title="Dismiss" style={{ fontSize: 11.5, padding: "3px 9px" }}>Dismiss</button>
-              </div>
-            ))}
-          </div>
+              )}
+
+              {/* A live window is open but its request already flipped to fixed — reassure it's sweeping. */}
+              {liveWorking && beingFixed.length === 0 && (
+                <div className="rpq-note"><i className="fas fa-gear fa-spin" aria-hidden="true" style={{ color: "var(--adm-accent, #e8a13c)", marginRight: 7 }} />A Claude window is open on the Mac — it fixes one problem, then sweeps the rest below in the same window.</div>
+              )}
+
+              {/* Up next — waiting for a window / the night robot. Numbered so the order is clear. */}
+              {upNext.length > 0 && (
+                <div className="rpq-grp">
+                  <div className="rpq-head"><i className="fas fa-hourglass-half" aria-hidden="true" style={{ opacity: 0.7 }} /> Up next</div>
+                  {upNext.map((q, i) => (
+                    <div key={q.id} className="rpq-row">
+                      <span className="rpq-pos" title="Position in the queue">{i + 1}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="rpq-sum">{q.summary}</div>
+                        <div className="adm-muted" style={{ fontSize: 11.5 }}>
+                          <i className={`fas ${q.mode === "overnight" ? "fa-moon" : q.source === "error_row" ? "fa-triangle-exclamation" : "fa-bolt"}`} aria-hidden="true" style={{ marginRight: 5, opacity: 0.7 }} />
+                          {q.mode === "overnight" ? "night robot at 2:30 AM" : "next Mac window"} · {fmtTime(q.created_at)}
+                        </div>
+                      </div>
+                      <button className="adm-btn" onClick={() => dismissRequest(q.id)} title="Remove from the queue" style={{ fontSize: 11.5, padding: "3px 9px" }}>Dismiss</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Recently fixed — Claude flips each request to 'fixed' on its own when the work is done. */}
+          {fixed.length > 0 && (
+            <div className="adm-card" style={{ marginBottom: 6 }}>
+              <div className="rpq-head"><i className="fas fa-circle-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)" }} /> Recently fixed <span className="adm-muted" style={{ fontWeight: 400, fontSize: 11.5, marginLeft: 4 }}>Claude marks these done itself</span></div>
+              {fixed.map((q) => (
+                <div key={q.id} className="rpq-row">
+                  <span className="rpq-dot done" title="Fixed" />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="rpq-sum">{q.summary}</div>
+                    <div className="adm-muted" style={{ fontSize: 11.5 }}>fixed {fmtTime(q.resolved_at || q.created_at)}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>see the fix →</a></> : ""}</div>
+                  </div>
+                  <i className="fas fa-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)", fontSize: 13 }} />
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
 
@@ -474,6 +549,18 @@ export default function AdminRepair() {
         .rp-x{margin-left:auto;background:none;border:none;color:var(--muted);opacity:.5;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px}
         .rp-x:hover{opacity:1;background:color-mix(in srgb,var(--text) 8%,transparent)}
         .rp-confirm{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 11px;border-radius:9px;background:color-mix(in srgb,var(--adm-ok,#4caf82) 10%,var(--card));border:1px solid color-mix(in srgb,var(--adm-ok,#4caf82) 35%,transparent)}
+        .rp-chip.ok{background:color-mix(in srgb,var(--adm-ok,#4caf82) 16%,transparent);color:var(--adm-ok,#4caf82)}
+        .rpq-grp{padding:2px 0}
+        .rpq-grp + .rpq-grp{margin-top:6px;border-top:var(--border)}
+        .rpq-head{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--muted);padding:10px 0 6px}
+        .rpq-row{display:flex;gap:11px;align-items:flex-start;padding:9px 0;border-bottom:var(--border);font-size:13px}
+        .rpq-row:last-child{border-bottom:none}
+        .rpq-sum{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .rpq-dot{width:9px;height:9px;border-radius:999px;margin-top:5px;flex:none}
+        .rpq-dot.working{background:var(--adm-accent,#e8a13c);box-shadow:0 0 0 4px color-mix(in srgb,var(--adm-accent,#e8a13c) 22%,transparent)}
+        .rpq-dot.done{background:var(--adm-ok,#4caf82)}
+        .rpq-pos{width:20px;height:20px;border-radius:999px;flex:none;display:grid;place-items:center;font-size:11px;font-weight:800;margin-top:1px;background:color-mix(in srgb,var(--text) 8%,transparent);color:var(--muted)}
+        .rpq-note{font-size:12px;line-height:1.5;color:var(--muted);padding:9px 0}
       `}</style>
     </>
   );

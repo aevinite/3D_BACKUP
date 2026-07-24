@@ -75,7 +75,21 @@ async function postHandler(req: NextRequest) {
   const ins = await sb.from("fix_requests").insert({ restaurant_id: rid, source, mode, summary: summary.slice(0, 300), note: note || null, context }).select("id").maybeSingle();
   if (ins.error) return err(ins.error.message, 500);
   await logAction("admin", "fix_request", { restaurant_id: rid ?? undefined, level: "info", detail: summary.slice(0, 120) });
-  return NextResponse.json({ ok: true, id: ins.data?.id ?? null });
+
+  // Tell the panel where this request lands so the click message is honest: how many problems
+  // are already waiting, and whether a live Mac window is open RIGHT NOW. Only one live window
+  // opens at a time (the watcher's busy-lock) — a fresh 'instant' ask made while one is running
+  // won't pop its own window; the open session sweeps it. Two tiny head-count reads, no rows.
+  const [openCount, liveRun] = await Promise.all([
+    sb.from("fix_requests").select("id", { count: "exact", head: true }).eq("status", "open"),
+    sb.from("agent_runs").select("id", { count: "exact", head: true }).eq("kind", "live").eq("status", "running"),
+  ]);
+  return NextResponse.json({
+    ok: true,
+    id: ins.data?.id ?? null,
+    openCount: openCount.count ?? null,
+    liveRunning: (liveRun.count ?? 0) > 0,
+  });
 }
 
 export const POST = withIdempotency(postHandler, "admin");
