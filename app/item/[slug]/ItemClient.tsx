@@ -286,7 +286,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         setItem(dish || null);              // this dish (or null if not found)
         // Real reviews load separately (the aggregate carries only the average);
         // a failure here just leaves the list empty.
-        if (dish) getItemReviews(dish.slug, restaurantId).then((r) => { if (!cancelled) setLocalReviews(r); }).catch(() => {});
+        if (dish && features.reviews) getItemReviews(dish.slug, restaurantId).then((r) => { if (!cancelled) setLocalReviews(r); }).catch(() => {}); else if (!cancelled) setLocalReviews([]);
         setLoading(false);                  // done loading
         setTimeout(() => { if (!cancelled) setImageLoaded(true); }, 50); // trigger the photo fade-in
 
@@ -796,7 +796,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         {/* The customer reviews area: two tabs (write one / read them).
             The ENTIRE area (label, tabs, form, list) disappears when the
             restaurant switches the reviews feature off. */}
-        {features.reviews && (<>
+        {features.ratings && features.reviews && (<>
         <div className="section-label" style={{ marginTop: '24px' }}>{t.customerReviews}</div>
         <div className="review-tabs">
           {/* Tab 1: the "rate this dish" form. */}

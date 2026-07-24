@@ -249,7 +249,7 @@ export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID,
   // `columns` defaults to everything (the dish page needs the full row); the grid
   // passes CARD_COLUMNS to skip heavy detail-only fields.
   const [items, ratings] = await Promise.all([
-    supabase.from("menu_items").select(columns).eq("restaurant_id", restaurantId).order("sort_order"),
+    supabase.from("menu_items").select(columns).eq("restaurant_id", restaurantId).order("sort_order").limit(2000),
     supabase.from("item_ratings").select("item_slug, avg_rating, review_count").eq("restaurant_id", restaurantId),
   ]);
   if (items.error) throw new Error(`Failed to load menu: ${items.error.message}`);
@@ -313,7 +313,8 @@ export async function getCategories(restaurantId: string = DEFAULT_RESTAURANT_ID
     .select("*")
     .eq("restaurant_id", restaurantId)
     .eq("active", true)    // only categories the owner has switched on
-    .order("sort_order");
+    .order("sort_order")
+    .limit(300);           // generous cap — satisfies the egress "always .limit()" rule without truncating real data
   if (error) throw new Error(`Failed to load categories: ${error.message}`);
   // Same snake_case -> camelCase tidy-up as mapRow, but for category rows.
   return (data ?? []).map((r) => ({

@@ -13,8 +13,9 @@ import { getMenuItem, type MenuItem } from "@/lib/menu"; // fetch one dish's det
 import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant"; // resolve the restaurant this viewer belongs to
 import { accentPaletteCss } from "@/lib/accent"; // restaurant colour for the viewer chrome
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
-import { formatPrice, getCurrency, type CurrencyMeta } from "@/lib/format"; // money formatting
+import { formatPrice, getCurrency, getLanguage, setLanguage, DEFAULT_CURRENCY, type CurrencyMeta } from "@/lib/format"; // money formatting
 import { useBackClose } from "@/lib/backStack"; // phone back button closes overlays first
+import { useFeatures, getFeatures } from "@/lib/features"; // per-restaurant feature switches (3D / currency / languages)
 
 // Describes the "config.json" file each dish folder has — the 3D model URLs,
 // the title/subtitle/stats, and the hotspot "tags" pinned onto the model.
@@ -87,6 +88,11 @@ export default function ViewerClient({ folder }: { folder: string }) {
   const [dbModel, setDbModel] = useState<{ small?: string; opt?: string } | null>(null);
   const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // currency for prices
   const [accentCss, setAccentCss] = useState<string>(""); // this restaurant's colour for the viewer chrome
+  // Which restaurant this viewer belongs to, resolved from ?r= (defaults to #1
+  // until resolved, so an unresolved link behaves exactly as before). Drives the
+  // per-restaurant feature switches below.
+  const [rid, setRid] = useState<string>(DEFAULT_RESTAURANT_ID);
+  const features = useFeatures(rid); // 3D viewer / currency / language switches for THIS restaurant
   const [loadFailed, setLoadFailed] = useState(false); // did the 3D model give up loading for good?
   const [showInfo, setShowInfo] = useState(false);       // is the details sheet open?
   // Phone back button closes the details sheet first, not the whole viewer page
@@ -119,7 +125,6 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // (config is only the hotspots/tags). Falls back to config if the item is missing.
   // Runs when we arrive (and if the source dish/restaurant changes).
   useEffect(() => {
-    setCurrency(getCurrency());  // figure out the currency for prices
     // CONCURRENCY GUARD: fromSlug can change (back/forward between dishes); ignore a
     // late reply from a previous fromSlug so it can't overwrite the current dish.
     let cancelled = false;
@@ -131,6 +136,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
         const r = await getRestaurantBySlug(fromRestaurant);
         if (r) {
           rid = r.id;
+          if (!cancelled) setRid(r.id); // drive useFeatures() for this restaurant
           // WHITE-LABEL COLOUR (audit fix bug #2): the /view route lives outside
           // the menu's AppShell, so its BACK / AR / Add-to-Order buttons defaulted
           // to French House gold for every restaurant. Emit this restaurant's
@@ -157,6 +163,20 @@ export default function ViewerClient({ folder }: { folder: string }) {
     })();
     return () => { cancelled = true; };
   }, [fromSlug, fromRestaurant]);
+
+  // Pin the display when a restaurant has those pickers switched off (the menu's
+  // Header does the same, but the /view route lives outside it). Currency OFF →
+  // always show base INR; languages OFF → force English. The listener keeps an
+  // open viewer's prices live if the guest changes currency elsewhere (mirrors
+  // the dish page). Re-runs if either switch changes for this restaurant.
+  useEffect(() => {
+    const readCur = () =>
+      setCurrency(features.currency === false ? DEFAULT_CURRENCY : getCurrency());
+    readCur();
+    if (features.languages === false && getLanguage().code !== "en") setLanguage("en");
+    window.addEventListener("lfh:currency-changed", readCur);
+    return () => window.removeEventListener("lfh:currency-changed", readCur);
+  }, [features.currency, features.languages]);
 
   // Open the SAME confirm popup the dish-detail page uses (qty picker + total),
   // handled by the globally-mounted OrderConfirmModal.
@@ -209,37 +229,46 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // ignore a stale earlier response so it can't replace the new folder's config.
     let cancelled = false;
     const normalizedFolder = (folder || "");
-    fetch(`/content/items/${normalizedFolder}/config.json`)
-      .then((res) => {
-        // No static config.json for this folder (only #1's flagship dishes ship one; every
-        // OTHER restaurant serves its model + name/stats from the DB) → fall back to an EMPTY
-        // config so the dish's own model still renders, instead of the "Failed to load" screen.
-        // A real server error (5xx) is still treated as a failure. (white-label fix 2026-07-09)
-        if (res.status === 404) return null;
-        if (!res.ok) throw new Error("Failed to load config");
-        return res.json();  // turn the response into a usable object
-      })
-      .then((data) => {
-        if (cancelled) return; // a newer folder superseded this fetch
-        // Empty config = no hotspots/framing; the model comes from the DB (dbModel) and the
-        // name/stats from the menu item. A dish with no model at all still degrades to the
-        // 32s "3D unavailable" overlay (the patience timers run once loading/error clear).
-        setConfig(data || {}); // store the config (or an empty one when none is published)
-        setLoading(false);   // done loading
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err.message);  // remember the error to show it
-        setLoading(false);
-      });
+    // 3D SWITCH (per restaurant): if this restaurant has the 3D viewer turned off,
+    // skip ALL model work — no config.json fetch and no GLB download. getFeatures is
+    // cached so this costs nothing extra; an unresolved rid = #1 defaults = on, so
+    // #1 behaves exactly as before.
+    getFeatures(rid).then((feats) => {
+      if (cancelled) return;
+      if (feats.model3d === false) { setLoading(false); return; }
+      fetch(`/content/items/${normalizedFolder}/config.json`)
+        .then((res) => {
+          // No static config.json for this folder (only #1's flagship dishes ship one; every
+          // OTHER restaurant serves its model + name/stats from the DB) → fall back to an EMPTY
+          // config so the dish's own model still renders, instead of the "Failed to load" screen.
+          // A real server error (5xx) is still treated as a failure. (white-label fix 2026-07-09)
+          if (res.status === 404) return null;
+          if (!res.ok) throw new Error("Failed to load config");
+          return res.json();  // turn the response into a usable object
+        })
+        .then((data) => {
+          if (cancelled) return; // a newer folder superseded this fetch
+          // Empty config = no hotspots/framing; the model comes from the DB (dbModel) and the
+          // name/stats from the menu item. A dish with no model at all still degrades to the
+          // 32s "3D unavailable" overlay (the patience timers run once loading/error clear).
+          setConfig(data || {}); // store the config (or an empty one when none is published)
+          setLoading(false);   // done loading
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setError(err.message);  // remember the error to show it
+          setLoading(false);
+        });
+    });
     return () => { cancelled = true; };
-  }, [folder]);
+  }, [folder, rid]);
 
   // Once the config is loaded, decide which model file to actually display:
   // prefer the high-quality "optimized" one, but show the small one first if
   // that's what's ready, and upgrade when the better one finishes loading.
   useEffect(() => {
     if (!config) return;  // wait for the config
+    if (features.model3d === false) return; // 3D off for this restaurant: never download GLBs
     // Model files: a non-#1 restaurant's OWN uploaded model wins; otherwise the
     // static config's. The config still supplies the hotspots/framing either way.
     const small = dbModel?.small || config.smallUrl;   // the fast ~2MB model
@@ -302,7 +331,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // function, which we return so React stops listening when we leave.
     const unsub = modelLoader.subscribe(apply);
     return unsub;
-  }, [config, folder, fromSlug, dbModel]);
+  }, [config, folder, fromSlug, dbModel, features.model3d]);
 
   // Wire up what happens once the 3D model element is on the page: when it
   // finishes loading, hide the spinner, slide in the bar, and play the reveal.
@@ -623,6 +652,22 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // runFullSequence is a stable closure (see note above); intentionally omitted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, error, activeUrl]);
+
+  // 3D viewer switched OFF for this restaurant → a simple, honest message with a
+  // Back link. No spinner, no model work (features starts ON by default, so this
+  // only shows once the switch resolves to off — #1 and unresolved links are on).
+  if (features.model3d === false) {
+    return (
+      <div className="viewer-wrapper flex flex-col items-center justify-center min-h-screen p-4">
+        <div className="text-4xl mb-4">🍽️</div>
+        <h2 className="text-xl font-bold text-white mb-2">3D preview isn&apos;t available</h2>
+        <p className="text-white/50 mb-4">You can still see this dish&apos;s photo and details on the menu.</p>
+        <Link href={backHref} className="text-[#6ddc8a] font-semibold hover:underline">
+          ← Back
+        </Link>
+      </div>
+    );
+  }
 
   // While the config is loading, show just the spinner.
   if (loading) {

@@ -82,6 +82,10 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
   const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null);
   // Whether the photo has finished loading (lets us fade it in).
   const [imgLoaded, setImgLoaded] = useState(false);
+  // A broken/missing photo URL: show a neutral placeholder instead of the
+  // browser's broken-image glyph or an endless shimmer. Starts true when there
+  // is no URL at all (an empty src never fires onError).
+  const [imgError, setImgError] = useState(!item.image);
   // A handle to the photo wrapper so we can "pop" it when added.
   const thumbRef = useRef<HTMLDivElement>(null);
 
@@ -215,7 +219,13 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
         style={{ animationDelay: `${index * 0.06}s` }}
       >
         {/* The photo area; the class flips from "loading" to "ready" once loaded */}
-        <div className={`thumb-wrapper ${imgLoaded ? "img-ready" : "img-loading"}`} ref={thumbRef}>
+        <div
+          className={`thumb-wrapper ${imgLoaded || imgError ? "img-ready" : "img-loading"}`}
+          ref={thumbRef}
+          // On a broken/missing photo, fill with a neutral tint so the card
+          // never shows a broken-image icon or pulses forever.
+          style={imgError ? { background: "var(--surface-2, rgba(120,120,120,0.12))" } : undefined}
+        >
           {/* Plain <img> (not next/image) on purpose: dish image URLs are
               DB-driven and set in the editor to ANY host, which would crash
               next/image's whitelist. Matches every other image in the app. */}
@@ -227,11 +237,14 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
             height={110}
             loading="lazy"
             decoding="async"
+            // Hide the img element itself when the photo is broken/missing, the
+            // same way the search dropdown does, so no broken glyph shows.
+            style={imgError ? { visibility: "hidden" } : undefined}
             onLoad={() => setImgLoaded(true)}
             // If the photo URL ever fails (dead host/404), stop the shimmer and
             // settle the card instead of leaving it pulsing forever — that
             // endless "loading" shimmer is what reads as a blank card.
-            onError={() => setImgLoaded(true)}
+            onError={() => { setImgLoaded(true); setImgError(true); }}
           />
           {/* Show a little "4D" cube badge only if this dish has a 3D model
               (and the restaurant hasn't switched the 3D feature off). */}

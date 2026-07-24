@@ -256,7 +256,9 @@ export default function OwnerStaffPage() {
             </div>
 
             {/* Manager powers */}
-            <div className="ost-section-t">Manager powers <span className="adm-muted" style={{ fontWeight: 500 }}>· what a manager here may do</span></div>
+            <div className="ost-section-t">Manager powers <span className="adm-muted" style={{ fontWeight: 500 }}>· what a manager here may do</span>
+              <span className="reach-legend" title="Each power shows how far it reaches. M = passed down to your managers."><span className="reach-chip on" aria-hidden="true">M</span> reaches managers</span>
+            </div>
             <div className="ost-perms">
               {PERMS.map(([key, label, hint]) => {
                 // The ladder (mig 133): a power the ADMIN removed doesn't exist here.
@@ -368,6 +370,14 @@ export default function OwnerStaffPage() {
         .ost-perm i { font-size: 16px; }
         .ost-perm:disabled { opacity: .75; cursor: default; }
         .ost-perm.xray-off { color: #b45309; border-color: color-mix(in srgb, #d97706 45%, transparent); opacity: .8; }
+        /* Reach badges — one letter shows how far a power reaches (M = managers).
+           Accent-tinted when it reaches, muted outline when it doesn't. The letter
+           itself carries the meaning (never colour-only) + a tooltip. */
+        .reach-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px; margin-left: 2px; border-radius: 6px; font-size: 10px; font-weight: 800; letter-spacing: .02em; line-height: 1; border: 1px solid transparent; transition: background .18s ease, color .18s ease, border-color .18s ease, opacity .18s ease; }
+        .reach-chip.on { color: var(--rcol, var(--accent)); border-color: color-mix(in srgb, var(--rcol, var(--accent)) 45%, transparent); background: color-mix(in srgb, var(--rcol, var(--accent)) 14%, transparent); }
+        .reach-chip.off { color: var(--muted); border-color: color-mix(in srgb, var(--fg, #888) 20%, transparent); background: transparent; }
+        .reach-legend { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; font-size: 11px; font-weight: 600; color: var(--muted); vertical-align: middle; }
+        @media (prefers-reduced-motion: reduce) { .reach-chip { transition: none; } }
         .ost-team { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
         .ost-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 9px 10px; border-radius: 9px; background: color-mix(in srgb, var(--fg, #888) 4%, transparent); }
         .ost-row.off { opacity: .6; }

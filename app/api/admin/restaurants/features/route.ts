@@ -34,7 +34,7 @@ export const dynamic = "force-dynamic";
 // default map locally from this key list.
 const GUEST_FEATURE_KEYS = [
   "ratings", "reviews", "model3d", "allergies", "favorites",
-  "waiter_calls", "search", "languages", "currency", "scrollspy",
+  "waiter_calls", "search", "languages", "currency",
   "diet_filter", // Veg / Non-Veg filter group (off for pure-veg restaurants)
 ];
 const FEATURE_DEFAULTS: Record<string, boolean> = Object.fromEntries(GUEST_FEATURE_KEYS.map((k) => [k, true]));

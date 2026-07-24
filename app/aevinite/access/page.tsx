@@ -277,7 +277,15 @@ export default function Access2Page() {
     return false;
   };
   const setSwitch = (p: Perm, on: boolean) => {
-    if (p.feature) save({ features: { [p.feature]: on } });
+    if (p.feature) {
+      // Ratings OFF must also force reviews OFF in the same save — reviews is the
+      // written-comment layer on top of star ratings, so a stored ratings-off-but-
+      // reviews-on state would leave the guest star/comment input alive. Turning
+      // ratings ON must NOT auto-enable reviews (owner flips that separately).
+      const feats: Record<string, boolean> = { [p.feature]: on };
+      if (p.feature === "ratings" && !on) feats.reviews = false;
+      save({ features: feats });
+    }
     else if (p.panel) save({ panels: { [p.panel]: on } });
     else if (p.section) save({ owner: { [p.section]: on } });
     else if (p.adminSwitch) save({ adminSwitches: { [p.adminSwitch]: on } });

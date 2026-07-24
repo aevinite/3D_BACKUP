@@ -62,7 +62,7 @@ const FEATURES = [
   { key: "reviews", label: "Written reviews" }, { key: "allergies", label: "Allergy system" },
   { key: "favorites", label: "Favorites" }, { key: "waiter_calls", label: "Call waiter" },
   { key: "search", label: "Dish search" }, { key: "languages", label: "Languages" },
-  { key: "currency", label: "Currency picker" }, { key: "scrollspy", label: "Category scroll-spy" },
+  { key: "currency", label: "Currency picker" },
   { key: "diet_filter", label: "Veg / Non-Veg filter" },
 ];
 
@@ -587,7 +587,6 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
 }
 
 function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
-  const [features, setFeatures] = useState<Record<string, boolean> | null>(null);
   const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
   const [staffFeat, setStaffFeat] = useState<Record<string, boolean> | null>(null);
   // Per-switch in-flight set: toggling ONE switch disables only THAT switch. The old single
@@ -647,12 +646,6 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
   // These loaders now announce a failure (flash) instead of silently swallowing it — a failed
   // load leaves the switches disabled, so without a message you couldn't tell why (audit 2026-07-07).
-  const load = useCallback(async () => {
-    try {
-      const j = await (await fetch(`/api/admin/restaurants/features?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
-      if (!j.error) setFeatures(j.features || {}); else flash("Couldn't load guest features."); } catch { flash("Couldn't load guest features."); } }, [restaurant.id, flash]);
-  useEffect(() => { load(); }, [load]);
-
   const loadPanels = useCallback(async () => {
     try {
       const j = await (await fetch(`/api/admin/restaurants/panels?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
@@ -668,35 +661,6 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
     } catch { flash("Couldn't load staff features."); }
   }, [restaurant.id, flash]);
   useEffect(() => { loadStaffFeat(); }, [loadStaffFeat]);
-
-  // Each switch defaults ON unless this restaurant explicitly turned it off
-  // (matches lib/features.ts FEATURE_DEFAULTS — all ten default true).
-  const on = (key: string) => { const v = features?.[key]; return v === undefined ? true : v === true; };
-  const toggle = async (key: string, current: boolean) => {
-    const pid = `f:${key}`; startPending(pid);
-    // Optimistic flip so the pill responds instantly; reconciled by load().
-    setFeatures((f) => ({ ...(f || {}), [key]: !current }));
-    try {
-      const r = await fetch("/api/admin/restaurants/features", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ restaurant_id: restaurant.id, key, value: !current }),
-      });
-      if (!r.ok) throw new Error();
-      await load();
-    } catch { flash("Couldn't save that change — reverted."); await load(); }
-    finally { endPending(pid); }
-  };
-
-  const Toggle = ({ k, label }: { k: string; label: string }) => {
-    const isOn = on(k);
-    return (
-      <button className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!features || pending.has(`f:${k}`)} onClick={() => toggle(k, isOn)}
-        title={isOn ? "On — tap to turn off" : "Off — tap to turn on"}>
-        <span>{label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
-      </button>
-    );
-  };
 
   // Panels default ON unless this restaurant explicitly turned one off (mig 106).
   const onP = (key: string) => { const v = panels?.[key]; return v === undefined ? true : v === true; };
