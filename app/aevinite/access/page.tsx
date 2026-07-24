@@ -650,8 +650,8 @@ function Style() {
   .acc2-sh-t { flex:1; min-width:0; }
   .acc2-sh h2 { margin:0; font-size:15.5px; font-weight:800; letter-spacing:-.02em; }
   .acc2-sh p { margin:2px 0 0; font-size:12px; color:var(--muted); line-height:1.35; }
-  .acc2-count { font:800 13px/1 ui-monospace,monospace; color:var(--muted); white-space:nowrap; padding:5px 9px; border-radius:8px; background:var(--bg); border:var(--border); }
-  .acc2-count i { font-style:normal; opacity:.55; font-size:11px; }
+  .acc2-count { display:inline-flex; align-items:baseline; gap:1px; font-size:13px; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:.01em; color:var(--muted); white-space:nowrap; padding:4px 11px; border-radius:999px; background:var(--bg); border:var(--border); }
+  .acc2-count i { font-style:normal; font-weight:600; opacity:.5; font-size:11px; }
   .acc2-count.has { color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); border-color:color-mix(in srgb, var(--accent) 26%, transparent); }
   .acc2-chev { color:var(--muted); transition:transform .2s; display:grid; place-items:center; background:none; border:none; cursor:pointer; }
   .acc2-chev.o { transform:rotate(180deg); color:var(--accent); }
