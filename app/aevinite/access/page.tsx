@@ -25,6 +25,16 @@ const P: Record<string, string> = {
   chevron: "M6 9l6 6 6-6", chevronR: "M9 18l6-6-6-6", info: "M12 22a10 10 0 100-20 10 10 0 000 20M12 16v-5M12 8h.01",
   alert: "M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0zM12 9v4M12 17h.01", key: "M7.5 15.5a4.5 4.5 0 100-9 4.5 4.5 0 000 9M10.7 12.3L21 2M17 6l3 3",
   shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", arrowR: "M5 12h14M12 5l7 7-7 7", arrowL: "M19 12H5M12 19l-7-7 7-7", lock: "M5 11h14v10H5zM8 11V7a4 4 0 018 0v4", x: "M18 6L6 18M6 6l12 12", reset: "M3 12a9 9 0 103-6.7L3 8M3 3v5h5",
+  // area icons (GROUPS[].icon)
+  cutlery: "M3 2v7a2 2 0 002 2h1a2 2 0 002-2V2M6 11v11M17 2v20M17 12c2 0 4-2 4-5V2c-2 0-4 2-4 5",
+  book: "M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z",
+  receipt: "M4 2v20l2.5-1.5L9 22l2.5-1.5L14 22l2.5-1.5L19 22V2l-2.5 1.5L14 2l-2.5 1.5L9 2 6.5 3.5zM8 8h8M8 12h6",
+  grip: "M5 5h4v4H5zM15 5h4v4h-4zM5 15h4v4H5zM15 15h4v4h-4z",
+  grid: "M5 5h4v4H5zM15 5h4v4h-4zM5 15h4v4H5zM15 15h4v4h-4z",
+  fire: "M12 2c1 4 4 5 4 9a4 4 0 01-8 0c0-1.5.5-2.5 1-3M12 22a6 6 0 006-6c0-2-1-4-2-5",
+  sparkles: "M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z",
+  chart: "M3 3v16.5A1.5 1.5 0 004.5 21H21M7 15l3.5-4 3 2.5L20 7",
+  sidebar: "M3 3h18v18H3zM9 3v18",
 };
 const Icon = ({ n, s = 16 }: { n: string; s?: number }) => (
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.85} strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none" }}>
@@ -220,6 +230,7 @@ export default function Access2Page() {
               const on = ps.filter((p) => (p.kind === "switch" ? switchVal(p) : reachLevel(p, st!) > 0)).length;
               return (
                 <button key={g.id} className={open[g.id] ? "on" : ""} onClick={() => { setOpen((s) => ({ ...s, [g.id]: true })); document.getElementById("sec-" + g.id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
+                  <span className="acc2-gi"><Icon n={g.icon} s={15} /></span>
                   <span className="nm">{g.name}</span><span className="ct">{on}/{ps.length}</span>
                 </button>
               );
@@ -233,8 +244,9 @@ export default function Access2Page() {
               return (
                 <section className="adm-card acc2-sect" id={"sec-" + g.id} key={g.id}>
                   <button className="acc2-sh" onClick={() => setOpen((s) => ({ ...s, [g.id]: !s[g.id] }))}>
-                    <div><h2>{g.name}</h2><p>{g.blurb}</p></div>
-                    <span className="acc2-count">{on} of {ps.length} on</span>
+                    <span className="acc2-gi lg"><Icon n={g.icon} s={19} /></span>
+                    <div className="acc2-sh-t"><h2>{g.name}</h2><p>{g.blurb}</p></div>
+                    <span className={`acc2-count ${on ? "has" : ""}`}>{on}<i>/{ps.length}</i></span>
                     <span className={`acc2-chev ${isOpen ? "o" : ""}`}><Icon n="chevron" /></span>
                   </button>
                   {isOpen && <div className="acc2-body">{ps.map((p) => p.kind === "switch" ? <SwitchRow key={p.id} p={p} /> : <LadderCard key={p.id} p={p} />)}</div>}
@@ -506,17 +518,25 @@ function Style() {
   .acc2-rail-wrap { display:grid; grid-template-columns:250px 1fr; gap:20px; align-items:start; }
   .acc2-rail { position:sticky; top:12px; background:var(--card); border:var(--border); border-radius:14px; padding:7px; }
   .acc2-rail .rh { padding:9px 11px 6px; font-size:10.5px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
-  .acc2-rail button { display:flex; align-items:center; gap:9px; width:100%; min-height:46px; padding:8px 11px; border:none; background:transparent; border-radius:10px; border-left:3px solid transparent; cursor:pointer; color:var(--text); text-align:left; }
-  .acc2-rail button:hover { background:color-mix(in srgb, var(--accent) 8%, transparent); }
-  .acc2-rail button.on { background:color-mix(in srgb, var(--accent) 14%, transparent); border-left-color:var(--accent); }
+  .acc2-rail button { display:flex; align-items:center; gap:10px; width:100%; min-height:44px; padding:7px 10px; border:none; background:transparent; border-radius:10px; cursor:pointer; color:var(--text); text-align:left; transition:background .14s; }
+  .acc2-rail button:hover { background:color-mix(in srgb, var(--accent) 9%, transparent); }
+  .acc2-rail button.on { background:color-mix(in srgb, var(--accent) 15%, transparent); }
+  .acc2-rail button.on .acc2-gi { background:var(--accent); color:#fff; border-color:var(--accent); }
+  /* the small area-icon chip (rail + section header) */
+  .acc2-gi { width:28px; height:28px; border-radius:8px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--accent) 12%, transparent); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
+  .acc2-gi.lg { width:38px; height:38px; border-radius:11px; }
   .acc2-rail .nm { flex:1; font-size:13.5px; font-weight:700; }
   .acc2-rail .ct { font-size:11px; font-weight:800; font-family:ui-monospace,monospace; color:var(--muted); background:var(--bg); padding:3px 6px; border-radius:6px; }
   .acc2-main { display:flex; flex-direction:column; gap:14px; min-width:0; }
-  .acc2-sect { padding:0; overflow:hidden; scroll-margin-top:12px; }
-  .acc2-sh { display:flex; align-items:center; gap:14px; width:100%; padding:16px 18px; border:none; background:transparent; cursor:pointer; text-align:left; color:var(--text); }
-  .acc2-sh h2 { margin:0; font-size:17px; font-weight:800; letter-spacing:-.02em; }
-  .acc2-sh p { margin:3px 0 0; font-size:12.5px; color:var(--muted); }
-  .acc2-count { font-size:11.5px; font-weight:800; color:var(--muted); white-space:nowrap; }
+  .acc2-sect { padding:0; overflow:hidden; scroll-margin-top:12px; transition:box-shadow .15s, border-color .15s; }
+  .acc2-sect:hover { border-color:color-mix(in srgb, var(--accent) 30%, var(--border)); }
+  .acc2-sh { display:flex; align-items:center; gap:13px; width:100%; padding:13px 16px; border:none; background:transparent; cursor:pointer; text-align:left; color:var(--text); }
+  .acc2-sh-t { flex:1; min-width:0; }
+  .acc2-sh h2 { margin:0; font-size:15.5px; font-weight:800; letter-spacing:-.02em; }
+  .acc2-sh p { margin:2px 0 0; font-size:12px; color:var(--muted); line-height:1.35; }
+  .acc2-count { font:800 13px/1 ui-monospace,monospace; color:var(--muted); white-space:nowrap; padding:5px 9px; border-radius:8px; background:var(--bg); border:var(--border); }
+  .acc2-count i { font-style:normal; opacity:.55; font-size:11px; }
+  .acc2-count.has { color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); border-color:color-mix(in srgb, var(--accent) 26%, transparent); }
   .acc2-chev { color:var(--muted); transition:transform .2s; display:grid; place-items:center; background:none; border:none; cursor:pointer; }
   .acc2-chev.o { transform:rotate(180deg); color:var(--accent); }
   .acc2-body { border-top:var(--border); padding:8px; display:flex; flex-direction:column; gap:8px; }

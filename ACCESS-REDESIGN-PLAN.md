@@ -30,9 +30,9 @@ Legend: [ ] todo · [~] doing · [x] done+verified
 
 ## B — ACCESS PANEL LOOK (app/aevinite/access/page.tsx) — "look is bad", esp. LIGHT mode
 - [ ] B1  Screenshot current light + dark to baseline
-- [ ] B2  Card hierarchy: sections shouldn't be big empty white boxes — tighter, clearer
-- [ ] B3  Accordion header: better weight/spacing, count chip styling
-- [ ] B4  Rail: selected state + counts polish (light + dark)
+- [x] B2  Card hierarchy: sections shouldn't be big empty white boxes — tighter, clearer
+- [x] B3  Accordion header: better weight/spacing, count chip styling
+- [x] B4  Rail: selected state + counts polish (light + dark)
 - [ ] B5  Ladder card header: reach tag + toggle alignment + hover
 - [ ] B6  Sub-tabs + chips: light-mode contrast + polish
 - [ ] B7  Per-person rows + tri-state: light-mode polish
