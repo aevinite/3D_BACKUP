@@ -1945,6 +1945,15 @@ function printBillFromKey(key) {
   printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, g);
 }
 // Expand one bill into a modal: full item list + totals + Print / Restore / Close.
+// May the current viewer DELETE a bill? Admin + owner always (higherView); a real manager
+// only when the owner ticked "Delete a bill" (server resolves it into whoami.canDeleteBill).
+// Deleting a bill is the most destructive money action, so it defaults OFF (owner, 2026-07-24).
+function canDeleteBillNow() {
+  if (!XRAY_WHO) return false;
+  if (XRAY_WHO.higherView) return true;
+  return XRAY_WHO.canDeleteBill === true;
+}
+
 function openBillModal(key) {
   const pool = billOrdersPool();
   const g = (key || "").startsWith("solo:")
@@ -2001,6 +2010,7 @@ function openBillModal(key) {
         ${canRestore
           ? `<button class="btn" data-bm-restore title="Undo within the next ${restoreMins} min">↩ Restore to floor (${restoreMins}m left)</button>`
           : `<button class="btn" disabled title="More than 30 minutes have passed since this bill was settled">↩ Restore window expired</button>`}
+        ${liveOrders.length === 0 && canDeleteBillNow() ? `<button class="btn danger" data-bm-delete title="Permanently delete this cancelled bill — cannot be undone">🗑 Delete bill</button>` : ""}
         <button class="btn confirm-cancel" data-bm-close>Close</button>
       </div>
     </div>`;
@@ -2017,6 +2027,11 @@ function openBillModal(key) {
   if (freeBtn) freeBtn.onclick = async () => { close(); await freeTable(freeBtn.dataset.bmFree); };
   const restoreBtn = wrap.querySelector("[data-bm-restore]");
   if (restoreBtn) restoreBtn.onclick = async () => { close(); await restoreBill(g); };
+  // Delete a CANCELLED bill permanently (owner 2026-07-24). deleteOrders() itself REQUIRES a
+  // typed reason (its prompt is the confirmation) and the server re-checks the delete_bill
+  // grant, so a stale UI can never delete without permission.
+  const delBtn = wrap.querySelector("[data-bm-delete]");
+  if (delBtn) delBtn.onclick = async () => { close(); await deleteOrders(g.map((o) => o.id)); };
   // Re-open this SAME bill fresh after a dish edit, so the updated note/allergy chip
   // shows immediately. openDishEditModal's own save already calls loadSessions(), but
   // that's LIVE-floor-scoped — an ARCHIVED bill's order needs the full loadOrders()
