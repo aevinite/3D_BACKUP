@@ -42,6 +42,30 @@ const Icon = ({ n, s = 16 }: { n: string; s?: number }) => (
   </svg>
 );
 
+// Count badge — an oval that fills like a progress ring (owner design, 2026-07-24).
+// Shows "on/total" (one consistent bold colour, no faded denominator); the oval outline
+// draws round proportionally from the TOP-CENTRE; when everything's on it goes green and
+// the label becomes just "All". Geometry is fixed (48×28) so the perimeter is analytic —
+// no DOM measuring, works on the server render too.
+const OW = 48, OH = 28, OINSET = 2, OR = OH / 2 - OINSET;
+const OX0 = OINSET, OY0 = OINSET, OX1 = OW - OINSET, OY1 = OH - OINSET, OCX = OW / 2;
+const OVAL_D = `M ${OCX} ${OY0} L ${OX1 - OR} ${OY0} A ${OR} ${OR} 0 0 1 ${OX1 - OR} ${OY1} L ${OX0 + OR} ${OY1} A ${OR} ${OR} 0 0 1 ${OX0 + OR} ${OY0} L ${OCX} ${OY0} Z`;
+const OVAL_PERIM = 2 * ((OX1 - OR) - (OX0 + OR)) + Math.PI * (2 * OR);
+const CountOval = ({ on, total }: { on: number; total: number }) => {
+  const full = total > 0 && on >= total;
+  const ratio = total > 0 ? Math.min(on / total, 1) : 0;
+  return (
+    <span className={`acc2-count ${full ? "full" : ""}`}>
+      <svg viewBox={`0 0 ${OW} ${OH}`} aria-hidden="true">
+        <path className="bgf" d={OVAL_D} />
+        <path className="tk" d={OVAL_D} />
+        <path className="pg" d={OVAL_D} style={{ strokeDasharray: OVAL_PERIM, strokeDashoffset: OVAL_PERIM * (1 - ratio) }} />
+      </svg>
+      <span className="lb">{full ? "All" : `${on}/${total}`}</span>
+    </span>
+  );
+};
+
 const REACH_LABEL = ["Off", "Owner only", "Owner + Manager", "Owner + Mgr + Tablet"];
 // The three sub-option tiers mirror the reach ladder (owner ⊇ manager ⊇ waiter).
 type Side = "owner" | "manager" | "waiter";
@@ -315,7 +339,7 @@ export default function Access2Page() {
               return (
                 <button key={g.id} data-area={g.id} className={activeArea === g.id ? "on" : ""} onClick={() => { spyClick.current = Date.now() + 750; setActiveArea(g.id); setOpen((s) => ({ ...s, [g.id]: true })); document.getElementById("sec-" + g.id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
                   <span className="acc2-gi"><Icon n={g.icon} s={15} /></span>
-                  <span className="nm">{g.name}</span><span className="ct"><b>{on}</b><i>/{ps.length}</i></span>
+                  <span className="nm">{g.name}</span><CountOval on={on} total={ps.length} />
                 </button>
               );
             })}
@@ -330,7 +354,7 @@ export default function Access2Page() {
                   <button className="acc2-sh" onClick={() => setOpen((s) => ({ ...s, [g.id]: !s[g.id] }))}>
                     <span className="acc2-gi lg"><Icon n={g.icon} s={19} /></span>
                     <div className="acc2-sh-t"><h2>{g.name}</h2><p>{g.blurb}</p></div>
-                    <span className={`acc2-count ${on ? "has" : ""}`}>{on}<i>/{ps.length}</i></span>
+                    <CountOval on={on} total={ps.length} />
                     <span className={`acc2-chev ${isOpen ? "o" : ""}`}><Icon n="chevron" /></span>
                   </button>
                   {isOpen && <div className="acc2-body">{ps.map((p) => p.kind === "switch" ? <SwitchRow key={p.id} p={p} /> : <LadderCard key={p.id} p={p} />)}</div>}
@@ -639,10 +663,6 @@ function Style() {
   .acc2-gi { width:30px; height:30px; border-radius:9px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--accent) 11%, transparent); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
   .acc2-gi.lg { width:38px; height:38px; border-radius:11px; }
   .acc2-rail .nm { flex:1; font-size:13.5px; font-weight:700; }
-  .acc2-rail .ct { display:inline-flex; align-items:baseline; font-size:11.5px; font-weight:700; font-variant-numeric:tabular-nums; color:var(--muted); background:var(--bg); padding:2px 8px; border-radius:999px; letter-spacing:.01em; }
-  .acc2-rail .ct b { font-weight:750; color:var(--text); }
-  .acc2-rail .ct i { font-style:normal; font-weight:600; opacity:.55; margin-left:.5px; }
-  .acc2-rail button.on .ct b { color:var(--accent); }
   .acc2-main { display:flex; flex-direction:column; gap:14px; min-width:0; }
   .acc2-sect { padding:0; overflow:hidden; scroll-margin-top:12px; transition:box-shadow .15s, border-color .15s; }
   .acc2-sect:hover { border-color:color-mix(in srgb, var(--accent) 30%, var(--border)); }
@@ -650,9 +670,15 @@ function Style() {
   .acc2-sh-t { flex:1; min-width:0; }
   .acc2-sh h2 { margin:0; font-size:15.5px; font-weight:800; letter-spacing:-.02em; }
   .acc2-sh p { margin:2px 0 0; font-size:12px; color:var(--muted); line-height:1.35; }
-  .acc2-count { display:inline-flex; align-items:baseline; gap:1px; font-size:13px; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:.01em; color:var(--muted); white-space:nowrap; padding:4px 11px; border-radius:999px; background:var(--bg); border:var(--border); }
-  .acc2-count i { font-style:normal; font-weight:600; opacity:.5; font-size:11px; }
-  .acc2-count.has { color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); border-color:color-mix(in srgb, var(--accent) 26%, transparent); }
+  .acc2-count { position:relative; display:inline-flex; align-items:center; justify-content:center; width:48px; height:28px; flex:none; }
+  .acc2-count svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+  .acc2-count .bgf { fill:transparent; transition:fill .3s; }
+  .acc2-count .tk { fill:none; stroke:color-mix(in srgb, var(--muted) 34%, transparent); stroke-width:2; }
+  .acc2-count .pg { fill:none; stroke:var(--accent); stroke-width:2; stroke-linecap:round; transition:stroke-dashoffset .5s ease; }
+  .acc2-count .lb { position:relative; font-size:12px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:.02em; color:var(--text); }
+  .acc2-count.full .pg { stroke:var(--adm-ok); }
+  .acc2-count.full .bgf { fill:color-mix(in srgb, var(--adm-ok) 13%, transparent); }
+  .acc2-count.full .lb { color:var(--adm-ok); letter-spacing:.04em; }
   .acc2-chev { color:var(--muted); transition:transform .2s; display:grid; place-items:center; background:none; border:none; cursor:pointer; }
   .acc2-chev.o { transform:rotate(180deg); color:var(--accent); }
   .acc2-body { border-top:var(--border); padding:8px; display:flex; flex-direction:column; gap:8px; }
