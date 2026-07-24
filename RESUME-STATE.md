@@ -27,7 +27,7 @@
 1. Migration 181 — backfill restaurants.access_config.edit_menu {owner_opts,manager_opts} = the 7 sub-options
    (add_dish,edit_dish,edit_price,delete_dish,mark_86,manage_categories,manage_filters) all TRUE for existing
    restaurants (NOT edit_3d — admin-only). Panel display defaults; non-breaking. Run on DEV.
-2. ITEM 3 — real HD screenshots: headless-capture guest menu dish card / manager bill+discount / kitchen / tablet
+2. [DONE] ITEM 3 — real HD screenshots: headless-capture guest menu dish card / manager bill+discount / kitchen / tablet
    into public/admin-help/*.png; wire /aevinite/access (i) popover to lazy-load the matching image + lightbox,
    replacing the placeholder. Map each PERMISSIONS[].shot → a file (lib/accessModel has `shot` in the prototype
    but the REAL panel's (i) uses perm.what + a placeholder — wire the image there). Keep lazy/egress-safe.

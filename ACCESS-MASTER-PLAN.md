@@ -181,7 +181,7 @@ STAGE 9 — Info screenshots + bulletproof + ship
   non-breaking (unconfigured/all-true → allow); owner/admin full. edit_price/mark_86 ride edit_dish;
   edit_3d server gate + the display-default backfill migration = small TODO.
 - ITEM 2 discount %-cap — DONE + VERIFIED live 4/4 (manager 90% over 10% cap → 403; 5% ok; cap 100% → non-breaking). editor(manager)+tablet(waiter) gated via lib/discountCap.
-- ITEM 3 real (i) screenshots — TODO (manual capture). Small TODOs: edit_3d server gate (DEFERRED — 3D saved in item upsert, needs col names+strip; admin-only). Migration 181 backfill edit_menu defaults = DONE (applied dev, 15/15).
+- ITEM 3 real (i) screenshots — DONE+VERIFIED live (real panel shots in public/admin-help/; (i) popover lazy-loads per-area image + lightbox; asset 200, 0 errors). Small TODOs: edit_3d server gate (DEFERRED — 3D saved in item upsert, needs col names+strip; admin-only). Migration 181 backfill edit_menu defaults = DONE (applied dev, 15/15).
 - MAIN DEPLOY — pending owner's go (everything on 3-d-backup only).
 
 ## 6. STATUS LOG:
