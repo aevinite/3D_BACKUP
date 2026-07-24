@@ -434,14 +434,17 @@ export default function Access2Page() {
                         const on = subOn(p, shown, spt.id);
                         const dis = spt.adminOnly && shown !== "owner";           // admin-only sub can't be delegated below owner
                         const bad = shown !== "owner" && on && !parentHas(spt, shown); // holding what the tier above lacks
-                        const others = tiers.filter((t) => t !== shown && subOn(p, t, spt.id)).map((t) => t[0].toUpperCase());
+                        // Corner badges = the OTHER tiers that also hold this sub-option.
+                        // Owner→O, Manager→M, waiter tier→T (the tablet — the rest of the UI
+                        // says "+ Tablet"/"T", so t[0] "W" was the odd one out; owner 2026-07-24).
+                        const others = tiers.filter((t) => t !== shown && subOn(p, t, spt.id)).map((t) => t === "waiter" ? "T" : t[0].toUpperCase());
                         return (
                           <div key={spt.id} className={`chip ${on ? "on" : ""} ${bad ? "bad" : ""} ${dis ? "dis" : ""}`}>
                             <button disabled={dis} onClick={() => setSub(p, shown, spt.id, !on)}>
                               <span className="box"><Icon n="check" s={12} /></span>{spt.name}
                               {spt.adminOnly && <span className="tag">ADMIN</span>}
                             </button>
-                            {others.length > 0 && <span className="xb" title={"Also on for: " + others.map((o) => o === "O" ? "owner" : o === "M" ? "manager" : "waiter").join(", ")}>{others.join("")}</span>}
+                            {others.length > 0 && <span className="xb" title={"Also on for: " + others.map((o) => o === "O" ? "owner" : o === "M" ? "manager" : "tablet").join(", ")}>{others.join("")}</span>}
                             <button className="ib" onClick={() => setInfo({ perm: p, sub: spt.id })}><Icon n="info" s={12} /></button>
                           </div>
                         );
