@@ -3805,13 +3805,22 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 20%, transparent), transparent);
   transform: translateX(2px);
 }
-/* Every page title wears the spectrum. */
-.adm.adx .adm-page-h {
-  background: var(--accent-grad);
+/* Page titles stay the original solid --text colour (owner: don't gradient the heading). */
+/* The breadcrumb PATH flows blue → violet → red across its whole width, so each segment
+   lands at its own hue automatically: 2 crumbs = blue→red, 3 = blue→violet→red,
+   4 = blue→light→violet→red, and so on. */
+.adm.adx .adm-crumbs {
+  width: fit-content; max-width: 100%;
+  background: linear-gradient(90deg, #2f8bff 0%, #8b5cf6 50%, #ff5e7e 100%);
   -webkit-background-clip: text; background-clip: text;
-  -webkit-text-fill-color: transparent; color: transparent;
-  width: fit-content;
 }
+.adm.adx .adm-crumbs a,
+.adm.adx .adm-crumbs .cur,
+.adm.adx .adm-crumbs .sep {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent;
+}
+.adm.adx .adm-crumbs a:hover { text-decoration: underline; text-decoration-color: #8b5cf6; }
 /* Access panel: the AREA ICONS get their own VIOLET identity so the page isn't all-blue,
    and the SELECTED area's icon wears the full blue→violet→red spectrum. Blue base elsewhere. */
 .adm.adx .acc2-gi {
