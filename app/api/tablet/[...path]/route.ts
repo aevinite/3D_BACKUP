@@ -41,7 +41,7 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 // unpaid/cooking close|restart override). The admin super-user bypasses it; and
 // until ANY active manager has a PIN we stay open (bootstrap) so a waiter is never
 // locked out before setup. Returns { allow:true, managerName? } or a 403 to relay.
-type PinGate = { allow: true; managerName?: string } | { allow: false; resp: NextResponse };
+type PinGate = { allow: true; managerName?: string; managerNames?: string[]; sharedPin?: boolean } | { allow: false; resp: NextResponse };
 async function managerPinGate(req: NextRequest, body: any, rid: string): Promise<PinGate> {
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { allow: true, managerName: "admin" };
   if (!(await anyManagerHasPin(rid))) return { allow: true }; // no manager PIN set yet for THIS restaurant → open
@@ -53,9 +53,19 @@ async function managerPinGate(req: NextRequest, body: any, rid: string): Promise
       ? { allow: false, resp: NextResponse.json({ error: "Too many wrong PINs — wait a minute and try again.", locked: true }, { status: 429 }) }
       : { allow: false, resp: NextResponse.json({ error: "A manager PIN is required for this.", needPin: true }, { status: 403 }) };
   }
-  return { allow: true, managerName: check.managerName };
+  return { allow: true, managerName: check.managerName, managerNames: check.managerNames, sharedPin: check.sharedPin };
 }
-const byNote = (g: { managerName?: string }) => (g.managerName && g.managerName !== "admin" ? ` (by ${g.managerName})` : "");
+// Log tag naming WHOSE PIN unlocked the action. A unique PIN names the one manager it
+// belongs to; a PIN shared by two+ managers is genuinely ambiguous, so we name every one
+// it could have been ("shared PIN") rather than credit the wrong person. Admin bypass
+// (managerName "admin") and 'on'-mode actions (no PIN) add nothing.
+const byNote = (g: { managerName?: string; managerNames?: string[]; sharedPin?: boolean }) => {
+  if (!g.managerName || g.managerName === "admin") return "";
+  const names = g.managerNames && g.managerNames.length ? g.managerNames : [g.managerName];
+  return names.length > 1
+    ? ` (PIN shared by ${names.join(" or ")})`
+    : ` (by ${names[0]}'s PIN)`;
+};
 
 // Setting-aware gate for a tablet BILLING action. The manager's Access settings
 // hold a tri-state per action (tablet_discount / tablet_mark_paid / tablet_invoice):
