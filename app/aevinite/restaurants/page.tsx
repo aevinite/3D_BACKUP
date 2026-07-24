@@ -786,7 +786,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
           {/* Access & permissions is its OWN screen (owner 2026-07-23) reached by a button
               from here, not shown inline. Carries ?rid so access2 preselects this restaurant;
               &from=rest lets its breadcrumb come back to this detail view. */}
-          <a className="adm-btn primary" href={`/aevinite/access2?rid=${restaurant.id}&from=rest`}
+          <a className="adm-btn primary" href={`/aevinite/access?rid=${restaurant.id}&from=rest`}
             title={`Manage who can do what at ${restaurant.name}`}>
             <i className="fas fa-user-shield" style={{ marginRight: 7 }} aria-hidden="true" />Access &amp; permissions
           </a>
