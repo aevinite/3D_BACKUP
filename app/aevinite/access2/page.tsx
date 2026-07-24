@@ -471,7 +471,7 @@ export default function Access2Page() {
   function InfoBtn({ p }: { p: Perm }) { return <button className="acc2-ib" onClick={() => setInfo({ perm: p })}><Icon n="info" s={12} /></button>; }
   function InfoPop() {
     if (!info) return null;
-    const sub = info.sub && info.perm.sub?.find((s) => s.id === info.sub);
+    const sub = info.sub ? info.perm.sub?.find((s) => s.id === info.sub) : undefined;
     return (
       <div className="acc2-infowrap" onClick={() => setInfo(null)}>
         <div className="acc2-info" onClick={(e) => e.stopPropagation()}>
