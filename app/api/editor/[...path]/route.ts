@@ -63,6 +63,21 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
 
+// Activity-log visibility (owner 2026-07-24, access panel "Activity log" power). Deliberately
+// NON-BREAKING: a manager keeps the log UNLESS the admin or owner has EXPLICITLY switched
+// view_logs off in the access panel (owner_entitlements.power_view_logs === false, or
+// manager_permissions.view_logs === false). An absent flag = keep it (every restaurant that
+// never touched the new panel is unchanged). Owner + admin (no staff cookie) always see it.
+async function canViewLogs(g: { user: StaffUser | null }, rid: string): Promise<boolean> {
+  const u = g.user;
+  if (!u || u.role === "owner") return true;
+  const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
+    { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
+  if (r?.owner_entitlements?.power_view_logs === false) return false;   // admin removed the whole power
+  if (r?.manager_permissions?.view_logs === false) return false;        // owner pulled it back from managers
+  return true;
+}
+
 // Granular Edit-the-menu sub-option gate (owner 2026-07-24). Only restricts a plain MANAGER:
 // admin (no cookie) + owner pass fully. NON-BREAKING: if the owner hasn't configured
 // access_config.edit_menu.manager_opts for this restaurant, allow everything (current behaviour
@@ -976,6 +991,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     if (p === "oplog") {
+      if (!(await canViewLogs(g, rid))) return permDenied("view the activity log");
       // The operation log: recent staff actions across all panels. HIERARCHY RULE
       // (owner, 2026-07-03 — "in the manager's logs there shouldn't be owner or admin
       // actions"): a lower role must never observe a higher role's activity. So the
