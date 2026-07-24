@@ -1,18 +1,18 @@
-// POST /api/admin/oplog/ack — mark Everything-Log error rows SEEN and/or RESOLVED.
+// POST /api/admin/oplog/ack — mark Everything-Log error rows SEEN / unseen for the notification
+// bell (owner 2026-07-24: "stop showing in the notification when it has been seen").
 //
-// Two INDEPENDENT states (owner 2026-07-24), both nullable timestamps on staff_actions (mig 179):
-//   • seen     — drives the notification-bell badge. Opening the bell marks the shown errors
-//                seen so they stop counting; "mark unread" clears it so they count again.
-//   • resolved — drives the red styling in the log. The admin marks an error handled and it
-//                stops showing red; "reopen" brings the red back.
+// `seen_at` (mig 182) is INDEPENDENT of `resolved_at` (mig 181, the red-in-the-log state handled by
+// /api/admin/resolve-error). This endpoint only ever touches SEEN:
+//   • opening the bell marks the shown errors seen → the badge clears;
+//   • a per-error "mark unread" clears seen_at → the badge shows that one again.
 //
-// POST { action_ids: string[], seen?: boolean, resolved?: boolean }
-//   Applies ONLY the fields present. seen/resolved true → set the timestamp to now; false → NULL.
-//   Marking RESOLVED also marks SEEN (a handled error shouldn't keep nagging the bell) — but
-//   reopening does NOT un-see, and mark-unread only touches `seen`.
-//
-// Admin-gated; ids UUID-validated + capped; idempotent (the write is naturally re-runnable, but
-// we honour X-LFH-Action-Id per the offline-sync contract). Scoped update by id list — no scans.
+// POST { action_ids: string[], seen: boolean }  — mark those rows seen/unseen.
+// POST { all: true, seen: true }                 — mark EVERY still-unseen error in the last 24h
+//                                                   seen in one shot (what opening the bell does, so
+//                                                   the badge fully clears even past the 10 shown).
+// Admin-gated; ids UUID-validated + capped; idempotent (naturally re-runnable, but we honour
+// X-LFH-Action-Id per the offline-sync contract). Scoped update — the `all` path is bounded to the
+// 24h window and rides the partial idx_staff_actions_error_unseen index, never a full scan.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
@@ -29,25 +29,26 @@ async function postHandler(req: NextRequest) {
   let body: Record<string, unknown> = {};
   try { body = await req.json(); } catch { /* empty */ }
 
-  // Validate + cap the id list (a bell open marks at most ~10 shown errors; 200 is a safe ceiling).
+  if (typeof body.seen !== "boolean") return err("seen (boolean) is required");
+  const nowIso = new Date().toISOString();
+
+  // "Mark all seen" — clears the whole bell badge on open (bounded to the 24h badge window).
+  if (body.all === true) {
+    if (!body.seen) return err("all-mode only marks seen");
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const r = await sb.from("staff_actions").update({ seen_at: nowIso })
+      .eq("level", "error").is("seen_at", null).gte("created_at", since24h).select("id");
+    if (r.error) return err(r.error.message, 500);
+    return NextResponse.json({ ok: true, changed: r.data?.length ?? 0 });
+  }
+
+  // Validate + cap the id list (per-row toggles, e.g. "mark unread"; 200 is a safe ceiling).
   const ids = Array.isArray(body.action_ids)
     ? Array.from(new Set((body.action_ids as unknown[]).filter((x): x is string => typeof x === "string" && UUID.test(x)))).slice(0, 200)
     : [];
   if (ids.length === 0) return err("no valid action_ids");
 
-  const hasSeen = typeof body.seen === "boolean";
-  const hasResolved = typeof body.resolved === "boolean";
-  if (!hasSeen && !hasResolved) return err("nothing to change (pass seen and/or resolved)");
-
-  const now = new Date().toISOString();
-  const patch: Record<string, string | null> = {};
-  if (hasResolved) {
-    patch.resolved_at = body.resolved ? now : null;
-    if (body.resolved) patch.seen_at = now; // resolving also stops the bell nagging
-  }
-  if (hasSeen) patch.seen_at = body.seen ? now : null; // explicit seen wins (e.g. mark-unread)
-
-  const r = await sb.from("staff_actions").update(patch).in("id", ids).select("id");
+  const r = await sb.from("staff_actions").update({ seen_at: body.seen ? nowIso : null }).in("id", ids).select("id");
   if (r.error) return err(r.error.message, 500);
   return NextResponse.json({ ok: true, changed: r.data?.length ?? 0 });
 }

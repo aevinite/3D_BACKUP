@@ -139,18 +139,19 @@ export default function AdminLogs() {
     if (r.ok) toast("Sent to Claude — it'll be looked at overnight."); else toast(r.error || "Couldn't send that.", "err");
   };
 
-  // Mark an error row resolved (stops it showing red) or reopen it. Optimistic: flip the local
-  // row instantly, revert by reloading if the server rejects it. Resolving also marks it seen so
-  // the notification bell stops nagging about an error that's been handled.
+  // Mark an error resolved (stops it showing red) or reopen it — via the SAME group endpoint the
+  // Repair page + dashboard use (/api/admin/resolve-error), so all three stay in step. It acts on
+  // the whole repeat-group (same panel + action + message + restaurant), so we optimistically flip
+  // every matching row locally the way the server does, and reload only if the server rejects it.
   const markResolved = async (a: Action, resolved: boolean) => {
     const now = new Date().toISOString();
-    setOps((prev) => prev ? prev.map((x) => x.id === a.id
-      ? { ...x, resolved_at: resolved ? now : null, seen_at: resolved ? (x.seen_at || now) : x.seen_at }
-      : x) : prev);
-    const r = await adminFetch<{ ok: boolean }>("/api/admin/oplog/ack", {
+    const sameGroup = (x: Action) => x.level === "error" && x.panel === a.panel && x.action === a.action
+      && (x.detail ?? null) === (a.detail ?? null) && (x.restaurant_id ?? null) === (a.restaurant_id ?? null);
+    setOps((prev) => prev ? prev.map((x) => sameGroup(x) ? { ...x, resolved_at: resolved ? now : null } : x) : prev);
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/resolve-error", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now()) },
-      body: JSON.stringify({ action_ids: [a.id], resolved }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action_id: a.id, reopen: !resolved }),
     });
     if (r.ok) toast(resolved ? "Marked resolved." : "Reopened."); else { toast(r.error || "Couldn't update that.", "err"); loadOps(); }
   };

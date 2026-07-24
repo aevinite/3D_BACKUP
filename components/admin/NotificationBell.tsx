@@ -71,12 +71,13 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
     if (seenOnce.current || !feed) return;
     seenOnce.current = true;
     setErrs(feed.errors || []);
-    const ids = (feed.errors || []).map((e) => e.id);
-    if (ids.length === 0) return;
+    if ((feed.errorCount || 0) === 0) return;
+    // Mark ALL unseen errors seen (not just the ≤10 shown) so the badge fully clears in one open
+    // even during a burst — otherwise it stayed lit with the remainder (audit 2026-07-24).
     fetch("/api/admin/oplog/ack", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-LFH-Action-Id": rand() },
-      body: JSON.stringify({ action_ids: ids, seen: true }),
+      body: JSON.stringify({ all: true, seen: true }),
     }).then(() => onChanged()).catch(() => { /* badge just won't clear this tick */ });
   }, [feed, onChanged]);
 
