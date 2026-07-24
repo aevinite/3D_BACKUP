@@ -12,7 +12,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   GROUPS, PERMISSIONS, PERM_BY_ID, permsOf, maxReach, reachLevel, allowed,
-  tabletValue, moduleKey, type Perm, type AccessState,
+  tabletValue, moduleKey, type Perm, type SubOpt, type AccessState,
 } from "@/lib/accessModel";
 
 type Rest = { id: string; name: string; slug: string; active: boolean };
@@ -43,6 +43,12 @@ const Icon = ({ n, s = 16 }: { n: string; s?: number }) => (
 );
 
 const REACH_LABEL = ["Off", "Owner only", "Owner + Manager", "Owner + Mgr + Tablet"];
+// The three sub-option tiers mirror the reach ladder (owner ⊇ manager ⊇ waiter).
+type Side = "owner" | "manager" | "waiter";
+const OPTS = { owner: "owner_opts", manager: "manager_opts", waiter: "waiter_opts" } as const;
+const SIDE_META: Record<Side, { label: string; icon: string }> = {
+  owner: { label: "Owner can…", icon: "crown" }, manager: { label: "Manager can…", icon: "users" }, waiter: { label: "Waiter can…", icon: "user" },
+};
 // The per-user override is stored+enforced under the tablet_* column key (staff_users.permissions,
 // mig 115, read by tabletPerm) — NOT the capability id. MODULE-SCOPE so it's never in the TDZ when
 // resolved()/holders() run during render (moving it inside the component crashed the panel — a
@@ -74,7 +80,7 @@ export default function Access2Page() {
   const [personFilter, setPersonFilter] = useState<string>("");
   const [open, setOpen] = useState<Record<string, boolean>>({ guest: true });
   const [activeArea, setActiveArea] = useState<string>("guest"); // the ONE rail item highlighted (nav target)
-  const [side, setSide] = useState<Record<string, "owner" | "manager">>({});
+  const [side, setSide] = useState<Record<string, Side>>({});
   const [openCards, setOpenCards] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<"" | "saving" | "saved" | "err">("");
   const [info, setInfo] = useState<{ perm: Perm; sub?: string } | null>(null);
@@ -192,14 +198,22 @@ export default function Access2Page() {
   };
   const setMaster = (p: Perm, on: boolean) => { setReach(p, on ? Math.max(1, reachLevel(p, st)) : 0); if (on) setOpenCards((s) => ({ ...s, [p.id]: true })); else setOpenCards((s) => ({ ...s, [p.id]: false })); };
   const setWaiter = (p: Perm, v: string) => { if (p.tabletNew) save({ config: { [p.id]: { tablet: v } } }); else if (p.tablet) save({ tablet: { [p.tablet]: v } }); };
-  const setSub = (p: Perm, sideK: "owner" | "manager", subId: string, on: boolean) => {
-    const cur = { ...((st.config[p.id]?.[sideK === "owner" ? "owner_opts" : "manager_opts"]) || {}) };
+  const setSub = (p: Perm, sideK: Side, subId: string, on: boolean) => {
+    const cur = { ...((st.config[p.id]?.[OPTS[sideK]]) || {}) };
     cur[subId] = on;
-    const patch: any = { config: { [p.id]: { [sideK === "owner" ? "owner_opts" : "manager_opts"]: cur } } };
-    // manager can't exceed owner: turning an owner option off drops it for the manager too
-    if (sideK === "owner" && !on) {
-      const mgr = { ...((st.config[p.id]?.manager_opts) || {}) };
-      if (mgr[subId]) { delete mgr[subId]; patch.config[p.id].manager_opts = mgr; }
+    const patch: any = { config: { [p.id]: { [OPTS[sideK]]: cur } } };
+    // Cascade DOWN — a lower tier can never hold a sub-option a higher one lacks.
+    // owner OFF → drop it for manager AND waiter; manager OFF → drop it for waiter.
+    if (!on) {
+      if (sideK === "owner") {
+        const mgr = { ...((st.config[p.id]?.manager_opts) || {}) };
+        const wtr = { ...((st.config[p.id]?.waiter_opts) || {}) };
+        if (mgr[subId]) { delete mgr[subId]; patch.config[p.id].manager_opts = mgr; }
+        if (wtr[subId]) { delete wtr[subId]; patch.config[p.id].waiter_opts = wtr; }
+      } else if (sideK === "manager") {
+        const wtr = { ...((st.config[p.id]?.waiter_opts) || {}) };
+        if (wtr[subId]) { delete wtr[subId]; patch.config[p.id].waiter_opts = wtr; }
+      }
     }
     save(patch);
   };
@@ -220,11 +234,16 @@ export default function Access2Page() {
     else if (p.adminSwitch) save({ adminSwitches: { [p.adminSwitch]: on } });
   };
 
-  const subOn = (p: Perm, sideK: "owner" | "manager", subId: string) =>
-    !!(st.config[p.id]?.[sideK === "owner" ? "owner_opts" : "manager_opts"]?.[subId]);
+  const subOn = (p: Perm, sideK: Side, subId: string) =>
+    !!(st.config[p.id]?.[OPTS[sideK]]?.[subId]);
   const conflicts = (p: Perm): string[] => {
-    if (!p.sub || reachLevel(p, st) < 2) return [];
-    return p.sub.filter((spt) => subOn(p, "manager", spt.id) && !subOn(p, "owner", spt.id)).map((s) => s.name);
+    if (!p.sub) return [];
+    const lvl = reachLevel(p, st);
+    const bad = new Set<string>();
+    // a lower tier holding a sub-option a higher tier lacks = an impossible state to flag
+    if (lvl >= 2) p.sub.forEach((s) => { if (subOn(p, "manager", s.id) && !subOn(p, "owner", s.id)) bad.add(s.name); });
+    if (lvl >= 3 && p.waiter) p.sub.forEach((s) => { if (subOn(p, "waiter", s.id) && !subOn(p, "manager", s.id)) bad.add(s.name); });
+    return [...bad];
   };
 
   const sortedStaff = [...staff].sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9) || (a.name || a.username).localeCompare(b.name || b.username));
@@ -344,7 +363,11 @@ export default function Access2Page() {
     const isOpen = !!openCards[p.id];
     const sd = side[p.id] || "owner";
     const canMgr = lvl >= 2;
-    const shown = sd === "manager" && canMgr ? "manager" : "owner";
+    const canWtr = !!p.waiter && lvl >= 3;
+    // which tiers this capability actually reaches → which "…can" tabs to show
+    const tiers: Side[] = ["owner", ...(canMgr ? ["manager"] as Side[] : []), ...(canWtr ? ["waiter"] as Side[] : [])];
+    const shown: Side = tiers.includes(sd) ? sd : "owner";
+    const parentHas = (spt: SubOpt, s: Side) => s === "owner" ? true : s === "manager" ? subOn(p, "owner", spt.id) : subOn(p, "manager", spt.id);
     const conf = conflicts(p);
     const master = p.fixedTop ? true : lvl >= 1;
     const reachTxt = p.fixedTop ? "Owner + Manager" + (lvl >= 3 ? " + Tablet" : "") : REACH_LABEL[lvl];
@@ -376,13 +399,18 @@ export default function Access2Page() {
               <p className="acc2-hint"><Icon n="shield" /> Switched off for this restaurant. Turn “Admin allows” on to open the settings.</p>
             ) : master ? (
               <>
-                {/* reach steps capped at the capability's max: owner-only caps (Issues/Customers)
-                    show just "Owner"; money/floor caps show up to "+ Tablet". */}
+                {/* CUMULATIVE reach ladder (capped at the capability's max): the model is
+                    additive — manager always includes owner, tablet always includes manager —
+                    so every step UP TO the chosen reach fills in (soft) and the chosen ceiling
+                    is solid + checked. Reads like signal bars: you can SEE that "+ Manager"
+                    still keeps the owner. Clicking a step sets the ceiling. Owner-only caps
+                    (Issues/Customers) show just "Owner"; money/floor caps go up to "+ Tablet". */}
                 {!p.fixedTop && !p.ownerOnly && (
                   <div className="acc2-reach">
                     {Array.from({ length: maxReach(p) }, (_, i) => i + 1).map((v) => (
-                      <button key={v} className={`rs r${v} ${lvl === v ? "on" : ""}`} onClick={() => setReach(p, v)}>
+                      <button key={v} className={`rs r${v} ${lvl >= v ? "on" : ""} ${lvl === v ? "cur" : ""}`} onClick={() => setReach(p, v)} title={v === 1 ? "Owner only" : v === 2 ? "Owner and managers" : "Owner, managers and waiters"}>
                         <Icon n={v === 1 ? "crown" : v === 2 ? "users" : "user"} s={14} />{v === 1 ? "Owner" : v === 2 ? "+ Manager" : "+ Tablet"}
+                        {lvl === v && <span className="rc"><Icon n="check" s={11} /></span>}
                       </button>
                     ))}
                   </div>
@@ -392,24 +420,28 @@ export default function Access2Page() {
 
                 {p.sub && (
                   <>
+                    {/* ONE "…can" tab per tier this capability reaches: Owner, +Manager, +Tablet(Waiter).
+                        Each tier picks WHICH sub-actions it gets; cascade is waiter ⊆ manager ⊆ owner. */}
                     <div className="acc2-sides">
-                      <button className={`sd owner ${shown === "owner" ? "on" : ""}`} onClick={() => setSide((s) => ({ ...s, [p.id]: "owner" }))}><Icon n="crown" s={14} /> Owner can… <b>{p.sub.filter((spt) => subOn(p, "owner", spt.id)).length}/{p.sub.length}</b></button>
-                      <button className={`sd manager ${shown === "manager" ? "on" : ""}`} disabled={!canMgr} onClick={() => setSide((s) => ({ ...s, [p.id]: "manager" }))}><Icon n="users" s={14} /> Manager can… <b>{canMgr ? `${p.sub.filter((spt) => subOn(p, "manager", spt.id)).length}/${p.sub.length}` : "—"}</b></button>
+                      {tiers.map((tk) => (
+                        <button key={tk} className={`sd ${tk} ${shown === tk ? "on" : ""}`} onClick={() => setSide((s) => ({ ...s, [p.id]: tk }))}>
+                          <Icon n={SIDE_META[tk].icon} s={14} /> {SIDE_META[tk].label} <b>{p.sub!.filter((spt) => subOn(p, tk, spt.id)).length}/{p.sub!.length}</b>
+                        </button>
+                      ))}
                     </div>
                     <div className={`acc2-chips ${shown}`}>
                       {p.sub.map((spt) => {
                         const on = subOn(p, shown, spt.id);
-                        const other = shown === "owner" ? subOn(p, "manager", spt.id) : subOn(p, "owner", spt.id);
-                        const badge = shown === "owner" ? (other && canMgr) : other;
-                        const dis = spt.adminOnly && shown === "manager";
-                        const bad = shown === "manager" && on && !subOn(p, "owner", spt.id);
+                        const dis = spt.adminOnly && shown !== "owner";           // admin-only sub can't be delegated below owner
+                        const bad = shown !== "owner" && on && !parentHas(spt, shown); // holding what the tier above lacks
+                        const others = tiers.filter((t) => t !== shown && subOn(p, t, spt.id)).map((t) => t[0].toUpperCase());
                         return (
                           <div key={spt.id} className={`chip ${on ? "on" : ""} ${bad ? "bad" : ""} ${dis ? "dis" : ""}`}>
                             <button disabled={dis} onClick={() => setSub(p, shown, spt.id, !on)}>
                               <span className="box"><Icon n="check" s={12} /></span>{spt.name}
                               {spt.adminOnly && <span className="tag">ADMIN</span>}
                             </button>
-                            {badge && <span className={`xb ${shown === "owner" ? "m" : "o"}`} title={shown === "owner" ? "Also on for the manager" : "Also on for the owner"}>{shown === "owner" ? "M" : "O"}</span>}
+                            {others.length > 0 && <span className="xb" title={"Also on for: " + others.map((o) => o === "O" ? "owner" : o === "M" ? "manager" : "waiter").join(", ")}>{others.join("")}</span>}
                             <button className="ib" onClick={() => setInfo({ perm: p, sub: spt.id })}><Icon n="info" s={12} /></button>
                           </div>
                         );
@@ -647,8 +679,11 @@ function Style() {
   .acc2-hint { display:flex; gap:8px; align-items:flex-start; font-size:12.5px; color:var(--muted); margin:2px 0; }
   .acc2-reach { display:grid; grid-template-columns:repeat(auto-fit,minmax(90px,1fr)); gap:4px; padding:4px; background:var(--card); border:var(--border); border-radius:11px; }
   .acc2-reach .rs { display:flex; align-items:center; justify-content:center; gap:6px; min-height:42px; border-radius:8px; border:none; background:transparent; color:var(--muted); font-weight:700; font-size:12.5px; cursor:pointer; }
-  .acc2-reach .rs.on { color:#fff; background:var(--accent); }
-  .acc2-reach .rs.r1.on { background:color-mix(in srgb,var(--accent) 22%,transparent); color:var(--accent); }
+  .acc2-reach .rs { position:relative; transition:background .14s, color .14s; }
+  .acc2-reach .rs.on { color:var(--accent); background:color-mix(in srgb,var(--accent) 20%,transparent); }
+  .acc2-reach .rs.cur { color:#fff; background:var(--accent); }
+  .acc2-reach .rs .rc { display:grid; place-items:center; width:15px; height:15px; border-radius:999px; background:rgba(255,255,255,.28); }
+  .acc2-reach .rs.cur .rc { color:#fff; }
   .acc2-sides { display:flex; gap:4px; background:var(--card); border:var(--border); border-radius:11px; padding:4px; margin:14px 0 12px; }
   .acc2-sides .sd { flex:1; display:flex; align-items:center; justify-content:center; gap:7px; min-height:40px; border-radius:8px; border:none; background:transparent; color:var(--muted); font-weight:700; font-size:13px; cursor:pointer; }
   .acc2-sides .sd.on { background:var(--muted2); color:var(--text); }
@@ -662,8 +697,7 @@ function Style() {
   .acc2-chips .chip.bad { border-color:var(--adm-danger); background:color-mix(in srgb,var(--adm-danger) 12%,transparent); }
   .acc2-chips .chip.dis { opacity:.5; }
   .acc2-chips .chip .ib { padding:0 9px 0 2px; background:none; border:none; color:var(--muted); cursor:pointer; align-self:center; }
-  .acc2-chips .chip .xb { position:absolute; top:-7px; right:-6px; width:18px; height:18px; border-radius:99px; display:grid; place-items:center; font-size:10px; font-weight:800; font-family:ui-monospace,monospace; border:2px solid var(--bg); }
-  .acc2-chips .chip .xb.m { background:var(--adm-ok); color:#04210f; } .acc2-chips .chip .xb.o { background:var(--accent); color:#fff; }
+  .acc2-chips .chip .xb { position:absolute; top:-7px; right:-6px; min-width:18px; height:18px; padding:0 4px; border-radius:99px; display:grid; place-items:center; font-size:9.5px; font-weight:800; letter-spacing:.06em; font-family:ui-monospace,monospace; border:2px solid var(--bg); background:var(--accent); color:#fff; }
   .acc2-limit { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:14px; padding:11px 13px; border-radius:11px; background:var(--card); border:var(--border); }
   .acc2-limit .lbl { flex:1; min-width:150px; font-size:13px; font-weight:700; } .acc2-limit small { display:block; font-weight:400; color:var(--muted); }
   .acc2-limit .segs { display:flex; gap:3px; background:var(--bg); border:var(--border); border-radius:9px; padding:3px; }
