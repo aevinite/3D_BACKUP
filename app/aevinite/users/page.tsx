@@ -27,12 +27,6 @@ const card: React.CSSProperties = { background: "var(--card)", border: "var(--bo
 const field: React.CSSProperties = { boxSizing: "border-box", padding: "10px 12px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 14, width: "100%" };
 const btn = (bg: string): React.CSSProperties => ({ padding: "10px 14px", borderRadius: 9, border: 0, background: bg, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", minHeight: 40 });
 const label: React.CSSProperties = { display: "grid", gap: 4, fontSize: 12, color: "var(--muted)" };
-// A small toggleable filter "chip" (role filters). `on` gives it the accent fill.
-const chip = (on: boolean, color?: string): React.CSSProperties => ({
-  padding: "7px 14px", borderRadius: 999, border: on ? "1px solid transparent" : "var(--border)",
-  background: on ? (color || "var(--text)") : "var(--bg)", color: on ? "#fff" : "var(--text)",
-  fontWeight: 600, fontSize: 12.5, cursor: "pointer", minHeight: 34, lineHeight: 1,
-});
 
 export default function AdminUsers() {
   const [users, setUsers] = useState<User[]>([]);
@@ -64,6 +58,9 @@ export default function AdminUsers() {
   // Which roles to show. Empty = all roles. Roles combine (e.g. manager + tablet).
   const [filterRoles, setFilterRoles] = useState<string[]>([]);
   const [search, setSearch] = useState("");
+  // Spotlight redesign (owner 2026-07-24): the create form is tucked behind a "+ Add user"
+  // button so the SEARCH is the hero. Opens on demand.
+  const [addOpen, setAddOpen] = useState(false);
 
   const scopedName = filterRid ? restaurants.find((r) => r.id === filterRid)?.name : "";
 
@@ -126,29 +123,60 @@ export default function AdminUsers() {
     finally { setCreating(false); creatingRef.current = false; }
   }
 
-  return (
-    <>
-      <h1 className="adm-page-h">Users &amp; access</h1>
-      <p className="adm-page-sub">Create logins for any restaurant&apos;s manager, kitchen and tablet panels — each user is scoped to the restaurant you pick. (Owners are assigned on the Restaurants page.)</p>
+  // Group the visible users by restaurant (Spotlight "browse by restaurant" list).
+  const groups: Record<string, User[]> = {};
+  visible.forEach((u) => { const k = u.restaurantName || "No restaurant"; (groups[k] ||= []).push(u); });
+  const groupNames = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+  const initialOf = (u: User) => (u.name || u.username).charAt(0).toUpperCase();
 
-      {err ? <div style={{ ...card, borderColor: "#7f1d1d", color: "#fca5a5", marginBottom: 14 }}>{err}</div> : null}
+  return (
+    <div className="usp">
+      <UsersStyle />
+      <h1 className="adm-page-h">Users &amp; access</h1>
+      <p className="adm-page-sub">Every staff login across your restaurants. Search a person, or filter by restaurant / role — then tap them to edit. (Owners are assigned on the Restaurants page.)</p>
+
+      {err ? <div className="usp-banner err">{err}</div> : null}
 
       {/* One-time password reveal banner (after CREATE) */}
       {reveal ? (
-        <div style={{ ...card, borderColor: "#166534", marginBottom: 14 }}>
-          <div style={{ fontSize: 13, color: "#86efac" }}>
-            Password for <b>{reveal.name}</b> — copy it now, it won&apos;t be shown again:
-          </div>
+        <div className="usp-banner ok">
+          <div style={{ fontSize: 13 }}>Password for <b>{reveal.name}</b> — copy it now, it won&apos;t be shown again:</div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-            <code style={{ fontSize: 18, background: "var(--bg)", padding: "8px 12px", borderRadius: 8, letterSpacing: 1 }}>{reveal.password}</code>
-            <button style={btn("#3b82f6")} onClick={() => navigator.clipboard?.writeText(reveal.password)}>Copy</button>
-            <button style={btn("#374151")} onClick={() => setReveal(null)}>Done</button>
+            <code className="usp-code">{reveal.password}</code>
+            <button className="usp-btn blue" onClick={() => navigator.clipboard?.writeText(reveal.password)}>Copy</button>
+            <button className="usp-btn ghost" onClick={() => setReveal(null)}>Done</button>
           </div>
         </div>
       ) : null}
 
-      {/* Create user */}
-      <section style={{ ...card, marginBottom: 18 }}>
+      {/* ── Spotlight hero: search is the star ── */}
+      <div className="usp-hero">
+        <label className="usp-search">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search a person — name, role, restaurant or phone…" aria-label="Search users" />
+          {search ? <button type="button" className="clr" onClick={() => setSearch("")} aria-label="Clear">×</button> : null}
+        </label>
+        <div className="usp-tools">
+          <select value={filterRid} onChange={(e) => setFilterRid(e.target.value)} className="usp-sel" aria-label="Filter by restaurant">
+            <option value="">All restaurants</option>
+            {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+          <div className="usp-chips">
+            <button type="button" onClick={() => setFilterRoles([])} className={`usp-chip ${filterRoles.length === 0 ? "on" : ""}`}>All</button>
+            {ROLES.map((r) => (
+              <button key={r} type="button" onClick={() => toggleRole(r)} className={`usp-chip ${filterRoles.includes(r) ? "on" : ""}`}>
+                <span className="dot" style={{ background: ROLE_COLOR[r] }} />{ROLE_LABEL[r]}
+              </button>
+            ))}
+          </div>
+          {filtered ? <button type="button" className="usp-clear" onClick={() => { setFilterRid(""); setFilterRoles([]); setSearch(""); }}>Clear</button> : null}
+          <button type="button" className={`usp-add ${addOpen ? "open" : ""}`} onClick={() => setAddOpen((o) => !o)}>{addOpen ? "×  Close" : "+  Add user"}</button>
+        </div>
+      </div>
+
+      {/* Create user — collapsible so search stays the hero */}
+      {addOpen ? (
+      <section className="usp-addpanel">
         <h2 style={{ fontSize: 15, margin: "0 0 12px" }}>
           Add a user{scopedName ? <> to <span style={{ color: "var(--text)" }}>{scopedName}</span></> : ""}
         </h2>
@@ -200,69 +228,38 @@ export default function AdminUsers() {
             {creating ? "Creating…" : "Create user"}
           </button>
         </form>
-        <p style={{ fontSize: 12, color: "var(--muted)", margin: "10px 0 0" }}>
+        <p className="usp-formhint">
           The <b>Username</b> is what they sign in with (and how they appear everywhere) — it must be unique. They can change their password and set a PIN in their own profile after signing in.
         </p>
       </section>
+      ) : null}
 
-      {/* User list — compact rows, ONE button (Edit) each. Everything else lives in the modal. */}
-      <section style={{ ...card }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-          <h2 style={{ fontSize: 15, margin: 0 }}>
-            {scopedName ? scopedName : "All"} users {loading ? "" : filtered ? `(${visible.length} of ${users.length})` : `(${users.length})`}
-          </h2>
+      {/* Count + grouped results (browse by restaurant) */}
+      <div className="usp-count">{loading ? "Loading…" : filtered ? `${visible.length} of ${users.length} shown` : `${users.length} ${users.length === 1 ? "person" : "people"}`}</div>
+      {loading ? null : users.length === 0 ? (
+        <div className="usp-empty">No users yet — add your first one with “+ Add user”.</div>
+      ) : visible.length === 0 ? (
+        <div className="usp-empty">No one matches. Try a different search, or clear the filters.</div>
+      ) : (
+        <div className="usp-results">
+          {groupNames.map((gname) => (
+            <div className="usp-group" key={gname}>
+              <div className="usp-group-h"><span>{gname}</span><b>{groups[gname].length}</b></div>
+              {groups[gname].map((u) => (
+                <button key={u.id} className={`usp-row ${u.active ? "" : "off"}`} onClick={() => setEditId(u.id)}>
+                  <span className="av" style={{ background: ROLE_COLOR[u.role] || "#64748b" }} aria-hidden>{initialOf(u)}</span>
+                  <span className="pi">
+                    <span className="nm">{u.name || u.username}{u.hasPin ? <span className="pin" title="PIN set">🔑</span> : null}{!u.active ? <em>disabled</em> : null}</span>
+                    <span className="mt">{u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleDateString() : "never"}</span>
+                  </span>
+                  <span className="rp" style={{ color: ROLE_COLOR[u.role], background: `color-mix(in srgb, ${ROLE_COLOR[u.role]} 16%, transparent)` }}>{ROLE_LABEL[u.role] || u.role}</span>
+                  <svg className="chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+                </button>
+              ))}
+            </div>
+          ))}
         </div>
-
-        {/* Filter toolbar: pick a restaurant, narrow by role (combinable), or search. */}
-        <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <select value={filterRid} onChange={(e) => setFilterRid(e.target.value)} style={{ ...field, width: "auto", minWidth: 190, flex: "0 1 auto" }}>
-              <option value="">All restaurants</option>
-              {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-            <span style={{ position: "relative", flex: "1 1 180px", maxWidth: 320, minWidth: 180 }}>
-              <i className="fas fa-magnifying-glass" aria-hidden="true" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 13 }} />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, role, restaurant or phone…" aria-label="Search users" style={{ ...field, paddingLeft: 34 }} />
-            </span>
-            {filtered ? <button type="button" onClick={() => { setFilterRid(""); setFilterRoles([]); setSearch(""); }} style={{ ...chip(false), color: "var(--muted)" }}>Clear filters</button> : null}
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>Role:</span>
-            <button type="button" onClick={() => setFilterRoles([])} style={chip(filterRoles.length === 0)}>All</button>
-            {ROLES.map((r) => (
-              <button key={r} type="button" onClick={() => toggleRole(r)} style={chip(filterRoles.includes(r), ROLE_COLOR[r])}>{ROLE_LABEL[r]}</button>
-            ))}
-          </div>
-        </div>
-
-        {loading ? <div style={{ color: "var(--muted)" }}>Loading…</div> : users.length === 0 ? (
-          <div style={{ color: "var(--muted)" }}>No users yet — add your first one above.</div>
-        ) : visible.length === 0 ? (
-          <div style={{ color: "var(--muted)" }}>No users match these filters.</div>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {visible.map((u) => (
-              <div key={u.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, alignItems: "center", padding: 12, borderRadius: 10, background: "var(--bg)", border: "var(--border)", opacity: u.active ? 1 : 0.55 }}>
-                {/* Initial badge */}
-                <div aria-hidden style={{ width: 38, height: 38, borderRadius: 999, background: ROLE_COLOR[u.role] || "#9ca3af", color: "var(--bg)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 16 }}>
-                  {(u.name || u.username).charAt(0).toUpperCase()}
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <strong style={{ fontSize: 15 }}>{u.name || u.username}</strong>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--bg)", background: ROLE_COLOR[u.role] || "#9ca3af", padding: "2px 8px", borderRadius: 999 }}>{ROLE_LABEL[u.role] || u.role}</span>
-                    {!u.active ? <span style={{ fontSize: 11, color: "#fca5a5" }}>disabled</span> : null}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {u.restaurantName ? <><b style={{ color: "var(--text)", fontWeight: 600 }}>{u.restaurantName}</b> · </> : ""}{u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleString() : "never"}
-                  </div>
-                </div>
-                <button style={{ ...btn("transparent"), border: "var(--border)", color: "var(--text)" }} onClick={() => setEditId(u.id)}>Edit</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      )}
 
       {/* The per-user edit modal: all the controls for one person, in one focused place. */}
       {editing ? (
@@ -273,7 +270,7 @@ export default function AdminUsers() {
           onDeleted={() => { setEditId(null); load(); }}
         />
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -516,6 +513,56 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
       <style>{`@keyframes lfhFade{from{opacity:0}to{opacity:1}}@keyframes lfhPop{from{opacity:0;transform:scale(0.96) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}`}</style>
     </>
   );
+}
+
+// Spotlight look for the list view (owner 2026-07-24): electric-blue accent + a search-first
+// hero + grouped result rows. Scoped to .usp so the rest of the admin keeps its own accent.
+function UsersStyle() {
+  return <style jsx global>{`
+  .usp { --ub:#3b82f6; --ub2:#60a5fa; max-width:1100px; }
+  .usp-banner { border-radius:14px; padding:14px 16px; margin-bottom:14px; border:var(--border); background:var(--card); }
+  .usp-banner.err { border-color:#7f1d1d; color:#fca5a5; }
+  .usp-banner.ok { border-color:#166534; color:#86efac; }
+  .usp-code { font-size:18px; background:var(--bg); padding:8px 12px; border-radius:8px; letter-spacing:1px; }
+  .usp-btn { padding:9px 14px; border-radius:9px; border:0; font-weight:700; font-size:13px; cursor:pointer; color:#fff; }
+  .usp-btn.blue { background:var(--ub); } .usp-btn.ghost { background:#374151; }
+  .usp-hero { border-radius:18px; padding:18px; margin-bottom:14px; border:var(--border);
+    background: radial-gradient(700px 200px at 50% -40%, color-mix(in srgb, var(--ub) 22%, transparent), transparent 70%), var(--card); }
+  .usp-search { display:flex; align-items:center; gap:13px; height:60px; padding:0 18px; border-radius:14px; background:var(--bg); border:1px solid var(--border); transition:border-color .15s, box-shadow .15s; }
+  .usp-search:focus-within { border-color:var(--ub); box-shadow:0 0 0 4px color-mix(in srgb, var(--ub) 30%, transparent); }
+  .usp-search svg { color:var(--muted); flex:none; }
+  .usp-search input { flex:1; min-width:0; border:0; background:none; outline:none; color:var(--text); font-size:17px; font-weight:500; }
+  .usp-search .clr { border:0; background:none; color:var(--muted); font-size:22px; line-height:1; cursor:pointer; padding:0 4px; flex:none; }
+  .usp-tools { display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-top:13px; }
+  .usp-sel { height:38px; border-radius:10px; border:var(--border); background:var(--bg); color:var(--text); font-weight:600; font-size:13px; padding:0 10px; }
+  .usp-chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .usp-chip { display:flex; align-items:center; gap:7px; height:38px; padding:0 13px; border-radius:10px; border:var(--border); background:var(--bg); color:var(--muted); font-weight:700; font-size:12.5px; cursor:pointer; }
+  .usp-chip .dot { width:8px; height:8px; border-radius:50%; }
+  .usp-chip.on { border-color:var(--ub); background:color-mix(in srgb, var(--ub) 15%, transparent); color:var(--text); }
+  .usp-clear { height:38px; padding:0 12px; border-radius:10px; border:var(--border); background:none; color:var(--muted); font-weight:600; font-size:12.5px; cursor:pointer; }
+  .usp-add { margin-left:auto; height:38px; padding:0 16px; border-radius:10px; border:0; background:var(--ub); color:#fff; font-weight:700; font-size:13px; cursor:pointer; box-shadow:0 4px 14px color-mix(in srgb, var(--ub) 40%, transparent); }
+  .usp-add.open { background:#374151; box-shadow:none; }
+  .usp-addpanel { border-radius:16px; padding:18px; margin-bottom:16px; border:1px solid color-mix(in srgb, var(--ub) 40%, var(--border)); background:var(--card); }
+  .usp-formhint { font-size:12px; color:var(--muted); margin:10px 0 0; }
+  .usp-count { font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:6px 2px 10px; }
+  .usp-empty { padding:30px; text-align:center; color:var(--muted); border:var(--border); border-radius:14px; background:var(--card); }
+  .usp-results { display:flex; flex-direction:column; gap:18px; }
+  .usp-group-h { display:flex; align-items:center; gap:9px; padding:0 4px 8px; font-size:12.5px; font-weight:800; color:var(--text); }
+  .usp-group-h b { font-family:ui-monospace,monospace; font-size:11px; font-weight:700; color:var(--muted); background:var(--card); border:var(--border); border-radius:20px; padding:2px 9px; }
+  .usp-row { display:flex; align-items:center; gap:13px; width:100%; text-align:left; padding:11px 14px; margin-bottom:8px; border-radius:12px; background:var(--card); border:1px solid var(--border); cursor:pointer; transition:border-color .13s, background .13s; }
+  .usp-row:hover { border-color:var(--ub); background:color-mix(in srgb, var(--ub) 7%, var(--card)); }
+  .usp-row:hover .chev { color:var(--ub); transform:translateX(2px); }
+  .usp-row.off { opacity:.55; }
+  .usp-row .av { width:40px; height:40px; border-radius:11px; display:grid; place-items:center; color:#0b0f16; font-weight:800; font-size:16px; flex:none; }
+  .usp-row .pi { flex:1; min-width:0; }
+  .usp-row .nm { display:flex; align-items:center; gap:7px; font-size:14.5px; font-weight:700; color:var(--text); }
+  .usp-row .nm em { font-style:normal; font-size:10.5px; font-weight:700; color:#fca5a5; background:color-mix(in srgb,#ef4444 16%,transparent); padding:2px 7px; border-radius:20px; }
+  .usp-row .nm .pin { font-size:12px; }
+  .usp-row .mt { display:block; font-size:12px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .usp-row .rp { font-size:11px; font-weight:800; padding:4px 10px; border-radius:20px; flex:none; }
+  .usp-row .chev { color:var(--muted); flex:none; transition:color .13s, transform .13s; }
+  @media (max-width:640px){ .usp-add { margin-left:0; } .usp-row .rp { display:none; } }
+  `}</style>;
 }
 
 // A simple labelled on/off toggle row used inside the modal.

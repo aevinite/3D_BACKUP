@@ -365,7 +365,7 @@ export default function Access2Page() {
         {conf.length > 0 && (
           <div className="acc2-warn">
             <Icon n="alert" s={18} />
-            <span><b>{conf.length} power{conf.length > 1 ? "s have" : " has"} a manager set above the owner.</b> A manager can never hold something the owner doesn't — {conf.map((c) => c.name).join(", ")}.</span>
+            <span><b>{conf.length} power{conf.length > 1 ? "s have" : " has"} a manager set above the owner.</b> A manager can never hold something the owner doesn&rsquo;t — {conf.map((c) => c.name).join(", ")}.</span>
           </div>
         )}
         <div className="acc2-rail-wrap">
