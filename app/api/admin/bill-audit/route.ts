@@ -17,11 +17,15 @@ const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 // doesn't emit bill_paid, so including it would show a misleading partial list; payments live
 // on Revenue/Billing.) table_shift = the manager's move; order_move = the tablet's (audit).
 const BILL_ACTIONS = ["order_delete", "payment_revert", "close_unpaid", "order_discount", "order_move", "table_shift",
+  // Cancelling / clearing a bill: voiding a generated invoice (reopen), and closing/restarting
+  // a table (which cancels its unpaid orders). Shown so the "what happened" category is visible
+  // here too, not just in the per-restaurant log (owner, 2026-07-24).
+  "invoice_void", "table_restart", "table_close",
   // Admin Repair Kit actions that touch bills/orders (mig 159 tooling) — surfaced here so the
   // tamper log shows emergency surgery too.
   "repair_void_bill", "repair_delete_order", "repair_refire_order", "repair_edit_time"];
-const RISK = new Set(["order_delete", "payment_revert", "close_unpaid",
-  "repair_delete_order", "repair_void_bill", "repair_edit_time"]); // removals / edits = the tamper-risk signals
+const RISK = new Set(["order_delete", "payment_revert", "close_unpaid", "invoice_void",
+  "repair_delete_order", "repair_void_bill", "repair_edit_time"]); // removals / voids / edits = the tamper-risk signals
 
 export async function GET(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))

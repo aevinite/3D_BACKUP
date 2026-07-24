@@ -94,6 +94,19 @@ async function menuSubAllowed(g: { user: StaffUser | null }, rid: string, action
   return mo[action] === true;
 }
 
+// Delete-a-bill sub-permission (owner 2026-07-24). Deleting a bill is the MOST destructive
+// money action, so unlike the other void_bills sub-options (and unlike menuSubAllowed above)
+// it defaults OFF: a plain manager may delete a bill ONLY when the owner has explicitly ticked
+// "Delete a bill" (access_config.void_bills.manager_opts.delete_bill === true). Admin (no
+// cookie) + owner always may. The caller must already have passed managerCan("void_bills").
+async function canDeleteBill(g: { user: StaffUser | null }, rid: string): Promise<boolean> {
+  const u = g.user;
+  if (!u || u.role !== "manager") return true; // admin / owner: full power
+  const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
+    { void_bills?: { manager_opts?: Record<string, boolean> } } | null;
+  return cfg?.void_bills?.manager_opts?.delete_bill === true; // absent → OFF (deliberate default)
+}
+
 // Gate for the KOT ▾ menu (Table & KOT operations — canonical module ladder, mig 177).
 // ADMIN X-RAY rule (owner, 2026-07-22): the admin super-user (no staff cookie) passes
 // every rung — from the admin console the greyed-out button must genuinely work, the
@@ -272,6 +285,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         managerPermissions: perms,
         effectivePowers,
         offByAdmin,
+        // Delete-a-bill sub-permission (default OFF) — lets the panel show the "🗑 Delete bill"
+        // button only when the owner ticked it (admin/owner always true). (owner, 2026-07-24)
+        canDeleteBill: await canDeleteBill(g, rid),
         features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective, table_ops: tOps.effective, take_orders: tOrd.effective },
       });
     }
@@ -1270,6 +1286,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // records leave a trace (accountability — same rule as the payment-revert audit trail).
     if (a === "orders" && b === "delete") {
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("delete or clear bills");
+      if (!(await canDeleteBill(g, rid))) return permDenied("delete bills");
       const { ids, all } = body || {};
       // Reason the manager typed (owner 2026-07-23 — deletes must carry a why for the bill audit).
       const delReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
@@ -2349,6 +2366,7 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       // Permanent bill deletion is owner-gated (least-privilege) + always logged — same
       // rule as the bulk clear above. A manager can still CANCEL an order without this power.
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("delete bills");
+      if (!(await canDeleteBill(g, rid))) return permDenied("delete bills");
       const cur = must(await sb.from("orders").select("payment_status,status").eq("id", id).eq("restaurant_id", rid).single());
       if (cur && cur.payment_status === "paid" && cur.status !== "cancelled")
         return err("Won't delete a PAID bill — it's a financial record. Mark it unpaid or void it first.", 409);
