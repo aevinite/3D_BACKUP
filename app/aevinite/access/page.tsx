@@ -48,6 +48,13 @@ const REACH_LABEL = ["Off", "Owner only", "Owner + Manager", "Owner + Mgr + Tabl
 // resolved()/holders() run during render (moving it inside the component crashed the panel — a
 // hoisted fn called it before the const initialised). Falls back to id for caps with no column.
 const permKey = (p: Perm) => p.tablet || p.id;
+// A representative real-panel screenshot per area, shown in the (i) popover so the admin can
+// see WHERE the thing lives in the app. Files in public/admin-help/ (captured from the live
+// panels). Lazy-loaded (only when a popover opens). Missing file → the img just doesn't show.
+const SHOT_BY_GROUP: Record<string, string> = {
+  guest: "guest-menu", menu: "manager-menu", money: "manager-menu", floor: "tablet",
+  kitchen: "kitchen", banquet: "manager-menu", reports: "owner-home", staff: "owner-staff", panels: "owner-home",
+};
 const ROLE_ORDER: Record<string, number> = { owner: 0, manager: 1, tablet: 2, kitchen: 3 };
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", manager: "Manager", tablet: "Waiter", kitchen: "Kitchen" };
 const ROLE_RELEVANCE: Record<string, string[]> = {
@@ -71,6 +78,7 @@ export default function Access2Page() {
   const [openCards, setOpenCards] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<"" | "saving" | "saved" | "err">("");
   const [info, setInfo] = useState<{ perm: Perm; sub?: string } | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const [fromRest, setFromRest] = useState(false);
 
   useEffect(() => {
@@ -218,6 +226,12 @@ export default function Access2Page() {
       {tab === "general" ? <General /> : <PerPerson />}
 
       {info && <InfoPop />}
+      {lightbox && (
+        <div className="acc2-lightbox" onClick={() => setLightbox(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- local help screenshot lightbox */}
+          <img src={lightbox} alt="Where this appears in the app, enlarged" />
+        </div>
+      )}
     </div>
   );
 
@@ -499,13 +513,19 @@ export default function Access2Page() {
   function InfoPop() {
     if (!info) return null;
     const sub = info.sub ? info.perm.sub?.find((s) => s.id === info.sub) : undefined;
+    const shot = SHOT_BY_GROUP[info.perm.group];
+    const src = shot ? `/admin-help/${shot}.png` : null;
     return (
       <div className="acc2-infowrap" onClick={() => setInfo(null)}>
         <div className="acc2-info" onClick={(e) => e.stopPropagation()}>
           <button className="cl" onClick={() => setInfo(null)}><Icon n="x" s={16} /></button>
           <h4>{sub ? sub.name : info.perm.name}{(sub?.adminOnly || info.perm.adminOnly) && <span className="tag">ADMIN ONLY</span>}</h4>
           <p>{sub ? sub.what : info.perm.what}</p>
-          <p className="note">Where it shows in the app: a labelled screenshot loads here once these are captured (public/admin-help/).</p>
+          {src && <>
+            <p className="note">Where it shows in the app (tap to enlarge):</p>
+            {/* eslint-disable-next-line @next/next/no-img-element -- local help screenshot, lazy-loaded */}
+            <img className="acc2-shot" src={src} alt="Where this appears in the app" loading="lazy" onClick={() => setLightbox(src)} />
+          </>}
         </div>
       </div>
     );
@@ -649,6 +669,9 @@ function Style() {
   .acc2-info h4 { margin:0 0 8px; font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px; padding-right:24px; }
   .acc2-info p { margin:0; font-size:13.5px; color:var(--text); line-height:1.5; } .acc2-info .note { margin-top:10px; font-size:12px; color:var(--muted); }
   .acc2-info .cl { position:absolute; top:12px; right:12px; width:28px; height:28px; border-radius:8px; border:none; background:var(--bg); color:var(--muted); cursor:pointer; display:grid; place-items:center; }
+  .acc2-shot { width:100%; margin-top:8px; border-radius:10px; border:var(--border); cursor:zoom-in; display:block; background:var(--bg); }
+  .acc2-lightbox { position:fixed; inset:0; z-index:1100; background:rgba(0,0,0,.75); display:grid; place-items:center; padding:32px; cursor:zoom-out; }
+  .acc2-lightbox img { max-width:96vw; max-height:92vh; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
   @media (max-width:900px){ .acc2-rail-wrap,.acc2-pp{ grid-template-columns:1fr; } .acc2-rail,.acc2-plist{ position:static; } }
   `}</style>;
 }
