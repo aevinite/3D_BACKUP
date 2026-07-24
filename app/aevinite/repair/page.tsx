@@ -17,7 +17,7 @@ type Restaurant = { id: string; name: string; slug: string };
 type Session = { id: string; table_number: string; status: string; bill_no: number | null; invoice_no: number | null; invoice_voided: boolean };
 type Order = { id: string; table_number: string; kot_no: number | null; status: string; payment_status: string; created_at: string; session_id: string | null };
 type RepairData = { sessions: Session[]; orders: Order[] };
-type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; mode?: string | null; summary: string; pr_url: string | null; status?: string; resolved_at?: string | null };
+type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; mode?: string | null; summary: string; pr_url: string | null; status?: string; resolved_at?: string | null; action_id?: string | null; err_key?: string | null };
 type AgentRun = { id: string; kind: "live" | "nightly" | "audit"; title: string; request_id: string | null; status: "running" | "done" | "closed" | "failed"; report: string | null; started_at: string; ended_at: string | null };
 
 type Op = "void_bill" | "delete_order" | "refire_order" | "unstick_table" | "edit_time";
@@ -83,10 +83,12 @@ export default function AdminRepair() {
   const [errors, setErrors] = useState<Action[]>([]);
   const [errLoading, setErrLoading] = useState(true);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
-  const [sent, setSent] = useState<Set<string>>(new Set());
+  const [sending2, setSending2] = useState<Set<string>>(new Set());  // groups mid-send (spinner), cleared on reload
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState("");            // which error group is in "are you sure?" mode
   const [resolving, setResolving] = useState<Set<string>>(new Set());
+  const [noteFor, setNoteFor] = useState("");                  // which group has the "Fix with a note" box open
+  const [noteText, setNoteText] = useState("");                // the hint typed into that box
 
   // "Describe a problem" box + the queue + Claude session history.
   const [note, setNote] = useState("");
@@ -153,16 +155,23 @@ export default function AdminRepair() {
     } else toast(r.error || "Couldn't send that.", "err");
   };
 
-  // Hand a specific error to Claude, bundling its surrounding log rows as context.
-  const sendError = async (g: ErrGroup, mode: "instant" | "overnight") => {
-    setSent((prev) => new Set(prev).add(g.key));
+  // Hand a specific error to Claude, bundling its surrounding log rows as context. `note` is the
+  // optional owner hint from "Fix now with a note"; `reshare` just relabels the toast when the
+  // same problem is being sent again. The queued/being-fixed state comes from the DB now (open
+  // fix_requests keyed by err_key), so it survives a refresh — no in-memory "sent" flag.
+  const sendError = async (g: ErrGroup, mode: "instant" | "overnight", note?: string, reshare?: boolean) => {
+    setSending2((prev) => new Set(prev).add(g.key));
     const r = await adminFetch<{ ok: boolean } & QueueInfo>("/api/admin/fix-request", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
-      body: JSON.stringify({ action_id: g.sample.id, restaurant_id: g.sample.restaurant_id || null, mode }),
+      body: JSON.stringify({ action_id: g.sample.id, restaurant_id: g.sample.restaurant_id || null, mode, note: (note || "").trim() || undefined }),
     });
-    if (r.ok) { toast(queueToast(mode, r.data)); loadHub(); }
-    else { toast(r.error || "Couldn't send that.", "err"); setSent((prev) => { const n = new Set(prev); n.delete(g.key); return n; }); }
+    setSending2((prev) => { const n = new Set(prev); n.delete(g.key); return n; });
+    if (r.ok) {
+      setNoteFor(""); setNoteText("");
+      toast(reshare ? "Re-shared with Claude — a fresh look is queued." : queueToast(mode, r.data));
+      loadHub();
+    } else toast(r.error || "Couldn't send that.", "err");
   };
 
   // Owner fixed it themselves → mark the whole repeat-group resolved (two-step: the button first
@@ -200,6 +209,21 @@ export default function AdminRepair() {
     if (!r.ok) { toast(r.error || "Couldn't update that.", "err"); loadHub(); }
   };
 
+  // Re-share an existing request (e.g. from "Recently fixed" — a fix didn't hold). Re-files it as a
+  // fresh instant request off the same error row (or the same description), so Claude takes another
+  // look. Keeps the original row's history intact.
+  const [resharing, setResharing] = useState("");
+  const reshareRequest = async (q: FixRequest) => {
+    setResharing(q.id);
+    const r = await adminFetch<{ ok: boolean } & QueueInfo>("/api/admin/fix-request", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
+      body: JSON.stringify(q.action_id ? { action_id: q.action_id, restaurant_id: q.restaurant_id, mode: "instant" } : { note: q.summary, restaurant_id: q.restaurant_id, mode: "instant" }),
+    });
+    setResharing("");
+    if (r.ok) { toast("Re-shared with Claude — a fresh look is queued."); loadHub(); }
+    else toast(r.error || "Couldn't re-share that.", "err");
+  };
+
   const scoped = restaurants.find((r) => r.id === rid);
   const scopedName = scoped?.name || null;
   const scopedSlug = scoped?.slug || "";
@@ -212,6 +236,14 @@ export default function AdminRepair() {
   const liveWorking = runs.some((r) => r.status === "running" && r.kind === "live");
   const beingFixed = requests.filter((q) => workingIds.has(q.id));
   const upNext = requests.filter((q) => !workingIds.has(q.id));
+
+  // Match each error tile to its repair request by the stored err_key (same key groupErrors builds),
+  // so an already-sent error shows "In the queue / Being fixed" instead of re-offering "Fix now"
+  // after a refresh. Open requests win over fixed (a re-fired error that's queued again). newest-first.
+  const openByKey = new Map<string, FixRequest>();
+  for (const q of requests) if (q.err_key && !openByKey.has(q.err_key)) openByKey.set(q.err_key, q);
+  const fixedByKey = new Map<string, FixRequest>();
+  for (const q of fixed) if (q.err_key && !fixedByKey.has(q.err_key)) fixedByKey.set(q.err_key, q);
 
   return (
     <>
@@ -259,7 +291,11 @@ export default function AdminRepair() {
             const title = ACT_LABEL[a.action] || a.action;
             const jl = jumpLabel(a);
             const isOpen = expanded.has(g.key);
-            const wasSent = sent.has(g.key);
+            const openReq = openByKey.get(g.key);            // already queued for Claude (survives refresh)
+            const fixedReq = fixedByKey.get(g.key);          // a past fix landed for this exact error
+            const isWorking = !!openReq && workingIds.has(openReq.id);
+            const sendingNow = sending2.has(g.key);
+            const noteOpen = noteFor === g.key;
             return (
               <div key={g.key} className="rp-err">
                 <span className="rp-err-bar" style={{ background: color }} />
@@ -286,24 +322,46 @@ export default function AdminRepair() {
                       </div>
                     </div>
                   ) : (
+                    <>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>
                       {jl ? (
                         <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => jumpTo(a)} title="Open that panel for this restaurant to fix it by hand">
                           <i className="fas fa-arrow-up-right-from-square" aria-hidden="true" style={{ marginRight: 6 }} />{jl}
                         </button>
                       ) : null}
-                      {wasSent ? (
-                        <span className="adm-muted" style={{ fontSize: 12 }}><i className="fas fa-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 5 }} />Sent to Claude</span>
+                      {/* State is DB-derived (open fix_requests keyed by err_key) so it survives a refresh —
+                          no more re-offering "Fix now" on something already sent. */}
+                      {isWorking ? (
+                        <span className="adm-muted" style={{ fontSize: 12, display: "inline-flex", alignItems: "center" }}>
+                          <i className="fas fa-gear fa-spin" aria-hidden="true" style={{ color: "var(--adm-accent, #e8a13c)", marginRight: 6 }} />Being fixed now
+                        </span>
+                      ) : openReq ? (
+                        <span className="adm-muted" style={{ fontSize: 12, display: "inline-flex", alignItems: "center" }}>
+                          <i className={`fas ${openReq.mode === "overnight" ? "fa-moon" : "fa-hourglass-half"}`} aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />
+                          {openReq.mode === "overnight" ? "Queued for tonight" : "In the queue for Claude"}
+                        </span>
                       ) : (
                         <>
-                          <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => sendError(g, "instant")} title="A Claude window opens on the office Mac within a minute">
-                            <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-accent, #e8a13c)" }} />Fix now
+                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => sendError(g, "instant")} title="A Claude window opens on the office Mac within a minute">
+                            <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-accent, #e8a13c)" }} />{sendingNow ? "Sending…" : "Fix now"}
                           </button>
-                          <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => sendError(g, "overnight")} title="The 2:30 AM robot fixes it and leaves a morning report">
+                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => sendError(g, "overnight")} title="The 2:30 AM robot fixes it and leaves a morning report">
                             <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />Overnight
                           </button>
                         </>
                       )}
+                      {/* "…with a note": send to Claude AND attach a hint (what you know / how to fix). When the
+                          problem is already queued/fixed this same box re-shares it with the note. */}
+                      <button className="adm-btn" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => { setNoteFor(noteOpen ? "" : g.key); setNoteText(""); }} title="Send it to Claude with a note of your own">
+                        <i className="fas fa-pen-to-square" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-accent, #e8a13c)" }} />{(openReq || isWorking || fixedReq) ? "Add a note & re-share" : "Fix now with a note"}
+                      </button>
+                      {/* Quick re-share (no note) — for a fresh attempt when it's queued/being-fixed, or a past
+                          fix didn't hold. */}
+                      {(isWorking || openReq || fixedReq) ? (
+                        <button className="adm-btn" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => sendError(g, "instant", undefined, true)} title="Send this to Claude again for a fresh attempt">
+                          <i className="fas fa-share-from-square" aria-hidden="true" style={{ marginRight: 6 }} />{sendingNow ? "Sending…" : "Re-share to Claude"}
+                        </button>
+                      ) : null}
                       {/* Owner's own fix — the green "I handled it" action, separate from the two Claudes. */}
                       <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={() => setConfirming(g.key)} title="I fixed this myself — clear it from the list">
                         <i className="fas fa-circle-check" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-ok, #4caf82)" }} />Resolve
@@ -312,6 +370,21 @@ export default function AdminRepair() {
                         <button className="rp-link" onClick={() => setExpanded((p) => { const n = new Set(p); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}>{isOpen ? "less" : "more"}</button>
                       ) : null}
                     </div>
+                    {noteOpen ? (
+                      <div className="rp-confirm" style={{ marginTop: 9 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600 }}><i className="fas fa-pen-to-square" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />A note for Claude (optional) — what you know, or how you want it fixed</span>
+                        <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} maxLength={1000} rows={2} autoFocus
+                          placeholder="e.g. only happens on the waiter tablet during rush; please keep the old bill number."
+                          style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13, resize: "vertical" }} />
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button className="adm-btn primary" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => sendError(g, "instant", noteText, !!(openReq || isWorking || fixedReq))}>
+                            <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 6 }} />{sendingNow ? "Sending…" : (openReq || isWorking || fixedReq) ? "Re-share with this note" : "Fix now with this note"}
+                          </button>
+                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => { setNoteFor(""); setNoteText(""); }}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : null}
+                    </>
                   )}
                 </div>
               </div>
@@ -414,6 +487,9 @@ export default function AdminRepair() {
                     <div className="rpq-sum">{q.summary}</div>
                     <div className="adm-muted" style={{ fontSize: 11.5 }}>fixed {fmtTime(q.resolved_at || q.created_at)}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>see the fix →</a></> : ""}</div>
                   </div>
+                  <button className="adm-btn" onClick={() => reshareRequest(q)} disabled={resharing === q.id} title="Didn't hold? Send it to Claude again" style={{ fontSize: 11.5, padding: "3px 9px" }}>
+                    <i className="fas fa-share-from-square" aria-hidden="true" style={{ marginRight: 5 }} />{resharing === q.id ? "Sending…" : "Re-share"}
+                  </button>
                   <i className="fas fa-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)", fontSize: 13 }} />
                 </div>
               ))}
