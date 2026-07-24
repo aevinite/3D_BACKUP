@@ -22,6 +22,19 @@ import { USER_COOKIE, userFromCookie, hashSecret, normalizeLoginName, type Role 
 import { logAction } from "@/lib/oplog";
 import { mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
+import { banquetLadder, tableTagsLadder, tableOpsLadder, takeOrdersLadder } from "@/lib/tableTags";
+
+// GAP-B (owner ceiling): a tablet cap gated by an admin module may only be granted to a
+// waiter if that module is EFFECTIVE for the restaurant. The money caps (discount/mark_paid/
+// invoice) have no module gate. Keys with no entry here = ungated. Used for the OWNER actor
+// only; the admin super-user is unrestricted.
+const CAP_MODULE_GATE: Record<string, (rid: string) => Promise<{ effective: boolean }>> = {
+  tablet_banquet: banquetLadder,
+  tablet_table_tags: tableTagsLadder,
+  tablet_khata: tableTagsLadder,
+  tablet_table_ops: tableOpsLadder,
+  tablet_take_orders: takeOrdersLadder,
+};
 
 export const dynamic = "force-dynamic";
 
@@ -250,6 +263,17 @@ export async function PATCH(req: NextRequest) {
       // the owner deliberately withheld from the manager. Only the owner/admin grants powers.
       if (s.actor === "manager" && (v === "on" || v === "pin"))
         return bad("Only the owner can grant extra powers to staff.", 403);
+      // GAP-B ceiling + role-relevance (owner actor granting on/pin): the admin super-user
+      // is unrestricted, but an OWNER may only grant a cap that (a) applies to the target's
+      // role — these tablet_* caps are for WAITER accounts — and (b) is within the ceiling the
+      // admin allowed for this restaurant (its module is effective). Server-refused, not just hidden.
+      if (s.actor === "owner" && (v === "on" || v === "pin")) {
+        if (u.role !== "tablet")
+          return bad("These per-user powers apply to waiter (tablet) accounts only.", 400);
+        const gate = CAP_MODULE_GATE[k];
+        if (gate && !(await gate(u.restaurant_id)).effective)
+          return bad("That feature isn't enabled for this restaurant by the admin — you can't grant it.", 403);
+      }
       merged[k] = String(v); noted.push(`${k}→${v}`);
     }
     if (!noted.length) return bad("Nothing to change.");
