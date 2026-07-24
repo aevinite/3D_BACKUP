@@ -78,9 +78,19 @@ const SIDE_META: Record<Side, { label: string; icon: string }> = {
 // resolved()/holders() run during render (moving it inside the component crashed the panel — a
 // hoisted fn called it before the const initialised). Falls back to id for caps with no column.
 const permKey = (p: Perm) => p.tablet || p.id;
-// A representative real-panel screenshot per area, shown in the (i) popover so the admin can
-// see WHERE the thing lives in the app. Files in public/admin-help/ (captured from the live
-// panels). Lazy-loaded (only when a popover opens). Missing file → the img just doesn't show.
+// A real-panel screenshot PER FEATURE, shown in the (i) popover so the admin can see WHERE
+// the thing lives in the app (the exact control ringed + a path banner across the top).
+// Files in public/admin-help/<perm.id>.png, captured by the re-runnable script
+// scripts/shot-access-help.mjs — RE-RUN IT whenever a panel's UI changes so these never go
+// stale (owner rule 2026-07-24). SHOT_IDS lists the ids that have their own image; anything
+// not yet captured falls back to the per-AREA image in SHOT_BY_GROUP. Lazy-loaded.
+const SHOT_IDS = new Set([
+  "ratings", "reviews", "model3d", "allergies", "favorites", "waiter_calls", "diet_filter", "languages", "currency",
+  "edit_menu", "give_discounts", "void_bills", "mark_paid", "print_invoice", "khata",
+  "take_orders", "table_ops", "table_tags", "auto_print_kot", "banquet",
+  "view_dashboard", "view_ratings", "view_logs", "handle_issues", "view_customers",
+  "manage_staff", "edit_settings", "panel_manager", "panel_kitchen", "panel_tablet", "panel_owner",
+]);
 const SHOT_BY_GROUP: Record<string, string> = {
   guest: "guest-menu", menu: "manager-menu", money: "manager-menu", floor: "tablet",
   kitchen: "kitchen", banquet: "manager-menu", reports: "owner-home", staff: "owner-staff", panels: "owner-home",
@@ -628,7 +638,8 @@ export default function Access2Page() {
   function InfoPop() {
     if (!info) return null;
     const sub = info.sub ? info.perm.sub?.find((s) => s.id === info.sub) : undefined;
-    const shot = SHOT_BY_GROUP[info.perm.group];
+    // Prefer the feature's OWN screenshot (control ringed); fall back to the area image.
+    const shot = SHOT_IDS.has(info.perm.id) ? info.perm.id : SHOT_BY_GROUP[info.perm.group];
     const src = shot ? `/admin-help/${shot}.png` : null;
     return (
       <div className="acc2-infowrap" onClick={() => closeStay(() => setInfo(null))}>
