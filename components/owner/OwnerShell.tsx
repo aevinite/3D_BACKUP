@@ -31,6 +31,10 @@ const GROUPS: NavGroup[] = [
       { href: "/owner/reports", label: "Reports", icon: "fa-file-invoice", ent: "reports" },
       { href: "/owner/staff", label: "Staff & powers", icon: "fa-users-gear", ent: "staff" },
       { href: "/owner/customers", label: "Customers", icon: "fa-user-group", ent: "customers" },
+      // Pay Later (khata, mig 166/184): gated on the pay-later MODULE being effective for the
+      // restaurant (ent key injected by the layout), NOT a separate admin section toggle — so
+      // it appears only for restaurants that actually have pay-later on (no dead section).
+      { href: "/owner/khata", label: "Pay Later", icon: "fa-book", ent: "khata_book" },
       { href: "/owner/issues", label: "Feedback & issues", icon: "fa-triangle-exclamation", ent: "issues" },
     ],
   },
