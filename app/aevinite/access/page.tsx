@@ -43,6 +43,11 @@ const Icon = ({ n, s = 16 }: { n: string; s?: number }) => (
 );
 
 const REACH_LABEL = ["Off", "Owner only", "Owner + Manager", "Owner + Mgr + Tablet"];
+// The per-user override is stored+enforced under the tablet_* column key (staff_users.permissions,
+// mig 115, read by tabletPerm) — NOT the capability id. MODULE-SCOPE so it's never in the TDZ when
+// resolved()/holders() run during render (moving it inside the component crashed the panel — a
+// hoisted fn called it before the const initialised). Falls back to id for caps with no column.
+const permKey = (p: Perm) => p.tablet || p.id;
 const ROLE_ORDER: Record<string, number> = { owner: 0, manager: 1, tablet: 2, kitchen: 3 };
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", manager: "Manager", tablet: "Waiter", kitchen: "Kitchen" };
 const ROLE_RELEVANCE: Record<string, string[]> = {
@@ -398,10 +403,6 @@ export default function Access2Page() {
   function holders(p: Perm): Staff[] {
     return sortedStaff.filter((u) => (ROLE_RELEVANCE[u.role] || []).includes(p.id) && resolved(u, p).eff);
   }
-  // The per-user override is stored+enforced under the tablet_* column key (staff_users.permissions,
-  // mig 115, read by tabletPerm) — NOT the capability id. Use p.tablet where it exists; otherwise
-  // per-user override doesn't enforce yet (tabletNew void/revert have no column) so fall back to id.
-  const permKey = (p: Perm) => p.tablet || p.id;
   function resolved(u: Staff, p: Perm): { base: boolean; eff: boolean; ov: string } {
     const lvl = reachLevel(p, st!);
     let base = false;
