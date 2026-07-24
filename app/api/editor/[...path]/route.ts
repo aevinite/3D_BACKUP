@@ -13,6 +13,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { menuTag } from "@/lib/menuDataServer";
 import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
+import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
@@ -1292,6 +1293,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // a foreign order id can't be discounted.
       const cur = must(await sb.from("orders").select("subtotal, session_id").eq("id", b).eq("restaurant_id", rid).single());
       const raw = Number(body && body.amount);
+      // Per-role %-cap (owner 2026-07-24): refuse a discount over this actor's configured limit
+      // (non-breaking — no cap → no block). Admin (g.user null) is uncapped.
+      { const cap = await discountCapPct(rid, discountRole(g.user?.role)); const base0 = Number(cur.subtotal) || 0;
+        if (Number.isFinite(raw) && overDiscountCap(Math.max(raw, 0), base0, cap)) return err(`That discount is over your ${cap}% limit — ask the owner.`, 403); }
       const note = String((body && body.note) || "").slice(0, 200) || null;
       // WHOLE-BILL (session) discount path — the FIX for the "discount shrinks when marked paid"
       // bug (2026-07-08). A table's discount is conceptually on the whole BILL, but the manager
