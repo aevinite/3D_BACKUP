@@ -815,20 +815,26 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           </button>
         </div>
 
-        {/* Happy-diner Google review nudge — appears after a HIGH rating (>= 4★) when
-            this restaurant configured a Google link. Tapping opens their Google review
-            page in a new tab; "No thanks" (or tapping through) dismisses it. */}
-        {googleReviewUrl && (
+        {/* Happy-diner review nudge — appears after a HIGH rating (>= 4★) when this
+            restaurant has a review link. It ADAPTS to the destination: a Google link shows
+            Google wording/icon; an Instagram link (the default for brand-new restaurants that
+            haven't set their own Google page yet) shows Instagram wording/icon — so the label
+            never promises "Google" while opening Instagram. Tapping opens it in a new tab;
+            "No thanks" (or tapping through) dismisses it. */}
+        {googleReviewUrl && (() => {
+          const isInsta = /instagram\.com/i.test(googleReviewUrl);
+          return (
           <div className="google-review-prompt" style={{ background: "var(--card, rgba(255,255,255,0.06))", border: "1px solid var(--accent)", borderRadius: 14, padding: "16px 18px", margin: "0 0 16px", textAlign: "center" }}>
             <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">⭐</div>
-            <div style={{ fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>Thank you! Would you share it on Google?</div>
-            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>A quick Google review really helps us — it only takes a moment.</div>
+            <div style={{ fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>{isInsta ? "Thank you! Would you follow us on Instagram?" : "Thank you! Would you share it on Google?"}</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>{isInsta ? "A quick follow on Instagram really helps us — it only takes a moment." : "A quick Google review really helps us — it only takes a moment."}</div>
             <a href={googleReviewUrl} target="_blank" rel="noopener noreferrer" className="btn btn-gold" style={{ display: "inline-flex", alignItems: "center", gap: 8, textDecoration: "none" }} onClick={() => setGoogleReviewUrl(null)}>
-              <i className="fab fa-google" aria-hidden="true"></i> Review on Google
+              <i className={isInsta ? "fab fa-instagram" : "fab fa-google"} aria-hidden="true"></i> {isInsta ? "Follow on Instagram" : "Review on Google"}
             </a>
             <div><button type="button" onClick={() => setGoogleReviewUrl(null)} style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 12.5, marginTop: 10, cursor: "pointer" }}>No thanks</button></div>
           </div>
-        )}
+          );
+        })()}
         {/* The review form — shown only when the "rate" tab is active. */}
         {reviewTab === "rate" && (
           <div className="review-form" id="review-form">

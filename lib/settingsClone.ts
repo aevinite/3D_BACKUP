@@ -24,6 +24,14 @@ const NULL_COLUMNS = [
   "geo_lat", "geo_lng",                                        // location gate center → else #1's café coords leak in
 ] as const;
 
+// Default guest "leave a review" link for a BRAND-NEW restaurant. A raw clone copied #1's
+// google_review_url, so a happy guest at a new restaurant was nudged to review LITTLE FRENCH
+// HOUSE on Google (the "#1 leaks onto restaurant #2" class — QA 2026-07-24). Instead of just
+// blanking it, new restaurants default to our own Instagram (@aevinite) until the owner sets
+// their own Google review page in the admin. The guest nudge (ItemClient) detects an
+// instagram.com link and shows Instagram wording/icon, so the label matches the destination.
+export const DEFAULT_REVIEW_URL = "https://instagram.com/aevinite";
+
 export function cleanClonedSettings(
   templateRow: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> {
@@ -93,5 +101,8 @@ export function cleanClonedSettings(
   // Guest feature flags: start empty so the new restaurant uses the code defaults
   // (lib/features.ts), not #1's current on/off choices.
   base.features = {};
+  // Review link: never inherit #1's Google page — default to our own Instagram (see above).
+  // The admin's google-review route later overrides this with the restaurant's own link.
+  base.google_review_url = DEFAULT_REVIEW_URL;
   return base;
 }

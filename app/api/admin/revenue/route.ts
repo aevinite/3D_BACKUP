@@ -20,7 +20,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const now = new Date();
-  const yearStart = `${now.getUTCFullYear()}-01-01`;
+  // IST calendar year for the "collected this year" boundary (see /api/admin/billing) — the
+  // page label is IST, so a UTC year flips ~5.5h late and mismatches the heading. UTC+5:30.
+  const yearStart = `${new Date(now.getTime() + 330 * 60000).getUTCFullYear()}-01-01`;
 
   const [billingQ, paymentsQ, restsQ] = await Promise.all([
     sb.from("restaurant_billing").select("restaurant_id, plan, status, amount, currency, cycle, next_due_on"),
@@ -34,7 +36,11 @@ export async function GET(req: NextRequest) {
   if (anyErr) return NextResponse.json({ error: anyErr.message }, { status: 500 });
 
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
-  const billing = (billingQ.data || []) as Billing[];
+  // Only count LIVE restaurants (matches the Billing page's H4 rule + its Trial count): drop
+  // any billing row whose restaurant was soft-deleted, so a binned restaurant never inflates
+  // MRR / the status bars here.
+  const liveIds = new Set<string>((restsQ.data || []).map((r) => r.id));
+  const billing = ((billingQ.data || []) as Billing[]).filter((b) => liveIds.has(b.restaurant_id));
   // Monthly-equivalent recurring value of one subscription (yearly spread over 12).
   const monthlyEq = (b: Billing) => { const a = Number(b.amount) || 0; return b.cycle === "monthly" ? a : a / 12; };
 
@@ -45,9 +51,16 @@ export async function GET(req: NextRequest) {
   const arr = mrr * 12;
   const nonInrActive = billing.filter((b) => b.status === "active" && (b.currency || "INR") !== "INR").length;
 
-  // Counts by status across ALL subscriptions.
+  // Counts by status across ALL LIVE restaurants — a live restaurant with NO billing row
+  // counts as "trial", the SAME derivation as /api/admin/billing. Iterating only billing rows
+  // here undercounted Trial, so the Revenue and Billing screens showed different Trial totals
+  // for the same platform (QA 2026-07-24). Now both agree.
+  const billingByRid = new Map<string, Billing>(billing.map((b) => [b.restaurant_id, b]));
   const byStatus: Record<string, number> = { active: 0, trial: 0, paused: 0, cancelled: 0 };
-  for (const b of billing) byStatus[b.status] = (byStatus[b.status] || 0) + 1;
+  for (const r of restsQ.data || []) {
+    const st = billingByRid.get(r.id)?.status ?? "trial";
+    byStatus[st] = (byStatus[st] || 0) + 1;
+  }
 
   // MRR contribution by plan (active INR only).
   const planMap = new Map<string, { plan: string; mrr: number; count: number }>();
