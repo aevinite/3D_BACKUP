@@ -19,13 +19,17 @@ export const dynamic = "force-dynamic";
 // never drift again: edit_settings + view_ratings were missing here, so the admin's grant/revoke
 // of those two silently never persisted (audit 2026-07-09).
 const MANAGER_POWERS = MANAGER_POWER_FLAGS;
-// table_tags/khata default OFF (new module); banquet defaults ON (rung backfilled true in
-// mig 167 so pre-existing behaviour is unchanged); table_ops defaults OFF (KOT ▾ menu).
+// table_tags/khata default OFF (new module); table_ops defaults OFF (KOT ▾ menu).
 // take_orders defaults OFF as a manager GRANT (owner grants deliberately) — its tablet
 // cap defaults 'on' separately (mig 178), taking orders being the tablet's core function.
-// Keep these matching the migrations — enforcement (managerCan) reads an ABSENT key as
-// false, so display and truth must agree.
-const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: true, table_ops: false, take_orders: false };
+// banquet defaults OFF here too: mig 167 backfilled the "banquet":true key ONLY onto
+// restaurants that existed then, and the mig-091 column default does NOT include it, so a
+// restaurant created after mig 167 has NO banquet key → enforcement (managerCan) reads an
+// ABSENT key as false. A `true` default therefore made the admin switch show GRANTED while
+// managers were actually refused (403) on every new restaurant (QA 2026-07-24). Existing
+// restaurants still carry their backfilled true, so this only fixes the false display for
+// new ones. Keep these matching the migrations — display and truth must agree.
+const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: false, table_ops: false, take_orders: false };
 // The tablet capabilities (settings.*), tri-state off|on|pin. tablet_table_tags /
 // tablet_khata are normally the MANAGER's rung (manager settings), but the admin
 // console shows every access bit of the ladder, so they're editable here too (mig 166).
