@@ -159,7 +159,22 @@ export async function GET(req: NextRequest) {
     // Never ship hashes; expose only whether a PIN exists.
     staff = (data || []).map(({ pin_hash, ...u }) => ({ ...u, hasPin: !!pin_hash }));
   }
-  return ok({ actor: s.actor, restaurants: s.restaurants.map(slim), staff });
+  // Module-effective per restaurant (one batched read) so the per-user override UI can GREY
+  // any waiter cap the admin hasn't enabled for the restaurant (the ceiling GAP-B refuses).
+  const modsByRid: Record<string, Record<string, boolean>> = {};
+  if (ids.length) {
+    const { data: setRows } = await sb.from("settings")
+      .select("restaurant_id, banquet_allowed, banquet_owner_control, banquet_enabled, table_tags_allowed, table_tags_owner_control, table_tags_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled, take_orders_allowed, take_orders_owner_control, take_orders_enabled")
+      .in("restaurant_id", ids);
+    const eff = (r: any, a: string, c: string, e: string) => r?.[a] === true && (r?.[c] !== true || r?.[e] !== false);
+    for (const r of (setRows || []) as any[]) modsByRid[r.restaurant_id] = {
+      banquet: eff(r, "banquet_allowed", "banquet_owner_control", "banquet_enabled"),
+      table_tags: eff(r, "table_tags_allowed", "table_tags_owner_control", "table_tags_enabled"),
+      table_ops: eff(r, "table_ops_allowed", "table_ops_owner_control", "table_ops_enabled"),
+      take_orders: eff(r, "take_orders_allowed", "take_orders_owner_control", "take_orders_enabled"),
+    };
+  }
+  return ok({ actor: s.actor, restaurants: s.restaurants.map((r) => ({ ...slim(r), modules: modsByRid[r.id] || {} })), staff });
 }
 
 export async function POST(req: NextRequest) {

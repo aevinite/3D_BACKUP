@@ -158,7 +158,8 @@ STAGE 9 — Info screenshots + bulletproof + ship
 
 ## 6. STATUS LOG:
 - GAP-A DONE+VERIFIED live (override stores under tablet_mark_paid, reverts clean).
-- GAP-B DONE (build): owner set_permissions now ceiling+role-gated (owner grants on/pin only if target is a waiter AND the cap's module is effective; admin unrestricted). Owner-side live test to come with Stage 5 UI.
+- GAP-B DONE (build): owner set_permissions now ceiling+role-gated (owner grants on/pin only if target is a waiter AND the cap's module is effective; admin unrestricted). Owner-side live test with Stage 5.
+- Stage 5 (GAP-C) BUILT: owner Staff page now shows per-user Default/On/PIN/Off overrides for waiter accounts (tablet_* caps), greying caps whose admin module isn't effective; route GET returns module-effective per restaurant; writes via set_permissions. Build green. Owner-login live verify next.
 - 2026-07-24 master plan created; A/B live.
 - Stage 1 DONE+VERIFIED live (10/10: ratings unified, owner-sections area gone, writes both columns, 0 errors).
 - Stage 2 (owner-only caps show just Owner step) code done.

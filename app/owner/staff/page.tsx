@@ -11,8 +11,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Perms = Record<string, boolean>;
-type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms };
-type Staff = { id: string; username: string; role: string; name: string | null; phone: string | null; active: boolean; restaurant_id: string; hasPin: boolean; last_seen_at?: string | null };
+type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms; modules?: Record<string, boolean> };
+type Staff = { id: string; username: string; role: string; name: string | null; phone: string | null; active: boolean; restaurant_id: string; hasPin: boolean; last_seen_at?: string | null; permissions?: Record<string, string> };
+
+// Per-user override caps for a WAITER (tablet) account — the tablet_* keys tabletPerm enforces.
+// The module gate (or null) is what the admin must have enabled for the restaurant; a gated cap
+// whose module is OFF is greyed here (and refused server-side by GAP-B).
+const WAITER_CAPS: [string, string, string | null][] = [
+  ["tablet_mark_paid", "Mark bill paid", null],
+  ["tablet_discount", "Give discount", null],
+  ["tablet_invoice", "Generate invoice", null],
+  ["tablet_take_orders", "Take orders", "take_orders"],
+  ["tablet_table_ops", "Table & KOT ops", "table_ops"],
+  ["tablet_table_tags", "Mark table types", "table_tags"],
+  ["tablet_khata", "Khata (pay later)", "table_tags"],
+  ["tablet_banquet", "Banquet billing", "banquet"],
+];
+const OVR_MODES: [string, string][] = [["default", "Default"], ["on", "On"], ["pin", "PIN"], ["off", "Off"]];
 
 // [flag, label, hint]. Rendered by mapping — add a new power here (and to the API
 // FLAGS whitelist) and it just appears; nothing is hardcoded to a fixed count.
@@ -123,6 +138,16 @@ export default function OwnerStaffPage() {
       const d = await call(withScope("/api/owner/manager-permissions"), { method: "PATCH", body: JSON.stringify({ restaurant_id: rid, permissions: { [key]: value } }) });
       setRestaurants((rs) => rs.map((r) => (r.id === rid ? { ...r, managerPermissions: d.manager_permissions } : r)));
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+  }
+
+  // Per-user override for a waiter's tablet cap (Default/On/PIN/Off). Server (GAP-B) refuses a
+  // grant beyond the restaurant's ceiling; the UI also greys those, so this only ever sends valid ones.
+  async function setUserPerm(u: Staff, key: string, v: string) {
+    setStaff((prev) => prev.map((x) => x.id === u.id ? { ...x, permissions: { ...(x.permissions || {}), [key]: v } } : x));
+    try {
+      const d = await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: u.id, action: "set_permissions", permissions: { [key]: v === "default" ? null : v } }) });
+      setStaff((prev) => prev.map((x) => x.id === u.id ? { ...x, permissions: d.permissions || {} } : x));
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); load(); }
   }
 
   async function addStaff(rid: string, form: HTMLFormElement) {
@@ -288,6 +313,31 @@ export default function OwnerStaffPage() {
                         onChange={(e) => setEditing({ ...editing, phone: e.target.value })} />
                       <button className="ost-btn" disabled={busy} onClick={() => saveEdit(s)}>Save</button>
                       <button className="ost-mini" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
+                    </div>
+                  )}
+                  {/* Per-user tablet permissions — only for waiter accounts, only the owner can set.
+                      A cap the admin hasn't enabled for this restaurant is greyed (and refused server-side). */}
+                  {s.role === "tablet" && canEditPowers && (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "var(--border)", display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {WAITER_CAPS.map(([key, label, gate]) => {
+                        const gated = !!gate && !(r.modules?.[gate]);
+                        const cur = s.permissions?.[key] || "default";
+                        return (
+                          <div key={key} style={{ display: "flex", alignItems: "center", gap: 7, opacity: gated ? 0.45 : 1 }}>
+                            <span style={{ fontSize: 11.5, fontWeight: 600, minWidth: 96 }}>{label}{gated ? " · not enabled" : ""}</span>
+                            <div style={{ display: "inline-flex", gap: 2, background: "var(--bg)", border: "var(--border)", borderRadius: 8, padding: 2 }}>
+                              {OVR_MODES.map(([v, ml]) => (
+                                <button key={v} disabled={busy || gated}
+                                  onClick={() => setUserPerm(s, key, v)}
+                                  title={gated ? "The admin hasn't enabled this feature for the restaurant" : `Set ${label} to ${ml}`}
+                                  style={{ minHeight: 28, padding: "0 9px", borderRadius: 6, border: "none", fontSize: 11.5, fontWeight: 700, cursor: gated ? "not-allowed" : "pointer",
+                                    background: cur === v ? (v === "off" ? "var(--adm-danger)" : v === "default" ? "var(--muted2)" : "var(--accent)") : "transparent",
+                                    color: cur === v ? (v === "default" ? "var(--text)" : "#fff") : "var(--muted)" }}>{ml}</button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
