@@ -9,7 +9,7 @@
 // Because it's public, it is hardened: tiny body, strict field whitelists, and a per-device rate
 // cap enforced against the log itself (no new table). It fails soft — a bad or over-limit request
 // just returns ok:true without writing, so a misbehaving client can never error-storm the DB.
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sendOwnerAlert } from "@/lib/alerts";
 
@@ -71,8 +71,11 @@ export async function POST(req: NextRequest) {
       ...(rid !== null ? { restaurant_id: rid } : { restaurant_id: null }),
     });
 
-    // Best-effort grouped alert (15-min dedupe lives in sendOwnerAlert).
-    sendOwnerAlert(`⚠️ ${panel} screen error: ${message.slice(0, 100)}`, `client:${panel}`).catch(() => {});
+    // Best-effort grouped alert (15-min dedupe lives in sendOwnerAlert). Wrapped in after() so
+    // the serverless platform keeps the function alive until the push completes AFTER the
+    // response is sent — a bare fire-and-forget gets frozen on Vercel and drops the alert
+    // (proven flaky in a live test 2026-07-24). The response stays instant; the push runs after.
+    after(sendOwnerAlert(`⚠️ ${panel} screen error: ${message.slice(0, 100)}`, `client:${panel}`).catch(() => {}));
 
     return NextResponse.json({ ok: true });
   } catch {
