@@ -3812,6 +3812,21 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   -webkit-text-fill-color: transparent; color: transparent;
   width: fit-content;
 }
+/* Access panel: the AREA ICONS get their own VIOLET identity so the page isn't all-blue,
+   and the SELECTED area's icon wears the full blue→violet→red spectrum. Blue base elsewhere. */
+.adm.adx .acc2-gi {
+  background: color-mix(in srgb, #8b5cf6 15%, transparent);
+  color: #a78bfa;
+  border-color: color-mix(in srgb, #8b5cf6 34%, transparent);
+}
+.adm.adx[data-skin="light"] .acc2-gi {
+  background: color-mix(in srgb, #7c3aed 12%, transparent);
+  color: #7c3aed;
+  border-color: color-mix(in srgb, #7c3aed 26%, transparent);
+}
+.adm.adx .acc2-rail button.on .acc2-gi {
+  background: var(--accent-grad); color: #fff; border-color: transparent;
+}
 /* The NAV LIST scrolls internally (overflow-y) so a long list can't spill past the footer;
    the footer stays pinned below it (flex-shrink:0). Fixes the phone overlap where the
    "Aevidine · Restaurant OS" footer sat on top of the last nav items (audit 2026-07-09). */
