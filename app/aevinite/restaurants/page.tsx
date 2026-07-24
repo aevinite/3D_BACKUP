@@ -485,8 +485,15 @@ function GoogleReviewCard({ restaurant }: { restaurant: Restaurant }) {
   };
   return (
     <div className="adm-card" style={{ marginBottom: 14 }}>
-      <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Google review link</div>
-      <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Paste this restaurant&apos;s Google review URL. When set, a guest who rates a dish <b>4–5★</b> is invited to review you on Google (a low rating stays private). Leave blank to turn the nudge off.</p>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 4 }}>
+        <div className="adm-section-h" style={{ fontWeight: 800 }}>Google review nudge</div>
+        {loadOk && (
+          <span className="adm-chip" style={url
+            ? { background: "color-mix(in srgb, var(--adm-ok) 20%, transparent)", color: "var(--adm-ok)" }
+            : { background: "var(--muted2)", color: "var(--muted)" }}>{url ? "ON" : "OFF"}</span>
+        )}
+      </div>
+      <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>When a guest rates a dish <b>4–5★</b>, invite them to review you on Google (a low rating stays private). Paste the review URL to turn it ON; clear it to turn it OFF. Optional — leave blank if you don&apos;t use Google reviews.</p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <input className="adm-input" style={{ flex: 1, minWidth: 240 }} type="url" inputMode="url" placeholder="https://g.page/r/…/review" value={draft} maxLength={500} disabled={!loadOk || busy} onChange={(e) => setDraft(e.target.value)} />
         <button className="adm-btn primary" disabled={!loadOk || busy || draft.trim() === (url || "")} onClick={save}>{busy ? "Saving…" : "Save"}</button>

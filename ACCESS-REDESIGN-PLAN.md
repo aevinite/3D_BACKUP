@@ -14,7 +14,7 @@ Legend: [ ] todo · [~] doing · [x] done+verified
 - [x] A5  Remove Suspend button from the TOP status area
 - [x] A6  Top status: keep a clean LIVE / maintenance STATUS display only (no destructive buttons)
 - [x] A7  Improve "Take menu offline" (maintenance) wording + control clarity
-- [ ] A8  Google review card: add on/off state to the heading ("Google review nudge — ON/OFF") + clearer copy so it's not "out of nowhere"
+- [x] A8  Google review card: add on/off state to the heading ("Google review nudge — ON/OFF") + clearer copy so it's not "out of nowhere"
 - [x] A9  EnterCard "View & manage": redesign layout (clean grouping, good UI)
 - [x] A10 EnterCard: clarify OR remove "Stop viewing as this restaurant" (owner doesn't know what it does)
 - [x] A11 EnterCard: keep "Manage staff & create users" here; remove the confusing duplicate/"two things"
