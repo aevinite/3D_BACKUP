@@ -286,7 +286,8 @@ export function reachLevel(p: Perm, s: AccessState): number {
   return lvl;
 }
 
-export function subState(p: Perm, side: "owner" | "manager", s: AccessState): Record<string, boolean> {
+export function subState(p: Perm, side: "owner" | "manager" | "waiter", s: AccessState): Record<string, boolean> {
   const cfg = s.config?.[p.id];
-  return (cfg && cfg[side === "owner" ? "owner_opts" : "manager_opts"]) || {};
+  const key = side === "owner" ? "owner_opts" : side === "manager" ? "manager_opts" : "waiter_opts";
+  return (cfg && cfg[key]) || {};
 }
