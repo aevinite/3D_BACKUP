@@ -142,4 +142,6 @@ STAGE 9 — Info screenshots + bulletproof + ship
 ## 5. DEFERRED (owner-approved, later): per-dish discount feature; owner's-guest on-the-house settle.
 ## 6. STATUS LOG:
 - 2026-07-24 master plan created; A/B live.
-- Stage 1 (unify sections↔powers) code DONE: accessModel section links + handle_issues/view_customers + removed ownersections group/sec_* + maxReach/allowed for section+ownerOnly; panel setReach writes the section; route already carries section keys. Build green. Loop to deploy+verify (1.7) + Stage 2.
+- Stage 1 DONE+VERIFIED live (10/10: ratings unified, owner-sections area gone, writes both columns, 0 errors).
+- Stage 2 (owner-only caps show just Owner step) code done.
+- (was) Stage 1 (unify sections↔powers) code DONE: accessModel section links + handle_issues/view_customers + removed ownersections group/sec_* + maxReach/allowed for section+ownerOnly; panel setReach writes the section; route already carries section keys. Build green. Loop to deploy+verify (1.7) + Stage 2.
