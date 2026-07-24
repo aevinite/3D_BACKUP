@@ -90,14 +90,18 @@ const clickSub = (t) => `const s2=[...document.querySelectorAll('.subtab')].find
 const tabEl = (t) => `const b=[...document.querySelectorAll('.tab')].find(e=>e.textContent.includes(${JSON.stringify(t)}));return [b,b];`;
 const navlink = (t) => `const a=[...document.querySelectorAll('.owx-navlink')].find(e=>e.textContent.trim().replace(/Soon$/,'')===${JSON.stringify(t)})||[...document.querySelectorAll('.owx-navlink')].find(e=>e.textContent.includes(${JSON.stringify(t)}));return [a,a];`;
 const billCard = `let e=[...document.querySelectorAll('.ord-btn')][0];while(e&&e.offsetHeight<220)e=e.parentElement;return [e,null];`;
+// Void / close-unpaid have NO dedicated button yet (owner 2026-07-24: "we'll make the
+// button; till then use the Unpaid / regenerate-invoice image"). Ring the bill card +
+// tight-highlight its "Unpaid" pill (falling back to the invoice chip).
+const billCardUnpaid = `let e=[...document.querySelectorAll('.ord-btn')][0];while(e&&e.offsetHeight<220)e=e.parentElement;const t=(e&&(e.querySelector('.pay-pill.pending')||e.querySelector('.pay-pill')||e.querySelector('.inv-chip')))||null;return [e,t];`;
 
 const editorJobs = [
   { id: "edit_menu", nav: clickTab("Editor") + clickSub("Dishes"), pick: `const b=document.getElementById('newBtn');return [b,b];`, label: "Manager panel  ›  Menu (Editor)  ›  “+ New” dish" },
   { id: "mark_paid", nav: clickTab("Bills"), pick: `const b=[...document.querySelectorAll('.ord-btn.pay')][0];return [b,b];`, label: "Manager panel  ›  Bills  ›  “Mark paid” (settle a bill)" },
   { id: "print_invoice", nav: clickTab("Bills"), pick: `const b=[...document.querySelectorAll('.ord-btn.invoice')][0];return [b,b];`, label: "Manager panel  ›  Bills  ›  “Generate invoice”" },
-  { id: "give_discounts", nav: clickTab("Bills"), pick: billCard, label: "Manager panel  ›  Bills  ›  a bill (Discount lives in its actions)" },
-  { id: "void_bills", nav: clickTab("Bills"), pick: billCard, label: "Manager panel  ›  Bills  ›  a bill (Void / delete / close lives in its actions)" },
-  { id: "khata", nav: clickTab("Bills"), pick: billCard, label: "Manager panel  ›  Bills  ›  a bill (Khata / pay-later lives in its actions)" },
+  { id: "give_discounts", nav: clickTab("Bills"), pick: billCard, label: "Manager panel  ›  Bills  ›  a bill — Discount comes off this bill total" },
+  { id: "void_bills", nav: clickTab("Bills"), pick: billCardUnpaid, label: "Manager panel  ›  Bills  ›  ‘Unpaid’ bill — void / regenerate invoice / close (buttons coming)" },
+  { id: "khata", nav: clickTab("Bills"), pick: billCard, label: "Manager panel  ›  Bills  ›  a bill — Khata / pay-later (module button coming)" },
   { id: "take_orders", nav: clickTab("Tables"), pick: `const t=[...document.querySelectorAll('.ftile')].find(e=>/New ord|Open|Accept/i.test(e.textContent))||document.querySelector('.ftile');return [t,t];`, label: "Manager panel  ›  Tables  ›  Take / accept a new order" },
   { id: "table_ops", nav: clickTab("Tables"), pick: `const t=[...document.querySelectorAll('.ftile')].find(e=>/Prepar|min|₹/i.test(e.textContent))||document.querySelector('.ftile');return [t,t];`, label: "Manager panel  ›  Tables  ›  KOT ▾ menu (move / merge / split / reprint)" },
   { id: "table_tags", nav: clickTab("Tables"), pick: `const t=document.querySelector('.ftile');return [t,t];`, label: "Manager panel  ›  Tables  ›  Mark VIP / Family / Guest" },
@@ -114,7 +118,7 @@ const ownerJobs = [
 ];
 const panelJobs = {
   manager: [{ id: "panel_manager", pick: `return [null,null];`, label: "Staff apps  ›  Manager panel (the control room)" }],
-  kitchen: [{ id: "panel_kitchen", pick: `return [null,null];`, label: "Staff apps  ›  Kitchen display (New → Cooking → Ready)" }, { id: "auto_print_kot", pick: `const s=document.querySelector('#kdsSettings,[class*=setting],[class*=gear],button');return [s,s];`, label: "Kitchen display  ›  Auto-print kitchen tickets" }],
+  kitchen: [{ id: "panel_kitchen", pick: `return [null,null];`, label: "Staff apps  ›  Kitchen display (New → Cooking → Ready)" }, { id: "auto_print_kot", pick: `const s=document.querySelector('.reprint')||document.querySelector('button');return [s,s];`, label: "Kitchen display  ›  ticket 🖨 — Auto-print kitchen tickets (admin hardware setting)" }],
   tablet: [{ id: "panel_tablet", pick: `return [null,null];`, label: "Staff apps  ›  Waiter tablet (floor + take order)" }],
   owner: [{ id: "panel_owner", pick: `return [null,null];`, label: "Staff apps  ›  Owner panel (dashboard, staff, reports)" }],
 };
@@ -125,7 +129,7 @@ async function runRole(role, jobs, useEditorFrame) {
   const page = await ctx.newPage();
   await page.goto(BASE + route, { waitUntil: "networkidle", timeout: 40000 });
   await page.waitForTimeout(3500);
-  const frameOf = () => (useEditorFrame ? page.frames().find((f) => f.url().includes("/panels/editor")) : null) || page.mainFrame();
+  const frameOf = () => (useEditorFrame ? page.frames().find((f) => f.url().includes("/panels/")) : null) || page.mainFrame();
   for (const j of jobs) {
     try {
       let fr = frameOf();
@@ -157,7 +161,7 @@ try {
     await runRole("manager", editorJobs, true);
     await runRole("owner", ownerJobs, false);
     await runRole("manager", panelJobs.manager, true);
-    await runRole("kitchen", panelJobs.kitchen, false);
+    await runRole("kitchen", panelJobs.kitchen, true);
     await runRole("tablet", panelJobs.tablet, false);
     await runRole("owner", panelJobs.owner, false);
   }
