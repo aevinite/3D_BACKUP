@@ -23,12 +23,16 @@ export const FEATURE_SWITCHES = [
 ] as const;
 
 // The owner's grant baseline for the manager powers (restaurants.manager_permissions).
-// Must match the migration backfill: banquet/edit_menu/give_discounts/view_dashboard ON,
-// the money-risk + newer powers OFF.
+// edit_menu/give_discounts/view_dashboard ON; money-risk + newer powers OFF.
+// banquet is OFF: mig 167 backfilled "banquet":true ONLY onto restaurants that existed
+// then, and the mig-091 column default doesn't include it, so a restaurant created after
+// mig 167 has NO banquet key → managerCan reads absent as false. A `true` default made the
+// admin switch show GRANTED while managers were refused (403) on new restaurants (QA
+// 2026-07-24). Keep matching the migrations — display and truth must agree.
 export const MP_DEFAULT: Record<string, boolean> = {
   manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true,
   void_bills: false, edit_settings: false, view_ratings: false, table_tags: false,
-  khata: false, banquet: true, table_ops: false, take_orders: false,
+  khata: false, banquet: false, table_ops: false, take_orders: false,
 };
 
 // New-restaurant DEFAULT tablet caps (mirrors lib/settingsClone.ts). take_orders 'on'.

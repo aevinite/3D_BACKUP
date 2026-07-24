@@ -51,7 +51,10 @@ export async function GET(req: NextRequest) {
     return ok({ billing: billingQ.data || null, payments: paymentsQ.data || [] });
   }
 
-  const yearStart = `${new Date().getUTCFullYear()}-01-01`;
+  // Use the IST calendar year (owner + the page label are IST) so "Collected this year"
+  // doesn't sum the PREVIOUS year for the first ~5.5h after IST New Year while the heading
+  // already shows the new one (QA 2026-07-24). IST = UTC+5:30, no DST.
+  const yearStart = `${new Date(Date.now() + 330 * 60000).getUTCFullYear()}-01-01`;
   const [restQ, billingQ, yearPaymentsQ] = await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): a binned restaurant must not appear
     // as a billable row in the SaaS billing table.
