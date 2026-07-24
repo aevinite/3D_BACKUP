@@ -174,6 +174,15 @@ STAGE 9 — Info screenshots + bulletproof + ship
 - 9 bulletproof: FINAL CONSOLIDATED CHECK PASSED 7/7 (admin access panel desktop+phone + owner
   Staff page: loads, 0 console errors, no h-scroll). Per-stage live verifies passed throughout.
 
+## DEFERRED-ITEMS PROGRESS (owner approved 2026-07-24, BACKUP only, MAIN pending)
+- CRASH FIX (permKey TDZ) — done+verified live. LEFT-RAIL cleanup — done+verified (single active).
+- ITEM 1 edit-menu SUB-OPTION enforcement — DONE + VERIFIED live 5/5: manager gated on
+  add_dish/delete_dish (+manage_categories/filters) per access_config.edit_menu.manager_opts;
+  non-breaking (unconfigured/all-true → allow); owner/admin full. edit_price/mark_86 ride edit_dish;
+  edit_3d server gate + the display-default backfill migration = small TODO.
+- ITEM 2 discount %-cap clamp — TODO. ITEM 3 real (i) screenshots — TODO.
+- MAIN DEPLOY — pending owner's go (everything on 3-d-backup only).
+
 ## 6. STATUS LOG:
 - Stage 7 IN PROGRESS: entitledSubset per-restaurant gating already covers reports/customers/issues/ratings. ADDED it to analytics (revenue = the 'bill' section the owner flagged). analytics gate VERIFIED live (reports off → analytics rid+group 403). ADDED overview gate: revenue zeroed + reportsOff flag for ungranted restaurants (build green). settings section NOW gated (GET filters restaurants to settings-entitled; PATCH refuses ungranted; admin unrestricted). Build green. STAGE 7 COMPLETE (reports/analytics/overview/customers/issues/ratings/settings all per-restaurant private).
 - GAP-A DONE+VERIFIED live (override stores under tablet_mark_paid, reverts clean).
