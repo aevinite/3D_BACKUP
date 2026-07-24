@@ -17,6 +17,7 @@ import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { getOwnerEntitlements, getOwnerEntitlementsUnion } from "@/lib/ownerEntitlements";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
+import { tableTagsLadder } from "@/lib/tableTags";
 import OwnerShell from "@/components/owner/OwnerShell";
 import OwnerReconnecting from "@/components/owner/OwnerReconnecting";
 
@@ -58,6 +59,9 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
   if (u && u.role === "owner") {
     if (!ownedIds.length) redirect("/login?next=/owner");
     const ents = await getOwnerEntitlementsUnion(ownedIds);
+    // Pay Later nav shows if the module is on for ANY owned restaurant (per-restaurant data
+    // is filtered by the API). Injected as a synthetic section key the nav gate reads.
+    ents.khata_book = (await Promise.all(ownedIds.map((id) => tableTagsLadder(id)))).some((l) => l.effective);
     return <OwnerShell initialSkin={initialSkin} entitlements={ents}>{children}</OwnerShell>;
   }
 
@@ -65,8 +69,12 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
   // The admin sees removed sections TINTED (hierarchy X-ray), never hidden.
   if (acting && actingValid) {
     const r = (await sb.from("restaurants").select("name").eq("id", acting).limit(1)).data?.[0];
+    const adminEnts = await getOwnerEntitlements(acting);
+    // Admin act-as: show Pay Later greyed (X-ray) when the module is off for this restaurant,
+    // never hidden — same rule as the other sections the admin sees tinted.
+    adminEnts.khata_book = (await tableTagsLadder(acting)).effective;
     return (
-      <OwnerShell adminViewing restaurantName={r?.name || "this restaurant"} initialSkin={initialSkin} entitlements={await getOwnerEntitlements(acting)}>
+      <OwnerShell adminViewing restaurantName={r?.name || "this restaurant"} initialSkin={initialSkin} entitlements={adminEnts}>
         {children}
       </OwnerShell>
     );
