@@ -43,8 +43,21 @@
   }
 
   // ── 1) Crash capture ────────────────────────────────────────────────────────
+  // Benign noise we deliberately never log as a red crash row. KOT auto-print is best-effort
+  // ("printing must NEVER break the board" — kitchen printKot): Chrome can throw
+  // "Failed to execute 'print' on 'Window': The provided callback is no longer runnable" a beat
+  // LATE (as an unhandled promise rejection the synchronous try/catch around print() can't catch)
+  // when the hidden print frame's context is gone — tab hidden mid-print, etc. It means at worst
+  // one ticket didn't auto-print (staff can tap 🖨 reprint); it is NOT a crash, so it must not
+  // create client_error rows / fake fix requests. The removal-timing cause was fixed in #353;
+  // this guard covers the residual late-rejection path.
+  function isBenign(message) {
+    var m = String(message || "");
+    return m.indexOf("Failed to execute 'print' on 'Window'") >= 0;
+  }
   var lastMsg = "", lastAt = 0;
   function reportError(message, where) {
+    if (isBenign(message)) return;
     var now = Date.now();
     // Dedupe an identical message firing repeatedly within 5s (a render loop shouldn't spam).
     if (message === lastMsg && now - lastAt < 5000) return;
