@@ -1851,7 +1851,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
           <button type="button" class="pay-method-btn" data-method="Card" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">💳</span>Card</button>
           <button type="button" class="pay-method-btn" data-method="Other" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">⋯</span>Other</button>
           ${opts.onHouse ? `<button type="button" class="pay-method-btn" data-special="onhouse" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid #e11d48;background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">🏠</span>On the house</button>` : ""}
-          ${opts.khata ? `<button type="button" class="pay-method-btn" data-special="khata" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid #0ea5e9;background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">📒</span>Collect later</button>` : ""}
+          ${opts.khata ? `<button type="button" class="pay-method-btn" data-special="khata" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid #0ea5e9;background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">📒</span>Pay Later</button>` : ""}
         </div>
         <div class="pay-other-field" style="display:none;margin-top:12px">
           <div style="font-size:13px;font-weight:700;margin:0 0 8px">What kind?</div>
@@ -1917,7 +1917,7 @@ async function payBillWithMethod(t, a) {
 async function tabletKhataFlow(t, due) {
   const who = await openKhataPersonSheet(due, t);
   if (!who) return;
-  await actGated("POST", `/tables/${t}/khata`, who, { message: "Enter a manager PIN to park this bill.", toast: "📒 Parked — collect later from the manager's Khata book" });
+  await actGated("POST", `/tables/${t}/khata`, who, { message: "Enter a manager PIN to park this bill.", toast: "📒 Parked — collect later from the manager's Pay Later list" });
   state.table = null; renderFloor(); renderPanel(); // the table just closed
 }
 
@@ -1932,7 +1932,7 @@ function openKhataPersonSheet(due, t) {
     Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
     const inputCss = "width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px";
     ov.innerHTML = `<div style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
-      <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Collect later — whose khata?</h3><button class="kp-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Pay Later — who's this bill on?</h3><button class="kp-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
       <div style="padding:16px 18px">
         <div style="display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted);margin-bottom:10px"><span>Table ${esc(t)} bill</span><b style="color:var(--text)">${inr(due)}</b></div>
         <input type="text" class="kp-search" maxlength="60" placeholder="🔍 Search name or mobile…" autocomplete="off" style="${inputCss};margin-bottom:8px">
