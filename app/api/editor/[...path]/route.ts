@@ -297,38 +297,23 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "khata") {
       if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("see the khata book");
-      const rows = must(await sb.from("orders")
-        .select("id,session_id,khata_customer_id,khata_at,table_number,subtotal,tax,total,discount,created_at")
-        .eq("restaurant_id", rid).not("khata_at", "is", null).neq("payment_status", "paid").neq("status", "cancelled")
-        .order("khata_at", { ascending: false }).limit(2000)) as any[];
-      // bill_no lives on SESSIONS (daily counter, mig 036) — one scoped lookup for the parked bills.
-      const sessIds = [...new Set(rows.map((o) => o.session_id).filter(Boolean))];
-      const billNos = new Map<string, number>();
-      if (sessIds.length) for (const srow of must(await sb.from("sessions").select("id,bill_no").in("id", sessIds)) as any[]) billNos.set(srow.id, srow.bill_no);
-      const custIds = [...new Set(rows.map((o) => o.khata_customer_id).filter(Boolean))];
-      const custs = custIds.length
-        ? (must(await sb.from("khata_customers").select("id,name,phone,note,created_at").eq("restaurant_id", rid).in("id", custIds)) as any[])
-        : [];
+      // ONE source of truth for the net-due math (mig 184): the RPC returns per-BILL open
+      // rows; we group them into person → bills for the Pay Later view. The owner panel
+      // calls the SAME RPC, so the two panels can never disagree on what's owed.
+      const rows = (must(await sb.rpc("lfh_khata_outstanding", { p_restaurant_ids: [rid] })) || []) as any[];
       const byCust = new Map<string, any>();
-      for (const cst of custs) byCust.set(cst.id, { ...cst, outstanding: 0, bills: new Map<string, any>() });
-      for (const o of rows) {
-        const cst = byCust.get(o.khata_customer_id); if (!cst) continue;
-        // Same net-due math as everywhere else: discount is pre-tax, so owed drops by discount×(1+rate).
-        const sub = Number(o.subtotal) || 0, tax = Number(o.tax) || 0;
-        const rate = sub > 0 ? tax / sub : 0;
-        const due = Math.round(((Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate)) * 100) / 100;
-        const key = o.session_id || o.id;
-        const bill = cst.bills.get(key) || { key, session_id: o.session_id, order_ids: [], bill_no: o.session_id ? billNos.get(o.session_id) ?? null : null, table_number: o.table_number, khata_at: o.khata_at, amount: 0 };
-        bill.order_ids.push(o.id);
-        bill.amount = Math.round((bill.amount + due) * 100) / 100;
-        cst.bills.set(key, bill);
-        cst.outstanding = Math.round((cst.outstanding + due) * 100) / 100;
+      for (const r of rows) {
+        let cst = byCust.get(r.khata_customer_id);
+        if (!cst) { cst = { id: r.khata_customer_id, name: r.name, phone: r.phone, note: r.note, outstanding: 0, bills: [] }; byCust.set(r.khata_customer_id, cst); }
+        const amt = Number(r.bill_amount) || 0;
+        cst.bills.push({ key: r.bill_key, session_id: r.session_id, order_ids: r.order_ids || [], bill_no: r.bill_no, table_number: r.table_number, khata_at: r.khata_at, amount: amt });
+        cst.outstanding = Math.round((cst.outstanding + amt) * 100) / 100;
       }
-      const customers = [...byCust.values()]
-        .map((cst) => ({ ...cst, bills: [...cst.bills.values()] }))
-        .filter((cst) => cst.bills.length)
-        .sort((x, y) => y.outstanding - x.outstanding);
-      return ok({ customers, total: Math.round(customers.reduce((s, cst) => s + cst.outstanding, 0) * 100) / 100 });
+      const customers = [...byCust.values()].sort((x, y) => y.outstanding - x.outstanding);
+      // "Collected today" — money actually received today (by paid_at), for the summary bar.
+      const coll = (must(await sb.rpc("lfh_khata_collected", { p_restaurant_ids: [rid], p_from: businessDayStartIso(), p_to: nowIso() })) || []) as any[];
+      const collectedToday = Math.round(coll.reduce((s, c) => s + (Number(c.collected) || 0), 0) * 100) / 100;
+      return ok({ customers, total: Math.round(customers.reduce((s, cst) => s + cst.outstanding, 0) * 100) / 100, collectedToday });
     }
 
     // khata/customers?q= — the person picker's search (scoped, limited, debounced client-side).
@@ -338,7 +323,23 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const q = (new URL(req.url).searchParams.get("q") || "").trim().slice(0, 60);
       let sel = sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(8);
       if (q) sel = sel.or(`name.ilike.%${q.replace(/[%,()]/g, "")}%,phone.ilike.%${q.replace(/[%,()]/g, "")}%`);
-      return ok({ customers: must(await sel) });
+      const people = (must(await sel) || []) as any[];
+      // Show each shown person's CURRENT tab so staff see they're adding to an existing
+      // debt. Scoped to just the ≤8 shown people, riding the open-khata index (mig 166).
+      if (people.length) {
+        const openRows = (must(await sb.from("orders")
+          .select("khata_customer_id,subtotal,tax,total,discount")
+          .eq("restaurant_id", rid).in("khata_customer_id", people.map((p2) => p2.id))
+          .not("khata_at", "is", null).neq("payment_status", "paid").neq("status", "cancelled")) || []) as any[];
+        const owed = new Map<string, number>();
+        for (const o of openRows) {
+          const sub = Number(o.subtotal) || 0, tax = Number(o.tax) || 0, rate = sub > 0 ? tax / sub : 0;
+          const due = Math.round(((Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate)) * 100) / 100;
+          owed.set(o.khata_customer_id, Math.round(((owed.get(o.khata_customer_id) || 0) + due) * 100) / 100);
+        }
+        people.forEach((p2) => { p2.outstanding = owed.get(p2.id) || 0; });
+      }
+      return ok({ customers: people });
     }
 
     // onhouse?days=N — the "On the house" report (comp bills; would-be amount = the bill's

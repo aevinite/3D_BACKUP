@@ -487,7 +487,7 @@ function renderList() {
     ul.appendChild(mk("previous", '<i class="fas fa-receipt"></i>', "Previous", previous.length));
     // Pay later (mig 166): the parked-bills book, grouped by person. Count = people
     // with something outstanding (from the last book fetch; refreshed on open).
-    if (tagActionAllowed("khata")) ul.appendChild(mk("khata", "📒", "Khata", (state.khataBook && state.khataBook.customers || []).length));
+    if (tagActionAllowed("khata")) ul.appendChild(mk("khata", "📒", "Pay Later", (state.khataBook && state.khataBook.customers || []).length));
     ul.appendChild(mk("calls", "🔔", "Calls", callCount));
     return;
   }
@@ -2061,22 +2061,42 @@ function ordersKhataHtml() {
   // whatever's cached meanwhile, so opening the tab never blanks the screen.
   if (!state.khataLoadedAt || Date.now() - state.khataLoadedAt > 30000) loadKhataBook();
   const book = state.khataBook;
-  if (!book) return `<div class="empty">Loading the khata book…</div>`;
-  if (book.error) return `<div class="empty">Couldn't load the khata book: ${esc(book.error)}</div>`;
-  const customers = book.customers || [];
+  if (!book) return `<div class="empty">Loading Pay Later…</div>`;
+  if (book.error) return `<div class="empty">Couldn't load Pay Later: ${esc(book.error)}</div>`;
+  const allCust = book.customers || [];
+  const q = (state.khataSearch || "").trim().toLowerCase();
+  const customers = q
+    ? allCust.filter((c) => (c.name || "").toLowerCase().includes(q) || (c.phone || "").toLowerCase().includes(q))
+    : allCust;
+  const peopleCount = allCust.length;
+
+  // Summary bar — outstanding (liability), how many people owe, and what actually
+  // came in today (by collection day). Tabular money so the digits line up.
+  const summary = `<div class="khata-summary">
+    <div class="khata-stat"><span class="ks-label">Outstanding</span><span class="ks-val">${inr(book.total || 0)}</span></div>
+    <div class="khata-stat"><span class="ks-label">${peopleCount === 1 ? "Person owes" : "People owe"}</span><span class="ks-val">${peopleCount}</span></div>
+    <div class="khata-stat"><span class="ks-label">Collected today</span><span class="ks-val ks-good">${inr(book.collectedToday || 0)}</span></div>
+  </div>`;
+  const searchBar = peopleCount
+    ? `<input type="text" class="khata-search" id="khataViewSearch" placeholder="🔍 Search name or mobile…" maxlength="60" autocomplete="off" value="${esc(state.khataSearch || "")}">`
+    : "";
+
   const bookHtml = customers.length ? customers.map((cst) => `
     <div class="card khata-group">
-      <div class="khata-ghead"><b>${esc(cst.name)}</b><small>${esc(cst.phone || "no mobile")}${cst.note ? " · " + esc(cst.note) : ""}</small><span class="khata-due">${inr(cst.outstanding)}</span></div>
+      <div class="khata-ghead">
+        <div class="khata-gwho"><b>${esc(cst.name)}</b><small>${esc(cst.phone || "no mobile")}${cst.note ? " · " + esc(cst.note) : ""}</small></div>
+        <div class="khata-gright"><span class="khata-due">${inr(cst.outstanding)}</span>${cst.bills.length > 1 ? `<button class="btn small ghost" data-khata-collectall="${esc(cst.id)}" data-khata-name="${esc(cst.name)}" data-khata-amount="${cst.outstanding}">Collect all</button>` : ""}</div>
+      </div>
       ${cst.bills.map((bl) => `<div class="khata-bill">
-        <span>${bl.bill_no != null ? `Bill #${esc(String(bl.bill_no))} · ` : ""}${esc(fmtDate(bl.khata_at))} · T${esc(String(bl.table_number || "?"))}</span>
-        <b>${inr(bl.amount)}</b>
-        <button class="btn small primary" data-khata-collect="${esc(bl.key)}" data-khata-session="${esc(bl.session_id || "")}" data-khata-order="${esc(bl.session_id ? "" : bl.key)}" data-khata-amount="${bl.amount}" data-khata-name="${esc(cst.name)}">Mark paid</button>
+        <span class="khata-bmeta">${bl.bill_no != null ? `<b>#${esc(String(bl.bill_no))}</b> · ` : ""}${esc(fmtDate(bl.khata_at))} · T${esc(String(bl.table_number || "?"))}</span>
+        <b class="khata-bamt">${inr(bl.amount)}</b>
+        <button class="btn small primary" data-khata-collect="${esc(bl.key)}" data-khata-session="${esc(bl.session_id || "")}" data-khata-order="${esc(bl.session_id ? "" : bl.key)}" data-khata-amount="${bl.amount}" data-khata-name="${esc(cst.name)}">Collect</button>
       </div>`).join("")}
     </div>`).join("")
-    : `<div class="empty">No pay-later bills right now. Settle a table with 📒 "Collect later" and it lands here.</div>`;
-  const head = customers.length
-    ? `<div class="ord-note">📒 <b>Khata:</b> ${customers.length} ${customers.length === 1 ? "person owes" : "people owe"} ${inr(book.total || 0)} in total.</div>`
-    : "";
+    : (q
+      ? `<div class="empty">No one matches “${esc(state.khataSearch)}”.</div>`
+      : `<div class="empty">No pay-later bills right now. Settle a table with 📒 <b>Pay Later</b> and it lands here.</div>`);
+  const head = summary + searchBar;
   // On-the-house report (last 30 days) + the "show in main lists" toggle. Report data
   // needs the dashboard power; the card explains itself when that's off.
   const oh = state.onhouseReport;
@@ -2365,7 +2385,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
           <button type="button" class="pay-method-btn" data-method="Card"><span class="pmi">💳</span>Card</button>
           <button type="button" class="pay-method-btn" data-method="Other"><span class="pmi">⋯</span>Other</button>
           ${opts.onHouse ? `<button type="button" class="pay-method-btn pay-special-onhouse" data-special="onhouse"><span class="pmi">🏠</span>On the house</button>` : ""}
-          ${opts.khata ? `<button type="button" class="pay-method-btn pay-special-khata" data-special="khata"><span class="pmi">📒</span>Collect later</button>` : ""}
+          ${opts.khata ? `<button type="button" class="pay-method-btn pay-special-khata" data-special="khata"><span class="pmi">📒</span>Pay Later</button>` : ""}
         </div>
         <div class="pay-other-field" style="display:none">
           <label class="dish-edit-lbl">What kind?</label>
@@ -2568,9 +2588,9 @@ function openKhataPersonPicker(due, t) {
   return new Promise((resolve) => {
     document.querySelector(".khata-overlay")?.remove();
     const wrap = el(`<div class="sx-modal-overlay khata-overlay"><div class="sx-modal pay-modal">
-      <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Collect later — whose khata?</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+      <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Pay Later — who's this bill on?</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
       <div class="dish-edit-body">
-        <div class="disc-bill-row"><span>Table ${esc(t)} bill</span><b>${inr(due)}</b></div>
+        <div class="disc-bill-row"><span>Park Table ${esc(t)} bill</span><b>${inr(due)}</b></div>
         <input type="text" class="dish-edit-custominput" id="khataSearch" maxlength="60" placeholder="🔍 Search name or mobile…" autocomplete="off" style="margin:8px 0 6px">
         <div class="khata-pick-list" id="khataPickList"><div class="sx-empty">Type to search, or add a new person below.</div></div>
         <div class="dish-edit-lbl" style="margin-top:10px">— or add a new person —</div>
@@ -2580,7 +2600,7 @@ function openKhataPersonPicker(due, t) {
       </div>
       <div class="dish-edit-foot">
         <button type="button" class="btn dish-edit-cancel">Cancel</button>
-        <button type="button" class="btn primary" id="khataParkBtn">📒 Park bill on this person</button>
+        <button type="button" class="btn primary" id="khataParkBtn">📒 Pay Later — park on this person</button>
       </div>
     </div></div>`);
     document.body.appendChild(wrap);
@@ -2596,7 +2616,7 @@ function openKhataPersonPicker(due, t) {
     const search = wrap.querySelector("#khataSearch");
     const renderList = (customers) => {
       list.innerHTML = customers.length
-        ? customers.map((cst) => `<button type="button" class="khata-pick-row${pickedId === cst.id ? " sel" : ""}" data-cid="${esc(cst.id)}"><b>${esc(cst.name)}</b><small>${esc(cst.phone || "no mobile")}${cst.note ? " · " + esc(cst.note) : ""}</small></button>`).join("")
+        ? customers.map((cst) => `<button type="button" class="khata-pick-row${pickedId === cst.id ? " sel" : ""}" data-cid="${esc(cst.id)}"><b>${esc(cst.name)}</b><small>${esc(cst.phone || "no mobile")}${cst.note ? " · " + esc(cst.note) : ""}</small>${cst.outstanding > 0 ? `<span class="khata-pick-owes" title="Already owes">owes ${inr(cst.outstanding)}</span>` : ""}</button>`).join("")
         : `<div class="sx-empty">No one found — add them below.</div>`;
       list.querySelectorAll(".khata-pick-row").forEach((row) => (row.onclick = () => {
         pickedId = row.dataset.cid;
@@ -3766,6 +3786,39 @@ function renderEditor() {
         } catch (e) { toast("Couldn't collect: " + e.message, "err"); }
       };
     });
+    // Collect ALL of one person's parked bills at once — one payment method, then settle
+    // each bill on it (sequential so each leaves the book cleanly and logs its own collect).
+    ed.querySelectorAll("[data-khata-collectall]").forEach((btn) => {
+      btn.onclick = async () => {
+        const cid = btn.dataset.khataCollectall;
+        const cst = ((state.khataBook && state.khataBook.customers) || []).find((c) => c.id === cid);
+        if (!cst || !cst.bills.length) return;
+        const amount = Number(btn.dataset.khataAmount) || 0;
+        const picked = await openPaymentMethodModal(amount, `Collect all from ${btn.dataset.khataName}`);
+        if (!picked) return;
+        try {
+          for (const bl of cst.bills) {
+            const payload = { method: picked.method, note: picked.note };
+            if (bl.session_id) payload.session_id = bl.session_id; else payload.order_id = bl.key;
+            await api("POST", "/khata/pay", payload);
+          }
+          toast(`Collected ${inr(amount)} from ${btn.dataset.khataName} 📒→💳`, "ok");
+          state.khataLoadedAt = 0;
+          await loadKhataBook();
+          loadSessions();
+        } catch (e) { toast("Couldn't collect: " + e.message, "err"); }
+      };
+    });
+    // Pay Later search — filter the people list client-side (small list; no refetch). Keep
+    // caret position so typing feels natural through the re-render.
+    const kSearch = document.getElementById("khataViewSearch");
+    if (kSearch) kSearch.oninput = () => {
+      state.khataSearch = kSearch.value;
+      const pos = kSearch.selectionStart;
+      renderEditor();
+      const again = document.getElementById("khataViewSearch");
+      if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch {} }
+    };
     // On-the-house display toggle (mig 166): purely client-side list preference.
     const ohT = document.getElementById("khataOhToggle");
     if (ohT) ohT.onchange = () => { lsSet("lfh_show_onhouse", ohT.checked ? "1" : "0"); renderList(); renderEditor(); };
@@ -8405,6 +8458,9 @@ function startOrderWatch() {
       ops: (detail) => {
         if (detail && !detail.full && detail.tables && detail.tables.length) pollTables(detail.tables);
         else if (Date.now() >= rtBootGraceUntil) { pollOrders(); loadPlatform(); } // else: boot already loaded it
+        // Pay Later view open? A park or collect touches orders → refresh the book LIVE
+        // (loadKhataBook self-guards against overlap; one scoped read per event burst).
+        if (state.tab === "orders" && ordersViewKey() === "khata") { state.khataLoadedAt = 0; loadKhataBook(); }
       },
       menu: () => { if (Date.now() >= rtBootGraceUntil) loadAll(); }, // boot already loaded the menu
     }});
