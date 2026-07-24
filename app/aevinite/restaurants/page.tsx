@@ -252,28 +252,93 @@ export default function AdminRestaurants() {
   );
 }
 
-// ＋ New restaurant — create a restaurant in one go: name + which panels it has, and the
-// backend mints one starter login per ENABLED panel (passwords shown ONCE). Default panels:
-// Manager+Kitchen+Tablet on, Owner OFF (owner's choice 2026-06-29).
+// ＋ New restaurant — create a restaurant in one go: name, panels, sample menu, AND its
+// full ACCESS setup (owner sections, modules, manager powers, tablet caps). Whatever the
+// admin picks is REMEMBERED (app_config, mig 186) and auto-fills the next create form
+// (owner 2026-07-24). The backend mints one starter login per ENABLED panel (shown ONCE).
+type Access = { owner: Record<string, boolean>; manager: Record<string, boolean>; tablet: Record<string, "off" | "on" | "pin">; features: Record<string, boolean> };
+const NR_PANELS = [
+  { key: "manager", label: "Manager panel" }, { key: "kitchen", label: "Kitchen display" },
+  { key: "tablet", label: "Waiter tablet" }, { key: "owner", label: "Owner dashboard" },
+] as const;
+const SYS_PANELS: Record<string, boolean> = { manager: true, kitchen: true, tablet: true, owner: false };
+const NR_OWNER_SECTIONS = [["reports", "Reports"], ["staff", "Staff & powers"], ["issues", "Feedback & issues"], ["ratings", "Ratings"], ["customers", "Customers"], ["settings", "Settings"]] as const;
+const NR_MGR_POWERS = [["manage_staff", "Manage staff"], ["edit_menu", "Edit menu"], ["give_discounts", "Give discounts"], ["view_dashboard", "View dashboard"], ["void_bills", "Void / delete bills"], ["edit_settings", "Edit settings"], ["view_ratings", "View ratings"], ["table_tags", "Table types"], ["khata", "Pay Later (khata)"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT ops"], ["take_orders", "Take orders"]] as const;
+const NR_MODULES = [["table_tags", "Table types + Pay Later"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT operations"], ["take_orders", "Take orders (manager)"]] as const;
+const NR_TABLET_CAPS = [["tablet_discount", "Discounts"], ["tablet_mark_paid", "Mark paid"], ["tablet_invoice", "Invoice"], ["tablet_banquet", "Banquet"], ["tablet_table_tags", "Table types"], ["tablet_khata", "Pay Later"], ["tablet_table_ops", "Table & KOT ops"], ["tablet_take_orders", "Take orders"]] as const;
+const NR_MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: false, table_ops: false, take_orders: false };
+const NR_TABLET_DEFAULT: Record<string, "off" | "on" | "pin"> = { tablet_discount: "off", tablet_mark_paid: "off", tablet_invoice: "off", tablet_banquet: "off", tablet_table_tags: "off", tablet_khata: "off", tablet_table_ops: "off", tablet_take_orders: "on" };
+// The SYSTEM defaults for a brand-new restaurant (matches lib/settingsClone + MP_DEFAULT +
+// owner absent=ON). All owner sections + power switches on; modules off; grants = MP_DEFAULT.
+function systemAccess(): Access {
+  const owner: Record<string, boolean> = {};
+  for (const [k] of NR_OWNER_SECTIONS) owner[k] = true;
+  for (const [k] of NR_MGR_POWERS) owner["power_" + k] = true;
+  const features: Record<string, boolean> = {};
+  for (const [m] of NR_MODULES) { features[m + "_allowed"] = false; features[m + "_owner_control"] = false; }
+  return { owner, manager: { ...NR_MP_DEFAULT }, tablet: { ...NR_TABLET_DEFAULT }, features };
+}
+// Merge a (possibly partial) saved access blob over the system defaults, so a missing key
+// always falls back to a sane default — the form never renders an undefined toggle.
+function mergeAccess(saved: Partial<Access> | undefined | null): Access {
+  const base = systemAccess();
+  if (!saved || typeof saved !== "object") return base;
+  return {
+    owner: { ...base.owner, ...(saved.owner || {}) },
+    manager: { ...base.manager, ...(saved.manager || {}) },
+    tablet: { ...base.tablet, ...(saved.tablet || {}) },
+    features: { ...base.features, ...(saved.features || {}) },
+  };
+}
+
 function NewRestaurant({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  const [panels, setPanels] = useState<Record<string, boolean>>({ manager: true, kitchen: true, tablet: true, owner: false });
+  const [panels, setPanels] = useState<Record<string, boolean>>({ ...SYS_PANELS });
   const [seedMenu, setSeedMenu] = useState(true);
+  const [access, setAccess] = useState<Access>(() => systemAccess());
+  const [preset, setPreset] = useState<"saved" | "system">("system");
+  const [saved, setSaved] = useState<{ panels?: Record<string, boolean>; seedMenu?: boolean; access?: Partial<Access> } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [done, setDone] = useState<{ name: string; slug: string; logins: { panel: string; username: string; password: string }[]; loginErrors?: string[]; menuSeeded?: boolean; seedError?: string | null } | null>(null);
-  // Synchronous re-entry guard (bug #12, 2026-07-06): `busy` only disables the button
-  // after a re-render, so a fast double-click fired two creates → a duplicate "-2" tenant.
-  const creatingRef = useRef(false);
+  const creatingRef = useRef(false); // sync double-submit guard (bug #12)
 
-  const PANELS = [
-    { key: "manager", label: "Manager panel" }, { key: "kitchen", label: "Kitchen display" },
-    { key: "tablet", label: "Waiter tablet" }, { key: "owner", label: "Owner dashboard" },
-  ];
+  // On open, load the admin's remembered setup and auto-fill from it (editable). First
+  // time (no saved row) → system defaults. One scoped admin read; only while the card is open.
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    (async () => {
+      try {
+        const d = await (await fetch("/api/admin/restaurants/create-defaults", { cache: "no-store" })).json();
+        if (!live) return;
+        if (d?.defaults) {
+          setSaved(d.defaults);
+          setPreset("saved");
+          setPanels({ ...SYS_PANELS, ...(d.defaults.panels || {}) });
+          setSeedMenu(d.defaults.seedMenu !== false);
+          setAccess(mergeAccess(d.defaults.access));
+        } else { setPreset("system"); setAccess(systemAccess()); }
+      } catch { /* fall back to the system defaults already in state */ }
+    })();
+    return () => { live = false; };
+  }, [open]);
+
+  const applyPreset = (p: "saved" | "system") => {
+    setPreset(p);
+    if (p === "system") { setPanels({ ...SYS_PANELS }); setSeedMenu(true); setAccess(systemAccess()); }
+    else if (saved) { setPanels({ ...SYS_PANELS, ...(saved.panels || {}) }); setSeedMenu(saved.seedMenu !== false); setAccess(mergeAccess(saved.access)); }
+  };
+  const slugPreview = (name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)) || "restaurant";
+  const setPanel = (k: string) => setPanels((s) => ({ ...s, [k]: !s[k] }));
+  const setOwner = (k: string) => setAccess((a) => ({ ...a, owner: { ...a.owner, [k]: !a.owner[k] } }));
+  const setManager = (k: string) => setAccess((a) => ({ ...a, manager: { ...a.manager, [k]: !a.manager[k] } }));
+  const setFeature = (k: string) => setAccess((a) => ({ ...a, features: { ...a.features, [k]: !a.features[k] } }));
+  const setTablet = (k: string, v: "off" | "on" | "pin") => setAccess((a) => ({ ...a, tablet: { ...a.tablet, [k]: v } }));
 
   const create = async () => {
-    if (creatingRef.current) return; // block a fast second click before `busy` re-renders
+    if (creatingRef.current) return;
     if (name.trim().length < 2) { setMsg("Enter a name (at least 2 characters)."); return; }
     if (!Object.values(panels).some(Boolean)) { setMsg("Turn on at least one panel."); return; }
     creatingRef.current = true;
@@ -281,11 +346,12 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
     try {
       const r = await fetch("/api/admin/restaurants", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create_restaurant", name: name.trim(), panels, seedMenu }),
+        body: JSON.stringify({ action: "create_restaurant", name: name.trim(), panels, seedMenu, access, saveDefaults: true }),
       });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't create the restaurant.");
       setDone({ name: d.name, slug: d.slug, logins: d.logins || [], loginErrors: d.loginErrors || [], menuSeeded: d.menuSeeded, seedError: d.seedError });
-      setName(""); setPanels({ manager: true, kitchen: true, tablet: true, owner: false }); setSeedMenu(true);
+      // Remember locally too so the very next open pre-fills instantly, and mark preset "saved".
+      setSaved({ panels, seedMenu, access }); setPreset("saved"); setName("");
       onCreated();
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); creatingRef.current = false; }
   };
@@ -300,33 +366,100 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
     );
   }
 
+  // Small building blocks (kept inline so the create card owns its own look).
+  const Tog = ({ on, k, label, onClick }: { on: boolean; k: string; label: string; onClick: () => void }) => (
+    <button key={k} type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={busy} onClick={onClick}
+      title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
+      <span>{label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
+    </button>
+  );
+  const Tri = ({ cap, label }: { cap: string; label: string }) => {
+    const val = access.tablet[cap] || "off";
+    return (
+      <div className="nr-row">
+        <span className="nr-row-label">{label}</span>
+        <span className="nr-tri">
+          {(["off", "on", "pin"] as const).map((o) => (
+            <button key={o} type="button" disabled={busy} onClick={() => setTablet(cap, o)}
+              className={`nr-seg ${val === o ? "sel" : ""}`}>{o === "off" ? "Off" : o === "on" ? "On" : "PIN"}</button>
+          ))}
+        </span>
+      </div>
+    );
+  };
+  const groupCount = (entries: readonly (readonly [string, string])[], on: (k: string) => boolean) => entries.filter(([k]) => on(k)).length;
+
   return (
-    <div className="adm-card" style={{ marginBottom: 14 }}>
+    <div className="adm-card nr-card" style={{ marginBottom: 14 }}>
       <h2>New restaurant</h2>
-      <p className="hint">Name it and pick which panels it has. We&apos;ll create one starter login per panel you turn on — copy the passwords, they show once.</p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 12 }}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Restaurant name" disabled={busy}
-          style={{ flex: 1, minWidth: 200, padding: "9px 12px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13.5 }} />
+      <p className="hint">Set it up in one go — name, panels, sample menu, and its access. Whatever you pick is remembered and pre-fills the next restaurant you create. One starter login is made per panel you turn on (passwords show once).</p>
+
+      {/* BASICS */}
+      <div className="nr-sec">
+        <div className="nr-sec-h">Basics</div>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Restaurant name" disabled={busy} className="nr-input" />
+        <div className="nr-slug">Guest link: <code>/r/{slugPreview}/menu</code></div>
+        <div className="adm-togglegrid" style={{ marginTop: 8 }}>
+          <Tog on={seedMenu} k="seed" label="Start with sample menu" onClick={() => setSeedMenu((v) => !v)} />
+        </div>
       </div>
-      <div className="adm-togglegrid">
-        {PANELS.map((p) => {
-          const isOn = panels[p.key] === true;
-          return (
-            <button key={p.key} className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={busy}
-              onClick={() => setPanels((s) => ({ ...s, [p.key]: !isOn }))}
-              title={isOn ? "On — tap to turn off" : "Off — tap to turn on"}>
-              <span>{p.label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
-            </button>
-          );
-        })}
+
+      {/* PANELS */}
+      <div className="nr-sec">
+        <div className="nr-sec-h">Panels</div>
+        <div className="adm-togglegrid">
+          {NR_PANELS.map((p) => <Tog key={p.key} on={panels[p.key] === true} k={p.key} label={p.label} onClick={() => setPanel(p.key)} />)}
+        </div>
       </div>
-      <div className="adm-togglegrid" style={{ marginTop: 8 }}>
-        <button className={`adm-toggle ${seedMenu ? "on" : "off"}`} disabled={busy}
-          onClick={() => setSeedMenu((v) => !v)}
-          title={seedMenu ? "On — a sample menu will be added" : "Off — start with an empty menu"}>
-          <span>Start with sample menu</span><span className="pill">{seedMenu ? "ON" : "OFF"}</span>
-        </button>
+
+      {/* ACCESS */}
+      <div className="nr-sec">
+        <div className="nr-sec-h" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span>Access &amp; permissions</span>
+          <select className="nr-preset" disabled={busy} value={preset} onChange={(e) => applyPreset(e.target.value as "saved" | "system")}>
+            {saved && <option value="saved">My saved setup</option>}
+            <option value="system">System defaults</option>
+          </select>
+          {preset === "saved" && saved && <span className="adm-muted" style={{ fontSize: 11.5 }}>pre-filled from your last restaurant — edit anything</span>}
+        </div>
+
+        <details className="nr-grp"><summary>Owner panel sections <em>· {groupCount(NR_OWNER_SECTIONS, (k) => access.owner[k])}/{NR_OWNER_SECTIONS.length} on</em></summary>
+          <div className="adm-togglegrid">
+            {NR_OWNER_SECTIONS.map(([k, l]) => <Tog key={k} on={access.owner[k]} k={k} label={l} onClick={() => setOwner(k)} />)}
+          </div>
+        </details>
+
+        <details className="nr-grp"><summary>Modules <em>· {groupCount(NR_MODULES, (m) => access.features[m + "_allowed"])}/{NR_MODULES.length} on</em></summary>
+          <div className="nr-mod-list">
+            {NR_MODULES.map(([m, l]) => (
+              <div key={m} className="nr-mod">
+                <div className="nr-mod-name">{l}</div>
+                <Tog on={access.features[m + "_allowed"]} k={m + "_a"} label="On" onClick={() => setFeature(m + "_allowed")} />
+                <Tog on={access.features[m + "_owner_control"]} k={m + "_c"} label="Owner controls" onClick={() => setFeature(m + "_owner_control")} />
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className="nr-grp"><summary>Manager powers <em>· {groupCount(NR_MGR_POWERS, (k) => access.manager[k])} granted</em></summary>
+          <div className="nr-mod-list">
+            {NR_MGR_POWERS.map(([k, l]) => (
+              <div key={k} className="nr-mod">
+                <div className="nr-mod-name">{l}</div>
+                <Tog on={access.owner["power_" + k]} k={k + "_ex"} label="Exists" onClick={() => setOwner("power_" + k)} />
+                <Tog on={access.manager[k]} k={k + "_gr"} label="Granted" onClick={() => setManager(k)} />
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className="nr-grp"><summary>Waiter tablet abilities <em>· {NR_TABLET_CAPS.filter(([k]) => (access.tablet[k] || "off") !== "off").length}/{NR_TABLET_CAPS.length} on</em></summary>
+          <div style={{ display: "grid", gap: 2 }}>
+            {NR_TABLET_CAPS.map(([k, l]) => <Tri key={k} cap={k} label={l} />)}
+          </div>
+        </details>
       </div>
+
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14 }}>
         <button className="adm-btn primary" disabled={busy} onClick={create}>
           <i className="fas fa-check" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Creating…" : "Create restaurant"}

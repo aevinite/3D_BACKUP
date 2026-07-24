@@ -12,36 +12,13 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { OWNER_ENTITLEMENT_KEYS, mergeOwnerEntitlements, MANAGER_POWER_FLAGS } from "@/lib/ownerEntitlements";
+// CANONICAL access lists live in lib/accessConfig so the create-restaurant flow and this
+// editor can never drift (they used to each carry their own copy — audit 2026-07-09).
+import { TABLET_CAPS, FEATURE_SWITCHES, MP_DEFAULT, isTri } from "@/lib/accessConfig";
 
 export const dynamic = "force-dynamic";
 
-// The manager powers (restaurants.manager_permissions) come from the CANONICAL list so this can
-// never drift again: edit_settings + view_ratings were missing here, so the admin's grant/revoke
-// of those two silently never persisted (audit 2026-07-09).
 const MANAGER_POWERS = MANAGER_POWER_FLAGS;
-// table_tags/khata default OFF (new module); table_ops defaults OFF (KOT ▾ menu).
-// take_orders defaults OFF as a manager GRANT (owner grants deliberately) — its tablet
-// cap defaults 'on' separately (mig 178), taking orders being the tablet's core function.
-// banquet defaults OFF here too: mig 167 backfilled the "banquet":true key ONLY onto
-// restaurants that existed then, and the mig-091 column default does NOT include it, so a
-// restaurant created after mig 167 has NO banquet key → enforcement (managerCan) reads an
-// ABSENT key as false. A `true` default therefore made the admin switch show GRANTED while
-// managers were actually refused (403) on every new restaurant (QA 2026-07-24). Existing
-// restaurants still carry their backfilled true, so this only fixes the false display for
-// new ones. Keep these matching the migrations — display and truth must agree.
-const MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: false, table_ops: false, take_orders: false };
-// The tablet capabilities (settings.*), tri-state off|on|pin. tablet_table_tags /
-// tablet_khata are normally the MANAGER's rung (manager settings), but the admin
-// console shows every access bit of the ladder, so they're editable here too (mig 166).
-// tablet_table_ops (mig 172) is the ladder's manager→tablet rung for the KOT ▾ menu;
-// it only takes effect while the module itself is effective (mig 177).
-// tablet_take_orders (mig 178) is the manager→tablet rung for order-taking; unlike the
-// others it defaults 'on' (the tablet already takes orders).
-const TABLET_CAPS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders"] as const;
-// Feature-ladder switches on settings (mig 166): the feature itself + the admin's
-// "power transfer" (may the OWNER toggle it). Booleans, default OFF via the migration.
-const FEATURE_SWITCHES = ["table_tags_allowed", "table_tags_owner_control", "banquet_allowed", "banquet_owner_control", "table_ops_allowed", "table_ops_owner_control", "take_orders_allowed", "take_orders_owner_control"] as const;
-const isTri = (v: unknown): v is "off" | "on" | "pin" => v === "off" || v === "on" || v === "pin";
 
 const bad = (m: string, s = 400) => NextResponse.json({ error: m }, { status: s });
 
