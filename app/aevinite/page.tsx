@@ -101,7 +101,7 @@ export default function AdminCommand() {
   const STATS: { k: string; v: string | number; href?: string; warn?: boolean }[] = [
     { k: "Restaurants", v: rests === null ? "…" : `${activeCount} active / ${rests.length}`, href: "/aevinite/restaurants" },
     { k: "Open issues", v: openIssuesCount ?? openIssues.length, href: "/aevinite/issues", warn: (openIssuesCount ?? openIssues.length) > 0 },
-    { k: "Open tables now", v: openTablesNow ?? "…", href: "/aevinite/open-tables" },
+    { k: "Open tables now", v: openTablesNow ?? "…", href: "/aevinite/floor" },
     { k: "Staff online now", v: onlineCount ?? online.length, href: "/aevinite/staff-online" },
     { k: "Orders today", v: ordersToday ?? "…", href: "/aevinite/analytics?range=today" },
   ];
