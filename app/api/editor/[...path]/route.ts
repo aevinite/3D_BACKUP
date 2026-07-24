@@ -2181,6 +2181,24 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           if (!owner) return err("That dish was removed — reload to see the current menu.", 404);
           if (owner.restaurant_id !== rid) return err("That dish belongs to another restaurant", 409);
         }
+        // Required-column safety net (B26): menu_items has NOT NULL, no-default columns
+        // (title, price, image, category — slug/id are already set above). A CREATE that
+        // omitted one, or an EDIT that sent an explicit null, used to reach the DB as a raw
+        // "null value in column X" 500 (the reported image-on-create + slug crashes — often a
+        // programmatic/restore save that skips a field). Coalesce/validate here so a save
+        // either succeeds or returns a friendly message, never a scary constraint error.
+        if (isCreate) {
+          if (!String(body.title ?? "").trim()) return err("Give the dish a name first.", 400);
+          if (!("price" in body)) return err("Enter a price for the dish.", 400);
+          if (body.image == null) body.image = "";      // no photo → saves blank; the panel shows the default mark (owner 2026-07-24)
+          if (body.category == null) body.category = ""; // uncategorised bucket, not a crash
+        } else {
+          // EDIT: never let an explicit null wipe a required column — drop the key so the
+          // upsert keeps the stored value (a tag-only / partial save already omits these).
+          for (const k of ["title", "price", "image", "category", "slug"] as const) {
+            if (k in body && (body as Record<string, unknown>)[k] == null) delete (body as Record<string, unknown>)[k];
+          }
+        }
       }
       // Sort order (B20): the "Sort order" box is a number input, so clearing it sends "" —
       // which the numeric sort_order column rejects (a raw 500) or stores as null (the row
