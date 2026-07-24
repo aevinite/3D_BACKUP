@@ -224,6 +224,14 @@ export default function AdminRepair() {
     else toast(r.error || "Couldn't re-share that.", "err");
   };
 
+  // Top status pills jump to their section (owner 2026-07-24: "every box up there should be
+  // clickable and take you somewhere"). Falls back to a nearby anchor if the target section
+  // isn't rendered (e.g. the Fix queue is hidden when nothing is queued or fixed).
+  const scrollToId = (id: string, fallback?: string) => {
+    const el = document.getElementById(id) || (fallback ? document.getElementById(fallback) : null);
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const scoped = restaurants.find((r) => r.id === rid);
   const scopedName = scoped?.name || null;
   const scopedSlug = scoped?.slug || "";
@@ -259,20 +267,20 @@ export default function AdminRepair() {
 
       {/* Status strip */}
       <div className="rp-strip">
-        <div className={`rp-pill${groups.length ? " alert" : " ok"}`}>
+        <button type="button" className={`rp-pill${groups.length ? " alert" : " ok"}`} onClick={() => scrollToId("rp-problems")} title="Jump to the problems list">
           <i className={`fas ${groups.length ? "fa-triangle-exclamation" : "fa-circle-check"}`} aria-hidden="true" />
           <span className="n">{errLoading ? "…" : groups.length}</span><span>problem{groups.length === 1 ? "" : "s"} (24h)</span>
-        </div>
-        <div className="rp-pill">
+        </button>
+        <button type="button" className="rp-pill" onClick={() => scrollToId("rp-queue", "rp-report")} title="Jump to the fix queue">
           <i className="fas fa-robot" aria-hidden="true" /><span className="n">{requests.length}</span><span>waiting for Claude</span>
-        </div>
-        <div className="rp-pill">
+        </button>
+        <button type="button" className="rp-pill" onClick={() => scrollToId("rp-tools")} title="Jump to the hands-on tools">
           <i className="fas fa-screwdriver-wrench" aria-hidden="true" /><span className="n">{TOOLS.length}</span><span>hands-on tools</span>
-        </div>
+        </button>
       </div>
 
       {/* ── Problems right now ─────────────────────────────────────────── */}
-      <div className="rp-sec-h">
+      <div className="rp-sec-h" id="rp-problems" style={{ scrollMarginTop: 16 }}>
         <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: groups.length ? "var(--adm-danger)" : "var(--muted)" }} />
         <h2>Problems right now</h2>
         {groups.length ? <span className="rp-chip danger">{groups.length}</span> : null}
@@ -394,7 +402,7 @@ export default function AdminRepair() {
       )}
 
       {/* ── Report anything else ───────────────────────────────────────── */}
-      <div className="rp-sec-h">
+      <div className="rp-sec-h" id="rp-report" style={{ scrollMarginTop: 16 }}>
         <i className="fas fa-comment-dots" aria-hidden="true" style={{ color: "var(--muted)" }} />
         <h2>Report a problem</h2>
         <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>for anything the list above didn&rsquo;t catch</span>
@@ -424,7 +432,7 @@ export default function AdminRepair() {
       {/* ── Fix queue ──────────────────────────────────────────────────── */}
       {(requests.length > 0 || fixed.length > 0) && (
         <>
-          <div className="rp-sec-h">
+          <div className="rp-sec-h" id="rp-queue" style={{ scrollMarginTop: 16 }}>
             <i className="fas fa-list-check" aria-hidden="true" style={{ color: "var(--muted)" }} />
             <h2>Fix queue</h2>
             {requests.length ? <span className="rp-chip">{requests.length} waiting</span> : null}
@@ -499,7 +507,7 @@ export default function AdminRepair() {
       )}
 
       {/* ── Hands-on tools ─────────────────────────────────────────────── */}
-      <div className="rp-sec-h">
+      <div className="rp-sec-h" id="rp-tools" style={{ scrollMarginTop: 16 }}>
         <i className="fas fa-screwdriver-wrench" aria-hidden="true" style={{ color: "var(--muted)" }} />
         <h2>Hands-on tools</h2>
         <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>fix a table or order yourself — pick a restaurant</span>
@@ -605,7 +613,9 @@ export default function AdminRepair() {
 
       <style>{`
         .rp-strip{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 4px}
-        .rp-pill{display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:12px;border:var(--border);background:var(--card);font-size:12.5px;color:var(--muted)}
+        .rp-pill{display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:12px;border:var(--border);background:var(--card);font-size:12.5px;color:var(--muted);font-family:inherit;cursor:pointer;text-align:left;transition:transform .08s ease,border-color .15s ease,box-shadow .15s ease}
+        .rp-pill:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--adm-accent,#e8a13c) 55%,transparent);box-shadow:0 3px 10px rgba(0,0,0,.12)}
+        .rp-pill:focus-visible{outline:2px solid var(--adm-accent,#e8a13c);outline-offset:2px}
         .rp-pill .n{font-size:18px;font-weight:800;color:var(--text)}
         .rp-pill.alert{background:color-mix(in srgb,var(--adm-danger) 13%,var(--card));border-color:color-mix(in srgb,var(--adm-danger) 45%,transparent);color:var(--adm-danger)}
         .rp-pill.alert .n{color:var(--adm-danger)}
