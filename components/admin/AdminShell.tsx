@@ -100,6 +100,8 @@ export default function AdminShell({ children, initialSkin }: { children: React.
   // 2026-07-08 but the button that toggles it never did — so on a phone the sidebar sat
   // off-screen with NO way to open it. This is that missing half (found 2026-07-20).
   const [navOpen, setNavOpen] = useState(false);
+  // Bumping this remounts the brand underline so its blue→violet→red draw replays on click.
+  const [lineKey, setLineKey] = useState(0);
   // Hardware BACK closes the drawer instead of leaving the page (project rule: every
   // overlay registers). Self-noops while closed.
   useBackClose("admin-nav", navOpen, () => setNavOpen(false));
@@ -117,11 +119,16 @@ export default function AdminShell({ children, initialSkin }: { children: React.
     <div className="adm adx" data-skin={skin}>
       {navOpen && <div className="adx-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
       <aside className={"adx-side" + (navOpen ? " open" : "")} id="adminNav">
-        <div className="adx-brand">
+        <div className="adx-brand" role="button" tabIndex={0} title="Aevidine"
+          onClick={() => setLineKey((k) => k + 1)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLineKey((k) => k + 1); } }}>
           <span className="mark" style={{ background: "transparent", boxShadow: "none" }}>
             <img src="/brand/aevidine-mark.svg" alt="Aevidine" width={28} height={28} style={{ display: "block" }} />
           </span>
-          <span className="who"><b>Aevidine</b><span>Platform admin</span></span>
+          <span className="who">
+            <b>Aevidine</b><span>Platform admin</span>
+            <span key={lineKey} className="adx-brand-line" aria-hidden="true" />
+          </span>
         </div>
         <nav className="adx-nav" aria-label="Admin sections">
           {GROUPS.map((g) => (
