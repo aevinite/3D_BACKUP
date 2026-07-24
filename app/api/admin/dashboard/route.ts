@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   const since24hIso = new Date(Date.now() - 24 * 3600_000).toISOString();
 
-  const [restQ, setQ, ownersQ, ordersTodayQ, maintQ, onlineQ, issuesQ, ovRpc, actQ, errQ, fixQ] =
+  const [restQ, setQ, ownersQ, ordersTodayQ, maintQ, onlineQ, issuesQ, actQ, errQ, fixQ] =
     await Promise.all([
       sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name"),
       sb.from("settings").select("restaurant_id, enabled_panels"),
@@ -35,9 +35,6 @@ export async function GET(req: NextRequest) {
       // hauling the ENTIRE staff_users table every 60s just to filter it on the client.
       sb.from("staff_users").select("name, username, role, restaurant_id, last_seen_at", { count: "exact" }).eq("active", true).gte("last_seen_at", onlineSinceIso).limit(200),
       sb.from("issues").select("id, restaurant_id, subject, status, created_at", { count: "exact" }).eq("status", "open").order("created_at", { ascending: false }).limit(50),
-      // Per-restaurant open-table counts from the pre-aggregated RPC (p_ids=null → all). We read
-      // ONLY open_tables from it; its revenue columns are ignored (no money to admin).
-      sb.rpc("lfh_owner_overview", { p_ids: null }),
       // Only the columns the activity feed renders (not select("*")) — trims wire size.
       sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, created_at").order("created_at", { ascending: false }).limit(18),
       // Two HEAD counts for the red "Fix problems" button (owner 2026-07-22): recent app
@@ -50,7 +47,7 @@ export async function GET(req: NextRequest) {
   // hiccup shows a confident "0 open tables / 0 orders / no maintenance" all-clear with a 200
   // (the anti-pattern the floor route avoids). The two soft LISTS below (online staff, issues)
   // may still degrade to empty; the notifications bell is the primary issues surface (audit 2026-07-09).
-  const critErr = restQ.error || ovRpc.error || ordersTodayQ.error || maintQ.error;
+  const critErr = restQ.error || ordersTodayQ.error || maintQ.error;
   if (critErr) return NextResponse.json({ error: critErr.message }, { status: 500 });
 
   const withSettings = new Set((setQ.data || []).map((r) => r.restaurant_id).filter(Boolean));
@@ -65,15 +62,6 @@ export async function GET(req: NextRequest) {
     ownerName: r.owner_user_id ? (ownerName.get(r.owner_user_id) || "—") : null,
     panels: panelsByRid.get(r.id) || null,
   }));
-
-  // Per-restaurant open tables (revenue columns from the RPC are dropped). Filtered to restaurants
-  // that still EXIST (not soft-deleted): the RPC counts open sessions even for recycle-binned
-  // restaurants (soft-delete doesn't close their sessions), which would push the headline sum above
-  // the rows shown + the /open-tables drill-down (audit 2026-07-09).
-  const liveIds = new Set(restaurants.map((r) => r.id));
-  const openByRid = ((ovRpc.data as { restaurant_id: string; open_tables: number }[] | null) || [])
-    .map((r) => ({ id: r.restaurant_id, openTables: Number(r.open_tables) || 0 }))
-    .filter((r) => liveIds.has(r.id));
 
   // Live restaurants currently in maintenance, by name.
   const maintenanceNames = (maintQ.data || [])
@@ -99,16 +87,9 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     restaurants,
-    openByRid,
     maintenance: maintenanceNames.length > 0,
     maintenanceNames,
     ordersToday: ordersTodayQ.count || 0,
-    // Headline = SUM of the per-restaurant rows shown right below it (same lfh_owner_overview
-    // source), so the card and the table can never disagree; also drops a separate sessions
-    // COUNT query every 60s refresh (audit 2026-07-08). Both mean "open dining sessions" — the
-    // /open-tables detail page counts occupied floor TILES, which can differ only for table-less
-    // banquet/takeaway sessions or a cleared-not-yet-freed table (rare, documented, not a bug).
-    openTables: openByRid.reduce((n, r) => n + r.openTables, 0),
     online,
     onlineCount: onlineQ.count ?? online.length, // exact total (list capped at 200) so the KPI can't under-report at scale
     issues,
