@@ -66,6 +66,7 @@ export default function Access2Page() {
   const [personId, setPersonId] = useState<string>("");
   const [personFilter, setPersonFilter] = useState<string>("");
   const [open, setOpen] = useState<Record<string, boolean>>({ guest: true });
+  const [activeArea, setActiveArea] = useState<string>("guest"); // the ONE rail item highlighted (nav target)
   const [side, setSide] = useState<Record<string, "owner" | "manager">>({});
   const [openCards, setOpenCards] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<"" | "saving" | "saved" | "err">("");
@@ -238,7 +239,7 @@ export default function Access2Page() {
               const ps = permsOf(g.id);
               const on = ps.filter((p) => (p.kind === "switch" ? switchVal(p) : reachLevel(p, st!) > 0)).length;
               return (
-                <button key={g.id} className={open[g.id] ? "on" : ""} onClick={() => { setOpen((s) => ({ ...s, [g.id]: true })); document.getElementById("sec-" + g.id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
+                <button key={g.id} className={activeArea === g.id ? "on" : ""} onClick={() => { setActiveArea(g.id); setOpen((s) => ({ ...s, [g.id]: true })); document.getElementById("sec-" + g.id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
                   <span className="acc2-gi"><Icon n={g.icon} s={15} /></span>
                   <span className="nm">{g.name}</span><span className="ct">{on}/{ps.length}</span>
                 </button>
@@ -531,12 +532,18 @@ function Style() {
   .acc2-rail-wrap { display:grid; grid-template-columns:250px 1fr; gap:20px; align-items:start; }
   .acc2-rail { position:sticky; top:12px; background:var(--card); border:var(--border); border-radius:14px; padding:7px; }
   .acc2-rail .rh { padding:9px 11px 6px; font-size:10.5px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
-  .acc2-rail button { display:flex; align-items:center; gap:10px; width:100%; min-height:44px; padding:7px 10px; border:none; background:transparent; border-radius:10px; cursor:pointer; color:var(--text); text-align:left; transition:background .14s; }
-  .acc2-rail button:hover { background:color-mix(in srgb, var(--accent) 9%, transparent); }
-  .acc2-rail button.on { background:color-mix(in srgb, var(--accent) 15%, transparent); }
-  .acc2-rail button.on .acc2-gi { background:var(--accent); color:#fff; border-color:var(--accent); }
-  /* the small area-icon chip (rail + section header) */
-  .acc2-gi { width:28px; height:28px; border-radius:8px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--accent) 12%, transparent); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 22%, transparent); }
+  .acc2-rail button { position:relative; display:flex; align-items:center; gap:11px; width:100%; min-height:46px; padding:8px 12px; border:none; background:transparent; border-radius:10px; cursor:pointer; color:var(--text); text-align:left; transition:background .14s; }
+  .acc2-rail button:hover { background:color-mix(in srgb, var(--accent) 7%, transparent); }
+  /* Single, consistent active treatment: a soft tint + a slim accent bar on the left
+     (only ONE rail item is active = the nav target). Icon chip stays uniform — no jarring
+     big solid block, so items read as one clean list. */
+  .acc2-rail button.on { background:color-mix(in srgb, var(--accent) 11%, transparent); }
+  .acc2-rail button.on::before { content:""; position:absolute; left:0; top:9px; bottom:9px; width:3px; border-radius:0 3px 3px 0; background:var(--accent); }
+  .acc2-rail button.on .nm { color:var(--accent); }
+  .acc2-rail button.on .acc2-gi { background:color-mix(in srgb, var(--accent) 20%, transparent); border-color:color-mix(in srgb, var(--accent) 40%, transparent); }
+  .acc2-rail .nm { flex:1; font-size:13.5px; font-weight:650; }
+  /* the small area-icon chip (rail + section header) — uniform for all rows */
+  .acc2-gi { width:30px; height:30px; border-radius:9px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--accent) 11%, transparent); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
   .acc2-gi.lg { width:38px; height:38px; border-radius:11px; }
   .acc2-rail .nm { flex:1; font-size:13.5px; font-weight:700; }
   .acc2-rail .ct { font-size:11px; font-weight:800; font-family:ui-monospace,monospace; color:var(--muted); background:var(--bg); padding:3px 6px; border-radius:6px; }
