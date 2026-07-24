@@ -88,6 +88,12 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // this restaurant configured a Google review link. A low rating stays private (no
   // nudge). null = prompt hidden. (owner 2026-07-09 "do push to google review")
   const [googleReviewUrl, setGoogleReviewUrl] = useState<string | null>(null);
+  // The admin-chosen Google-review MODE + destination link for THIS restaurant (mig 187),
+  // loaded once on mount. Mode drives whether/how the Google invite shows relative to the
+  // normal in-menu reviews: off · google (CTA only) · google_plus_normal (both) ·
+  // google_after_normal (the post-rating nudge above). Default off. (owner 2026-07-24)
+  const [googleMode, setGoogleMode] = useState<"off" | "google" | "google_plus_normal" | "google_after_normal">("off");
+  const [googleCfgUrl, setGoogleCfgUrl] = useState<string | null>(null);
   const [imgZoom, setImgZoom] = useState(false);             // is the full-screen photo open?
   const [lbScale, setLbScale] = useState(1);                 // zoom level in the lightbox (1 = normal)
   const [lbPos, setLbPos] = useState({ x: 0, y: 0 });        // pan offset while zoomed in
@@ -310,6 +316,17 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     return () => { cancelled = true; };
   }, [slug]);
 
+  // Load THIS restaurant's Google-review mode + link once (getSettings is cached per
+  // restaurant, so this is effectively free). Drives the persistent Google call-to-action
+  // and, for the "google_after_normal" mode, the post-rating nudge. (mig 187)
+  useEffect(() => {
+    let cancelled = false;
+    getSettings(restaurantId)
+      .then((s) => { if (!cancelled) { setGoogleMode(s.googleReviewMode); setGoogleCfgUrl(s.googleReviewUrl); } })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [restaurantId]);
+
   // Background preload: this dish's model first, then the next & previous dishes
   // in the category (their GLBs + images), so moving between dishes — and opening
   // the 3D view — feels instant. Downloads run through the singleton loader.
@@ -479,14 +496,12 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     setSelectedRating(0);
     // Show a friendly success toast.
     window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Review posted", subtitle: "thanks for sharing", kicker: "review", variant: "success" } }));
-    // HAPPY diner → invite a Google review (owner 2026-07-09). Only on a high rating,
-    // and only if THIS restaurant set a Google link. getSettings is cached per restaurant
-    // so this is effectively free, and a low rating (< 4★) stays private + costs nothing.
-    if (selectedRating >= 4) {
-      try {
-        const s = await getSettings(restaurantId);
-        if (s.googleReviewUrl) setGoogleReviewUrl(s.googleReviewUrl);
-      } catch { /* no nudge if settings can't load */ }
+    // HAPPY diner → invite a Google review, but ONLY in the "google_after_normal" mode
+    // (owner 2026-07-24). A low rating (< 4★) stays private. The other Google modes show a
+    // standing call-to-action instead (see the review section), so they don't post-nudge.
+    // Reuse the mode/link already loaded on mount — no extra fetch, no egress.
+    if (selectedRating >= 4 && googleMode === "google_after_normal" && googleCfgUrl) {
+      setGoogleReviewUrl(googleCfgUrl);
     }
   };
 
@@ -793,11 +808,41 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           ))}
         </div>
 
-        {/* The customer reviews area: two tabs (write one / read them).
-            The ENTIRE area (label, tabs, form, list) disappears when the
-            restaurant switches the reviews feature off. */}
-        {features.ratings && features.reviews && (<>
+        {/* The customer reviews area (mig 187 modes). "Normal" in-menu reviews show when the
+            restaurant's reviews/ratings feature is on — EXCEPT in Google-ONLY mode, which
+            replaces them with a Google call-to-action. A STANDING Google invite shows in the
+            google / google_plus_normal modes; the post-rating nudge fires only in
+            google_after_normal. When everything's off, the whole area disappears. */}
+        {(() => {
+          const normalOn = features.ratings && features.reviews;
+          const showNormal = normalOn && googleMode !== "google";
+          const showGoogleCta = (googleMode === "google" || googleMode === "google_plus_normal") && !!googleCfgUrl;
+          if (!showNormal && !showGoogleCta) return null;
+          // One adaptive review-invite card, reused by the standing CTA and the post-rating
+          // nudge. It ADAPTS to the destination so the label never promises "Google" while
+          // opening our @aevinite Instagram (the default link for a brand-new restaurant).
+          const cta = (u: string, dismissable: boolean) => {
+            const isInsta = /instagram\.com/i.test(u);
+            const heading = dismissable
+              ? (isInsta ? "Thank you! Would you follow us on Instagram?" : "Thank you! Would you share it on Google?")
+              : (isInsta ? "Enjoying it? Follow us on Instagram" : "Enjoying it? Review us on Google");
+            return (
+              <div className="google-review-prompt" style={{ background: "var(--card, rgba(255,255,255,0.06))", border: "1px solid var(--accent)", borderRadius: 14, padding: "16px 18px", margin: "0 0 16px", textAlign: "center" }}>
+                <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">⭐</div>
+                <div style={{ fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>{heading}</div>
+                <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>{isInsta ? "A quick follow really helps us — it only takes a moment." : "A quick review really helps us — it only takes a moment."}</div>
+                <a href={u} target="_blank" rel="noopener noreferrer" className="btn btn-gold" style={{ display: "inline-flex", alignItems: "center", gap: 8, textDecoration: "none" }} onClick={() => { if (dismissable) setGoogleReviewUrl(null); }}>
+                  <i className={isInsta ? "fab fa-instagram" : "fab fa-google"} aria-hidden="true"></i> {isInsta ? "Follow on Instagram" : "Review on Google"}
+                </a>
+                {dismissable && <div><button type="button" onClick={() => setGoogleReviewUrl(null)} style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 12.5, marginTop: 10, cursor: "pointer" }}>No thanks</button></div>}
+              </div>
+            );
+          };
+          return (<>
         <div className="section-label" style={{ marginTop: '24px' }}>{t.customerReviews}</div>
+        {/* Standing Google invite (google / google_plus_normal modes). */}
+        {showGoogleCta && cta(googleCfgUrl as string, false)}
+        {showNormal && (<>
         <div className="review-tabs">
           {/* Tab 1: the "rate this dish" form. */}
           <button
@@ -815,26 +860,9 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           </button>
         </div>
 
-        {/* Happy-diner review nudge — appears after a HIGH rating (>= 4★) when this
-            restaurant has a review link. It ADAPTS to the destination: a Google link shows
-            Google wording/icon; an Instagram link (the default for brand-new restaurants that
-            haven't set their own Google page yet) shows Instagram wording/icon — so the label
-            never promises "Google" while opening Instagram. Tapping opens it in a new tab;
-            "No thanks" (or tapping through) dismisses it. */}
-        {googleReviewUrl && (() => {
-          const isInsta = /instagram\.com/i.test(googleReviewUrl);
-          return (
-          <div className="google-review-prompt" style={{ background: "var(--card, rgba(255,255,255,0.06))", border: "1px solid var(--accent)", borderRadius: 14, padding: "16px 18px", margin: "0 0 16px", textAlign: "center" }}>
-            <div style={{ fontSize: 26, marginBottom: 6 }} aria-hidden="true">⭐</div>
-            <div style={{ fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>{isInsta ? "Thank you! Would you follow us on Instagram?" : "Thank you! Would you share it on Google?"}</div>
-            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>{isInsta ? "A quick follow on Instagram really helps us — it only takes a moment." : "A quick Google review really helps us — it only takes a moment."}</div>
-            <a href={googleReviewUrl} target="_blank" rel="noopener noreferrer" className="btn btn-gold" style={{ display: "inline-flex", alignItems: "center", gap: 8, textDecoration: "none" }} onClick={() => setGoogleReviewUrl(null)}>
-              <i className={isInsta ? "fab fa-instagram" : "fab fa-google"} aria-hidden="true"></i> {isInsta ? "Follow on Instagram" : "Review on Google"}
-            </a>
-            <div><button type="button" onClick={() => setGoogleReviewUrl(null)} style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 12.5, marginTop: 10, cursor: "pointer" }}>No thanks</button></div>
-          </div>
-          );
-        })()}
+        {/* Post-rating nudge (google_after_normal) — appears after a HIGH rating (>= 4★).
+            Tapping opens it in a new tab; "No thanks" (or tapping through) dismisses it. */}
+        {googleReviewUrl && cta(googleReviewUrl, true)}
         {/* The review form — shown only when the "rate" tab is active. */}
         {reviewTab === "rate" && (
           <div className="review-form" id="review-form">
@@ -889,6 +917,8 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           </div>
         )}
         </>)}
+          </>);
+        })()}
 
         {/* The "You might like" row — only shown if there are suggestions. */}
         {relatedItems.length > 0 && (

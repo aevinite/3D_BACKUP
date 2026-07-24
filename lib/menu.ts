@@ -353,6 +353,9 @@ export interface Settings {
   // "loved it? review us on Google" nudge after a HIGH dish rating; null = feature off.
   // A PUBLIC link, so it's guest-safe to expose (unlike gstin/phone).
   googleReviewUrl: string | null;
+  // How the Google-review invite behaves relative to the in-menu review (mig 187, admin-only).
+  //   off · google (Google CTA only) · google_plus_normal (both) · google_after_normal (post-rating nudge)
+  googleReviewMode: "off" | "google" | "google_plus_normal" | "google_after_normal";
 }
 // Reads the single site-wide settings row and returns it with safe defaults,
 // so the app still works even if settings haven't been configured yet.
@@ -384,7 +387,7 @@ async function fetchSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Prom
   // prefix, phone…) that `*` was silently shipping to every menu visitor.
   const { data, error } = await supabase
     .from("settings")
-    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features, tax_rate, tax_components, google_review_url")
+    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features, tax_rate, tax_components, google_review_url, google_review_mode")
     .eq("restaurant_id", restaurantId)   // one settings row per restaurant (079)
     .maybeSingle();
   if (error) throw new Error(`Failed to load settings: ${error.message}`);
@@ -411,6 +414,10 @@ async function fetchSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Prom
       : {},
     taxRate: effectiveTaxRate(data),
     googleReviewUrl: data && typeof data.google_review_url === "string" && data.google_review_url.trim() ? data.google_review_url.trim() : null,
+    // Default 'off' for any restaurant that hasn't been switched on (and for a missing row).
+    googleReviewMode: (data && ["google", "google_plus_normal", "google_after_normal"].includes(String(data.google_review_mode)))
+      ? (data.google_review_mode as "google" | "google_plus_normal" | "google_after_normal")
+      : "off",
   };
 }
 
