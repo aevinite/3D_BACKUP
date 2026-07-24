@@ -4,7 +4,7 @@
 //   1. Compact stat strip (counts only — NO food/earnings revenue in the admin panel; the
 //      only money shown anywhere is platform SUBSCRIPTION income on Billing/Revenue).
 //   2. The restaurant command table: one dense row per restaurant with panel
-//      chips (M K T O), live open-table count, quick-open buttons (act-as +
+//      chips (M K T O), quick-open buttons (act-as +
 //      new tab) and a Manage → link.
 //   3. Working now (active staff) + Latest activity.
 // Data: the SAME existing admin endpoints as before (one fetch each, no per-row
@@ -19,7 +19,6 @@ type Rest = {
   ownerUserId: string | null; ownerName: string | null;
   panels: Record<string, boolean> | null;
 };
-type OvRow = { id: string; openTables: number };
 type Issue = { id: string; restaurantName: string; subject: string; status: string; created_at: string };
 type Staff = { name: string | null; username: string; role: string; restaurantName: string | null; last_seen_at: string | null };
 
@@ -35,9 +34,7 @@ const panelOn = (r: Rest, key: string) => !r.panels || r.panels[key] !== false;
 export default function AdminCommand() {
   const toast = useToast();
   const [rests, setRests] = useState<Rest[] | null>(null);
-  const [ovRows, setOvRows] = useState<OvRow[]>([]);
   const [ordersToday, setOrdersToday] = useState<number | null>(null);
-  const [openTablesNow, setOpenTablesNow] = useState<number | null>(null);
   const [maintenance, setMaintenance] = useState(false);
   const [maintenanceNames, setMaintenanceNames] = useState<string[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -62,11 +59,9 @@ export default function AdminCommand() {
       if (j.error) { setLoadErr(true); return; }
       setLoadErr(false);
       setRests(j.restaurants || []);
-      setOvRows((j.openByRid || []).map((r: { id: string; openTables: number }) => ({ id: r.id, openTables: Number(r.openTables) || 0 })));
       setMaintenance(!!j.maintenance);
       setMaintenanceNames(Array.isArray(j.maintenanceNames) ? j.maintenanceNames : []);
       setOrdersToday(Number(j.ordersToday) || 0);
-      setOpenTablesNow(Number(j.openTables) || 0);
       setIssues(j.issues || []);
       setOpenIssuesCount(typeof j.openIssuesCount === "number" ? j.openIssuesCount : null);
       setOnline(j.online || []);
@@ -80,7 +75,6 @@ export default function AdminCommand() {
   const [refreshing, setRefreshing] = useState(false);
   const manualRefresh = () => { setRefreshing(true); load(); setTimeout(() => setRefreshing(false), 600); };
 
-  const ovById = useMemo(() => new Map(ovRows.map((r) => [r.id, r.openTables])), [ovRows]);
   const openIssues = useMemo(() => issues.filter((i) => i.status === "open"), [issues]);
   // `online` now arrives already filtered to currently-online staff from the combined endpoint.
   const PANEL_NAME = (role: string) => (({ owner: "Owner", manager: "Manager", kitchen: "Kitchen", tablet: "Tablet" } as Record<string, string>)[role] || role);
@@ -101,7 +95,6 @@ export default function AdminCommand() {
   const STATS: { k: string; v: string | number; href?: string; warn?: boolean }[] = [
     { k: "Restaurants", v: rests === null ? "…" : `${activeCount} active / ${rests.length}`, href: "/aevinite/restaurants" },
     { k: "Open issues", v: openIssuesCount ?? openIssues.length, href: "/aevinite/issues", warn: (openIssuesCount ?? openIssues.length) > 0 },
-    { k: "Open tables now", v: openTablesNow ?? "…", href: "/aevinite/floor" },
     { k: "Staff online now", v: onlineCount ?? online.length, href: "/aevinite/staff-online" },
     { k: "Orders today", v: ordersToday ?? "…", href: "/aevinite/analytics?range=today" },
   ];
@@ -165,7 +158,7 @@ export default function AdminCommand() {
         </div>
         {err && <div style={{ padding: "8px 14px", color: "var(--adm-danger)", fontSize: 12.5, borderBottom: "var(--border)" }}>{err}</div>}
         <div className="cmd-row head">
-          <span>Restaurant</span><span>Status</span><span>Panels</span><span className="num">Open</span><span>Quick open</span><span />
+          <span>Restaurant</span><span>Status</span><span>Panels</span><span>Quick open</span><span />
         </div>
         {rests === null ? (
           loadErr ? (
@@ -190,7 +183,6 @@ export default function AdminCommand() {
                   <span key={p.key} className={`pchip${panelOn(r, p.key) ? " on" : ""}`} aria-label={`${p.label} panel ${panelOn(r, p.key) ? "enabled" : "off"}`}>{p.letter}</span>
                 ))}
               </span>
-              <span className="num">{ovById.has(r.id) ? ovById.get(r.id) : "—"}</span>
               <span className="cmd-open">
                 {r.active ? (
                   <a className="obtn" href={`/r/${r.slug}/menu`} target="_blank" rel="noopener" title={`Open ${r.name}'s guest menu`}>Guest</a>
@@ -274,12 +266,11 @@ export default function AdminCommand() {
         /* command table */
         .cmd-tools { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: var(--border); }
         .cmd-tools input { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: var(--text); font-size: 13px; padding: 2px 0; }
-        .cmd-row { display: grid; grid-template-columns: minmax(140px, 1.1fr) 84px 96px 46px minmax(340px, 1.9fr) 78px; gap: 8px; align-items: center; padding: 0 14px; min-height: 40px; border-bottom: var(--border); font-size: 13px; }
+        .cmd-row { display: grid; grid-template-columns: minmax(140px, 1.1fr) 84px 96px minmax(340px, 1.9fr) 78px; gap: 8px; align-items: center; padding: 0 14px; min-height: 40px; border-bottom: var(--border); font-size: 13px; }
         .cmd-row:last-child { border-bottom: 0; }
         .cmd-row.head { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; min-height: 32px; background: var(--muted2); }
         .cmd-row .nm { display: block; font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .cmd-row .sl { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .cmd-row .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
         .cmd-pill { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
         .cmd-pill.on { background: color-mix(in srgb, var(--adm-ok) 16%, transparent); color: var(--adm-ok); }
         .cmd-pill.off { background: color-mix(in srgb, var(--adm-danger) 14%, transparent); color: var(--adm-danger); }
@@ -305,14 +296,12 @@ export default function AdminCommand() {
         .cmd-issue:last-child { border-bottom: 0; }
         @media (max-width: 1100px) {
           .cmd-row { grid-template-columns: minmax(140px, 1.2fr) 84px 100px minmax(280px, 1.6fr) 80px; }
-          .cmd-row .num, .cmd-row.head .num { display: none; }
         }
         @media (max-width: 900px) { .cmd-grid2 { grid-template-columns: 1fr; } }
         @media (max-width: 760px) {
           .cmd-row { grid-template-columns: 1fr; gap: 4px; padding: 10px 14px; }
           .cmd-row.head { display: none; }
           .cmd-row > span { text-align: left !important; }
-          .cmd-row .num { display: none; }
           /* Bigger tap targets for the quick-open buttons on phones (audit 2026-07-07). */
           .obtn { min-height: 40px; padding: 0 12px; }
         }
