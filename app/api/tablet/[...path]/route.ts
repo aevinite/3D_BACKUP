@@ -41,7 +41,9 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 // unpaid/cooking close|restart override). The admin super-user bypasses it; and
 // until ANY active manager has a PIN we stay open (bootstrap) so a waiter is never
 // locked out before setup. Returns { allow:true, managerName? } or a 403 to relay.
-type PinGate = { allow: true; managerName?: string; managerNames?: string[]; sharedPin?: boolean } | { allow: false; resp: NextResponse };
+type PinGate =
+  | { allow: true; managerName?: string; managerNames?: string[]; managerId?: string; managerIds?: string[]; sharedPin?: boolean }
+  | { allow: false; resp: NextResponse };
 async function managerPinGate(req: NextRequest, body: any, rid: string): Promise<PinGate> {
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { allow: true, managerName: "admin" };
   if (!(await anyManagerHasPin(rid))) return { allow: true }; // no manager PIN set yet for THIS restaurant → open
@@ -53,19 +55,21 @@ async function managerPinGate(req: NextRequest, body: any, rid: string): Promise
       ? { allow: false, resp: NextResponse.json({ error: "Too many wrong PINs — wait a minute and try again.", locked: true }, { status: 429 }) }
       : { allow: false, resp: NextResponse.json({ error: "A manager PIN is required for this.", needPin: true }, { status: 403 }) };
   }
-  return { allow: true, managerName: check.managerName, managerNames: check.managerNames, sharedPin: check.sharedPin };
+  return { allow: true, managerName: check.managerName, managerNames: check.managerNames, managerId: check.managerId, managerIds: check.managerIds, sharedPin: check.sharedPin };
 }
-// Log tag naming WHOSE PIN unlocked the action. A unique PIN names the one manager it
-// belongs to; a PIN shared by two+ managers is genuinely ambiguous, so we name every one
-// it could have been ("shared PIN") rather than credit the wrong person. Admin bypass
-// (managerName "admin") and 'on'-mode actions (no PIN) add nothing.
-const byNote = (g: { managerName?: string; managerNames?: string[]; sharedPin?: boolean }) => {
-  if (!g.managerName || g.managerName === "admin") return "";
+// Turn a passed gate into the log's structured "who authorised by PIN" fields, so the
+// Operation log can render a manager PIN pill from real columns instead of parsing free
+// text. A unique PIN names the one manager it belongs to (with a stable id for the
+// bill-audit match); a PIN shared by two+ managers is genuinely ambiguous, so we name
+// every one it could have been and leave the id null (no single truth). Admin bypass
+// (managerName "admin") and 'on'-mode actions (no PIN) → null, nothing recorded.
+type PinActor = { actor: string; actor_id: string | null; pin_shared: boolean };
+function pinActorFrom(g: PinGate): PinActor | null {
+  if (!g.allow || !g.managerName || g.managerName === "admin") return null;
   const names = g.managerNames && g.managerNames.length ? g.managerNames : [g.managerName];
-  return names.length > 1
-    ? ` (PIN shared by ${names.join(" or ")})`
-    : ` (by ${names[0]}'s PIN)`;
-};
+  const shared = names.length > 1 || !!g.sharedPin;
+  return { actor: names.join(" / "), actor_id: shared ? null : (g.managerId ?? g.managerIds?.[0] ?? null), pin_shared: shared };
+}
 
 // Setting-aware gate for a tablet BILLING action. The manager's Access settings
 // hold a tri-state per action (tablet_discount / tablet_mark_paid / tablet_invoice):
@@ -351,7 +355,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   // restaurant #1 — a non-#1 restaurant's Log missed its own tablet actions and #1's Log
   // showed other restaurants'. This wrapper carries `rid` on all of them. (2026-07-07)
   const tabletPanel = "tablet" as const;
-  const log = (action: string, fields: Record<string, unknown> = {}) => logAction(tabletPanel, action, { ...fields, restaurant_id: rid });
+  // WHO authorised a PIN-gated action. Recorded ONCE per request by recordPin (wrapped
+  // around every PIN gate below) and auto-attached to every log row as structured
+  // actor/actor_id — so the Operation log renders a manager PIN pill from real columns,
+  // not by parsing free text. Stays null for 'on'-mode or admin-bypass actions (no PIN).
+  let pinAuth: { actor: string; actor_id: string | null } | null = null;
+  const recordPin = <T extends PinGate>(g: T): T => { const p = pinActorFrom(g); if (p) pinAuth = { actor: p.actor, actor_id: p.actor_id }; return g; };
+  const log = (action: string, fields: Record<string, unknown> = {}) =>
+    logAction(tabletPanel, action, { ...(pinAuth ?? {}), ...fields, restaurant_id: rid });
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
@@ -384,7 +395,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // The manager→tablet rung (mig 178): a real waiter may take orders only when the
       // tablet_take_orders cap allows it (tri-state off/on/pin, default 'on'; per-user
       // override honoured). The admin super-user bypasses, like every other tablet cap.
-      { const g2 = await tabletPerm("tablet_take_orders", req, body, rid, actor); if (!g2.allow) return g2.resp; }
+      { const g2 = recordPin(await tabletPerm("tablet_take_orders", req, body, rid, actor)); if (!g2.allow) return g2.resp; }
       const { table, items, allergies, note } = body || {};
       const t = String(table || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
@@ -469,7 +480,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Full ladder (mig 167): owner's toggle counts; the RPC re-checks the admin
       // switch in SQL as the backstop.
       if (actor && !(await banquetLadder(rid)).effective) return err("Banquet billing isn't enabled for this restaurant.", 403);
-      const gate2 = await tabletPerm("tablet_banquet", req, body, rid, actor);
+      const gate2 = recordPin(await tabletPerm("tablet_banquet", req, body, rid, actor));
       if (!gate2.allow) return gate2.resp;
       // Table is OPTIONAL (mig 132): blank → a standalone walk-in-style bill the
       // manager settles from the Bills tab; given → lands on that table as before.
@@ -485,7 +496,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_banquet_place_order", { p_table: t || null, p_lines: lines, p_restaurant_id: rid });
       if (error) throw new Error(error.message);
       if (!(data as any)?.ok) return err(banquetErrMsg((data as any)?.reason), 400);
-      await log("banquet_place", { table_number: t || null, device_id: dev, detail: `total ${(data as any)?.total}${byNote(gate2)}` });
+      await log("banquet_place", { table_number: t || null, device_id: dev, detail: `total ${(data as any)?.total}` });
       return ok(data);
     }
 
@@ -549,7 +560,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // the editor's banMember, but done server-side in one call: we look up the
     // member's phone here (the editor passes it from its row). (owner, 2026-06-17)
     if (a === "members" && c === "ban") {
-      const g = await managerPinGate(req, body, rid); if (!g.allow) return g.resp; // manager PIN required
+      const g = recordPin(await managerPinGate(req, body, rid)); if (!g.allow) return g.resp; // manager PIN required
       const found = must(await sb.from("session_members").select("id,phone,device_id").eq("id", b).eq("restaurant_id", rid).limit(1));
       const m = found[0];
       if (!m) return err("member not found", 404);
@@ -564,7 +575,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       must(await sb.from("blocklist").insert({ member_id: b, phone, device_id: device, reason: "banned from tablet", restaurant_id: rid }).select());
       if (phone) await sb.from("customers").upsert({ phone, blocked: true, restaurant_id: rid }, { onConflict: "restaurant_id,phone" });
       const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).eq("restaurant_id", rid).select());
-      await log("member_ban", { detail: (phone ? `banned ${phone}` : "banned") + byNote(g), device_id: dev });
+      await log("member_ban", { detail: (phone ? `banned ${phone}` : "banned"), device_id: dev });
       return ok(row[0] || null);
     }
 
@@ -580,7 +591,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // orders/:id/discount — reduce ONE order's bill (comp/loyalty/fix). Clamped to
     // 0..order total, money-safe. Mirrors the editor endpoint. (owner, 2026-06-17)
     if (a === "orders" && c === "discount") {
-      const g = await tabletPerm("tablet_discount", req, body, rid, actor); if (!g.allow) return g.resp; // off/pin/on per settings
+      const g = recordPin(await tabletPerm("tablet_discount", req, body, rid, actor)); if (!g.allow) return g.resp; // off/pin/on per settings
       // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS); the perm
       // gate above is a FEATURE gate, not a tenant one, so a foreign ?rid= must still be blocked.
       const cur = must(await sb.from("orders").select("total, subtotal, session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
@@ -603,7 +614,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       { const cap = await discountCapPct(rid, discountRole(actor?.role)); if (overDiscountCap(amount, base, cap)) return err(`That's over your ${cap}% discount limit — ask a manager.`, 403); }
       const note = String((body && body.note) || "").slice(0, 200) || null;
       const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid).select());
-      await log("order_discount", { order_id: b, detail: `₹${amount}` + byNote(g), device_id: dev });
+      await log("order_discount", { order_id: b, detail: `₹${amount}`, device_id: dev });
       return ok(row[0] || null);
     }
 
@@ -612,7 +623,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // table's unpaid tickets' orders.discount, so every money view stays correct. Gated the
     // same as the per-ticket discount (off/on/pin). (mig 143)
     if (a === "sessions" && c === "bill-discount") {
-      const g = await tabletPerm("tablet_discount", req, body, rid, actor); if (!g.allow) return g.resp;
+      const g = recordPin(await tabletPerm("tablet_discount", req, body, rid, actor)); if (!g.allow) return g.resp;
       const sess = must(await sb.from("sessions").select("id, discount").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!sess) return err("That table isn't there anymore — refresh.", 404);
       // Reciprocal of the per-ticket guard above: the two discounts are mutually exclusive (the
@@ -635,7 +646,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const note = String((body && body.note) || "").slice(0, 200) || null;
       const { data, error } = await sb.rpc("lfh_staff_bill_discount", { p_session: b, p_amount: amount, p_note: note });
       if (error) throw new Error(error.message);
-      await log("bill_discount", { detail: `whole bill ₹${amount} (session ${b})` + byNote(g), device_id: dev });
+      await log("bill_discount", { detail: `whole bill ₹${amount} (session ${b})`, device_id: dev });
       return ok(data);
     }
 
@@ -644,14 +655,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // RPC the manager panel uses; it's idempotent (a repeat call just returns the
     // existing invoice), so there's no double-invoice risk.
     if (a === "sessions" && c === "invoice") {
-      const g = await tabletPerm("tablet_invoice", req, body, rid, actor); if (!g.allow) return g.resp;
+      const g = recordPin(await tabletPerm("tablet_invoice", req, body, rid, actor)); if (!g.allow) return g.resp;
       // lfh_generate_invoice takes only p_session (no tenant param) — confirm the session is
       // THIS restaurant's first (service-role bypasses RLS), mirroring the editor invoice guard.
       const ownsGen = (await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
       if (!ownsGen) return err("That table isn't for this restaurant.", 404);
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
       if (error) throw new Error(error.message);
-      await log("invoice_generate", { detail: `session ${b}` + byNote(g), device_id: dev });
+      await log("invoice_generate", { detail: `session ${b}`, device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
     }
 
@@ -677,8 +688,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const owed = pending
         .filter((o: any) => o.payment_status !== "paid")
         .reduce((s: number, o: any) => s + ((Number(o.total) || 0) - (Number(o.discount) || 0)), 0);
-      let by = "";
-      if (needsPin) { const g = await managerPinGate(req, body, rid); if (!g.allow) return g.resp; by = byNote(g); }
+      if (needsPin) { const g = recordPin(await managerPinGate(req, body, rid)); if (!g.allow) return g.resp; } // manager PIN → recorded via recordPin
       let q = sb.from("orders").update({ status: "served", archived: true, archived_at: new Date().toISOString() }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
       const rows = must(await q.select());
@@ -690,7 +700,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // old party left a ghost 🔔 badge + ATTEND on the now-empty table. Shared helper so the
       // manual + auto (lib/autoSettle) restart paths can't drift apart.
       await clearTableSignals(rid, t);
-      await log("table_restart", { table_number: t, detail: `${rows.length} order(s) cleared${owed > 0 ? `, ≈₹${Math.round(owed)} was unpaid` : ""}` + by, device_id: dev });
+      await log("table_restart", { table_number: t, detail: `${rows.length} order(s) cleared${owed > 0 ? `, ≈₹${Math.round(owed)} was unpaid` : ""}`, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
 
@@ -716,7 +726,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && c === "merge") {
       // actor null = admin act-as (X-ray rule: the greyed button genuinely works).
       if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
-      const gm = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gm.allow) return gm.resp;
+      const gm = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gm.allow) return gm.resp;
       const to = String((body && body.to) || "").trim();
       if (!/^\d+$/.test(to)) return err("valid target table required");
       const mtc2 = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
@@ -735,7 +745,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           : "Couldn't merge: " + (reason || "refused");
         return err(msg, 409);
       }
-      await log("table_merge", { table_number: to, detail: `T${(mg as any).from} → T${to} (one bill)${byNote(gm)}`, device_id: dev });
+      await log("table_merge", { table_number: to, detail: `T${(mg as any).from} → T${to} (one bill)`, device_id: dev });
       return ok(mg);
     }
 
@@ -743,7 +753,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // Same ladder gate as merge; the RPC (mig 175) reprices both KOTs server-side.
     if (a === "order-items" && c === "move") {
       if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403); // actor null = admin (X-ray)
-      const gi = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gi.allow) return gi.resp;
+      const gi = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gi.allow) return gi.resp;
       const to = String((body && body.to) || "").trim();
       if (!/^\d+$/.test(to)) return err("valid target table required");
       const mtc3 = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
@@ -762,7 +772,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           : "Couldn't move the dish: " + (reason || "refused");
         return err(msg, 409);
       }
-      await log("order_item_move", { table_number: to, detail: `dish → table ${to} (new KOT)${byNote(gi)}`, device_id: dev });
+      await log("order_item_move", { table_number: to, detail: `dish → table ${to} (new KOT)`, device_id: dev });
       return ok(im);
     }
 
@@ -985,7 +995,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "pay") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      const g = await tabletPerm("tablet_mark_paid", req, body, rid, actor); if (!g.allow) return g.resp; // off/pin/on per settings
+      const g = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!g.allow) return g.resp; // off/pin/on per settings
       // Settle only the CURRENT party's bill: scope to the table's open session
       // so we never mark a previous party's leftover order paid. Sessions-off
       // mode (no open session) falls back to the table's active orders.
@@ -1010,7 +1020,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const splits = Array.isArray(body?.splits) ? body.splits : null;
       if (splits) {
         if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403); // actor null = admin (X-ray)
-        const gs = await tabletPerm("tablet_table_ops", req, body, rid, actor); if (!gs.allow) return gs.resp;
+        const gs = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gs.allow) return gs.resp;
         if (splits.length < 2 || splits.length > 12) return err("Give at least two split shares (max 12).");
         for (const s of splits) {
           if (!(Number(s?.amount) > 0)) return err("Every split share needs an amount above zero.");
@@ -1057,7 +1067,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
       if (actor && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
-      const tg = await tabletPerm("tablet_table_tags", req, body, rid, actor); if (!tg.allow) return tg.resp;
+      const tg = recordPin(await tabletPerm("tablet_table_tags", req, body, rid, actor)); if (!tg.allow) return tg.resp;
       const tag = body?.tag ?? null;
       if (tag === null || tag === "") {
         must(await sb.from("table_tags").delete().eq("restaurant_id", rid).eq("table_number", t).select());
@@ -1081,7 +1091,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
       if (actor && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
-      const hg = await tabletPerm("tablet_mark_paid", req, body, rid, actor); if (!hg.allow) return hg.resp;
+      const hg = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!hg.allow) return hg.resp;
       const tagRow = (await sb.from("table_tags").select("tag").eq("restaurant_id", rid).eq("table_number", t).maybeSingle()).data as { tag?: TableTag } | null;
       if (!tagRow?.tag || !COMP_TAGS.includes(tagRow.tag)) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
       const openSess = (await sb.from("sessions").select("id")
@@ -1111,7 +1121,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
       if (actor && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
-      const kg = await tabletPerm("tablet_khata", req, body, rid, actor); if (!kg.allow) return kg.resp;
+      const kg = recordPin(await tabletPerm("tablet_khata", req, body, rid, actor)); if (!kg.allow) return kg.resp;
       const openSess = (await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
         .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
@@ -1161,7 +1171,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "unpay") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      const g = await tabletPerm("tablet_mark_paid", req, body, rid, actor); if (!g.allow) return g.resp;
+      const g = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!g.allow) return g.resp;
       const openSess = (await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
         .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
@@ -1199,7 +1209,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // "close anyway" override (force) for an unpaid/cooking table needs a manager PIN.
     if (a === "sessions" && c === "close") {
       const force = !!(body && body.force === true);
-      if (force) { const g = await managerPinGate(req, body, rid); if (!g.allow) return g.resp; } // override → manager PIN
+      if (force) { const g = recordPin(await managerPinGate(req, body, rid)); if (!g.allow) return g.resp; } // override → manager PIN
       const result = await closeSession(b, { force }, { panel: "tablet", deviceId: dev, restaurantId: rid });
       if (!result.ok) return err(result.message, result.status);
       return ok(result.session);

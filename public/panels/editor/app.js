@@ -7732,6 +7732,20 @@ function logHtml() {
   return head + table + blkPanel;
 }
 
+// A gold "manager PIN" pill for a TABLET action that a manager's PIN unlocked. The
+// tablet has no per-person login, so a non-empty `actor` on a tablet row is always the
+// manager whose PIN authorised the action (recorded server-side, mig-free — the actor
+// column). A name containing " / " means the SAME PIN belongs to more than one manager,
+// so it's genuinely ambiguous who tapped it — we name them all and tint the pill.
+function pinPill(r) {
+  if (!r || r.panel !== "tablet" || !r.actor) return "";
+  const shared = String(r.actor).includes(" / ");
+  const title = shared
+    ? "This PIN is shared by these managers — any of them could have entered it"
+    : "Unlocked by this manager's PIN";
+  return ` <span class="op-pinpill${shared ? " op-pinpill-shared" : ""}" title="${esc(title)}">🔑 ${esc(r.actor)}</span>`;
+}
+
 // oplogHtml: the Operation log — every staff action across the panels (which
 // panel did what, where, and when). Fed by /oplog (the staff_actions table).
 function oplogHtml() {
@@ -7763,7 +7777,7 @@ function oplogHtml() {
     return `<div class="oprow oprow-click${blockedDev[r.device_id] ? " op-blocked" : ""}" data-op-detail="${esc(r.id)}">
       <div class="opcell">${device}</div>
       <div class="opcell"><span class="op-panel op-${esc(r.panel)}">${esc(PANEL_LABEL[r.panel] || r.panel)}</span></div>
-      <div class="opcell"><b>${esc(ACT[r.action] || r.action)}</b></div>
+      <div class="opcell"><b>${esc(ACT[r.action] || r.action)}</b>${pinPill(r)}</div>
       <div class="opcell lg-muted">${where}</div>
       <div class="opcell"><small>${esc(whenLabel(r.created_at))}</small></div>
       <div class="opcell opacts">${act}</div>
@@ -7804,12 +7818,17 @@ function bindLog() {
 function showOpDetail(id) {
   const r = (state.oplog || []).find((x) => x.id === id);
   if (!r) return;
+  // For a TABLET action, `actor` is the manager whose PIN authorised it (see pinPill).
+  // Label it plainly so the reviewer knows it was a manager PIN, and flag a shared PIN.
+  const pinShared = r.panel === "tablet" && r.actor && String(r.actor).includes(" / ");
+  const byRow = (r.panel === "tablet" && r.actor)
+    ? { label: pinShared ? "Authorised by (shared PIN)" : "Authorised by (manager PIN)", value: r.actor }
+    : { label: "By", value: r.actor || "— (no staff login yet, device only)" };
   logDetailDialog("Operation log entry", [
     { label: "Action", value: OP_ACTION_LABELS[r.action] || r.action },
     { label: "Panel", value: PANEL_LABEL[r.panel] || r.panel },
     { label: "Device", value: r.device_id ? "#" + r.device_id : "—" },
-    // The "who" slot — filled once staff login lands (migration 053 actor column).
-    { label: "By", value: r.actor || "— (no staff login yet, device only)" },
+    byRow,
     { label: "Table", value: r.table_number ? "Table " + r.table_number : "" },
     { label: "Note", value: r.detail || "" },
     { label: "Order id", value: r.order_id || "" },

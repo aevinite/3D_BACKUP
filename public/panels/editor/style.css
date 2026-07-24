@@ -1036,6 +1036,13 @@ body {
 .opcell { font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .op-dev { font-weight: 800; color: var(--gold); white-space: nowrap; }
 .op-panel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; padding: 2px 8px; border-radius: 999px; text-align: center; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); display: inline-block; }
+/* Manager PIN pill on a tablet action — a small gold "badge with a name" (like a
+   notification bubble, but it holds the manager's name) showing whose PIN unlocked it. */
+.op-pinpill { display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; vertical-align: middle;
+  background: color-mix(in srgb, var(--gold) 16%, transparent); color: var(--gold);
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent); }
+/* Shared PIN (>1 manager owns it) — amber-tinted so the ambiguity is obvious at a glance. */
+.op-pinpill-shared { background: rgba(232,161,60,0.18); color: #e8a13c; border-color: rgba(232,161,60,0.5); }
 .op-editor { color: var(--gold); border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
 .op-kitchen { color: #7ec88a; }
 .op-tablet { color: #4f9dff; }

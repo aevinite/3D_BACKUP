@@ -267,6 +267,10 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
         const det = isErr ? (a.detail || "") : formatActionDetail(a.action, a.detail);
         const expandable = !!det && (det.length > 60 || isErr);
         const isOpen = open === a.id;
+        // On a TABLET row, `actor` is the manager whose PIN unlocked the action (no per-person
+        // tablet login exists). A name with " / " = a PIN shared by >1 manager → ambiguous.
+        const isTabletPin = a.panel === "tablet" && !!a.actor;
+        const pinShared = isTabletPin && String(a.actor).includes(" / ");
         return (
           <div
             key={a.id}
@@ -286,7 +290,11 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
             <div style={{ minWidth: 0 }}>
               <span style={{ color: showRed ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined, textDecoration: isResolved ? "line-through" : undefined }}>{ACT_LABEL[a.action] || a.action}</span>
               {isResolved && <span className="adm-chip" style={{ marginLeft: 6, background: "color-mix(in srgb, var(--adm-ok, #16a34a) 20%, transparent)", color: "var(--adm-ok, #16a34a)", fontWeight: 700 }}><i className="fas fa-check" aria-hidden="true" style={{ marginRight: 4 }} />Resolved</span>}
-              {a.actor ? <span className="adm-muted"> · {a.actor}</span> : a.table_number ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
+              {isTabletPin
+                ? <span className="adm-chip" title={pinShared ? "PIN shared by these managers — any could have entered it" : "Unlocked by this manager's PIN"}
+                    style={{ marginLeft: 6, fontWeight: 700, background: pinShared ? "color-mix(in srgb, var(--adm-warn) 20%, transparent)" : "color-mix(in srgb, #d4af37 20%, transparent)", color: pinShared ? "var(--adm-warn)" : "#d4af37" }}>🔑 {a.actor}</span>
+                : a.actor ? <span className="adm-muted"> · {a.actor}</span> : ""}
+              {a.table_number && (isTabletPin || !a.actor) ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
               {det ? (
                 isOpen
                   ? <div className="adm-muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{det}</div>
