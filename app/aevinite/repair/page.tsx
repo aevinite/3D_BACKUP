@@ -73,6 +73,8 @@ export default function AdminRepair() {
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [sent, setSent] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [confirming, setConfirming] = useState("");            // which error group is in "are you sure?" mode
+  const [resolving, setResolving] = useState<Set<string>>(new Set());
 
   // "Describe a problem" box + the queue + Claude session history.
   const [note, setNote] = useState("");
@@ -105,7 +107,7 @@ export default function AdminRepair() {
     setErrLoading(true);
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const [e, q, h] = await Promise.all([
-      adminFetch<{ actions: Action[] }>(`/api/admin/oplog?level=error&limit=50&since=${encodeURIComponent(since24h)}`),
+      adminFetch<{ actions: Action[] }>(`/api/admin/oplog?level=error&unresolved=1&limit=50&since=${encodeURIComponent(since24h)}`),
       adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open"),
       adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
     ]);
@@ -146,6 +148,21 @@ export default function AdminRepair() {
     });
     if (r.ok) { toast(mode === "instant" ? "Sent to Claude — window opens on the Mac shortly." : "Queued for the 2:30 AM robot."); loadHub(); }
     else { toast(r.error || "Couldn't send that.", "err"); setSent((prev) => { const n = new Set(prev); n.delete(g.key); return n; }); }
+  };
+
+  // Owner fixed it themselves → mark the whole repeat-group resolved (two-step: the button first
+  // asks "are you sure?", this runs on confirm). Clears it from the list and the dashboard red button.
+  const resolveError = async (g: ErrGroup) => {
+    setConfirming("");
+    setResolving((p) => new Set(p).add(g.key));
+    setHidden((p) => new Set(p).add(g.key)); // optimistic remove
+    const r = await adminFetch<{ ok: boolean; resolved: number }>("/api/admin/resolve-error", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action_id: g.sample.id }),
+    });
+    setResolving((p) => { const n = new Set(p); n.delete(g.key); return n; });
+    if (r.ok) { toast("Marked resolved — cleared from your problems."); loadHub(); }
+    else { toast(r.error || "Couldn't resolve that.", "err"); setHidden((p) => { const n = new Set(p); n.delete(g.key); return n; }); }
   };
 
   const jumpTo = (a: Action) => {
@@ -234,29 +251,45 @@ export default function AdminRepair() {
                   {a.detail ? (
                     <div className="rp-detail" style={{ maxHeight: isOpen ? 240 : 34 }}>{a.detail}</div>
                   ) : <div className="adm-muted" style={{ fontSize: 12 }}>No further detail was recorded.</div>}
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>
-                    {jl ? (
-                      <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => jumpTo(a)} title="Open that panel for this restaurant to fix it by hand">
-                        <i className="fas fa-arrow-up-right-from-square" aria-hidden="true" style={{ marginRight: 6 }} />{jl}
+                  {confirming === g.key ? (
+                    // Step 2 — the "are you sure?" confirm (owner 2026-07-24).
+                    <div className="rp-confirm" style={{ marginTop: 9 }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 600 }}><i className="fas fa-circle-question" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />You fixed this yourself? It&rsquo;ll clear from your problems.</span>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button className="adm-btn" style={{ fontSize: 12, background: "var(--adm-ok, #4caf82)", borderColor: "var(--adm-ok, #4caf82)", color: "#fff", fontWeight: 700 }} disabled={resolving.has(g.key)} onClick={() => resolveError(g)}>
+                          <i className="fas fa-check" aria-hidden="true" style={{ marginRight: 6 }} />{resolving.has(g.key) ? "Resolving…" : "Yes, it's resolved"}
+                        </button>
+                        <button className="adm-btn" style={{ fontSize: 12 }} disabled={resolving.has(g.key)} onClick={() => setConfirming("")}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>
+                      {jl ? (
+                        <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => jumpTo(a)} title="Open that panel for this restaurant to fix it by hand">
+                          <i className="fas fa-arrow-up-right-from-square" aria-hidden="true" style={{ marginRight: 6 }} />{jl}
+                        </button>
+                      ) : null}
+                      {wasSent ? (
+                        <span className="adm-muted" style={{ fontSize: 12 }}><i className="fas fa-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 5 }} />Sent to Claude</span>
+                      ) : (
+                        <>
+                          <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => sendError(g, "instant")} title="A Claude window opens on the office Mac within a minute">
+                            <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-accent, #e8a13c)" }} />Fix now
+                          </button>
+                          <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => sendError(g, "overnight")} title="The 2:30 AM robot fixes it and leaves a morning report">
+                            <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />Overnight
+                          </button>
+                        </>
+                      )}
+                      {/* Owner's own fix — the green "I handled it" action, separate from the two Claudes. */}
+                      <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={() => setConfirming(g.key)} title="I fixed this myself — clear it from the list">
+                        <i className="fas fa-circle-check" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-ok, #4caf82)" }} />Resolve
                       </button>
-                    ) : null}
-                    {wasSent ? (
-                      <span className="adm-muted" style={{ fontSize: 12 }}><i className="fas fa-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 5 }} />Sent to Claude</span>
-                    ) : (
-                      <>
-                        <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => sendError(g, "instant")} title="A Claude window opens on the office Mac within a minute">
-                          <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-accent, #e8a13c)" }} />Fix now
-                        </button>
-                        <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => sendError(g, "overnight")} title="The 2:30 AM robot fixes it and leaves a morning report">
-                          <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />Overnight
-                        </button>
-                      </>
-                    )}
-                    {a.detail && a.detail.length > 90 ? (
-                      <button className="rp-link" onClick={() => setExpanded((p) => { const n = new Set(p); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}>{isOpen ? "less" : "more"}</button>
-                    ) : null}
-                    <button className="rp-x" title="Hide (I've handled this)" onClick={() => setHidden((p) => new Set(p).add(g.key))}><i className="fas fa-xmark" aria-hidden="true" /></button>
-                  </div>
+                      {a.detail && a.detail.length > 90 ? (
+                        <button className="rp-link" onClick={() => setExpanded((p) => { const n = new Set(p); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}>{isOpen ? "less" : "more"}</button>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -440,6 +473,7 @@ export default function AdminRepair() {
         .rp-link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0 2px}
         .rp-x{margin-left:auto;background:none;border:none;color:var(--muted);opacity:.5;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px}
         .rp-x:hover{opacity:1;background:color-mix(in srgb,var(--text) 8%,transparent)}
+        .rp-confirm{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 11px;border-radius:9px;background:color-mix(in srgb,var(--adm-ok,#4caf82) 10%,var(--card));border:1px solid color-mix(in srgb,var(--adm-ok,#4caf82) 35%,transparent)}
       `}</style>
     </>
   );

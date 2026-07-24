@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
       sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, created_at").order("created_at", { ascending: false }).limit(18),
       // Two HEAD counts for the red "Fix problems" button (owner 2026-07-22): recent app
       // errors (partial error index, mig 159) + problems reported but not yet solved.
-      sb.from("staff_actions").select("id", head).eq("level", "error").gte("created_at", since24hIso),
+      sb.from("staff_actions").select("id", head).eq("level", "error").is("resolved_at", null).gte("created_at", since24hIso),
       sb.from("fix_requests").select("id", head).eq("status", "open"),
     ]);
 
