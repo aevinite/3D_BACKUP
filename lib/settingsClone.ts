@@ -104,5 +104,8 @@ export function cleanClonedSettings(
   // Review link: never inherit #1's Google page — default to our own Instagram (see above).
   // The admin's google-review route later overrides this with the restaurant's own link.
   base.google_review_url = DEFAULT_REVIEW_URL;
+  // Google-review MODE (mig 187): a new restaurant starts with the Google invite OFF — guests
+  // see only the normal in-menu reviews until the admin picks a Google mode. (owner 2026-07-24)
+  base.google_review_mode = "off";
   return base;
 }

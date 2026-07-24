@@ -581,16 +581,25 @@ function StatusCard({ restaurant }: { restaurant: Restaurant }) {
   );
 }
 
-// Google review link — the admin pastes this restaurant's Google review URL. When set, a
-// guest who rates a dish 4–5★ sees a "review us on Google" nudge (guest side in ItemClient);
-// a low rating stays private. Empty clears it. Saved to settings.google_review_url. (owner 2026-07-09)
+// Google review — a sub-option that sits UNDER the reviews feature. A single-select (pick one)
+// for how the Google-review invite behaves relative to the normal in-menu review, plus the
+// destination link. Admin-only; the owner can't change it. DEFAULT OFF for every restaurant
+// (owner 2026-07-24). Saved to settings.google_review_mode (mig 187) + google_review_url (155).
+const GR_MODES = [
+  { key: "off", label: "Off", hint: "No Google invite — guests see only the normal in-menu reviews." },
+  { key: "google", label: "Google only", hint: "Show a “Review us on Google” button instead of the in-menu rate form." },
+  { key: "google_plus_normal", label: "Google + in-menu reviews", hint: "The in-menu review form AND a Google button, shown together." },
+  { key: "google_after_normal", label: "Google after a review", hint: "The Google invite appears after a guest leaves a 4–5★ in-menu review." },
+] as const;
+type GrMode = (typeof GR_MODES)[number]["key"];
 function GoogleReviewCard({ restaurant }: { restaurant: Restaurant }) {
   const [url, setUrl] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [mode, setMode] = useState<GrMode>("off");        // saved mode
+  const [draftMode, setDraftMode] = useState<GrMode>("off"); // being edited
   // loadOk gates Save: it's true ONLY after a SUCCESSFUL load. Before this, a FAILED load
-  // set loaded=true too, so a network hiccup looked identical to "no link set" and pressing
-  // Save would overwrite the real, saved link with an empty string (mirrors BrandingCard's
-  // brandLoaded guard — audit 2026-07-23).
+  // set loaded=true too, so a network hiccup looked identical to "off" and pressing Save
+  // would overwrite the real, saved link/mode (mirrors BrandingCard's brandLoaded guard).
   const [loadOk, setLoadOk] = useState(false);
   const [loadErr, setLoadErr] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -602,36 +611,61 @@ function GoogleReviewCard({ restaurant }: { restaurant: Restaurant }) {
       .then((r) => r.json())
       .then((j) => {
         if (j.error || typeof j.url === "undefined") { setLoadErr(true); return; }
-        setUrl(j.url || null); setDraft(j.url || ""); setLoadOk(true);
+        const m = (GR_MODES.some((x) => x.key === j.mode) ? j.mode : "off") as GrMode;
+        setUrl(j.url || null); setDraft(j.url || ""); setMode(m); setDraftMode(m); setLoadOk(true);
       })
       .catch(() => setLoadErr(true));
   }, [restaurant.id]);
   useEffect(() => { loadReview(); }, [loadReview]);
+  const needsLink = draftMode !== "off" && !draft.trim();  // a Google mode with no URL is invalid
+  const dirty = draftMode !== mode || draft.trim() !== (url || "");
   const save = async () => {
     setBusy(true); setErr(null); setMsg(null);
     try {
-      const r = await fetch("/api/admin/restaurants/google-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, url: draft.trim() }) });
+      const r = await fetch("/api/admin/restaurants/google-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, url: draft.trim(), mode: draftMode }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      setUrl(d.url || null); setDraft(d.url || "");
-      setMsg(d.url ? "Saved — guests who rate a dish 4–5★ now see a Google-review nudge." : "Cleared — the Google nudge is off for this restaurant.");
+      const m = (GR_MODES.some((x) => x.key === d.mode) ? d.mode : "off") as GrMode;
+      setUrl(d.url || null); setDraft(d.url || ""); setMode(m); setDraftMode(m);
+      setMsg(m === "off" ? "Saved — Google invite is off; guests see only normal reviews." : `Saved — ${GR_MODES.find((x) => x.key === m)?.label}.`);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   return (
     <div className="adm-card" style={{ marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 4 }}>
-        <div className="adm-section-h" style={{ fontWeight: 800 }}>Google review nudge</div>
+        <div className="adm-section-h" style={{ fontWeight: 800 }}>Google review</div>
         {loadOk && (
-          <span className="adm-chip" style={url
+          <span className="adm-chip" style={mode !== "off"
             ? { background: "color-mix(in srgb, var(--adm-ok) 20%, transparent)", color: "var(--adm-ok)" }
-            : { background: "var(--muted2)", color: "var(--muted)" }}>{url ? "ON" : "OFF"}</span>
+            : { background: "var(--muted2)", color: "var(--muted)" }}>{mode === "off" ? "OFF" : "ON"}</span>
         )}
       </div>
-      <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>When a guest rates a dish <b>4–5★</b>, invite them to review you on Google (a low rating stays private). Paste the review URL to turn it ON; clear it to turn it OFF. Optional — leave blank if you don&apos;t use Google reviews.</p>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <input className="adm-input" style={{ flex: 1, minWidth: 240 }} type="url" inputMode="url" placeholder="https://g.page/r/…/review" value={draft} maxLength={500} disabled={!loadOk || busy} onChange={(e) => setDraft(e.target.value)} />
-        <button className="adm-btn primary" disabled={!loadOk || busy || draft.trim() === (url || "")} onClick={save}>{busy ? "Saving…" : "Save"}</button>
+      <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Sits under the reviews feature. Pick how the Google-review invite works — this is separate from the normal in-menu reviews (turned on/off in <b>Features</b> above). Default is Off.</p>
+      {/* Pick-one mode list — the same toggle format used elsewhere in this panel. */}
+      <div style={{ display: "grid", gap: 6, marginBottom: 10, opacity: loadOk ? 1 : 0.5, pointerEvents: loadOk && !busy ? "auto" : "none" }}>
+        {GR_MODES.map((m) => {
+          const on = draftMode === m.key;
+          return (
+            <button key={m.key} type="button" className="adm-card" onClick={() => setDraftMode(m.key)}
+              style={{ display: "flex", alignItems: "flex-start", gap: 10, textAlign: "left", padding: "9px 11px", cursor: "pointer",
+                border: on ? "2px solid var(--adm-ok)" : "1px solid var(--adm-border, rgba(128,128,128,0.3))",
+                background: on ? "color-mix(in srgb, var(--adm-ok) 8%, transparent)" : "transparent" }}>
+              <span aria-hidden="true" style={{ marginTop: 1, fontWeight: 800, color: on ? "var(--adm-ok)" : "var(--muted)" }}>{on ? "◉" : "○"}</span>
+              <span><span style={{ fontWeight: 700 }}>{m.label}</span><span className="adm-muted" style={{ display: "block", fontSize: 12 }}>{m.hint}</span></span>
+            </button>
+          );
+        })}
       </div>
-      {loadErr && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>Couldn&rsquo;t load the current link — editing is locked so you don&rsquo;t overwrite it by mistake. <button className="adm-btn" style={{ marginLeft: 6, padding: "3px 9px" }} onClick={loadReview}>Retry</button></div>}
+      {/* The destination link — only relevant when a Google mode is chosen. */}
+      {draftMode !== "off" && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+          <input className="adm-input" style={{ flex: 1, minWidth: 240 }} type="url" inputMode="url" placeholder="https://g.page/r/…/review" value={draft} maxLength={500} disabled={!loadOk || busy} onChange={(e) => setDraft(e.target.value)} />
+        </div>
+      )}
+      {needsLink && <div className="adm-muted" style={{ fontSize: 12, marginBottom: 6 }}>Add the Google review link to use this mode.</div>}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button className="adm-btn primary" disabled={!loadOk || busy || !dirty || needsLink} onClick={save}>{busy ? "Saving…" : "Save"}</button>
+      </div>
+      {loadErr && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>Couldn&rsquo;t load the current setting — editing is locked so you don&rsquo;t overwrite it by mistake. <button className="adm-btn" style={{ marginLeft: 6, padding: "3px 9px" }} onClick={loadReview}>Retry</button></div>}
       {msg && <div style={{ color: "var(--adm-ok,#16a34a)", fontSize: 12.5, marginTop: 8 }}>{msg}</div>}
       {err && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
     </div>
