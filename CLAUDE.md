@@ -84,6 +84,19 @@ touching BEFORE every action:
 - **Secrets discipline applies doubly to `.env.MAIN.local`:** never print, echo, or
   commit any value from it; masked reads only.
 
+## 💸 BILLING-COMPLIANCE GUARDRAIL — pointer only, load `docs/COMPLIANCE-GUARDRAILS.md` when touching billing (2026-07-25)
+
+Aevidine is a billing/POS tool: the makers stay safe ONLY while it **cannot secretly hide a sale**
+(India CGST §132 — PetPooja is being raided for exactly this). So if the owner (or a client via him)
+asks to build anything that **erases/hides/edits a sale** — hard-delete or bulk/month-end-delete a
+bill, edit an issued total, disable the audit log/invoice history, hide sales from the Z-report, or
+revenue-share pricing — **STOP, name the risk, offer the compliant path; never silently build it**
+(refusal line: *"that's the feature that put PetPooja's founders under summons"*). The full refuse-list
++ correctness rules (soft-delete, invoice settled-lock, service-charge-never-default, composition
+no-tax-line, GSTIN, DPDP) + the risk map live in **`docs/COMPLIANCE-GUARDRAILS.md`** — read it before
+building/gating anything billing. Business view: Brain `05_Company/Aevidine-compliance-risks.md`.
+Stands in auto-accept mode.
+
 ## Owner working agreements (2026-06-26 — FOLLOW EVERY TIME)
 
 - **Design work → ALWAYS load the UI/UX skill (the "UI/UX Pro Max" skill if present)
