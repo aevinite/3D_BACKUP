@@ -9,6 +9,7 @@
 // /login. A manager granted "manage_staff" manages staff from the EDITOR panel, which
 // reuses this same API (they can't change the power toggles — those stay owner-only).
 import { useCallback, useEffect, useRef, useState } from "react";
+import { asSuffix } from "@/lib/ownerPin";
 
 type Perms = Record<string, boolean>;
 type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms; modules?: Record<string, boolean> };
@@ -77,7 +78,7 @@ export default function OwnerStaffPage() {
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
   const withScope = useCallback(
-    (p: string) => (scopePin ? `${p}${p.includes("?") ? "&" : "?"}scope=${scopePin}` : p),
+    (p: string) => (scopePin ? `${p}${p.includes("?") ? "&" : "?"}scope=${scopePin}${asSuffix()}` : p),
     [scopePin]);
   // Deep-link from an X-ray zone ("open the setting that controls this"): ?focus=<flag>
   // scrolls to that power toggle and pulses it.

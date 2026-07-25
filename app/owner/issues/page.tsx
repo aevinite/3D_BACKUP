@@ -8,6 +8,7 @@
 // A 60s backstop refresh (paused while the tab is hidden) keeps new items appearing
 // without a manual Refresh; no faster poll (egress rule).
 import { useCallback, useEffect, useRef, useState } from "react";
+import { asSuffix } from "@/lib/ownerPin";
 
 type Issue = {
   id: string; restaurant_id: string; restaurantName: string;
@@ -39,7 +40,7 @@ export default function OwnerFeedback() {
   // second tab's shared act-as cookie can't hijack this tab. Null for a real owner.
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
-  const scp = scopePin ? `?scope=${scopePin}` : "";
+  const scp = scopePin ? `?scope=${scopePin}${asSuffix()}` : "";
 
   // ── Ratings ──
   const [ratings, setRatings] = useState<Rating[] | null>(null);

@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ACT_LABEL, PANEL_COLOR, timeAgo, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
+import { asValue } from "@/lib/ownerPin";
 
 export default function OwnerActivity() {
   // Admin-in-one-restaurant scope pin (?rid=) — rides on every call as ?scope= so a second
@@ -28,7 +29,7 @@ export default function OwnerActivity() {
 
   const load = useCallback(async () => {
     const params = new URLSearchParams();
-    if (scopePin) params.set("scope", scopePin);
+    if (scopePin) { params.set("scope", scopePin); const a = asValue(); if (a) params.set("as", a); }
     if (level) params.set("level", level);
     if (qDebounced.trim()) params.set("q", qDebounced.trim());
     const qs = params.toString();

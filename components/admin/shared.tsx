@@ -104,12 +104,15 @@ export function formatActionDetail(action: string, detail: string | null | undef
 // 2026-07-04 — the old await-POST-then-open flow felt slow and risked popup
 // blockers). The ?rid= pin keeps THAT tab on the restaurant even if the
 // browser-wide cookie later changes (owner 2026-07-03).
-export async function openRestaurantPanel(restaurantId: string, path: string): Promise<Window | null> {
+export async function openRestaurantPanel(restaurantId: string, path: string, ownerUid?: string): Promise<Window | null> {
   // Open WITHOUT the "noopener" feature so we still get a window handle back (with it,
   // window.open always returns null, making a blocked popup undetectable). We null `opener`
   // ourselves to keep the same safety. Returns null if the popup was blocked, so callers
   // can tell the admin instead of falsely claiming "now viewing" (audit 2026-07-08).
-  const w = window.open(`/api/admin/act-as/go?rid=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(path)}`, "_blank");
+  // ownerUid (owner panel only): pin to a SPECIFIC owner when a restaurant has several
+  // (the "which owner?" chooser, owner 2026-07-25) — act-as/go forwards it as ?as=.
+  const uidQ = ownerUid ? `&uid=${encodeURIComponent(ownerUid)}` : "";
+  const w = window.open(`/api/admin/act-as/go?rid=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(path)}${uidQ}`, "_blank");
   if (w) { try { w.opener = null; } catch {} }
   return w;
 }

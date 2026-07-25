@@ -75,7 +75,15 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
       ]);
       const members = (membersQ.data || []).map((m) => m.user_id as string);
       const primary = primaryQ.data?.owner_user_id as string | null | undefined;
-      const ownerId = primary && members.includes(primary) ? primary : (members[0] ?? primary ?? null);
+      // ?as=<ownerId> — the admin explicitly PICKED which owner's cockpit to open (the
+      // dashboard "which owner?" chooser, owner 2026-07-25). Honor it ONLY when that owner
+      // actually co-owns this restaurant; otherwise fall back to primary/first (a stale or
+      // crafted id can never widen the view to someone else's restaurants). Per-tab param,
+      // never a cookie, so a second admin tab can't repaint this one (same rule as ?scope=).
+      const asOwner = sp?.get("as");
+      const ownerId = (asOwner && members.includes(asOwner))
+        ? asOwner
+        : (primary && members.includes(primary) ? primary : (members[0] ?? primary ?? null));
       if (ownerId) {
         const { data } = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId);
         const ids = (data || []).map((x) => x.restaurant_id as string);

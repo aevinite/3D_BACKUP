@@ -24,11 +24,14 @@ export async function GET(req: NextRequest) {
 
   const since24hIso = new Date(Date.now() - 24 * 3600_000).toISOString();
 
-  const [restQ, setQ, ownersQ, ordersTodayQ, maintQ, onlineQ, issuesQ, actQ, errQ, fixQ] =
+  const [restQ, setQ, ownersQ, linksQ, ordersTodayQ, maintQ, onlineQ, issuesQ, actQ, errQ, fixQ] =
     await Promise.all([
       sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name"),
       sb.from("settings").select("restaurant_id, enabled_panels"),
       sb.from("staff_users").select("id, name, username").eq("role", "owner").eq("active", true),
+      // The owner⇄restaurant join (mig 097) — so the "Owner" quick-open knows when a
+      // restaurant has SEVERAL owners and shows a "which owner?" chooser (owner 2026-07-25).
+      sb.from("restaurant_owners").select("restaurant_id, user_id"),
       sb.from("orders").select("id", head).neq("status", "cancelled").gte("created_at", sinceIso),
       sb.from("settings").select("restaurant_id").eq("service_mode", true),
       // Only the staff CURRENTLY online (seen in the last 3 min) — a small list, instead of
@@ -55,11 +58,27 @@ export async function GET(req: NextRequest) {
   const ownerName = new Map((ownersQ.data || []).map((o) => [o.id, o.name || o.username]));
   const nameByRid = new Map((restQ.data || []).map((r) => [r.id, r.name]));
 
+  // Owners per restaurant (ACTIVE owners only — a suspended one can't log in, so it's not
+  // an option in the chooser). primary = the restaurant's owner_user_id. Sorted primary-first
+  // then A–Z so the chooser lists the main owner at the top.
+  const primaryByRid = new Map((restQ.data || []).map((r) => [r.id, r.owner_user_id || null]));
+  const ownersByRid = new Map<string, { id: string; name: string; primary: boolean }[]>();
+  for (const l of linksQ.data || []) {
+    const nm = ownerName.get(l.user_id); // undefined → suspended/deleted owner, skip
+    if (!nm) continue;
+    const list = ownersByRid.get(l.restaurant_id) || [];
+    list.push({ id: l.user_id, name: nm, primary: primaryByRid.get(l.restaurant_id) === l.user_id });
+    ownersByRid.set(l.restaurant_id, list);
+  }
+  for (const list of ownersByRid.values())
+    list.sort((a, b) => (a.primary === b.primary ? a.name.localeCompare(b.name) : a.primary ? -1 : 1));
+
   const restaurants = (restQ.data || []).map((r) => ({
     id: r.id, slug: r.slug, name: r.name, active: r.active === true,
     hasSettings: withSettings.has(r.id),
     ownerUserId: r.owner_user_id || null,
     ownerName: r.owner_user_id ? (ownerName.get(r.owner_user_id) || "—") : null,
+    owners: ownersByRid.get(r.id) || [],
     panels: panelsByRid.get(r.id) || null,
   }));
 
