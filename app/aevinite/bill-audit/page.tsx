@@ -20,7 +20,8 @@ type Rest = { id: string; name: string };
 type Data = { bills: Bill[]; counts: Record<string, number>; total: number; restaurants: Rest[]; generatedAt: string };
 type TrailEvent = { action: string; actor: string | null; detail: string | null; at: string };
 type InvEvent = { event: string; no: number | null; reason: string | null; actor: string | null; at: string };
-type Expanded = { trail: TrailEvent[]; invoiceHistory: InvEvent[] } | "loading";
+type CNote = { no: number; amount: number; reason: string | null; actor: string | null; at: string };
+type Expanded = { trail: TrailEvent[]; invoiceHistory: InvEvent[]; creditNotes: CNote[] } | "loading";
 
 const META: Record<BillState, { label: string; tone: string; icon: IconName }> = {
   running:   { label: "Running",       tone: "#22c55e", icon: "running" },
@@ -108,8 +109,8 @@ export default function AdminBills() {
       try {
         const res = await fetch("/api/admin/bills?trail=" + b.sessionId, { cache: "no-store" });
         const j = await res.json();
-        setExp((t) => ({ ...t, [b.sessionId]: { trail: j.trail || [], invoiceHistory: j.invoiceHistory || [] } }));
-      } catch { setExp((t) => ({ ...t, [b.sessionId]: { trail: [], invoiceHistory: [] } })); }
+        setExp((t) => ({ ...t, [b.sessionId]: { trail: j.trail || [], invoiceHistory: j.invoiceHistory || [], creditNotes: j.creditNotes || [] } }));
+      } catch { setExp((t) => ({ ...t, [b.sessionId]: { trail: [], invoiceHistory: [], creditNotes: [] } })); }
     }
   };
 
@@ -128,6 +129,27 @@ export default function AdminBills() {
       if (!res.ok) throw new Error(j.error || "Action failed.");
       setExp((t) => { const c = { ...t }; delete c[b.sessionId]; return c; });
       await load();
+    } catch (e) { alert(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
+  };
+
+  // Issue a CREDIT NOTE (post-settlement correction) — the bill is never changed; a new
+  // immutable credit document is recorded against it (mig 194).
+  const issueCredit = async (b: Bill) => {
+    const amtStr = window.prompt(`Issue a credit note against bill${b.billNo ? ` #${b.billNo}` : ""} (${b.restaurantName})?\n\nThe bill is NOT changed — a new credit note is recorded against it. Bill total is ${inr(b.amount)}.\n\nCredit amount (₹):`, "");
+    if (amtStr === null) return;
+    const amount = Math.round(parseFloat(amtStr) * 100) / 100;
+    if (!amount || amount <= 0) { alert("Enter a valid credit amount."); return; }
+    const reason = window.prompt("Reason for this credit note (required):", "");
+    if (reason === null) return;
+    if (!reason.trim()) { alert("A reason is required to issue a credit note."); return; }
+    setBusy(b.sessionId);
+    try {
+      const res = await fetch("/api/admin/bills", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "credit_note", sessionId: b.sessionId, amount, reason: reason.trim() }) });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "Failed to issue credit note.");
+      const r2 = await fetch("/api/admin/bills?trail=" + b.sessionId, { cache: "no-store" });
+      const j2 = await r2.json();
+      setExp((t) => ({ ...t, [b.sessionId]: { trail: j2.trail || [], invoiceHistory: j2.invoiceHistory || [], creditNotes: j2.creditNotes || [] } }));
     } catch (e) { alert(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
   };
 
@@ -228,6 +250,9 @@ export default function AdminBills() {
                     <SecHead icon="invoice" label="Invoice history" />
                     <InvoiceHistory e={exp[b.sessionId]} gens={b.invoiceGens} />
 
+                    <SecHead icon="reopen" label="Credit notes" />
+                    <CreditNotes e={exp[b.sessionId]} />
+
                     <SecHead icon="log" label="What happened to this bill" />
                     <Trail e={exp[b.sessionId]} openedAt={b.openedAt} rest={b.restaurantName} />
 
@@ -239,6 +264,11 @@ export default function AdminBills() {
                       ) : (
                         <button className="adm-btn blz-act" disabled={busy === b.sessionId} onClick={() => act(b, "delete")} style={{ borderColor: "var(--adm-danger)", color: "var(--adm-danger)", display: "inline-flex", alignItems: "center", gap: 7 }}>
                           <Ico n="trash" s={14} />{busy === b.sessionId ? "Deleting…" : "Delete bill"}
+                        </button>
+                      )}
+                      {!del && (
+                        <button className="adm-btn blz-act" disabled={busy === b.sessionId} onClick={() => issueCredit(b)} style={{ display: "inline-flex", alignItems: "center", gap: 7 }} title="Record a refund/correction without changing the settled bill">
+                          <Ico n="reopen" s={14} />Issue credit note
                         </button>
                       )}
                     </div>
@@ -294,6 +324,25 @@ function InvoiceHistory({ e, gens }: { e: Expanded | undefined; gens: number }) 
         })}
       </div>
     </>
+  );
+}
+
+function CreditNotes({ e }: { e: Expanded | undefined }) {
+  if (e === "loading" || e === undefined) return <div style={{ color: "var(--muted)", fontSize: 12.5 }}>Loading…</div>;
+  const cn = e.creditNotes;
+  if (!cn.length) return <div style={{ color: "var(--muted)", fontSize: 12.5 }}>No credit notes on this bill.</div>;
+  const total = cn.reduce((s, c) => s + c.amount, 0);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      {cn.map((c, i) => (
+        <div key={i} style={{ display: "flex", gap: 10, fontSize: 12.5, alignItems: "baseline" }}>
+          <span style={{ fontWeight: 600, minWidth: 150, fontVariantNumeric: "tabular-nums" }}>Credit note #{c.no} · {inr(c.amount)}</span>
+          <span style={{ color: "var(--muted)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.reason || ""}{c.actor ? ` · ${c.actor}` : ""}</span>
+          <span style={{ color: "var(--muted)", fontSize: 11.5 }} title={c.at}>{timeAgo(c.at)}</span>
+        </div>
+      ))}
+      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>Total credited: <b style={{ color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{inr(total)}</b></div>
+    </div>
   );
 }
 

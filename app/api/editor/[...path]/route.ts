@@ -1538,6 +1538,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       await log("editor", "invoice_void", { restaurant_id: rid, detail: `session ${b} · ${voidReason}`, device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
     }
+    // sessions/:id/credit-note — issue a CREDIT NOTE against a bill (the legal correction
+    // path once the invoice/bill is settled and locked; mig 194). Money action → void_bills.
+    // The bill is NEVER edited — a new, numbered, immutable credit document is recorded.
+    if (a === "sessions" && c === "credit-note") {
+      if (!(await managerCan(g, rid, "void_bills"))) return permDenied("issue credit notes");
+      const ownsCn = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!ownsCn) return err("That table isn't for this restaurant.", 404);
+      const cnAmount = Math.round((Number(body?.amount) || 0) * 100) / 100;
+      const cnReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
+      if (cnAmount <= 0) return err("Enter a credit amount greater than zero.", 400);
+      if (!cnReason) return err("A reason is required to issue a credit note.", 400);
+      const { data: cnData, error: cnErr } = await sb.rpc("lfh_issue_credit_note", { p_session: b, p_amount: cnAmount, p_reason: cnReason, p_actor: actorName });
+      if (cnErr) { if (/cannot exceed/i.test(cnErr.message)) return err("The credit can't be more than the bill total.", 400); throw new Error(cnErr.message); }
+      const cnRow = Array.isArray(cnData) ? cnData[0] : cnData;
+      await log("editor", "credit_note", { restaurant_id: rid, order_id: undefined, detail: `session ${b} · credit ₹${cnAmount} · ${cnReason}`, device_id: dev });
+      return ok(cnRow);
+    }
     if (a === "sessions" && c === "shift") {
       const to = String((body && body.to) || "").trim();
       // Validate the destination is a plain positive integer (the RPC trusts whatever arrives).

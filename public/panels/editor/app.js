@@ -1368,7 +1368,7 @@ function formGeneral(s) {
     ${tf("Address", "restaurant_address", s.restaurant_address ?? "", { ph: bi.address, hint: !s.restaurant_address && bi.address ? "Currently prints the placeholder shown — type your real address." : "" })}
     <div class="grid cols-3">
       ${tf("Phone", "restaurant_phone", s.restaurant_phone ?? "", { ph: bi.phone })}
-      ${tf("GSTIN", "gstin", s.gstin ?? "", { ph: bi.gstin, hint: !s.gstin && bi.gstin ? "⚠ Prints a PLACEHOLDER GSTIN — enter your REAL GSTIN before tax filing." : "" })}
+      ${tf("GSTIN", "gstin", s.gstin ?? "", { ph: "e.g. 24ABCDE1234F1Z5", hint: !s.gstin ? "No GSTIN set — bills print WITHOUT a GSTIN until you enter your real one (a fake number on a real bill is illegal)." : "" })}
       ${tf("Invoice prefix", "invoice_prefix", s.invoice_prefix ?? "")}
     </div>
     ${tf("Bill footer message", "bill_footer", s.bill_footer ?? "", { hint: "Printed at the very bottom of the customer's bill, e.g. “Thank you — visit again!”." })}
@@ -1560,7 +1560,7 @@ function billIdentity(settings) {
     name: s.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")),
     address: s.restaurant_address || (isDefault ? "" : DEFAULT_BILL.address),
     phone: s.restaurant_phone || (isDefault ? "+91 90999 14418" : DEFAULT_BILL.phone),
-    gstin: s.gstin || (isDefault ? "" : DEFAULT_BILL.gstin),
+    gstin: s.gstin || "", // NEVER fall back to a placeholder GSTIN — a fake tax number on a real bill is illegal. Empty prints no GSTIN line (templates handle it).
     prefix: s.invoice_prefix || "INV",
     footer: s.bill_footer || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again"),
     taxLabel: taxLabel(s),
@@ -1633,7 +1633,7 @@ function mergedOrderCardHtml(g) {
     billBtns = anyUnpaid ? `<button class="ord-btn invoice" data-gen-invoice="${esc(sid)}">🧾 Generate invoice</button>` : "";
   } else if (sid && invoiced) {
     const pay = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "";
-    billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">🖨 Print</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button>`;
+    billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">🖨 Print</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button><button class="ord-btn ghost" data-credit-note="${esc(sid)}" title="Refund/correct without changing the bill (issues a credit note)">🧾− Credit note</button>`;
   } else {
     // Legacy non-session order (no session to invoice): still honour invoice-first —
     // Print only once the bill is SETTLED (paid = finalised). Before that, Mark paid only,
@@ -3744,6 +3744,7 @@ function renderEditor() {
     // Invoice pipeline buttons on the bill card.
     ed.querySelectorAll("[data-gen-invoice]").forEach((btn) => { btn.onclick = () => generateInvoice(btn.dataset.genInvoice); });
     ed.querySelectorAll("[data-void-invoice]").forEach((btn) => { btn.onclick = () => voidInvoice(btn.dataset.voidInvoice); });
+    ed.querySelectorAll("[data-credit-note]").forEach((btn) => { btn.onclick = () => creditNote(btn.dataset.creditNote); });
     ed.querySelectorAll("[data-print-group]").forEach((btn) => {
       btn.onclick = () => {
         const os = ordersInGroup(btn.dataset.printGroup);
@@ -8142,6 +8143,18 @@ async function voidInvoice(sid) {
   const reason = await promptDialog("Why are you voiding / reopening this invoice? (required)", { confirmLabel: "Void invoice", placeholder: "refund, correction, wrong GST…", required: true });
   if (reason == null) return; // cancelled — a reason is required
   try { await api("POST", `/sessions/${sid}/void-invoice`, { reason }); await loadOrders(); toast("Invoice voided — bill reopened", "ok"); }
+  catch (e) { toast("Failed: " + e.message, "err"); }
+}
+// Issue a CREDIT NOTE — the legal way to refund/correct a bill WITHOUT changing it (used
+// once a bill is settled and can't be edited). Records a new, numbered credit document.
+async function creditNote(sid) {
+  const amtStr = await promptDialog("Credit note — refund/correction amount (₹)?", { confirmLabel: "Next", placeholder: "e.g. 200", required: true });
+  if (amtStr == null) return;
+  const amount = Math.round(parseFloat(amtStr) * 100) / 100;
+  if (!amount || amount <= 0) { toast("Enter a valid amount", "err"); return; }
+  const reason = await promptDialog("Why this credit note? (required)", { confirmLabel: "Issue credit note", placeholder: "overcharge, refund, correction…", required: true });
+  if (reason == null) return;
+  try { const cn = await api("POST", `/sessions/${sid}/credit-note`, { amount, reason }); await loadOrders(); toast(`Credit note #${cn && cn.credit_no ? cn.credit_no : ""} issued`, "ok"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 async function loadOrders() {
