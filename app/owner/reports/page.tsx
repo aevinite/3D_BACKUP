@@ -16,7 +16,7 @@ import {
   canonPayMethod, PAY_COLORS,
 } from "@/components/owner/Charts";
 import {
-  REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, nfmt, scrollToId, type RKey, type DataKind,
+  REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, PrintHead, nfmt, scrollToId, type RKey, type DataKind,
 } from "@/components/owner/reports/kit";
 import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
 import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
@@ -326,6 +326,7 @@ function ReportView({ sel, data, loading, error, range, accent, restName, single
   const tone = meta.tone || "accent";
   return (
     <div className={`rs-report tone-${tone}`} id="rs-print">
+      <PrintHead restName={restName} title={meta.label} period={rangeLabel(range)} />
       <div className="rs-rtitle">
         <span className="cic"><i className={`fas ${meta.icon}`} aria-hidden /></span>
         <div><h2>{meta.label}</h2><div className="scope">{restName} · {rangeLabel(range)}</div></div>

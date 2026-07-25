@@ -150,7 +150,7 @@ function RiStyles() {
       .rs-root .ri-when { font-size: 12.5px; font-weight: 700; color: var(--text); margin-top: 6px; }
       .rs-root .ri-v { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin-top: 2px; line-height: 1.1; }
       .rs-root .ri-bar { height: 6px; border-radius: 999px; background: var(--muted2); overflow: hidden; margin: 9px 0 5px; }
-      .rs-root .ri-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--tone-c); }
+      .rs-root .ri-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
       .rs-root .ri-share { font-size: 11px; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
       .rs-root .ri-foot { font-size: 12px; color: var(--muted); margin: 13px 2px 0; line-height: 1.5; }
       .rs-root .ri-foot b { color: var(--text); font-weight: 800; font-variant-numeric: tabular-nums; }

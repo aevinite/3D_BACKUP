@@ -12,6 +12,7 @@
 // invented. Reports that need data the DB can't yet back (expenses, purchases,
 // cash-drawer, tips, staff payroll) are intentionally NOT listed; they arrive
 // with their own data-entry modules.
+import { useEffect, useState } from "react";
 import { inr } from "@/components/admin/shared";
 import { Spark } from "@/components/owner/Charts";
 import { AnimatedStatValue } from "@/components/owner/AnimatedNumber";
@@ -115,7 +116,7 @@ export function Stat({ label, value, sub, tone = "accent", icon, delta, spark, b
       </div>
       <div className="rs-stat-v"><AnimatedStatValue value={value} /></div>
       {sub != null && <div className="rs-stat-sub">{sub}</div>}
-      {spark && spark.length > 1 && <div className="rs-stat-spark"><Spark points={spark} color="var(--tone-c)" width={128} height={30} /></div>}
+      {spark && spark.length > 1 && <div className="rs-stat-spark"><Spark points={spark} color="var(--accent)" width={128} height={30} /></div>}
     </div>
   );
 }
@@ -150,6 +151,34 @@ export function Panel({ title, hint, right, children, pad = true, id }: {
       )}
       <div className={pad ? "rs-panel-b" : ""}>{children}</div>
     </section>
+  );
+}
+
+// ── Print-only document header ────────────────────────────────────────────────
+// Hidden on screen (display:none), painted ONLY in @media print. Gives the printed
+// sheet a real document masthead — brand line, report title, "restaurant · period"
+// scope, and a "Generated <date, time>" stamp — so a printout reads like an official
+// statement rather than a screenshot of the console. The timestamp is filled on mount
+// (empty on the server + first client paint) to avoid an SSR/CSR hydration mismatch,
+// and refreshed on `beforeprint` so it reflects the moment the sheet is actually made.
+export function PrintHead({ restName, title, period }: { restName: string; title: string; period: string }) {
+  const [gen, setGen] = useState("");
+  useEffect(() => {
+    const stamp = () =>
+      setGen(new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }));
+    stamp();
+    window.addEventListener("beforeprint", stamp);
+    return () => window.removeEventListener("beforeprint", stamp);
+  }, []);
+  return (
+    <div className="rs-printhead" aria-hidden>
+      <div className="rs-ph-row">
+        <span className="rs-ph-brand">Aevidine · Restaurant OS</span>
+        {gen && <span className="rs-ph-gen">Generated {gen}</span>}
+      </div>
+      <div className="rs-ph-title">{title}</div>
+      <div className="rs-ph-scope">{restName} · {period}</div>
+    </div>
   );
 }
 
@@ -347,14 +376,85 @@ export function ReportsStyles() {
         .rs-ov-kpis { gap: 20px; }
       }
 
-      /* ── Print: a clean document, not a screenshot of the console ──────── */
+      /* The document masthead is invisible on screen; it only paints in @media print. */
+      .rs-printhead { display: none; }
+
+      /* ── Print: a clean one-report document, not a screenshot of the console ──
+         Works for EVERY report (the rules are generic by class): money/day-summary,
+         item/category/menu, tax with its split table, hourly/daypart, etc. */
       @media print {
-        .rs-controls, .rs-catrow, .rs-cards, .rs-crumb, .rs-actions, .rs-card .go, .rs-stat-go, .rs-drill { display: none !important; }
-        .owx-side, .owx-top, .adm-adminbar, .owx-navdrawer { display: none !important; }
-        .adm-main, .adm-body, .owx-wrap { padding: 0 !important; margin: 0 !important; overflow: visible !important; }
-        .rs-panel, .rs-stat, .rs-qbox, .rs-overview { border: 1px solid #ccc !important; box-shadow: none !important; background: #fff !important; break-inside: avoid; }
-        .rs-report, .rs-stat, .rs-card { animation: none !important; }
-        .rs-h1, .rs-report { color: #000 !important; }
+        @page { margin: 14mm; }
+
+        /* Force an ink-friendly light palette regardless of the dark/light skin, by
+           re-pointing the CSS tokens the whole studio reads from. Without this a dark
+           skin would print light text onto white paper (invisible). */
+        .adm.owx, .rs-root {
+          --text: #111 !important;
+          --muted: #555 !important;
+          --muted2: #f1f1f1 !important;
+          --card: #ffffff !important;
+          --border-c: #cfcfcf !important;
+          background: #fff !important;
+          color: #111 !important;
+        }
+        /* Print backgrounds/rules faithfully (chart bars, coloured tags, split bars). */
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+        /* Hide every piece of app chrome + on-screen-only affordances:
+           sidebar, top strip, admin bar, drawer backdrop; the period control + CSV/Print
+           buttons; the report-hub cards + category rows; the breadcrumb; the bar/line
+           toggle pills; the search boxes; and all hover/drill arrows. Also hide the
+           on-screen report title strip — the print masthead replaces it. */
+        .owx-side, .owx-top, .owx-backdrop, .adm-adminbar,
+        .rs-head, .rs-controls, .rs-crumb, .rs-actions,
+        .rs-catrow, .rs-cards, .rs-card,
+        .rs-rtitle,
+        .rs-tc-toggle, .rs-ov-toggle,
+        .rs-stat-go, .rs-drill, .rs-card .go,
+        .rs-st-search, .rs-st-clear {
+          display: none !important;
+        }
+
+        /* Flatten the shell so the report owns the full page width. */
+        .adm, .adm.owx, .adm-body, .adm-main, .owx-wrap, .rs-root {
+          display: block !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          overflow: visible !important;
+          width: auto !important;
+          max-width: none !important;
+        }
+
+        /* The print-only document masthead. */
+        .rs-printhead { display: block !important; margin: 0 0 16px; padding: 0 0 10px; border-bottom: 1.5px solid #111; color: #111; break-inside: avoid; break-after: avoid; }
+        .rs-ph-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+        .rs-ph-brand { font-size: 10.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: #333; }
+        .rs-ph-gen { font-size: 10.5px; color: #555; font-variant-numeric: tabular-nums; }
+        .rs-ph-title { font-size: 23px; font-weight: 800; letter-spacing: -0.02em; margin: 9px 0 2px; color: #111; }
+        .rs-ph-scope { font-size: 12.5px; color: #444; font-weight: 600; }
+
+        /* KPI tiles, panels and quadrant boxes → clean bordered boxes; no colour
+           wash, no shadow, and never split across a page. */
+        .rs-report { animation: none !important; }
+        .rs-overview, .rs-stat, .rs-panel, .rs-qbox {
+          border: 1px solid #cfcfcf !important;
+          background: #fff !important;
+          box-shadow: none !important;
+          break-inside: avoid;
+        }
+        .rs-stat::before { display: none !important; }        /* drop the coloured accent bar */
+        .rs-stat.big, .rs-overview { background: #fff !important; }
+        .rs-stat.clickable, .rs-card { transform: none !important; }
+        .rs-payrow, .rs-line, .rs-qbox, .rs-panel-h, .rs-panel-b, .rs-ov-chart, .ri-card { break-inside: avoid; }
+        .rs-h1 { color: #111 !important; }
+
+        /* Tables print in FULL — no inner scroll cap, no sticky header, rows kept whole.
+           (.rs-st-scroll carries an inline max-height that this !important overrides.) */
+        .rs-tablewrap, .rs-st-scroll { overflow: visible !important; max-height: none !important; }
+        .rs-table th { position: static !important; background: #fff !important; color: #333 !important; border-bottom: 1px solid #999 !important; }
+        .rs-table td { border-bottom: 1px solid #e4e4e4 !important; }
+        .rs-table tbody tr { break-inside: avoid; }
+        .rs-table tbody tr:hover { background: none !important; }
       }
     `}</style>
   );

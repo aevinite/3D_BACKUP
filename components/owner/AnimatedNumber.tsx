@@ -68,7 +68,9 @@ export function AnimatedNumber({ value, loading, money, format, className }: {
 }) {
   const disp = useAnimatedValue(value, loading);
   const fmt = format ?? (money ? inr : (n: number) => Math.round(n).toLocaleString("en-US"));
-  return <span className={`anim-num${loading ? " num-rolling" : ""}${className ? " " + className : ""}`}>{fmt(disp)}</span>;
+  // Round before formatting — a custom `format` (e.g. the en-IN count formatter) would
+  // otherwise print the fractional mid-roll value as "5,216.473" (a broken-looking bill count).
+  return <span className={`anim-num${loading ? " num-rolling" : ""}${className ? " " + className : ""}`}>{fmt(Math.round(disp))}</span>;
 }
 
 // String-aware API: takes an already-formatted value (e.g. inr()/nfmt() output) and animates
