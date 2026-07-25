@@ -12,7 +12,8 @@
 //      nightly prune (lfh_prune_logs, migration 152). It only ever deletes activity-log
 //      rows (staff_actions) — never bills or customer records.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ACT_LABEL, PANEL_COLOR, timeAgo, formatActionDetail, type Action } from "@/components/admin/shared";
+import { ACT_LABEL, PANEL_COLOR, timeAgo, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
+import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
@@ -244,12 +245,13 @@ export default function AdminLogs() {
 
 function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }: { rows: Action[] | null; err: boolean; onRetry: () => void; scopedName: string | null; onSendToClaude: (a: Action) => void; onResolve: (a: Action, resolved: boolean) => void }) {
   const cols = "92px 1fr auto";
-  // Which row's full detail is expanded (errors + tap-batches carry long text worth reading).
-  const [open, setOpen] = useState<string | null>(null);
+  // Which row's full detail popup is open (every row is clickable → the organized detail card).
+  const [detailRow, setDetailRow] = useState<Action | null>(null);
   if (err) return <div className="adm-empty">Couldn&rsquo;t load the operations log. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={onRetry}>Retry</button></div>;
   if (rows === null) return <div className="adm-empty">Loading…</div>;
   if (rows.length === 0) return <div className="adm-empty">No staff actions {scopedName ? `for ${scopedName}` : "yet"}.</div>;
   return (
+    <>
     <div className="adm-logwrap">
       <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>Panel</div><div>Action</div><div>When</div></div>
       {rows.map((a) => {
@@ -265,20 +267,22 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
         // Errors keep their raw text (stack/where matters); everything else (esp. tap batches)
         // is shown in plain English via the shared formatter.
         const det = isErr ? (a.detail || "") : formatActionDetail(a.action, a.detail);
-        const expandable = !!det && (det.length > 60 || isErr);
-        const isOpen = open === a.id;
         // On a TABLET row, `actor` is the manager whose PIN unlocked the action (no per-person
-        // tablet login exists). A name with " / " = a PIN shared by >1 manager → ambiguous.
-        const isTabletPin = a.panel === "tablet" && !!a.actor;
+        // tablet login exists) — except a person's own login/profile actions. A name with
+        // " / " = a PIN shared by >1 manager → ambiguous.
+        const isTabletPin = isManagerPinRow(a);
         const pinShared = isTabletPin && String(a.actor).includes(" / ");
         return (
           <div
             key={a.id}
             className="adm-logrow"
-            onClick={expandable ? () => setOpen(isOpen ? null : a.id) : undefined}
+            role="button"
+            tabIndex={0}
+            onClick={() => setDetailRow(a)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailRow(a); } }}
             style={{
               gridTemplateColumns: cols,
-              cursor: expandable ? "pointer" : "default",
+              cursor: "pointer",
               // Tint the whole row by severity so unresolved errors jump out; a resolved error
               // (showRed=false) drops back to neutral so it no longer reads as a live problem.
               background: showRed ? "color-mix(in srgb, var(--adm-danger) 12%, transparent)" : isWarn ? "color-mix(in srgb, var(--adm-warn) 8%, transparent)" : undefined,
@@ -295,11 +299,7 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
                     style={{ marginLeft: 6, fontWeight: 700, background: pinShared ? "color-mix(in srgb, var(--adm-warn) 20%, transparent)" : "color-mix(in srgb, #d4af37 20%, transparent)", color: pinShared ? "var(--adm-warn)" : "#d4af37" }}>🔑 {a.actor}</span>
                 : a.actor ? <span className="adm-muted"> · {a.actor}</span> : ""}
               {a.table_number && (isTabletPin || !a.actor) ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
-              {det ? (
-                isOpen
-                  ? <div className="adm-muted" style={{ fontSize: 12, marginTop: 4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{det}</div>
-                  : <span className="adm-muted"> · {det.length > 60 ? det.slice(0, 60) + "…" : det}</span>
-              ) : null}
+              {det ? <span className="adm-muted"> · {det.length > 60 ? det.slice(0, 60) + "…" : det}</span> : null}
               {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
               {isErr && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
@@ -335,6 +335,8 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
         );
       })}
     </div>
+    {detailRow && <LogDetailModal row={detailRow} onClose={() => setDetailRow(null)} />}
+    </>
   );
 }
 
