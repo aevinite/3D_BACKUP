@@ -4242,7 +4242,15 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 .owx-delta.up   { color: var(--adm-ok);     background: color-mix(in srgb, var(--adm-ok) 14%, transparent); }
 .owx-delta.down { color: var(--adm-danger); background: color-mix(in srgb, var(--adm-danger) 14%, transparent); }
 .owx-delta.flat { color: var(--muted);      background: var(--muted2); }
-.owx-spark { position: absolute; right: 8px; bottom: 6px; opacity: .8; pointer-events: none; }
+/* Revenue-over-time legend — wrapping chips ABOVE the plot (not inside the chart canvas)
+   so the chart fills the whole box and every restaurant is listed however many there are.
+   Past a few rows it scrolls instead of pushing the chart down (owner 2026-07-25). */
+.own-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 2px 10px;
+  max-height: 4.7em; overflow-y: auto;
+}
+.own-leg { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.own-leg-dot { width: 9px; height: 9px; border-radius: 3px; flex: 0 0 auto; }
 /* Insight strip — plain-language callouts */
 .owx-insights { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
 .owx-insight {
@@ -4366,5 +4374,16 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
    layout doesn't jitter as digits change while animating; the rolling state (shown while
    the value is still loading) is dimmed so the "building" figure reads as in-progress. */
 .anim-num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
-.num-rolling { opacity: 0.5; }
-@media (prefers-reduced-motion: reduce) { .num-rolling { opacity: 1; } }
+/* Loading placeholder for a not-yet-known number — a calm shimmer pill sized like a number,
+   so a stat never shows a fabricated rolling figure while it loads (owner 2026-07-25). */
+.anim-skel {
+  display: inline-block; min-width: 2.6em; height: 0.72em; vertical-align: middle;
+  border-radius: 6px; position: relative; overflow: hidden;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+.anim-skel::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 12%, transparent), transparent);
+  animation: adm-shimmer 1.3s infinite;
+}
+@media (prefers-reduced-motion: reduce) { .anim-skel::after { animation: none; } }

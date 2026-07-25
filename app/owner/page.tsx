@@ -8,7 +8,7 @@
 //     (5+ caps the trend at the top-5 lines so it stays readable).
 //   · 10+           → HQ mode: ONE sortable, searchable table (cards would be a wall
 //     of noise); scales to 50+. Sidebar (OwnerShell) always lists every restaurant.
-// Every KPI carries a ▲/▼ delta vs the previous equal-length period + a sparkline,
+// Every KPI carries a ▲/▼ delta vs the previous equal-length period,
 // and an insight strip says in plain words what the numbers mean. All data arrives
 // pre-aggregated from /api/owner/{overview,analytics,reports} (tiny rows, mig-113
 // paid-only rule everywhere). Refresh: activity-gated ~60s + manual — no websocket.
@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import {
-  AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod, Spark, DeltaChip,
+  AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod, DeltaChip,
   SameHourBar, PayTrendStack,
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
@@ -147,12 +147,12 @@ function rangeSpanText(k: Range): string {
 // AnimatedNumber (count-up, loading-aware) now lives in @/components/owner/AnimatedNumber
 // so every owner page shares one animation. Imported at the top of this file.
 
-function Kpi({ k, v, money, delta, prevTitle, spark, color, sub, loading }: {
+function Kpi({ k, v, money, delta, prevTitle, sub, loading }: {
   k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };
-  prevTitle?: string; spark?: number[]; color?: string; sub?: string; loading?: boolean;
+  prevTitle?: string; sub?: string; loading?: boolean;
 }) {
-  // Numbers count up from zero and keep rolling while the data loads, so the tile always
-  // feels alive (never a dead "…") and the animation masks the fetch (owner 2026-07-25).
+  // While loading the number shows a calm shimmer, then counts up once to the real value —
+  // no fake rolling figure, no inline sparkline cramped against the delta (owner 2026-07-25).
   return (
     <div className="adm-stat owx-kpi">
       <div className="k">{k}</div>
@@ -161,7 +161,6 @@ function Kpi({ k, v, money, delta, prevTitle, spark, color, sub, loading }: {
         {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
       </div>
       {sub && !loading && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{sub}</div>}
-      {spark && spark.length > 1 && <Spark points={spark} color={color || "#34d399"} />}
     </div>
   );
 }
@@ -307,10 +306,10 @@ export default function OwnerDashboard() {
     if (!group) return { rows: [] as Record<string, unknown>[], lines: [] as { key: string; name: string; color: string }[] };
     // Key each series by restaurant ID, never by display name — two restaurants can share
     // a name, and keying by name silently merges their two lines into one (found 2026-07-05).
-    // 5+ restaurants → only the top-5 earners get a line (8 lines were already noise;
-    // the rest are one tap away in the cards/HQ table).
-    const lineCap = group.restaurantRevenue.length >= 5 ? 5 : 8;
-    const lines = group.restaurantRevenue.slice(0, lineCap).map((r) => ({ key: r.id, name: r.name, color: r.accentColor || FALLBACK }));
+    // Show a line for EVERY restaurant in view — no hidden top-N cap (owner 2026-07-25: "if
+    // there are 100 I want 100 listed"). This branch only runs for the 2–9 tier anyway (10+
+    // uses the sortable HQ table), and the legend now wraps/scrolls to fit any count.
+    const lines = group.restaurantRevenue.map((r) => ({ key: r.id, name: r.name, color: r.accentColor || FALLBACK }));
     const byKey = new Map<string, Record<string, unknown>>();
     for (const t of group.timeseries) {
       const k = istKey(new Date(t.bucket), range);
@@ -337,13 +336,6 @@ export default function OwnerDashboard() {
     if (!expected.length) return (rest?.timeseries ?? []).map((t) => ({ label: tsLabel(t.bucket, range), Revenue: t.revenue }));
     return expected.map((e) => ({ label: e.label, Revenue: byKey.get(e.key) ?? 0 }));
   }, [rest, range]);
-  const restSpark = useMemo(() => (rest?.timeseries ?? []).map((t) => t.revenue), [rest]);
-  const groupSpark = useMemo(() => {
-    if (!group) return [];
-    const byBucket = new Map<string, number>();
-    for (const t of group.timeseries) byBucket.set(t.bucket, (byBucket.get(t.bucket) || 0) + t.revenue);
-    return Array.from(byBucket.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
-  }, [group]);
 
   // ── plain-language insights, derived from data already on screen (no extra fetch) ──
   const insights = useMemo(() => {
@@ -470,7 +462,7 @@ export default function OwnerDashboard() {
           <div className="adm-stats">
             <Kpi k={`Revenue (${RANGE_LABEL[range]})`} v={groupTotals?.revenue ?? 0} money loading={!group}
               delta={group?.prev ? { now: groupTotals?.revenue ?? 0, prev: group.prev.revenue } : undefined}
-              prevTitle={PREV_LABEL[range]} spark={groupSpark} />
+              prevTitle={PREV_LABEL[range]} />
             <Kpi k="Orders" v={groupTotals?.orders ?? 0} loading={!group}
               sub={groupTotals && groupTotals.paidOrders !== groupTotals.orders ? `${groupTotals.paidOrders} paid · rest still open` : undefined}
               delta={group?.prev ? { now: groupTotals?.orders ?? 0, prev: group.prev.orders } : undefined}
@@ -623,7 +615,7 @@ export default function OwnerDashboard() {
 
       {/* ═══════ RESTAURANT (drill-down, or HOME when there's only one) ═══════ */}
       {((view.level === "home" && single) || view.level === "restaurant") && activeRid && (
-        <RestaurantView rest={rest && rest.restaurant.id === activeRid ? rest : null} money={money} range={range} restTrend={restTrend} restSpark={restSpark}
+        <RestaurantView rest={rest && rest.restaurant.id === activeRid ? rest : null} money={money} range={range} restTrend={restTrend}
           dishSort={dishSort} setDishSort={setDishSort}
           onDish={(title) => setView({ level: "dish", rid: activeRid, dish: title })} />
       )}
@@ -736,8 +728,8 @@ export default function OwnerDashboard() {
 }
 
 // ── Restaurant detail (also the HOME layout when the owner has one restaurant) ──
-function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, setDishSort, onDish }: {
-  rest: RestA | null; money: MoneyTotals | null; range: Range; restTrend: Record<string, unknown>[]; restSpark: number[];
+function RestaurantView({ rest, money, range, restTrend, dishSort, setDishSort, onDish }: {
+  rest: RestA | null; money: MoneyTotals | null; range: Range; restTrend: Record<string, unknown>[];
   dishSort: "revenue" | "qty"; setDishSort: (s: "revenue" | "qty") => void; onDish: (t: string) => void;
 }) {
   if (!rest) return <div className="adm-empty">Loading restaurant…</div>;
@@ -757,7 +749,7 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
       <div className="adm-stats">
         <Kpi k="Revenue" v={k.revenue} money
           delta={rest.prev ? { now: k.revenue, prev: rest.prev.revenue } : undefined}
-          prevTitle={PREV_LABEL[range]} spark={restSpark} color={accent} />
+          prevTitle={PREV_LABEL[range]} />
         <Kpi k="Orders" v={k.orders}
           sub={k.paidOrders != null && k.paidOrders !== k.orders ? `${k.paidOrders} paid · rest still open` : undefined}
           delta={rest.prev ? { now: k.orders, prev: rest.prev.orders } : undefined} prevTitle={PREV_LABEL[range]} />

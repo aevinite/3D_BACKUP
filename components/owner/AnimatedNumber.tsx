@@ -1,9 +1,9 @@
 "use client";
-// Shared count-up animation for owner-panel numbers. Every stat rolls UP from zero and
-// "forms" its value; while the data is still loading it keeps a gentle rolling climb
-// (dimmed) instead of a dead "…", so the animation overlaps the fetch and masks it —
-// even a 1–2s load feels alive. Eases exactly onto the true value the instant it lands.
-// Respects prefers-reduced-motion (snaps straight to the value). Pure UI.
+// Shared count-up animation for owner-panel numbers. While a value is still loading we show a
+// calm shimmer skeleton — NOT a fabricated rolling number — so a stat never looks "half
+// calculated". The instant the real figure lands it counts up ONCE, smoothly, from where it
+// was to the true value (never downward from a fake overshoot). Snappy by design (~520ms
+// ease-out). Respects prefers-reduced-motion (snaps straight to the value). Pure UI.
 import { useEffect, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
 
@@ -20,41 +20,32 @@ function usePrefersReducedMotion(): boolean {
   return reduce;
 }
 
-// Core: drives a displayed number toward `value`, or keeps a "building" roll while loading.
+const DUR = 520; // reveal duration — short enough to feel instant, long enough to read the roll
+
+// Drives a displayed number toward `value` with a single ease-out count-up. While `loading`
+// it HOLDS at the last real value (the component shows a skeleton instead), so we never
+// animate a made-up figure and never count the wrong direction when data lands.
 function useAnimatedValue(value: number, loading?: boolean): number {
   const reduce = usePrefersReducedMotion();
   const [disp, setDisp] = useState(0);
-  const fromRef = useRef(0);   // where the live animation currently sits
+  const fromRef = useRef(0);   // last committed displayed value
   const rafRef = useRef(0);
   useEffect(() => {
     cancelAnimationFrame(rafRef.current);
-    if (reduce) {
-      const v = loading ? fromRef.current : value;
-      fromRef.current = v; setDisp(v); return;
+    if (loading) return;                         // hold; skeleton is shown by the component
+    if (reduce || fromRef.current === value) {   // no motion needed → snap
+      fromRef.current = value; setDisp(value); return;
     }
-    const t0 = performance.now();
     const from = fromRef.current;
-    if (loading) {
-      // Alive "building" roll: a decelerating climb + slow creep so it never freezes while
-      // we wait. Magnitude is loose — the reveal below sweeps to the real figure regardless.
-      const tick = (t: number) => {
-        const el = t - t0;
-        const v = from + (1 - Math.exp(-el / 600)) * 6000 + el * 0.25;
-        fromRef.current = v; setDisp(v);
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      rafRef.current = requestAnimationFrame(tick);
-    } else {
-      const dur = 900;   // reveal: ease from wherever we are up to the true value
-      const tick = (t: number) => {
-        const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
-        const v = from + (value - from) * e;
-        fromRef.current = v; setDisp(v);
-        if (p < 1) rafRef.current = requestAnimationFrame(tick);
-        else { fromRef.current = value; setDisp(value); }
-      };
-      rafRef.current = requestAnimationFrame(tick);
-    }
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - t0) / DUR), e = 1 - Math.pow(1 - p, 3);
+      const v = from + (value - from) * e;
+      fromRef.current = v; setDisp(v);
+      if (p < 1) rafRef.current = requestAnimationFrame(tick);
+      else { fromRef.current = value; setDisp(value); }
+    };
+    rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
   }, [value, loading, reduce]);
   return disp;
@@ -68,9 +59,10 @@ export function AnimatedNumber({ value, loading, money, format, className }: {
 }) {
   const disp = useAnimatedValue(value, loading);
   const fmt = format ?? (money ? inr : (n: number) => Math.round(n).toLocaleString("en-US"));
+  if (loading) return <span className={`anim-num anim-skel${className ? " " + className : ""}`} aria-hidden="true" />;
   // Round before formatting — a custom `format` (e.g. the en-IN count formatter) would
   // otherwise print the fractional mid-roll value as "5,216.473" (a broken-looking bill count).
-  return <span className={`anim-num${loading ? " num-rolling" : ""}${className ? " " + className : ""}`}>{fmt(Math.round(disp))}</span>;
+  return <span className={`anim-num${className ? " " + className : ""}`}>{fmt(Math.round(disp))}</span>;
 }
 
 // String-aware API: takes an already-formatted value (e.g. inr()/nfmt() output) and animates
@@ -83,7 +75,8 @@ export function AnimatedStatValue({ value, loading }: { value: React.ReactNode; 
     : parseFormatted(value);
   const disp = useAnimatedValue(parsed ? parsed.num : 0, loading);
   if (!parsed) return <>{value}</>;
-  return <span className={`anim-num${loading ? " num-rolling" : ""}`}>
+  if (loading) return <span className="anim-num anim-skel" aria-hidden="true" />;
+  return <span className="anim-num">
     {parsed.pre + Math.round(disp).toLocaleString(parsed.locale) + parsed.suf}
   </span>;
 }

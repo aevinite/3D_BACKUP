@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Restaurant POS Owner Dashboards — Research Reference</title>
+<style>
+:root{--bg:#0e1116;--card:#161b22;--card2:#1c232d;--line:#2a323d;--txt:#e6edf3;--mut:#9aa7b4;--accent:#ff7a45;--india:#f0a020;--global:#3aa0ff;--agg:#36c98d;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+header.hero{padding:38px 22px 24px;max-width:1180px;margin:0 auto}
+header.hero h1{margin:0 0 6px;font-size:30px;letter-spacing:-.3px}
+header.hero p{color:var(--mut);max-width:820px;margin:8px 0}
+.wrap{max-width:1180px;margin:0 auto;padding:0 22px 80px}
+.controls{position:sticky;top:0;z-index:30;background:rgba(14,17,22,.92);backdrop-filter:blur(10px);padding:12px 0;border-bottom:1px solid var(--line);margin-bottom:22px}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.filters button{background:var(--card2);color:var(--txt);border:1px solid var(--line);padding:7px 14px;border-radius:999px;cursor:pointer;font-size:13px}
+.filters button.active{background:var(--accent);color:#10141a;border-color:var(--accent);font-weight:600}
+.filters input{margin-left:auto;background:var(--card2);border:1px solid var(--line);color:var(--txt);padding:7px 12px;border-radius:8px;min-width:180px}
+.nav{display:flex;flex-direction:column;gap:10px;margin:0 0 26px}
+.navgrp{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.navlabel{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--mut);width:100%;margin-bottom:-2px}
+.navgrp a{background:var(--card);border:1px solid var(--line);padding:5px 11px;border-radius:7px;font-size:13px;color:var(--txt)}
+.navgrp a:hover{border-color:var(--accent);text-decoration:none}
+.intro-note{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;padding:14px 18px;color:var(--mut);font-size:13.5px;margin-bottom:26px}
+h2.block{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--mut);margin:34px 0 12px;border-bottom:1px solid var(--line);padding-bottom:8px}
+/* matrix */
+.matrix-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;margin-bottom:10px}
+table.matrix{border-collapse:collapse;width:100%;min-width:920px;font-size:12.5px}
+table.matrix th,table.matrix td{border:1px solid var(--line);padding:7px 8px;text-align:center}
+table.matrix thead th{background:var(--card2);color:var(--mut);font-weight:600;vertical-align:bottom;position:sticky;top:0}
+table.matrix th.rowh{text-align:left;background:var(--card);white-space:nowrap;position:sticky;left:0;z-index:2}
+table.matrix th.rowh a{color:var(--txt)}
+td.y{color:#36c98d;font-weight:700} td.p{color:#f0a020;font-weight:700} td.n{color:#566;}
+.legend{font-size:12px;color:var(--mut);margin:0 0 30px}
+/* cards */
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 22px 14px;margin-bottom:26px;scroll-margin-top:80px}
+.card-head{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+.card-head h2{margin:0;font-size:22px}
+.badge{font-size:11px;padding:3px 9px;border-radius:999px;font-weight:700;letter-spacing:.3px}
+.badge.india{background:rgba(240,160,32,.16);color:var(--india);border:1px solid rgba(240,160,32,.4)}
+.badge.global{background:rgba(58,160,255,.14);color:var(--global);border:1px solid rgba(58,160,255,.4)}
+.badge.aggregator{background:rgba(54,201,141,.14);color:var(--agg);border:1px solid rgba(54,201,141,.4)}
+.tag{color:var(--mut);font-size:13px}
+.pos{margin:12px 0 8px;font-size:15.5px}
+.meta{display:flex;gap:22px;flex-wrap:wrap;color:var(--mut);font-size:13px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px 0;margin:10px 0 16px}
+.meta b{color:var(--txt)}
+.cols{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.col h3{font-size:14px;margin:0 0 8px}
+.col ul{margin:0;padding-left:18px} .col li{margin:4px 0;color:#cdd6df;font-size:13.5px}
+h3.sec{font-size:14px;margin:20px 0 10px;border-top:1px solid var(--line);padding-top:14px}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.shot{margin:0;background:var(--card2);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.shot img{width:100%;height:150px;object-fit:cover;display:block;cursor:zoom-in;background:#0b0e13}
+.shot figcaption{font-size:11.5px;color:var(--mut);padding:7px 9px;line-height:1.4}
+.nogallery{color:var(--mut);font-size:13.5px;font-style:italic}
+.videos{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start}
+.vid{width:180px;display:block;color:var(--txt)}
+.vthumb{position:relative;display:block;border-radius:9px;overflow:hidden;border:1px solid var(--line)}
+.vthumb img{width:100%;height:101px;object-fit:cover;display:block;background:#0b0e13}
+.play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:26px;color:#fff;background:rgba(0,0,0,.28);text-shadow:0 1px 6px #000}
+.vid:hover{text-decoration:none} .vid:hover .vthumb{border-color:var(--accent)}
+.vlabel{display:block;font-size:12px;color:var(--mut);margin-top:6px;line-height:1.35}
+.btn{display:inline-block;background:var(--card2);border:1px solid var(--line);padding:9px 14px;border-radius:9px;font-size:13px;color:var(--txt)}
+.btn.demo{border-color:var(--accent);color:var(--accent)} .btn:hover{border-color:var(--accent);text-decoration:none}
+.imgfail{display:flex;align-items:center;justify-content:center;height:150px;font-size:12px;color:var(--mut);padding:10px;text-align:center}
+.top{display:inline-block;margin:14px 0 2px;font-size:12px;color:var(--mut)}
+footer{max-width:1180px;margin:0 auto;padding:30px 22px 60px;color:var(--mut);font-size:12.5px;border-top:1px solid var(--line)}
+/* lightbox */
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.9);display:none;align-items:center;justify-content:center;z-index:100;cursor:zoom-out;padding:30px}
+#lb img{max-width:96vw;max-height:92vh;border-radius:8px;box-shadow:0 10px 60px #000}
+@media(max-width:780px){.cols{grid-template-columns:1fr}}
+</style></head>
+<body><a id="top"></a>
+<header class="hero">
+  <h1>🍽️ Restaurant POS — Owner Dashboards & Reports</h1>
+  <p>A visual research reference of how the owner/admin panels and reports look across <b>17 restaurant platforms</b> — Indian POS leaders, global giants, and the delivery-aggregator owner panels. Built to spark ideas for your own admin/reports screens.</p>
+  <p style="font-size:13px">Click any screenshot to enlarge. Each picture links to its original source. The red ▶ tiles open real demo/walkthrough videos — the fastest way to <i>see</i> a full panel in motion.</p>
+</header>
+<div class="wrap">
+  <div class="controls">
+    <div class="filters">
+      <button class="active" data-f="all" onclick="filt(this,'all')">All (17)</button>
+      <button data-f="india" onclick="filt(this,'india')">Indian POS</button>
+      <button data-f="global" onclick="filt(this,'global')">Global POS</button>
+      <button data-f="aggregator" onclick="filt(this,'aggregator')">Aggregator panels</button>
+      <input id="q" type="search" placeholder="filter by name…" oninput="search(this.value)">
+    </div>
+  </div>
+
+  <div class="intro-note">
+    <b>How to read this:</b> three things matter for ideas — (1) the <b>live dashboard</b> (the numbers an owner sees the second they log in), (2) the <b>reports</b> (the deep breakdowns: day-end/Z, tax/GST, item-wise, staff, inventory), and (3) the <b>standout feature</b> each one is known for (★ marks the genuinely novel ones — Toast's peer benchmarking, Lightspeed's Magic Menu Quadrant, UrbanPiper's payout reconciliation, SpotOn's AI Profit Assist). The matrix below shows who has what at a glance.
+  </div>
+
+  <h2 class="block">Feature comparison — who has what</h2>
+  <div class="matrix-wrap"><table class="matrix"><thead><tr><th class="rowh">Software</th><th>Live KPI dashboard</th><th>Day-end / Z report</th><th>GST / tax report</th><th>Inventory + recipe/food-cost</th><th>Staff / labour reporting</th><th>CRM / loyalty</th><th>Multi-outlet roll-up</th><th>Benchmark vs peers</th><th>Mobile owner app</th><th>Aggregator orders / reconciliation</th></tr></thead><tbody><tr><th class="rowh"><a href="#petpooja">PetPooja</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td><td class="n">–</td><td class="y">✓</td><td class="y">✓</td></tr><tr><th class="rowh"><a href="#restroworks">Restroworks (POSist)</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">–</td><td class="y">✓</td><td class="y">✓</td></tr><tr><th class="rowh"><a href="#dotpe-rista">DotPe / Rista</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">–</td><td class="y">✓</td><td class="y">✓</td></tr><tr><th class="rowh"><a href="#gofrugal">GoFrugal ServeEasy</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">–</td><td class="y">✓</td><td class="y">✓</td></tr><tr><th class="rowh"><a href="#limetray">LimeTray</a></th><td class="y">✓</td><td class="p">~</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">–</td><td class="y">✓</td><td class="y">✓</td></tr><tr><th class="rowh"><a href="#torqus">Torqus / inresto</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">–</td><td class="y">✓</td><td class="p">~</td></tr><tr><th class="rowh"><a href="#toast">Toast POS</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td></tr><tr><th class="rowh"><a href="#square">Square for Restaurants</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">–</td><td class="y">✓</td><td class="n">–</td></tr><tr><th class="rowh"><a href="#lightspeed">Lightspeed Restaurant</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">–</td></tr><tr><th class="rowh"><a href="#touchbistro">TouchBistro</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td><td class="n">–</td><td class="y">✓</td><td class="p">~</td></tr><tr><th class="rowh"><a href="#clover">Clover</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">–</td><td class="y">✓</td><td class="p">~</td></tr><tr><th class="rowh"><a href="#loyverse">Loyverse POS</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td><td class="p">~</td><td class="y">✓</td><td class="y">✓</td><td class="n">–</td><td class="y">✓</td><td class="n">–</td></tr><tr><th class="rowh"><a href="#spoton">SpotOn Restaurant</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">–</td></tr><tr><th class="rowh"><a href="#oracle-simphony">Oracle MICROS Simphony</a></th><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td></tr><tr><th class="rowh"><a href="#urbanpiper">UrbanPiper (Atlas)</a></th><td class="y">✓</td><td class="n">–</td><td class="p">~</td><td class="p">~</td><td class="p">~</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td><td class="p">~</td><td class="y">✓</td></tr><tr><th class="rowh"><a href="#zomato">Zomato Partner</a></th><td class="y">✓</td><td class="n">–</td><td class="n">–</td><td class="p">~</td><td class="p">~</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td><td class="y">✓</td></tr><tr><th class="rowh"><a href="#swiggy">Swiggy Partner</a></th><td class="y">✓</td><td class="n">–</td><td class="n">–</td><td class="p">~</td><td class="n">–</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td></tr></tbody></table></div>
+  <p class="legend"><span style="color:#36c98d">✓ yes</span> &nbsp; <span style="color:#f0a020">~ partial / paid add-on</span> &nbsp; <span style="color:#889">– no / not found</span></p>
+
+  <h2 class="block">Jump to a platform</h2>
+  <div class="nav"><div class="navgrp"><span class="navlabel">Indian POS / Management</span><a href="#petpooja">PetPooja</a><a href="#restroworks">Restroworks (POSist)</a><a href="#dotpe-rista">DotPe / Rista</a><a href="#gofrugal">GoFrugal ServeEasy</a><a href="#limetray">LimeTray</a><a href="#torqus">Torqus / inresto</a></div><div class="navgrp"><span class="navlabel">Global POS / Management</span><a href="#toast">Toast POS</a><a href="#square">Square for Restaurants</a><a href="#lightspeed">Lightspeed Restaurant</a><a href="#touchbistro">TouchBistro</a><a href="#clover">Clover</a><a href="#loyverse">Loyverse POS</a><a href="#spoton">SpotOn Restaurant</a><a href="#oracle-simphony">Oracle MICROS Simphony</a></div><div class="navgrp"><span class="navlabel">Aggregator owner panels</span><a href="#urbanpiper">UrbanPiper (Atlas)</a><a href="#zomato">Zomato Partner</a><a href="#swiggy">Swiggy Partner</a></div></div>
+
+  <h2 class="block">The platforms</h2>
+  <section class="card" id="petpooja" data-cat="india" data-name="petpooja">
+  <div class="card-head">
+    <h2>PetPooja</h2>
+    <span class="badge india">Indian POS</span>
+    <span class="tag">India · SMB POS leader</span>
+  </div>
+  <p class="pos">India&#x27;s largest restaurant POS &amp; management platform — billing-first with a huge add-on suite.</p>
+  <div class="meta"><span><b>Market:</b> India (150k+ businesses) + Middle East, Canada, South Africa.</span><span><b>Pricing:</b> Per-outlet annual tiers: Core ~₹10k, Growth ~₹20k, Scale ~₹40k/yr. Add-ons (Dynamic Reports, CRM+Loyalty, aggregator reconciliation) billed separately.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Today&#x27;s revenue, order count, hourly/time-slot sales bifurcation</li>
+<li>Payment-method split (Cash/Card/UPI/Wallet) live</li>
+<li>Online vs dine-in split (Swiggy/Zomato feeds)</li>
+<li>Low-stock alerts &amp; item-wise stock levels</li>
+<li>Bills punched per waiter/cashier/captain</li>
+<li>Multi-outlet view with city/zone grouping (Scale)</li>
+<li>Table/floor status + reservation manager</li>
+<li>Web + Petpooja Merchant App (push alerts)</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Day-End Summary (cash received vs sales — theft detection)</li>
+<li>Item-Wise Sales (revenue+qty, filter by category/date/outlet)</li>
+<li>Hourly Sales Trend (peak hours)</li>
+<li>GST / Item-Wise Tax (CGST/SGST split, downloadable)</li>
+<li>Discounted Orders (count, value, reason — flags misuse)</li>
+<li>Bill Modification &amp; Cancellation (every void w/ staff name)</li>
+<li>Online Order Reconciliation (aggregator vs POS, commissions)</li>
+<li>Raw-material Consumption &amp; Wastage (actual vs recipe)</li>
+<li>P&amp;L Report (food cost + margins) · 80–100+ reports total</li>
+<li>Dynamic Reports add-on = drag-drop chart builder + Excel upload</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>Dynamic Reports drag-drop builder, schedulable email delivery</li>
+<li>One-click Zomato/Swiggy commission-vs-payout reconciliation</li>
+<li>Head-office / central-kitchen menu+recipe push to all outlets</li>
+<li>Role-based report access; 5-minute automated day-end</li>
+<li>Payroll linked to attendance + sales performance</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/petpooja-s0.webp" data-remote="https://petpoojaweb.gumlet.io/images/analytics_lg.webp" alt="Analytics dashboard overview" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Analytics dashboard overview · <a href="https://petpoojaweb.gumlet.io/images/analytics_lg.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/petpooja-s1.webp" data-remote="https://petpoojaweb.gumlet.io/images/Real-Time-Reporting_lg.webp" alt="Real-time reporting module" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Real-time reporting module · <a href="https://petpoojaweb.gumlet.io/images/Real-Time-Reporting_lg.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/petpooja-s2.webp" data-remote="https://petpoojaweb.gumlet.io/images/billing-software_lg.webp" alt="Billing / POS main screen" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Billing / POS main screen · <a href="https://petpoojaweb.gumlet.io/images/billing-software_lg.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/petpooja-s3.webp" data-remote="https://petpoojaweb.gumlet.io/images/Inventory-Management_lg.webp" alt="Inventory management panel" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Inventory management panel · <a href="https://petpoojaweb.gumlet.io/images/Inventory-Management_lg.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/petpooja-s4.webp" data-remote="https://petpoojaweb.gumlet.io/images/CRM_lg.webp" alt="CRM / customer management" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>CRM / customer management · <a href="https://petpoojaweb.gumlet.io/images/CRM_lg.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/petpooja-s5.webp" data-remote="https://i0.wp.com/blog.petpooja.com/wp-content/uploads/2022/02/image-13.png" alt="Dashboard overview (blog)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Dashboard overview (blog) · <a href="https://i0.wp.com/blog.petpooja.com/wp-content/uploads/2022/02/image-13.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/petpooja-s6.webp" data-remote="https://i0.wp.com/blog.petpooja.com/wp-content/uploads/2022/03/image.png" alt="Day-end summary report" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Day-end summary report · <a href="https://i0.wp.com/blog.petpooja.com/wp-content/uploads/2022/03/image.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/petpooja-s7.webp" data-remote="https://i0.wp.com/blog.petpooja.com/wp-content/uploads/2022/03/Untitled-design-2.png" alt="Item-wise tax report" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Item-wise tax report · <a href="https://i0.wp.com/blog.petpooja.com/wp-content/uploads/2022/03/Untitled-design-2.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/petpooja-s8.jpg" data-remote="https://images.softwaresuggest.com/latest_screenshots/petpooja-20250821124851.jpg" alt="Product screenshot 1" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Product screenshot 1 · <a href="https://images.softwaresuggest.com/latest_screenshots/petpooja-20250821124851.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/petpooja-s9.jpg" data-remote="https://images.softwaresuggest.com/latest_screenshots/petpooja-20250821124900.jpg" alt="Product screenshot 2" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Product screenshot 2 · <a href="https://images.softwaresuggest.com/latest_screenshots/petpooja-20250821124900.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="btn demo" href="https://demo.petpooja.com/" target="_blank" rel="noopener">▶ Live interactive demo (no login)</a><a class="btn" href="https://petpoojademo.petpooja.com/" target="_blank" rel="noopener">Alternate live demo</a><a class="vid" href="https://www.youtube.com/watch?v=ReK9on1tAXc" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/petpooja-v2.jpg" alt="Owner&#x27;s Dashboard walkthrough (English)" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Owner&#x27;s Dashboard walkthrough (English)</span></a><a class="vid" href="https://www.youtube.com/watch?v=EpSQxgLzqn4" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/petpooja-v3.jpg" alt="Owner&#x27;s Dashboard walkthrough (Hindi)" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Owner&#x27;s Dashboard walkthrough (Hindi)</span></a><a class="vid" href="https://www.youtube.com/watch?v=htzVtDTM7q8" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/petpooja-v4.jpg" alt="Owner Dashboard analytics page" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Owner Dashboard analytics page</span></a><a class="vid" href="https://www.youtube.com/watch?v=zPwJPJmhsek" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/petpooja-v5.jpg" alt="Inventory dashboard" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Inventory dashboard</span></a><a class="btn" href="https://www.youtube.com/playlist?list=PLnQ3PwuWnF-mwndlOWReh4v_Pb7x-ndhz" target="_blank" rel="noopener">Owner Dashboard full playlist</a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="restroworks" data-cat="india" data-name="restroworks (posist)">
+  <div class="card-head">
+    <h2>Restroworks (POSist)</h2>
+    <span class="badge india">Indian POS</span>
+    <span class="tag">Enterprise chains OS</span>
+  </div>
+  <p class="pos">Enterprise cloud restaurant OS for chains, QSRs &amp; global franchises — multi-outlet, multi-country at scale.</p>
+  <div class="meta"><span><b>Market:</b> Global — 25,000+ restaurants, 50+ countries. Taco Bell, Nando&#x27;s, Subway, Häagen-Dazs.</span><span><b>Pricing:</b> Enterprise / quote-based; no public pricing.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Live revenue + order count, hourly granularity</li>
+<li>Rejected-order count + ₹ loss from rejections</li>
+<li>Same-store sales &amp; order growth vs prior period</li>
+<li>Source-wise revenue: dine-in/delivery/takeaway/aggregator per outlet</li>
+<li>Aggregator ratings, rejection &amp; acceptance rates per platform</li>
+<li>Multi-outlet / multi-brand / multi-region comparison w/ drill-down</li>
+<li>Anti-theft dashboard: suspicious voids/discounts/cash anomalies</li>
+<li>Cockpit native owner app (iOS/Android)</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Daily Sales + Settlement (cash/card/UPI/aggregator payout reconciliation)</li>
+<li>Item-Wise Sales + Item-Wise Variance (recipe-ideal vs actual = waste/theft)</li>
+<li>Vendor-Wise Summary (purchase value, frequency, lead time)</li>
+<li>Discount &amp; Complimentary (value, authorizing staff, reason)</li>
+<li>Online/Aggregator Payment Detail (GMV, commission, payout)</li>
+<li>Taxation Summary (GST-ready, item + category)</li>
+<li>CRM / Loyalty (frequency, spend, redemption)</li>
+<li>Live Inventory + ML Order Forecasting (forecast vs actual)</li>
+<li>Outlet Performance comparison (net/gross, AOV, rejection rate) · 200+ reports</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>Cockpit native owner app — real-time KPI widgets</li>
+<li>Analytics Cloud BI: nested graphs, brand/format/region rollups</li>
+<li>PitDrop — share custom analytics snapshots to team chat</li>
+<li>AI/ML demand forecasting + auto purchase-orders</li>
+<li>Dedicated Anti-Theft application; G2 4.8/5 (2,600+ reviews)</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/restroworks-s0.webp" data-remote="https://www.restroworks.com/wp-content/uploads/2023/11/Analytics-Dashboard-1024x757.webp" alt="Analytics Cloud web dashboard" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Analytics Cloud web dashboard · <a href="https://www.restroworks.com/wp-content/uploads/2023/11/Analytics-Dashboard-1024x757.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/restroworks-s1.webp" data-remote="https://www.restroworks.com/wp-content/uploads/2023/11/Performance-Comparison-1024x737.webp" alt="Multi-outlet performance comparison" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Multi-outlet performance comparison · <a href="https://www.restroworks.com/wp-content/uploads/2023/11/Performance-Comparison-1024x737.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/restroworks-s2.webp" data-remote="https://www.restroworks.com/wp-content/uploads/2023/11/Tracking-growth--1024x950.webp" alt="Growth / same-store sales" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Growth / same-store sales · <a href="https://www.restroworks.com/wp-content/uploads/2023/11/Tracking-growth--1024x950.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/restroworks-s3.webp" data-remote="https://www.restroworks.com/wp-content/uploads/2023/10/CRM-Dashboard-1024x767.webp" alt="CRM / loyalty dashboard" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>CRM / loyalty dashboard · <a href="https://www.restroworks.com/wp-content/uploads/2023/10/CRM-Dashboard-1024x767.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/restroworks-s4.webp" data-remote="https://www.restroworks.com/wp-content/uploads/2023/11/Analyse-Online-Orders-1024x808.webp" alt="Online / aggregator order analysis" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Online / aggregator order analysis · <a href="https://www.restroworks.com/wp-content/uploads/2023/11/Analyse-Online-Orders-1024x808.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/restroworks-s5.webp" data-remote="https://www.restroworks.com/wp-content/uploads/2023/10/Live-inventory-reports-1024x950.webp" alt="Live inventory reports" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Live inventory reports · <a href="https://www.restroworks.com/wp-content/uploads/2023/10/Live-inventory-reports-1024x950.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/restroworks-s6.webp" data-remote="https://www.restroworks.com/wp-content/uploads/2023/11/Partner-wise-reporting-image-1024x950.webp" alt="Partner / aggregator-wise reporting" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Partner / aggregator-wise reporting · <a href="https://www.restroworks.com/wp-content/uploads/2023/11/Partner-wise-reporting-image-1024x950.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/restroworks-s7.webp" data-remote="https://www.restroworks.com/wp-content/uploads/2023/11/foh-tab-1024x930.webp" alt="Front-of-house floor / table view" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Front-of-house floor / table view · <a href="https://www.restroworks.com/wp-content/uploads/2023/11/foh-tab-1024x930.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/restroworks-s8.webp" data-remote="https://www.restroworks.com/wp-content/uploads/2024/10/cockpit-app-banner.webp" alt="Cockpit owner mobile app" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Cockpit owner mobile app · <a href="https://www.restroworks.com/wp-content/uploads/2024/10/cockpit-app-banner.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="btn demo" href="https://www.restroworks.com/contact/" target="_blank" rel="noopener">🔗 Get a personalized demo</a><a class="vid" href="https://www.youtube.com/watch?v=34cFbDHf_jY" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/restroworks-v1.jpg" alt="POS tutorial / software demo" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">POS tutorial / software demo</span></a><a class="vid" href="https://www.youtube.com/watch?v=fKhvOLBibag" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/restroworks-v2.jpg" alt="Unified platform overview" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Unified platform overview</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="dotpe-rista" data-cat="india" data-name="dotpe / rista">
+  <div class="card-head">
+    <h2>DotPe / Rista</h2>
+    <span class="badge india">Indian POS</span>
+    <span class="tag">QR-ordering + cloud POS (same backend)</span>
+  </div>
+  <p class="pos">DotPe&#x27;s QR-ordering &amp; payments wrapped around the Rista cloud POS core (DotPe acquired Rista) — one merchant dashboard front-to-back.</p>
+  <div class="meta"><span><b>Market:</b> India-first. McDonald&#x27;s India, Haldiram, PVR, Blue Tokai, Burger Singh, Farzi Cafe.</span><span><b>Pricing:</b> Rista per-store: Basic ~₹10k/yr, Premium ~₹20k/yr. Reports add-on ~₹600/mo (paywalled). DotPe QR/ordering originally commission-based.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>KPIs: Total Sales, Orders, Forwarded Orders, Total Discount, Kitchen Prep Time (MoM %), Total Wastage</li>
+<li>Stacked orders-over-time bar + line overlay</li>
+<li>All-Taxes donut (VAT/CGST/SGST/CESS); wastage donut by reason</li>
+<li>&#x27;Most Selling Brands&#x27; table w/ up/down ranking arrows</li>
+<li>Branch selector for multi-outlet (consolidated or per-outlet)</li>
+<li>Inventory Overview: attention badge, stock-mismatch value, restock-in-N-days</li>
+<li>Unified live order queue: dine-in, takeaway, delivery, Zomato/Swiggy in one view</li>
+<li>Real-time table occupancy + accept-to-dispatch lifecycle</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Sales (returns/discounts/taxes/payments by channel/date/outlet/brand)</li>
+<li>Item-wise ranking; channel split (Dine-in/Takeaway/Delivery/Zomato/Swiggy/ONDC)</li>
+<li>Payment-mode split (PhonePe/Paytm/cash/card, partial payments)</li>
+<li>Inventory ledgers (batch, expiry, low-stock + restock ETA)</li>
+<li>Wastage / loss report (donut by reason)</li>
+<li>GST tax report (VAT/CGST/SGST/CESS)</li>
+<li>CRM segments (Top Spender, Corporate, Gold Member); campaign + loyalty</li>
+<li>Kitchen-efficiency (accept-to-dispatch, KOT completion)</li>
+<li>DotPe Horizon add-on: true repeat-rate, churn prediction, ad ROI</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>WhatsApp digital bills (capture customer contacts)</li>
+<li>Recipe-based inventory auto-deduction per sale</li>
+<li>Multi-brand invoicing from one device / one kitchen</li>
+<li>Captain waiter app + KDS (New → Processing → Dispatched)</li>
+<li>Self-ordering kiosk mode (same app flipped customer-facing)</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/dotpe-rista-s0.png" data-remote="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/main-image.png" alt="Hero dashboard composite (Sales ₹10,00,006)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Hero dashboard composite (Sales ₹10,00,006) · <a href="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/main-image.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/dotpe-rista-s1.png" data-remote="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/reports-new.png" alt="Reports module screen" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Reports module screen · <a href="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/reports-new.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/dotpe-rista-s2.png" data-remote="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/Billing-new.png" alt="Billing w/ split-payment + Send Digital Bill" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Billing w/ split-payment + Send Digital Bill · <a href="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/Billing-new.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/dotpe-rista-s3.png" data-remote="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/inventory-new.png" alt="Inventory w/ recipe breakdown + Low/Out-of-Stock" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Inventory w/ recipe breakdown + Low/Out-of-Stock · <a href="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/inventory-new.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/dotpe-rista-s4.png" data-remote="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/marketing-crm-new.png" alt="Marketing CRM: campaigns, loyalty, segments" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Marketing CRM: campaigns, loyalty, segments · <a href="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/marketing-crm-new.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/dotpe-rista-s5.png" data-remote="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/reservation-new.png" alt="Reservation management w/ guest profile" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Reservation management w/ guest profile · <a href="https://cdn.dotpe.in/dotpe-website-live/images/new-resta-page/reservation-new.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/dotpe-rista-s6.png" data-remote="https://images.softwaresuggest.com/latest_screenshots/ristapos-20241203135702.png" alt="Rista Cloud Dashboard (KPIs, taxes donut, top brands)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Rista Cloud Dashboard (KPIs, taxes donut, top brands) · <a href="https://images.softwaresuggest.com/latest_screenshots/ristapos-20241203135702.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/dotpe-rista-s7.png" data-remote="https://media.technologycounter.com/vendors/software-products/software-product-screenshot/1733914802_3fe0fa206cdacbd9b153.png" alt="Inventory Overview (attention badge, wastage donut)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Inventory Overview (attention badge, wastage donut) · <a href="https://media.technologycounter.com/vendors/software-products/software-product-screenshot/1733914802_3fe0fa206cdacbd9b153.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/dotpe-rista-s8.png" data-remote="https://images.softwaresuggest.com/latest_screenshots/ristapos-20241203135717.png" alt="Delivery KDS: New/Processing/Dispatched kanban" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Delivery KDS: New/Processing/Dispatched kanban · <a href="https://images.softwaresuggest.com/latest_screenshots/ristapos-20241203135717.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="vid" href="https://www.youtube.com/watch?v=x1CMQeplieg" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/dotpe-rista-v0.jpg" alt="Rista Analytics (reporting)" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Rista Analytics (reporting)</span></a><a class="vid" href="https://www.youtube.com/watch?v=A4zcvMbdKTI" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/dotpe-rista-v1.jpg" alt="Rista Analytics — Enterprise" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Rista Analytics — Enterprise</span></a><a class="vid" href="https://www.youtube.com/watch?v=xherNdmSQFQ" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/dotpe-rista-v2.jpg" alt="POS &amp; Inventory walkthrough" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">POS &amp; Inventory walkthrough</span></a><a class="vid" href="https://www.youtube.com/watch?v=cYno5ka_dEk" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/dotpe-rista-v3.jpg" alt="Rista Sales POS for QSR" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Rista Sales POS for QSR</span></a><a class="btn" href="https://www.youtube.com/playlist?list=PLgDP-6bLtfv9VNSWHCB_BZa-8fVvCp-6N" target="_blank" rel="noopener">Full demo playlist</a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="gofrugal" data-cat="india" data-name="gofrugal serveeasy">
+  <div class="card-head">
+    <h2>GoFrugal ServeEasy</h2>
+    <span class="badge india">Indian POS</span>
+    <span class="tag">Restaurant ERP</span>
+  </div>
+  <p class="pos">&#x27;Beyond a POS&#x27; restaurant ERP — billing, kitchen, inventory, recipe/production, accounting/GST, aggregators, franchise control.</p>
+  <div class="meta"><span><b>Market:</b> India-first, ISO 27001 certified, on-prem or cloud w/ strong offline billing.</span><span><b>Pricing:</b> Tiered licence/subscription + paid &#x27;Business Booster&#x27; add-ons (waiter app, mobile POS, storefront, QR, mobile BI). ~4.4/5 Capterra.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Customizable drag-drop dashboard + WhatsNow mobile BI (sales+purchase+inventory on one screen)</li>
+<li>Eight analysis surfaces: Sales, Inventory, Menu, Customer, Production, Staff, Finance, Security</li>
+<li>Live sales, top-10 items, top-10 sellers, food-cost %, COGS</li>
+<li>Stock discrepancy (physical vs system), outlet revenue comparison</li>
+<li>Real-time table/floor status, steward assignment, shift cash</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Sales: trends, peak-hour, item-wise, best-sellers, moving/non-moving</li>
+<li>GST/Finance: auto-GST invoices, GSTR e-filing, P&amp;L, balance sheet, multi-outlet consolidated P&amp;L</li>
+<li>Inventory: opening/closing stock, purchase-invoice detail, freshness/expiry, wastage</li>
+<li>Production/Costing: BOM, planned-vs-actual consumption, recipe verification, food-cost %</li>
+<li>Staff: sales by steward, tables served, kitchen turnaround</li>
+<li>Audit: POS action tracking, session/in-hand cash · 300–350+ MIS reports</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>Recipe bank + nested-BOM costing standardized across outlets</li>
+<li>Aggregator hub (Swiggy/Zomato/MagicPin/Dunzo/ONDC) w/ auto menu-availability</li>
+<li>Franchise engine: central menu/recipe/pricing + inter-outlet stock transfers</li>
+<li>KDS multi-kitchen routing, split/merge/edit KOT</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/gofrugal-s0.webp" data-remote="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant-vertical/reports/banner-dashboard1.webp" alt="Reports / dashboard banner" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Reports / dashboard banner · <a href="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant-vertical/reports/banner-dashboard1.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/gofrugal-s1.webp" data-remote="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant-vertical/reports/top10items.webp" alt="Top 10 items widget" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Top 10 items widget · <a href="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant-vertical/reports/top10items.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/gofrugal-s2.webp" data-remote="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant-vertical/reports/top10sellers.webp" alt="Top 10 sellers widget" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Top 10 sellers widget · <a href="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant-vertical/reports/top10sellers.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/gofrugal-s3.webp" data-remote="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant-vertical/reports/whatsnow-visual.webp" alt="WhatsNow mobile BI app" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>WhatsNow mobile BI app · <a href="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant-vertical/reports/whatsnow-visual.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/gofrugal-s4.webp" data-remote="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant/restaurant-macro/res-desktop-screen.webp" alt="Desktop POS UI" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Desktop POS UI · <a href="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant/restaurant-macro/res-desktop-screen.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/gofrugal-s5.webp" data-remote="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant/restaurant-pos/billing-screen.webp" alt="Billing screen" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Billing screen · <a href="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/restaurant/restaurant-pos/billing-screen.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/gofrugal-s6.webp" data-remote="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/Kds/kds.webp" alt="Kitchen Display System" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Kitchen Display System · <a href="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/Kds/kds.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/gofrugal-s7.jpg" data-remote="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/product-image/report-screen.jpg" alt="SmartReports BI screen" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>SmartReports BI screen · <a href="https://www.gofrugal.com/sites/gweb/files/gofrugal/images/product-image/report-screen.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="vid" href="https://www.youtube.com/watch?v=Flb973_UqTI" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/gofrugal-v0.jpg" alt="ServeEasy: KOT → Bill → Payment" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">ServeEasy: KOT → Bill → Payment</span></a><a class="vid" href="https://www.youtube.com/watch?v=QLcs2yMXmU8" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/gofrugal-v1.jpg" alt="Restaurant Management re-imagined (demo)" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Restaurant Management re-imagined (demo)</span></a><a class="vid" href="https://www.youtube.com/watch?v=tuXKNbVOq18" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/gofrugal-v2.jpg" alt="ServeEasy: KOT creation" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">ServeEasy: KOT creation</span></a><a class="vid" href="https://www.youtube.com/watch?v=zuECw_tnpa4" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/gofrugal-v3.jpg" alt="Bakery POS case study" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Bakery POS case study</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="limetray" data-cat="india" data-name="limetray">
+  <div class="card-head">
+    <h2>LimeTray</h2>
+    <span class="badge india">Indian POS</span>
+    <span class="tag">All-in-one + &#x27;Lost Business&#x27;</span>
+  </div>
+  <p class="pos">India-founded all-in-one restaurant tech — multi-outlet POS + online ordering + CRM + analytics.</p>
+  <div class="meta"><span><b>Market:</b> Chains, QSRs, enterprise groups across India, SE Asia, Africa.</span><span><b>Pricing:</b> USD: Essentials $49 / Turbo $149 / Supercharger $199 per outlet/mo. India ~₹24k/yr per outlet.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Service-wise revenue donut (Dine-In / Delivery / Take Away)</li>
+<li>Total orders counter + average basket size per channel</li>
+<li>&#x27;Lost Business&#x27; time-series (Pending / Declined / Cancelled) + lost-revenue KPIs</li>
+<li>Go-Analytics mobile app: orders by Online/Phone/Outlet, customer segments</li>
+<li>Multi-location grid: per-outlet toggle for Website/App/Zomato/Foodpanda/Swiggy</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Type-Wise Sales (revenue by channel, trend + weekly table)</li>
+<li>Order Analytics, Menu Performance, COGS</li>
+<li>Inventory (stock/turnover/wastage/low-stock alerts)</li>
+<li>Labor/Staff (shifts, sales/staff, tips, clock-in)</li>
+<li>Customer (segmentation/demographics/satisfaction)</li>
+<li>Promotions &amp; Discount effectiveness; Feedback Dashboard (outlet NPS)</li>
+<li>Lost Business report; multi-outlet comparison; automated daily emails</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>&#x27;Lost Business&#x27; — quantifies revenue lost from declined/cancelled orders</li>
+<li>Go-Analytics mobile app with offline mode</li>
+<li>Aggregator channel management from one per-outlet toggle grid</li>
+<li>Feedback-to-action loop w/ one-click &#x27;Engage Now&#x27;</li>
+<li>IVR / cloud-telephony + missed-call tracking; zero-commission ordering</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/limetray-s0.png" data-remote="https://limetray.com/img/restaurant-software/Dashboard.png" alt="Merchant Dashboard (service revenue + Lost Business)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Merchant Dashboard (service revenue + Lost Business) · <a href="https://limetray.com/img/restaurant-software/Dashboard.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/limetray-s1.png" data-remote="https://limetray.com/img/restaurant-software/Reports.png" alt="Mobile Go-Analytics (Orders/Reports/Customers)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Mobile Go-Analytics (Orders/Reports/Customers) · <a href="https://limetray.com/img/restaurant-software/Reports.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/limetray-s2.png" data-remote="https://limetray.com/img/crm-analytics.png" alt="Settings: multi-outlet channel toggles" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Settings: multi-outlet channel toggles · <a href="https://limetray.com/img/crm-analytics.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/limetray-s3.png" data-remote="https://limetray.com/blog/wp-content/uploads/2025/02/image-68-1024x825.png" alt="Type-Wise Sales report (full)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Type-Wise Sales report (full) · <a href="https://limetray.com/blog/wp-content/uploads/2025/02/image-68-1024x825.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/limetray-s4.png" data-remote="https://limetray.com/blog/wp-content/uploads/2025/01/image-53-1024x529.png" alt="Feedback dashboard" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Feedback dashboard · <a href="https://limetray.com/blog/wp-content/uploads/2025/01/image-53-1024x529.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/limetray-s5.png" data-remote="https://limetray.com/blog/wp-content/uploads/2025/01/image-54-1024x720.png" alt="Inventory dashboard / stock view (iPad)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Inventory dashboard / stock view (iPad) · <a href="https://limetray.com/blog/wp-content/uploads/2025/01/image-54-1024x720.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/limetray-s6.png" data-remote="https://limetray.com/blog/wp-content/uploads/2025/02/image-66-1024x691.png" alt="Order management list" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Order management list · <a href="https://limetray.com/blog/wp-content/uploads/2025/02/image-66-1024x691.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/limetray-s7.png" data-remote="https://limetray.com/blog/wp-content/uploads/2025/02/image-65-1024x666.png" alt="Customer CRM panel (loyalty tier, history)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Customer CRM panel (loyalty tier, history) · <a href="https://limetray.com/blog/wp-content/uploads/2025/02/image-65-1024x666.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="vid" href="https://www.youtube.com/watch?v=8__58XgBInc" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/limetray-v0.jpg" alt="All-in-one platform overview" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">All-in-one platform overview</span></a><a class="vid" href="https://www.youtube.com/watch?v=xxpxPKZNTRg" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/limetray-v1.jpg" alt="Take your restaurant online" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Take your restaurant online</span></a><a class="vid" href="https://www.youtube.com/watch?v=mHPiTibR63I" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/limetray-v2.jpg" alt="Mad Over Donuts success story" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Mad Over Donuts success story</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="torqus" data-cat="india" data-name="torqus / inresto">
+  <div class="card-head">
+    <h2>Torqus / inresto</h2>
+    <span class="badge india">Indian POS</span>
+    <span class="tag">POS + SCM (now Swiggy-owned)</span>
+  </div>
+  <p class="pos">POS + Supply-Chain + Head-Office ERP for multi-outlet chains. Acquired → rebranded inresto → Swiggy/Dineout (sites now dark).</p>
+  <div class="meta"><span><b>Market:</b> India-first multi-outlet chains. 3,500+ outlets, 70+ cities, 5 countries.</span><span><b>Pricing:</b> Not public (custom/enterprise).</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Torqus Edge mobile: Today&#x27;s Sales, MTD Sales, Sales Growth %, Avg Bill Value, Best Day</li>
+<li>Site-wise Sales bar chart across outlets</li>
+<li>SCM Head-Office: &#x27;Site Wise Sales&#x27; + &#x27;Site Wise APC (Average Per Cover)&#x27; charts</li>
+<li>POS billing: floor view by section, live KOT panel w/ SC 10% / CGST 5% / SGST 5% auto-split</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Sales: Daily, Rush Hour, Total Comparison/Summary, Growth, Section-wise, Item-wise, Site-wise</li>
+<li>Operational: Home Delivery, Takeaway, Product Name Exception</li>
+<li>Financial: Income/Expense, Payments mode-split, Cashbook</li>
+<li>Inventory/SCM: food-cost, stock, menu performance · 50–60+ reports</li>
+<li>GST billing w/ CGST/SGST auto-split</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>Torqus Edge — minute-by-minute sales/inventory push to owner phone</li>
+<li>Full second SCM product (procurement, recipe costing, central kitchen)</li>
+<li>CRM + promo engine (promo codes, BOGO, customer-targeting, scheduling)</li>
+<li>Happy Hours toggle; offline+online POS; tablet feedback</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/torqus-s0.png" data-remote="https://images.softwaresuggest.com/latest_screenshots/1515405085_feature_scm.png" alt="SCM Head-Office dashboard (Site Wise Sales + APC)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>SCM Head-Office dashboard (Site Wise Sales + APC) · <a href="https://images.softwaresuggest.com/latest_screenshots/1515405085_feature_scm.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/torqus-s1.png" data-remote="https://images.softwaresuggest.com/latest_screenshots/1515405078_feature_pos.png" alt="POS billing / floor view (desktop)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>POS billing / floor view (desktop) · <a href="https://images.softwaresuggest.com/latest_screenshots/1515405078_feature_pos.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/torqus-s2.png" data-remote="https://images.softwaresuggest.com/latest_screenshots/1515405074_Addons.png" alt="Dashboard mobile + POS + feedback (3-panel)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Dashboard mobile + POS + feedback (3-panel) · <a href="https://images.softwaresuggest.com/latest_screenshots/1515405074_Addons.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/torqus-s3.png" data-remote="https://images.softwaresuggest.com/latest_screenshots/1515405091_Loyalty+%26+Promotions.png" alt="SCM promo definition (BOGO/CRM)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>SCM promo definition (BOGO/CRM) · <a href="https://images.softwaresuggest.com/latest_screenshots/1515405091_Loyalty+%26+Promotions.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/torqus-s4.png" data-remote="https://images.softwaresuggest.com/latest_screenshots/1615290232_Inresto+home.png" alt="inresto home (successor brand)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>inresto home (successor brand) · <a href="https://images.softwaresuggest.com/latest_screenshots/1615290232_Inresto+home.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="vid" href="https://www.youtube.com/watch?v=6Cv7ttiGtQQ" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/torqus-v0.jpg" alt="Torqus — Wok Express success story" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Torqus — Wok Express success story</span></a><a class="btn" href="https://www.youtube.com/@inrestobydineout4816" target="_blank" rel="noopener">📺 inresto by Dineout channel</a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="toast" data-cat="global" data-name="toast pos">
+  <div class="card-head">
+    <h2>Toast POS</h2>
+    <span class="badge global">Global POS</span>
+    <span class="tag">US market leader · 40+ reports</span>
+  </div>
+  <p class="pos">All-in-one US restaurant platform, front door to back office (POS, payments, online ordering, payroll, analytics).</p>
+  <div class="meta"><span><b>Market:</b> US, all sizes — ~140k–148k locations (~15–17% of US market).</span><span><b>Pricing:</b> Starter Kit $0/mo (2.99%+15¢); Point of Sale $69/mo; Build-Your-Own $110+/mo. Hardware $169–$999. Add-ons monthly.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Weekly Overview (hourly refresh): Net Sales w/ period-over-period %</li>
+<li>Labor Cost ($ and % of net sales), Guest Count, Top 7 Selling Items</li>
+<li>Each widget drills into its detailed report</li>
+<li>Compare vs prior week / same week last year / two years ago</li>
+<li>Toast Now mobile: live net sales, hour-by-hour sales+labor charts, 86 &amp; channel toggles</li>
+<li>Manager Log: thread-style per-shift notes</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Sales Summary (net sales, gratuity, tax, tips, revenue centers, voids, check averages, expected vs actual cash)</li>
+<li>Labor Cost Breakdown (job/employee/hour, labor %, sales-per-labor-hour)</li>
+<li>Employee Productivity (sales, tips, guests, table-turn)</li>
+<li>Product Mix / PMIX (qty, revenue, % of sales — menu engineering)</li>
+<li>Payments, Payouts, Reconciliation, Chargebacks, Gift Cards</li>
+<li>Cash &amp; Loss: Voids (reason/approver), Discounts, Refunds, End of Day (Z Report)</li>
+<li>Custom Reports Builder: drag-drop Table/Chart/Metric widgets · 40+ reports</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>★ Toast Benchmarking — compare vs anonymized peers across ~148k real restaurants (by state/cuisine/service/price/alcohol%)</li>
+<li>Toast IQ AI assistant — plain-English Q&amp;A + proactive &#x27;For You&#x27; insights + takes actions</li>
+<li>xtraCHEF — photo-invoice AI, recipe costing, food-cost %, waste tracking</li>
+<li>Integrated payroll; multi-location menu push from one login</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/toast-s0.png" data-remote="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000NGqTYAW/0EM4W000008fyEQ" alt="Reporting Dashboard / Weekly Overview" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Reporting Dashboard / Weekly Overview · <a href="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000NGqTYAW/0EM4W000008fyEQ" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/toast-s1.png" data-remote="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000NGqTYAW/0EM4W000008fyEV" alt="Weekly Overview KPI widgets" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Weekly Overview KPI widgets · <a href="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000NGqTYAW/0EM4W000008fyEV" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/toast-s2.png" data-remote="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000LRtFYAW/0EM4W000008gHlF" alt="Sales Summary report" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Sales Summary report · <a href="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000LRtFYAW/0EM4W000008gHlF" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/toast-s3.png" data-remote="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000LRtFYAW/0EM4W000008gHlU" alt="Sales Summary detail" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Sales Summary detail · <a href="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000LRtFYAW/0EM4W000008gHlU" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/toast-s4.png" data-remote="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000NoovYAC/0EMPV00000i3w4Y" alt="Labor report" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Labor report · <a href="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000NoovYAC/0EMPV00000i3w4Y" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/toast-s5.png" data-remote="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000NoovYAC/0EMPV00000i45Kk" alt="Labor cost breakdown" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Labor cost breakdown · <a href="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000NoovYAC/0EMPV00000i45Kk" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/toast-s6.png" data-remote="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000HjuoYAC/0EMPV00000D3WTk" alt="Toast Benchmarking" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Toast Benchmarking · <a href="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000HjuoYAC/0EMPV00000D3WTk" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/toast-s7.png" data-remote="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000HjuoYAC/0EMPV00000D3ax8" alt="Benchmarking peer comparison" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Benchmarking peer comparison · <a href="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000HjuoYAC/0EMPV00000D3ax8" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/toast-s8.png" data-remote="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000LIjVYAW/0EMPV00000i3Z1V" alt="Custom Reports Builder" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Custom Reports Builder · <a href="https://dwvhey99m5tyy.cloudfront.net/images/ka2PV000000LIjVYAW/0EMPV00000i3Z1V" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="btn demo" href="https://pos.toasttab.com/request-demo" target="_blank" rel="noopener">🔗 Request a live demo</a><a class="btn demo" href="https://pos.toasttab.com/request-demo-video" target="_blank" rel="noopener">🔗 Pre-recorded demo video</a><a class="vid" href="https://www.youtube.com/watch?v=3F2Q-r-mTBs" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/toast-v2.jpg" alt="Custom Reporting &amp; Analytics" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Custom Reporting &amp; Analytics</span></a><a class="vid" href="https://www.youtube.com/watch?v=aFQcJ7ns1-k" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="https://img.youtube.com/vi/aFQcJ7ns1-k/hqdefault.jpg" alt="Sales Summary insights" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Sales Summary insights</span></a><a class="vid" href="https://www.youtube.com/watch?v=XaBTMeK6_Mg" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/toast-v4.jpg" alt="Tutorial for beginners" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Tutorial for beginners</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="square" data-cat="global" data-name="square for restaurants">
+  <div class="card-head">
+    <h2>Square for Restaurants</h2>
+    <span class="badge global">Global POS</span>
+    <span class="tag">Free dashboard tier</span>
+  </div>
+  <p class="pos">&#x27;Refreshingly easy&#x27; all-in-one POS + back-office, sold on easy setup and an integrated free dashboard.</p>
+  <div class="meta"><span><b>Market:</b> Full spectrum — QSR, full-service, bars, cafes, food trucks; independents → small chains.</span><span><b>Pricing:</b> Free $0/mo (full free analytics dashboard); Plus $49/mo/location; Premium $149/mo/location. Processing ~2.6%+10¢.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Sales today / custom range; gross &amp; net sales</li>
+<li>Sales-vs-prior-period: week-over-week, month-over-month, 6-month trend</li>
+<li>Top-selling items; sales by item/category/modifier; by payment method</li>
+<li>Per-employee sales; new vs returning customers, visit frequency, avg spend</li>
+<li>Multi-location performance (aggregate + per-location); CSV export</li>
+<li>Automated daily email digest (zero setup)</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Sales Summary (gross/net, txn count, refunds, taxes, fees)</li>
+<li>Sales Trends, Item Sales, Category Sales, Payment Methods</li>
+<li>Adjustments (discounts/comps/voids w/ usage counts), Tax &amp; Fees, Gift Cards</li>
+<li>Section Sales — revenue by floor-plan zone mapped to visual floor plan (paid)</li>
+<li>Kitchen Performance — completed tickets + avg completion time per KDS (paid)</li>
+<li>Close-of-Day, Labor vs Sales, COGS (Plus/Premium)</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>Genuinely FREE dashboard tier — most owner reports at $0</li>
+<li>Square AI — natural-language queries + real-time anomaly spotting</li>
+<li>Section Sales tied to the visual floor plan</li>
+<li>Kitchen Performance ticket-timing analytics</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/square-s0.png" data-remote="https://restauranttechnologynews.com/wp-content/uploads/2025/10/Screenshot-2025-10-09-063940-678x381.png" alt="Square dashboard (Oct 2025)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Square dashboard (Oct 2025) · <a href="https://restauranttechnologynews.com/wp-content/uploads/2025/10/Screenshot-2025-10-09-063940-678x381.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/square-s1.webp" data-remote="https://windsor.ai/wp-content/uploads/2024/07/square-dashboard-template-930x526.jpg.webp" alt="Square dashboard template" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Square dashboard template · <a href="https://windsor.ai/wp-content/uploads/2024/07/square-dashboard-template-930x526.jpg.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/square-s2.png" data-remote="https://www.jotform.com/blog/wp-content/uploads/2019/08/image6-7.png" alt="Sales Summary report" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Sales Summary report · <a href="https://www.jotform.com/blog/wp-content/uploads/2019/08/image6-7.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/square-s3.png" data-remote="https://www.jotform.com/blog/wp-content/uploads/2019/08/image9-6.png" alt="Sales Trends report" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Sales Trends report · <a href="https://www.jotform.com/blog/wp-content/uploads/2019/08/image9-6.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/square-s4.png" data-remote="https://images.ctfassets.net/2d5q1td6cyxq/4QwPnF8Vz0O6csmZXZ5sLs/684cf7911fcf4c5aa8097d48d52073d1/PD07074_-_RST_My_2_cents_carousel.png" alt="&#x27;My 2 cents&#x27; analytics (official)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>&#x27;My 2 cents&#x27; analytics (official) · <a href="https://images.ctfassets.net/2d5q1td6cyxq/4QwPnF8Vz0O6csmZXZ5sLs/684cf7911fcf4c5aa8097d48d52073d1/PD07074_-_RST_My_2_cents_carousel.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/square-s5.png" data-remote="https://images.ctfassets.net/2d5q1td6cyxq/bY8BSSL4Aqruz4xlvDcc5/bd0e91945283327e6e4a557c416808a0/PD07074_-_USEN_RST_X2_carousel.png" alt="Reporting carousel (official)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Reporting carousel (official) · <a href="https://images.ctfassets.net/2d5q1td6cyxq/bY8BSSL4Aqruz4xlvDcc5/bd0e91945283327e6e4a557c416808a0/PD07074_-_USEN_RST_X2_carousel.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/square-s6.png" data-remote="https://images.ctfassets.net/2d5q1td6cyxq/6teoHCaqdy8HNaZlHBGa5h/903767ff58dd332faa216f6e13747ce2/PD07074_-_USEN_RST_KDS_carousel.png" alt="KDS carousel (official)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>KDS carousel (official) · <a href="https://images.ctfassets.net/2d5q1td6cyxq/6teoHCaqdy8HNaZlHBGa5h/903767ff58dd332faa216f6e13747ce2/PD07074_-_USEN_RST_KDS_carousel.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="btn demo" href="https://squareup.com/us/en/point-of-sale/restaurants/features" target="_blank" rel="noopener">🔗 Official features + interactive demo</a><a class="vid" href="https://www.youtube.com/watch?v=5intWLLYpjw" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/square-v1.jpg" alt="See another side of your restaurant (Dashboard)" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">See another side of your restaurant (Dashboard)</span></a><a class="vid" href="https://www.youtube.com/watch?v=IyzKYmnsuO4" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/square-v2.jpg" alt="Set up your restaurant with Square" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Set up your restaurant with Square</span></a><a class="vid" href="https://www.youtube.com/watch?v=zHoIy_4rJLQ" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/square-v3.jpg" alt="Configure your menu" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Configure your menu</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="lightspeed" data-cat="global" data-name="lightspeed restaurant">
+  <div class="card-head">
+    <h2>Lightspeed Restaurant</h2>
+    <span class="badge global">Global POS</span>
+    <span class="tag">Benchmarks &amp; menu engineering</span>
+  </div>
+  <p class="pos">Cloud POS that turns sales data into owner decisions — heavy on benchmarking and menu engineering.</p>
+  <div class="meta"><span><b>Market:</b> Independent → multi-location full-service, QSR, hotel restaurants; North America + global.</span><span><b>Pricing:</b> Starter $69/mo, Essential $189/mo, Premium $399/mo. Advanced Insights + Guestbook are paid add-ons.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Six headline KPIs: Gross Sales, Net Sales, Orders, Order Avg, Covers, Cover Avg — each vs prior period</li>
+<li>Best Sellers chart + Top Payment Methods (amount + usage %)</li>
+<li>Quick tiles: Benchmarks &amp; Trends, Order Anywhere, KDS, Capital</li>
+<li>Lightspeed Pulse mobile: revenue, covers, table-turn, sales per labor hour, voids, top-10 items, multi-location</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Sales Summary (gross→net flow, tips by tender, discounts, voids, taxes); day-of-week vs time-of-day toggle</li>
+<li>Hourly Sales heat map (30-min cells w/ avg net sales, checks, labor hours)</li>
+<li>Product Mix (qty, sales, margin, cost) + per-item peak-time heat map</li>
+<li>★ Magic Menu Quadrant — 2x2 menu-engineering matrix (Hidden Gems / Greatest Hits / One-Hit Wonders / Underperformers)</li>
+<li>Labor Report + per-server scorecards w/ coaching flags</li>
+<li>Fiscal Report (auto-close), Period/Shift/Z reports</li>
+<li>Guestbook CRM (add-on): auto profiles, estimated lifetime value, Best Guests top-100</li>
+<li>KDS Statistics: per-item prep times, speed distribution</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>★ Benchmarks &amp; Trends — ML comparison vs nearby similar Lightspeed venues (food/bev split, sales per cover/labor hour, tip %, turn time)</li>
+<li>Magic Menu Quadrant menu-engineering matrix</li>
+<li>Per-server scorecards with coaching flags</li>
+<li>Guestbook CRM auto-built from payment data w/ predicted LTV</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/lightspeed-s0.png" data-remote="https://k-series-support.lightspeedhq.com/hc/article_attachments/47796756021659" alt="Sales Summary main view" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Sales Summary main view · <a href="https://k-series-support.lightspeedhq.com/hc/article_attachments/47796756021659" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/lightspeed-s1.png" data-remote="https://k-series-support.lightspeedhq.com/hc/article_attachments/51729483217051" alt="Sales Report Dashboard landing" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Sales Report Dashboard landing · <a href="https://k-series-support.lightspeedhq.com/hc/article_attachments/51729483217051" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/lightspeed-s2.png" data-remote="https://k-series-support.lightspeedhq.com/hc/article_attachments/5147833477787" alt="Hourly Performance heat map" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Hourly Performance heat map · <a href="https://k-series-support.lightspeedhq.com/hc/article_attachments/5147833477787" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/lightspeed-s3.png" data-remote="https://k-series-support.lightspeedhq.com/hc/article_attachments/19618490739355" alt="Magic Menu Quadrant" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Magic Menu Quadrant · <a href="https://k-series-support.lightspeedhq.com/hc/article_attachments/19618490739355" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/lightspeed-s4.png" data-remote="https://k-series-support.lightspeedhq.com/hc/article_attachments/19618466964635" alt="Item Popularity report" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Item Popularity report · <a href="https://k-series-support.lightspeedhq.com/hc/article_attachments/19618466964635" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/lightspeed-s5.png" data-remote="https://k-series-support.lightspeedhq.com/hc/article_attachments/28440447203995" alt="Benchmarks &amp; Trends (food/beverage split)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Benchmarks &amp; Trends (food/beverage split) · <a href="https://k-series-support.lightspeedhq.com/hc/article_attachments/28440447203995" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/lightspeed-s6.png" data-remote="https://k-series-support.lightspeedhq.com/hc/article_attachments/29192667832987" alt="Benchmarks &amp; Trends detail" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Benchmarks &amp; Trends detail · <a href="https://k-series-support.lightspeedhq.com/hc/article_attachments/29192667832987" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/lightspeed-s7.png" data-remote="https://k-series-support.lightspeedhq.com/hc/article_attachments/48885019875227" alt="Pulse mobile app — all-locations sales" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Pulse mobile app — all-locations sales · <a href="https://k-series-support.lightspeedhq.com/hc/article_attachments/48885019875227" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/lightspeed-s8.png" data-remote="https://k-series-support.lightspeedhq.com/hc/article_attachments/7528720862107" alt="Fiscal Report table" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Fiscal Report table · <a href="https://k-series-support.lightspeedhq.com/hc/article_attachments/7528720862107" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="btn demo" href="https://www.lightspeedhq.com/pos/restaurant/benchmarks-and-trends/" target="_blank" rel="noopener">🔗 Benchmarks &amp; Trends feature page</a><a class="vid" href="https://www.youtube.com/watch?v=bUBYgmJw--k" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/lightspeed-v1.jpg" alt="Discover O-Series POS &amp; Back Office" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Discover O-Series POS &amp; Back Office</span></a><a class="vid" href="https://www.youtube.com/watch?v=iPBUGKs6big" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="https://img.youtube.com/vi/iPBUGKs6big/hqdefault.jpg" alt="K-Series: understanding reports" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">K-Series: understanding reports</span></a><a class="vid" href="https://www.youtube.com/watch?v=em5UHIDJXpM" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/lightspeed-v3.jpg" alt="Advanced Insights 2.0: menu reports" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Advanced Insights 2.0: menu reports</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="touchbistro" data-cat="global" data-name="touchbistro">
+  <div class="card-head">
+    <h2>TouchBistro</h2>
+    <span class="badge global">Global POS</span>
+    <span class="tag">iPad POS · 50+ reports</span>
+  </div>
+  <p class="pos">All-in-one iPad-based restaurant platform with &#x27;50+ reports that update in real time&#x27;.</p>
+  <div class="meta"><span><b>Market:</b> North America; full-service, fine dining, QSR, bars, breweries, multi-unit.</span><span><b>Pricing:</b> Base POS ~$69/mo per license (incl. 50+ reports). Inventory/Food-Cost, Loyalty/CRM, advanced Labor are paid add-ons.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Snapshot Report: live revenue, labor cost, COGS</li>
+<li>Cloud &#x27;today&#x27; + rolling 7-day view; net sales (pre/post-tax), avg check</li>
+<li>Top sellers by volume + revenue, plus underperformers</li>
+<li>Sales by dining section (patio/bar/dining) and by table</li>
+<li>Labor cost as % of profit, sales by server, table-turn</li>
+<li>Automated Daily Sales Report emailed at close</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Sales (Totals, Daily, by Section/Table/Category, Order Type, Gross Margin, YoY)</li>
+<li>Item/Product (by Menu Item, Modifier Preference, Menu List price vs cost)</li>
+<li>Composable End-of-Day report (selectable sub-reports — no fixed Z)</li>
+<li>Labor (Hours FOH vs BOH, Shift, Labor Cost, Staff Performance, Weekly Targets)</li>
+<li>Payments/Tips (cash/card split, CC tips, by Section)</li>
+<li>Food Cost % / variance / waste (paid); Guest Report 24 data points (paid)</li>
+<li>Discount/Void/Comp (who issued, who approved); multi-location roll-up</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>Floor-plan / section analytics (revenue &amp; turnover by zone)</li>
+<li>Anti-theft labor reporting (voids/deletes/no-sales/comps per employee)</li>
+<li>Composable End-of-Day rather than a fixed Z-report</li>
+<li>Automated daily sales email digest for absent owners</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/touchbistro-s0.jpg" data-remote="https://images.tech.co/wp-content/uploads/2024/07/02114031/cloudsalesdashboard-2.jpg" alt="Cloud Sales Dashboard" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Cloud Sales Dashboard · <a href="https://images.tech.co/wp-content/uploads/2024/07/02114031/cloudsalesdashboard-2.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/touchbistro-s1.png" data-remote="https://images.tech.co/wp-content/uploads/2024/07/02112809/Sales.png" alt="Sales / payment screen" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Sales / payment screen · <a href="https://images.tech.co/wp-content/uploads/2024/07/02112809/Sales.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/touchbistro-s2.webp" data-remote="https://www.touchbistro.com/wp-content/uploads/2021/02/reporting-1-414x314.webp" alt="Reporting UI panel" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Reporting UI panel · <a href="https://www.touchbistro.com/wp-content/uploads/2021/02/reporting-1-414x314.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/touchbistro-s3.webp" data-remote="https://www.touchbistro.com/wp-content/uploads/2021/02/reporting-2-414x314.webp" alt="Reporting UI panel 2" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Reporting UI panel 2 · <a href="https://www.touchbistro.com/wp-content/uploads/2021/02/reporting-2-414x314.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/touchbistro-s4.jpg" data-remote="https://www.touchbistro.com/wp-content/uploads/2021/09/reportinganalytics-1223014141-3-414x276.jpeg" alt="Reporting &amp; analytics" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Reporting &amp; analytics · <a href="https://www.touchbistro.com/wp-content/uploads/2021/09/reportinganalytics-1223014141-3-414x276.jpeg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/touchbistro-s5.webp" data-remote="https://www.touchbistro.com/wp-content/uploads/2023/08/homepage_carousel_cloud_desktop-v3-414x454.webp" alt="Cloud reporting carousel" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Cloud reporting carousel · <a href="https://www.touchbistro.com/wp-content/uploads/2023/08/homepage_carousel_cloud_desktop-v3-414x454.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/touchbistro-s6.webp" data-remote="https://www.posusa.com/wp-content/uploads/2021/05/touchbistro-online-reporting.jpg" alt="Online reporting (review site)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Online reporting (review site) · <a href="https://www.posusa.com/wp-content/uploads/2021/05/touchbistro-online-reporting.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/touchbistro-s7.webp" data-remote="https://www.posusa.com/wp-content/uploads/2021/05/touchbistro-floor-plan.jpg" alt="Floor-plan management" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Floor-plan management · <a href="https://www.posusa.com/wp-content/uploads/2021/05/touchbistro-floor-plan.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="vid" href="https://www.youtube.com/watch?v=VGZ0KReUsww" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/touchbistro-v0.jpg" alt="Tutorial for beginners (2026)" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Tutorial for beginners (2026)</span></a><a class="vid" href="https://www.youtube.com/watch?v=u4sv6uGNiEM" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/touchbistro-v1.jpg" alt="App demo walkthrough" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">App demo walkthrough</span></a><a class="vid" href="https://www.youtube.com/watch?v=rTWQtkmG2PM" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/touchbistro-v2.jpg" alt="&#x27;This is TouchBistro&#x27; (official)" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">&#x27;This is TouchBistro&#x27; (official)</span></a><a class="vid" href="https://www.youtube.com/watch?v=9xsXCPz_JF0" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/touchbistro-v3.jpg" alt="Closing your shift / day" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Closing your shift / day</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="clover" data-cat="global" data-name="clover">
+  <div class="card-head">
+    <h2>Clover</h2>
+    <span class="badge global">Global POS</span>
+    <span class="tag">Fiserv · FOH+kitchen+office</span>
+  </div>
+  <p class="pos">Syncs front-of-house, kitchen and back office into one owner dashboard. Owned by Fiserv.</p>
+  <div class="meta"><span><b>Market:</b> US SMB restaurants (counter + full-service).</span><span><b>Pricing:</b> Hardware tiers + monthly software plans bundled by reseller (software-only price varies by reseller).</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Gross &amp; net sales, amount collected, avg ticket size (w/ trends)</li>
+<li>Hourly revenue breakdown; top items, top categories, bottom performers</li>
+<li>Sales by tender, employee, order type, device, source (in-house/to-go/online)</li>
+<li>Refund &amp; discount volume, open orders, tip totals, cash flow</li>
+<li>Labor cost vs sales side-by-side; multi-location aggregated sales</li>
+<li>Web + Clover Go mobile app, ~hourly refresh</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Sales Overview/Summary (gross/net/refunds/discounts/tender/avg ticket; CSV/Excel/PDF)</li>
+<li>Sales Interval (by-hour) + Trends (weekly/monthly/YoY)</li>
+<li>Item Sales / Top 5 / Category; Orders (closed/refunded/voided/open)</li>
+<li>Employee Transaction; Tips by employee + payout</li>
+<li>Labor (cost vs revenue via Homebase); Payments; Cash Log; Tax (QuickBooks/Xero)</li>
+<li>Closeout / End-of-Day Z-report (per-server, configurable close time)</li>
+<li>COGS + inventory w/ reorder alerts &amp; 86&#x27;ing; add-on &#x27;BusinessQ&#x27; = 40+ reports</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>One dashboard across FOH / kitchen / back office</li>
+<li>Anywhere access w/ labor-cost-vs-sales view</li>
+<li>Clover App Market (QuickBooks, Xero, ADP, Homebase, delivery)</li>
+<li>Embedded finance — Clover Capital lending + Rapid Deposit</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/clover-s0.webp" data-remote="https://images.ctfassets.net/v6ivjcl8qjz2/6T0pP0vaa7sW79i3ShGkkP/6e66628fae283594c988927221ac998b/clover-reporting-dashboard-hero.png?fit=scale&amp;fm=webp" alt="Reporting dashboard hero (official)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Reporting dashboard hero (official) · <a href="https://images.ctfassets.net/v6ivjcl8qjz2/6T0pP0vaa7sW79i3ShGkkP/6e66628fae283594c988927221ac998b/clover-reporting-dashboard-hero.png?fit=scale&amp;fm=webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/clover-s1.png" data-remote="https://blog.clover.com/ca/wp-content/uploads/sites/3/2022/02/web-dashboard-laptop-mock-np-Register-Lite-6-2021-Reporting-Sales-Overview-resize.png" alt="Reporting / Sales Overview" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Reporting / Sales Overview · <a href="https://blog.clover.com/ca/wp-content/uploads/sites/3/2022/02/web-dashboard-laptop-mock-np-Register-Lite-6-2021-Reporting-Sales-Overview-resize.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/clover-s2.jpg" data-remote="https://blog.clover.com/ca/wp-content/uploads/sites/3/2022/02/42-Clover-Dashboard.jpg" alt="Dashboard main overview" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Dashboard main overview · <a href="https://blog.clover.com/ca/wp-content/uploads/sites/3/2022/02/42-Clover-Dashboard.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/clover-s3.png" data-remote="https://blog.clover.com/ca/wp-content/uploads/sites/3/2022/02/web-dashboard-laptop-mock-np-Register-Lite-6-2021-Inventory-Items-resize-1.png" alt="Inventory / Items" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Inventory / Items · <a href="https://blog.clover.com/ca/wp-content/uploads/sites/3/2022/02/web-dashboard-laptop-mock-np-Register-Lite-6-2021-Inventory-Items-resize-1.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/clover-s4.png" data-remote="https://blog.clover.com/ca/wp-content/uploads/sites/3/2022/02/web-dashboard-laptop-mock-np-Register-Lite-6-2021-Employees-1-resized.png" alt="Employees" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Employees · <a href="https://blog.clover.com/ca/wp-content/uploads/sites/3/2022/02/web-dashboard-laptop-mock-np-Register-Lite-6-2021-Employees-1-resized.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/clover-s5.png" data-remote="https://blog.clover.com/ca/wp-content/uploads/sites/3/2022/02/web-dashboard-laptop-mock-np-Register-Lite-8-2021-Customers_v2-1resized.png" alt="Customers" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Customers · <a href="https://blog.clover.com/ca/wp-content/uploads/sites/3/2022/02/web-dashboard-laptop-mock-np-Register-Lite-8-2021-Customers_v2-1resized.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/clover-s6.webp" data-remote="https://images.ctfassets.net/v6ivjcl8qjz2/4oBqpTfc2JmLMuKHPdynRM/2b67863dfc0cfb15c725897ef6edb6b2/kitchen-display-system-sizes.webp" alt="Kitchen Display System (official)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Kitchen Display System (official) · <a href="https://images.ctfassets.net/v6ivjcl8qjz2/4oBqpTfc2JmLMuKHPdynRM/2b67863dfc0cfb15c725897ef6edb6b2/kitchen-display-system-sizes.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="vid" href="https://www.youtube.com/watch?v=hptDJpo0hkc" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/clover-v0.jpg" alt="Official: features of the Clover Dashboard" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Official: features of the Clover Dashboard</span></a><a class="vid" href="https://www.youtube.com/watch?v=xV3xfHfS67Q" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/clover-v1.jpg" alt="Official: Clover tour for table service" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Official: Clover tour for table service</span></a><a class="vid" href="https://www.youtube.com/watch?v=OcoQ8Bg7i4M" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/clover-v2.jpg" alt="How to read Clover dashboard reporting" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">How to read Clover dashboard reporting</span></a><a class="vid" href="https://www.youtube.com/watch?v=xUMn7TayF1c" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/clover-v3.jpg" alt="Deep dive into Clover Dining" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Deep dive into Clover Dining</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="loyverse" data-cat="global" data-name="loyverse pos">
+  <div class="card-head">
+    <h2>Loyverse POS</h2>
+    <span class="badge global">Global POS</span>
+    <span class="tag">Free · mobile owner app</span>
+  </div>
+  <p class="pos">Free POS + inventory software — turn a phone/tablet into a full POS; &#x27;real-time insights at your fingertips&#x27;.</p>
+  <div class="meta"><span><b>Market:</b> Small-to-mid independent retail, cafés, bars, QSR; 30+ countries. Capterra 4.8/5.</span><span><b>Pricing:</b> Free-forever core (POS + Back Office + Dashboard app). Add-ons: Advanced Inventory $25/store/mo, Employee Mgmt $5/employee/mo.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Two surfaces: web Back Office + a separate mobile Dashboard app (signature move)</li>
+<li>Sales Overview: receipt count, net sales, average ticket — each w/ day-over-day comparison</li>
+<li>Interactive bar chart (pinch-zoom, group by Hours/Days/Months)</li>
+<li>Drill-downs: Sales by Items / Categories / Employees</li>
+<li>Color-coded Stock tab (green/yellow/red) + push notifications on depletion</li>
+<li>Multi-store switcher; dark theme; per-section staff access</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Consistent template: period selector → KPI tiles → switchable chart → custom table → CSV</li>
+<li>Sales Summary (Gross, Refunds, Discounts, Net, Gross profit) w/ current-vs-previous</li>
+<li>Sales by Item (SKU, COGS, Gross profit, Margin, Taxes) + Top-5 strip</li>
+<li>Sales by Category; Receipts (row click → transaction detail panel)</li>
+<li>Shifts (open/close, expected vs actual cash, variance, pay-ins/outs)</li>
+<li>By Employee (incl. tips), by Payment Type, by Modifier · 11 report types</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>Dedicated mobile owner Dashboard app (not just responsive back office)</li>
+<li>Color-coded inventory + low/out-of-stock push notifications</li>
+<li>Free-forever including standard reports; multi-store roll-up</li>
+<li>Period-over-period comparison baked into every metric; dark theme</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/loyverse-s0.png" data-remote="https://downloads.intercomcdn.com/i/o/516395159/7045842dc0e97c9d943b815d/Sales-Summary-Report-1.png" alt="Back Office Sales Summary (web dashboard)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Back Office Sales Summary (web dashboard) · <a href="https://downloads.intercomcdn.com/i/o/516395159/7045842dc0e97c9d943b815d/Sales-Summary-Report-1.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/loyverse-s1.png" data-remote="https://downloads.intercomcdn.com/i/o/516395588/16f524cef9a72f0d340ef3ec/Sales-Summary-Report-3.png" alt="Five metric tabs w/ current-vs-previous" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Five metric tabs w/ current-vs-previous · <a href="https://downloads.intercomcdn.com/i/o/516395588/16f524cef9a72f0d340ef3ec/Sales-Summary-Report-3.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/loyverse-s2.png" data-remote="https://downloads.intercomcdn.com/i/o/516396180/7ca69c80fcd2c8dc581c19eb/Sales-Summary-Report-4.png" alt="Chart-type switcher + grouping" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Chart-type switcher + grouping · <a href="https://downloads.intercomcdn.com/i/o/516396180/7ca69c80fcd2c8dc581c19eb/Sales-Summary-Report-4.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/loyverse-s3.png" data-remote="https://downloads.intercomcdn.com/i/o/793927901/a27c3889917f4233ffa3fc70/Sales-by-Items-Report-4.png" alt="Sales-by-Item full table (COGS, margin, taxes)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Sales-by-Item full table (COGS, margin, taxes) · <a href="https://downloads.intercomcdn.com/i/o/793927901/a27c3889917f4233ffa3fc70/Sales-by-Items-Report-4.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/loyverse-s4.png" data-remote="https://downloads.intercomcdn.com/i/o/516401268/7892e1e23f058c1cb19fadd8/Sales-Report-Category-1.png" alt="Sales-by-Category report" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Sales-by-Category report · <a href="https://downloads.intercomcdn.com/i/o/516401268/7892e1e23f058c1cb19fadd8/Sales-Report-Category-1.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/loyverse-s5.png" data-remote="https://downloads.intercomcdn.com/i/o/793748152/4421bfb43746e2726f3aa93e/Receipts-Section-3.png" alt="Receipts list + transaction detail panel" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Receipts list + transaction detail panel · <a href="https://downloads.intercomcdn.com/i/o/793748152/4421bfb43746e2726f3aa93e/Receipts-Section-3.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/loyverse-s6.png" data-remote="https://downloads.intercomcdn.com/i/o/656112329/df72e370f2d5f27dffb2d95d/Loyverse-Dashboard-2.png" alt="Mobile dashboard sales summary" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Mobile dashboard sales summary · <a href="https://downloads.intercomcdn.com/i/o/656112329/df72e370f2d5f27dffb2d95d/Loyverse-Dashboard-2.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/loyverse-s7.png" data-remote="https://downloads.intercomcdn.com/i/o/656113391/1bc801e22b9a88c13b27fabb/Loyverse-Dashboard-7.png" alt="Color-coded inventory list" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Color-coded inventory list · <a href="https://downloads.intercomcdn.com/i/o/656113391/1bc801e22b9a88c13b27fabb/Loyverse-Dashboard-7.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/loyverse-s8.png" data-remote="https://downloads.intercomcdn.com/i/o/656113579/b133d986e41baaa945bb8d98/Loyverse-Dashboard-9.png" alt="Push notification: stock-depleted" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Push notification: stock-depleted · <a href="https://downloads.intercomcdn.com/i/o/656113579/b133d986e41baaa945bb8d98/Loyverse-Dashboard-9.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/loyverse-s9.png" data-remote="https://downloads.intercomcdn.com/i/o/656113813/f3612e8daf74b9d22a7aa12f/Loyverse-Dashboard-11.png" alt="Dark theme toggle" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Dark theme toggle · <a href="https://downloads.intercomcdn.com/i/o/656113813/f3612e8daf74b9d22a7aa12f/Loyverse-Dashboard-11.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="vid" href="https://www.youtube.com/watch?v=KvtocjryOpw" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/loyverse-v0.jpg" alt="Sales analytics &amp; reporting in Back Office" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Sales analytics &amp; reporting in Back Office</span></a><a class="vid" href="https://www.youtube.com/watch?v=Q1FcGkk8saE" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/loyverse-v1.jpg" alt="Overview of Back Office" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Overview of Back Office</span></a><a class="vid" href="https://www.youtube.com/watch?v=-HhwmTADj9c" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/loyverse-v2.jpg" alt="Dashboard / BI mobile app intro" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Dashboard / BI mobile app intro</span></a><a class="vid" href="https://www.youtube.com/watch?v=S5NqcRKW3sA" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/loyverse-v3.jpg" alt="Inventory management with Dashboard app" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Inventory management with Dashboard app</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="spoton" data-cat="global" data-name="spoton restaurant">
+  <div class="card-head">
+    <h2>SpotOn Restaurant</h2>
+    <span class="badge global">Global POS</span>
+    <span class="tag">AI Profit Assist</span>
+  </div>
+  <p class="pos">&#x27;A POS that feels like second nature&#x27; — advanced features made effortless; 2026 angle &#x27;profit, not hype&#x27;.</p>
+  <div class="meta"><span><b>Market:</b> US full-service &amp; quick-service; independents → multi-unit/enterprise. G2 #1 Restaurant POS (2026).</span><span><b>Pricing:</b> All-In $0/station/mo @ 2.79%+20¢; POS Essentials $55/station/mo; custom enterprise. Profit Assist add-on ~$100/location/mo.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Top-line KPIs: net sales, check count, guest count, average check</li>
+<li>Daily Recap (EOD): net sales by category, voids, discounts, batches, reconciliation</li>
+<li>Sales Snapshot: period-over-period w/ labor cost %, discounts, voids</li>
+<li>Real-time sales + labor during service</li>
+<li>Smart filters (date/category/employee/order origin/fulfillment), saved custom views</li>
+<li>Multi-location comparison; web + mobile remote access</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Sales: Daily Recap, Sales Snapshot, Hourly Sales (by channel), Sales &amp; Labor by Hour</li>
+<li>Sales Summary (by employee/origin/fulfillment/daypart/location)</li>
+<li>Product Mix (by category/employee/modifiers), Menu Mix, Product Details w/ guest-pairing</li>
+<li>Payments: Payment Summary, CC Transactions, Batches/Settlements, Deposits</li>
+<li>Labor: Labor Report, Payroll, Employee Performance</li>
+<li>Kitchen Performance (Fresh KDS)</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>★ Profit Assist — AI P&amp;L, connects QuickBooks/Xero/Restaurant365, anomaly detection, benchmarking</li>
+<li>Profit AI (beta) — &#x27;what changed → why → what to do&#x27; using sales, labor, accounting, weather</li>
+<li>Daypart segmentation; Order Origin + Fulfillment filters; guest-pairing menu engineering</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/spoton-s0.png" data-remote="https://www.spoton.com/_next/static/media/spoton-reporting-dashboard-home.c4536813.png" alt="Reporting dashboard home (KPIs + comparisons)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Reporting dashboard home (KPIs + comparisons) · <a href="https://www.spoton.com/_next/static/media/spoton-reporting-dashboard-home.c4536813.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/spoton-s1.png" data-remote="https://www.spoton.com/_next/static/media/dashboard-casual-dining-daily-recap.3ad64e10.png" alt="Daily Recap view" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Daily Recap view · <a href="https://www.spoton.com/_next/static/media/dashboard-casual-dining-daily-recap.3ad64e10.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/spoton-s2.png" data-remote="https://www.spoton.com/_next/static/media/spoton-reporting-sales-summary.70ecafa3.png" alt="Sales Summary report" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Sales Summary report · <a href="https://www.spoton.com/_next/static/media/spoton-reporting-sales-summary.70ecafa3.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/spoton-s3.png" data-remote="https://www.spoton.com/_next/static/media/spoton-profit-assist-kaleis.87c045ef.png" alt="Profit Assist desktop (AI P&amp;L)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Profit Assist desktop (AI P&amp;L) · <a href="https://www.spoton.com/_next/static/media/spoton-profit-assist-kaleis.87c045ef.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/spoton-s4.png" data-remote="https://storage.ghost.io/c/22/56/2256c778-7ed4-48f6-b263-d1f698aa8a02/content/images/2021/07/Sales-Snapshot.png" alt="Sales Snapshot (classic UI)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Sales Snapshot (classic UI) · <a href="https://storage.ghost.io/c/22/56/2256c778-7ed4-48f6-b263-d1f698aa8a02/content/images/2021/07/Sales-Snapshot.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/spoton-s5.png" data-remote="https://gdm-catalog-fmapi-prod.imgix.net/ProductScreenshot/c3fdb420-9e4e-404a-b948-91a0f3843deb.png" alt="In-app screenshot (GetApp)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>In-app screenshot (GetApp) · <a href="https://gdm-catalog-fmapi-prod.imgix.net/ProductScreenshot/c3fdb420-9e4e-404a-b948-91a0f3843deb.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/spoton-s6.png" data-remote="https://gdm-catalog-fmapi-prod.imgix.net/ProductScreenshot/2d030183-766e-4a12-aa03-9ea0483df696.png" alt="In-app screenshot (GetApp)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>In-app screenshot (GetApp) · <a href="https://gdm-catalog-fmapi-prod.imgix.net/ProductScreenshot/2d030183-766e-4a12-aa03-9ea0483df696.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/spoton-s7.png" data-remote="https://gdm-catalog-fmapi-prod.imgix.net/ProductScreenshot/76387a5b-a0a4-4d5e-9f73-220d13c87da0.png" alt="In-app screenshot (GetApp)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>In-app screenshot (GetApp) · <a href="https://gdm-catalog-fmapi-prod.imgix.net/ProductScreenshot/76387a5b-a0a4-4d5e-9f73-220d13c87da0.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="btn demo" href="https://www.spoton.com/101/restaurantpos/" target="_blank" rel="noopener">🔗 Official tutorial video library</a><a class="vid" href="https://www.youtube.com/watch?v=F1PFSInOae4" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/spoton-v1.jpg" alt="Restaurant full demo (official)" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Restaurant full demo (official)</span></a><a class="vid" href="https://www.youtube.com/watch?v=271RDfzrwHw" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/spoton-v2.jpg" alt="Reporting walkthrough" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Reporting walkthrough</span></a><a class="vid" href="https://www.youtube.com/watch?v=nD8u4yth87g" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/spoton-v3.jpg" alt="Introducing the new SpotOn Restaurant" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Introducing the new SpotOn Restaurant</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="oracle-simphony" data-cat="global" data-name="oracle micros simphony">
+  <div class="card-head">
+    <h2>Oracle MICROS Simphony</h2>
+    <span class="badge global">Global POS</span>
+    <span class="tag">Enterprise · 3-tier admin</span>
+  </div>
+  <p class="pos">One cloud platform running front-of-house, kitchen and back office — &#x27;the world&#x27;s leading cloud POS&#x27;.</p>
+  <div class="meta"><span><b>Market:</b> Single venues → global enterprise (QSR, fine dining, hotels, stadiums, theme parks, airports). 180 countries, 6.3B txns/yr.</span><span><b>Pricing:</b> Essentials $55/mo, Plus $75/mo (multi-location: inventory, loyalty, advanced analytics), Single-Tenant Enterprise custom.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Three admin surfaces: PMC (on-terminal), R&amp;A web back-office, InMotion mobile</li>
+<li>R&amp;A: five role-based dashboards — Operations, Sales &amp; Costs, Service Performance, Labor, Inventory</li>
+<li>Filter by business date, location, revenue center, order type, day part</li>
+<li>Configurable tiles w/ drill-down; per-user &#x27;myPage&#x27; portlets</li>
+<li>InMotion mobile: live KPI graphs (Sales, Labor, Discounts, Check Count, Ticket Time), forecast overlays, push alerts (high voids, KPI out of range)</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Daily Operations: Net VAT &amp; Margin %, COGS %, Labor %, guest &amp; check counts, Sales Metrics grid, Adjustments (Voids/Error Corrects drill to check-level)</li>
+<li>Customized Sales Reports (menu/price mix by channel, most/least profitable)</li>
+<li>Discount Reports (by reason/employee/item); Day-Part Reports (labor vs net sales)</li>
+<li>Employee Performance (avg check &amp; variance, flags lost tips / possible theft)</li>
+<li>Inventory Analytics (forecasting, vendor re-ordering, pricing trends)</li>
+<li>Gift &amp; Loyalty; Power BI / BI REST API; ~22 on-terminal PMC reports</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>Three-tier admin split (on-terminal / web / mobile) — right surface per context</li>
+<li>Menu Engineering scatter chart (Star / Puzzle / Plow Horse / Dog)</li>
+<li>Forecasting + benchmarking baked into every KPI</li>
+<li>Drag-and-drop Report Builder for non-technical owners</li>
+<li>2026: embedded GenAI &#x27;Smart Assistant&#x27;, Mobile Order &amp; Pay, NetSuite ERP</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/oracle-simphony-s0.png" data-remote="https://gdm-catalog-fmapi-prod.imgix.net/ProductScreenshot/1f98fc07-a592-4462-95d0-aed7ea61c08b.png" alt="R&amp;A KPI dashboard (Net Sales, Top 10, Check Count Forecast)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>R&amp;A KPI dashboard (Net Sales, Top 10, Check Count Forecast) · <a href="https://gdm-catalog-fmapi-prod.imgix.net/ProductScreenshot/1f98fc07-a592-4462-95d0-aed7ea61c08b.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/oracle-simphony-s1.jpg" data-remote="https://gdm-catalog-fmapi-prod.imgix.net/ProductScreenshot/44dcf57d-2fde-4ed7-8f32-0e9f3fadb573.jpg" alt="Table-management floor plan + Open Checks" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Table-management floor plan + Open Checks · <a href="https://gdm-catalog-fmapi-prod.imgix.net/ProductScreenshot/44dcf57d-2fde-4ed7-8f32-0e9f3fadb573.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/oracle-simphony-s2.jpg" data-remote="https://www.oracle.com/a/ocom/img/cb125-reports-dashboard-min.jpg" alt="R&amp;A reports / custom dashboards" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>R&amp;A reports / custom dashboards · <a href="https://www.oracle.com/a/ocom/img/cb125-reports-dashboard-min.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/oracle-simphony-s3.jpg" data-remote="https://www.oracle.com/a/ocom/img/cb125-sales-reports-min.jpg" alt="Customized Sales Reports" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Customized Sales Reports · <a href="https://www.oracle.com/a/ocom/img/cb125-sales-reports-min.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/oracle-simphony-s4.jpg" data-remote="https://www.oracle.com/a/ocom/img/cb125-discount-reports-min.jpg" alt="Discount-analysis report" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Discount-analysis report · <a href="https://www.oracle.com/a/ocom/img/cb125-discount-reports-min.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/oracle-simphony-s5.jpg" data-remote="https://www.oracle.com/a/ocom/img/cb125-daypart-reports-min.jpg" alt="Profitability by Day Part" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Profitability by Day Part · <a href="https://www.oracle.com/a/ocom/img/cb125-daypart-reports-min.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/oracle-simphony-s6.jpg" data-remote="https://www.oracle.com/a/ocom/img/cb125-employee-analytics-reports-min.jpg" alt="Employee performance report" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Employee performance report · <a href="https://www.oracle.com/a/ocom/img/cb125-employee-analytics-reports-min.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/oracle-simphony-s7.jpg" data-remote="https://www.oracle.com/a/ocom/img/cb125v4-inventory-management-min.jpg" alt="Inventory management analytics" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Inventory management analytics · <a href="https://www.oracle.com/a/ocom/img/cb125v4-inventory-management-min.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/oracle-simphony-s8.jpg" data-remote="https://www.oracle.com/a/ocom/img/cb125-restaurant-analytics-min.jpg" alt="Restaurant analytics overview" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Restaurant analytics overview · <a href="https://www.oracle.com/a/ocom/img/cb125-restaurant-analytics-min.jpg" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="vid" href="https://www.youtube.com/watch?v=U7x3dkQ9mBg" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/oracle-simphony-v0.jpg" alt="Oracle MICROS Simphony demo" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Oracle MICROS Simphony demo</span></a><a class="vid" href="https://www.youtube.com/watch?v=Co1K9TSZ5YI" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/oracle-simphony-v1.jpg" alt="InMotion mobile app (analytics on the go)" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">InMotion mobile app (analytics on the go)</span></a><a class="vid" href="https://www.youtube.com/watch?v=F_X-YkjLq4c" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/oracle-simphony-v2.jpg" alt="Real-time data anywhere (Simphony Cloud)" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Real-time data anywhere (Simphony Cloud)</span></a><a class="btn" href="https://www.youtube.com/playlist?list=PLMheYmAD_UCHDPYph8WRR4lssn2eY_IbZ" target="_blank" rel="noopener">📺 Simphony tutorials playlist</a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="urbanpiper" data-cat="aggregator" data-name="urbanpiper (atlas)">
+  <div class="card-head">
+    <h2>UrbanPiper (Atlas)</h2>
+    <span class="badge aggregator">Aggregator panel</span>
+    <span class="tag">Aggregator middleware</span>
+  </div>
+  <p class="pos">Middleware between restaurants and delivery aggregators — syncs menus, centralizes orders, unified analytics (&#x27;Atlas&#x27;).</p>
+  <div class="meta"><span><b>Market:</b> India, MENA, UK, US. 27,000+ restaurants, 9M+ transactions/month. Both Zomato AND Swiggy are investors.</span><span><b>Pricing:</b> Per-location/month subscription, not public (demo/sales-only). Lower add-on for ghost-kitchen &#x27;Virtual Businesses&#x27;.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Command Center: Avg Revenue/Day, Avg Order Value, Completed Orders, Lost Orders (+ Lost Revenue Breakdown), Restaurant Health Index</li>
+<li>Platform/Channel split pie across Zomato/Swiggy/Uber Eats/others</li>
+<li>Brand-wise performance; sortable Location Performance table w/ custom columns</li>
+<li>Revenue breakdown stacked chart: Taxes / Charges / Discounts / Net Revenue</li>
+<li>Customer Analytics: New vs Repeat vs Lapsed, acquisition trend</li>
+<li>Heatmaps: store-availability (offline periods) + order-frequency by hour/day</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Order Transactions Report (per-order: Brand, Channel, Store, State, Totals, Aggregator vs Merchant Discount, Taxes, Payment Mode, Customer)</li>
+<li>Item-wise + Option-wise (modifier-level) transactions</li>
+<li>Items Summary across all locations; Order Status Transitions (time in each state)</li>
+<li>Central Report (cross-brand/location)</li>
+<li>★ Online Order Reconciliation — aggregator payout vs UrbanPiper sales; flags Complete/Missing/Inconsistent + tracks resolution</li>
+<li>Revenue + Customer Analytics; export PNG/CSV, share via permalink/email</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>★ Aggregator payout reconciliation — the only dedicated tool of its kind in India</li>
+<li>Multi-brand / cloud-kitchen virtual businesses; 99.99% uptime SLA</li>
+<li>Swiggy Bolt / Zomato Express fast-order KOT tagging; KDS 2.0</li>
+<li>Orderline AI phone-order answering; receipt QR codes for direct ordering</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/urbanpiper-s0.png" data-remote="https://cdn.prod.website-files.com/62aae3a2134cd27204efacc7/661833809e53675fc0be803d_uHBrSKoqLxFMnN_Xln0AOjJJq_MsUy__hsOm01IXA7jRqoKDhSjmNIbOjcw2g_biRo1OPMixcaVHCs0IMqaBplqE31QxLX-TKs2PQh5jL1ZtB4YQxWhjwMIDdtSLrIURYdIjr3m5A82Wt7AVr8otEiY.png" alt="Atlas Home tab (command center)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Atlas Home tab (command center) · <a href="https://cdn.prod.website-files.com/62aae3a2134cd27204efacc7/661833809e53675fc0be803d_uHBrSKoqLxFMnN_Xln0AOjJJq_MsUy__hsOm01IXA7jRqoKDhSjmNIbOjcw2g_biRo1OPMixcaVHCs0IMqaBplqE31QxLX-TKs2PQh5jL1ZtB4YQxWhjwMIDdtSLrIURYdIjr3m5A82Wt7AVr8otEiY.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/urbanpiper-s1.png" data-remote="https://cdn.prod.website-files.com/62aae3a2134cd27204efacc7/66183380cfc69f7cfeb12703_GBI69YI1pWSXuIP4Jm9LUe3tguNoI1OULFD_dcS-8Rzs8wTo4NytQMsTVXyIL2qnFPokxJ-zN1BjnIdaHuk-AkME7E4YN4gyTtPYRM3HYurfswFBVPIURtaBEJfjOsedA4_1n9zhwVW5Liw0CQZo3Pk.png" alt="KPI dashboard (Avg Revenue, Completed/Lost)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>KPI dashboard (Avg Revenue, Completed/Lost) · <a href="https://cdn.prod.website-files.com/62aae3a2134cd27204efacc7/66183380cfc69f7cfeb12703_GBI69YI1pWSXuIP4Jm9LUe3tguNoI1OULFD_dcS-8Rzs8wTo4NytQMsTVXyIL2qnFPokxJ-zN1BjnIdaHuk-AkME7E4YN4gyTtPYRM3HYurfswFBVPIURtaBEJfjOsedA4_1n9zhwVW5Liw0CQZo3Pk.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="https://cdn.prod.website-files.com/62aae3a2134cd27204efacc7/66183380eb3597ccb2938640_BBXF3bv-GqQYY_NwXvZLjs1kgnKNWaYl8AFqLv_lr_XOy4gyNa5XHTMdh7ZoSLwYwx8cNlwGs3AUnbkO8co9ZPZD7B9b5JH4PVwCaFEKww9AP3Z_Pj9gkcoJzG9dLT_jovHCNUNaCLmpo8fodXNGDY.png" alt="Heatmap (offline periods + order peaks)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Heatmap (offline periods + order peaks) · <a href="https://cdn.prod.website-files.com/62aae3a2134cd27204efacc7/66183380eb3597ccb2938640_BBXF3bv-GqQYY_NwXvZLjs1kgnKNWaYl8AFqLv_lr_XOy4gyNa5XHTMdh7ZoSLwYwx8cNlwGs3AUnbkO8co9ZPZD7B9b5JH4PVwCaFEKww9AP3Z_Pj9gkcoJzG9dLT_jovHCNUNaCLmpo8fodXNGDY.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="https://cdn.prod.website-files.com/62aae3a2134cd27204efacc7/6618338004e93a8b465fc0a2_QhiaENhXA_6wltmQsVvk3hc-XaOq7XpTyo4VWWnURUG5HDfnlijBx-1EMdbDQAI6bnFOWHEL3Ufi7BbSdvY5-j-OdkLjDoSb7jfgYSxH22VCoRsLyWGtfNudzZ4G_J5U9lQwaRYQmRxGZbYn1mc.png" alt="Pie + bar (platform/brand split, Lost Revenue)" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Pie + bar (platform/brand split, Lost Revenue) · <a href="https://cdn.prod.website-files.com/62aae3a2134cd27204efacc7/6618338004e93a8b465fc0a2_QhiaENhXA_6wltmQsVvk3hc-XaOq7XpTyo4VWWnURUG5HDfnlijBx-1EMdbDQAI6bnFOWHEL3Ufi7BbSdvY5-j-OdkLjDoSb7jfgYSxH22VCoRsLyWGtfNudzZ4G_J5U9lQwaRYQmRxGZbYn1mc.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/urbanpiper-s4.png" data-remote="https://cdn.prod.website-files.com/62aae3a2134cd27204efacc7/62b31711c2f039742562dc24_Screenshot-2021-09-15-at-3.31.45-PM-1.png" alt="Business performance analytics" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Business performance analytics · <a href="https://cdn.prod.website-files.com/62aae3a2134cd27204efacc7/62b31711c2f039742562dc24_Screenshot-2021-09-15-at-3.31.45-PM-1.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/urbanpiper-s5.webp" data-remote="https://cdn.prod.website-files.com/62458251a5559067512bba0b/625408ec19f2e9dc6a25663a_Group%20386.webp" alt="Hub main dashboard overview" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Hub main dashboard overview · <a href="https://cdn.prod.website-files.com/62458251a5559067512bba0b/625408ec19f2e9dc6a25663a_Group%20386.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="vid" href="https://www.youtube.com/watch?v=s3iRA09Psuk" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/urbanpiper-v0.jpg" alt="Upgraded analytics module walkthrough" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Upgraded analytics module walkthrough</span></a><a class="vid" href="https://www.youtube.com/watch?v=ilZyI-VUgJ4" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/urbanpiper-v1.jpg" alt="Hub explainer" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Hub explainer</span></a><a class="vid" href="https://www.youtube.com/watch?v=E-2EcIqyQuI" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/urbanpiper-v2.jpg" alt="Prime POS explainer" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Prime POS explainer</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="zomato" data-cat="aggregator" data-name="zomato partner">
+  <div class="card-head">
+    <h2>Zomato Partner</h2>
+    <span class="badge aggregator">Aggregator panel</span>
+    <span class="tag">Aggregator owner app (India)</span>
+  </div>
+  <p class="pos">Free full-stack control panel (two apps + web) — live orders, menu/stock, analytics, ads/offers, reviews, payouts in one place.</p>
+  <div class="meta"><span><b>Market:</b> Indian restaurant partners on Zomato (delivery + dine-in). Restaurant Partner app 4.8★.</span><span><b>Pricing:</b> Free app/portal; revenue via ~15–25% commission + ads/promotions spend.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Live orders feed (accept → kitchen → pickup); Rush Hour toggle auto-extends prep times</li>
+<li>Business Insights: delivered orders, net sales, AOV, bad orders (cancelled), customer funnel, ad performance, payouts</li>
+<li>Menu/Inventory: in/out-of-stock per item + variant, category timings (time-gated menus)</li>
+<li>Reviews: real-time replies + AI Reviews Summarizer; sentiment &amp; complaint-category breakdown</li>
+<li>Owner&#x27;s Hub finance: one-tap payouts, switchable daily/weekly, settlement w/ bank UTR</li>
+<li>Ads &amp; Offers: 8 formats; impressions, CTR, CPC, CPA, conversions, ROAS, GMV, ROI</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Daily performance/trends; order analytics (hourly + daily demand, peak-hour)</li>
+<li>Dish-level (bestsellers / underperformers / trends)</li>
+<li>Customer analytics (funnel, frequency/spend, retention/churn)</li>
+<li>Marketing (ROAS/GMV); review analytics (sentiment, complaint categories)</li>
+<li>Finance (settlement history, order-level payout, monthly export)</li>
+<li>Separate free Zomato Food Trends tool (demand-supply gap by locality)</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>AI Reviews Summarizer; Rush Hour prep-time lever; category timings</li>
+<li>Flexible daily (3-day lag) / weekly payouts; Owner&#x27;s Hub one-tap finance</li>
+<li>Advance staff-leave scheduling; multi-outlet single login</li>
+<li>Restaurant Services Hub (hiring/FSSAI/GST/trademark); free Food Trends data platform</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <p class="nogallery">Native screenshots don't hotlink for this app — see the demo videos below, which show the actual owner screens.</p>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="vid" href="https://www.youtube.com/watch?v=R3FC5J5933g" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/zomato-v0.jpg" alt="Dashboard / menu tool" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Dashboard / menu tool</span></a><a class="vid" href="https://www.youtube.com/watch?v=DKa5OaQz5qI" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/zomato-v1.jpg" alt="Business Insights analytics screen" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Business Insights analytics screen</span></a><a class="vid" href="https://www.youtube.com/watch?v=XztYS-Xg_h4" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/zomato-v2.jpg" alt="How to use the Partner App" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">How to use the Partner App</span></a><a class="vid" href="https://www.youtube.com/watch?v=6eETUpAiXyo" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/zomato-v3.jpg" alt="Update menu live" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Update menu live</span></a><a class="vid" href="https://www.youtube.com/watch?v=2btTyHXl-pU" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/zomato-v4.jpg" alt="Create offers &amp; discounts" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Create offers &amp; discounts</span></a><a class="btn" href="https://www.youtube.com/playlist?list=PLQO9UcGeB3ASwLSD4WVoqIDh2RY1qpgFO" target="_blank" rel="noopener">📺 Partner App features playlist</a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+<section class="card" id="swiggy" data-cat="aggregator" data-name="swiggy partner">
+  <div class="card-head">
+    <h2>Swiggy Partner</h2>
+    <span class="badge aggregator">Aggregator panel</span>
+    <span class="tag">Aggregator owner app (India)</span>
+  </div>
+  <p class="pos">&#x27;Swiggy Owner&#x27; — all-in-one control panel: delivery orders, menu, ads &amp; discounts, real-time revenue, benchmark vs market peers.</p>
+  <div class="meta"><span><b>Market:</b> Indian restaurant partners on Swiggy; 300,000+ partners, 600+ cities.</span><span><b>Pricing:</b> Free app/portal; revenue via ~15–30% commission + ~2% collection fee + ads/discount spend.</span></div>
+  <div class="cols">
+    <div class="col"><h3>📊 Owner dashboard shows</h3><ul><li>Home / All Outlets: summary (&#x27;2 Cities · 3 outlets · 1 offline&#x27;), Sales/Feedback/Customers sub-tabs, quick-action grid</li>
+<li>Live Orders (multi-outlet): Preparing → Ready → Picked up tabs w/ count badges + &#x27;Mark Ready in 10:32&#x27; countdown</li>
+<li>Menu Management: Items/Add-ons, per-item photo (red + flags missing image), price, availability toggle</li>
+<li>Business Details: Total Sales w/ +25% vs yesterday arrows, Cancelled Orders Loss in ₹, conversion funnel</li>
+<li>Menu Score Tool: 0–100 gauge, area benchmark, Orders/Day, AOV, Menu-to-Cart conversion (M2C)</li></ul></div>
+    <div class="col"><h3>📑 Reports</h3><ul><li>Daily/weekly/monthly sales, orders w/ % change, cancelled count + ₹ lost, per-outlet revenue</li>
+<li>★ Market Intelligence Dashboard: Overview score, Business + Operational Metrics, Funnel Metrics (impressions→cart→order), Spend Metrics (ad+discount ROI vs peers) — 30+ benchmarked metrics</li>
+<li>Menu Score Tool (brand + outlet, sub-scores, area benchmarking)</li>
+<li>Network Expansion Insights (ranks expansion zones by demand-supply gap)</li></ul></div>
+    <div class="col"><h3>✨ Standout features</h3><ul><li>Cancellation revenue (₹) surfaced on home screen (not just count)</li>
+<li>Competitor benchmarking; Menu-to-Cart (M2C) as headline metric</li>
+<li>Growth Buddy — AI prescriptive suggestions; Spend-ROI-vs-peers tab</li>
+<li>In-app Learning Station academy; weekly payouts</li></ul></div>
+  </div>
+  <h3 class="sec">🖼️ Screenshots</h3>
+  <div class="gallery"><figure class="shot"><img loading="lazy" src="assets/swiggy-s0.webp" data-remote="https://cdn.soft112.com/bundl-partners-app/00/00/0G/6H/00000G6H87/pad_screenshot_P2W5H2V6L9.webp" alt="Home / All Outlets" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Home / All Outlets · <a href="https://cdn.soft112.com/bundl-partners-app/00/00/0G/6H/00000G6H87/pad_screenshot_P2W5H2V6L9.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/swiggy-s1.webp" data-remote="https://cdn.soft112.com/bundl-partners-app/00/00/0G/6H/00000G6H87/pad_screenshot_1J5Q2E1E2K.webp" alt="Live Orders feed" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Live Orders feed · <a href="https://cdn.soft112.com/bundl-partners-app/00/00/0G/6H/00000G6H87/pad_screenshot_1J5Q2E1E2K.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/swiggy-s2.webp" data-remote="https://cdn.soft112.com/bundl-partners-app/00/00/0G/6H/00000G6H87/pad_screenshot_L3G5R7W2M7.webp" alt="Menu Management" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Menu Management · <a href="https://cdn.soft112.com/bundl-partners-app/00/00/0G/6H/00000G6H87/pad_screenshot_L3G5R7W2M7.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/swiggy-s3.webp" data-remote="https://cdn.soft112.com/bundl-partners-app/00/00/0G/6H/00000G6H87/pad_screenshot_D6T8U2F5N5.webp" alt="Business Details" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Business Details · <a href="https://cdn.soft112.com/bundl-partners-app/00/00/0G/6H/00000G6H87/pad_screenshot_D6T8U2F5N5.webp" target="_blank" rel="noopener">source ↗</a></figcaption></figure><figure class="shot"><img loading="lazy" src="assets/swiggy-s4.png" data-remote="https://pimwp.s3-accelerate.amazonaws.com/2023/08/image001-3-1.png" alt="Menu Score Tool web dashboard" onclick="zoom(this)" onerror="imgErr(this)"><figcaption>Menu Score Tool web dashboard · <a href="https://pimwp.s3-accelerate.amazonaws.com/2023/08/image001-3-1.png" target="_blank" rel="noopener">source ↗</a></figcaption></figure></div>
+  <h3 class="sec">▶️ Demos & walkthroughs</h3>
+  <div class="videos"><a class="vid" href="https://www.youtube.com/watch?v=NrnOaFcia0M" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/swiggy-v0.jpg" alt="Complete Partner App guide (~15 min)" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Complete Partner App guide (~15 min)</span></a><a class="vid" href="https://www.youtube.com/watch?v=YjU4nViwvzA" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/swiggy-v1.jpg" alt="Official &#x27;All New Swiggy Owner App&#x27;" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Official &#x27;All New Swiggy Owner App&#x27;</span></a><a class="vid" href="https://www.youtube.com/watch?v=kO8bBFVTCJ0" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/swiggy-v2.jpg" alt="Download + login walkthrough" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Download + login walkthrough</span></a><a class="vid" href="https://www.youtube.com/watch?v=anQDN7YKKqQ" target="_blank" rel="noopener"><span class="vthumb"><img loading="lazy" src="assets/swiggy-v3.jpg" alt="Growth Buddy" onerror="imgErr(this)"><span class="play">▶</span></span><span class="vlabel">Growth Buddy</span></a></div>
+  <a class="top" href="#top">↑ back to top</a>
+</section>
+</div>
+<footer>
+  <p><b>Research reference</b> · compiled 2026-06-25 · 180 screenshots/thumbnails saved locally in <code>./assets</code>, with live-source links as fallback. Keep this folder together (the HTML + the assets folder) when moving it.</p>
+  <p>All images and trademarks belong to their respective owners (PetPooja, Toast, Square, Lightspeed, Oracle, Zomato, Swiggy, etc.). This is a private internal reference gathered from public marketing pages, official support docs, app-store listings and review sites for design inspiration only — it is not published or deployed.</p>
+</footer>
+<div id="lb" onclick="this.style.display='none'"><img id="lbimg" src="" alt=""></div>
+<script>
+function filt(btn,c){
+  document.querySelectorAll('.filters button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.card').forEach(card=>{
+    card.style.display = (c==='all'||card.dataset.cat===c) ? '' : 'none';
+  });
+  document.getElementById('q').value='';
+}
+function search(v){
+  v=v.trim().toLowerCase();
+  document.querySelectorAll('.card').forEach(card=>{
+    card.style.display = card.dataset.name.includes(v) ? '' : 'none';
+  });
+}
+function zoom(img){
+  var lb=document.getElementById('lb'), li=document.getElementById('lbimg');
+  li.src = img.dataset.remote && img.naturalWidth<10 ? img.dataset.remote : img.src;
+  li.src = img.src; lb.style.display='flex';
+}
+function imgErr(img){
+  // try remote hotlink once, then show a graceful 'view at source' box
+  if(img.dataset.remote && !img.dataset.tried){ img.dataset.tried=1; img.src=img.dataset.remote; return; }
+  var box=document.createElement('div'); box.className='imgfail';
+  var fig=img.closest('figure'), a=fig?fig.querySelector('a'):null;
+  box.innerHTML = a ? ('⚠ image moved · <a href="'+a.href+'" target="_blank">view at source ↗</a>') : '⚠ image unavailable';
+  img.replaceWith(box);
+}
+</script>
+</body></html>
