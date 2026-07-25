@@ -165,6 +165,18 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading }: {
   );
 }
 
+// "updated X ago" for the cached-snapshot timestamp (mig 196). Coarse on purpose — only
+// roughly how stale the numbers are matters, not the exact second.
+function timeAgo(iso: string): string {
+  const s = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
+  if (s < 45) return "just now";
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} hr ago`;
+  return `${Math.round(h / 24)} d ago`;
+}
+
 export default function OwnerDashboard() {
   const [view, setView] = useState<View>({ level: "home" });
   const [range, setRange] = useState<Range>("today");
@@ -172,6 +184,7 @@ export default function OwnerDashboard() {
   const [group, setGroup] = useState<GroupA | null>(null);
   const [rest, setRest] = useState<RestA | null>(null);
   const [money, setMoney] = useState<MoneyTotals | null>(null); // discounts + lost business tiles
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null); // when the cached snapshot was computed (mig 196)
   const [err, setErr] = useState<string | null>(null);
   const [dishSort, setDishSort] = useState<"revenue" | "qty">("revenue");
   // If an ADMIN opened this cockpit for a specific restaurant, the URL carries
@@ -212,7 +225,7 @@ export default function OwnerDashboard() {
   // any response that lands after a newer one started — so a slow earlier fetch can't
   // overwrite the range you just switched to (owner audit 2026-07-06).
   const loadSeq = useRef(0);
-  const load = useCallback(async (opts?: { withRecords?: boolean }) => {
+  const load = useCallback(async (opts?: { withRecords?: boolean; refresh?: boolean }) => {
     const myGen = ++loadSeq.current;
     const fresh = () => myGen === loadSeq.current;
     try {
@@ -222,13 +235,17 @@ export default function OwnerDashboard() {
       // manual refresh — NOT on the 60s auto-refresh, which keeps the last records value
       // (audit 2026-07-07). The flag rides on the restaurant-scope analytics calls only.
       const recQ = opts?.withRecords ? "&records=1" : "";
+      // Refresh button (or first load) forces a live recompute of the compute-on-view cache
+      // (mig 196); a normal auto-refresh serves the instant cached snapshot. `updatedAt`
+      // tracks when the snapshot was computed so the bar can say "updated X ago".
+      const refQ = opts?.refresh ? "&refresh=1" : "";
       // The tab's scope pin (admin-in-one-restaurant) rides on EVERY call so the
       // shared act-as cookie can't hijack this tab (C1). Null for a real owner.
       const scp = scopePin ? `&scope=${scopePin}` : "";
       // range=all now maps to an unbounded reports window (mig M11) — pass it through so the
       // money tiles cover the same span as the all-time revenue KPIs (was collapsed to 12m).
       const moneyUrl = (rid: string | null) =>
-        `/api/owner/reports?type=sales&range=${rg}${rid ? `&rid=${rid}` : ""}${scp}`;
+        `/api/owner/reports?type=sales&range=${rg}${rid ? `&rid=${rid}` : ""}${scp}${refQ}`;
       if (view.level === "home") {
         const o: Overview = await fetchOwnerOverview(scp) as Overview;
         if ((o as unknown as { error?: string }).error) throw new Error((o as unknown as { error: string }).error);
@@ -237,30 +254,33 @@ export default function OwnerDashboard() {
         if (o.restaurants.length === 1) {
           const rid = o.restaurants[0].id;
           const [a, m] = await Promise.all([
-            fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}`, { cache: "no-store" }).then(j),
+            fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then(j),
             fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
           ]);
           if (a.error) throw new Error(a.error);
           if (!fresh()) return;
           setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null })); setMoney(m.error ? null : m.totals); setGroup(null);
+          setUpdatedAt(m.cachedAt || a.cachedAt || null);
         } else {
           const [g, m] = await Promise.all([
-            fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}`, { cache: "no-store" }).then(j),
+            fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}${refQ}`, { cache: "no-store" }).then(j),
             fetch(moneyUrl(null), { cache: "no-store" }).then(j),
           ]);
           if (g.error) throw new Error(g.error);
           if (!fresh()) return;
           setGroup(g); setMoney(m.error ? null : m.totals); setRest(null);
+          setUpdatedAt(m.cachedAt || g.cachedAt || null);
         }
       } else {
         const rid = (view as { rid: string }).rid;
         const [a, m] = await Promise.all([
-          fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}`, { cache: "no-store" }).then(j),
+          fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then(j),
           fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
         ]);
         if (a.error) throw new Error(a.error);
         if (!fresh()) return;
         setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null })); setMoney(m.error ? null : m.totals);
+        setUpdatedAt(m.cachedAt || a.cachedAt || null);
       }
       if (fresh()) setErr(null);
       // The owner panel has NO realtime socket — it polls. So IT drives the connection
@@ -294,7 +314,7 @@ export default function OwnerDashboard() {
   const manualRefresh = () => {
     setRefreshing(true);
     const started = Date.now();
-    Promise.resolve(loadRef.current({ withRecords: true })).finally(() => {
+    Promise.resolve(loadRef.current({ withRecords: true, refresh: true })).finally(() => {
       const wait = Math.max(0, 400 - (Date.now() - started));
       setTimeout(() => setRefreshing(false), wait);
     });
@@ -439,9 +459,12 @@ export default function OwnerDashboard() {
         </div>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
           <RangeSlider items={RANGES} value={range} onChange={setRange} caption={rangeSpanText(range)} />
-          <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now (auto-updates are throttled to save load)" style={{ marginTop: 2 }}>
-            <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, marginTop: 2 }}>
+            <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now — recomputes the live numbers (normal views show a stored snapshot to stay instant)">
+              <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
+            </button>
+            {updatedAt && !refreshing && <span style={{ fontSize: 10.5, color: "var(--muted)" }}>updated {timeAgo(updatedAt)}</span>}
+          </div>
         </div>
       </div>
 
