@@ -32,6 +32,51 @@ function fitDomain(values: number[]): [number, number] {
   return [Math.max(0, min - pad), max + pad];
 }
 
+// ── Dynamic-chart rule (owner, 2026-07-25) ───────────────────────────────────
+// A lonely 1-bar chart floating in an empty plot reads as broken. So EVERY
+// time-series chart here obeys one shared rule (see dataviz skill · "a single value
+// is a stat tile, not a one-bar chart"):
+//   · < 2 points with real activity → DON'T draw a chart; show the NotEnough card
+//     (the single value is still surfaced as a number, never lost).
+//   · many buckets → the plot SCROLLS horizontally (ScrollX) so bars keep a
+//     comfortable width instead of squeezing into threads; it fills the card with
+//     no scrollbar whenever the natural width already fits.
+// New time charts added later MUST route through populated()/NotEnough/ScrollX.
+const MIN_POINTS = 2;
+/** How many buckets carry real activity (a zero bucket is not a data point). */
+const populated = (values: number[]) => values.filter((v) => (Number(v) || 0) > 0).length;
+/** The one non-zero value, when there's exactly one — surfaced in NotEnough. */
+const soleValue = (values: number[]) => values.find((v) => (Number(v) || 0) > 0) ?? 0;
+
+/** Horizontal-scroll frame. Bars keep ≥`per`px each; past what fits, the plot
+ *  scrolls. `width: max(100%, …)` means it fills the card (no scrollbar) whenever
+ *  the natural width already fits — so normal 7/30-day charts are unchanged. */
+function ScrollX({ count, per = 24, height, children }: { count: number; per?: number; height: number; children: React.ReactNode }) {
+  return (
+    <div className="owx-scrollx" style={{ width: "100%", overflowX: "auto", overflowY: "hidden" }}>
+      <div style={{ width: `max(100%, ${Math.round(count * per)}px)`, height }}>{children}</div>
+    </div>
+  );
+}
+
+/** Shown instead of a sad 1-bar chart. Keeps the single value visible as a stat. */
+function NotEnough({ height = 200, value, hint }: { height?: number; value?: string; hint?: string }) {
+  return (
+    <div style={{ minHeight: height, display: "grid", placeItems: "center", textAlign: "center", padding: 18 }}>
+      <div>
+        <div style={{ fontSize: 24, marginBottom: 8, opacity: 0.4 }}><i className="fas fa-chart-column" aria-hidden="true" /></div>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Not enough data yet</div>
+        {value != null && (
+          <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.3, margin: "6px 0 2px", fontVariantNumeric: "tabular-nums" }}>{value}</div>
+        )}
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, maxWidth: 280, marginInline: "auto", lineHeight: 1.45 }}>
+          {hint || "A trend needs activity on more than one point in this period — come back once there’s a bit more."}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TipBox({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ background: "var(--card)", border: "1px solid var(--border-c, rgba(128,128,128,.3))", borderRadius: 10, padding: "8px 10px", fontSize: 12, boxShadow: "0 6px 20px rgba(0,0,0,.25)" }}>
@@ -121,10 +166,11 @@ const cssId = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_");
 
 // ── TimeBar — revenue per bucket for ONE scope (bars, zero-based, fitted top) ─
 export function TimeBar({ data, color, height = 240 }: { data: { label: string; revenue: number }[]; color: string; height?: number }) {
-  if (!data.length) return <Empty />;
-  const max = Math.max(1, ...data.map((d) => d.revenue));
+  const values = data.map((d) => d.revenue);
+  if (populated(values) < MIN_POINTS) return <NotEnough height={height} value={populated(values) === 1 ? inr(soleValue(values)) : undefined} />;
+  const max = Math.max(1, ...values);
   return (
-    <div style={{ width: "100%", height }}>
+    <ScrollX count={data.length} height={height}>
       <ResponsiveContainer>
         <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
@@ -134,7 +180,7 @@ export function TimeBar({ data, color, height = 240 }: { data: { label: string; 
           <Bar dataKey="revenue" name="Revenue" fill={color} radius={[5, 5, 0, 0]} maxBarSize={42} />
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </ScrollX>
   );
 }
 
@@ -143,8 +189,12 @@ export type RevDatum = { id: string; name: string; revenue: number; orders: numb
 export function LeaderBar({ data, onSelect }: { data: RevDatum[]; onSelect?: (id: string) => void }) {
   if (!data.length) return <Empty />;
   const max = Math.max(1, ...data.map((d) => d.revenue));
+  // Ranking bars: comfortable row height, but past ~8 rows the card would grow
+  // unbounded — cap the visible height and scroll instead of stretching the page.
+  const rowH = 42, visible = Math.min(data.length, 8);
   return (
-    <div style={{ width: "100%", height: Math.max(140, data.length * 42) }}>
+    <div style={{ width: "100%", maxHeight: visible * rowH + 20, overflowY: data.length > 8 ? "auto" : "visible" }}>
+     <div style={{ width: "100%", height: Math.max(140, data.length * rowH) }}>
       <ResponsiveContainer>
         <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
           <CartesianGrid horizontal={false} stroke={GRID} />
@@ -157,6 +207,7 @@ export function LeaderBar({ data, onSelect }: { data: RevDatum[]; onSelect?: (id
           </Bar>
         </BarChart>
       </ResponsiveContainer>
+     </div>
     </div>
   );
 }
@@ -194,10 +245,11 @@ export function HourlyBar({ data, color }: { data: { hour: number; orders: numbe
 export function CountBar({ data, color, name = "Orders", height = 220 }: {
   data: { label: string; value: number }[]; color: string; name?: string; height?: number;
 }) {
-  if (!data.length) return <Empty />;
-  const max = Math.max(1, ...data.map((d) => d.value));
+  const values = data.map((d) => d.value);
+  if (populated(values) < MIN_POINTS) return <NotEnough height={height} value={populated(values) === 1 ? String(Math.round(soleValue(values))) : undefined} />;
+  const max = Math.max(1, ...values);
   return (
-    <div style={{ width: "100%", height }}>
+    <ScrollX count={data.length} height={height}>
       <ResponsiveContainer>
         <BarChart data={data} margin={{ left: 0, right: 12, top: 6, bottom: 4 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
@@ -207,7 +259,7 @@ export function CountBar({ data, color, name = "Orders", height = 220 }: {
           <Bar dataKey="value" name={name} fill={color} radius={[5, 5, 0, 0]} maxBarSize={46} />
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </ScrollX>
   );
 }
 
@@ -328,9 +380,9 @@ export function PayTrendStack({ data }: { data: { day: string; method: string; r
   }
   const rows = [...byDay.values()].sort((a, b) => String(a.day).localeCompare(String(b.day)))
     .map((r) => ({ ...r, label: new Date(String(r.day)).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" }) }));
-  if (!rows.length || !methods.length) return <Empty />;
+  if (!methods.length || rows.length < MIN_POINTS) return <NotEnough height={200} />;
   return (
-    <div style={{ width: "100%", height: 200 }}>
+    <ScrollX count={rows.length} height={200}>
       <ResponsiveContainer>
         <BarChart data={rows} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
@@ -343,7 +395,7 @@ export function PayTrendStack({ data }: { data: { day: string; method: string; r
           ))}
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </ScrollX>
   );
 }
 
@@ -394,20 +446,25 @@ export function ToggleChart({ data, color, money = true, height = 240, name, tit
   const [mode, setMode] = useState<"bar" | "line">(defaultMode);
   const label = name || (money ? "Revenue" : "Orders");
   const fmt = money ? compact : (v: number) => Math.round(v).toString();
-  const max = Math.max(1, ...data.map((d) => d.value));
   const values = data.map((d) => d.value);
+  const max = Math.max(1, ...values);
+  const enough = populated(values) >= MIN_POINTS;
   const gid = "own-tg-" + cssId(label);
   return (
     <div>
       <div className="rs-tc-head">
         <span className="rs-tc-title">{title || ""}</span>
-        <div className="rs-tc-toggle" role="tablist" aria-label="Chart type">
-          <button role="tab" aria-selected={mode === "bar"} className={mode === "bar" ? "on" : ""} onClick={() => setMode("bar")}>Bar</button>
-          <button role="tab" aria-selected={mode === "line"} className={mode === "line" ? "on" : ""} onClick={() => setMode("line")}>Line</button>
-        </div>
+        {enough && (
+          <div className="rs-tc-toggle" role="tablist" aria-label="Chart type">
+            <button role="tab" aria-selected={mode === "bar"} className={mode === "bar" ? "on" : ""} onClick={() => setMode("bar")}>Bar</button>
+            <button role="tab" aria-selected={mode === "line"} className={mode === "line" ? "on" : ""} onClick={() => setMode("line")}>Line</button>
+          </div>
+        )}
       </div>
-      {!data.length ? <Empty /> : (
-        <div style={{ width: "100%", height }}>
+      {!enough ? (
+        <NotEnough height={height} value={populated(values) === 1 ? (money ? inr(soleValue(values)) : String(Math.round(soleValue(values)))) : undefined} />
+      ) : (
+        <ScrollX count={data.length} height={height}>
           <ResponsiveContainer>
             {mode === "bar" ? (
               <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
@@ -428,7 +485,7 @@ export function ToggleChart({ data, color, money = true, height = 240, name, tit
               </AreaChart>
             )}
           </ResponsiveContainer>
-        </div>
+        </ScrollX>
       )}
     </div>
   );

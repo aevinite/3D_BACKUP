@@ -172,32 +172,54 @@ export async function GET(req: NextRequest) {
     // The "daysummary" report reads the SAME money payload and additionally bundles the
     // payment-mode settlement (one extra RPC per restaurant) so the day sheet is one round-trip.
     if (type === "sales" || type === "tax" || type === "discounts" || type === "cancellations" || type === "daysummary") {
-      const res = await sb.rpc("lfh_owner_sales_report", {
-        p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: bucket,
-      });
-      if (res.error) throw res.error;
-      // all-restaurants for a scoped owner: the RPC can't filter by ownership, so
-      // sum each owned restaurant separately and merge the tiny bucket rows.
-      let raw = (res.data ?? []) as Row[];
-      if (!rid && !scope.all) {
-        const per = await mapLimit(scope.ids, 8, (id) =>
-          sb.rpc("lfh_owner_sales_report", { p_restaurant_id: id, p_from: from, p_to: to, p_bucket: bucket }));
-        // Degrade gracefully: ONE restaurant's RPC failing must not blank the WHOLE
-        // all-restaurants report — keep the healthy restaurants, only surface an error
-        // when EVERY restaurant failed (audit 2026-07-09).
-        const okData = per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]);
-        if (!okData.length && per.length) throw per.find((p) => p.error)?.error || new Error("Report failed");
-        raw = mergeBy(okData, "bucket",
-          ["orders", "paid_orders", "subtotal", "tax", "discount", "revenue", "cancelled_orders", "cancelled_value"]);
-        raw.sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)));
+      // One bucketed fetch — reused for the main window AND for the sparse auto-drill
+      // (below), so both go through the identical scope/merge/mapping path.
+      const salesRows = async (f: string, t: string, bkt: string) => {
+        const res = await sb.rpc("lfh_owner_sales_report", { p_restaurant_id: rid, p_from: f, p_to: t, p_bucket: bkt });
+        if (res.error) throw res.error;
+        // all-restaurants for a scoped owner: the RPC can't filter by ownership, so
+        // sum each owned restaurant separately and merge the tiny bucket rows.
+        let raw = (res.data ?? []) as Row[];
+        if (!rid && !scope.all) {
+          const per = await mapLimit(scope.ids, 8, (id) =>
+            sb.rpc("lfh_owner_sales_report", { p_restaurant_id: id, p_from: f, p_to: t, p_bucket: bkt }));
+          // Degrade gracefully: ONE restaurant's RPC failing must not blank the WHOLE
+          // all-restaurants report — keep the healthy restaurants, only surface an error
+          // when EVERY restaurant failed (audit 2026-07-09).
+          const okData = per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]);
+          if (!okData.length && per.length) throw per.find((p) => p.error)?.error || new Error("Report failed");
+          raw = mergeBy(okData, "bucket",
+            ["orders", "paid_orders", "subtotal", "tax", "discount", "revenue", "cancelled_orders", "cancelled_value"]);
+          raw.sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)));
+        }
+        return raw.map((r) => ({
+          bucket: r.bucket,
+          orders: Number(r.orders) || 0,
+          paidOrders: Number(r.paid_orders) || 0,
+          subtotal: num(r.subtotal), tax: num(r.tax), discount: num(r.discount), revenue: num(r.revenue),
+          cancelledOrders: Number(r.cancelled_orders) || 0, cancelledValue: num(r.cancelled_value),
+        }));
+      };
+      const rows = await salesRows(from, to, bucket);
+
+      // ── Auto-drill sparse timelines (owner 2026-07-25) ──────────────────────
+      // When the whole period had activity on ONLY ONE day/month, a single bar in a
+      // wide plot reads as broken. Re-fetch that one bucket at a finer grain (day→hour,
+      // month→day) and hand the chart the fuller series via drillRows. The daily `rows`
+      // (and the GST-style table built from them) are left untouched.
+      let drillBucket: string | undefined, drillRows: typeof rows | undefined;
+      if (rows.length === 1 && (bucket === "day" || bucket === "month")) {
+        const b0 = new Date(String(rows[0].bucket));
+        const finer = bucket === "day" ? "hour" : "day";
+        // next bucket boundary in IST (fixed +5:30, no DST → a day is exactly 24h).
+        const next = bucket === "day"
+          ? new Date(b0.getTime() + DAY)
+          : (() => { const d = new Date(b0.getTime() + 5.5 * 3600_000); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - 5.5 * 3600_000); })();
+        try {
+          const drilled = await salesRows(b0.toISOString(), next.toISOString(), finer);
+          if (drilled.length >= 2) { drillRows = drilled; drillBucket = finer; }
+        } catch { /* drill is best-effort; fall back to the single-bucket message */ }
       }
-      const rows = raw.map((r) => ({
-        bucket: r.bucket,
-        orders: Number(r.orders) || 0,
-        paidOrders: Number(r.paid_orders) || 0,
-        subtotal: num(r.subtotal), tax: num(r.tax), discount: num(r.discount), revenue: num(r.revenue),
-        cancelledOrders: Number(r.cancelled_orders) || 0, cancelledValue: num(r.cancelled_value),
-      }));
       const totals = rows.reduce((a, r) => ({
         orders: a.orders + r.orders, paidOrders: a.paidOrders + r.paidOrders,
         subtotal: num(a.subtotal + r.subtotal), tax: num(a.tax + r.tax),
@@ -245,7 +267,7 @@ export async function GET(req: NextRequest) {
           .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))
           .sort((a, b) => b.revenue - a.revenue);
       }
-      return { type, range, bucket, rows, totals, tax, payments };
+      return { type, range, bucket, rows, totals, tax, payments, drillBucket, drillRows };
     }
 
     // ── breakdown reports: dishes / categories / payments / hourly ──
