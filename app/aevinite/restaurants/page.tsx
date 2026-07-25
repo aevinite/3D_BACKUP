@@ -753,6 +753,72 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
   );
 }
 
+// Quick on/off for a restaurant's MAIN operational features (banquet, auto-print KOT), a
+// shortcut so you don't have to open the full Access screen for the common ones (owner
+// 2026-07-25). Each switch shows/sets the EFFECTIVE state (is it actually live for staff) and
+// writes the SAME settings columns the Access screen reads — so the two are always in sync
+// (single source of truth; no duplicated value). Fine-tune the full ladder in Access below.
+const QUICK_FEATURES = [
+  { key: "banquet", label: "Banquet billing" },
+  { key: "auto_print_kot", label: "Auto-print KOT" },
+] as const;
+type QuickKey = (typeof QUICK_FEATURES)[number]["key"];
+function QuickFeaturesCard({ restaurant }: { restaurant: Restaurant }) {
+  const [state, setState] = useState<Record<QuickKey, boolean> | null>(null);
+  const [loadErr, setLoadErr] = useState(false);
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(() => {
+    setLoadErr(false);
+    fetch(`/api/admin/restaurants/quick-features?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (j.error || typeof j.banquet === "undefined") { setLoadErr(true); return; }
+        setState({ banquet: !!j.banquet, auto_print_kot: !!j.auto_print_kot });
+      })
+      .catch(() => setLoadErr(true));
+  }, [restaurant.id]);
+  useEffect(() => { load(); }, [load]);
+  const toggle = async (key: QuickKey) => {
+    if (!state || pending.has(key)) return;
+    const next = !state[key];
+    setErr(null);
+    setPending((s) => new Set(s).add(key));
+    setState((s) => (s ? { ...s, [key]: next } : s)); // optimistic
+    try {
+      const r = await fetch("/api/admin/restaurants/quick-features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, feature: key, on: next }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
+      setState({ banquet: !!d.banquet, auto_print_kot: !!d.auto_print_kot }); // trust the server's effective read
+    } catch (e) {
+      setState((s) => (s ? { ...s, [key]: !next } : s)); // revert
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPending((s) => { const n = new Set(s); n.delete(key); return n; });
+    }
+  };
+  return (
+    <div className="adm-card" style={{ marginBottom: 14 }}>
+      <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Main features</div>
+      <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Quick on/off for this restaurant&apos;s main operational features. Same switches as <b>Access &amp; permissions</b> below — changing one changes the other. Fine-tune who can use them (owner / manager / tablet) in Access.</p>
+      {state === null && !loadErr
+        ? <div className="adm-empty">Loading…</div>
+        : <div className="adm-togglegrid">
+            {QUICK_FEATURES.map((f) => {
+              const on = !!state?.[f.key];
+              return (
+                <button key={f.key} type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={!state || pending.has(f.key)} onClick={() => toggle(f.key)}
+                  title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
+                  <span>{f.label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
+                </button>
+              );
+            })}
+          </div>}
+      {loadErr && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>Couldn&rsquo;t load — editing is locked so you don&rsquo;t change it by mistake. <button className="adm-btn" style={{ marginLeft: 6, padding: "3px 9px" }} onClick={load}>Retry</button></div>}
+      {err && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
+    </div>
+  );
+}
+
 function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
   const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
   const [staffFeat, setStaffFeat] = useState<Record<string, boolean> | null>(null);
@@ -945,6 +1011,8 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       <div id="det-branding"><BrandingCard restaurant={restaurant} /></div>
 
       <div id="det-enter"><EnterCard restaurant={restaurant} panels={panels} /></div>
+
+      <div id="det-main-features"><QuickFeaturesCard restaurant={restaurant} /></div>
 
       {/* Panels, guest features, auto-print/banquet allow, manager powers, tablet caps and
           per-person overrides ALL live in the ONE Access & permissions panel now (owner
