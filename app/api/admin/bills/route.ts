@@ -57,7 +57,12 @@ export async function GET(req: NextRequest) {
       .eq("session_id", trail).order("created_at", { ascending: true }).limit(50)).data as
       { event: string; invoice_no: number | null; reason: string | null; actor: string | null; created_at: string }[] | null;
     const invoiceHistory = (invRows || []).map((e) => ({ event: e.event, no: e.invoice_no, reason: e.reason, actor: e.actor, at: e.created_at }));
-    return NextResponse.json({ trail: events, invoiceHistory });
+    // Credit notes issued against this bill (mig 194) — post-settlement corrections.
+    const cnRows = (await sb.from("credit_notes").select("credit_no, amount, reason, actor, created_at")
+      .eq("session_id", trail).order("created_at", { ascending: true }).limit(50)).data as
+      { credit_no: number; amount: number; reason: string | null; actor: string | null; created_at: string }[] | null;
+    const creditNotes = (cnRows || []).map((c) => ({ no: c.credit_no, amount: Number(c.amount) || 0, reason: c.reason, actor: c.actor, at: c.created_at }));
+    return NextResponse.json({ trail: events, invoiceHistory, creditNotes });
   }
 
   // ── The ledger list ─────────────────────────────────────────────────────────
@@ -140,6 +145,20 @@ export async function POST(req: NextRequest) {
     await sb.from("sessions").update({ deleted_at: null, deleted_by: null, deleted_by_id: null, delete_reason: null }).eq("id", sessionId);
     await logAction("admin", "bill_restore", { restaurant_id: rid, table_number: sess.table_number, detail: `admin restored bill${sess.bill_no ? ` #${sess.bill_no}` : ""}` });
     return NextResponse.json({ ok: true, restored: res.restored });
+  }
+
+  if (action === "credit_note") {
+    // Admin issues a CREDIT NOTE against this bill (post-settlement correction, mig 194) —
+    // the bill is never edited; a new immutable credit document is recorded.
+    const amount = Math.round((Number(body?.amount) || 0) * 100) / 100;
+    const reason = String(body?.reason || "").trim().slice(0, 200);
+    if (amount <= 0) return NextResponse.json({ error: "Enter a credit amount greater than zero." }, { status: 400 });
+    if (!reason) return NextResponse.json({ error: "A reason is required to issue a credit note." }, { status: 400 });
+    const { data, error } = await sb.rpc("lfh_issue_credit_note", { p_session: sessionId, p_amount: amount, p_reason: reason, p_actor: "Admin" });
+    if (error) return NextResponse.json({ error: /cannot exceed/i.test(error.message) ? "The credit can't be more than the bill total." : error.message }, { status: 400 });
+    const row = Array.isArray(data) ? data[0] : data;
+    await logAction("admin", "credit_note", { restaurant_id: rid, table_number: sess.table_number, detail: `admin credit note #${row?.credit_no} · ₹${amount} on bill${sess.bill_no ? ` #${sess.bill_no}` : ""} — ${reason}` });
+    return NextResponse.json({ ok: true, creditNo: row?.credit_no });
   }
 
   return NextResponse.json({ error: "unknown action" }, { status: 400 });
