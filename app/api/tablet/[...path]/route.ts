@@ -13,6 +13,7 @@ import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
+import { softDeleteOrders } from "@/lib/softDelete";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
@@ -677,8 +678,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // THIS restaurant's first (service-role bypasses RLS), mirroring the editor invoice guard.
       const ownsGen = (await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
       if (!ownsGen) return err("That table isn't for this restaurant.", 404);
-      const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
-      if (error) throw new Error(error.message);
+      const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: null, p_actor: actor?.name || actor?.username || null });
+      if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened.", 409); throw new Error(error.message); }
       await log("invoice_generate", { detail: `session ${b}`, device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
     }
@@ -965,16 +966,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
 
     // orders/:id/delete — remove a WHOLE order (and its dishes). Refuses a PAID
-    // order (it's a financial record); otherwise hard-deletes order + items.
+    // order (it's a financial record); otherwise SOFT-deletes it (mig 188): the row
+    // is stamped deleted, never erased, so the bill is retained for tax/audit and
+    // still shows as a tombstone in the admin ledger. Never a real SQL DELETE.
     if (a === "orders" && c === "delete") {
       // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS) — without
-      // it a foreign order id could be HARD-DELETED from another restaurant. Scope the
-      // gate read AND both deletes.
+      // it a foreign order id could be touched from another restaurant. Scope the gate read.
       const cur = must(await sb.from("orders").select("payment_status").eq("id", b).eq("restaurant_id", rid).single());
       if (cur && cur.payment_status === "paid") return err("Won't delete a PAID order — mark it unpaid first.", 409);
-      await sb.from("order_items").delete().eq("order_id", b).eq("restaurant_id", rid);
-      must(await sb.from("orders").delete().eq("id", b).eq("restaurant_id", rid).select());
-      await log("order_delete", { order_id: b, device_id: dev });
+      const reason = String(body?.reason ?? "").trim();
+      const who = actor?.name || actor?.username || "staff";
+      await softDeleteOrders(rid, [b], { actor: who, actorId: actor?.id ?? null, reason });
+      await log("order_delete", { order_id: b, device_id: dev, detail: reason || undefined });
       return ok({ ok: true });
     }
 
