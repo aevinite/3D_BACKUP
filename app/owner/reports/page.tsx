@@ -13,7 +13,7 @@ import { inr } from "@/components/admin/shared";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import {
   AreaTrend, TimeBar, CountBar, HourlyBar, CategoryDonut, PaymentDonut, LeaderBar,
-  Spark, canonPayMethod, PAY_COLORS,
+  canonPayMethod, PAY_COLORS,
 } from "@/components/owner/Charts";
 import {
   REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, nfmt, type RKey, type DataKind,
@@ -113,10 +113,11 @@ const DAYPARTS: { label: string; icon: string; hours: number[] }[] = [
 export default function OwnerReports() {
   const [rests, setRests] = useState<Rest[]>([]);
   const [ready, setReady] = useState(false);
-  // Pin the scope immediately from the URL (admin act-as ?rid) so the first query is
-  // scoped and correctly labelled, without waiting on the (heavy) overview call. "" = all.
-  const [rid, setRid] = useState<string>(() =>
-    typeof window === "undefined" ? "" : (new URLSearchParams(window.location.search).get("rid") || ""));
+  // Start "" so SSR and the first client render agree (reading the URL in the initial
+  // state caused a hydration mismatch on the "This restaurant"/"All restaurants" label).
+  // An effect below pins it from ?rid; the data fetch is gated on `ready`, so no query
+  // fires against the wrong scope in the meantime. "" = all restaurants.
+  const [rid, setRid] = useState<string>("");
   const [sel, setSel] = useState<RKey | "">("");         // "" = hub
   const [range, setRange] = useState<Range>("30d");
   const [store, setStore] = useState<Record<string, Entry>>({});
@@ -126,6 +127,11 @@ export default function OwnerReports() {
   const scopePin = useMemo(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"), []);
   const scp = scopePin ? `&scope=${scopePin}` : "";
+
+  // Pin the scope from the URL (admin act-as ?rid) after hydration — not in the initial
+  // state (that mismatches SSR). Runs once on mount, before `ready`, so the gated fetch
+  // already sees the pinned rid.
+  useEffect(() => { if (scopePin) setRid(scopePin); }, [scopePin]);
 
   useEffect(() => {
     fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then((r) => r.json()).then((o) => {
@@ -172,7 +178,9 @@ export default function OwnerReports() {
   const entry = store[cacheKey(activeKind, rid, range)];
   const data = entry?.data;
   const restName = rid ? (rests.find((r) => r.id === rid)?.name ?? "This restaurant") : "All restaurants";
-  const accent = (rid ? rests.find((r) => r.id === rid)?.accent : "") || "var(--accent)";
+  // Charts follow the owner-panel THEME (green), not each restaurant's brand colour —
+  // a brown/orange/red chart inside the green owner console read as a bug (owner 2026-07-25).
+  const accent = "var(--accent)";
   const singleRest = !!rid;
 
   const exportCsv = () => {
@@ -259,26 +267,41 @@ function Hub({ range, money, restName, accent, onOpen }: {
 }) {
   const t = money?.data?.totals;
   const rows = (money?.data?.rows ?? []) as MoneyRow[];
-  const spark = rows.map((r) => r.revenue);
+  const bucket = money?.data?.bucket || "day";
+  const series = rows.map((r) => ({ label: bucketLabel(r.bucket, bucket), revenue: r.revenue }));
   const avg = t && t.paidOrders ? t.revenue / t.paidOrders : 0;
+  const loading = money?.loading;
+  const [chartMode, setChartMode] = useState<"bar" | "line">("bar");
   return (
     <>
-      <div className="rs-hero">
-        <div className="rs-hero-l">
-          <div className="rs-hero-eyebrow">{restName} · {rangeLabel(range)}</div>
-          <div className="rs-hero-val"><AnimatedNumber value={t?.revenue || 0} money loading={money?.loading} /></div>
-          <div className="rs-hero-sub">Net revenue kept in this period{money?.error ? " — couldn't load" : ""}</div>
-          <div className="rs-hero-mini">
-            <div className="m"><div className="k">Paid bills</div><div className="v"><AnimatedNumber value={t?.paidOrders || 0} format={nfmt} loading={money?.loading} /></div></div>
-            <div className="m"><div className="k">Avg bill</div><div className="v"><AnimatedNumber value={avg} money loading={money?.loading} /></div></div>
-            <div className="m"><div className="k">Tax collected</div><div className="v"><AnimatedNumber value={t?.tax || 0} money loading={money?.loading} /></div></div>
-            <div className="m"><div className="k">Discounts</div><div className="v"><AnimatedNumber value={t?.discount || 0} money loading={money?.loading} /></div></div>
+      {/* Overview: the animated headline + KPIs and the revenue chart, together in one panel.
+          The chart is CONTAINED here (the old hero re-used the dashboard's corner-Spark, whose
+          global `.owx-spark{position:absolute}` yanked it to the page corner — the "stray graph"). */}
+      <div className="rs-overview">
+        <div className="rs-ov-eyebrow">{restName} · {rangeLabel(range)}</div>
+        <div className="rs-ov-val"><AnimatedNumber value={t?.revenue || 0} money loading={loading} /></div>
+        <div className="rs-ov-sub">Net revenue kept in this period{money?.error ? " — couldn't load" : ""}</div>
+        <div className="rs-ov-kpis">
+          <div className="k"><span className="lbl">Paid bills</span><span className="v"><AnimatedNumber value={t?.paidOrders || 0} format={nfmt} loading={loading} /></span></div>
+          <div className="k"><span className="lbl">Avg bill</span><span className="v"><AnimatedNumber value={avg} money loading={loading} /></span></div>
+          <div className="k"><span className="lbl">Tax collected</span><span className="v"><AnimatedNumber value={t?.tax || 0} money loading={loading} /></span></div>
+          <div className="k"><span className="lbl">Discounts</span><span className="v"><AnimatedNumber value={t?.discount || 0} money loading={loading} /></span></div>
+        </div>
+        <div className="rs-ov-charthead">
+          <span className="t">Revenue over the period</span>
+          <div className="rs-ov-toggle" role="tablist" aria-label="Chart type">
+            <button role="tab" aria-selected={chartMode === "bar"} className={chartMode === "bar" ? "on" : ""} onClick={() => setChartMode("bar")}>Bar</button>
+            <button role="tab" aria-selected={chartMode === "line"} className={chartMode === "line" ? "on" : ""} onClick={() => setChartMode("line")}>Line</button>
           </div>
         </div>
-        <div className="rs-hero-r">
-          {spark.length > 1
-            ? <Spark points={spark} color={accent} width={280} height={110} />
-            : <i className="fas fa-chart-line" style={{ fontSize: 60, color: "color-mix(in srgb, var(--accent) 35%, transparent)" }} aria-hidden />}
+        <div className="rs-ov-chart">
+          {loading
+            ? <div className="rs-ov-skel" aria-hidden />
+            : series.length > 1
+              ? (chartMode === "bar"
+                  ? <TimeBar data={series} color={accent} height={210} />
+                  : <AreaTrend data={series} lines={[{ key: "revenue", name: "Revenue", color: accent }]} height={210} />)
+              : <div className="rs-ov-empty">Not enough data to chart this period yet.</div>}
         </div>
       </div>
 
