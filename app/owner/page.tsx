@@ -143,43 +143,80 @@ function rangeSpanText(k: Range): string {
   return `Everything up to ${f(now)}`;
 }
 
-// Count-up: eases a number to its target so tiles feel alive without lying —
-// respects prefers-reduced-motion (jumps straight to the value).
-function useCountUp(target: number, ms = 420): number {
-  const [val, setVal] = useState(target);
-  const fromRef = useRef(target);
+function usePrefersReducedMotion(): boolean {
+  const [reduce, setReduce] = useState(false);
   useEffect(() => {
-    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      fromRef.current = target; setVal(target); return;
+    const m = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!m) return;
+    setReduce(m.matches);
+    const on = () => setReduce(m.matches);
+    m.addEventListener?.("change", on);
+    return () => m.removeEventListener?.("change", on);
+  }, []);
+  return reduce;
+}
+
+// AnimatedNumber — every stat counts UP from zero and "forms" its value. Crucially,
+// while `loading` (the real value isn't back yet) it keeps a gentle rolling climb, so
+// the wait reads as the number building rather than a dead "…" — then it eases exactly
+// onto the true value the instant it lands. That overlap is deliberate: the animation
+// covers the fetch, so even a 1–2s load feels alive, not slow. Respects reduced-motion
+// (snaps straight to the value). Pure UI: no data/DB behaviour changes.
+function AnimatedNumber({ value, loading, money, className }: {
+  value: number; loading?: boolean; money?: boolean; className?: string;
+}) {
+  const reduce = usePrefersReducedMotion();
+  const [disp, setDisp] = useState(0);
+  const fromRef = useRef(0);   // where the live animation currently sits
+  const rafRef = useRef(0);
+  useEffect(() => {
+    cancelAnimationFrame(rafRef.current);
+    if (reduce) {
+      const v = loading ? fromRef.current : value;
+      fromRef.current = v; setDisp(v); return;
     }
+    const t0 = performance.now();
     const from = fromRef.current;
-    if (from === target) return;
-    let raf = 0; const t0 = performance.now();
-    const tick = (t: number) => {
-      const p = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - p, 3);
-      setVal(from + (target - from) * e);
-      if (p < 1) raf = requestAnimationFrame(tick);
-      else fromRef.current = target;
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [target, ms]);
-  return val;
+    if (loading) {
+      // Alive "building" roll: a decelerating climb plus a slow creep so it never freezes
+      // while we wait. Magnitude is intentionally loose — the reveal below sweeps to the
+      // real figure regardless, so this only has to look like it's counting up.
+      const tick = (t: number) => {
+        const el = t - t0;
+        const v = from + (1 - Math.exp(-el / 600)) * 6000 + el * 0.25;
+        fromRef.current = v; setDisp(v);
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      rafRef.current = requestAnimationFrame(tick);
+    } else {
+      // Reveal: ease from wherever we are up to the true value (easeOutCubic).
+      const dur = 900;
+      const tick = (t: number) => {
+        const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+        const v = from + (value - from) * e;
+        fromRef.current = v; setDisp(v);
+        if (p < 1) rafRef.current = requestAnimationFrame(tick);
+        else { fromRef.current = value; setDisp(value); }
+      };
+      rafRef.current = requestAnimationFrame(tick);
+    }
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [value, loading, reduce]);
+  const text = money ? inr(disp) : Math.round(disp).toLocaleString("en-US");
+  return <span className={`anim-num${loading ? " num-rolling" : ""}${className ? " " + className : ""}`}>{text}</span>;
 }
 
 function Kpi({ k, v, money, delta, prevTitle, spark, color, sub, loading }: {
   k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };
   prevTitle?: string; spark?: number[]; color?: string; sub?: string; loading?: boolean;
 }) {
-  // While the underlying data is still loading (e.g. just after a range change cleared it),
-  // show a calm "…" instead of animating from ₹0 — the ₹0-flash looked like a real zero
-  // for a moment (audit 2026-07-07). The count-up runs only once the real value arrives.
-  const n = useCountUp(typeof v === "number" && !loading ? v : 0);
+  // Numbers count up from zero and keep rolling while the data loads, so the tile always
+  // feels alive (never a dead "…") and the animation masks the fetch (owner 2026-07-25).
   return (
     <div className="adm-stat owx-kpi">
       <div className="k">{k}</div>
       <div className="row">
-        <div className="v">{loading ? <span style={{ opacity: 0.4 }}>…</span> : typeof v === "number" ? (money ? inr(n) : Math.round(n).toLocaleString("en-US")) : v}</div>
+        <div className="v">{typeof v === "number" ? <AnimatedNumber value={v} loading={loading} money={money} /> : v}</div>
         {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
       </div>
       {sub && !loading && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{sub}</div>}
@@ -534,12 +571,12 @@ export default function OwnerDashboard() {
                           <span className="hq-nm"><span className="sw" style={{ background: r.accent }} aria-hidden="true" />{r.name}</span>
                         </td>
                         <td>
-                          <b>{inr(r.revenue)}</b>
+                          <b><AnimatedNumber value={r.revenue} money /></b>
                           <span className="hq-meter" aria-hidden="true"><span style={{ width: `${Math.round((r.revenue / hqMaxRev) * 100)}%`, background: r.accent }} /></span>
                         </td>
-                        <td className="mut">{r.orders}</td>
-                        <td className="mut">{inr(r.revenueToday)}</td>
-                        <td className="mut">{r.openTables}</td>
+                        <td className="mut"><AnimatedNumber value={r.orders} /></td>
+                        <td className="mut"><AnimatedNumber value={r.revenueToday} money /></td>
+                        <td className="mut"><AnimatedNumber value={r.openTables} /></td>
                         <td><span className={`own-pill ${r.active ? "on" : "off"}`}>{r.active ? "Active" : "Off"}</span></td>
                         <td className="go"><i className="fas fa-chevron-right" aria-hidden="true" /></td>
                       </tr>
@@ -561,9 +598,9 @@ export default function OwnerDashboard() {
                     return (
                       <button key={r.id} className="own-h2h-col" style={{ ["--rcol" as string]: r.accentColor || FALLBACK }} onClick={() => setView({ level: "restaurant", rid: r.id })}>
                         <div className="nm">{r.name}</div>
-                        <div className="rev">{inr(r.revenue)}</div>
+                        <div className="rev"><AnimatedNumber value={r.revenue} money /></div>
                         <div className="meter"><span style={{ width: `${(r.revenue / max) * 100}%` }} /></div>
-                        <div className="meta">{r.orders} orders · {o?.openTables ?? 0} open tables</div>
+                        <div className="meta"><AnimatedNumber value={r.orders} /> orders · {o?.openTables ?? 0} open tables</div>
                       </button>
                     );
                   })}
@@ -604,13 +641,13 @@ export default function OwnerDashboard() {
                   <span className={`own-pill ${r.active ? "on" : "off"}`}>{r.active ? "Active" : "Off"}</span>
                 </div>
                 <div className="own-today">
-                  <div className="own-cell"><div className="k">Orders today</div><div className="v">{r.ordersToday}</div></div>
-                  <div className="own-cell"><div className="k">Revenue today</div><div className="v">{inr(r.revenueToday)}</div></div>
-                  <div className="own-cell"><div className="k">Open tables</div><div className="v">{r.openTables}</div></div>
+                  <div className="own-cell"><div className="k">Orders today</div><div className="v"><AnimatedNumber value={r.ordersToday} /></div></div>
+                  <div className="own-cell"><div className="k">Revenue today</div><div className="v"><AnimatedNumber value={r.revenueToday} money /></div></div>
+                  <div className="own-cell"><div className="k">Open tables</div><div className="v"><AnimatedNumber value={r.openTables} /></div></div>
                 </div>
                 <div className="own-foot">
-                  <span><i className="fas fa-receipt" aria-hidden="true" /> {r.ordersAll.toLocaleString("en-US")} all-time</span>
-                  <span><i className="fas fa-indian-rupee-sign" aria-hidden="true" /> {inr(r.revenueAll)} all-time</span>
+                  <span><i className="fas fa-receipt" aria-hidden="true" /> <AnimatedNumber value={r.ordersAll} /> all-time</span>
+                  <span><i className="fas fa-indian-rupee-sign" aria-hidden="true" /> <AnimatedNumber value={r.revenueAll} money /> all-time</span>
                   <span className="own-open">Open <i className="fas fa-arrow-right" aria-hidden="true" /></span>
                 </div>
               </button>
@@ -667,7 +704,7 @@ export default function OwnerDashboard() {
               <div className="adm-muted">at {rest?.restaurant.name} · {RANGES.find((r) => r.k === range)?.label}</div>
             </div>
             <div className="adm-stats" style={{ marginTop: 14 }}>
-              <div className="adm-stat"><div className="k">Revenue</div><div className="v">{inr(dishView.d.revenue)}</div></div>
+              <div className="adm-stat"><div className="k">Revenue</div><div className="v"><AnimatedNumber value={dishView.d.revenue} money /></div></div>
               <div className="adm-stat"><div className="k">Sold</div><div className="v">{dishView.d.qty}</div></div>
               <div className="adm-stat"><div className="k">Share of revenue</div><div className="v">{dishView.share}%</div></div>
               <div className="adm-stat"><div className="k">Rank by revenue</div><div className="v">#{dishView.rank}<span style={{ fontSize: 13, color: "var(--muted)" }}> / {dishView.of}</span></div></div>
@@ -836,7 +873,7 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
           <div className="rv-ct">Your records <span>· the numbers worth bragging about</span></div>
           <div className="rv-recs">
             {rest.records.bestDay && (
-              <div className="rv-rec"><span className="e">🏆</span><span><small>BEST DAY EVER</small><b>{inr(rest.records.bestDay.revenue)}</b>
+              <div className="rv-rec"><span className="e">🏆</span><span><small>BEST DAY EVER</small><b><AnimatedNumber value={rest.records.bestDay.revenue} money /></b>
                 <i>{new Date(rest.records.bestDay.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: IST })} — beat it!</i></span></div>
             )}
             {rest.records.starDish && (
@@ -844,15 +881,15 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
                 <i>{rest.records.starDish.qty} plates</i></span></div>
             )}
             {rest.records.fastHour && (
-              <div className="rv-rec"><span className="e">⚡</span><span><small>BUSIEST HOUR EVER</small><b>{rest.records.fastHour.orders} orders</b>
+              <div className="rv-rec"><span className="e">⚡</span><span><small>BUSIEST HOUR EVER</small><b><AnimatedNumber value={rest.records.fastHour.orders} /> orders</b>
                 <i>{istWall(rest.records.fastHour.at, { day: "numeric", month: "short", hour: "numeric", hour12: true })}</i></span></div>
             )}
             {rest.records.bigBill && (
-              <div className="rv-rec"><span className="e">💎</span><span><small>BIGGEST BILL</small><b>{inr(rest.records.bigBill.revenue)}</b>
+              <div className="rv-rec"><span className="e">💎</span><span><small>BIGGEST BILL</small><b><AnimatedNumber value={rest.records.bigBill.revenue} money /></b>
                 <i>{rest.records.bigBill.table ? `table ${rest.records.bigBill.table}` : "one sitting"}</i></span></div>
             )}
             {(rest.records.regulars ?? 0) > 0 && (
-              <div className="rv-rec"><span className="e">🔁</span><span><small>REGULARS · 30 DAYS</small><b>{rest.records.regulars} returning guests</b>
+              <div className="rv-rec"><span className="e">🔁</span><span><small>REGULARS · 30 DAYS</small><b><AnimatedNumber value={rest.records.regulars ?? 0} /> returning guests</b>
                 <i>same name, 2+ visits</i></span></div>
             )}
           </div>
