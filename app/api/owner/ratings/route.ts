@@ -39,8 +39,18 @@ export async function GET(req: NextRequest) {
   scope = gated;
 
   const onlyUnhandled = req.nextUrl.searchParams.get("filter") === "unhandled";
-  const ids = await scopedIds(scope);
-  if (!ids.length) return NextResponse.json({ summary: { total: 0, avg: 0, dist: [0, 0, 0, 0, 0], unhandled: 0 }, ratings: [] });
+  const empty = () => NextResponse.json({ summary: { total: 0, avg: 0, dist: [0, 0, 0, 0, 0], unhandled: 0 }, ratings: [] });
+  // Optional ?rid= — narrow to ONE selected restaurant (the top-strip pick / an admin act-as
+  // one restaurant), mirroring /api/owner/reports. Only honoured when that id is already in the
+  // caller's scope, so it can only NARROW, never widen. Both the summary RPC (p_ids) and the
+  // list read below scope off this same `ids` list, so the whole tab narrows together.
+  let ids = await scopedIds(scope);
+  const pinRid = req.nextUrl.searchParams.get("rid");
+  if (pinRid) {
+    if (!inScope(scope, pinRid)) return empty();
+    ids = [pinRid];
+  }
+  if (!ids.length) return empty();
 
   // Summary (pre-aggregated in the DB — never scans another tenant, mig 138).
   const sum = await sb.rpc("lfh_ratings_summary", { p_ids: ids });
