@@ -6,6 +6,7 @@
 //   3. What's enabled — a read-only view of the owner-panel sections the admin turned on,
 //      plus the restaurants they own. Everything money/branding stays admin-controlled.
 import { useCallback, useEffect, useState } from "react";
+import { asSuffix } from "@/lib/ownerPin";
 
 type Module = { restaurant_id: string; name: string; key: string; label: string; enabled: boolean };
 type Data = {
@@ -21,7 +22,7 @@ const SECTION_LABEL: Record<string, string> = {
 export default function OwnerSettings() {
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
-  const scp = scopePin ? `?scope=${scopePin}` : "";
+  const scp = scopePin ? `?scope=${scopePin}${asSuffix()}` : "";
 
   const [data, setData] = useState<Data | null>(null);
   const [err, setErr] = useState<string | null>(null);

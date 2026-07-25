@@ -11,6 +11,7 @@ import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import { useBackClose } from "@/lib/backStack";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
+import { asSuffix } from "@/lib/ownerPin";
 
 type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean; ent?: string };
 type NavGroup = { label: string; quiet?: boolean; items: NavItem[] };
@@ -104,7 +105,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   // any nav click. A real owner has no ?rid, so this stays null throughout.
   const [ridPin, setRidPin] = useState<string | null>(null);
   useEffect(() => { setRidPin(new URLSearchParams(window.location.search).get("rid")); }, []);
-  const withRid = (href: string) => (ridPin ? `${href}${href.includes("?") ? "&" : "?"}rid=${ridPin}` : href);
+  const withRid = (href: string) => (ridPin ? `${href}${href.includes("?") ? "&" : "?"}rid=${ridPin}${asSuffix()}` : href);
   // Skin: the server passes the cookie value as `initialSkin` so SSR already emits the
   // RIGHT data-skin — no dark→light flash on load for owners who chose light (fixed
   // 2026-07-06). Falls back to dark on a first-ever visit (no cookie yet).
@@ -153,7 +154,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   // no longer drifts stale against the live cards (audit 2026-07-07).
   const [myRests, setMyRests] = useState<{ id: string; name: string; accentColor: string; revenueToday: number }[]>([]);
   const refreshMyRests = useCallback(() => {
-    const scp = ridPin ? `&scope=${ridPin}` : "";
+    const scp = ridPin ? `&scope=${ridPin}${asSuffix()}` : "";
     return fetchOwnerOverview(scp)
       .then((j) => {
         const list = (j as { restaurants?: unknown })?.restaurants;
@@ -190,7 +191,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
       window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid } }));
     } else {
       // navigating → the path-effect closes the drawer after the route commits
-      const q = [rid ? `focus=${rid}` : "", ridPin ? `rid=${ridPin}` : ""].filter(Boolean).join("&");
+      const q = [rid ? `focus=${rid}` : "", ridPin ? `rid=${ridPin}${asSuffix()}` : ""].filter(Boolean).join("&");
       router.push(`/owner${q ? `?${q}` : ""}`);
     }
   };

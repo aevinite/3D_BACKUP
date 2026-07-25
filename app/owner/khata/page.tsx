@@ -6,6 +6,7 @@
 // paused while hidden (egress rule); a search filters the loaded list client-side.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
+import { asSuffix } from "@/lib/ownerPin";
 
 const IST = "Asia/Kolkata";
 type Bill = { bill_no: number | null; table_number: string | null; khata_at: string; amount: number };
@@ -34,7 +35,7 @@ export default function OwnerKhata() {
 
   const load = useCallback(async () => {
     try {
-      const qs = scopePin ? `?scope=${scopePin}` : "";
+      const qs = scopePin ? `?scope=${scopePin}${asSuffix()}` : "";
       const j = await (await fetch(`/api/owner/khata${qs}`, { cache: "no-store" })).json();
       if (j.error) throw new Error(j.error);
       setCustomers(j.customers || []); setSummary(j.summary || null); setErr(null);

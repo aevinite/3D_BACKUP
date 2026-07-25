@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
+import { asSuffix } from "@/lib/ownerPin";
 import {
   AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod, Spark, DeltaChip,
   SameHourBar, PayTrendStack,
@@ -183,7 +184,7 @@ export default function OwnerDashboard() {
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
   // Hero quick-links must keep the admin's tab pin (same rule as OwnerShell.withRid).
-  const withPin = (href: string) => (scopePin ? `${href}?rid=${scopePin}` : href);
+  const withPin = (href: string) => (scopePin ? `${href}?rid=${scopePin}${asSuffix()}` : href);
 
   const single = ov?.restaurants.length === 1;
   // With ONE restaurant the home page IS that restaurant — resolve its id once known.
@@ -225,7 +226,7 @@ export default function OwnerDashboard() {
       const recQ = opts?.withRecords ? "&records=1" : "";
       // The tab's scope pin (admin-in-one-restaurant) rides on EVERY call so the
       // shared act-as cookie can't hijack this tab (C1). Null for a real owner.
-      const scp = scopePin ? `&scope=${scopePin}` : "";
+      const scp = scopePin ? `&scope=${scopePin}${asSuffix()}` : "";
       // range=all now maps to an unbounded reports window (mig M11) — pass it through so the
       // money tiles cover the same span as the all-time revenue KPIs (was collapsed to 12m).
       const moneyUrl = (rid: string | null) =>

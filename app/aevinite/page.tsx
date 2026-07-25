@@ -10,13 +10,16 @@
 // Data: the SAME existing admin endpoints as before (one fetch each, no per-row
 // fetches), refreshed by useActiveAutoRefresh (60s, only while visible & in use).
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { openRestaurantPanel, useActiveAutoRefresh, ActivityFeed, timeAgo, type Action } from "@/components/admin/shared";
 import { useToast } from "@/components/admin/toast";
+import { useAdminModal } from "@/components/admin/useAdminModal";
 
+type RestOwner = { id: string; name: string; primary: boolean };
 type Rest = {
   id: string; slug: string; name: string; active: boolean;
   ownerUserId: string | null; ownerName: string | null;
+  owners: RestOwner[];
   panels: Record<string, boolean> | null;
 };
 type Issue = { id: string; restaurantName: string; subject: string; status: string; created_at: string };
@@ -50,6 +53,9 @@ export default function AdminCommand() {
   const [loadErr, setLoadErr] = useState(false);
   // Red "Fix problems" button: 24h app errors + unsolved reported problems (owner 2026-07-22).
   const [fixCount, setFixCount] = useState(0);
+  // "Which owner?" chooser: set to a restaurant when its Owner button is clicked AND it
+  // has 2+ owners — otherwise the panel opens straight to the sole/primary owner (owner 2026-07-25).
+  const [chooser, setChooser] = useState<Rest | null>(null);
 
   const load = useCallback(() => {
     // ONE combined call instead of six separate ones (egress: fewer round-trips on the 60s
@@ -191,13 +197,18 @@ export default function AdminCommand() {
                   // to a maintenance page (matches the detail view's EnterCard guard, audit 2026-07-23).
                   <button className="obtn" disabled title={`${r.name}'s guest menu is offline while suspended`}>Guest</button>
                 )}
-                {PANEL_DEFS.map((p) => (
-                  <button key={p.key} className="obtn" disabled={!panelOn(r, p.key) || busyRow === r.id}
-                    onClick={() => openPanel(r, p.path)}
-                    title={panelOn(r, p.key) ? `Open ${p.label} as ${r.name} (new tab, no password)` : `${p.label} panel is off for this restaurant`}>
-                    {p.label}
-                  </button>
-                ))}
+                {PANEL_DEFS.map((p) => {
+                  const multiOwner = p.key === "owner" && r.owners.length >= 2;
+                  return (
+                    <button key={p.key} className="obtn" disabled={!panelOn(r, p.key) || busyRow === r.id}
+                      onClick={() => { if (multiOwner) setChooser(r); else openPanel(r, p.path); }}
+                      title={panelOn(r, p.key)
+                        ? (multiOwner ? `${r.name} has ${r.owners.length} owners — choose whose panel to open` : `Open ${p.label} as ${r.name} (new tab, no password)`)
+                        : `${p.label} panel is off for this restaurant`}>
+                      {p.label}{multiOwner ? ` (${r.owners.length})` : ""}
+                    </button>
+                  );
+                })}
               </span>
               <span style={{ textAlign: "right" }}>
                 <Link className="cmd-manage" href={`/aevinite/restaurants?focus=${encodeURIComponent(r.slug)}`} title={`Manage ${r.name}`}>
@@ -260,6 +271,15 @@ export default function AdminCommand() {
         )}
       </div>
 
+      {chooser && (
+        <OwnerChooser rest={chooser} onClose={() => setChooser(null)}
+          onPick={async (uid) => {
+            setChooser(null);
+            const w = await openRestaurantPanel(chooser.id, "/owner", uid);
+            if (!w) toast("Popup blocked — allow popups to open the owner panel.", "err");
+          }} />
+      )}
+
       <style jsx>{`
         /* stat-strip styles live in globals.css now — its cells are <Link>s, which styled-jsx
            can't scope (the scoped rules never matched, so labels+values ran together). */
@@ -306,6 +326,47 @@ export default function AdminCommand() {
           .obtn { min-height: 40px; padding: 0 12px; }
         }
       `}</style>
+    </>
+  );
+}
+
+// "Which owner's panel?" — shown when the admin opens the Owner panel for a restaurant
+// that has SEVERAL owners (owner 2026-07-25). Each row opens THAT owner's cockpit
+// (act-as, no password, invisible to them). Registers with the back-stack via useAdminModal.
+function OwnerChooser({ rest, onClose, onPick }: { rest: Rest; onClose: () => void; onPick: (uid: string) => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useAdminModal(dialogRef, "admin-owner-chooser", onClose);
+  const avc = (id: string) => { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return ["#60a5fa", "#a78bfa", "#34d399", "#fbbf24", "#f472b6", "#22d3ee"][h % 6]; };
+  const initials = (n: string) => n.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Choose an owner for ${rest.name}`} style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+        <div style={{ pointerEvents: "auto", width: "min(96vw, 420px)", background: "var(--card)", border: "var(--border)", borderRadius: 16, padding: 18, display: "grid", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 16.5, fontWeight: 800 }}>Which owner&rsquo;s panel?</div>
+            <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3 }}><b style={{ color: "var(--text)" }}>{rest.name}</b> has {rest.owners.length} owners — pick whose owner panel to open.</div>
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {rest.owners.map((o) => (
+              <button key={o.id} onClick={() => onPick(o.id)}
+                style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "11px 13px", border: "var(--border)", borderRadius: 12, background: "var(--bg)", color: "var(--text)", cursor: "pointer", textAlign: "left" }}>
+                <span aria-hidden style={{ width: 38, height: 38, borderRadius: 11, background: `${avc(o.id)}33`, color: avc(o.id), display: "grid", placeItems: "center", fontWeight: 800, fontSize: 13.5, flex: "none" }}>{initials(o.name)}</span>
+                <span style={{ minWidth: 0, flex: 1 }}>
+                  <span style={{ display: "block", fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</span>
+                  <span style={{ display: "block", fontSize: 11.5, marginTop: 1 }}>
+                    {o.primary
+                      ? <span style={{ color: "#fbbf24", fontWeight: 700 }}><i className="fas fa-star" style={{ fontSize: 9, marginRight: 4 }} aria-hidden="true" />Primary owner</span>
+                      : <span style={{ color: "#60a5fa", fontWeight: 700 }}><i className="fas fa-user-group" style={{ fontSize: 9, marginRight: 4 }} aria-hidden="true" />Co-owner</span>}
+                  </span>
+                </span>
+                <i className="fas fa-chevron-right" style={{ color: "var(--muted)", fontSize: 12 }} aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+          <button onClick={onClose} style={{ justifySelf: "end", background: "transparent", border: 0, color: "var(--muted)", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: "6px 8px" }}>Cancel</button>
+        </div>
+      </div>
     </>
   );
 }
