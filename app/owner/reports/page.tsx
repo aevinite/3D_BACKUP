@@ -39,7 +39,7 @@ type PayRow = { method: string; revenue: number; orders: number };
 type DishRow = { title: string; qty: number; revenue: number };
 type CatRow = { category: string; qty: number; revenue: number };
 type HourRow = { hour: number; orders: number; revenue: number };
-type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: PayRow[]; bucket?: string };
+type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: PayRow[]; bucket?: string; drillBucket?: string; drillRows?: unknown[] };
 type Entry = { loading?: boolean; error?: string; data?: Payload };
 
 const apiType = (kind: DataKind): string =>
@@ -266,7 +266,12 @@ function Hub({ range, money, restName, accent, onOpen }: {
   const t = money?.data?.totals;
   const rows = (money?.data?.rows ?? []) as MoneyRow[];
   const bucket = money?.data?.bucket || "day";
-  const series = rows.map((r) => ({ label: bucketLabel(r.bucket, bucket), revenue: r.revenue }));
+  // Auto-drill: when only one day/month had activity the server returns a finer
+  // hourly/daily series so the chart fills instead of showing a lonely bar.
+  const drill = (money?.data?.drillRows ?? []) as MoneyRow[];
+  const chartBucket = money?.data?.drillBucket || bucket;
+  const chartRows = drill.length ? drill : rows;
+  const series = chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), value: r.revenue }));
   const avg = t && t.paidOrders ? t.revenue / t.paidOrders : 0;
   const loading = money?.loading;
   return (
@@ -287,9 +292,7 @@ function Hub({ range, money, restName, accent, onOpen }: {
         <div className="rs-ov-chart">
           {loading
             ? <div className="rs-ov-skel" aria-hidden />
-            : series.length > 1
-              ? <ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={210} title="Revenue over the period" />
-              : <div className="rs-ov-empty">Not enough data to chart this period yet.</div>}
+            : <ToggleChart data={series} color={accent} money height={210} title="Revenue over the period" />}
         </div>
       </div>
 
@@ -351,7 +354,14 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   const bucket = data.bucket || "day";
   const t = data.totals;
   const mrows = (data.rows ?? []) as MoneyRow[];
-  const series = mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), revenue: r.revenue }));
+  // Charts read the auto-drilled finer series when the server sent one (one active
+  // day/month → hourly/daily), so a single-bar period fills out. KPI cards + the
+  // GST-style tables keep using the daily `mrows`/`bucket` untouched.
+  const chartBucket = data.drillBucket || bucket;
+  const drillRows = (data.drillRows as MoneyRow[] | undefined) ?? [];
+  const chartRows = drillRows.length ? drillRows : mrows;
+  const cser = (pick: (r: MoneyRow) => number) => chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), value: pick(r) }));
+  const series = chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), revenue: r.revenue }));
 
   // ── DAY SUMMARY ──
   if (sel === "daysummary") {
@@ -469,7 +479,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   // ── AVERAGE BILL ──
   if (sel === "avgbill") {
     if (!t) return <EmptyCard text="No paid bills in this period yet." />;
-    const avgSeries = mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), revenue: r.paidOrders ? Math.round(r.revenue / r.paidOrders) : 0 }));
+    const avgSeries = chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), revenue: r.paidOrders ? Math.round(r.revenue / r.paidOrders) : 0 }));
     const avg = t.paidOrders ? t.revenue / t.paidOrders : 0;
     const withData = avgSeries.filter((s) => s.revenue > 0).map((s) => s.revenue);
     return (
@@ -499,7 +509,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   // ── ORDER VOLUME ──
   if (sel === "volume") {
     if (!t) return <EmptyCard text="No orders in this period yet." />;
-    const vol = mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.orders }));
+    const vol = chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), value: r.orders }));
     const placed = t.orders + t.cancelledOrders;
     const paidPct = placed ? (t.paidOrders / placed) * 100 : 0;
     const openOrders = Math.max(0, t.orders - t.paidOrders);   // placed, not cancelled, not yet paid
@@ -666,7 +676,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           <EmptyCard text="Pick a single restaurant to see its CGST/SGST split — tax lines are set per restaurant." />
         )}
         <Panel title="Tax over time" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.tax }))} color={accent} money name="Tax" height={220} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={cser((r) => r.tax)} color={accent} money name="Tax" height={220} /></div>
         </Panel>
         {filingRows.length > 0 && (
           <Panel title="Tax by period — filing view" hint="taxable value and each tax line, per period" pad={false}>
@@ -719,7 +729,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           <Stat label="Biggest day" tone="bad" icon="fa-arrow-up" value={biggest ? inr(biggest.discount) : "—"} sub={biggest ? bucketLabel(biggest.bucket, bucket) : ""} onClick={biggest ? () => scrollToId("rs-disc-days") : undefined} title={biggest ? "Jump to the days-with-discounts table" : undefined} />
         </div>
         <Panel title="Discounts over time" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.discount }))} color={accent} money name="Discount" height={240} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={cser((r) => r.discount)} color={accent} money name="Discount" height={240} /></div>
         </Panel>
         {top5.length > 0 && (
           <Panel title="Biggest discount days" hint="top 5 by amount given away">
@@ -772,7 +782,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           Your cancel rate is <b>{cxPct.toFixed(1)}%</b> ({health.word}) — {nfmt(t.cancelledOrders)} of {nfmt(placed)} placed orders were voided, losing {inr(t.cancelledValue)} (about {inr(avgPerCx)} per cancel).
         </p>
         <Panel title="Value lost over time" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.cancelledValue }))} color={accent} money name="Lost value" height={240} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={cser((r) => r.cancelledValue)} color={accent} money name="Lost value" height={240} /></div>
         </Panel>
         {top5.length > 0 && (
           <Panel title="Worst cancellation days" hint="top 5 by value lost">

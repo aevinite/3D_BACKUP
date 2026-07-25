@@ -261,6 +261,27 @@ without being reminded.** When you add anything, wire ALL of these that apply:
    - **No new poll faster than the 60s backstop;** realtime channels stay keyed per restaurant
      and drop on hidden/idle. Verify in the Network tab that one change refetches ONLY that table.
 
+## Charts / graphs must be DYNAMIC — never a lonely 1-bar plot (owner, 2026-07-25)
+
+A single fat bar floating in a wide empty plot reads as broken. EVERY chart (owner,
+admin, manager, any new one) must be dynamic: big & full when sparse, scrollable when
+dense, and an honest message when there's nothing — never an empty 1–2 line graph.
+The shared implementation lives in `components/owner/Charts.tsx` — reuse it, don't
+reinvent (dataviz skill agrees: "a single value is a stat tile, not a one-bar chart").
+
+- **< 2 points of real activity → NO chart.** Render the `NotEnough` card ("Not enough
+  data yet") with the one value still shown as a number. Gate: `populated(values) < MIN_POINTS`.
+- **Sparse timeline (only one active day/month) → AUTO-DRILL to finer time.** The
+  reports API (`app/api/owner/reports/route.ts`) re-queries `lfh_owner_sales_report` at a
+  finer `p_bucket` (day→hour, month→day) and returns `drillRows`/`drillBucket`; the page
+  charts use those while KPI cards + GST tables keep the daily `rows`. One day fills into
+  ~24 hourly bars instead of one bar.
+- **Dense → SCROLL, don't squeeze.** `ScrollX` keeps bars ≥~24px (`width: max(100%, …)` so
+  it fills the card when it fits, scrolls when it doesn't). `LeaderBar` caps ~8 rows then
+  scrolls vertically.
+- **New time charts MUST route through `populated()` / `NotEnough` / `ScrollX`** (or
+  replicate the three behaviours). Pairs with the adaptive-time-axis tick-thinning rule.
+
 ## Stack at a glance
 
 - Next 16.2.6, App Router, async `params`. React 19.2.4. TS strict.
