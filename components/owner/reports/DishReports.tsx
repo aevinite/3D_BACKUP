@@ -14,7 +14,7 @@
 // theme green — the honest fit for a toggleable ranking.
 import { useState } from "react";
 import { inr } from "@/components/admin/shared";
-import { nfmt } from "@/components/owner/reports/kit";
+import { nfmt, scrollToId, type RKey } from "@/components/owner/reports/kit";
 import { CategoryDonut } from "@/components/owner/Charts";
 import { Panel, Stat } from "@/components/owner/reports/kit";
 import { SearchTable, type Col } from "@/components/owner/reports/SearchTable";
@@ -74,7 +74,7 @@ function RankStyles() {
 }
 
 // ── ITEM SALES ────────────────────────────────────────────────────────────────
-export function DishesReport({ rows }: { rows: DishRow[] }) {
+export function DishesReport({ rows, onOpenReport }: { rows: DishRow[]; onOpenReport?: (k: RKey) => void }) {
   const [metric, setMetric] = useState<"revenue" | "qty">("revenue");
   const totalRev = rows.reduce((a, d) => a + d.revenue, 0);
   const totalQty = rows.reduce((a, d) => a + d.qty, 0);
@@ -111,13 +111,14 @@ export function DishesReport({ rows }: { rows: DishRow[] }) {
     <>
       <div className="rs-kpis">
         <Stat label="Item sales (list price)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} sub="menu price × paid qty" />
-        <Stat label="Units sold" tone="info" icon="fa-boxes-stacked" value={nfmt(totalQty)} />
-        <Stat label="Distinct dishes" tone="info" icon="fa-utensils" value={nfmt(rows.length)} />
-        <Stat label="Top seller" tone="good" icon="fa-crown" value={topSeller?.title || "—"} sub={topSeller ? `${nfmt(topSeller.qty)} sold · ${inr(topSeller.revenue)}` : ""} />
+        <Stat label="Units sold" tone="info" icon="fa-boxes-stacked" value={nfmt(totalQty)} onClick={() => scrollToId("rs-top-movers")} title="See the top-moving dishes" />
+        <Stat label="Distinct dishes" tone="info" icon="fa-utensils" value={nfmt(rows.length)} onClick={() => scrollToId("rs-every-dish")} title="Jump to the full dish list" />
+        <Stat label="Top seller" tone="good" icon="fa-crown" value={topSeller?.title || "—"} sub={topSeller ? `${nfmt(topSeller.qty)} sold · ${inr(topSeller.revenue)}` : ""} onClick={() => scrollToId("rs-top-movers")} title="See the top movers" />
         <Stat label="Avg per dish" tone="accent" icon="fa-scale-balanced" value={inr(avgPerDish)} sub="item sales ÷ dishes" />
       </div>
 
       <Panel
+        id="rs-top-movers"
         title="Top movers"
         hint={metric === "revenue" ? "top 12 by item sales" : "top 12 by units sold"}
         right={
@@ -136,7 +137,12 @@ export function DishesReport({ rows }: { rows: DishRow[] }) {
         </Panel>
       )}
 
-      <Panel title="Every dish" pad={false}>
+      <Panel
+        id="rs-every-dish"
+        title="Every dish"
+        right={onOpenReport && <button type="button" className="rs-drill" onClick={() => onOpenReport("menu")} title="Open the Menu engineering report">Menu engineering <i className="fas fa-arrow-right" aria-hidden /></button>}
+        pad={false}
+      >
         <SearchTable
           rows={rows} columns={cols} searchKey={(d) => d.title}
           initialSort={{ key: "revenue", dir: "desc" }} placeholder="Search dishes…" footer={footer}
@@ -149,7 +155,7 @@ export function DishesReport({ rows }: { rows: DishRow[] }) {
 }
 
 // ── CATEGORY MIX ────────────────────────────────────────────────────────────────
-export function CategoriesReport({ rows }: { rows: CatRow[] }) {
+export function CategoriesReport({ rows, onOpenReport }: { rows: CatRow[]; onOpenReport?: (k: RKey) => void }) {
   const byRev = [...rows].sort((a, b) => b.revenue - a.revenue);
   const totalRev = rows.reduce((a, c) => a + c.revenue, 0);
   const totalQty = rows.reduce((a, c) => a + c.qty, 0);
@@ -161,6 +167,12 @@ export function CategoriesReport({ rows }: { rows: CatRow[] }) {
     { key: "qty", label: "Qty", num: true, render: (c) => nfmt(c.qty), sortBy: (c) => c.qty },
     { key: "revenue", label: "Item sales", num: true, render: (c) => <b>{inr(c.revenue)}</b>, sortBy: (c) => c.revenue },
     { key: "share", label: "%", num: true, render: (c) => pct1(c.revenue, totalRev), sortBy: (c) => c.revenue },
+    // Category rows carry an explicit "view items" affordance → the full Item sales report
+    // (the dishes payload isn't category-scoped, so every row opens the same item report).
+    ...(onOpenReport ? [{
+      key: "drill", label: "", num: true,
+      render: () => <button type="button" className="rs-drill" onClick={() => onOpenReport("dishes")} title="Open the Item sales report">Items <i className="fas fa-arrow-right" aria-hidden /></button>,
+    } as Col<CatRow>] : []),
   ];
   const footer = (
     <tr>
@@ -168,6 +180,7 @@ export function CategoriesReport({ rows }: { rows: CatRow[] }) {
       <td className="num">{nfmt(totalQty)}</td>
       <td className="num"><b>{inr(totalRev)}</b></td>
       <td className="num">100%</td>
+      {onOpenReport && <td className="num" />}
     </tr>
   );
 
@@ -175,12 +188,12 @@ export function CategoriesReport({ rows }: { rows: CatRow[] }) {
     <>
       <div className="rs-kpis">
         <Stat label="Item sales (list price)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} sub="across all sections" />
-        <Stat label="Categories" tone="info" icon="fa-layer-group" value={nfmt(rows.length)} />
-        <Stat label="Top category" tone="good" icon="fa-crown" value={top?.category || "—"} sub={top ? `${pct0(top.revenue, totalRev)} of sales` : ""} />
+        <Stat label="Categories" tone="info" icon="fa-layer-group" value={nfmt(rows.length)} onClick={() => scrollToId("rs-every-cat")} title="Jump to the category table" />
+        <Stat label="Top category" tone="good" icon="fa-crown" value={top?.category || "—"} sub={top ? `${pct0(top.revenue, totalRev)} of sales` : ""} onClick={onOpenReport ? () => onOpenReport("dishes") : undefined} title={onOpenReport ? "See the dishes in Item sales" : undefined} />
         <Stat label="Weakest category" tone="warn" icon="fa-arrow-down" value={weak?.category || "—"} sub={weak ? `${pct0(weak.revenue, totalRev)} of sales` : ""} />
       </div>
       <div className="rs-grid two">
-        <Panel title="Every category" pad={false}>
+        <Panel id="rs-every-cat" title="Every category" pad={false}>
           <SearchTable
             rows={rows} columns={cols} searchKey={(c) => c.category}
             initialSort={{ key: "revenue", dir: "desc" }} placeholder="Search categories…"
@@ -223,7 +236,7 @@ function classifyMenu(rows: MI[]) {
 }
 type MenuDish = ReturnType<typeof classifyMenu>["dishes"][number];
 
-export function MenuReport({ rows }: { rows: MI[] }) {
+export function MenuReport({ rows, onOpenReport }: { rows: MI[]; onOpenReport?: (k: RKey) => void }) {
   const { dishes, totalQty, totalRev } = classifyMenu(rows);
   const byRev = [...dishes].sort((a, b) => b.revenue - a.revenue);
   const count = (k: Klass) => dishes.filter((d) => d.klass === k).length;
@@ -257,9 +270,9 @@ export function MenuReport({ rows }: { rows: MI[] }) {
     <>
       <div className="rs-kpis">
         <Stat label="Item sales (list price)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} sub="menu price × paid qty" />
-        <Stat label="Units sold" tone="info" icon="fa-boxes-stacked" value={nfmt(totalQty)} />
-        <Stat label="Stars" tone="good" icon="fa-star" value={nfmt(stars)} sub="push these" />
-        <Stat label="Needs attention" tone="warn" icon="fa-screwdriver-wrench" value={nfmt(attention)} sub="puzzles + dogs" />
+        <Stat label="Units sold" tone="info" icon="fa-boxes-stacked" value={nfmt(totalQty)} onClick={() => scrollToId("rs-product-mix")} title="Jump to the full product mix" />
+        <Stat label="Stars" tone="good" icon="fa-star" value={nfmt(stars)} sub="push these" onClick={() => scrollToId("rs-menu-quad")} title="See the star dishes" />
+        <Stat label="Needs attention" tone="warn" icon="fa-screwdriver-wrench" value={nfmt(attention)} sub="puzzles + dogs" onClick={() => scrollToId("rs-menu-quad")} title="See what needs attention" />
       </div>
 
       {opp && (
@@ -276,7 +289,7 @@ export function MenuReport({ rows }: { rows: MI[] }) {
 
       <p className="rs-note" style={{ marginTop: 0, marginBottom: 12 }}>Every dish is grouped by how <b>often</b> it&apos;s ordered and how <b>pricey</b> it is. Uses menu price (not cost) — a per-dish cost field would make this profit-true.</p>
 
-      <div className="rs-quad">
+      <div className="rs-quad" id="rs-menu-quad">
         {QORDER.map((k) => {
           const list = byRev.filter((d) => d.klass === k);
           return (
@@ -294,7 +307,13 @@ export function MenuReport({ rows }: { rows: MI[] }) {
       </div>
 
       <div style={{ height: 14 }} />
-      <Panel title="Product mix" hint="each dish's share of what sold" pad={false}>
+      <Panel
+        id="rs-product-mix"
+        title="Product mix"
+        hint="each dish's share of what sold"
+        right={onOpenReport && <button type="button" className="rs-drill" onClick={() => onOpenReport("dishes")} title="Open the Item sales report">Item sales <i className="fas fa-arrow-right" aria-hidden /></button>}
+        pad={false}
+      >
         <SearchTable
           rows={byRev} columns={cols} searchKey={(d) => d.title}
           initialSort={{ key: "revenue", dir: "desc" }} placeholder="Search dishes…" footer={footer}

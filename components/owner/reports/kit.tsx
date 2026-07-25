@@ -86,16 +86,32 @@ export function Delta({ now, prev, invert = false }: { now: number; prev: number
 }
 
 // ── KPI stat card ─────────────────────────────────────────────────────────────
-export function Stat({ label, value, sub, tone = "accent", icon, delta, spark, big = false }: {
+// A tile can be made "clickable" by passing `onClick` — it then drills into the
+// list/section it summarises (same-report smooth-scroll) or jumps to a related
+// report. Clickable tiles are keyboard-operable (role=button, Enter/Space) and show
+// a subtle arrow affordance that stays faintly visible on touch (no hover there).
+export function Stat({ label, value, sub, tone = "accent", icon, delta, spark, big = false, onClick, title }: {
   label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: Tone; icon?: string;
   delta?: { now: number; prev: number | null | undefined; invert?: boolean };
   spark?: number[]; big?: boolean;
+  onClick?: () => void;      // makes the tile a button that expands what it summarises
+  title?: string;            // native tooltip + screen-reader label (e.g. "Jump to the dish list")
 }) {
+  const clickable = !!onClick;
   return (
-    <div className={`rs-stat tone-${tone}${big ? " big" : ""}`}>
+    <div
+      className={`rs-stat tone-${tone}${big ? " big" : ""}${clickable ? " clickable" : ""}`}
+      onClick={onClick}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      title={title}
+      aria-label={clickable ? (title || (typeof label === "string" ? label : undefined)) : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+    >
       <div className="rs-stat-top">
         <span className="rs-stat-k">{icon && <i className={`fas ${icon}`} aria-hidden />}{label}</span>
-        {delta && <Delta now={delta.now} prev={delta.prev} invert={delta.invert} />}
+        {delta ? <Delta now={delta.now} prev={delta.prev} invert={delta.invert} />
+          : clickable ? <span className="rs-stat-go" aria-hidden><i className="fas fa-arrow-right-long" /></span> : null}
       </div>
       <div className="rs-stat-v"><AnimatedStatValue value={value} /></div>
       {sub != null && <div className="rs-stat-sub">{sub}</div>}
@@ -104,12 +120,28 @@ export function Stat({ label, value, sub, tone = "accent", icon, delta, spark, b
   );
 }
 
+// Smooth-scroll to a section within the report and briefly flash it, so a tile that
+// says "12 dishes" can carry the eye to the actual dish table. Respects reduced-motion
+// (jumps instead of animating) and is a no-op if the id isn't on the page.
+export function scrollToId(id: string) {
+  if (typeof document === "undefined") return;
+  const el = document.getElementById(id);
+  if (!el) return;
+  const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  el.classList.remove("rs-flash");
+  void el.offsetWidth;                 // restart the flash even on a repeat click
+  el.classList.add("rs-flash");
+  window.setTimeout(() => el.classList.remove("rs-flash"), 1400);
+}
+
 // ── Panel — a titled card that content sits inside ────────────────────────────
-export function Panel({ title, hint, right, children, pad = true }: {
+export function Panel({ title, hint, right, children, pad = true, id }: {
   title?: React.ReactNode; hint?: React.ReactNode; right?: React.ReactNode; children: React.ReactNode; pad?: boolean;
+  id?: string;   // anchor target so a KPI tile can smooth-scroll to this panel
 }) {
   return (
-    <section className="rs-panel">
+    <section className="rs-panel" id={id}>
       {(title || right) && (
         <header className="rs-panel-h">
           <div><b>{title}</b>{hint && <span className="rs-panel-hint"> · {hint}</span>}</div>
@@ -219,6 +251,26 @@ export function ReportsStyles() {
       .rs-stat-sub { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
       .rs-stat-spark { margin-top: 8px; }
 
+      /* Clickable KPI tile — drills into the list/section it summarises. */
+      .rs-stat.clickable { cursor: pointer; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
+      .rs-stat.clickable:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--tone-c) 50%, var(--border-c)); box-shadow: 0 10px 24px -14px color-mix(in srgb, var(--tone-c) 55%, transparent); }
+      .rs-stat.clickable:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone-c) 40%, transparent); border-color: color-mix(in srgb, var(--tone-c) 55%, var(--border-c)); }
+      .rs-stat-go { display: inline-grid; place-items: center; width: 22px; height: 22px; flex-shrink: 0; border-radius: 999px; color: var(--tone-c); background: color-mix(in srgb, var(--tone-c) 13%, transparent); font-size: 10px; opacity: .6; transition: opacity .16s ease, transform .16s ease; }
+      .rs-stat.clickable:hover .rs-stat-go, .rs-stat.clickable:focus-visible .rs-stat-go { opacity: 1; transform: translateX(2px); }
+      @media (prefers-reduced-motion: reduce) { .rs-stat.clickable { transition: none; } .rs-stat.clickable:hover { transform: none; } .rs-stat.clickable:hover .rs-stat-go, .rs-stat.clickable:focus-visible .rs-stat-go { transform: none; } }
+
+      /* Inline "open the full report / view items" affordance used inside tables + panel headers. */
+      .rs-drill { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent); border-radius: 8px; padding: 3px 9px; cursor: pointer; white-space: nowrap; transition: background .14s ease, transform .14s ease; }
+      .rs-drill:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); transform: translateX(1px); }
+      .rs-drill:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+      .rs-drill i { font-size: 9px; }
+      @media (prefers-reduced-motion: reduce) { .rs-drill:hover { transform: none; } }
+
+      /* Landing flash — a brief accent ring when a tile scrolls you to a section. */
+      .rs-flash { animation: rs-flash 1.4s ease; }
+      @keyframes rs-flash { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); } 35% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 34%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+      @media (prefers-reduced-motion: reduce) { .rs-flash { animation: none; } }
+
       .rs-delta { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 999px; font-variant-numeric: tabular-nums; white-space: nowrap; }
       .rs-delta i { font-size: 9px; }
       .rs-delta.good { color: var(--adm-ok); background: color-mix(in srgb, var(--adm-ok) 15%, transparent); }
@@ -229,7 +281,7 @@ export function ReportsStyles() {
       .rs-grid.two { grid-template-columns: 1.5fr 1fr; }
       @media (max-width: 900px) { .rs-grid.two { grid-template-columns: 1fr; } }
 
-      .rs-panel { border: 1px solid var(--border-c); border-radius: var(--r); background: var(--card); overflow: hidden; }
+      .rs-panel { border: 1px solid var(--border-c); border-radius: var(--r); background: var(--card); overflow: hidden; scroll-margin-top: 84px; }
       .rs-panel-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--border-c); font-size: 13px; }
       .rs-panel-h b { font-weight: 800; letter-spacing: -0.01em; }
       .rs-panel-hint { font-weight: 500; color: var(--muted); }
@@ -270,7 +322,7 @@ export function ReportsStyles() {
       .rs-paybar > span { display: block; height: 100%; border-radius: 999px; }
 
       /* ── Menu-engineering quadrant ─────────────────────────────────────── */
-      .rs-quad { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .rs-quad { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; scroll-margin-top: 84px; }
       @media (max-width: 720px) { .rs-quad { grid-template-columns: 1fr; } }
       .rs-qbox { border: 1px solid var(--border-c); border-radius: 12px; padding: 13px 14px; background: var(--card); border-top: 3px solid var(--qc, var(--border-c)); }
       .rs-qbox.star { --qc: #16a34a; } .rs-qbox.workhorse { --qc: #3987e5; }
@@ -297,7 +349,7 @@ export function ReportsStyles() {
 
       /* ── Print: a clean document, not a screenshot of the console ──────── */
       @media print {
-        .rs-controls, .rs-catrow, .rs-cards, .rs-crumb, .rs-actions, .rs-card .go { display: none !important; }
+        .rs-controls, .rs-catrow, .rs-cards, .rs-crumb, .rs-actions, .rs-card .go, .rs-stat-go, .rs-drill { display: none !important; }
         .owx-side, .owx-top, .adm-adminbar, .owx-navdrawer { display: none !important; }
         .adm-main, .adm-body, .owx-wrap { padding: 0 !important; margin: 0 !important; overflow: visible !important; }
         .rs-panel, .rs-stat, .rs-qbox, .rs-overview { border: 1px solid #ccc !important; box-shadow: none !important; background: #fff !important; break-inside: avoid; }
