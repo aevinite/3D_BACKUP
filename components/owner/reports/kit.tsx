@@ -157,16 +157,25 @@ export function ReportsStyles() {
       .rs-dirty-hint { font-size: 11.5px; font-weight: 700; color: var(--own-cta); display: inline-flex; align-items: center; gap: 6px; }
 
       /* ── Hub: overview strip + category sections + report cards ─────────── */
-      .rs-hero { display: grid; grid-template-columns: 1.15fr 1fr; gap: 16px; border: 1px solid var(--border-c); border-radius: var(--r); background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--card)), var(--card) 62%); padding: 20px 22px; margin-bottom: 22px; overflow: hidden; }
-      .rs-hero-l { min-width: 0; }
-      .rs-hero-eyebrow { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
-      .rs-hero-val { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
-      .rs-hero-sub { font-size: 12.5px; color: var(--muted); }
-      .rs-hero-mini { display: flex; gap: 22px; margin-top: 16px; flex-wrap: wrap; }
-      .rs-hero-mini .m { min-width: 0; }
-      .rs-hero-mini .m .k { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-      .rs-hero-mini .m .v { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
-      .rs-hero-r { display: grid; place-items: center; min-width: 0; }
+      .rs-overview { border: 1px solid var(--border-c); border-radius: var(--r); background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--card)), var(--card) 60%); padding: 20px 22px; margin-bottom: 22px; overflow: hidden; }
+      .rs-ov-eyebrow { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+      .rs-ov-val { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
+      .rs-ov-sub { font-size: 12.5px; color: var(--muted); }
+      .rs-ov-kpis { display: flex; gap: 30px; flex-wrap: wrap; margin: 16px 0 4px; }
+      .rs-ov-kpis .k { display: flex; flex-direction: column; min-width: 0; }
+      .rs-ov-kpis .lbl { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+      .rs-ov-kpis .v { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 3px; }
+      .rs-ov-charthead { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
+      .rs-ov-charthead .t { font-size: 12px; font-weight: 700; color: var(--muted); }
+      .rs-ov-toggle { display: inline-flex; background: var(--muted2); border-radius: 999px; padding: 3px; gap: 3px; }
+      .rs-ov-toggle button { border: none; background: none; color: var(--muted); font: inherit; font-size: 12px; font-weight: 700; padding: 5px 16px; border-radius: 999px; cursor: pointer; transition: background .18s ease, color .18s ease; }
+      .rs-ov-toggle button:hover { color: var(--text); }
+      .rs-ov-toggle button.on { background: var(--accent); color: #fff; }
+      .rs-ov-chart { margin-top: 8px; }
+      .rs-ov-empty { height: 210px; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+      .rs-ov-skel { height: 210px; border-radius: 10px; background: linear-gradient(90deg, color-mix(in srgb, var(--muted2) 55%, transparent), var(--muted2), color-mix(in srgb, var(--muted2) 55%, transparent)); background-size: 200% 100%; animation: rs-shimmer 1.3s ease-in-out infinite; }
+      @keyframes rs-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+      @media (prefers-reduced-motion: reduce) { .rs-ov-skel { animation: none; } }
 
       .rs-catrow { display: flex; align-items: center; gap: 9px; margin: 26px 2px 12px; }
       .rs-catrow .ic { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-size: 12px; }
@@ -275,9 +284,8 @@ export function ReportsStyles() {
       .rs-tag.dog { background: color-mix(in srgb, #e2607a 16%, transparent); color: #e2607a; }
 
       @media (max-width: 640px) {
-        .rs-hero { grid-template-columns: 1fr; }
-        .rs-hero-r { display: none; }
-        .rs-hero-val { font-size: 32px; }
+        .rs-ov-val { font-size: 32px; }
+        .rs-ov-kpis { gap: 20px; }
       }
 
       /* ── Print: a clean document, not a screenshot of the console ──────── */
@@ -285,7 +293,7 @@ export function ReportsStyles() {
         .rs-controls, .rs-catrow, .rs-cards, .rs-crumb, .rs-actions, .rs-card .go { display: none !important; }
         .owx-side, .owx-top, .adm-adminbar, .owx-navdrawer { display: none !important; }
         .adm-main, .adm-body, .owx-wrap { padding: 0 !important; margin: 0 !important; overflow: visible !important; }
-        .rs-panel, .rs-stat, .rs-qbox, .rs-hero { border: 1px solid #ccc !important; box-shadow: none !important; background: #fff !important; break-inside: avoid; }
+        .rs-panel, .rs-stat, .rs-qbox, .rs-overview { border: 1px solid #ccc !important; box-shadow: none !important; background: #fff !important; break-inside: avoid; }
         .rs-report, .rs-stat, .rs-card { animation: none !important; }
         .rs-h1, .rs-report { color: #000 !important; }
       }

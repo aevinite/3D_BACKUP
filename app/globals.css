@@ -4128,7 +4128,10 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 .owx-brand .who { min-width: 0; }
 .owx-brand .who b { display: block; font-size: 13.5px; font-weight: 700; line-height: 1.15; color: var(--text); }
 .owx-brand .who span { font-size: 11px; color: var(--muted); }
-.owx-nav { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.owx-nav { display: flex; flex-direction: column; flex: 1 0 auto; min-height: 0; }
+/* flex-shrink 0: on a short viewport the nav keeps its full content height and the whole
+   sidebar (.owx-side) scrolls, instead of the nav collapsing so "My restaurants" overlaps
+   the Coming-soon links (owner 2026-07-25). */
 .owx-group { display: flex; flex-direction: column; gap: 1px; }
 .owx-group-lbl {
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
