@@ -10,6 +10,7 @@
 // is rich without being egress-heavy. Charts adopt the SELECTED restaurant's brand accent.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
+import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import {
   AreaTrend, TimeBar, CountBar, HourlyBar, CategoryDonut, PaymentDonut, LeaderBar,
   Spark, canonPayMethod, PAY_COLORS,
@@ -265,13 +266,13 @@ function Hub({ range, money, restName, accent, onOpen }: {
       <div className="rs-hero">
         <div className="rs-hero-l">
           <div className="rs-hero-eyebrow">{restName} · {rangeLabel(range)}</div>
-          <div className="rs-hero-val">{money?.loading ? "…" : inr(t?.revenue || 0)}</div>
+          <div className="rs-hero-val"><AnimatedNumber value={t?.revenue || 0} money loading={money?.loading} /></div>
           <div className="rs-hero-sub">Net revenue kept in this period{money?.error ? " — couldn't load" : ""}</div>
           <div className="rs-hero-mini">
-            <div className="m"><div className="k">Paid bills</div><div className="v">{nfmt(t?.paidOrders || 0)}</div></div>
-            <div className="m"><div className="k">Avg bill</div><div className="v">{inr(avg)}</div></div>
-            <div className="m"><div className="k">Tax collected</div><div className="v">{inr(t?.tax || 0)}</div></div>
-            <div className="m"><div className="k">Discounts</div><div className="v">{inr(t?.discount || 0)}</div></div>
+            <div className="m"><div className="k">Paid bills</div><div className="v"><AnimatedNumber value={t?.paidOrders || 0} format={nfmt} loading={money?.loading} /></div></div>
+            <div className="m"><div className="k">Avg bill</div><div className="v"><AnimatedNumber value={avg} money loading={money?.loading} /></div></div>
+            <div className="m"><div className="k">Tax collected</div><div className="v"><AnimatedNumber value={t?.tax || 0} money loading={money?.loading} /></div></div>
+            <div className="m"><div className="k">Discounts</div><div className="v"><AnimatedNumber value={t?.discount || 0} money loading={money?.loading} /></div></div>
           </div>
         </div>
         <div className="rs-hero-r">
