@@ -85,9 +85,10 @@ export default function AdminRepair() {
   // Live problems (error-level log rows) + local view state.
   const [errors, setErrors] = useState<Action[]>([]);
   const [errLoading, setErrLoading] = useState(true);
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [sent, setSent] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [confirmResolve, setConfirmResolve] = useState<string>(""); // group key mid-confirm ("are you sure?")
+  const [resolving, setResolving] = useState<Set<string>>(new Set());
 
   // "Describe a problem" box + the queue + Claude session history.
   const [note, setNote] = useState("");
@@ -132,7 +133,10 @@ export default function AdminRepair() {
     // ?scope=all forces the platform-wide complaints view (an admin's act-as cookie would
     // otherwise silently collapse it to one restaurant — same fix the old Tickets page used).
     const [e, q, h, iss, at] = await Promise.all([
-      adminFetch<{ actions: Action[] }>("/api/admin/oplog?level=error&limit=50"),
+      // ?unresolved=1 — only errors nobody has cleared yet (mig 181 resolved_at). Resolving one
+      // (or a landed fix, via the mig 183 trigger) drops it off this list; the full Logs page
+      // still shows resolved rows. Without this the board could never be emptied.
+      adminFetch<{ actions: Action[] }>("/api/admin/oplog?level=error&limit=50&unresolved=1"),
       adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open"),
       adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
       adminFetch<{ issues: Issue[] }>("/api/owner/issues?scope=all"),
@@ -179,6 +183,24 @@ export default function AdminRepair() {
     else { toast(r.error || "Couldn't send that.", "err"); setSent((prev) => { const n = new Set(prev); n.delete(g.key); return n; }); }
   };
 
+  // Mark a problem handled (owner 2026-07-24: a Resolve action, separate from Fix now/Overnight,
+  // with an are-you-sure step). Persists via /api/admin/resolve-error (mig 181 resolved_at) for
+  // the WHOLE ×N group, so it drops off the board here AND clears the dashboard red count — and
+  // stays gone after a refresh (unlike the old local-only hide). Optimistic; reverts on failure.
+  const resolveError = async (g: ErrGroup) => {
+    setConfirmResolve("");
+    setResolving((prev) => new Set(prev).add(g.key));
+    setErrors((prev) => prev.filter((a) => !(a.panel === g.sample.panel && (a.restaurant_id || "") === (g.sample.restaurant_id || "") && a.action === g.sample.action && (a.detail || "").slice(0, 90) === (g.sample.detail || "").slice(0, 90))));
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/resolve-error", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action_id: g.sample.id }),
+    });
+    setResolving((prev) => { const n = new Set(prev); n.delete(g.key); return n; });
+    if (r.ok) toast(g.count > 1 ? `Resolved · cleared ${g.count} reports` : "Resolved");
+    else { toast(r.error || "Couldn't resolve that.", "err"); loadHub(); }
+  };
+
   const jumpTo = (a: Action) => {
     const j = PANEL_JUMP[a.panel];
     if (j && a.restaurant_id) { openRestaurantPanel(a.restaurant_id, j.route); return; }
@@ -221,7 +243,7 @@ export default function AdminRepair() {
   const attCount = (att?.atRisk.length || 0) + (att?.onboarding.length || 0);
 
   const scopedName = restaurants.find((r) => r.id === rid)?.name || null;
-  const groups = groupErrors(errors).filter((g) => !hidden.has(g.key));
+  const groups = groupErrors(errors);
 
   return (
     <>
@@ -311,7 +333,21 @@ export default function AdminRepair() {
                     {a.detail && a.detail.length > 90 ? (
                       <button className="rp-link" onClick={() => setExpanded((p) => { const n = new Set(p); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}>{isOpen ? "less" : "more"}</button>
                     ) : null}
-                    <button className="rp-x" title="Hide (I've handled this)" onClick={() => setHidden((p) => new Set(p).add(g.key))}><i className="fas fa-xmark" aria-hidden="true" /></button>
+                    {/* Resolve — the owner clears it himself (persists; whole ×N group). Two-step
+                        are-you-sure so a mis-tap can't wipe a real problem off the board. */}
+                    {confirmResolve === g.key ? (
+                      <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                        <span className="adm-muted">Mark resolved?</span>
+                        <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => resolveError(g)}>
+                          <i className="fas fa-check" aria-hidden="true" style={{ marginRight: 5 }} />Yes, resolve
+                        </button>
+                        <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setConfirmResolve("")}>Cancel</button>
+                      </span>
+                    ) : (
+                      <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} disabled={resolving.has(g.key)} onClick={() => setConfirmResolve(g.key)} title="I've handled this — clear it from the board (stays gone after refresh)">
+                        <i className="fas fa-circle-check" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-ok, #4caf82)" }} />{resolving.has(g.key) ? "Resolving…" : "Resolve"}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
