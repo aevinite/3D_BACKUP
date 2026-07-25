@@ -175,7 +175,12 @@ export function HourlyBar({ data, color }: { data: { hour: number; orders: numbe
           {/* Adaptive ticks (owner's axis rule): let Recharts drop labels by available
               width instead of a hard every-3rd-hour — narrow cards thin out, wide fill. */}
           <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" />
-          <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={28} allowDecimals={false} />
+          {/* width must fit the widest count label — a busy restaurant's 4-digit hourly count
+              (e.g. Green Bowl's 0/350/700/1050/1303) overflowed the old 28px axis, so each
+              label's leading digit was clipped and the numbers read as a scrambled
+              "303/050/700" (1303→303, 1050→050) — the owner's bug, 2026-07-25. Widen the axis
+              + round to whole orders so the full label always fits. */}
+          <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={40} allowDecimals={false} tickFormatter={(v: number) => Math.round(v).toString()} />
           <Tooltip content={<CountTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="orders" name="Orders" fill={color} radius={[5, 5, 0, 0]} />
         </BarChart>

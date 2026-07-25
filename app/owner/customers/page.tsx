@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { nfmt } from "@/components/owner/reports/kit";
+import { asSuffix } from "@/lib/ownerPin";
 
 const IST = "Asia/Kolkata";
 type Customer = {
@@ -30,7 +31,7 @@ export default function OwnerCustomers() {
   const load = useCallback(async () => {
     try {
       const s = searchRef.current.trim();
-      const qs = [scopePin ? `scope=${scopePin}` : "", s ? `q=${encodeURIComponent(s)}` : ""].filter(Boolean).join("&");
+      const qs = [scopePin ? `scope=${scopePin}${asSuffix()}` : "", s ? `q=${encodeURIComponent(s)}` : ""].filter(Boolean).join("&");
       const j = await (await fetch(`/api/owner/customers${qs ? `?${qs}` : ""}`, { cache: "no-store" })).json();
       if (j.disabled) { setDisabled(true); return; }
       if (j.error) throw new Error(j.error);

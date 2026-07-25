@@ -10,6 +10,7 @@
 // is rich without being egress-heavy. Charts adopt the SELECTED restaurant's brand accent.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
+import { asSuffix } from "@/lib/ownerPin";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import {
   ToggleChart, PaymentDonut, LeaderBar,
@@ -122,7 +123,7 @@ export default function OwnerReports() {
   // tab's act-as cookie can't hijack this one.
   const scopePin = useMemo(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"), []);
-  const scp = scopePin ? `&scope=${scopePin}` : "";
+  const scp = scopePin ? `&scope=${scopePin}${asSuffix()}` : "";
 
   // Pin the scope from the URL (admin act-as ?rid) after hydration — not in the initial
   // state (that mismatches SSR). Runs once on mount, before `ready`, so the gated fetch

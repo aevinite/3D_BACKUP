@@ -8,6 +8,7 @@
 // A 60s backstop refresh (paused while the tab is hidden) keeps new items appearing
 // without a manual Refresh; no faster poll (egress rule).
 import { useCallback, useEffect, useRef, useState } from "react";
+import { asSuffix } from "@/lib/ownerPin";
 
 type Issue = {
   id: string; restaurant_id: string; restaurantName: string;
@@ -39,7 +40,11 @@ export default function OwnerFeedback() {
   // second tab's shared act-as cookie can't hijack this tab. Null for a real owner.
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
-  const scp = scopePin ? `?scope=${scopePin}` : "";
+  // scope = the admin act-as auth pin; rid = the narrowing filter so a single selected
+  // restaurant shows ONLY its own ratings/issues (mirrors the Reports page, which sends both).
+  // Without rid the server falls back to the owner's full set. Harmless on the PATCH calls
+  // (they scope by the row id), so one suffix serves every request here.
+  const scp = scopePin ? `?scope=${scopePin}&rid=${scopePin}${asSuffix()}` : "";
 
   // ── Ratings ──
   const [ratings, setRatings] = useState<Rating[] | null>(null);

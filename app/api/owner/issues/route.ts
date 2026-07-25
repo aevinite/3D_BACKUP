@@ -38,10 +38,12 @@ export async function GET(req: NextRequest) {
     if (!scope.ids.length) return NextResponse.json({ issues: [] });
     q = q.in("restaurant_id", scope.ids);
   }
-  // Optional ?restaurant_id= filter — the admin restaurant DETAIL view shows just one
-  // restaurant's tickets. Only honoured when that id is already in the caller's scope
-  // (an admin's scope is every restaurant), so it can only NARROW, never widen.
-  const oneRid = req.nextUrl.searchParams.get("restaurant_id");
+  // Optional ?rid= (or legacy ?restaurant_id=) filter — narrow to ONE selected restaurant:
+  // the owner's top-strip restaurant pick / an admin act-as one restaurant (mirrors
+  // /api/owner/reports), and the admin restaurant DETAIL view. Only honoured when that id is
+  // already in the caller's scope (an admin's scope is every restaurant), so it can only
+  // NARROW, never widen.
+  const oneRid = req.nextUrl.searchParams.get("rid") || req.nextUrl.searchParams.get("restaurant_id");
   if (oneRid) {
     if (!inScope(scope, oneRid)) return NextResponse.json({ issues: [], openCount: 0 });
     q = q.eq("restaurant_id", oneRid);

@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ACT_LABEL, PANEL_COLOR, timeAgo, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
+import { asValue } from "@/lib/ownerPin";
 
 export default function OwnerActivity() {
   // Admin-in-one-restaurant scope pin (?rid=) — rides on every call as ?scope= so a second
@@ -28,7 +29,10 @@ export default function OwnerActivity() {
 
   const load = useCallback(async () => {
     const params = new URLSearchParams();
-    if (scopePin) params.set("scope", scopePin);
+    // scope = the admin act-as auth pin (per-tab, can't be hijacked); rid = the narrowing
+    // filter so a single selected restaurant shows ONLY its own rows (mirrors the Reports
+    // page, which sends both). Without rid the server falls back to the owner's full set.
+    if (scopePin) { params.set("scope", scopePin); params.set("rid", scopePin); const a = asValue(); if (a) params.set("as", a); }
     if (level) params.set("level", level);
     if (qDebounced.trim()) params.set("q", qDebounced.trim());
     const qs = params.toString();
