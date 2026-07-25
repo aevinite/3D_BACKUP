@@ -526,8 +526,11 @@ function UsersStyle() {
   .usp-code { font-size:18px; background:var(--bg); padding:8px 12px; border-radius:8px; letter-spacing:1px; }
   .usp-btn { padding:9px 14px; border-radius:9px; border:0; font-weight:700; font-size:13px; cursor:pointer; color:#fff; }
   .usp-btn.blue { background:var(--ub); } .usp-btn.ghost { background:#374151; }
-  .usp-hero { border-radius:18px; padding:18px; margin-bottom:14px; border:var(--border);
+  /* Sticky search/filter hero so the search + role filters + Add stay reachable while
+     scrolling the user list (owner 2026-07-25). */
+  .usp-hero { border-radius:18px; padding:18px; margin-bottom:14px; border:var(--border); position:sticky; top:0; z-index:20;
     background: radial-gradient(700px 200px at 50% -40%, color-mix(in srgb, var(--ub) 22%, transparent), transparent 70%), var(--card); }
+  .usp-hero::before { content:""; position:absolute; left:0; right:0; top:-24px; height:24px; background:var(--bg); }
   .usp-search { display:flex; align-items:center; gap:13px; height:60px; padding:0 18px; border-radius:14px; background:var(--bg); border:1px solid var(--border); transition:border-color .15s, box-shadow .15s; }
   .usp-search:focus-within { border-color:var(--ub); box-shadow:0 0 0 4px color-mix(in srgb, var(--ub) 30%, transparent); }
   .usp-search svg { color:var(--muted); flex:none; }

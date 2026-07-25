@@ -316,6 +316,7 @@ export default function Access2Page() {
   return (
     <div className="acc2">
       <Style />
+      <div className="acc2-top">
       <nav className="adm-crumbs" style={{ marginBottom: 4 }}>
         <a href="/aevinite">Dashboard</a><span className="sep">›</span>
         <a href="/aevinite/restaurants">Restaurants</a><span className="sep">›</span>
@@ -347,6 +348,7 @@ export default function Access2Page() {
           </div>
         </div>
       </header>
+      </div>
 
       {tab === "general" ? <General /> : <PerPerson />}
 
@@ -730,7 +732,13 @@ function Style() {
   .acc2 .ppill { display:inline-block; margin-top:3px; font-size:10.5px; font-weight:800; letter-spacing:.02em; padding:2px 9px; border-radius:20px; line-height:1.5; }
   .acc2 .acc2-rolechips .cdot { width:8px; height:8px; border-radius:50%; flex:none; }
   .acc2 .prow.on .av { color:#10131a; }  /* avatar stays role-coloured (inline bg) even when selected */
-  .acc2-head { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:6px 0 18px; }
+  /* Sticky top bar: breadcrumb + title + restaurant selector + General/Per-person toggle stay
+     pinned as ONE block while the panel scrolls, so you can switch tab/restaurant without
+     scrolling up (owner 2026-07-25). One opaque wrapper = no content peeking above it. */
+  .acc2-top { position:sticky; top:0; z-index:20; background:var(--bg); padding-bottom:12px; }
+  /* cover the scroll container's ~20px top padding so no row peeks above the pinned bar */
+  .acc2-top::before { content:""; position:absolute; left:0; right:0; top:-24px; height:24px; background:var(--bg); }
+  .acc2-head { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:6px 0 0; }
   .acc2-head-r { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .acc2-save { font-size:12px; font-weight:700; color:var(--muted); min-width:60px; }
   .acc2-save.saved { color:var(--adm-ok); } .acc2-save.err { color:var(--adm-danger); }
@@ -741,7 +749,7 @@ function Style() {
   .acc2-warn { display:flex; gap:10px; align-items:flex-start; padding:12px 16px; margin:0 0 16px; border-radius:12px; background:color-mix(in srgb, var(--adm-danger) 12%, transparent); border:1px solid color-mix(in srgb, var(--adm-danger) 40%, transparent); color:var(--text); font-size:13.5px; }
   .acc2-warn svg { color:var(--adm-danger); margin-top:1px; }
   .acc2-rail-wrap { display:grid; grid-template-columns:250px 1fr; gap:20px; align-items:start; }
-  .acc2-rail { position:sticky; top:12px; max-height:calc(100dvh - 96px); overflow-y:auto; background:var(--card); border:var(--border); border-radius:14px; padding:7px; scrollbar-width:thin; }
+  .acc2-rail { position:sticky; top:100px; max-height:calc(100dvh - 120px); overflow-y:auto; background:var(--card); border:var(--border); border-radius:14px; padding:7px; scrollbar-width:thin; }
   .acc2-rail .rh { padding:9px 11px 6px; font-size:10.5px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
   .acc2-rail button { position:relative; display:flex; align-items:center; gap:11px; width:100%; min-height:46px; padding:8px 12px; border:none; background:transparent; border-radius:10px; cursor:pointer; color:var(--text); text-align:left; transition:background .14s; }
   .acc2-rail button:hover { background:color-mix(in srgb, var(--accent) 7%, transparent); }
@@ -836,7 +844,7 @@ function Style() {
   .acc2-ib { width:20px; height:20px; padding:0; appearance:none; -webkit-appearance:none; border-radius:99px; border:var(--border); background:none; color:var(--muted); display:inline-grid; place-items:center; cursor:pointer; flex:none; line-height:0; }
   .acc2-ib svg { display:block; }
   .acc2-pp { display:grid; grid-template-columns:270px 1fr; gap:20px; align-items:start; }
-  .acc2-plist { padding:8px; position:sticky; top:12px; }
+  .acc2-plist { padding:8px; position:sticky; top:100px; }
   .prole { padding:10px 12px 4px; font-size:10px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
   .prow { display:flex; align-items:center; gap:11px; width:100%; min-height:56px; padding:7px 12px; border:none; background:none; border-radius:10px; border-left:3px solid transparent; cursor:pointer; text-align:left; color:var(--text); }
   .prow:hover { background:color-mix(in srgb,var(--accent) 7%,transparent); }
@@ -873,7 +881,7 @@ function Style() {
   .acc2-lightbox img { max-width:96vw; max-height:92vh; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
   /* People rail: search + role-filter chips + a scrollable list with the search pinned
      (the two-pane "find a person fast" bar, owner 2026-07-24). */
-  .acc2-plist { max-height:calc(100dvh - 96px); overflow-y:auto; scrollbar-width:thin; }
+  .acc2-plist { max-height:calc(100dvh - 120px); overflow-y:auto; scrollbar-width:thin; }
   .acc2-railhead { position:sticky; top:0; z-index:2; background:var(--card); padding:2px 2px 9px; margin-bottom:2px; }
   .acc2-search { display:flex; align-items:center; gap:8px; padding:9px 11px; border-radius:10px; background:var(--bg); border:var(--border); }
   .acc2-search:focus-within { border-color:var(--accent); }
