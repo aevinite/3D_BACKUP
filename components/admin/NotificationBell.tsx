@@ -199,7 +199,7 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
               <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)" }}>
                 Open tickets {(feed?.openTicketCount || 0) > 0 && <span>· {feed?.openTicketCount}</span>}
               </div>
-              <a href="/aevinite/issues" onClick={onClose} style={{ marginLeft: "auto", fontSize: 12, color: "var(--accent)", fontWeight: 700 }}>View all →</a>
+              <a href="/aevinite/repair#complaints" onClick={onClose} style={{ marginLeft: "auto", fontSize: 12, color: "var(--accent)", fontWeight: 700 }}>View all →</a>
             </div>
             {tickets.length === 0 ? (
               <div className="adm-empty" style={{ padding: "14px 12px", fontSize: 13 }}>No open tickets right now. 🎉</div>
@@ -213,7 +213,7 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
             )}
             {(feed?.openTicketCount || 0) > tickets.length && tickets.length > 0 && (
               <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 8, textAlign: "center" }}>
-                Showing the {tickets.length} newest · <a href="/aevinite/issues" onClick={onClose} style={{ color: "var(--accent)" }}>see all {feed?.openTicketCount}</a>
+                Showing the {tickets.length} newest · <a href="/aevinite/repair#complaints" onClick={onClose} style={{ color: "var(--accent)" }}>see all {feed?.openTicketCount}</a>
               </div>
             )}
           </section>

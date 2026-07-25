@@ -94,7 +94,7 @@ export default function AdminCommand() {
   // should be clickable"). A card with a `href` becomes a link with a → affordance.
   const STATS: { k: string; v: string | number; href?: string; warn?: boolean }[] = [
     { k: "Restaurants", v: rests === null ? "…" : `${activeCount} active / ${rests.length}`, href: "/aevinite/restaurants" },
-    { k: "Open issues", v: openIssuesCount ?? openIssues.length, href: "/aevinite/issues", warn: (openIssuesCount ?? openIssues.length) > 0 },
+    { k: "Open issues", v: openIssuesCount ?? openIssues.length, href: "/aevinite/repair#complaints", warn: (openIssuesCount ?? openIssues.length) > 0 },
     { k: "Staff online now", v: onlineCount ?? online.length, href: "/aevinite/staff-online" },
     { k: "Orders today", v: ordersToday ?? "…", href: "/aevinite/analytics?range=today" },
   ];
@@ -244,7 +244,7 @@ export default function AdminCommand() {
       <div className="adm-card" style={{ marginTop: 12 }}>
         <div className="cmd-sec">
           Open issues <span>· {openIssues.length} open</span>
-          <Link href="/aevinite/issues" style={{ marginLeft: "auto", fontSize: 12, color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>Manage →</Link>
+          <Link href="/aevinite/repair#complaints" style={{ marginLeft: "auto", fontSize: 12, color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>Manage →</Link>
         </div>
         {openIssues.length === 0 ? (
           <div style={{ color: "var(--muted)", fontSize: 13, padding: "4px 0" }}>Nothing open right now.</div>
