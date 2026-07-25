@@ -20,7 +20,7 @@ function usePrefersReducedMotion(): boolean {
   return reduce;
 }
 
-const DUR = 520; // reveal duration — short enough to feel instant, long enough to read the roll
+const DUR = 460; // reveal duration — snappy; expo ease-out lands fast then settles
 
 // Drives a displayed number toward `value` with a single ease-out count-up. While `loading`
 // it HOLDS at the last real value (the component shows a skeleton instead), so we never
@@ -39,7 +39,9 @@ function useAnimatedValue(value: number, loading?: boolean): number {
     const from = fromRef.current;
     const t0 = performance.now();
     const tick = (t: number) => {
-      const p = Math.min(1, (t - t0) / DUR), e = 1 - Math.pow(1 - p, 3);
+      // expo ease-out: sprints to ~90% almost immediately, then eases onto the exact value —
+      // reads as "instant but smooth" rather than a slow linear crawl.
+      const p = Math.min(1, (t - t0) / DUR), e = p >= 1 ? 1 : 1 - Math.pow(2, -10 * p);
       const v = from + (value - from) * e;
       fromRef.current = v; setDisp(v);
       if (p < 1) rafRef.current = requestAnimationFrame(tick);
@@ -59,10 +61,12 @@ export function AnimatedNumber({ value, loading, money, format, className }: {
 }) {
   const disp = useAnimatedValue(value, loading);
   const fmt = format ?? (money ? inr : (n: number) => Math.round(n).toLocaleString("en-US"));
-  if (loading) return <span className={`anim-num anim-skel${className ? " " + className : ""}`} aria-hidden="true" />;
+  if (loading) return <span key="skel" className={`anim-num anim-skel${className ? " " + className : ""}`} aria-hidden="true" />;
   // Round before formatting — a custom `format` (e.g. the en-IN count formatter) would
   // otherwise print the fractional mid-roll value as "5,216.473" (a broken-looking bill count).
-  return <span className={`anim-num${className ? " " + className : ""}`}>{fmt(Math.round(disp))}</span>;
+  // key differs from the skeleton so the number REMOUNTS on reveal → the fade/slide-in runs
+  // once; live (non-loading) value changes keep the same node and just count the delta.
+  return <span key="num" className={`anim-num anim-num-in${className ? " " + className : ""}`}>{fmt(Math.round(disp))}</span>;
 }
 
 // String-aware API: takes an already-formatted value (e.g. inr()/nfmt() output) and animates
@@ -75,8 +79,8 @@ export function AnimatedStatValue({ value, loading }: { value: React.ReactNode; 
     : parseFormatted(value);
   const disp = useAnimatedValue(parsed ? parsed.num : 0, loading);
   if (!parsed) return <>{value}</>;
-  if (loading) return <span className="anim-num anim-skel" aria-hidden="true" />;
-  return <span className="anim-num">
+  if (loading) return <span key="skel" className="anim-num anim-skel" aria-hidden="true" />;
+  return <span key="num" className="anim-num anim-num-in">
     {parsed.pre + Math.round(disp).toLocaleString(parsed.locale) + parsed.suf}
   </span>;
 }
