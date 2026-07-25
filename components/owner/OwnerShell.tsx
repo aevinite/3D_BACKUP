@@ -58,6 +58,21 @@ const GROUPS: NavGroup[] = [
   },
 ];
 
+// The OWNER-panel path label for the top-strip breadcrumb — derived from the current
+// route by re-using the same labels the sidebar already shows (single source of truth,
+// so a renamed section updates both at once). Longest-prefix match: `/owner` → Dashboard
+// (exact), `/owner/reports` → Reports, `/owner/reports/sales` → Reports, etc. This is the
+// owner's own path (orientation inside /owner), NOT the admin act-as breadcrumb.
+function ownerSectionLabel(path: string): string {
+  const items = GROUPS.flatMap((g) => g.items);
+  let best: NavItem | undefined;
+  for (const it of items) {
+    const hit = it.exact ? path === it.href : path === it.href || path.startsWith(it.href + "/");
+    if (hit && (!best || it.href.length > best.href.length)) best = it;
+  }
+  return best?.label ?? "Dashboard";
+}
+
 export default function OwnerShell({ children, adminViewing, restaurantName, initialSkin, entitlements }: {
   children: React.ReactNode; adminViewing?: boolean; restaurantName?: string; initialSkin?: "light" | "dark";
   // Owner-panel section entitlements (mig 133), resolved server-side by the layout.
@@ -106,6 +121,20 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   const [navOpen, setNavOpen] = useState(false);
   useBackClose("owner-nav", navOpen, () => setNavOpen(false));
   useEffect(() => { setNavOpen(false); }, [path]);
+
+  // Top-strip restaurant switcher dropdown (multi-restaurant owners only). Hardware
+  // BACK closes it (project rule: every overlay registers); a route change closes it too.
+  const [restOpen, setRestOpen] = useState(false);
+  useBackClose("owner-rest-switch", restOpen, () => setRestOpen(false));
+  useEffect(() => { setRestOpen(false); }, [path]);
+  useEffect(() => {
+    if (!restOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest?.(".owx-switch-pop, .owx-switch")) setRestOpen(false);
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [restOpen]);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 900px)");
     const onChange = (e: MediaQueryListEvent) => { if (!e.matches) setNavOpen(false); };
@@ -293,9 +322,49 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
             aria-label={navOpen ? "Close menu" : "Open menu"} aria-expanded={navOpen} aria-controls="ownerNav">
             <i className={`fas ${navOpen ? "fa-xmark" : "fa-bars"}`} aria-hidden="true" />
           </button>
-          <span className="owx-scope">
-            <span className="dot" aria-hidden="true" /> {adminViewing ? shownName : "Owner overview"}
-          </span>
+          <div className="owx-top-nav">
+            {/* Restaurant switcher. >1 restaurant → dropdown that jumps the active
+                restaurant (reuses myRests + openRestaurant). One restaurant → static pill. */}
+            {myRests.length > 1 ? (
+              <div className="owx-switch-wrap">
+                <button type="button" className="owx-scope owx-switch" onClick={() => setRestOpen((o) => !o)}
+                  aria-haspopup="menu" aria-expanded={restOpen} title="Switch restaurant">
+                  <span className="dot" aria-hidden="true" />
+                  <span className="lbl">{adminViewing ? shownName : "Owner overview"}</span>
+                  <i className="fas fa-chevron-down caret" aria-hidden="true" />
+                </button>
+                {restOpen && (
+                  <div className="owx-switch-pop" role="menu" aria-label="Switch restaurant">
+                    <div className="hd">Switch restaurant</div>
+                    <button type="button" className="rrow all" role="menuitem"
+                      onClick={() => { setRestOpen(false); openRestaurant(null); }}>
+                      <i className="fas fa-layer-group" aria-hidden="true" />
+                      <span className="nm">All restaurants</span>
+                    </button>
+                    {myRests.map((r) => (
+                      <button key={r.id} type="button" className="rrow" role="menuitem"
+                        onClick={() => { setRestOpen(false); openRestaurant(r.id); }} title={`Open ${r.name}`}>
+                        <span className="sw" style={{ background: r.accentColor }} aria-hidden="true" />
+                        <span className="nm">{r.name}</span>
+                        <span className="rv">{inr(r.revenueToday)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span className="owx-scope">
+                <span className="dot" aria-hidden="true" />
+                <span className="lbl">{adminViewing ? shownName : "Owner overview"}</span>
+              </span>
+            )}
+            {/* Owner-panel path (orientation inside /owner) — NOT the admin act-as bar. */}
+            <nav className="owx-path" aria-label="Owner panel path">
+              <Link href={withRid("/owner")} className="cr root">Owner</Link>
+              <i className="fas fa-chevron-right sep root" aria-hidden="true" />
+              <span className="cr cur" aria-current="page">{ownerSectionLabel(path)}</span>
+            </nav>
+          </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
             <ConnectionBadge pollMode />
             <button className="adm-icnbtn" onClick={toggleSkin} title={skin === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">

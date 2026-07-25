@@ -4184,7 +4184,41 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   border-radius: 8px; border: var(--border); background: var(--bg); color: var(--text);
   font-size: 12.5px; font-weight: 600;
 }
-.owx-scope .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--adm-ok); }
+.owx-scope .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--adm-ok); flex-shrink: 0; }
+.owx-scope .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* left cluster of the top strip: restaurant switcher + owner-panel path.
+   min-width:0 lets both shrink/truncate before the right-side controls are pushed off. */
+.owx-top-nav { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+/* Restaurant switcher — the scope pill becomes a dropdown for multi-restaurant owners
+   (single-restaurant owners keep the plain .owx-scope pill). Emerald owner accent. */
+.owx-switch-wrap { position: relative; display: inline-flex; min-width: 0; }
+.owx-switch { max-width: 240px; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
+.owx-switch .caret { font-size: 9px; color: var(--muted); margin-left: 2px; flex-shrink: 0; transition: transform .15s ease; }
+.owx-switch:hover { background: var(--muted2); }
+.owx-switch[aria-expanded="true"] { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 8%, var(--bg)); }
+.owx-switch[aria-expanded="true"] .caret { transform: rotate(180deg); color: var(--accent); }
+.owx-switch-pop {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 240px; max-width: 300px;
+  background: var(--card); border: var(--border); border-radius: 12px; padding: 6px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.28); max-height: min(60vh, 420px); overflow-y: auto;
+}
+.owx-switch-pop .hd { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 6px 8px 5px; }
+.owx-switch-pop .rrow {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent;
+  border: 0; border-radius: 8px; padding: 8px; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text); cursor: pointer;
+}
+.owx-switch-pop .rrow:hover { background: var(--muted2); }
+.owx-switch-pop .rrow .sw { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+.owx-switch-pop .rrow .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.owx-switch-pop .rrow .rv { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.owx-switch-pop .rrow.all { color: var(--accent); }
+.owx-switch-pop .rrow.all i { width: 8px; font-size: 10px; color: var(--accent); }
+/* Owner-panel path breadcrumb (orientation inside /owner) — distinct from the amber admin bar. */
+.owx-path { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font-size: 12px; }
+.owx-path .cr { color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.owx-path a.cr:hover { color: var(--accent); text-decoration: underline; }
+.owx-path .cr.cur { color: var(--text); font-weight: 600; }
+.owx-path .sep { font-size: 8px; color: var(--muted); flex-shrink: 0; }
 /* ── page container / density overrides for shared .adm-* pieces ─────────── */
 .owx .adm-main { padding: 20px; }
 .owx-wrap { max-width: 1280px; margin: 0 auto; }
@@ -4267,13 +4301,22 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   /* Comfortable thumb targets inside the drawer (desktop rows are 7px-padded). */
   .owx-navlink { min-height: 40px; }
   .owx-myrest .rrow { min-height: 40px; }
-  .owx-top { padding: 8px 12px; gap: 8px; }
+  /* Keep the top strip pinned while the page scrolls (≤900px the whole .adm scrolls, not
+     .adm-main). z-index sits under the ☰ drawer (1001/1002) so the drawer still covers it. */
+  .owx-top { padding: 8px 12px; gap: 8px; position: sticky; top: 0; z-index: 30; }
   /* Bottom breathing room so scrolling content (last staff row / first chart title) never
      butts the screen edge or sits under any floating control on phones. Desktop unchanged.
      Add the device's safe-area inset: with viewport-fit:cover (app/layout.tsx) the page draws
      edge-to-edge UNDER the phone's home-indicator / gesture bar, so a flat 32px let the last
      row tuck under it on notched phones — matches the guest menu's safe-area handling. */
   .owx .adm-main { padding: 14px; padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)); }
+}
+/* Very small phones (≤560px, incl. the owner's A35 ~360px): drop the "Owner ›" root crumb
+   so the current section + right-side controls always fit; the switcher name truncates. */
+@media (max-width: 560px) {
+  .owx-path .root { display: none; }
+  .owx-switch { max-width: 150px; }
+  .owx-top-nav { gap: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .owx-navlink, .owx-chip, .owx .adm-btn, .owx-side { transition: none; }
