@@ -262,7 +262,7 @@ const NR_PANELS = [
   { key: "tablet", label: "Waiter tablet" }, { key: "owner", label: "Owner dashboard" },
 ] as const;
 const SYS_PANELS: Record<string, boolean> = { manager: true, kitchen: true, tablet: true, owner: false };
-const NR_OWNER_SECTIONS = [["reports", "Reports"], ["staff", "Staff & powers"], ["issues", "Feedback & issues"], ["ratings", "Ratings"], ["customers", "Customers"], ["settings", "Settings"]] as const;
+const NR_OWNER_SECTIONS = [["menu", "Menu"], ["reports", "Reports"], ["staff", "Staff & powers"], ["issues", "Feedback & issues"], ["ratings", "Ratings"], ["customers", "Customers"], ["settings", "Settings"]] as const;
 const NR_MGR_POWERS = [["manage_staff", "Manage staff"], ["edit_menu", "Edit menu"], ["give_discounts", "Give discounts"], ["view_dashboard", "View dashboard"], ["void_bills", "Void / delete bills"], ["edit_settings", "Edit settings"], ["view_ratings", "View ratings"], ["table_tags", "Table types"], ["khata", "Pay Later (khata)"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT ops"], ["take_orders", "Take orders"]] as const;
 const NR_MODULES = [["table_tags", "Table types + Pay Later"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT operations"], ["take_orders", "Take orders (manager)"]] as const;
 const NR_TABLET_CAPS = [["tablet_discount", "Discounts"], ["tablet_mark_paid", "Mark paid"], ["tablet_invoice", "Invoice"], ["tablet_banquet", "Banquet"], ["tablet_table_tags", "Table types"], ["tablet_khata", "Pay Later"], ["tablet_table_ops", "Table & KOT ops"], ["tablet_take_orders", "Take orders"]] as const;

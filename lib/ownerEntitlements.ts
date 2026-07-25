@@ -14,7 +14,12 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 // get on the Feedback & issues page.
 // "customers" (guest list from the customers table) + "settings" (owner appearance /
 // password / what's-enabled) added 2026-07-07; absent = ON, so every restaurant gets them.
-export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings", "customers", "settings"] as const;
+// "menu" (2026-07-25) gates the owner-panel Menu editor page (the real dishes/categories/
+// tags editor embedded from the manager panel). Absent = ON, so every restaurant gets it;
+// the admin can switch it off to remove the section for a restaurant. Note this is the
+// SECTION-visibility rung — whether the owner can EDIT vs only VIEW the menu is the separate
+// power_edit_menu rung (see MANAGER_POWER_FLAGS below).
+export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings", "customers", "settings", "menu"] as const;
 export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 
 // The manager powers (mig 091). The admin's availability switch for each lives under

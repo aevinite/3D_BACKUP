@@ -18,6 +18,7 @@ import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { panelRestaurantId } from "@/lib/panelScope";
+import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { raiseIssue } from "@/lib/issues";
 import { effectiveTaxRate, taxComponents } from "@/lib/tax";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
@@ -56,7 +57,17 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 // the only guard.
 async function managerCan(g: { user: StaffUser | null }, rid: string, flag: string): Promise<boolean> {
   const u = g.user;
-  if (!u || u.role === "owner") return true;
+  if (!u) return true; // admin super-user — X-ray honesty, always passes
+  if (u.role === "owner") {
+    // The owner passes every power automatically EXCEPT menu editing, which now cascades
+    // from the ADMIN rung (owner, 2026-07-25): when the admin turns menu editing OFF the
+    // owner also drops to a read-only "View menu" — matching the ladder (a rung that's off
+    // is refused by the server, not merely hidden). No extra DB read for any other power.
+    if (flag !== "edit_menu") return true;
+    const e = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data as
+      { owner_entitlements?: Record<string, boolean> } | null;
+    return e?.owner_entitlements?.[powerEntitlementKey("edit_menu")] !== false;
+  }
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
   if (r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false; // admin cap — nothing below re-grants
@@ -182,6 +193,29 @@ const must = (r: any) => {
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 
+// Which restaurant this editor request acts on — the SINGLE choke point that also proves
+// an OWNER's right to it. The owner menu editor (owner panel → Menu, 2026-07-25) opens the
+// panel with ?rid=<one restaurant the owner owns>. Owner rows are pinned to a shared "home"
+// namespace, so panelRestaurantId ignores their rid; instead we honor the ?rid HERE but ONLY
+// after validating it against the owner's own portfolio (enabledOwnedRestaurantIds) — so a
+// hand-forged rid for a restaurant they don't own is refused, never silently scoped. Other
+// staff (manager/kitchen/tablet) stay pinned to their own restaurant; the admin super-user
+// keeps the act-as path. Returns a rid, or a NextResponse (403/400) to short-circuit.
+async function editorScope(req: NextRequest, g: { user: StaffUser | null }): Promise<string | NextResponse> {
+  const u = g.user;
+  if (u && u.role === "owner") {
+    const urlRid = req.nextUrl.searchParams.get("rid");
+    if (urlRid) {
+      const owned = await enabledOwnedRestaurantIds(u.id);
+      if (!owned.includes(urlRid)) return err("You can only edit restaurants you own.", 403);
+      return urlRid;
+    }
+  }
+  const rid = panelRestaurantId(req, g);
+  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  return rid;
+}
+
 // Owner edited the SHARED menu (a dish/category/filter/guest-safe setting) → bust
 // THIS restaurant's cached menu bundle so guests get the change within seconds via
 // their realtime 'menu' refetch (which would otherwise hit a stale 120s cache),
@@ -244,8 +278,8 @@ type Ctx = { params: Promise<{ path?: string[] }> };
 // ── GET ──────────────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
-  const rid = panelRestaurantId(req, g);
-  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  const rid = await editorScope(req, g);
+  if (rid instanceof NextResponse) return rid;
   try {
     const { path = [] } = await ctx.params;
     const p = path.join("/");
@@ -297,7 +331,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // of showing-then-refusing it. Same rule as the server: admin/owner get full menu editing
       // (all true); a manager is limited only when the owner configured manager_opts, and then
       // only an EXPLICIT true allows it (an absent/unconfigured key stays ALLOWED = default).
-      const MENU_SUB_KEYS = ["add_dish", "edit_dish", "delete_dish", "manage_categories", "manage_filters", "edit_3d"];
+      const MENU_SUB_KEYS = ["add_dish", "edit_dish", "edit_price", "delete_dish", "mark_86", "manage_categories", "manage_filters", "edit_3d"];
       const mo = (g.user && g.user.role === "manager") ? r?.access_config?.edit_menu?.manager_opts : null;
       const menuRestricted = !!(mo && typeof mo === "object");
       const menuSub: Record<string, boolean> = {};
@@ -1090,8 +1124,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   // the Operation-log "By" column and the Staff-watch tool saw only an anonymous row.
   const actorName = g.user?.name || g.user?.username || null;
   const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(a[2] || {}) });
-  const rid = panelRestaurantId(req, g);
-  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  const rid = await editorScope(req, g);
+  if (rid instanceof NextResponse) return rid;
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
@@ -2078,6 +2112,28 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // manager) editing a dish may NOT change its 3D model — strip those fields so only the
       // platform admin sets them. Non-breaking: a normal dish edit never carries these.
       if (a === "items" && g.user) for (const k of ["model_folder", "model_small_url", "model_optimized_url"]) { if (body && typeof body === "object" && k in (body as Record<string, unknown>)) delete (body as Record<string, unknown>)[k]; }
+      // Field-level menu limits (owner 2026-07-25): a manager may hold edit_dish yet NOT
+      // edit_price / mark_86. On an EDIT, if they'd change the price or the sold-out flag
+      // without that sub-permission, revert JUST that field to the stored value (the rest of
+      // their edit still saves) — so the limit holds even if the hidden control is forced.
+      if (a === "items" && g.user && g.user.role === "manager" && !isCreate && body && typeof body === "object") {
+        const b = body as Record<string, unknown>;
+        const wantsPrice = "price" in b;
+        const wantsTags = Array.isArray(b.tags);
+        if (wantsPrice || wantsTags) {
+          const cur = (await sb.from(t.name).select("price, tags").eq("restaurant_id", rid).eq("id", String(b.id ?? "")).maybeSingle()).data as
+            { price?: number | null; tags?: string[] | null } | null;
+          if (cur) {
+            if (wantsPrice && !(await menuSubAllowed(g, rid, "edit_price"))) b.price = cur.price ?? null;
+            if (wantsTags && !(await menuSubAllowed(g, rid, "mark_86"))) {
+              const hadSold = Array.isArray(cur.tags) && cur.tags.includes("sold-out");
+              const kept = (b.tags as string[]).filter((x) => x !== "sold-out"); // keep their OTHER tag edits
+              if (hadSold) kept.push("sold-out");                                // but hold the stored 86 state
+              b.tags = kept;
+            }
+          }
+        }
+      }
       // A new category/filter must not clobber an existing one with the same slug (the upsert
       // keys on (restaurant_id,slug), so a dup-slug create would DO UPDATE over it — silent
       // data loss, 2026-07-06). Tell the user instead.
@@ -2314,8 +2370,8 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const actorName = g.user?.name || g.user?.username || null;
   const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(a[2] || {}) });
-  const rid = panelRestaurantId(req, g);
-  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  const rid = await editorScope(req, g);
+  if (rid instanceof NextResponse) return rid;
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;
@@ -2408,8 +2464,8 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const actorName = g.user?.name || g.user?.username || null;
   const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(a[2] || {}) });
-  const rid = panelRestaurantId(req, g);
-  if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  const rid = await editorScope(req, g);
+  if (rid instanceof NextResponse) return rid;
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;
