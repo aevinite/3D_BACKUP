@@ -21,6 +21,7 @@ import {
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
 import RangeSlider from "@/components/owner/RangeSlider";
+import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { reportRealtime } from "@/lib/connectionStatus";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 
@@ -143,68 +144,8 @@ function rangeSpanText(k: Range): string {
   return `Everything up to ${f(now)}`;
 }
 
-function usePrefersReducedMotion(): boolean {
-  const [reduce, setReduce] = useState(false);
-  useEffect(() => {
-    const m = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    if (!m) return;
-    setReduce(m.matches);
-    const on = () => setReduce(m.matches);
-    m.addEventListener?.("change", on);
-    return () => m.removeEventListener?.("change", on);
-  }, []);
-  return reduce;
-}
-
-// AnimatedNumber — every stat counts UP from zero and "forms" its value. Crucially,
-// while `loading` (the real value isn't back yet) it keeps a gentle rolling climb, so
-// the wait reads as the number building rather than a dead "…" — then it eases exactly
-// onto the true value the instant it lands. That overlap is deliberate: the animation
-// covers the fetch, so even a 1–2s load feels alive, not slow. Respects reduced-motion
-// (snaps straight to the value). Pure UI: no data/DB behaviour changes.
-function AnimatedNumber({ value, loading, money, className }: {
-  value: number; loading?: boolean; money?: boolean; className?: string;
-}) {
-  const reduce = usePrefersReducedMotion();
-  const [disp, setDisp] = useState(0);
-  const fromRef = useRef(0);   // where the live animation currently sits
-  const rafRef = useRef(0);
-  useEffect(() => {
-    cancelAnimationFrame(rafRef.current);
-    if (reduce) {
-      const v = loading ? fromRef.current : value;
-      fromRef.current = v; setDisp(v); return;
-    }
-    const t0 = performance.now();
-    const from = fromRef.current;
-    if (loading) {
-      // Alive "building" roll: a decelerating climb plus a slow creep so it never freezes
-      // while we wait. Magnitude is intentionally loose — the reveal below sweeps to the
-      // real figure regardless, so this only has to look like it's counting up.
-      const tick = (t: number) => {
-        const el = t - t0;
-        const v = from + (1 - Math.exp(-el / 600)) * 6000 + el * 0.25;
-        fromRef.current = v; setDisp(v);
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      rafRef.current = requestAnimationFrame(tick);
-    } else {
-      // Reveal: ease from wherever we are up to the true value (easeOutCubic).
-      const dur = 900;
-      const tick = (t: number) => {
-        const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
-        const v = from + (value - from) * e;
-        fromRef.current = v; setDisp(v);
-        if (p < 1) rafRef.current = requestAnimationFrame(tick);
-        else { fromRef.current = value; setDisp(value); }
-      };
-      rafRef.current = requestAnimationFrame(tick);
-    }
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [value, loading, reduce]);
-  const text = money ? inr(disp) : Math.round(disp).toLocaleString("en-US");
-  return <span className={`anim-num${loading ? " num-rolling" : ""}${className ? " " + className : ""}`}>{text}</span>;
-}
+// AnimatedNumber (count-up, loading-aware) now lives in @/components/owner/AnimatedNumber
+// so every owner page shares one animation. Imported at the top of this file.
 
 function Kpi({ k, v, money, delta, prevTitle, spark, color, sub, loading }: {
   k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };

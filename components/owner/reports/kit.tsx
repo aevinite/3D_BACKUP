@@ -14,6 +14,7 @@
 // with their own data-entry modules.
 import { inr } from "@/components/admin/shared";
 import { Spark } from "@/components/owner/Charts";
+import { AnimatedStatValue } from "@/components/owner/AnimatedNumber";
 
 // ── The report catalog ─────────────────────────────────────────────────────
 export type RKey =
@@ -96,7 +97,7 @@ export function Stat({ label, value, sub, tone = "accent", icon, delta, spark, b
         <span className="rs-stat-k">{icon && <i className={`fas ${icon}`} aria-hidden />}{label}</span>
         {delta && <Delta now={delta.now} prev={delta.prev} invert={delta.invert} />}
       </div>
-      <div className="rs-stat-v">{value}</div>
+      <div className="rs-stat-v"><AnimatedStatValue value={value} /></div>
       {sub != null && <div className="rs-stat-sub">{sub}</div>}
       {spark && spark.length > 1 && <div className="rs-stat-spark"><Spark points={spark} color="var(--tone-c)" width={128} height={30} /></div>}
     </div>

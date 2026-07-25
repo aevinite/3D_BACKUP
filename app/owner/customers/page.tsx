@@ -4,6 +4,8 @@
 // admin-controlled "customers" entitlement. READ-ONLY and money-free. A 60s backstop
 // refresh (paused while hidden) keeps it fresh without a faster poll (egress rule).
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
+import { nfmt } from "@/components/owner/reports/kit";
 
 const IST = "Asia/Kolkata";
 type Customer = {
@@ -68,10 +70,10 @@ export default function OwnerCustomers() {
         <>
           {/* Summary tiles */}
           <div className="adm-stats" style={{ marginBottom: 14 }}>
-            <div className="adm-stat"><div className="k">Total customers</div><div className="v">{summary ? summary.total.toLocaleString("en-IN") : "…"}</div></div>
-            <div className="adm-stat"><div className="k">Regulars (came back)</div><div className="v">{summary ? summary.returning.toLocaleString("en-IN") : "…"}</div></div>
-            <div className="adm-stat"><div className="k">New (last 30 days)</div><div className="v">{summary ? summary.newThisMonth.toLocaleString("en-IN") : "…"}</div></div>
-            <div className="adm-stat"><div className="k">Blocked</div><div className="v">{summary ? summary.blocked.toLocaleString("en-IN") : "…"}</div></div>
+            <div className="adm-stat"><div className="k">Total customers</div><div className="v"><AnimatedNumber value={summary?.total ?? 0} loading={!summary} format={nfmt} /></div></div>
+            <div className="adm-stat"><div className="k">Regulars (came back)</div><div className="v"><AnimatedNumber value={summary?.returning ?? 0} loading={!summary} format={nfmt} /></div></div>
+            <div className="adm-stat"><div className="k">New (last 30 days)</div><div className="v"><AnimatedNumber value={summary?.newThisMonth ?? 0} loading={!summary} format={nfmt} /></div></div>
+            <div className="adm-stat"><div className="k">Blocked</div><div className="v"><AnimatedNumber value={summary?.blocked ?? 0} loading={!summary} format={nfmt} /></div></div>
           </div>
 
           <div className="adm-card">
