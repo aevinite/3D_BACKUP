@@ -1,119 +1,251 @@
 "use client";
-// Admin · Bill audit — a read-only trail of every bill change across all restaurants
-// (paid / deleted / discounted / reverted / closed-unpaid / moved), from the activity log.
-// Emphasises removals & reverts (tamper-risk). Money redacted (admin sees no ₹). Safe v1 of
-// the tamper-proof log — no triggers, no new table. From /api/admin/bill-audit.
+// Admin · Bills — the real bill LEDGER across all restaurants. One row per bill (a
+// session + its orders), bucketed by state: running · settled · pay-later · on-house ·
+// closed-unpaid · deleted. Amounts SHOWN (owner's oversight view — you must be able to
+// see if a real sale was made to vanish). Deleted bills are NEVER erased: they stay here,
+// tombstoned with who/when/why, and the admin can restore them. A "Change log" tab keeps
+// the old chronological trail. From /api/admin/bills (+ /api/admin/bill-audit for changes).
 import { useCallback, useEffect, useState } from "react";
-import { useActiveAutoRefresh, timeAgo } from "@/components/admin/shared";
+import { useActiveAutoRefresh, timeAgo, inr } from "@/components/admin/shared";
 
-type Row = { id: string; action: string; restaurantName: string; table: string | null; actor: string; detail: string | null; at: string; risk: boolean };
+type BillState = "running" | "settled" | "khata" | "onhouse" | "cancelled" | "deleted";
+type Bill = {
+  sessionId: string; billNo: number | null; invoiceNo: number | null; invoiceVoided: boolean;
+  restaurantId: string | null; restaurantName: string; table: string | null; state: BillState;
+  amount: number; paid: number; orderCount: number; openedAt: string | null; closedAt: string | null;
+  at: string | null; deletedAt: string | null; deletedBy: string | null; deleteReason: string | null;
+};
 type Rest = { id: string; name: string };
-type Data = { rows: Row[]; riskCount: number; restaurants: Rest[]; generatedAt: string };
+type Data = { bills: Bill[]; counts: Record<string, number>; total: number; restaurants: Rest[]; generatedAt: string };
+type TrailEvent = { action: string; actor: string | null; detail: string | null; at: string };
 
-const ACT: Record<string, { t: string; risk: boolean }> = {
-  order_delete: { t: "Bill deleted", risk: true },
-  payment_revert: { t: "Payment reverted", risk: true },
-  close_unpaid: { t: "Closed unpaid", risk: true },
-  order_discount: { t: "Discount applied", risk: false },
-  order_move: { t: "Order moved", risk: false },
-  table_shift: { t: "Table moved", risk: false },
-  invoice_void: { t: "Invoice voided (reopened)", risk: true },
-  table_restart: { t: "Table restarted", risk: false },
-  table_close: { t: "Table closed", risk: false },
-  // Admin Repair-Kit surgery (the route returns these too) — without labels they showed as
-  // raw snake_case; risk flags mirror the server's RISK set (audit 2026-07-23).
-  repair_void_bill: { t: "Bill voided (repair)", risk: true },
-  repair_delete_order: { t: "Order deleted (repair)", risk: true },
-  repair_edit_time: { t: "Order time edited (repair)", risk: true },
-  repair_refire_order: { t: "Order re-fired (repair)", risk: false },
+// Local state metadata (kept out of the shared lib so this client bundle stays lean).
+const META: Record<BillState, { label: string; tone: string; emoji: string }> = {
+  running:   { label: "Running",       tone: "#22c55e", emoji: "🟢" },
+  settled:   { label: "Settled",       tone: "#3b82f6", emoji: "✅" },
+  khata:     { label: "Pay-later",     tone: "#a855f7", emoji: "💜" },
+  onhouse:   { label: "On the house",  tone: "#14b8a6", emoji: "🎁" },
+  cancelled: { label: "Closed unpaid", tone: "#f59e0b", emoji: "🟠" },
+  deleted:   { label: "Deleted",       tone: "#ef4444", emoji: "🗑️" },
+};
+const ORDER: BillState[] = ["running", "settled", "khata", "onhouse", "cancelled", "deleted"];
+
+const ACT_LABEL: Record<string, string> = {
+  order_delete: "Bill/order deleted", orders_delete: "Bills cleared", bill_restore: "Bill restored",
+  order_discount: "Discount applied", bill_discount: "Bill discount", payment_revert: "Payment reverted",
+  bill_paid: "Marked paid", bill_split: "Split bill", on_the_house: "On the house", khata_park: "Parked to pay-later",
+  invoice_generate: "Invoice generated", invoice_void: "Invoice voided", close_unpaid: "Closed unpaid",
+  table_close: "Table closed", table_restart: "Table restarted", order_move: "Order moved", table_shift: "Table moved",
 };
 
-export default function AdminBillAudit() {
+export default function AdminBills() {
   const [d, setD] = useState<Data | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [type, setType] = useState<"all" | "risk">("all");
-  const [rid, setRid] = useState<string>("");
+  const [rid, setRid] = useState("");
+  const [state, setState] = useState<BillState | "">("");
+  const [open, setOpen] = useState<string | null>(null);
+  const [trails, setTrails] = useState<Record<string, TrailEvent[] | "loading">>({});
+  const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
       const qs = new URLSearchParams();
-      if (type === "risk") qs.set("type", "risk");
       if (rid) qs.set("restaurant_id", rid);
-      const res = await fetch("/api/admin/bill-audit?" + qs.toString(), { cache: "no-store" });
+      if (state) qs.set("state", state);
+      const res = await fetch("/api/admin/bills?" + qs.toString(), { cache: "no-store" });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Couldn't load.");
       setD(j);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); }
-  }, [type, rid]);
+  }, [rid, state]);
   useEffect(() => { load(); }, [load]);
   useActiveAutoRefresh(load, 60000);
+
+  const expand = async (b: Bill) => {
+    const next = open === b.sessionId ? null : b.sessionId;
+    setOpen(next);
+    if (next && !trails[b.sessionId]) {
+      setTrails((t) => ({ ...t, [b.sessionId]: "loading" }));
+      try {
+        const res = await fetch("/api/admin/bills?trail=" + b.sessionId, { cache: "no-store" });
+        const j = await res.json();
+        setTrails((t) => ({ ...t, [b.sessionId]: (j.trail || []) as TrailEvent[] }));
+      } catch { setTrails((t) => ({ ...t, [b.sessionId]: [] })); }
+    }
+  };
+
+  const act = async (b: Bill, action: "delete" | "restore") => {
+    let reason = "";
+    if (action === "delete") {
+      const r = window.prompt(`Delete bill${b.billNo ? ` #${b.billNo}` : ""} (${b.restaurantName})?\n\nThe bill is NOT erased — it stays here marked deleted and can be restored.\n\nReason (required):`, "");
+      if (r === null) return;
+      reason = r.trim();
+      if (!reason) { alert("A reason is required to delete a bill."); return; }
+    } else {
+      if (!window.confirm(`Restore bill${b.billNo ? ` #${b.billNo}` : ""} (${b.restaurantName})? It returns to the ledger as a normal record.`)) return;
+    }
+    setBusy(b.sessionId);
+    try {
+      const res = await fetch("/api/admin/bills", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, sessionId: b.sessionId, reason }) });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "Action failed.");
+      setTrails((t) => { const c = { ...t }; delete c[b.sessionId]; return c; });
+      await load();
+    } catch (e) { alert(e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
+  };
+
+  const counts = d?.counts || {};
+  const totalAll = ORDER.reduce((s, k) => s + (counts[k] || 0), 0);
 
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Bill audit</h1>
-          <p className="adm-page-sub" style={{ marginTop: 4 }}>Bill changes across all restaurants — deleted, reverted, closed-unpaid, discounted, moved. Read-only from the activity log (payments live on Revenue &amp; Billing); a fully un-editable ledger is a later add.</p>
+          <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Bills</h1>
+          <p className="adm-page-sub" style={{ marginTop: 4 }}>Every bill across all restaurants, by state. Deleted bills are never erased — they stay here, tombstoned, and you can restore them. Amounts shown for oversight.</p>
         </div>
-        <button className="adm-btn" disabled={loading} onClick={load}>
-          <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <a className="adm-btn" href="/aevinite/bill-audit/changes" style={{ textDecoration: "none" }} title="Chronological change log">
+            <i className="fas fa-list-timeline" style={{ marginRight: 7 }} aria-hidden="true" />Change log
+          </a>
+          <button className="adm-btn" disabled={loading} onClick={load}>
+            <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
+          </button>
+        </div>
       </div>
 
       {err && <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>{err} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></p>}
 
-      {d && (
-        <div className="adm-card" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 10, borderColor: d.riskCount > 0 ? "var(--adm-danger)" : undefined }}>
-          <i className={`fas ${d.riskCount > 0 ? "fa-triangle-exclamation" : "fa-shield-halved"}`} style={{ color: d.riskCount > 0 ? "var(--adm-danger)" : "var(--adm-ok)" }} aria-hidden="true" />
-          <span style={{ fontSize: 13 }}>{d.riskCount > 0 ? <><b>{d.riskCount}</b> bill removal{d.riskCount === 1 ? "" : "s"}/revert{d.riskCount === 1 ? "" : "s"} in this view — worth a glance.</> : "No bill removals or reverts in this view."}</span>
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="adm-card" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-        {(["all", "risk"] as const).map((k) => (
-          <button key={k} className="adm-chip" onClick={() => setType(k)}
-            style={{ cursor: "pointer", padding: "7px 12px", border: type === k ? "1px solid var(--accent)" : "var(--border)", background: type === k ? "color-mix(in srgb, var(--accent) 18%, transparent)" : "transparent", color: type === k ? "var(--accent)" : "var(--muted)", fontWeight: type === k ? 700 : 500 }}>
-            {k === "all" ? "All changes" : "At-risk only (deletions & reverts)"}
+      {/* Filters: restaurant + state buckets with counts */}
+      <div className="adm-card" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <button onClick={() => setState("")} className="adm-chip"
+          style={chip(state === "")}>All <span style={{ opacity: 0.6 }}>{totalAll}</span></button>
+        {ORDER.map((k) => (
+          <button key={k} onClick={() => setState(k)} className="adm-chip" style={chip(state === k, META[k].tone)}>
+            <span aria-hidden="true">{META[k].emoji}</span> {META[k].label} <span style={{ opacity: 0.6 }}>{counts[k] || 0}</span>
           </button>
         ))}
-        <select value={rid} onChange={(e) => setRid(e.target.value)} style={{ marginLeft: "auto", padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
+        <select value={rid} onChange={(e) => { setRid(e.target.value); setOpen(null); }} style={{ marginLeft: "auto", padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
           <option value="">All restaurants</option>
           {(d?.restaurants || []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select>
       </div>
 
       <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
-        {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : d.rows.length === 0 ? (
-          <div className="adm-empty">No bill changes recorded in this view.</div>
-        ) : (
-          // Reason column added 2026-07-23 (owner: "it should show WHY it was reverted").
-          // Horizontal scroll (minWidth below) so the 6 columns don't crush on a phone.
-          <div className="adm-logwrap" style={{ border: 0, overflowX: "auto" }}>
-            <div className="adm-logrow head" style={{ gridTemplateColumns: "150px 1.1fr 60px 0.9fr 1.4fr 84px", minWidth: 720 }}>
-              <span>Change</span><span>Restaurant</span><span>Table</span><span>By</span><span>Reason</span><span style={{ textAlign: "right" }}>When</span>
+        {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div>
+          : d.bills.length === 0 ? <div className="adm-empty">No bills in this view.</div>
+          : (
+            <div>
+              {d.bills.map((b) => {
+                const m = META[b.state];
+                const isOpen = open === b.sessionId;
+                const del = b.state === "deleted";
+                return (
+                  <div key={b.sessionId} style={{ borderBottom: "1px solid var(--adm-line, rgba(255,255,255,0.06))", background: del ? "color-mix(in srgb, #ef4444 8%, transparent)" : undefined }}>
+                    {/* Row */}
+                    <button onClick={() => expand(b)} style={{ width: "100%", display: "grid", gridTemplateColumns: "128px 1.2fr 64px 110px 90px 30px", gap: 10, alignItems: "center", padding: "11px 14px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", color: "var(--text)", minWidth: 640 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: 999, background: m.tone, flex: "0 0 auto" }} aria-hidden="true" />
+                        <span style={{ fontWeight: 700, fontSize: 12.5, color: m.tone }}>{m.label}</span>
+                      </span>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <b style={{ fontVariantNumeric: "tabular-nums" }}>{b.billNo != null ? `#${b.billNo}` : "—"}</b>
+                        <span className="adm-muted" style={{ margin: "0 6px" }}>·</span>
+                        <span className="adm-muted">{b.restaurantName}</span>
+                        {b.invoiceVoided && <span title="Tax invoice voided (reopened)" style={{ marginLeft: 8, fontSize: 11, padding: "1px 6px", borderRadius: 6, background: "color-mix(in srgb, #f59e0b 22%, transparent)", color: "#f59e0b" }}>↩ reopened</span>}
+                      </span>
+                      <span className="adm-muted" style={{ fontSize: 12.5 }}>{b.table ? `T${b.table}` : "—"}</span>
+                      <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", textDecoration: del ? "line-through" : undefined, opacity: del ? 0.7 : 1 }}>{inr(b.amount)}</span>
+                      <span className="adm-muted" style={{ fontSize: 12, textAlign: "right" }} title={b.at || undefined}>{b.at ? timeAgo(b.at) : "—"}</span>
+                      <i className={`fas fa-chevron-${isOpen ? "up" : "down"}`} style={{ fontSize: 11, opacity: 0.5, textAlign: "right" }} aria-hidden="true" />
+                    </button>
+
+                    {/* Expanded detail */}
+                    {isOpen && (
+                      <div style={{ padding: "4px 16px 16px", background: "color-mix(in srgb, var(--accent) 4%, transparent)" }}>
+                        {del && (
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--adm-danger)", background: "color-mix(in srgb, #ef4444 12%, transparent)", marginBottom: 12 }}>
+                            <i className="fas fa-trash-can" style={{ color: "var(--adm-danger)", marginTop: 2 }} aria-hidden="true" />
+                            <div style={{ fontSize: 13 }}>
+                              <b style={{ color: "var(--adm-danger)" }}>This bill was deleted</b>
+                              {b.deletedBy ? ` by ${b.deletedBy}` : ""}{b.deletedAt ? ` · ${new Date(b.deletedAt).toLocaleString()}` : ""}.
+                              {b.deleteReason ? <div style={{ marginTop: 3 }}>Reason: <i>{b.deleteReason}</i></div> : <div style={{ marginTop: 3, opacity: 0.7 }}>No reason recorded.</div>}
+                              <div style={{ marginTop: 3, opacity: 0.7 }}>It is retained in full for tax/audit and can be restored.</div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 12 }}>
+                          <Field k="Bill no" v={b.billNo != null ? `#${b.billNo}` : "—"} />
+                          <Field k="Invoice no" v={b.invoiceNo != null ? `#${b.invoiceNo}${b.invoiceVoided ? " (voided)" : ""}` : "—"} />
+                          <Field k="Restaurant" v={b.restaurantName} />
+                          <Field k="Table" v={b.table ? `T${b.table}` : "—"} />
+                          <Field k="Total" v={inr(b.amount)} />
+                          <Field k="Collected" v={inr(b.paid)} />
+                          <Field k="Orders" v={String(b.orderCount)} />
+                          <Field k="Opened" v={b.openedAt ? new Date(b.openedAt).toLocaleString() : "—"} />
+                          <Field k="Closed" v={b.closedAt ? new Date(b.closedAt).toLocaleString() : "—"} />
+                        </div>
+
+                        {/* Trail */}
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", marginBottom: 6 }}>What happened to this bill</div>
+                        {trails[b.sessionId] === "loading" || trails[b.sessionId] === undefined ? (
+                          <div className="adm-muted" style={{ fontSize: 12.5 }}>Loading trail…</div>
+                        ) : (trails[b.sessionId] as TrailEvent[]).length === 0 ? (
+                          <div className="adm-muted" style={{ fontSize: 12.5 }}>No recorded changes for this bill.</div>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            {(trails[b.sessionId] as TrailEvent[]).map((e, i) => (
+                              <div key={i} style={{ display: "flex", gap: 10, fontSize: 12.5, alignItems: "baseline" }}>
+                                <span style={{ fontWeight: 600, minWidth: 150 }}>{ACT_LABEL[e.action] || e.action}</span>
+                                <span className="adm-muted" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{e.detail || ""}{e.actor ? ` · ${e.actor}` : ""}</span>
+                                <span className="adm-muted" style={{ fontSize: 11.5 }} title={e.at}>{timeAgo(e.at)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Admin actions */}
+                        <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+                          {del ? (
+                            <button className="adm-btn" disabled={busy === b.sessionId} onClick={() => act(b, "restore")} style={{ borderColor: "#22c55e", color: "#22c55e" }}>
+                              <i className="fas fa-rotate-left" style={{ marginRight: 7 }} aria-hidden="true" />{busy === b.sessionId ? "Restoring…" : "Restore bill"}
+                            </button>
+                          ) : (
+                            <button className="adm-btn" disabled={busy === b.sessionId} onClick={() => act(b, "delete")} style={{ borderColor: "var(--adm-danger)", color: "var(--adm-danger)" }}>
+                              <i className="fas fa-trash-can" style={{ marginRight: 7 }} aria-hidden="true" />{busy === b.sessionId ? "Deleting…" : "Delete bill"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-            {d.rows.map((r) => {
-              const a = ACT[r.action] || { t: r.action, risk: r.risk };
-              return (
-                <div key={r.id} className="adm-logrow" style={{ gridTemplateColumns: "150px 1.1fr 60px 0.9fr 1.4fr 84px", minWidth: 720, alignItems: "center" }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ width: 7, height: 7, borderRadius: 999, background: a.risk ? "var(--adm-danger)" : "var(--muted)", flex: "0 0 auto" }} aria-hidden="true" />
-                    <span style={{ fontWeight: 600, color: a.risk ? "var(--adm-danger)" : "var(--text)", fontSize: 12.5 }}>{a.t}</span>
-                  </span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.restaurantName}</span>
-                  <span className="adm-muted">{r.table ? `#${r.table}` : "—"}</span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="adm-muted">{r.actor}</span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} className="adm-muted" title={r.detail || undefined}>{r.detail || "—"}</span>
-                  <span style={{ textAlign: "right" }} className="adm-muted" title={r.at}>{timeAgo(r.at)}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
+          )}
       </div>
     </>
   );
+}
+
+function Field({ k, v }: { k: string; v: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 2 }}>{k}</div>
+      <div style={{ fontSize: 13, fontWeight: 600 }}>{v}</div>
+    </div>
+  );
+}
+
+function chip(active: boolean, tone?: string): React.CSSProperties {
+  return {
+    cursor: "pointer", padding: "7px 11px", borderRadius: 8, fontSize: 12.5,
+    border: active ? `1px solid ${tone || "var(--accent)"}` : "var(--border)",
+    background: active ? `color-mix(in srgb, ${tone || "var(--accent)"} 18%, transparent)` : "transparent",
+    color: active ? (tone || "var(--accent)") : "var(--muted)", fontWeight: active ? 700 : 500,
+    display: "inline-flex", alignItems: "center", gap: 5,
+  };
 }

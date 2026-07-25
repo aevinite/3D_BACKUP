@@ -97,7 +97,7 @@ export async function liveOrdersAndItems(
   // PostgREST builds  ... AND table_number IN (…) AND (created_at>=since OR session_id IN (…)).
   // Paged (pageAll) + a stable created_at,id tiebreak so pages never overlap/skip.
   const orders = await pageAll<Row>((from, to) => {
-    let q = sb.from("orders").select(ORDER_COLS).eq("archived", false).eq("restaurant_id", restaurantId);
+    let q = sb.from("orders").select(ORDER_COLS).eq("archived", false).is("deleted_at", null).eq("restaurant_id", restaurantId);
     if (activeOnly) q = q.in("status", KITCHEN_ACTIVE_STATUSES); // kitchen board → drop served/cancelled server-side
     if (tableFilter) q = q.in("table_number", tableFilter);
     q = openIds.length

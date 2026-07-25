@@ -16,7 +16,7 @@ const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 // Bill CHANGES/removals only — NOT "paid". (The manager panel, the main billing surface,
 // doesn't emit bill_paid, so including it would show a misleading partial list; payments live
 // on Revenue/Billing.) table_shift = the manager's move; order_move = the tablet's (audit).
-const BILL_ACTIONS = ["order_delete", "payment_revert", "close_unpaid", "order_discount", "order_move", "table_shift",
+const BILL_ACTIONS = ["order_delete", "orders_delete", "bill_restore", "payment_revert", "close_unpaid", "order_discount", "order_move", "table_shift",
   // Cancelling / clearing a bill: voiding a generated invoice (reopen), and closing/restarting
   // a table (which cancels its unpaid orders). Shown so the "what happened" category is visible
   // here too, not just in the per-restaurant log (owner, 2026-07-24).

@@ -21,6 +21,7 @@ import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { effectiveTaxRate, taxComponents } from "@/lib/tax";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
+import { softDeleteOrders } from "@/lib/softDelete";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
@@ -1306,11 +1307,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return err("unknown banquet action", 404);
     }
 
-    // orders/delete (bulk/clear) — keep settled bills. Permanently removing bill
-    // records is destructive + owner-gated (least-privilege): a plain manager needs the
-    // void_bills power. Managers can always CANCEL an order (routine, ungated) — only a
-    // permanent DELETE needs the power. Every clear is written to the Log so cleared
-    // records leave a trace (accountability — same rule as the payment-revert audit trail).
+    // orders/delete (bulk/clear) — keep settled bills. Removing bill records is
+    // owner-gated (least-privilege): a plain manager needs the void_bills power.
+    // Managers can always CANCEL an order (routine, ungated) — only a DELETE needs
+    // the power. A "delete" here is a SOFT delete (mig 188): rows are stamped, never
+    // erased, so a deleted bill is retained for tax/audit and shows as a tombstone.
+    // Every clear is written to the Log for accountability.
     if (a === "orders" && b === "delete") {
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("delete or clear bills");
       if (!(await canDeleteBill(g, rid))) return permDenied("delete bills");
@@ -1319,21 +1321,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const delReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
       let deletable: string[]; let kept: number;
       if (all) {
-        // Scoped read: fetch ONLY the deletable rows (unpaid OR cancelled) so a "clear all"
-        // never scans the whole orders table; cap at 5000 as a safety bound. The count of
-        // KEPT paid bills comes from a rows-free head count (no row egress).
-        const del = must(await sb.from("orders").select("id").eq("restaurant_id", rid).or("payment_status.neq.paid,status.eq.cancelled").limit(5000)) as { id: string }[];
+        // Scoped read: fetch ONLY the deletable rows (unpaid OR cancelled) that aren't
+        // ALREADY soft-deleted, so a "clear all" never re-picks tombstoned rows and never
+        // scans the whole orders table; cap at 5000 as a safety bound. The count of KEPT
+        // paid bills comes from a rows-free head count (no row egress).
+        const del = must(await sb.from("orders").select("id").eq("restaurant_id", rid).is("deleted_at", null).or("payment_status.neq.paid,status.eq.cancelled").limit(5000)) as { id: string }[];
         deletable = del.map((o) => o.id);
-        const keptQ = await sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("payment_status", "paid").neq("status", "cancelled");
+        const keptQ = await sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).is("deleted_at", null).eq("payment_status", "paid").neq("status", "cancelled");
         kept = keptQ.count || 0;
       } else if (Array.isArray(ids) && ids.length) {
-        const candidates = must(await sb.from("orders").select("id,payment_status,status").eq("restaurant_id", rid).in("id", ids)) as { id: string; payment_status: string; status: string }[];
+        const candidates = must(await sb.from("orders").select("id,payment_status,status").eq("restaurant_id", rid).is("deleted_at", null).in("id", ids)) as { id: string; payment_status: string; status: string }[];
         deletable = candidates.filter((o) => !(o.payment_status === "paid" && o.status !== "cancelled")).map((o) => o.id);
         kept = candidates.length - deletable.length;
       } else return err("no ids");
-      if (deletable.length) must(await sb.from("orders").delete().eq("restaurant_id", rid).in("id", deletable));
-      await log("editor", "orders_delete", { restaurant_id: rid, detail: (all ? `cleared all freed records (${deletable.length})` : `deleted ${deletable.length} bill(s)`) + (delReason ? ` — ${delReason}` : ""), device_id: dev });
-      return ok({ ok: true, deleted: deletable.length, kept });
+      // SOFT delete — the row stays; a restore can bring it back.
+      const res = deletable.length ? await softDeleteOrders(rid, deletable, { actor: actorName, actorId: g.user?.id ?? null, reason: delReason }) : { deleted: 0 };
+      await log("editor", "orders_delete", { restaurant_id: rid, detail: (all ? `cleared all freed records (${res.deleted})` : `deleted ${res.deleted} bill(s)`) + (delReason ? ` — ${delReason}` : ""), device_id: dev });
+      return ok({ ok: true, deleted: res.deleted, kept });
     }
 
     // orders/:id/discount | accept | serve-all | item
@@ -2390,16 +2394,18 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
     const [a, id] = path;
 
     if (a === "orders" && id) {
-      // Permanent bill deletion is owner-gated (least-privilege) + always logged — same
-      // rule as the bulk clear above. A manager can still CANCEL an order without this power.
+      // Bill deletion is owner-gated (least-privilege) + always logged — same rule as the
+      // bulk clear above. A manager can still CANCEL an order without this power. This is a
+      // SOFT delete (mig 188): the row is stamped, never erased, so the bill is retained for
+      // tax/audit and shows as a tombstone in the admin ledger; a restore brings it back.
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("delete bills");
       if (!(await canDeleteBill(g, rid))) return permDenied("delete bills");
       const cur = must(await sb.from("orders").select("payment_status,status").eq("id", id).eq("restaurant_id", rid).single());
       if (cur && cur.payment_status === "paid" && cur.status !== "cancelled")
         return err("Won't delete a PAID bill — it's a financial record. Mark it unpaid or void it first.", 409);
-      must(await sb.from("orders").delete().eq("id", id).eq("restaurant_id", rid));
-      // Reason from the client (?reason=) → into the log detail so the bill audit shows WHY.
+      // Reason from the client (?reason=) → onto the tombstone + into the log so the audit shows WHY.
       const delReason = (req.nextUrl.searchParams.get("reason") || "").trim().slice(0, 200);
+      await softDeleteOrders(rid, [id], { actor: actorName, actorId: g.user?.id ?? null, reason: delReason });
       await log("editor", "order_delete", { restaurant_id: rid, order_id: id, detail: delReason || undefined, device_id: deviceIdFrom(req) });
       return ok({ ok: true });
     }
