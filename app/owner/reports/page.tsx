@@ -12,12 +12,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import {
-  ToggleChart, CategoryDonut, PaymentDonut, LeaderBar,
+  ToggleChart, PaymentDonut,
   canonPayMethod, PAY_COLORS,
 } from "@/components/owner/Charts";
 import {
   REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, nfmt, type RKey, type DataKind,
 } from "@/components/owner/reports/kit";
+import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
 
 type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy";
 const RANGES: { k: Range; label: string }[] = [
@@ -78,12 +79,6 @@ function downloadCsv(filename: string, header: string[], rows: (string | number)
 // ── Menu-engineering quadrant (client-only view over the dishes payload) ──────
 type MI = { title: string; qty: number; revenue: number };
 type Klass = "star" | "workhorse" | "puzzle" | "dog";
-const KLASS: Record<Klass, { label: string; icon: string; sub: string; tip: string }> = {
-  star:      { label: "Stars",      icon: "fa-star",         sub: "Ordered a lot · priced high",  tip: "Your winners — show them off: top of the menu, photos, specials." },
-  workhorse: { label: "Workhorses", icon: "fa-horse",        sub: "Ordered a lot · low price",    tip: "Nudge the price up a little, or add a combo — easy extra money." },
-  puzzle:    { label: "Puzzles",    icon: "fa-puzzle-piece", sub: "Priced high · rarely ordered", tip: "Give them a photo, a clearer name, or a small offer to move them." },
-  dog:       { label: "Dogs",       icon: "fa-face-frown",   sub: "Low price · rarely ordered",   tip: "Mostly clutter — worth thinking about dropping." },
-};
 function median(arr: number[]): number {
   if (!arr.length) return 0;
   const s = [...arr].sort((a, b) => a - b), m = Math.floor(s.length / 2);
@@ -651,96 +646,21 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
   if (sel === "dishes") {
     const dishes = (data.rows ?? []) as DishRow[];
     if (!dishes.length) return <EmptyCard text="No dish sales in this period." />;
-    const totalRev = dishes.reduce((a, d) => a + d.revenue, 0);
-    const totalQty = dishes.reduce((a, d) => a + d.qty, 0);
-    return (
-      <>
-        <div className="rs-kpis">
-          <Stat label="Item sales (list price)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} sub="menu price × paid qty" />
-          <Stat label="Units sold" tone="info" icon="fa-boxes-stacked" value={nfmt(totalQty)} />
-          <Stat label="Distinct dishes" tone="info" icon="fa-utensils" value={nfmt(dishes.length)} />
-          <Stat label="Top seller" tone="good" icon="fa-crown" value={dishes[0]?.title || "—"} sub={`${nfmt(dishes[0]?.qty || 0)} sold`} />
-        </div>
-        <Panel title="Top earners" hint="by item sales"><LeaderBar data={dishes.slice(0, 10).map((d) => ({ id: d.title, name: d.title, revenue: d.revenue, orders: d.qty, accentColor: accent }))} /></Panel>
-        <Panel title="Every dish" pad={false}>
-          <div className="rs-tablewrap">
-            <table className="rs-table">
-              <thead><tr><th>Dish</th><th className="num">Qty sold</th><th className="num">Item sales</th><th className="num">% of sales</th></tr></thead>
-              <tbody>{dishes.map((d) => <tr key={d.title}><td>{d.title}</td><td className="num">{nfmt(d.qty)}</td><td className="num"><b>{inr(d.revenue)}</b></td><td className="num">{totalRev ? ((d.revenue / totalRev) * 100).toFixed(1) : "0.0"}%</td></tr>)}</tbody>
-            </table>
-          </div>
-          <p className="rs-note">Item sales is menu list price × paid quantity — before discounts and tax — so it won&apos;t equal the net revenue on the Sales report.</p>
-        </Panel>
-      </>
-    );
+    return <DishesReport rows={dishes} />;
   }
 
   // ── CATEGORY MIX ──
   if (sel === "categories") {
     const cats = (data.rows ?? []) as CatRow[];
     if (!cats.length) return <EmptyCard text="No category sales in this period." />;
-    const totalRev = cats.reduce((a, c) => a + c.revenue, 0);
-    return (
-      <>
-        <div className="rs-kpis">
-          <Stat label="Item sales (list price)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} />
-          <Stat label="Categories" tone="info" icon="fa-layer-group" value={nfmt(cats.length)} />
-          <Stat label="Top category" tone="good" icon="fa-crown" value={cats[0]?.category || "—"} sub={`${totalRev ? Math.round((cats[0].revenue / totalRev) * 100) : 0}% of sales`} />
-        </div>
-        <div className="rs-grid two">
-          <Panel title="Every category" pad={false}>
-            <div className="rs-tablewrap">
-              <table className="rs-table">
-                <thead><tr><th>Category</th><th className="num">Qty</th><th className="num">Item sales</th><th className="num">%</th></tr></thead>
-                <tbody>{cats.map((c) => <tr key={c.category}><td>{c.category}</td><td className="num">{nfmt(c.qty)}</td><td className="num"><b>{inr(c.revenue)}</b></td><td className="num">{totalRev ? ((c.revenue / totalRev) * 100).toFixed(1) : "0.0"}%</td></tr>)}</tbody>
-              </table>
-            </div>
-          </Panel>
-          <Panel title="Share of sales"><CategoryDonut data={cats.map((c) => ({ category: c.category, revenue: c.revenue }))} /></Panel>
-        </div>
-      </>
-    );
+    return <CategoriesReport rows={cats} />;
   }
 
   // ── MENU ENGINEERING ──
   if (sel === "menu") {
-    const { dishes } = classifyMenu((data.rows ?? []) as MI[]);
-    if (!dishes.length) return <EmptyCard text="No dish sales in this period." />;
-    const byRev = [...dishes].sort((a, b) => b.revenue - a.revenue);
-    const count = (k: Klass) => dishes.filter((d) => d.klass === k).length;
-    const QORDER: Klass[] = ["star", "workhorse", "puzzle", "dog"];
-    return (
-      <>
-        <div className="rs-kpis">
-          {QORDER.map((k) => <Stat key={k} label={KLASS[k].label} tone={k === "star" ? "good" : k === "workhorse" ? "info" : k === "puzzle" ? "warn" : "bad"} icon={KLASS[k].icon} value={nfmt(count(k))} sub="dishes" />)}
-        </div>
-        <p className="rs-note" style={{ marginBottom: 12 }}>Every dish is grouped by how <b>often</b> it&apos;s ordered and how <b>pricey</b> it is. Uses menu price (not cost) — a per-dish cost field would make this profit-true.</p>
-        <div className="rs-quad">
-          {QORDER.map((k) => {
-            const list = byRev.filter((d) => d.klass === k);
-            return (
-              <div key={k} className={`rs-qbox ${k}`}>
-                <div className="rs-qh"><span className="qi"><i className={`fas ${KLASS[k].icon}`} aria-hidden /></span><b>{KLASS[k].label}</b><span className="qn">{list.length}</span></div>
-                <div className="rs-qsub">{KLASS[k].sub}</div>
-                <div className="rs-qtip">{KLASS[k].tip}</div>
-                <div className="rs-qchips">
-                  {list.length === 0 ? <span className="rs-qmore">none</span> : list.slice(0, 8).map((d) => <span key={d.title} className="rs-qchip" title={`${nfmt(d.qty)} sold · ₹${Math.round(d.price)} each`}>{d.title}</span>)}
-                  {list.length > 8 && <span className="rs-qmore">+{list.length - 8} more</span>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <Panel title="Product mix" hint="each dish's share of what sold" pad={false}>
-          <div className="rs-tablewrap">
-            <table className="rs-table">
-              <thead><tr><th>Dish</th><th>Group</th><th className="num">Sold</th><th className="num">% units</th><th className="num">Item sales</th><th className="num">% sales</th></tr></thead>
-              <tbody>{byRev.map((d) => <tr key={d.title}><td>{d.title}</td><td><span className={`rs-tag ${d.klass}`}>{KLASS[d.klass].label.replace(/s$/, "")}</span></td><td className="num">{nfmt(d.qty)}</td><td className="num">{(d.qtyShare * 100).toFixed(1)}%</td><td className="num"><b>{inr(d.revenue)}</b></td><td className="num">{(d.revShare * 100).toFixed(1)}%</td></tr>)}</tbody>
-            </table>
-          </div>
-        </Panel>
-      </>
-    );
+    const mrowsMenu = (data.rows ?? []) as MI[];
+    if (!classifyMenu(mrowsMenu).dishes.length) return <EmptyCard text="No dish sales in this period." />;
+    return <MenuReport rows={mrowsMenu} />;
   }
 
   // ── BUSY HOURS ──
