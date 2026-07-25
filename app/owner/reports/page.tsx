@@ -18,6 +18,7 @@ import {
 import {
   REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, nfmt, type RKey, type DataKind,
 } from "@/components/owner/reports/kit";
+import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
 
 type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy";
 const RANGES: { k: Range; label: string }[] = [
@@ -422,9 +423,16 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         </div>
 
         {series.length > 1 && (
-          <Panel title="Revenue through the period" pad={false}>
-            <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={220} /></div>
-          </Panel>
+          <>
+            <BestWorst
+              series={series.map((s) => ({ label: s.label, value: s.revenue }))}
+              money noun="income"
+              unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+            />
+            <Panel title="Revenue through the period" pad={false}>
+              <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={220} /></div>
+            </Panel>
+          </>
         )}
       </>
     );
@@ -445,6 +453,13 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         <Panel title="Revenue over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={240} /></div>
         </Panel>
+        {series.filter((s) => s.revenue > 0).length > 1 && (
+          <BestWorst
+            series={series.map((s) => ({ label: s.label, value: s.revenue }))}
+            money noun="revenue"
+            unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+          />
+        )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
       </>
     );
@@ -467,6 +482,14 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         <Panel title="Average bill over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={avgSeries.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money name="Avg bill" height={240} /></div>
         </Panel>
+        {withData.length > 1 && (
+          <BestWorst
+            series={avgSeries.map((s) => ({ label: s.label, value: s.revenue }))}
+            money noun="basket size"
+            title={`Fullest & thinnest ${bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}`}
+            unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+          />
+        )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} showAvg />
       </>
     );
@@ -476,18 +499,32 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
   if (sel === "volume") {
     if (!t) return <EmptyCard text="No orders in this period yet." />;
     const vol = mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.orders }));
-    const paidPct = t.orders ? (t.paidOrders / t.orders) * 100 : 0;
+    const placed = t.orders + t.cancelledOrders;
+    const paidPct = placed ? (t.paidOrders / placed) * 100 : 0;
+    const openOrders = Math.max(0, t.orders - t.paidOrders);   // placed, not cancelled, not yet paid
+    const unitWord = bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day";
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Orders placed" tone="info" icon="fa-list-check" big value={nfmt(t.orders)} spark={vol.map((v) => v.value)} />
-          <Stat label="Paid bills" tone="good" icon="fa-circle-check" value={nfmt(t.paidOrders)} sub={`${paidPct.toFixed(0)}% of orders`} />
-          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} />
-          <Stat label="Busiest bucket" tone="accent" icon="fa-fire" value={nfmt(vol.length ? Math.max(...vol.map((v) => v.value)) : 0)} sub="orders in one bucket" />
+          <Stat label="Orders placed" tone="info" icon="fa-list-check" big value={nfmt(placed)} sub={`${nfmt(t.paidOrders)} paid · ${nfmt(t.cancelledOrders)} cancelled`} spark={vol.map((v) => v.value)} />
+          <Stat label="Paid bills" tone="good" icon="fa-circle-check" value={nfmt(t.paidOrders)} sub={`${paidPct.toFixed(0)}% of placed`} />
+          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={placed ? `${((t.cancelledOrders / placed) * 100).toFixed(1)}% of placed` : ""} />
+          <Stat label={`Busiest ${unitWord}`} tone="accent" icon="fa-fire" value={nfmt(vol.length ? Math.max(...vol.map((v) => v.value)) : 0)} sub={`orders in one ${unitWord}`} />
         </div>
+        <SplitBar
+          title="Where the orders went"
+          segments={[
+            { label: "Paid", value: t.paidOrders, tone: "good" },
+            { label: "Open / unpaid", value: openOrders, tone: "info" },
+            { label: "Cancelled", value: t.cancelledOrders, tone: "bad" },
+          ]}
+        />
         <Panel title="Orders over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={vol} color={accent} money={false} name="Orders" height={240} /></div>
         </Panel>
+        {vol.filter((v) => v.value > 0).length > 1 && (
+          <BestWorst series={vol} money={false} noun="orders" unit={unitWord} />
+        )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
       </>
     );
