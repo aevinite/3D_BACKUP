@@ -169,11 +169,18 @@ function Kpi({ k, v, money, delta, prevTitle, spark, color, sub, loading }: {
 
 export default function OwnerDashboard() {
   const [view, setView] = useState<View>({ level: "home" });
-  const [range, setRange] = useState<Range>("today");
+  // Default to "30 days", not "today": on a quiet day "today" lands on ₹0 + empty charts,
+  // so the dashboard opens on a meaningful window instead (owner 2026-07-25).
+  const [range, setRange] = useState<Range>("30d");
   const [ov, setOv] = useState<Overview | null>(null);
   const [group, setGroup] = useState<GroupA | null>(null);
   const [rest, setRest] = useState<RestA | null>(null);
   const [money, setMoney] = useState<MoneyTotals | null>(null); // discounts + lost business tiles
+  // The money tiles come from a heavier reports scan that CAN legitimately fail/time out on
+  // the all-time whole-platform view (the pre-aggregated analytics call still succeeds). When
+  // it can't be computed we mark it, so the "Lost to cancellations" tile shows an honest "—"
+  // instead of rolling in its loading animation forever (bug, 2026-07-25).
+  const [moneyErr, setMoneyErr] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [dishSort, setDishSort] = useState<"revenue" | "qty">("revenue");
   // If an ADMIN opened this cockpit for a specific restaurant, the URL carries
@@ -231,6 +238,18 @@ export default function OwnerDashboard() {
       // money tiles cover the same span as the all-time revenue KPIs (was collapsed to 12m).
       const moneyUrl = (rid: string | null) =>
         `/api/owner/reports?type=sales&range=${rg}${rid ? `&rid=${rid}` : ""}${scp}`;
+      // The money tiles (discounts / lost-to-cancellations) come from a SEPARATE, heavier
+      // reports scan. For range=all that scan is an unbounded, whole-history month rollup
+      // and is far slower than the pre-aggregated analytics call — so it must NEVER gate the
+      // revenue/orders KPIs or the charts. Before, both rode ONE `await Promise.all`, so the
+      // slow all-time money scan kept `group` null and the tiles stuck in their loading roll
+      // with empty charts (bug, 2026-07-25). Fire it independently; it fills its own tile when
+      // it lands, guarded by the same latest-wins check so a stale response can't repaint.
+      const loadMoney = (rid: string | null) => {
+        fetch(moneyUrl(rid), { cache: "no-store" }).then(j)
+          .then((m) => { if (!fresh()) return; if (m.error) { setMoney(null); setMoneyErr(true); } else { setMoney(m.totals); setMoneyErr(false); } })
+          .catch(() => { if (fresh()) { setMoney(null); setMoneyErr(true); } });
+      };
       if (view.level === "home") {
         const o: Overview = await fetchOwnerOverview(scp) as Overview;
         if ((o as unknown as { error?: string }).error) throw new Error((o as unknown as { error: string }).error);
@@ -238,31 +257,25 @@ export default function OwnerDashboard() {
         setOv(o);
         if (o.restaurants.length === 1) {
           const rid = o.restaurants[0].id;
-          const [a, m] = await Promise.all([
-            fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}`, { cache: "no-store" }).then(j),
-            fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
-          ]);
+          const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}`, { cache: "no-store" }).then(j);
           if (a.error) throw new Error(a.error);
           if (!fresh()) return;
-          setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null })); setMoney(m.error ? null : m.totals); setGroup(null);
+          setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null })); setGroup(null);
+          loadMoney(rid);
         } else {
-          const [g, m] = await Promise.all([
-            fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}`, { cache: "no-store" }).then(j),
-            fetch(moneyUrl(null), { cache: "no-store" }).then(j),
-          ]);
+          const g = await fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}`, { cache: "no-store" }).then(j);
           if (g.error) throw new Error(g.error);
           if (!fresh()) return;
-          setGroup(g); setMoney(m.error ? null : m.totals); setRest(null);
+          setGroup(g); setRest(null);
+          loadMoney(null);
         }
       } else {
         const rid = (view as { rid: string }).rid;
-        const [a, m] = await Promise.all([
-          fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}`, { cache: "no-store" }).then(j),
-          fetch(moneyUrl(rid), { cache: "no-store" }).then(j),
-        ]);
+        const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}`, { cache: "no-store" }).then(j);
         if (a.error) throw new Error(a.error);
         if (!fresh()) return;
-        setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null })); setMoney(m.error ? null : m.totals);
+        setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null }));
+        loadMoney(rid);
       }
       if (fresh()) setErr(null);
       // The owner panel has NO realtime socket — it polls. So IT drives the connection
@@ -282,7 +295,7 @@ export default function OwnerDashboard() {
   // charts show a brief "Loading…" instead of flashing an all-zero chart under the NEW
   // range's labels (old data re-buckets to zeros). Auto-refresh does NOT change these,
   // so it never triggers this clear — no 60s flicker (owner audit 2026-07-06).
-  useEffect(() => { setRest(null); setGroup(null); setMoney(null); }, [range, view]);
+  useEffect(() => { setRest(null); setGroup(null); setMoney(null); setMoneyErr(false); }, [range, view]);
 
   const loadRef = useRef(load); loadRef.current = load;
   // First load + every range/restaurant change fetches the all-time records; the 60s
@@ -477,7 +490,8 @@ export default function OwnerDashboard() {
               delta={group?.prev ? { now: groupTotals?.orders ?? 0, prev: group.prev.orders } : undefined}
               prevTitle={PREV_LABEL[range]} />
             <Kpi k="Open tables now" v={ov?.totals.openTables ?? 0} />
-            <Kpi k="Lost to cancellations" v={money?.cancelledValue ?? 0} money loading={!money} sub={money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great"} />
+            <Kpi k="Lost to cancellations" v={moneyErr ? "—" : (money?.cancelledValue ?? 0)} money loading={!money && !moneyErr}
+              sub={moneyErr ? "couldn't total for this range" : (money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
           </div>
 
           {hq ? (
@@ -624,7 +638,7 @@ export default function OwnerDashboard() {
 
       {/* ═══════ RESTAURANT (drill-down, or HOME when there's only one) ═══════ */}
       {((view.level === "home" && single) || view.level === "restaurant") && activeRid && (
-        <RestaurantView rest={rest && rest.restaurant.id === activeRid ? rest : null} money={money} range={range} restTrend={restTrend} restSpark={restSpark}
+        <RestaurantView rest={rest && rest.restaurant.id === activeRid ? rest : null} money={money} moneyErr={moneyErr} range={range} restTrend={restTrend} restSpark={restSpark}
           dishSort={dishSort} setDishSort={setDishSort}
           onDish={(title) => setView({ level: "dish", rid: activeRid, dish: title })} />
       )}
@@ -737,8 +751,8 @@ export default function OwnerDashboard() {
 }
 
 // ── Restaurant detail (also the HOME layout when the owner has one restaurant) ──
-function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, setDishSort, onDish }: {
-  rest: RestA | null; money: MoneyTotals | null; range: Range; restTrend: Record<string, unknown>[]; restSpark: number[];
+function RestaurantView({ rest, money, moneyErr, range, restTrend, restSpark, dishSort, setDishSort, onDish }: {
+  rest: RestA | null; money: MoneyTotals | null; moneyErr: boolean; range: Range; restTrend: Record<string, unknown>[]; restSpark: number[];
   dishSort: "revenue" | "qty"; setDishSort: (s: "revenue" | "qty") => void; onDish: (t: string) => void;
 }) {
   if (!rest) return <div className="adm-empty">Loading restaurant…</div>;
@@ -764,7 +778,8 @@ function RestaurantView({ rest, money, range, restTrend, restSpark, dishSort, se
           delta={rest.prev ? { now: k.orders, prev: rest.prev.orders } : undefined} prevTitle={PREV_LABEL[range]} />
         <Kpi k="Avg order" v={k.avgOrder} money sub="per paid order" />
         <Kpi k="Open tables now" v={k.openTables} />
-        <Kpi k="Lost to cancellations" v={money?.cancelledValue ?? 0} money loading={!money} sub={money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great"} />
+        <Kpi k="Lost to cancellations" v={moneyErr ? "—" : (money?.cancelledValue ?? 0)} money loading={!money && !moneyErr}
+          sub={moneyErr ? "couldn't total for this range" : (money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
       </div>
       <div className="rv-charts">
         <div className="adm-card" style={{ gridColumn: "1 / -1" }}>
