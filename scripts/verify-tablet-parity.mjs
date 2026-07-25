@@ -33,7 +33,7 @@ async function expect(kind, label, write) {
 }
 
 // ---- set up a throwaway party on table 9932 ----
-await svc.from("sessions").delete().eq("table_number", TN);
+await svc.rpc("lfh_test_clear_table", { p_rid: "00000000-0000-0000-0000-000000000001", p_table: TN }); // issued-bill lock (mig 190): clears order_items+orders+sessions for this test table
 const sess = (await svc.from("sessions").insert({ table_number: TN, status: "open", auto_approve: true }).select("id").single()).data;
 const mem = (await svc.from("session_members").insert({ session_id: sess.id, name: "RT Selftest", role: "guest", approved: true, phone: "9990000000", token: "selftest-" + Date.now() }).select("id").single()).data;
 const ord = (await svc.from("orders").insert({ table_number: TN, session_id: sess.id, items: [{ id: "x", title: "T", price: 100, qty: 1 }], subtotal: 100, total: 100, status: "preparing" }).select("id,total").single()).data;
@@ -54,12 +54,12 @@ results.push(await expect("member", "kick (member removed)", () => svc.from("ses
 results.push(await expect("order", "restart (archive round)", () => svc.from("orders").update({ status: "served", archived: true }).eq("session_id", sess.id).eq("archived", false).neq("status", "cancelled")));
 
 // ---- cleanup ----
-await svc.from("order_items").delete().eq("order_id", ord.id);
-await svc.from("orders").delete().eq("id", ord.id);
+// order_items + orders + sessions are cleared together via lfh_test_clear_table below
+// (the served test order is "issued", so a direct DELETE is refused by mig 190's lock).
 await svc.from("session_members").delete().eq("session_id", sess.id);
 await svc.from("blocklist").delete().eq("member_id", mem.id);
 await svc.from("customers").delete().eq("phone", "9990000000");
-await svc.from("sessions").delete().eq("id", sess.id);
+await svc.rpc("lfh_test_clear_table", { p_rid: "00000000-0000-0000-0000-000000000001", p_table: TN });
 await anon.removeAllChannels();
 
 const pass = results.every(Boolean);

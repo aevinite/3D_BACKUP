@@ -16,6 +16,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
+import { softDeleteOrders } from "@/lib/softDelete";
 
 export const dynamic = "force-dynamic";
 
@@ -79,15 +80,16 @@ async function handler(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // ── Permanently delete an order/bill (admin override — god-mode, always logged) ─
+    // ── Delete an order/bill (admin override) — SOFT delete only. Even god-mode can't
+    //    ERASE a real sale (mig 188/190): this tombstones it (restorable), never a hard
+    //    DELETE — a hard delete of an issued bill is refused at the database level.
     if (op === "delete_order") {
       const orderId = String(body.order_id || "");
       if (!UUID.test(orderId)) return err("invalid order_id");
       const cur = (await sb.from("orders").select("id, table_number, payment_status, status").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; payment_status?: string; status?: string } | null;
       if (!cur) return err("That order isn't for this restaurant.", 404);
-      const { error } = await sb.from("orders").delete().eq("id", orderId).eq("restaurant_id", rid);
-      if (error) throw new Error(error.message);
-      await logRepair("repair_delete_order", { order_id: orderId, table_number: cur.table_number ?? null, detail: cur.payment_status === "paid" ? "was PAID" : undefined });
+      await softDeleteOrders(rid, [orderId], { actor: "Admin (repair)", actorId: null, reason: reason || "admin repair delete" });
+      await logRepair("repair_delete_order", { order_id: orderId, table_number: cur.table_number ?? null, detail: (cur.payment_status === "paid" ? "was PAID — " : "") + "soft-deleted (tombstoned)" });
       return NextResponse.json({ ok: true });
     }
 

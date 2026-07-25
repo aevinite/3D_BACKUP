@@ -66,12 +66,13 @@ if (iErr) throw new Error("menu_items: " + iErr.message);
 const itemsByRest = {};
 for (const it of items || []) (itemsByRest[it.restaurant_id] ||= []).push(it);
 
-// 2) Wipe ONLY previously-seeded demo rows (idempotent re-runs).
+// 2) Wipe ONLY previously-seeded demo rows (idempotent re-runs). Demo orders are
+//    served/paid = "issued", so a plain DELETE is refused by the issued-bill lock
+//    (mig 190). Route through the narrow, service-role-only test-cleanup door, which
+//    sets the purge flag for exactly these tagged rows.
 {
-  const d1 = await db.from("orders").delete().eq("discount_note", DEMO_TAG);
-  if (d1.error) throw new Error("clear demo orders: " + d1.error.message);
-  const d2 = await db.from("sessions").delete().eq("void_reason", DEMO_SESSION_TAG);
-  if (d2.error) throw new Error("clear demo sessions: " + d2.error.message);
+  const d = await db.rpc("lfh_test_clear_demo", { p_tag: DEMO_TAG, p_session_tag: DEMO_SESSION_TAG });
+  if (d.error) throw new Error("clear demo seed: " + d.error.message);
 }
 
 // 3) Build a realistic spread per restaurant. Each restaurant gets a different
