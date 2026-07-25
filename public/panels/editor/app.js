@@ -32,6 +32,17 @@ const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platf
 // Remember which tab you were on so a refresh keeps you there (e.g. stay on
 // Orders during a busy service instead of snapping back to Dishes).
 const savedTab = (() => { try { return localStorage.getItem("lfh_editor_tab"); } catch { return null; } })();
+// MENU-ONLY embed (owner panel → Menu, 2026-07-25): when the panel is opened with
+// ?menuonly=1 it shows ONLY the menu editor (Dishes / Categories / Tags) — every other
+// top tab and the admin ribbon are hidden. Used to host the same editor inside the owner
+// panel's Menu page without the Bills/Tables/etc. that already live elsewhere there.
+const MENU_ONLY = new URLSearchParams(location.search).get("menuonly") === "1";
+const MENU_TABS = ["items", "categories", "filters"];
+// When embedded in the owner panel, adopt the OWNER panel's skin (light violet / dark cyan)
+// so the editor looks native, not the manager panel's gold. ?skin=light|dark comes from the
+// owner Menu page. Match the editor's base data-theme too so hardcoded per-theme rules align.
+const MENU_SKIN = new URLSearchParams(location.search).get("skin") === "dark" ? "dark" : "light";
+if (MENU_ONLY) { try { document.documentElement.setAttribute("data-theme", MENU_SKIN); } catch (e) {} }
 // Tiny localStorage helpers so a refresh keeps you exactly where you were —
 // not just the tab, but the SUB-VIEW too (Orders: live/previous/calls; Log:
 // customer/operation). Wrapped so a blocked localStorage never throws.
@@ -42,7 +53,8 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 // currently being edited, the search text, and the live tables board. Whenever
 // state changes we re-draw the affected part of the screen from it.
 const state = {
-  tab: savedTab === "sessions" ? "tables" : (VALID_TABS.includes(savedTab) ? savedTab : "items"), // "sessions" merged into "tables"
+  tab: MENU_ONLY ? (MENU_TABS.includes(savedTab) ? savedTab : "items") // menu-only: never open a non-menu tab
+    : savedTab === "sessions" ? "tables" : (VALID_TABS.includes(savedTab) ? savedTab : "items"), // "sessions" merged into "tables"
   data: { items: [], categories: [], filters: [], orders: [], calls: [], settings: { id: "site", bubbles_enabled: true, service_mode: false } },
   sel: null,      // working copy of the record being edited
   isNew: false,
@@ -8043,6 +8055,9 @@ async function loadPlatform() {
 }
 
 function setTab(tab) {
+  // Menu-only embed: the only reachable tabs are the menu ones — redirect any other target
+  // (boot fallbacks, realtime handlers) to Dishes, and mark the body so the CSS hides the rest.
+  if (MENU_ONLY) { document.body.classList.add("menu-only", "skin-" + MENU_SKIN); if (!MENU_TABS.includes(tab)) tab = "items"; }
   // Leaving the Dashboard: destroy its live Chart.js instances so their detached canvases +
   // resize handlers don't linger until the next Dashboard visit.
   if (state.tab === "dash" && tab !== "dash") { dashCharts.forEach((c) => { try { c.destroy(); } catch {} }); dashCharts = []; }
@@ -8850,7 +8865,9 @@ function syncBanquetTab() {
 // ══════════════════════════════════════════════════════════════════════════════
 const XRAY_TABS = [
   { tab: "dash", flag: "view_dashboard", label: "Dashboard" },
-  { tab: "items", flag: "edit_menu", label: "Menu editor" },
+  // NOTE: the "items" (Editor) tab is deliberately NOT here — instead of vanishing when
+  // edit_menu is off it flips to a read-only "View menu" (owner 2026-07-25). That is
+  // handled by applyMenuReadonly() below, called from applyHierarchyView.
   { tab: "ratings", flag: "view_ratings", label: "Guest ratings" },
   { tab: "general", flag: "edit_settings", label: "Settings" },
 ];
@@ -8923,6 +8940,97 @@ function xraySettingUrl(flag) {
   const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
 })();
 
+// Read-only "View menu" styling (owner 2026-07-25): hide the edit-only buttons, block
+// the toggles/chips, dim the locked fields, and show a small view-only banner. Toggled
+// by body.menu-readonly in applyMenuReadonly(); the server enforces edit_menu regardless.
+(function injectMenuReadonlyStyles() {
+  const css = `
+  /* A .field wrapper has an explicit display, so the plain [hidden] attribute (UA
+     display:none) is overridden — force it, so a permission-hidden field (e.g. Price for a
+     manager without edit_price) actually disappears in BOTH the manager panel and the owner embed. */
+  #editor .field[hidden] { display: none !important; }
+  body.menu-readonly #newBtn,
+  body.menu-readonly #bulkBtn,
+  body.menu-readonly #saveBtn,
+  body.menu-readonly #delBtn,
+  body.menu-readonly .bulkbar { display: none !important; }
+  body.menu-readonly #editor [data-action] { pointer-events: none !important; opacity: .55; }
+  body.menu-readonly #editor input:disabled,
+  body.menu-readonly #editor select:disabled,
+  body.menu-readonly #editor textarea:disabled { opacity: .9; cursor: not-allowed; }
+  body.menu-readonly #editor::before {
+    content: "👁  View only — menu editing is turned off for you";
+    display: block; margin: 0 0 12px; padding: 8px 12px; border-radius: 10px;
+    background: color-mix(in srgb, #d97706 12%, var(--panel, #fff));
+    border: 1px solid color-mix(in srgb, #d97706 40%, transparent);
+    color: #b45309; font-weight: 700; font-size: 12.5px; }
+  /* Menu-only embed (owner panel → Menu): drop the whole manager chrome (brand bar,
+     Live/Profile/flag/theme/connection, every other top tab, the admin ribbon) so it
+     looks native inside the owner panel. The Dishes/Categories/Tags subtabs live in the
+     sidebar (kept), and the read-only "View only" banner conveys the mode. */
+  body.menu-only .topbar { display: none !important; }
+  body.menu-only #xrayRibbon { display: none !important; }
+  /* ── OWNER SKIN remap ──────────────────────────────────────────────────────────
+     The whole editor is themed off 8 CSS vars; point them at the OWNER panel's tokens
+     (app/globals.css .adm) so the embed matches — violet on light, cyan-neon on dark —
+     instead of the manager panel's gold. Set on <body> so it overrides both :root and
+     html[data-theme] for every descendant. */
+  body.menu-only.skin-light {
+    --bg:#f6f7f9; --panel:#ffffff; --panel-2:#f2f4f7; --line:#e5e8ee;
+    --text:#111827; --muted:#5b6474; --gold:#059669; --gold-strong:#10b981;
+  }
+  body.menu-only.skin-dark {
+    --bg:#0a0c10; --panel:#10141b; --panel-2:#171d28; --line:#1d2430;
+    --text:#e6ebf3; --muted:#9aa4b6; --gold:#10b981; --gold-strong:#34d399;
+  }
+  /* Kill the light theme's hardcoded cream body gradient so --bg shows through. */
+  body.menu-only { background: var(--bg) !important; }
+  /* Dark ink only on SOLID emerald fills (primary buttons, ticked checkbox). */
+  body.menu-only .btn.primary,
+  body.menu-only .list-item .bulk-cb.on { color:#04231a; }
+  /* The active category chip has a subtle TINT bg (not a solid fill) → keep bright-green
+     text + a readable fill so it never goes invisible on tap. */
+  body.menu-only .cat-chip.active {
+    background: color-mix(in srgb, var(--gold) 26%, var(--panel)) !important;
+    color: var(--gold-strong) !important; border-color: var(--gold) !important;
+  }
+  /* Premium finish: rounder cards + the owner panel's soft elevation on light. */
+  body.menu-only .card { border-radius:16px; padding:20px 22px; margin-bottom:16px; }
+  body.menu-only.skin-light .card { box-shadow:0 1px 2px rgba(16,24,40,.05), 0 14px 30px -18px rgba(20,16,50,.20); }
+  body.menu-only .card h3 { font-size:11.5px; letter-spacing:.7px; margin-bottom:16px; }
+  /* ── Owner-embed premium polish (menu-only only; manager panel untouched) ──────── */
+  /* Segmented Dishes/Categories/Tags */
+  body.menu-only .subtabs{ padding:16px 16px 4px; gap:8px; }
+  body.menu-only .subtab{ border-radius:12px; padding:11px 14px; font-weight:700; }
+  /* Search + actions row: room to breathe */
+  body.menu-only .sidebar-head{ padding:12px 16px; gap:10px; }
+  body.menu-only .search{ border-radius:12px; padding:11px 13px; }
+  body.menu-only #newBtn, body.menu-only #bulkBtn{ border-radius:12px; padding:10px 15px; }
+  body.menu-only .cat-filter{ padding:12px 16px 14px; gap:8px; }
+  /* List rows: card-like, comfortable, subtle hover slide + graceful bottom spacing */
+  body.menu-only .list{ padding:10px 14px 30px; }
+  body.menu-only .list-item{ padding:11px 10px; border-radius:14px; border:1px solid transparent; gap:12px; transition:background .14s, transform .14s, border-color .14s; }
+  body.menu-only .list-item:hover{ background:var(--panel-2); transform:translateX(3px); }
+  body.menu-only .list-item.active{ background:color-mix(in srgb, var(--gold) 12%, var(--panel-2)); border-color:var(--gold); }
+  body.menu-only .list-item .thumb{ width:46px; height:46px; border-radius:12px; }
+  body.menu-only .list-item .meta b{ font-size:14.5px; }
+  /* Editor pane: roomier header + a generous, graceful bottom */
+  body.menu-only .editor{ padding:0 32px 140px; }
+  body.menu-only .ed-head{ padding-top:24px; padding-bottom:18px; }
+  body.menu-only .ed-head h2{ font-size:27px; font-weight:800; letter-spacing:-.02em; }
+  /* Empty state: bigger, centred, friendlier */
+  body.menu-only .empty{ padding:110px 20px; font-size:15.5px; line-height:1.6; }
+  body.menu-only .empty::before{ content:"🍽"; display:block; font-size:40px; opacity:.5; margin-bottom:14px; }
+  /* Categories = ONE horizontal scrolling strip on top (not 4 wrapped rows), so the left
+     column is almost entirely the dish list. Overrides the desktop wrap rule. A soft fade on
+     the right edge hints there's more to scroll. */
+  body.menu-only .cat-filter{ flex-wrap:nowrap !important; overflow-x:auto !important; padding:12px 16px !important;
+    scrollbar-width:none; -webkit-mask-image:linear-gradient(90deg,#000 90%,transparent); mask-image:linear-gradient(90deg,#000 90%,transparent); }
+  body.menu-only .cat-filter::-webkit-scrollbar{ display:none; }
+  body.menu-only .cat-chip{ padding:8px 14px; }`;
+  const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
+})();
+
 // The LADDER rule (mig 133): a power is granted only when the admin still entitles it
 // AND the owner switched it on — the server resolves that into whoami.effectivePowers.
 // (managerPermissions kept as the fallback for a stale cached app.js talking to an
@@ -8942,6 +9050,43 @@ function xraySetTint(el, on, title) {
   if (el.classList.contains("xray-off") !== on) el.classList.toggle("xray-off", on);
   const want = on ? title : null;
   if ((el.getAttribute("title") || null) !== want) { if (want) el.setAttribute("title", want); else el.removeAttribute("title"); }
+}
+
+// ── Read-only "View menu" (owner 2026-07-25) ─────────────────────────────────────
+// When the viewer can't edit the menu, the Editor tab no longer VANISHES — it stays
+// visible, renames to "View menu", and every edit control is locked so they can still
+// browse dishes / categories / tags. The server (managerCan "edit_menu") refuses the
+// writes regardless, so this is the honest matching UI, never the only guard.
+//  • admin super-user — always edits (X-ray honesty)
+//  • owner — edits unless the ADMIN turned menu editing off for this restaurant
+//  • manager — the full ladder result (edit_menu effective)
+function menuEditAllowed() {
+  if (!XRAY_WHO) return true;                       // pre-boot: assume editable
+  if (XRAY_WHO.actor === "admin") return true;
+  if (XRAY_WHO.actor === "owner")
+    return !(XRAY_WHO.offByAdmin && XRAY_WHO.offByAdmin.edit_menu === true);
+  return xrayGrantedForManager("edit_menu");
+}
+function roSetDisabled(el, on) { if (!!el.disabled !== !!on) el.disabled = !!on; } // conditional → no observer loop
+function applyMenuReadonly() {
+  const ro = !menuEditAllowed();
+  // Rename the top Editor tab (📝 Editor ⇄ 👁 View menu). The items tab is plain text
+  // (no child element), so setting textContent is safe; skip if a badge is ever added.
+  const tab = document.querySelector('.tabs .tab[data-tab="items"]');
+  if (tab && !tab.firstElementChild) {
+    const want = ro ? "👁 View menu" : "📝 Editor";
+    if (tab.textContent !== want) tab.textContent = want;
+  }
+  const inMenu = state.tab === "items" || state.tab === "categories" || state.tab === "filters";
+  const active = ro && inMenu;
+  if (document.body.classList.contains("menu-readonly") !== active) document.body.classList.toggle("menu-readonly", active);
+  if (!active) return;
+  // Lock every edit field/toggle in the editor form so keyboard editing is impossible too
+  // (the +New / Select / Save / Delete buttons and chips are hidden/blocked by the
+  // body.menu-readonly CSS). Re-applied on every repaint via the MutationObserver; each
+  // write is conditional, so the steady-state pass stays mutation-free (no self-loop).
+  document.querySelectorAll('#editor input, #editor select, #editor textarea, #editor [data-action], #editor [data-path]')
+    .forEach((el) => roSetDisabled(el, true));
 }
 
 function applyHierarchyView() {
@@ -8991,10 +9136,26 @@ function applyHierarchyView() {
   // restaurant keeps every button, exactly as today. Re-applied each repaint (delBtn is rebuilt
   // per record render), so a redraw can't resurrect a hidden button.
   const msub = XRAY_WHO.menuSub || {};
-  for (const [sel, flag] of [["#newBtn", "add_dish"], ["#bulkBtn", "delete_dish"], ["#delBtn", "delete_dish"]]) {
+  for (const [sel, flag] of [
+    ["#newBtn", "add_dish"], ["#bulkBtn", "delete_dish"], ["#delBtn", "delete_dish"],
+    ['.subtab[data-tab="categories"]', "manage_categories"], // hide the whole sub-section…
+    ['.subtab[data-tab="filters"]', "manage_filters"],       // …not just its + / delete buttons
+  ]) {
     const el = document.querySelector(sel);
     if (el) xraySetHidden(el, msub[flag] === false);
   }
+  // A real manager sitting on a sub-tab that just got hidden hops back to Dishes.
+  if (!higher) {
+    const activeSub = document.querySelector('.subtab[data-tab="' + state.tab + '"]');
+    if (activeSub && activeSub.hidden) setTab("items");
+  }
+  // Field-level menu limits inside the dish form — hide the control a restricted manager
+  // isn't allowed instead of showing-then-refusing it (owner/admin get all, so nothing hides).
+  const priceEl = document.querySelector('#editor [data-path="price"]');
+  if (priceEl) { const f = priceEl.closest(".field"); if (f) xraySetHidden(f, msub.edit_price === false); }
+  const soldEl = document.querySelector('#editor [data-action="toggleSoldOut"]');
+  if (soldEl) xraySetHidden(soldEl, msub.mark_86 === false);
+  applyMenuReadonly(); // flip the Editor tab to a locked "View menu" when editing is off
   renderXrayRibbon(higher, zones);
 }
 

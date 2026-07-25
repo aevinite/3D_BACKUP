@@ -28,6 +28,9 @@ const GROUPS: NavGroup[] = [
     items: [
       // `ent` = the owner-entitlement key (mig 133) that must be ON for this section
       // to exist. Hidden from the real owner when off; tinted for the admin act-as.
+      // Menu = the real dishes/categories/tags editor (owner 2026-07-25); shows read-only
+      // "View menu" when the admin turned menu editing off (enforced in the editor panel).
+      { href: "/owner/menu", label: "Menu", icon: "fa-book-open", ent: "menu" },
       { href: "/owner/reports", label: "Reports", icon: "fa-file-invoice", ent: "reports" },
       { href: "/owner/staff", label: "Staff & powers", icon: "fa-users-gear", ent: "staff" },
       { href: "/owner/customers", label: "Customers", icon: "fa-user-group", ent: "customers" },
@@ -48,7 +51,6 @@ const GROUPS: NavGroup[] = [
     label: "Coming soon",
     quiet: true,
     items: [
-      { href: "/owner/menu", label: "Menu", icon: "fa-book-open", soon: true },
       { href: "/owner/inventory", label: "Inventory", icon: "fa-boxes-stacked", soon: true },
       { href: "/owner/marketing", label: "Marketing", icon: "fa-bullhorn", soon: true },
       { href: "/owner/online", label: "Online & apps", icon: "fa-truck-fast", soon: true },
