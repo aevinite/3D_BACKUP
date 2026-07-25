@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import {
-  AreaTrend, TimeBar, CountBar, HourlyBar, CategoryDonut, PaymentDonut, LeaderBar,
+  ToggleChart, CategoryDonut, PaymentDonut, LeaderBar,
   canonPayMethod, PAY_COLORS,
 } from "@/components/owner/Charts";
 import {
@@ -271,7 +271,6 @@ function Hub({ range, money, restName, accent, onOpen }: {
   const series = rows.map((r) => ({ label: bucketLabel(r.bucket, bucket), revenue: r.revenue }));
   const avg = t && t.paidOrders ? t.revenue / t.paidOrders : 0;
   const loading = money?.loading;
-  const [chartMode, setChartMode] = useState<"bar" | "line">("bar");
   return (
     <>
       {/* Overview: the animated headline + KPIs and the revenue chart, together in one panel.
@@ -287,20 +286,11 @@ function Hub({ range, money, restName, accent, onOpen }: {
           <div className="k"><span className="lbl">Tax collected</span><span className="v"><AnimatedNumber value={t?.tax || 0} money loading={loading} /></span></div>
           <div className="k"><span className="lbl">Discounts</span><span className="v"><AnimatedNumber value={t?.discount || 0} money loading={loading} /></span></div>
         </div>
-        <div className="rs-ov-charthead">
-          <span className="t">Revenue over the period</span>
-          <div className="rs-ov-toggle" role="tablist" aria-label="Chart type">
-            <button role="tab" aria-selected={chartMode === "bar"} className={chartMode === "bar" ? "on" : ""} onClick={() => setChartMode("bar")}>Bar</button>
-            <button role="tab" aria-selected={chartMode === "line"} className={chartMode === "line" ? "on" : ""} onClick={() => setChartMode("line")}>Line</button>
-          </div>
-        </div>
         <div className="rs-ov-chart">
           {loading
             ? <div className="rs-ov-skel" aria-hidden />
             : series.length > 1
-              ? (chartMode === "bar"
-                  ? <TimeBar data={series} color={accent} height={210} />
-                  : <AreaTrend data={series} lines={[{ key: "revenue", name: "Revenue", color: accent }]} height={210} />)
+              ? <ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={210} title="Revenue over the period" />
               : <div className="rs-ov-empty">Not enough data to chart this period yet.</div>}
         </div>
       </div>
@@ -433,7 +423,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
 
         {series.length > 1 && (
           <Panel title="Revenue through the period" pad={false}>
-            <div style={{ padding: 12 }}><AreaTrend data={series} lines={[{ key: "revenue", name: "Revenue", color: accent }]} height={220} /></div>
+            <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={220} /></div>
           </Panel>
         )}
       </>
@@ -453,7 +443,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
           <Stat label="Discounts" tone="warn" icon="fa-tag" value={inr(t.discount)} />
         </div>
         <Panel title="Revenue over time" pad={false}>
-          <div style={{ padding: 12 }}>{bucket === "hour" ? <TimeBar data={series} color={accent} height={240} /> : <AreaTrend data={series} lines={[{ key: "revenue", name: "Revenue", color: accent }]} height={240} />}</div>
+          <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={240} /></div>
         </Panel>
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
       </>
@@ -475,7 +465,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
           <Stat label="Lowest bucket" tone="warn" icon="fa-arrow-down" value={inr(withData.length ? Math.min(...withData) : 0)} />
         </div>
         <Panel title="Average bill over time" pad={false}>
-          <div style={{ padding: 12 }}><AreaTrend data={avgSeries} lines={[{ key: "revenue", name: "Avg bill", color: accent }]} height={240} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={avgSeries.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money name="Avg bill" height={240} /></div>
         </Panel>
         <MoneyTable rows={mrows} totals={t} bucket={bucket} showAvg />
       </>
@@ -496,7 +486,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
           <Stat label="Busiest bucket" tone="accent" icon="fa-fire" value={nfmt(vol.length ? Math.max(...vol.map((v) => v.value)) : 0)} sub="orders in one bucket" />
         </div>
         <Panel title="Orders over time" pad={false}>
-          <div style={{ padding: 12 }}><CountBar data={vol} color={accent} name="Orders" height={240} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={vol} color={accent} money={false} name="Orders" height={240} /></div>
         </Panel>
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
       </>
@@ -526,7 +516,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
           <Stat label="Weekend share" tone="info" icon="fa-champagne-glasses" value={allRev ? `${Math.round((wkRev / allRev) * 100)}%` : "0%"} sub="Sat + Sun of revenue" />
         </div>
         <Panel title="Revenue by day of week" pad={false}>
-          <div style={{ padding: 12 }}><TimeBar data={chart} color={accent} height={240} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={240} /></div>
         </Panel>
         <Panel title="Breakdown" pad={false}>
           <div className="rs-tablewrap">
@@ -570,7 +560,70 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         ) : (
           <EmptyCard text="Pick a single restaurant to see its CGST/SGST split — tax lines are set per restaurant." />
         )}
+        <Panel title="Tax over time" pad={false}>
+          <div style={{ padding: 12 }}><ToggleChart data={mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.tax }))} color={accent} money name="Tax" height={220} /></div>
+        </Panel>
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
+      </>
+    );
+  }
+
+  // ── DISCOUNTS GIVEN ──
+  if (sel === "discounts") {
+    if (!t) return <EmptyCard text="No sales in this period yet." />;
+    const discRows = mrows.filter((r) => r.discount > 0);
+    const effPct = t.subtotal ? (t.discount / t.subtotal) * 100 : 0;
+    const biggest = [...discRows].sort((a, b) => b.discount - a.discount)[0];
+    return (
+      <>
+        <div className="rs-kpis">
+          <Stat label="Discounts given" tone="warn" icon="fa-tag" big value={inr(t.discount)} spark={mrows.map((r) => r.discount)} />
+          <Stat label="Effective rate" tone="warn" icon="fa-percent" value={`${effPct.toFixed(1)}%`} sub="of gross sales" />
+          <Stat label="Revenue after discounts" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} />
+          <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} />
+          <Stat label="Biggest day" tone="bad" icon="fa-arrow-up" value={biggest ? inr(biggest.discount) : "—"} sub={biggest ? bucketLabel(biggest.bucket, bucket) : ""} />
+        </div>
+        <Panel title="Discounts over time" pad={false}>
+          <div style={{ padding: 12 }}><ToggleChart data={mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.discount }))} color={accent} money name="Discount" height={240} /></div>
+        </Panel>
+        <Panel title="Days with discounts" hint="only days a discount was given" pad={false}>
+          <div className="rs-tablewrap">
+            <table className="rs-table">
+              <thead><tr><th>Period</th><th className="num">Paid bills</th><th className="num">Discount</th><th className="num">Revenue</th><th className="num">Disc. rate</th></tr></thead>
+              <tbody>{discRows.length ? discRows.map((r) => <tr key={r.bucket}><td>{bucketLabel(r.bucket, bucket)}</td><td className="num">{nfmt(r.paidOrders)}</td><td className="num"><b>{inr(r.discount)}</b></td><td className="num">{inr(r.revenue)}</td><td className="num">{r.subtotal ? ((r.discount / r.subtotal) * 100).toFixed(1) : "0.0"}%</td></tr>) : <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--muted)", padding: 22 }}>No discounts were given in this period.</td></tr>}</tbody>
+            </table>
+          </div>
+        </Panel>
+      </>
+    );
+  }
+
+  // ── CANCELLATIONS ──
+  if (sel === "cancellations") {
+    if (!t) return <EmptyCard text="No orders in this period yet." />;
+    const cxRows = mrows.filter((r) => r.cancelledOrders > 0);
+    const placed = t.orders + t.cancelledOrders;
+    const cxPct = placed ? (t.cancelledOrders / placed) * 100 : 0;
+    const worst = [...cxRows].sort((a, b) => b.cancelledValue - a.cancelledValue)[0];
+    return (
+      <>
+        <div className="rs-kpis">
+          <Stat label="Value lost" tone="bad" icon="fa-ban" big value={inr(t.cancelledValue)} spark={mrows.map((r) => r.cancelledValue)} />
+          <Stat label="Cancelled orders" tone="bad" icon="fa-circle-xmark" value={nfmt(t.cancelledOrders)} sub={`${cxPct.toFixed(1)}% of all placed`} />
+          <Stat label="Kept revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} />
+          <Stat label="Worst day" tone="warn" icon="fa-arrow-up" value={worst ? inr(worst.cancelledValue) : "—"} sub={worst ? bucketLabel(worst.bucket, bucket) : ""} />
+        </div>
+        <Panel title="Value lost over time" pad={false}>
+          <div style={{ padding: 12 }}><ToggleChart data={mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.cancelledValue }))} color={accent} money name="Lost value" height={240} /></div>
+        </Panel>
+        <Panel title="Days with cancellations" hint="only days something was voided" pad={false}>
+          <div className="rs-tablewrap">
+            <table className="rs-table">
+              <thead><tr><th>Period</th><th className="num">Cancelled orders</th><th className="num">Value lost</th><th className="num">Kept revenue</th></tr></thead>
+              <tbody>{cxRows.length ? cxRows.map((r) => <tr key={r.bucket}><td>{bucketLabel(r.bucket, bucket)}</td><td className="num">{nfmt(r.cancelledOrders)}</td><td className="num"><b>{inr(r.cancelledValue)}</b></td><td className="num">{inr(r.revenue)}</td></tr>) : <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--muted)", padding: 22 }}>No cancellations in this period.</td></tr>}</tbody>
+            </table>
+          </div>
+        </Panel>
       </>
     );
   }
@@ -706,10 +759,10 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
           <Stat label="Total revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(totalRev)} />
         </div>
         <Panel title="Revenue by hour" pad={false}>
-          <div style={{ padding: 12 }}><TimeBar data={revSeries} color={accent} height={240} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={revSeries.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={240} /></div>
         </Panel>
         <Panel title="Orders by hour" pad={false}>
-          <div style={{ padding: 12 }}><HourlyBar data={hrs.map((h) => ({ hour: h.hour, orders: h.orders }))} color={accent} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={Array.from({ length: 24 }, (_, h) => ({ label: `${h}:00`, value: hrs.find((x) => x.hour === h)?.orders || 0 }))} color={accent} money={false} name="Orders" height={210} /></div>
         </Panel>
       </>
     );
@@ -735,7 +788,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
           {parts.map((p) => <Stat key={p.label} label={p.label} tone="info" icon={p.icon} value={inr(p.rev)} sub={`${nfmt(p.orders)} orders`} />)}
         </div>
         <Panel title="Revenue by day part" pad={false}>
-          <div style={{ padding: 12 }}><TimeBar data={chart} color={accent} height={230} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={230} /></div>
         </Panel>
       </>
     );

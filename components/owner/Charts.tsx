@@ -8,6 +8,7 @@
 //     but the top of the domain is EXACTLY the data max — no headroom.
 // Series colour = each restaurant's own accent. ₹ tooltips. All charts sit in
 // fixed-height responsive boxes so cards never jump while loading.
+import { useState } from "react";
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -362,6 +363,56 @@ export function DeltaChip({ now, prev, title }: { now: number; prev: number | nu
 
 function Empty() {
   return <div style={{ height: 120, display: "grid", placeItems: "center", color: "var(--muted)", fontSize: 13 }}>No data in this range yet.</div>;
+}
+
+// ── ToggleChart — ONE time-series the viewer flips between BARS and a filled LINE.
+// The "Bar / Line" pill sits top-right (owner's reference). `money` picks ₹ vs plain-count
+// formatting + tooltip. Data is normalised to {label, value}; used by the hub + every
+// time-based report so the toggle behaves identically everywhere.
+export function ToggleChart({ data, color, money = true, height = 240, name, title, defaultMode = "bar" }: {
+  data: { label: string; value: number }[]; color: string; money?: boolean; height?: number; name?: string; title?: string; defaultMode?: "bar" | "line";
+}) {
+  const [mode, setMode] = useState<"bar" | "line">(defaultMode);
+  const label = name || (money ? "Revenue" : "Orders");
+  const fmt = money ? compact : (v: number) => Math.round(v).toString();
+  const max = Math.max(1, ...data.map((d) => d.value));
+  const values = data.map((d) => d.value);
+  const gid = "own-tg-" + cssId(label);
+  return (
+    <div>
+      <div className="rs-tc-head">
+        <span className="rs-tc-title">{title || ""}</span>
+        <div className="rs-tc-toggle" role="tablist" aria-label="Chart type">
+          <button role="tab" aria-selected={mode === "bar"} className={mode === "bar" ? "on" : ""} onClick={() => setMode("bar")}>Bar</button>
+          <button role="tab" aria-selected={mode === "line"} className={mode === "line" ? "on" : ""} onClick={() => setMode("line")}>Line</button>
+        </div>
+      </div>
+      {!data.length ? <Empty /> : (
+        <div style={{ width: "100%", height }}>
+          <ResponsiveContainer>
+            {mode === "bar" ? (
+              <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
+                <CartesianGrid stroke={GRID} vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" />
+                <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={money ? 48 : 36} tickFormatter={fmt} allowDecimals={false} />
+                <Tooltip content={money ? <MoneyTip /> : <CountTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
+                <Bar dataKey="value" name={label} fill={color} radius={[5, 5, 0, 0]} maxBarSize={46} />
+              </BarChart>
+            ) : (
+              <AreaChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
+                <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.28} /><stop offset="100%" stopColor={color} stopOpacity={0.02} /></linearGradient></defs>
+                <CartesianGrid stroke={GRID} vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={24} interval="preserveStartEnd" />
+                <YAxis domain={fitDomain(values)} tick={{ fontSize: 11, fill: AXIS }} width={money ? 48 : 36} tickFormatter={fmt} allowDecimals={false} />
+                <Tooltip content={money ? <MoneyTip /> : <CountTip />} />
+                <Area type="monotone" dataKey="value" name={label} stroke={color} strokeWidth={2.25} dot={false} activeDot={{ r: 4 }} fill={`url(#${gid})`} />
+              </AreaChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── back-compat aliases — the current /aevinite admin page still imports these
