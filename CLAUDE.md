@@ -491,6 +491,31 @@ main TODOs. Code: `lib/idempotency.ts`, `lib/connectionStatus.ts`, `lib/guestOut
 `components/ConnectionBadge.tsx`, `public/panels/{outbox,connbadge}.js`, `realtime.js`,
 `app/api/guest/place-order/route.ts`, migration `138_action_idempotency.sql`.
 
+## Analytics / dashboards MUST use the compute-on-view snapshot cache (owner, 2026-07-25 — ALWAYS)
+
+Any owner/admin dashboard, report, or analytics number that comes from an aggregate query
+(scans/groups `orders` or similar) must be served through the **compute-on-view snapshot
+cache**, never recomputed on every open. This is now the DEFAULT for every such feature —
+do it automatically, without being asked. Reuse the existing engine, don't reinvent:
+
+- **Engine:** `lib/ownerCache.ts` (`cachedOwnerPayload`) + table `owner_analytics_cache`
+  (migration 196) + the change-detector `lfh_owner_orders_fingerprint`. Wrap the route
+  handler's compute in `cachedOwnerPayload({ key, force, fingerprint, compute })`.
+- **Behaviour it gives (all required):** a normal open returns the STORED JSON instantly
+  (one row read — near-zero egress); a snapshot older than ~5 min recomputes on next view
+  **only if the fingerprint shows data changed** (else it just reuses the JSON — "don't
+  recalc when nothing changed"); the **Refresh button forces a live recompute** (`?refresh=1`
+  → "wait for the live value"). The response carries `cachedAt` so the UI shows **"updated
+  X ago"** next to Refresh.
+- **Key** = `<area>:v<n>:<scopeKey>:<report>:<range>` where `scopeKey` comes from the
+  ALREADY-authorized `ownerScope` (`scopeKeyOf`) — never from raw request params — so
+  isolation is unchanged (an owner only ever hits their own restaurants' rows).
+- **Why (owner's #1 fear):** this LOWERS egress + DB load — reads become a single-row lookup
+  instead of whole-table scans, and heavy compute runs rarely (throttled + change-gated),
+  never on every open or every 60s poll. Do NOT add a blind cron that recomputes every
+  restaurant on a timer (wasted work on idle tenants); the lazy compute-on-view + fingerprint
+  is the pattern. Pairs with the egress rules in the SaaS efficiency playbook.
+
 ## Known gotchas (read before editing)
 
 - **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The

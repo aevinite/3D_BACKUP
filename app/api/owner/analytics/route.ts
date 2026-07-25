@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
+import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint } from "@/lib/ownerCache";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
@@ -100,7 +101,15 @@ export async function GET(req: NextRequest) {
 
   try {
     if (!rid) {
-      // Group scope — the "who earns more" bar + multi-line trend.
+      // Group scope — the "who earns more" bar + multi-line trend. Compute-on-view cached
+      // (mig 196): a normal home open serves the stored JSON instantly; the Refresh button
+      // (?refresh=1) forces a live recompute. Keyed by the already-authorized scope.
+      const gIds = scope.all ? [] : scope.ids;
+      const groupPayload = await cachedOwnerPayload({
+        key: `analytics:v1:group:${scopeKeyOf(null, scope.all, gIds)}:${range}:c${compare ? 1 : 0}`,
+        force: sp.get("refresh") === "1",
+        fingerprint: () => ordersFingerprint(scope.all ? null : gIds, from, to),
+        compute: async () => {
       const allow = scope.all ? null : new Set(scope.ids);
       const pIds = scope.all ? null : scope.ids; // DB-side scope (mig 138) — no whole-platform scan
       const [rev, ts] = await Promise.all([
@@ -142,7 +151,10 @@ export async function GET(req: NextRequest) {
       }
       const paymentMethods = Array.from(pmByMethod.values()).sort((a, b) => b.revenue - a.revenue);
       const prev = prevWin ? await windowTotals(pIds, prevWin.from, prevWin.to) : null;
-      return NextResponse.json({ scope: "group", range, restaurantRevenue, timeseries, paymentMethods, prev });
+      return { scope: "group", range, restaurantRevenue, timeseries, paymentMethods, prev };
+        },
+      });
+      return NextResponse.json(groupPayload);
     }
 
     // Restaurant scope — KPIs + per-dish/category/hourly + this restaurant's trend.

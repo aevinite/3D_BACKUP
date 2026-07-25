@@ -1,0 +1,5 @@
+#!/bin/bash
+# This runs when you double-click "Open Competitor POS".
+# It opens index.html (which sits in the SAME folder as this app) in your browser.
+APPDIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+open "$APPDIR/index.html"

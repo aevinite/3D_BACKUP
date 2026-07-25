@@ -8,7 +8,7 @@
 //     (5+ caps the trend at the top-5 lines so it stays readable).
 //   · 10+           → HQ mode: ONE sortable, searchable table (cards would be a wall
 //     of noise); scales to 50+. Sidebar (OwnerShell) always lists every restaurant.
-// Every KPI carries a ▲/▼ delta vs the previous equal-length period + a sparkline,
+// Every KPI carries a ▲/▼ delta vs the previous equal-length period,
 // and an insight strip says in plain words what the numbers mean. All data arrives
 // pre-aggregated from /api/owner/{overview,analytics,reports} (tiny rows, mig-113
 // paid-only rule everywhere). Refresh: activity-gated ~60s + manual — no websocket.
@@ -17,7 +17,7 @@ import Link from "next/link";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import { asSuffix } from "@/lib/ownerPin";
 import {
-  AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod, Spark, DeltaChip,
+  AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod, DeltaChip,
   SameHourBar, PayTrendStack,
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
@@ -148,12 +148,12 @@ function rangeSpanText(k: Range): string {
 // AnimatedNumber (count-up, loading-aware) now lives in @/components/owner/AnimatedNumber
 // so every owner page shares one animation. Imported at the top of this file.
 
-function Kpi({ k, v, money, delta, prevTitle, spark, color, sub, loading }: {
+function Kpi({ k, v, money, delta, prevTitle, sub, loading }: {
   k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };
-  prevTitle?: string; spark?: number[]; color?: string; sub?: string; loading?: boolean;
+  prevTitle?: string; sub?: string; loading?: boolean;
 }) {
-  // Numbers count up from zero and keep rolling while the data loads, so the tile always
-  // feels alive (never a dead "…") and the animation masks the fetch (owner 2026-07-25).
+  // While loading the number shows a calm shimmer, then counts up once to the real value —
+  // no fake rolling figure, no inline sparkline cramped against the delta (owner 2026-07-25).
   return (
     <div className="adm-stat owx-kpi">
       <div className="k">{k}</div>
@@ -162,9 +162,20 @@ function Kpi({ k, v, money, delta, prevTitle, spark, color, sub, loading }: {
         {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
       </div>
       {sub && !loading && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{sub}</div>}
-      {spark && spark.length > 1 && <Spark points={spark} color={color || "#34d399"} />}
     </div>
   );
+}
+
+// "updated X ago" for the cached-snapshot timestamp (mig 196). Coarse on purpose — only
+// roughly how stale the numbers are matters, not the exact second.
+function timeAgo(iso: string): string {
+  const s = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
+  if (s < 45) return "just now";
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} hr ago`;
+  return `${Math.round(h / 24)} d ago`;
 }
 
 export default function OwnerDashboard() {
@@ -176,6 +187,7 @@ export default function OwnerDashboard() {
   const [group, setGroup] = useState<GroupA | null>(null);
   const [rest, setRest] = useState<RestA | null>(null);
   const [money, setMoney] = useState<MoneyTotals | null>(null); // discounts + lost business tiles
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null); // when the cached snapshot was computed (mig 196)
   // The money tiles come from a heavier reports scan that CAN legitimately fail/time out on
   // the all-time whole-platform view (the pre-aggregated analytics call still succeeds). When
   // it can't be computed we mark it, so the "Lost to cancellations" tile shows an honest "—"
@@ -221,7 +233,7 @@ export default function OwnerDashboard() {
   // any response that lands after a newer one started — so a slow earlier fetch can't
   // overwrite the range you just switched to (owner audit 2026-07-06).
   const loadSeq = useRef(0);
-  const load = useCallback(async (opts?: { withRecords?: boolean }) => {
+  const load = useCallback(async (opts?: { withRecords?: boolean; refresh?: boolean }) => {
     const myGen = ++loadSeq.current;
     const fresh = () => myGen === loadSeq.current;
     try {
@@ -231,13 +243,17 @@ export default function OwnerDashboard() {
       // manual refresh — NOT on the 60s auto-refresh, which keeps the last records value
       // (audit 2026-07-07). The flag rides on the restaurant-scope analytics calls only.
       const recQ = opts?.withRecords ? "&records=1" : "";
+      // Refresh button (or first load) forces a live recompute of the compute-on-view cache
+      // (mig 196); a normal auto-refresh serves the instant cached snapshot. `updatedAt`
+      // tracks when the snapshot was computed so the bar can say "updated X ago".
+      const refQ = opts?.refresh ? "&refresh=1" : "";
       // The tab's scope pin (admin-in-one-restaurant) rides on EVERY call so the
       // shared act-as cookie can't hijack this tab (C1). Null for a real owner.
       const scp = scopePin ? `&scope=${scopePin}${asSuffix()}` : "";
       // range=all now maps to an unbounded reports window (mig M11) — pass it through so the
       // money tiles cover the same span as the all-time revenue KPIs (was collapsed to 12m).
       const moneyUrl = (rid: string | null) =>
-        `/api/owner/reports?type=sales&range=${rg}${rid ? `&rid=${rid}` : ""}${scp}`;
+        `/api/owner/reports?type=sales&range=${rg}${rid ? `&rid=${rid}` : ""}${scp}${refQ}`;
       // The money tiles (discounts / lost-to-cancellations) come from a SEPARATE, heavier
       // reports scan. For range=all that scan is an unbounded, whole-history month rollup
       // and is far slower than the pre-aggregated analytics call — so it must NEVER gate the
@@ -247,7 +263,7 @@ export default function OwnerDashboard() {
       // it lands, guarded by the same latest-wins check so a stale response can't repaint.
       const loadMoney = (rid: string | null) => {
         fetch(moneyUrl(rid), { cache: "no-store" }).then(j)
-          .then((m) => { if (!fresh()) return; if (m.error) { setMoney(null); setMoneyErr(true); } else { setMoney(m.totals); setMoneyErr(false); } })
+          .then((m) => { if (!fresh()) return; if (m.error) { setMoney(null); setMoneyErr(true); } else { setMoney(m.totals); setMoneyErr(false); if (m.cachedAt) setUpdatedAt(m.cachedAt); } })
           .catch(() => { if (fresh()) { setMoney(null); setMoneyErr(true); } });
       };
       if (view.level === "home") {
@@ -257,24 +273,27 @@ export default function OwnerDashboard() {
         setOv(o);
         if (o.restaurants.length === 1) {
           const rid = o.restaurants[0].id;
-          const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}`, { cache: "no-store" }).then(j);
+          const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then(j);
           if (a.error) throw new Error(a.error);
           if (!fresh()) return;
           setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null })); setGroup(null);
+          if (a.cachedAt) setUpdatedAt(a.cachedAt);
           loadMoney(rid);
         } else {
-          const g = await fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}`, { cache: "no-store" }).then(j);
+          const g = await fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}${refQ}`, { cache: "no-store" }).then(j);
           if (g.error) throw new Error(g.error);
           if (!fresh()) return;
           setGroup(g); setRest(null);
+          if (g.cachedAt) setUpdatedAt(g.cachedAt);
           loadMoney(null);
         }
       } else {
         const rid = (view as { rid: string }).rid;
-        const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}`, { cache: "no-store" }).then(j);
+        const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then(j);
         if (a.error) throw new Error(a.error);
         if (!fresh()) return;
         setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null }));
+        if (a.cachedAt) setUpdatedAt(a.cachedAt);
         loadMoney(rid);
       }
       if (fresh()) setErr(null);
@@ -309,7 +328,7 @@ export default function OwnerDashboard() {
   const manualRefresh = () => {
     setRefreshing(true);
     const started = Date.now();
-    Promise.resolve(loadRef.current({ withRecords: true })).finally(() => {
+    Promise.resolve(loadRef.current({ withRecords: true, refresh: true })).finally(() => {
       const wait = Math.max(0, 400 - (Date.now() - started));
       setTimeout(() => setRefreshing(false), wait);
     });
@@ -321,10 +340,10 @@ export default function OwnerDashboard() {
     if (!group) return { rows: [] as Record<string, unknown>[], lines: [] as { key: string; name: string; color: string }[] };
     // Key each series by restaurant ID, never by display name — two restaurants can share
     // a name, and keying by name silently merges their two lines into one (found 2026-07-05).
-    // 5+ restaurants → only the top-5 earners get a line (8 lines were already noise;
-    // the rest are one tap away in the cards/HQ table).
-    const lineCap = group.restaurantRevenue.length >= 5 ? 5 : 8;
-    const lines = group.restaurantRevenue.slice(0, lineCap).map((r) => ({ key: r.id, name: r.name, color: r.accentColor || FALLBACK }));
+    // Show a line for EVERY restaurant in view — no hidden top-N cap (owner 2026-07-25: "if
+    // there are 100 I want 100 listed"). This branch only runs for the 2–9 tier anyway (10+
+    // uses the sortable HQ table), and the legend now wraps/scrolls to fit any count.
+    const lines = group.restaurantRevenue.map((r) => ({ key: r.id, name: r.name, color: r.accentColor || FALLBACK }));
     const byKey = new Map<string, Record<string, unknown>>();
     for (const t of group.timeseries) {
       const k = istKey(new Date(t.bucket), range);
@@ -351,13 +370,6 @@ export default function OwnerDashboard() {
     if (!expected.length) return (rest?.timeseries ?? []).map((t) => ({ label: tsLabel(t.bucket, range), Revenue: t.revenue }));
     return expected.map((e) => ({ label: e.label, Revenue: byKey.get(e.key) ?? 0 }));
   }, [rest, range]);
-  const restSpark = useMemo(() => (rest?.timeseries ?? []).map((t) => t.revenue), [rest]);
-  const groupSpark = useMemo(() => {
-    if (!group) return [];
-    const byBucket = new Map<string, number>();
-    for (const t of group.timeseries) byBucket.set(t.bucket, (byBucket.get(t.bucket) || 0) + t.revenue);
-    return Array.from(byBucket.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
-  }, [group]);
 
   // ── plain-language insights, derived from data already on screen (no extra fetch) ──
   const insights = useMemo(() => {
@@ -461,9 +473,12 @@ export default function OwnerDashboard() {
         </div>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
           <RangeSlider items={RANGES} value={range} onChange={setRange} caption={rangeSpanText(range)} />
-          <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now (auto-updates are throttled to save load)" style={{ marginTop: 2 }}>
-            <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, marginTop: 2 }}>
+            <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now — recomputes the live numbers (normal views show a stored snapshot to stay instant)">
+              <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
+            </button>
+            {updatedAt && !refreshing && <span style={{ fontSize: 10.5, color: "var(--muted)" }}>updated {timeAgo(updatedAt)}</span>}
+          </div>
         </div>
       </div>
 
@@ -484,7 +499,7 @@ export default function OwnerDashboard() {
           <div className="adm-stats">
             <Kpi k={`Revenue (${RANGE_LABEL[range]})`} v={groupTotals?.revenue ?? 0} money loading={!group}
               delta={group?.prev ? { now: groupTotals?.revenue ?? 0, prev: group.prev.revenue } : undefined}
-              prevTitle={PREV_LABEL[range]} spark={groupSpark} />
+              prevTitle={PREV_LABEL[range]} />
             <Kpi k="Orders" v={groupTotals?.orders ?? 0} loading={!group}
               sub={groupTotals && groupTotals.paidOrders !== groupTotals.orders ? `${groupTotals.paidOrders} paid · rest still open` : undefined}
               delta={group?.prev ? { now: groupTotals?.orders ?? 0, prev: group.prev.orders } : undefined}
@@ -638,7 +653,7 @@ export default function OwnerDashboard() {
 
       {/* ═══════ RESTAURANT (drill-down, or HOME when there's only one) ═══════ */}
       {((view.level === "home" && single) || view.level === "restaurant") && activeRid && (
-        <RestaurantView rest={rest && rest.restaurant.id === activeRid ? rest : null} money={money} moneyErr={moneyErr} range={range} restTrend={restTrend} restSpark={restSpark}
+        <RestaurantView rest={rest && rest.restaurant.id === activeRid ? rest : null} money={money} moneyErr={moneyErr} range={range} restTrend={restTrend}
           dishSort={dishSort} setDishSort={setDishSort}
           onDish={(title) => setView({ level: "dish", rid: activeRid, dish: title })} />
       )}
@@ -751,8 +766,8 @@ export default function OwnerDashboard() {
 }
 
 // ── Restaurant detail (also the HOME layout when the owner has one restaurant) ──
-function RestaurantView({ rest, money, moneyErr, range, restTrend, restSpark, dishSort, setDishSort, onDish }: {
-  rest: RestA | null; money: MoneyTotals | null; moneyErr: boolean; range: Range; restTrend: Record<string, unknown>[]; restSpark: number[];
+function RestaurantView({ rest, money, moneyErr, range, restTrend, dishSort, setDishSort, onDish }: {
+  rest: RestA | null; money: MoneyTotals | null; moneyErr: boolean; range: Range; restTrend: Record<string, unknown>[];
   dishSort: "revenue" | "qty"; setDishSort: (s: "revenue" | "qty") => void; onDish: (t: string) => void;
 }) {
   if (!rest) return <div className="adm-empty">Loading restaurant…</div>;
@@ -772,7 +787,7 @@ function RestaurantView({ rest, money, moneyErr, range, restTrend, restSpark, di
       <div className="adm-stats">
         <Kpi k="Revenue" v={k.revenue} money
           delta={rest.prev ? { now: k.revenue, prev: rest.prev.revenue } : undefined}
-          prevTitle={PREV_LABEL[range]} spark={restSpark} color={accent} />
+          prevTitle={PREV_LABEL[range]} />
         <Kpi k="Orders" v={k.orders}
           sub={k.paidOrders != null && k.paidOrders !== k.orders ? `${k.paidOrders} paid · rest still open` : undefined}
           delta={rest.prev ? { now: k.orders, prev: rest.prev.orders } : undefined} prevTitle={PREV_LABEL[range]} />

@@ -19,6 +19,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct } from "@/lib/tax";
+import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint } from "@/lib/ownerCache";
 
 export const dynamic = "force-dynamic";
 
@@ -152,7 +153,21 @@ export async function GET(req: NextRequest) {
   // The restaurants this call may touch (for the merged all-restaurants shapes).
   const ridList: (string | null)[] = rid ? [rid] : scope.all ? [null] : scope.ids;
 
+  const KNOWN = new Set(["sales", "tax", "discounts", "cancellations", "daysummary", "dishes", "categories", "hourly", "payments"]);
+  if (!KNOWN.has(type)) return NextResponse.json({ error: "unknown report type" }, { status: 400 });
+  // Compute-on-view snapshot cache (mig 196): a normal open serves the stored JSON instantly;
+  // ?refresh=1 (the Refresh button) forces a live recompute + re-store. Keyed by the already-
+  // authorized scope, so isolation is unchanged. `cachedAt`/`cached` ride along for the UI.
+  const scopeIds = scope.all ? [] : scope.ids;
+  const cacheKey = `reports:v1:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range}`;
+  const force = sp.get("refresh") === "1";
+  const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
+
   try {
+    const payload = await cachedOwnerPayload({
+      key: cacheKey, force,
+      fingerprint: () => ordersFingerprint(fpIds, from, to),
+      compute: async () => {
     // ── money reports: one bucketed summary drives sales/tax/discounts/cancellations ──
     // The "daysummary" report reads the SAME money payload and additionally bundles the
     // payment-mode settlement (one extra RPC per restaurant) so the day sheet is one round-trip.
@@ -252,7 +267,7 @@ export async function GET(req: NextRequest) {
           .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))
           .sort((a, b) => b.revenue - a.revenue);
       }
-      return NextResponse.json({ type, range, bucket, rows, totals, tax, payments, drillBucket, drillRows });
+      return { type, range, bucket, rows, totals, tax, payments, drillBucket, drillRows };
     }
 
     // ── breakdown reports: dishes / categories / payments / hourly ──
@@ -290,7 +305,7 @@ export async function GET(req: NextRequest) {
       const rows: Row[] = mergeBy(rowsets, keyCol, numeric)
         .map((r) => ({ ...r, revenue: num(r.revenue) }));
       rows.sort((a, b) => (type === "hourly" ? Number(a.hour) - Number(b.hour) : Number(b.revenue) - Number(a.revenue)));
-      return NextResponse.json({ type, range, rows });
+      return { type, range, rows };
     }
 
     if (type === "payments") {
@@ -302,10 +317,13 @@ export async function GET(req: NextRequest) {
       const rows = mergeBy(okData, "method", ["revenue", "orders"])
         .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))
         .sort((a, b) => b.revenue - a.revenue);
-      return NextResponse.json({ type, range, rows });
+      return { type, range, rows };
     }
 
-    return NextResponse.json({ error: "unknown report type" }, { status: 400 });
+        throw new Error("unknown report type");
+      },
+    });
+    return NextResponse.json(payload);
   } catch (e) {
     // Supabase errors are plain objects ({code,message,…}), not Error instances — String(e)
     // rendered "[object Object]". Surface the real message, and turn a statement-timeout

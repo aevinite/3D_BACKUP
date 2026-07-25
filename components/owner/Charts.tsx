@@ -113,7 +113,7 @@ function CountTip({ active, payload, label }: any) {
 }
 
 // ── AreaTrend — revenue over time, single or multi restaurant ──────────────
-export function AreaTrend({ data, lines, height = 240 }: {
+export function AreaTrend({ data, lines, height = 260 }: {
   data: Record<string, unknown>[];
   lines: { key: string; name: string; color: string }[];
   height?: number;
@@ -122,29 +122,43 @@ export function AreaTrend({ data, lines, height = 240 }: {
   const values = data.flatMap((row) => lines.map((l) => Number(row[l.key]) || 0));
   const single = lines.length === 1;
   return (
-    <div style={{ width: "100%", height }}>
-      <ResponsiveContainer>
-        <AreaChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
-          <defs>
-            {lines.map((l) => (
-              <linearGradient key={l.key} id={`own-g-${cssId(l.key)}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={l.color} stopOpacity={0.28} />
-                <stop offset="100%" stopColor={l.color} stopOpacity={0.02} />
-              </linearGradient>
-            ))}
-          </defs>
-          <CartesianGrid stroke={GRID} vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} minTickGap={24} />
-          <YAxis domain={fitDomain(values)} tick={{ fontSize: 11, fill: AXIS }} tickFormatter={compact} width={48} allowDecimals={false} />
-          <Tooltip content={<MoneyTip />} />
-          {!single && <Legend wrapperStyle={{ fontSize: 11 }} />}
+    <div>
+      {/* Legend lives ABOVE the plot as wrapping HTML chips — NOT Recharts' in-canvas legend
+          — so the chart uses the FULL box height instead of surrendering a strip at the
+          bottom, and EVERY restaurant is listed no matter how many (the strip wraps, then
+          scrolls past a few rows). Owner 2026-07-25: "graph is not taking full space". */}
+      {!single && (
+        <div className="own-legend" role="list">
           {lines.map((l) => (
-            <Area key={l.key} type="monotone" dataKey={l.key} name={l.name} stroke={l.color}
-              strokeWidth={2.25} dot={false} activeDot={{ r: 4 }}
-              fill={single ? `url(#own-g-${cssId(l.key)})` : "transparent"} />
+            <span key={l.key} className="own-leg" role="listitem">
+              <span className="own-leg-dot" style={{ background: l.color }} aria-hidden="true" />{l.name}
+            </span>
           ))}
-        </AreaChart>
-      </ResponsiveContainer>
+        </div>
+      )}
+      <div style={{ width: "100%", height }}>
+        <ResponsiveContainer>
+          <AreaChart data={data} margin={{ left: 4, right: 10, top: 8, bottom: 4 }}>
+            <defs>
+              {lines.map((l) => (
+                <linearGradient key={l.key} id={`own-g-${cssId(l.key)}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={l.color} stopOpacity={0.28} />
+                  <stop offset="100%" stopColor={l.color} stopOpacity={0.02} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid stroke={GRID} vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} minTickGap={24} />
+            <YAxis domain={fitDomain(values)} tick={{ fontSize: 11, fill: AXIS }} tickFormatter={compact} width={48} allowDecimals={false} />
+            <Tooltip content={<MoneyTip />} />
+            {lines.map((l) => (
+              <Area key={l.key} type="monotone" dataKey={l.key} name={l.name} stroke={l.color}
+                strokeWidth={2.25} dot={false} activeDot={{ r: 4 }}
+                fill={single ? `url(#own-g-${cssId(l.key)})` : "transparent"} />
+            ))}
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }
