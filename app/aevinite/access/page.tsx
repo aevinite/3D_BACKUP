@@ -316,7 +316,7 @@ export default function Access2Page() {
   return (
     <div className="acc2">
       <Style />
-      <nav className="adm-crumbs" style={{ marginBottom: 2 }}>
+      <nav className="adm-crumbs" style={{ marginBottom: 4 }}>
         <a href="/aevinite">Dashboard</a><span className="sep">›</span>
         <a href="/aevinite/restaurants">Restaurants</a><span className="sep">›</span>
         {/* Back to origin: if we arrived from a restaurant detail, this crumb reopens THAT
@@ -332,7 +332,7 @@ export default function Access2Page() {
       )}
 
       <header className="acc2-head">
-        <div style={{ minWidth: 0 }}>
+        <div>
           <h1 className="adm-page-title" style={{ margin: 0 }}>Access &amp; permissions</h1>
           <p className="adm-page-sub" style={{ margin: "4px 0 0" }}>{rest?.name} · {staff.length} people · new panel (preview)</p>
         </div>
@@ -723,22 +723,18 @@ function Toggle({ checked, disabled, onChange }: { checked: boolean; disabled?: 
 
 function Style() {
   return <style jsx global>{`
-  .acc2 { max-width: 1180px; margin-top:-8px; }
+  .acc2 { max-width: 1180px; }
   /* People coloured by ROLE (owner 2026-07-25) — matches the Users page; no single gold accent. */
   .acc2 .prole { display:flex; align-items:center; gap:8px; }
   .acc2 .prole .pdot { width:8px; height:8px; border-radius:50%; flex:none; }
   .acc2 .ppill { display:inline-block; margin-top:3px; font-size:10.5px; font-weight:800; letter-spacing:.02em; padding:2px 9px; border-radius:20px; line-height:1.5; }
   .acc2 .acc2-rolechips .cdot { width:8px; height:8px; border-radius:50%; flex:none; }
   .acc2 .prow.on .av { color:#10131a; }  /* avatar stays role-coloured (inline bg) even when selected */
-  /* Header: title (shrinks) on the left, controls stay in the RIGHT column beside it and
-     NEVER drop to a full-width row of their own — so the panel sits right under the header
-     with no empty strip, at any width/zoom (owner 2026-07-25). */
-  .acc2-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:nowrap; margin:2px 0 12px; }
-  .acc2-head > div:first-child { min-width:0; }
-  .acc2-head-r { flex:none; display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; }
+  .acc2-head { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:6px 0 18px; }
+  .acc2-head-r { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .acc2-save { font-size:12px; font-weight:700; color:var(--muted); min-width:60px; }
   .acc2-save.saved { color:var(--adm-ok); } .acc2-save.err { color:var(--adm-danger); }
-  .acc2-rsel { height:40px; max-width:200px; border-radius:10px; border:var(--border); background:var(--card); color:var(--text); font-weight:700; font-size:13.5px; padding:0 10px; text-overflow:ellipsis; }
+  .acc2-rsel { height:40px; border-radius:10px; border:var(--border); background:var(--card); color:var(--text); font-weight:700; font-size:13.5px; padding:0 10px; }
   .acc2-tabs { display:flex; gap:3px; background:var(--card); border:var(--border); border-radius:12px; padding:4px; }
   .acc2-tabs button { display:flex; align-items:center; gap:7px; min-height:40px; padding:0 16px; border-radius:9px; border:none; background:transparent; color:var(--muted); font-weight:700; font-size:13.5px; cursor:pointer; }
   .acc2-tabs button.on { background:var(--accent); color:#fff; }

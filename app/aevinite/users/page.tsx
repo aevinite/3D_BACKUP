@@ -519,10 +519,7 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
 // hero + grouped result rows. Scoped to .usp so the rest of the admin keeps its own accent.
 function UsersStyle() {
   return <style jsx global>{`
-  .usp { --ub:#3b82f6; --ub2:#60a5fa; max-width:1100px; margin-top:-4px; }
-  /* tighten the top so the search bar sits close under the title (owner 2026-07-25) */
-  .usp .adm-page-h { margin:0 0 2px; }
-  .usp .adm-page-sub { margin:0 0 10px; }
+  .usp { --ub:#3b82f6; --ub2:#60a5fa; max-width:1100px; }
   .usp-banner { border-radius:14px; padding:14px 16px; margin-bottom:14px; border:var(--border); background:var(--card); }
   .usp-banner.err { border-color:#7f1d1d; color:#fca5a5; }
   .usp-banner.ok { border-color:#166534; color:#86efac; }
