@@ -6,21 +6,36 @@
 // Live errors come from /api/admin/oplog?level=error (the same rows the dashboard's red button
 // counts). Data surgery is backed by /api/admin/repair. Sending to Claude = /api/admin/fix-request
 // (action_id bundles the error's context; mode picks instant vs the 02:30 robot). NO earnings shown.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
+import Dropdown from "@/components/admin/Dropdown";
+import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
 import { openRestaurantPanel, PANEL_COLOR, ACT_LABEL, timeAgo, type Action } from "@/components/admin/shared";
 
-type Restaurant = { id: string; name: string; slug: string };
+type Restaurant = { id: string; name: string };
 type Session = { id: string; table_number: string; status: string; bill_no: number | null; invoice_no: number | null; invoice_voided: boolean };
 type Order = { id: string; table_number: string; kot_no: number | null; status: string; payment_status: string; created_at: string; session_id: string | null };
 type RepairData = { sessions: Session[]; orders: Order[] };
-type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; mode?: string | null; summary: string; pr_url: string | null; status?: string; resolved_at?: string | null; action_id?: string | null; err_key?: string | null };
-type AgentRun = { id: string; kind: "live" | "nightly" | "audit"; title: string; request_id: string | null; status: "running" | "done" | "closed" | "failed"; report: string | null; started_at: string; ended_at: string | null };
+type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; mode?: string | null; summary: string; pr_url: string | null };
+type AgentRun = { id: string; kind: "live" | "nightly" | "audit"; title: string; status: "running" | "done" | "closed" | "failed"; report: string | null; started_at: string; ended_at: string | null };
+// Complaints (staff/owner-raised tickets) — folded in from the old /aevinite/issues page.
+type Issue = TicketLike & { restaurantName: string; restaurantSlug?: string; status: string };
+// At-risk & onboarding — folded in from the old /aevinite/attention page.
+type Risk = { id: string; name: string; slug: string; plan: string | null; reason: string };
+type Onb = { id: string; name: string; slug: string; ageDays: number; reason: string };
+type AttData = { atRisk: Risk[]; onboarding: Onb[]; generatedAt: string };
 
 type Op = "void_bill" | "delete_order" | "refire_order" | "unstick_table" | "edit_time";
+
+const TICKET_FILTERS = [
+  { value: "open", label: "Open" },
+  { value: "resolved", label: "Resolved" },
+  { value: "all", label: "All" },
+];
 
 const uuid = () => (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now()) + Math.random();
 
@@ -59,18 +74,6 @@ function groupErrors(rows: Action[]): ErrGroup[] {
   return Array.from(map.values()).sort((x, y) => y.latest.localeCompare(x.latest));
 }
 
-// What the POST tells us about where this request landed, so the toast is honest instead of
-// always promising "a window opens" (only ONE live window opens at a time — see the API note).
-type QueueInfo = { openCount?: number | null; liveRunning?: boolean };
-function queueToast(mode: "instant" | "overnight", d?: QueueInfo): string {
-  if (mode === "overnight") return "Queued — the night robot takes it at 2:30 AM.";
-  if (d?.liveRunning) {
-    const n = d.openCount ?? 0;
-    return `Added to the queue — a Claude window is already open and will pick this up${n ? ` (${n} now waiting)` : ""}.`;
-  }
-  return "Sent — a Claude window opens on the Mac within a minute.";
-}
-
 export default function AdminRepair() {
   const toast = useToast();
   const [rid, setRid] = useState("");
@@ -83,21 +86,27 @@ export default function AdminRepair() {
   const [errors, setErrors] = useState<Action[]>([]);
   const [errLoading, setErrLoading] = useState(true);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
-  const [sending2, setSending2] = useState<Set<string>>(new Set());  // groups mid-send (spinner), cleared on reload
+  const [sent, setSent] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [confirming, setConfirming] = useState("");            // which error group is in "are you sure?" mode
-  const [resolving, setResolving] = useState<Set<string>>(new Set());
-  const [noteFor, setNoteFor] = useState("");                  // which group has the "Fix with a note" box open
-  const [noteText, setNoteText] = useState("");                // the hint typed into that box
 
   // "Describe a problem" box + the queue + Claude session history.
   const [note, setNote] = useState("");
   const [sending, setSending] = useState(false);
   const [requests, setRequests] = useState<FixRequest[]>([]);
-  const [fixed, setFixed] = useState<FixRequest[]>([]);
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [openRun, setOpenRun] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+
+  // Complaints (staff/owner tickets) — platform-wide, folded in from the old Tickets page.
+  const router = useRouter();
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [issuesErr, setIssuesErr] = useState(false);
+  const [ticketFilter, setTicketFilter] = useState("open");
+  const [ticketBusy, setTicketBusy] = useState<string | null>(null);
+
+  // At-risk & onboarding — platform-wide, folded in from the old At-risk page.
+  const [att, setAtt] = useState<AttData | null>(null);
+  const [attErr, setAttErr] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -120,17 +129,20 @@ export default function AdminRepair() {
   // click-to-refresh keeps egress low, matching the rest of admin).
   const loadHub = useCallback(async () => {
     setErrLoading(true);
-    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const [e, q, f, h] = await Promise.all([
-      adminFetch<{ actions: Action[] }>(`/api/admin/oplog?level=error&unresolved=1&limit=50&since=${encodeURIComponent(since24h)}`),
+    // ?scope=all forces the platform-wide complaints view (an admin's act-as cookie would
+    // otherwise silently collapse it to one restaurant — same fix the old Tickets page used).
+    const [e, q, h, iss, at] = await Promise.all([
+      adminFetch<{ actions: Action[] }>("/api/admin/oplog?level=error&limit=50"),
       adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=open"),
-      adminFetch<{ requests: FixRequest[] }>("/api/admin/fix-request?status=fixed"),
       adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
+      adminFetch<{ issues: Issue[] }>("/api/owner/issues?scope=all"),
+      adminFetch<AttData>("/api/admin/attention"),
     ]);
     if (e.ok) setErrors(e.data.actions || []);
     if (q.ok) setRequests(q.data.requests || []);
-    if (f.ok) setFixed(f.data.requests || []);
     if (h.ok) setRuns(h.data.runs || []);
+    if (iss.ok) { setIssues(iss.data.issues || []); setIssuesErr(false); } else setIssuesErr(true);
+    if (at.ok) { setAtt(at.data); setAttErr(false); } else setAttErr(true);
     setErrLoading(false);
   }, []);
   useEffect(() => { loadHub(); }, [loadHub]);
@@ -142,7 +154,7 @@ export default function AdminRepair() {
   const sendDescribed = async (mode: "instant" | "overnight") => {
     if (!note.trim()) { toast("Type what's happening first.", "err"); return; }
     setSending(true);
-    const r = await adminFetch<{ ok: boolean } & QueueInfo>("/api/admin/fix-request", {
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
       body: JSON.stringify({ note: note.trim(), restaurant_id: rid || null, mode }),
@@ -150,43 +162,21 @@ export default function AdminRepair() {
     setSending(false);
     if (r.ok) {
       setNote("");
-      toast(queueToast(mode, r.data));
+      toast(mode === "instant" ? "Sent — a Claude window opens on the Mac within a minute." : "Queued — the night robot takes it at 2:30 AM.");
       loadHub();
     } else toast(r.error || "Couldn't send that.", "err");
   };
 
-  // Hand a specific error to Claude, bundling its surrounding log rows as context. `note` is the
-  // optional owner hint from "Fix now with a note"; `reshare` just relabels the toast when the
-  // same problem is being sent again. The queued/being-fixed state comes from the DB now (open
-  // fix_requests keyed by err_key), so it survives a refresh — no in-memory "sent" flag.
-  const sendError = async (g: ErrGroup, mode: "instant" | "overnight", note?: string, reshare?: boolean) => {
-    setSending2((prev) => new Set(prev).add(g.key));
-    const r = await adminFetch<{ ok: boolean } & QueueInfo>("/api/admin/fix-request", {
+  // Hand a specific error to Claude, bundling its surrounding log rows as context.
+  const sendError = async (g: ErrGroup, mode: "instant" | "overnight") => {
+    setSent((prev) => new Set(prev).add(g.key));
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
-      body: JSON.stringify({ action_id: g.sample.id, restaurant_id: g.sample.restaurant_id || null, mode, note: (note || "").trim() || undefined }),
+      body: JSON.stringify({ action_id: g.sample.id, restaurant_id: g.sample.restaurant_id || null, mode }),
     });
-    setSending2((prev) => { const n = new Set(prev); n.delete(g.key); return n; });
-    if (r.ok) {
-      setNoteFor(""); setNoteText("");
-      toast(reshare ? "Re-shared with Claude — a fresh look is queued." : queueToast(mode, r.data));
-      loadHub();
-    } else toast(r.error || "Couldn't send that.", "err");
-  };
-
-  // Owner fixed it themselves → mark the whole repeat-group resolved (two-step: the button first
-  // asks "are you sure?", this runs on confirm). Clears it from the list and the dashboard red button.
-  const resolveError = async (g: ErrGroup) => {
-    setConfirming("");
-    setResolving((p) => new Set(p).add(g.key));
-    setHidden((p) => new Set(p).add(g.key)); // optimistic remove
-    const r = await adminFetch<{ ok: boolean; resolved: number }>("/api/admin/resolve-error", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action_id: g.sample.id }),
-    });
-    setResolving((p) => { const n = new Set(p); n.delete(g.key); return n; });
-    if (r.ok) { toast("Marked resolved — cleared from your problems."); loadHub(); }
-    else { toast(r.error || "Couldn't resolve that.", "err"); setHidden((p) => { const n = new Set(p); n.delete(g.key); return n; }); }
+    if (r.ok) { toast(mode === "instant" ? "Sent to Claude — window opens on the Mac shortly." : "Queued for the 2:30 AM robot."); loadHub(); }
+    else { toast(r.error || "Couldn't send that.", "err"); setSent((prev) => { const n = new Set(prev); n.delete(g.key); return n; }); }
   };
 
   const jumpTo = (a: Action) => {
@@ -209,78 +199,64 @@ export default function AdminRepair() {
     if (!r.ok) { toast(r.error || "Couldn't update that.", "err"); loadHub(); }
   };
 
-  // Re-share an existing request (e.g. from "Recently fixed" — a fix didn't hold). Re-files it as a
-  // fresh instant request off the same error row (or the same description), so Claude takes another
-  // look. Keeps the original row's history intact.
-  const [resharing, setResharing] = useState("");
-  const reshareRequest = async (q: FixRequest) => {
-    setResharing(q.id);
-    const r = await adminFetch<{ ok: boolean } & QueueInfo>("/api/admin/fix-request", {
-      method: "POST", headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
-      body: JSON.stringify(q.action_id ? { action_id: q.action_id, restaurant_id: q.restaurant_id, mode: "instant" } : { note: q.summary, restaurant_id: q.restaurant_id, mode: "instant" }),
-    });
-    setResharing("");
-    if (r.ok) { toast("Re-shared with Claude — a fresh look is queued."); loadHub(); }
-    else toast(r.error || "Couldn't re-share that.", "err");
+  // Resolve / reopen a complaint (admin is in scope for every restaurant). Optimistic flip.
+  const setTicketStatus = async (id: string, status: "resolved" | "open") => {
+    setTicketBusy(id);
+    setIssues((prev) => prev.map((i) => (i.id === id ? { ...i, status } : i)));
+    try {
+      const r = await fetch("/api/owner/issues?scope=all", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status }),
+      });
+      if (!r.ok) loadHub(); // revert to server truth on failure
+    } catch { loadHub(); }
+    finally { setTicketBusy(null); }
   };
+  const openTickets = issues.filter((i) => i.status === "open").length;
+  const shownTickets = useMemo(() => {
+    const list = ticketFilter === "all" ? issues : issues.filter((i) => i.status === ticketFilter);
+    return [...list].sort((a, b) =>
+      a.status === b.status ? +new Date(b.created_at) - +new Date(a.created_at) : a.status === "open" ? -1 : 1);
+  }, [issues, ticketFilter]);
+  const attCount = (att?.atRisk.length || 0) + (att?.onboarding.length || 0);
 
-  // Top status pills jump to their section (owner 2026-07-24: "every box up there should be
-  // clickable and take you somewhere"). Falls back to a nearby anchor if the target section
-  // isn't rendered (e.g. the Fix queue is hidden when nothing is queued or fixed).
-  const scrollToId = (id: string, fallback?: string) => {
-    const el = document.getElementById(id) || (fallback ? document.getElementById(fallback) : null);
-    el?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-
-  const scoped = restaurants.find((r) => r.id === rid);
-  const scopedName = scoped?.name || null;
-  const scopedSlug = scoped?.slug || "";
+  const scopedName = restaurants.find((r) => r.id === rid)?.name || null;
   const groups = groupErrors(errors).filter((g) => !hidden.has(g.key));
-
-  // Split the open queue into "being fixed now" vs "up next". A request is being fixed when a
-  // Claude session is running against it (agent_runs.request_id + status='running'). The rest
-  // are waiting — the open live window sweeps them, or the night robot picks them up.
-  const workingIds = new Set(runs.filter((r) => r.status === "running" && r.request_id).map((r) => r.request_id as string));
-  const liveWorking = runs.some((r) => r.status === "running" && r.kind === "live");
-  const beingFixed = requests.filter((q) => workingIds.has(q.id));
-  const upNext = requests.filter((q) => !workingIds.has(q.id));
-
-  // Match each error tile to its repair request by the stored err_key (same key groupErrors builds),
-  // so an already-sent error shows "In the queue / Being fixed" instead of re-offering "Fix now"
-  // after a refresh. Open requests win over fixed (a re-fired error that's queued again). newest-first.
-  const openByKey = new Map<string, FixRequest>();
-  for (const q of requests) if (q.err_key && !openByKey.has(q.err_key)) openByKey.set(q.err_key, q);
-  const fixedByKey = new Map<string, FixRequest>();
-  for (const q of fixed) if (q.err_key && !fixedByKey.has(q.err_key)) fixedByKey.set(q.err_key, q);
 
   return (
     <>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h1 className="adm-page-h" style={{ marginBottom: 4 }}>Repair</h1>
-          <p className="adm-page-sub" style={{ margin: 0 }}>See what&rsquo;s broken, jump straight into the panel to fix it by hand, or hand it to Claude — now on the Mac or overnight.</p>
+          <h1 className="adm-page-h" style={{ marginBottom: 4 }}>Repair &amp; support</h1>
+          <p className="adm-page-sub" style={{ margin: 0 }}>Everything that needs you — problems, complaints and at-risk restaurants — plus the tools to fix it by hand or hand to Claude.</p>
         </div>
-        <button className="adm-btn" onClick={refreshAll} disabled={refreshing} title="Reload problems, queue and history">
+        <button className="adm-btn" onClick={refreshAll} disabled={refreshing} title="Reload problems, complaints, at-risk, queue and history">
           <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
         </button>
       </div>
 
-      {/* Status strip */}
+      {/* Status strip — each live pill jumps to its section */}
       <div className="rp-strip">
-        <button type="button" className={`rp-pill${groups.length ? " alert" : " ok"}`} onClick={() => scrollToId("rp-problems")} title="Jump to the problems list">
+        <a className={`rp-pill${groups.length ? " alert" : " ok"}`} href="#problems" title="Jump to problems">
           <i className={`fas ${groups.length ? "fa-triangle-exclamation" : "fa-circle-check"}`} aria-hidden="true" />
-          <span className="n">{errLoading ? "…" : groups.length}</span><span>problem{groups.length === 1 ? "" : "s"} (24h)</span>
-        </button>
-        <button type="button" className="rp-pill" onClick={() => scrollToId("rp-queue", "rp-report")} title="Jump to the fix queue">
+          <span className="n">{errLoading ? "…" : errors.length}</span><span>problem{errors.length === 1 ? "" : "s"} (24h)</span>
+        </a>
+        <a className={`rp-pill${openTickets ? " warn" : ""}`} href="#complaints" title="Jump to complaints">
+          <i className="fas fa-flag" aria-hidden="true" /><span className="n">{openTickets}</span><span>open complaint{openTickets === 1 ? "" : "s"}</span>
+        </a>
+        <a className={`rp-pill${attCount ? " warn" : ""}`} href="#at-risk" title="Jump to at-risk restaurants">
+          <i className="fas fa-heart-pulse" aria-hidden="true" /><span className="n">{att ? attCount : "…"}</span><span>need attention</span>
+        </a>
+        <div className="rp-pill">
           <i className="fas fa-robot" aria-hidden="true" /><span className="n">{requests.length}</span><span>waiting for Claude</span>
-        </button>
-        <button type="button" className="rp-pill" onClick={() => scrollToId("rp-tools")} title="Jump to the hands-on tools">
+        </div>
+        <div className="rp-pill">
           <i className="fas fa-screwdriver-wrench" aria-hidden="true" /><span className="n">{TOOLS.length}</span><span>hands-on tools</span>
-        </button>
+        </div>
       </div>
 
       {/* ── Problems right now ─────────────────────────────────────────── */}
-      <div className="rp-sec-h" id="rp-problems" style={{ scrollMarginTop: 16 }}>
+      <div className="rp-sec-h" id="problems">
         <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: groups.length ? "var(--adm-danger)" : "var(--muted)" }} />
         <h2>Problems right now</h2>
         {groups.length ? <span className="rp-chip danger">{groups.length}</span> : null}
@@ -299,11 +275,7 @@ export default function AdminRepair() {
             const title = ACT_LABEL[a.action] || a.action;
             const jl = jumpLabel(a);
             const isOpen = expanded.has(g.key);
-            const openReq = openByKey.get(g.key);            // already queued for Claude (survives refresh)
-            const fixedReq = fixedByKey.get(g.key);          // a past fix landed for this exact error
-            const isWorking = !!openReq && workingIds.has(openReq.id);
-            const sendingNow = sending2.has(g.key);
-            const noteOpen = noteFor === g.key;
+            const wasSent = sent.has(g.key);
             return (
               <div key={g.key} className="rp-err">
                 <span className="rp-err-bar" style={{ background: color }} />
@@ -318,82 +290,29 @@ export default function AdminRepair() {
                   {a.detail ? (
                     <div className="rp-detail" style={{ maxHeight: isOpen ? 240 : 34 }}>{a.detail}</div>
                   ) : <div className="adm-muted" style={{ fontSize: 12 }}>No further detail was recorded.</div>}
-                  {confirming === g.key ? (
-                    // Step 2 — the "are you sure?" confirm (owner 2026-07-24).
-                    <div className="rp-confirm" style={{ marginTop: 9 }}>
-                      <span style={{ fontSize: 12.5, fontWeight: 600 }}><i className="fas fa-circle-question" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />You fixed this yourself? It&rsquo;ll clear from your problems.</span>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button className="adm-btn" style={{ fontSize: 12, background: "var(--adm-ok, #4caf82)", borderColor: "var(--adm-ok, #4caf82)", color: "#fff", fontWeight: 700 }} disabled={resolving.has(g.key)} onClick={() => resolveError(g)}>
-                          <i className="fas fa-check" aria-hidden="true" style={{ marginRight: 6 }} />{resolving.has(g.key) ? "Resolving…" : "Yes, it's resolved"}
-                        </button>
-                        <button className="adm-btn" style={{ fontSize: 12 }} disabled={resolving.has(g.key)} onClick={() => setConfirming("")}>Cancel</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>
-                      {jl ? (
-                        <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => jumpTo(a)} title="Open that panel for this restaurant to fix it by hand">
-                          <i className="fas fa-arrow-up-right-from-square" aria-hidden="true" style={{ marginRight: 6 }} />{jl}
-                        </button>
-                      ) : null}
-                      {/* State is DB-derived (open fix_requests keyed by err_key) so it survives a refresh —
-                          no more re-offering "Fix now" on something already sent. */}
-                      {isWorking ? (
-                        <span className="adm-muted" style={{ fontSize: 12, display: "inline-flex", alignItems: "center" }}>
-                          <i className="fas fa-gear fa-spin" aria-hidden="true" style={{ color: "var(--adm-accent, #e8a13c)", marginRight: 6 }} />Being fixed now
-                        </span>
-                      ) : openReq ? (
-                        <span className="adm-muted" style={{ fontSize: 12, display: "inline-flex", alignItems: "center" }}>
-                          <i className={`fas ${openReq.mode === "overnight" ? "fa-moon" : "fa-hourglass-half"}`} aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />
-                          {openReq.mode === "overnight" ? "Queued for tonight" : "In the queue for Claude"}
-                        </span>
-                      ) : (
-                        <>
-                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => sendError(g, "instant")} title="A Claude window opens on the office Mac within a minute">
-                            <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-accent, #e8a13c)" }} />{sendingNow ? "Sending…" : "Fix now"}
-                          </button>
-                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => sendError(g, "overnight")} title="The 2:30 AM robot fixes it and leaves a morning report">
-                            <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />Overnight
-                          </button>
-                        </>
-                      )}
-                      {/* "…with a note": send to Claude AND attach a hint (what you know / how to fix). When the
-                          problem is already queued/fixed this same box re-shares it with the note. */}
-                      <button className="adm-btn" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => { setNoteFor(noteOpen ? "" : g.key); setNoteText(""); }} title="Send it to Claude with a note of your own">
-                        <i className="fas fa-pen-to-square" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-accent, #e8a13c)" }} />{(openReq || isWorking || fixedReq) ? "Add a note & re-share" : "Fix now with a note"}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>
+                    {jl ? (
+                      <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => jumpTo(a)} title="Open that panel for this restaurant to fix it by hand">
+                        <i className="fas fa-arrow-up-right-from-square" aria-hidden="true" style={{ marginRight: 6 }} />{jl}
                       </button>
-                      {/* Quick re-share (no note) — for a fresh attempt when it's queued/being-fixed, or a past
-                          fix didn't hold. */}
-                      {(isWorking || openReq || fixedReq) ? (
-                        <button className="adm-btn" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => sendError(g, "instant", undefined, true)} title="Send this to Claude again for a fresh attempt">
-                          <i className="fas fa-share-from-square" aria-hidden="true" style={{ marginRight: 6 }} />{sendingNow ? "Sending…" : "Re-share to Claude"}
-                        </button>
-                      ) : null}
-                      {/* Owner's own fix — the green "I handled it" action, separate from the two Claudes. */}
-                      <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={() => setConfirming(g.key)} title="I fixed this myself — clear it from the list">
-                        <i className="fas fa-circle-check" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-ok, #4caf82)" }} />Resolve
-                      </button>
-                      {a.detail && a.detail.length > 90 ? (
-                        <button className="rp-link" onClick={() => setExpanded((p) => { const n = new Set(p); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}>{isOpen ? "less" : "more"}</button>
-                      ) : null}
-                    </div>
-                    {noteOpen ? (
-                      <div className="rp-confirm" style={{ marginTop: 9 }}>
-                        <span style={{ fontSize: 12, fontWeight: 600 }}><i className="fas fa-pen-to-square" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />A note for Claude (optional) — what you know, or how you want it fixed</span>
-                        <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} maxLength={1000} rows={2} autoFocus
-                          placeholder="e.g. only happens on the waiter tablet during rush; please keep the old bill number."
-                          style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13, resize: "vertical" }} />
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <button className="adm-btn primary" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => sendError(g, "instant", noteText, !!(openReq || isWorking || fixedReq))}>
-                            <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 6 }} />{sendingNow ? "Sending…" : (openReq || isWorking || fixedReq) ? "Re-share with this note" : "Fix now with this note"}
-                          </button>
-                          <button className="adm-btn" style={{ fontSize: 12 }} disabled={sendingNow} onClick={() => { setNoteFor(""); setNoteText(""); }}>Cancel</button>
-                        </div>
-                      </div>
                     ) : null}
-                    </>
-                  )}
+                    {wasSent ? (
+                      <span className="adm-muted" style={{ fontSize: 12 }}><i className="fas fa-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 5 }} />Sent to Claude</span>
+                    ) : (
+                      <>
+                        <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => sendError(g, "instant")} title="A Claude window opens on the office Mac within a minute">
+                          <i className="fas fa-bolt" aria-hidden="true" style={{ marginRight: 6, color: "var(--adm-accent, #e8a13c)" }} />Fix now
+                        </button>
+                        <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => sendError(g, "overnight")} title="The 2:30 AM robot fixes it and leaves a morning report">
+                          <i className="fas fa-moon" aria-hidden="true" style={{ marginRight: 6, opacity: 0.8 }} />Overnight
+                        </button>
+                      </>
+                    )}
+                    {a.detail && a.detail.length > 90 ? (
+                      <button className="rp-link" onClick={() => setExpanded((p) => { const n = new Set(p); if (n.has(g.key)) n.delete(g.key); else n.add(g.key); return n; })}>{isOpen ? "less" : "more"}</button>
+                    ) : null}
+                    <button className="rp-x" title="Hide (I've handled this)" onClick={() => setHidden((p) => new Set(p).add(g.key))}><i className="fas fa-xmark" aria-hidden="true" /></button>
+                  </div>
                 </div>
               </div>
             );
@@ -401,8 +320,86 @@ export default function AdminRepair() {
         </div>
       )}
 
+      {/* ── Complaints & issues (staff / owner raised) ─────────────────── */}
+      <div className="rp-sec-h" id="complaints">
+        <i className="fas fa-flag" aria-hidden="true" style={{ color: openTickets ? "var(--adm-accent, #e8a13c)" : "var(--muted)" }} />
+        <h2>Complaints &amp; issues</h2>
+        {openTickets ? <span className="rp-chip">{openTickets}</span> : null}
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>raised by staff &amp; owners · all restaurants</span>
+        <div style={{ marginLeft: "auto" }}>
+          <Dropdown value={ticketFilter} onChange={setTicketFilter} options={TICKET_FILTERS} ariaLabel="Filter complaints" minWidth={124} />
+        </div>
+      </div>
+      {errLoading && issues.length === 0 ? (
+        <div className="adm-empty">Loading complaints…</div>
+      ) : issuesErr ? (
+        <div className="adm-empty">Couldn&rsquo;t load complaints. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={loadHub}>Retry</button></div>
+      ) : shownTickets.length === 0 ? (
+        <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> {ticketFilter === "open" ? "No open complaints right now." : "Nothing here."}</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 6 }}>
+          {shownTickets.map((i) => (
+            <TicketCard key={i.id} issue={i} showRestaurant busy={ticketBusy === i.id}
+              onOpenRestaurant={(slug) => { router.push(`/aevinite/restaurants?focus=${encodeURIComponent(slug)}`); window.dispatchEvent(new CustomEvent("adm:focus-restaurant", { detail: slug })); }}
+              onSetStatus={(id, status) => setTicketStatus(id, status)} />
+          ))}
+        </div>
+      )}
+
+      {/* ── At-risk & onboarding (account health) ──────────────────────── */}
+      <div className="rp-sec-h" id="at-risk">
+        <i className="fas fa-heart-pulse" aria-hidden="true" style={{ color: attCount ? "var(--adm-danger)" : "var(--muted)" }} />
+        <h2>At-risk &amp; onboarding</h2>
+        {attCount ? <span className="rp-chip danger">{attCount}</span> : null}
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>restaurants that need a nudge</span>
+      </div>
+      {attErr && (
+        <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>Couldn&rsquo;t load account health. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={loadHub}>Retry</button></p>
+      )}
+      <div className="adm-card">
+        <div className="cmd-sec" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 10 }}>
+          <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-danger)" }} aria-hidden="true" />
+          Churn risk <span style={{ color: "var(--muted)", fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· paying but not ordering</span>
+        </div>
+        {!att ? <div className="adm-empty">{attErr ? "Couldn't load." : "Loading…"}</div> : att.atRisk.length === 0 ? (
+          <div className="adm-empty">✅ Nothing at risk — every paying restaurant is ordering.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {att.atRisk.map((r) => (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 0", borderBottom: "var(--border)" }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: "var(--adm-danger)", flex: "0 0 auto" }} aria-hidden="true" />
+                <b style={{ fontSize: 14 }}>{r.name}</b>
+                {r.plan && <span className="adm-chip" style={{ fontSize: 11 }}>{r.plan}</span>}
+                <span className="adm-muted" style={{ fontSize: 12.5 }}>{r.reason}</span>
+                <a className="adm-btn" style={{ marginLeft: "auto" }} href={`/aevinite/restaurants?focus=${encodeURIComponent(r.slug)}`}>Manage <i className="fas fa-arrow-right" style={{ fontSize: 10, marginLeft: 4 }} aria-hidden="true" /></a>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="adm-card" style={{ marginTop: 12, marginBottom: 6 }}>
+        <div className="cmd-sec" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em", marginBottom: 10 }}>
+          <i className="fas fa-seedling" style={{ color: "#60a5fa" }} aria-hidden="true" />
+          Needs onboarding <span style={{ color: "var(--muted)", fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· new, no orders yet</span>
+        </div>
+        {!att ? <div className="adm-empty">{attErr ? "Couldn't load." : "Loading…"}</div> : att.onboarding.length === 0 ? (
+          <div className="adm-empty">No stalled new restaurants — recent sign-ups are all ordering.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {att.onboarding.map((r) => (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 0", borderBottom: "var(--border)" }}>
+                <span style={{ width: 8, height: 8, borderRadius: 999, background: "#60a5fa", flex: "0 0 auto" }} aria-hidden="true" />
+                <b style={{ fontSize: 14 }}>{r.name}</b>
+                <span className="adm-muted" style={{ fontSize: 12.5 }}>{r.reason}</span>
+                <a className="adm-btn" style={{ marginLeft: "auto" }} href={`/aevinite/restaurants?focus=${encodeURIComponent(r.slug)}`}>Set up <i className="fas fa-arrow-right" style={{ fontSize: 10, marginLeft: 4 }} aria-hidden="true" /></a>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* ── Report anything else ───────────────────────────────────────── */}
-      <div className="rp-sec-h" id="rp-report" style={{ scrollMarginTop: 16 }}>
+      <div className="rp-sec-h">
         <i className="fas fa-comment-dots" aria-hidden="true" style={{ color: "var(--muted)" }} />
         <h2>Report a problem</h2>
         <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>for anything the list above didn&rsquo;t catch</span>
@@ -429,85 +426,30 @@ export default function AdminRepair() {
         </div>
       </div>
 
-      {/* ── Fix queue ──────────────────────────────────────────────────── */}
-      {(requests.length > 0 || fixed.length > 0) && (
+      {/* ── Waiting for Claude ─────────────────────────────────────────── */}
+      {requests.length > 0 && (
         <>
-          <div className="rp-sec-h" id="rp-queue" style={{ scrollMarginTop: 16 }}>
-            <i className="fas fa-list-check" aria-hidden="true" style={{ color: "var(--muted)" }} />
-            <h2>Fix queue</h2>
-            {requests.length ? <span className="rp-chip">{requests.length} waiting</span> : null}
-            <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>what Claude is working on now, next, and just finished</span>
+          <div className="rp-sec-h">
+            <i className="fas fa-robot" aria-hidden="true" style={{ color: "var(--muted)" }} />
+            <h2>Waiting for Claude</h2><span className="rp-chip">{requests.length}</span>
           </div>
-
-          {requests.length > 0 && (
-            <div className="adm-card" style={{ marginBottom: 6 }}>
-              {/* Being fixed now — a Claude session is live against this request. */}
-              {beingFixed.length > 0 && (
-                <div className="rpq-grp">
-                  <div className="rpq-head"><i className="fas fa-gear fa-spin" aria-hidden="true" style={{ color: "var(--adm-accent, #e8a13c)" }} /> Being fixed now</div>
-                  {beingFixed.map((q) => (
-                    <div key={q.id} className="rpq-row">
-                      <span className="rpq-dot working" title="Claude is on this now" />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="rpq-sum">{q.summary}</div>
-                        <div className="adm-muted" style={{ fontSize: 11.5 }}>working now · started {fmtTime(q.created_at)}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>see the fix →</a></> : ""}</div>
-                      </div>
-                    </div>
-                  ))}
+          <div className="adm-card" style={{ marginBottom: 6 }}>
+            {requests.map((q) => (
+              <div key={q.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 0", borderBottom: "var(--border)", fontSize: 13 }}>
+                <i className={`fas ${q.mode === "overnight" ? "fa-moon" : q.source === "error_row" ? "fa-triangle-exclamation" : "fa-bolt"}`} aria-hidden="true" title={q.mode === "overnight" ? "Waiting for the 2:30 AM robot" : "Instant — pops on the Mac"} style={{ marginTop: 2, opacity: 0.7 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.summary}</div>
+                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{new Date(q.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>fix ready →</a></> : ""}</div>
                 </div>
-              )}
-
-              {/* A live window is open but its request already flipped to fixed — reassure it's sweeping. */}
-              {liveWorking && beingFixed.length === 0 && (
-                <div className="rpq-note"><i className="fas fa-gear fa-spin" aria-hidden="true" style={{ color: "var(--adm-accent, #e8a13c)", marginRight: 7 }} />A Claude window is open on the Mac — it fixes one problem, then sweeps the rest below in the same window.</div>
-              )}
-
-              {/* Up next — waiting for a window / the night robot. Numbered so the order is clear. */}
-              {upNext.length > 0 && (
-                <div className="rpq-grp">
-                  <div className="rpq-head"><i className="fas fa-hourglass-half" aria-hidden="true" style={{ opacity: 0.7 }} /> Up next</div>
-                  {upNext.map((q, i) => (
-                    <div key={q.id} className="rpq-row">
-                      <span className="rpq-pos" title="Position in the queue">{i + 1}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="rpq-sum">{q.summary}</div>
-                        <div className="adm-muted" style={{ fontSize: 11.5 }}>
-                          <i className={`fas ${q.mode === "overnight" ? "fa-moon" : q.source === "error_row" ? "fa-triangle-exclamation" : "fa-bolt"}`} aria-hidden="true" style={{ marginRight: 5, opacity: 0.7 }} />
-                          {q.mode === "overnight" ? "night robot at 2:30 AM" : "next Mac window"} · {fmtTime(q.created_at)}
-                        </div>
-                      </div>
-                      <button className="adm-btn" onClick={() => dismissRequest(q.id)} title="Remove from the queue" style={{ fontSize: 11.5, padding: "3px 9px" }}>Dismiss</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Recently fixed — Claude flips each request to 'fixed' on its own when the work is done. */}
-          {fixed.length > 0 && (
-            <div className="adm-card" style={{ marginBottom: 6 }}>
-              <div className="rpq-head"><i className="fas fa-circle-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)" }} /> Recently fixed <span className="adm-muted" style={{ fontWeight: 400, fontSize: 11.5, marginLeft: 4 }}>Claude marks these done itself</span></div>
-              {fixed.map((q) => (
-                <div key={q.id} className="rpq-row">
-                  <span className="rpq-dot done" title="Fixed" />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="rpq-sum">{q.summary}</div>
-                    <div className="adm-muted" style={{ fontSize: 11.5 }}>fixed {fmtTime(q.resolved_at || q.created_at)}{q.pr_url ? <> · <a href={q.pr_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>see the fix →</a></> : ""}</div>
-                  </div>
-                  <button className="adm-btn" onClick={() => reshareRequest(q)} disabled={resharing === q.id} title="Didn't hold? Send it to Claude again" style={{ fontSize: 11.5, padding: "3px 9px" }}>
-                    <i className="fas fa-share-from-square" aria-hidden="true" style={{ marginRight: 5 }} />{resharing === q.id ? "Sending…" : "Re-share"}
-                  </button>
-                  <i className="fas fa-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)", fontSize: 13 }} />
-                </div>
-              ))}
-            </div>
-          )}
+                <button className="adm-btn" onClick={() => dismissRequest(q.id)} title="Dismiss" style={{ fontSize: 11.5, padding: "3px 9px" }}>Dismiss</button>
+              </div>
+            ))}
+          </div>
         </>
       )}
 
       {/* ── Hands-on tools ─────────────────────────────────────────────── */}
-      <div className="rp-sec-h" id="rp-tools" style={{ scrollMarginTop: 16 }}>
+      <div className="rp-sec-h">
         <i className="fas fa-screwdriver-wrench" aria-hidden="true" style={{ color: "var(--muted)" }} />
         <h2>Hands-on tools</h2>
         <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>fix a table or order yourself — pick a restaurant</span>
@@ -549,11 +491,8 @@ export default function AdminRepair() {
           <div className="adm-card" style={{ marginBottom: 12 }}>
             <h2 style={{ margin: "0 0 8px", fontSize: 14 }}>Other quick levers</h2>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {/* Land ON the right section of THIS restaurant's detail (slug + ?section=), not just the
-                  restaurants list — the old links passed the UUID (focus matches by slug) so they
-                  opened nothing, and "Maintenance mode" pointed at Settings which has no such toggle. */}
-              <Link className="adm-btn" href={`/aevinite/restaurants?focus=${encodeURIComponent(scopedSlug)}&section=access-link`}><i className="fas fa-toggle-on" aria-hidden="true" /> Feature switches</Link>
-              <Link className="adm-btn" href={`/aevinite/restaurants?focus=${encodeURIComponent(scopedSlug)}&section=status`}><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Maintenance mode</Link>
+              <Link className="adm-btn" href={`/aevinite/restaurants?focus=${rid}`}><i className="fas fa-toggle-on" aria-hidden="true" /> Feature switches</Link>
+              <Link className="adm-btn" href="/aevinite/settings"><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Maintenance mode</Link>
               <Link className="adm-btn" href={`/aevinite/logs?restaurant_id=${rid}`}><i className="fas fa-scroll" aria-hidden="true" /> Full activity log</Link>
             </div>
           </div>
@@ -613,12 +552,13 @@ export default function AdminRepair() {
 
       <style>{`
         .rp-strip{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 4px}
-        .rp-pill{display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:12px;border:var(--border);background:var(--card);font-size:12.5px;color:var(--muted);font-family:inherit;cursor:pointer;text-align:left;transition:transform .08s ease,border-color .15s ease,box-shadow .15s ease}
-        .rp-pill:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--adm-accent,#e8a13c) 55%,transparent);box-shadow:0 3px 10px rgba(0,0,0,.12)}
-        .rp-pill:focus-visible{outline:2px solid var(--adm-accent,#e8a13c);outline-offset:2px}
+        .rp-pill{display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:12px;border:var(--border);background:var(--card);font-size:12.5px;color:var(--muted);text-decoration:none;transition:filter .14s,border-color .14s}
+        a.rp-pill:hover{filter:brightness(1.06)}
         .rp-pill .n{font-size:18px;font-weight:800;color:var(--text)}
         .rp-pill.alert{background:color-mix(in srgb,var(--adm-danger) 13%,var(--card));border-color:color-mix(in srgb,var(--adm-danger) 45%,transparent);color:var(--adm-danger)}
         .rp-pill.alert .n{color:var(--adm-danger)}
+        .rp-pill.warn{background:color-mix(in srgb,var(--adm-accent,#e8a13c) 12%,var(--card));border-color:color-mix(in srgb,var(--adm-accent,#e8a13c) 45%,transparent);color:var(--adm-accent,#e8a13c)}
+        .rp-pill.warn .n{color:var(--adm-accent,#e8a13c)}
         .rp-pill.ok{border-color:color-mix(in srgb,var(--adm-ok,#4caf82) 40%,transparent)}
         .rp-sec-h{display:flex;align-items:center;gap:9px;margin:24px 0 11px}
         .rp-sec-h h2{margin:0;font-size:16px}
@@ -634,19 +574,6 @@ export default function AdminRepair() {
         .rp-link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0 2px}
         .rp-x{margin-left:auto;background:none;border:none;color:var(--muted);opacity:.5;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px}
         .rp-x:hover{opacity:1;background:color-mix(in srgb,var(--text) 8%,transparent)}
-        .rp-confirm{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 11px;border-radius:9px;background:color-mix(in srgb,var(--adm-ok,#4caf82) 10%,var(--card));border:1px solid color-mix(in srgb,var(--adm-ok,#4caf82) 35%,transparent)}
-        .rp-chip.ok{background:color-mix(in srgb,var(--adm-ok,#4caf82) 16%,transparent);color:var(--adm-ok,#4caf82)}
-        .rpq-grp{padding:2px 0}
-        .rpq-grp + .rpq-grp{margin-top:6px;border-top:var(--border)}
-        .rpq-head{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--muted);padding:10px 0 6px}
-        .rpq-row{display:flex;gap:11px;align-items:flex-start;padding:9px 0;border-bottom:var(--border);font-size:13px}
-        .rpq-row:last-child{border-bottom:none}
-        .rpq-sum{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-        .rpq-dot{width:9px;height:9px;border-radius:999px;margin-top:5px;flex:none}
-        .rpq-dot.working{background:var(--adm-accent,#e8a13c);box-shadow:0 0 0 4px color-mix(in srgb,var(--adm-accent,#e8a13c) 22%,transparent)}
-        .rpq-dot.done{background:var(--adm-ok,#4caf82)}
-        .rpq-pos{width:20px;height:20px;border-radius:999px;flex:none;display:grid;place-items:center;font-size:11px;font-weight:800;margin-top:1px;background:color-mix(in srgb,var(--text) 8%,transparent);color:var(--muted)}
-        .rpq-note{font-size:12px;line-height:1.5;color:var(--muted);padding:9px 0}
       `}</style>
     </>
   );
