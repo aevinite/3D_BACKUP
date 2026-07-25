@@ -1,8 +1,9 @@
 "use client";
 // Shared bits for the admin pages: types, formatting, the live-floor grid, the
 // activity feed, and a tiny polling hook. Keeps Overview/Floor/Logs DRY.
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRealtime } from "@/lib/useRealtime";
+import { LogDetailModal } from "@/components/admin/LogDetailModal";
 
 export type Tile = {
   table_number: string;
@@ -23,7 +24,7 @@ export type Overview = {
   openTables: number; activeOrders: number; unpaidOrders: number;
   ordersToday: number;
 };
-export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; created_at: string; restaurant_id?: string | null; restaurant_name?: string | null; restaurant_slug?: string | null; level?: "info" | "warn" | "error"; seen_at?: string | null; resolved_at?: string | null };
+export type Action = { id: string; panel: string; action: string; table_number?: string | null; detail?: string | null; actor?: string | null; actor_id?: string | null; device_id?: string | null; order_id?: string | null; created_at: string; restaurant_id?: string | null; restaurant_name?: string | null; restaurant_slug?: string | null; level?: "info" | "warn" | "error"; seen_at?: string | null; resolved_at?: string | null };
 
 export const STATE_LABEL: Record<Tile["state"], string> = {
   free: "Free", seated: "Seated", new: "New order", preparing: "Preparing", served: "Served", cleared: "Cleared",
@@ -57,6 +58,17 @@ export const ACT_LABEL: Record<string, string> = {
 };
 
 export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
+
+// isManagerPinRow — a TABLET row's `actor` normally names the manager whose PIN authorised
+// the action (the tablet has no per-person login). BUT a person's OWN identity actions —
+// signing in/out, setting up their profile, changing their password/PIN — also stamp `actor`
+// with that person's name, and those are NOT a manager-PIN authorisation. So we exclude them:
+// a login row must show "Done by <name>", never a "Manager PIN" block (owner 2026-07-25:
+// "if there is not manager PIN involved, the manager PIN part should not be there").
+const SELF_ACTOR_ACTIONS = new Set(["login", "logout", "profile_setup", "profile_update", "password_change", "pin_set"]);
+export function isManagerPinRow(row: { panel?: string; action?: string; actor?: string | null }): boolean {
+  return row.panel === "tablet" && !!row.actor && !SELF_ACTOR_ACTIONS.has(row.action || "");
+}
 
 // formatActionDetail — turn a raw stored `detail` into a plain-English phrase for the
 // activity feed. Today only "ui_taps" needs it: the black-box logger (public/panels/errlog.js)
@@ -107,6 +119,18 @@ export const timeAgo = (iso: string) => {
   if (s < 3600) return Math.floor(s / 60) + "m ago";
   if (s < 86400) return Math.floor(s / 3600) + "h ago";
   return Math.floor(s / 86400) + "d ago";
+};
+
+// fullWhen — the exact, human date + time for a log-detail popup (e.g. "Fri, 25 Jul
+// 2026, 3:42 PM"). timeAgo answers "how long ago" for the list; this answers "exactly
+// when" once a row is opened. Falls back to the raw string if the date is unparseable.
+export const fullWhen = (iso: string) => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    weekday: "short", day: "2-digit", month: "short", year: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
 };
 
 // Live refetch (replaced the old fixed-interval usePoll): refetches on mount, on
@@ -205,13 +229,18 @@ export function FloorGrid({ tiles, err }: { tiles: Tile[]; err: string | null })
 }
 
 export function ActivityFeed({ rows }: { rows: Action[] }) {
+  // Every row is clickable → the same organized detail popup the Logs page uses, so the
+  // Overview feed is never a dead-end (owner 2026-07-25: "everything should be clickable").
+  const [detailRow, setDetailRow] = useState<Action | null>(null);
   if (rows.length === 0) return <p className="adm-muted" style={{ fontSize: 13, margin: 0 }}>No staff actions yet.</p>;
   return (
     <div style={{ display: "flex", flexDirection: "column", maxHeight: 340, overflowY: "auto" }}>
       {rows.map((a) => {
         const det = formatActionDetail(a.action, a.detail);
         return (
-        <div key={a.id} style={{ display: "grid", gridTemplateColumns: "84px 1fr auto", gap: 10, alignItems: "center", fontSize: 13, padding: "8px 0", borderBottom: "var(--border)" }}>
+        <div key={a.id} role="button" tabIndex={0} onClick={() => setDetailRow(a)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailRow(a); } }}
+          style={{ display: "grid", gridTemplateColumns: "84px 1fr auto", gap: 10, alignItems: "center", fontSize: 13, padding: "8px 0", borderBottom: "var(--border)", cursor: "pointer" }}>
           <span className="adm-chip" style={{ background: "color-mix(in srgb, " + (PANEL_COLOR[a.panel] || "#888") + " 22%, transparent)", color: PANEL_COLOR[a.panel] || "var(--muted)" }}>{a.panel}</span>
           <span style={{ minWidth: 0 }}>
             {ACT_LABEL[a.action] || a.action}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : det ? ` · ${det}` : ""}
@@ -221,6 +250,7 @@ export function ActivityFeed({ rows }: { rows: Action[] }) {
         </div>
         );
       })}
+      {detailRow && <LogDetailModal row={detailRow} onClose={() => setDetailRow(null)} />}
     </div>
   );
 }

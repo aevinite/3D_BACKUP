@@ -4375,9 +4375,27 @@ async function saveRetention(which, val) {
 function logDetailDialog(title, rows) {
   const wrap = document.createElement("div");
   wrap.className = "confirm-overlay";
-  const body = rows
-    .filter((r) => r && r.value != null && r.value !== "")
-    .map((r) => `<div class="ld-row"><span class="ld-k">${esc(r.label)}</span><span class="ld-v">${esc(r.value)}</span></div>`)
+  // A row can be a SECTION heading ({ section:"When" }) or a value line
+  // ({ label, value }). Section headings render even with no value; value lines
+  // are dropped when empty so a row is tidy but never shows a blank field. A
+  // section whose every value line is empty is skipped so we don't leave a lone heading.
+  const isVal = (r) => r && r.value != null && r.value !== "";
+  const kept = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (r && r.section) {
+      // Look ahead: keep this heading only if a value line follows before the next heading.
+      let hasVal = false;
+      for (let j = i + 1; j < rows.length && !rows[j].section; j++) { if (isVal(rows[j])) { hasVal = true; break; } }
+      if (hasVal) kept.push(r);
+    } else if (isVal(r)) {
+      kept.push(r);
+    }
+  }
+  const body = kept
+    .map((r) => r.section
+      ? `<div class="ld-sec"${r.accent ? ` style="color:${esc(r.accent)}"` : ""}>${esc(r.section)}</div>`
+      : `<div class="ld-row"><span class="ld-k">${esc(r.label)}</span><span class="ld-v"${r.strong ? ` style="font-weight:800${r.color ? `;color:${esc(r.color)}` : ""}"` : ""}>${esc(r.value)}</span></div>`)
     .join("");
   wrap.innerHTML = `
     <div class="confirm-box logdetail">
@@ -7818,8 +7836,15 @@ function logHtml() {
 // manager whose PIN authorised the action (recorded server-side, mig-free — the actor
 // column). A name containing " / " means the SAME PIN belongs to more than one manager,
 // so it's genuinely ambiguous who tapped it — we name them all and tint the pill.
+// A person's OWN identity actions (login/logout/profile/password/PIN) also stamp `actor`
+// with that person's name, but that's NOT a manager-PIN authorisation — exclude them so a
+// tablet login row doesn't wrongly show a gold PIN pill / "Manager PIN" block.
+const SELF_ACTOR_ACTIONS = new Set(["login", "logout", "profile_setup", "profile_update", "password_change", "pin_set"]);
+function isManagerPinRow(r) {
+  return !!r && r.panel === "tablet" && !!r.actor && !SELF_ACTOR_ACTIONS.has(r.action);
+}
 function pinPill(r) {
-  if (!r || r.panel !== "tablet" || !r.actor) return "";
+  if (!isManagerPinRow(r)) return "";
   const shared = String(r.actor).includes(" / ");
   const title = shared
     ? "This PIN is shared by these managers — any of them could have entered it"
@@ -7895,26 +7920,57 @@ function bindLog() {
   ed.querySelectorAll("[data-cust-detail]").forEach((row) => (row.onclick = (e) => { if (!e.target.closest("button")) showCustDetail(row.dataset.custDetail); }));
 }
 
-// showOpDetail: open the full-info card for one operation-log row.
+// showOpDetail: open the full-info card for one operation-log row — everything about
+// that action, laid out in tidy sections (When / Who / What / Manager PIN / Status).
+// The Manager-PIN section appears ONLY when a manager's PIN actually authorised the
+// action (a tablet row with an `actor`); otherwise it isn't there at all.
 function showOpDetail(id) {
   const r = (state.oplog || []).find((x) => x.id === id);
   if (!r) return;
-  // For a TABLET action, `actor` is the manager whose PIN authorised it (see pinPill).
-  // Label it plainly so the reviewer knows it was a manager PIN, and flag a shared PIN.
-  const pinShared = r.panel === "tablet" && r.actor && String(r.actor).includes(" / ");
-  const byRow = (r.panel === "tablet" && r.actor)
-    ? { label: pinShared ? "Authorised by (shared PIN)" : "Authorised by (manager PIN)", value: r.actor }
-    : { label: "By", value: r.actor || "— (no staff login yet, device only)" };
-  logDetailDialog("Operation log entry", [
-    { label: "Action", value: OP_ACTION_LABELS[r.action] || r.action },
-    { label: "Panel", value: PANEL_LABEL[r.panel] || r.panel },
-    { label: "Device", value: r.device_id ? "#" + r.device_id : "—" },
-    byRow,
+  // On a TABLET row, a non-empty `actor` is the manager whose PIN unlocked it (the tablet has
+  // no per-person login) — except the person's own login/profile actions. " / " means one PIN
+  // shared by several managers → ambiguous.
+  const isPin = isManagerPinRow(r);
+  const pinShared = isPin && String(r.actor).includes(" / ");
+  const isErr = r.level === "error";
+  const isResolved = isErr && !!r.resolved_at;
+  const rows = [
+    { section: "When" },
+    { label: "Date & time", value: fullWhen(r.created_at) },
+    { label: "How long ago", value: whenLabel(r.created_at) },
+    { section: "Who" },
+    isPin
+      ? { label: "Panel", value: "Waiter tablet" }
+      : { label: "Done by", value: r.actor || (r.panel === "db" ? "Direct database edit" : "Panel action (no staff login yet)") },
+    { label: "Panel", value: isPin ? "" : (PANEL_LABEL[r.panel] || r.panel) },
+    { label: "Device", value: r.device_id ? "#" + r.device_id : "" },
+  ];
+  if (isPin) {
+    rows.push(
+      { section: "Manager PIN", accent: "#d4af37" },
+      { label: pinShared ? "Shared PIN of" : "Authorised by", value: "🔑 " + r.actor, strong: true, color: pinShared ? "var(--warn, #e0a800)" : "#d4af37" },
+    );
+    if (pinShared) rows.push({ label: "Note", value: "This PIN belongs to more than one manager — any of them could have entered it." });
+  }
+  rows.push(
+    { section: "What happened" },
+    { label: "Details", value: r.detail || "" },
     { label: "Table", value: r.table_number ? "Table " + r.table_number : "" },
-    { label: "Note", value: r.detail || "" },
     { label: "Order id", value: r.order_id || "" },
-    { label: "When", value: fullWhen(r.created_at) },
-  ]);
+  );
+  if (isErr) {
+    rows.push(
+      { section: "Status" },
+      { label: "State", value: isResolved ? "Resolved" : "Open — needs attention" },
+      { label: "Resolved at", value: isResolved ? fullWhen(r.resolved_at) : "" },
+    );
+  }
+  rows.push(
+    { section: "Reference" },
+    { label: "Action code", value: r.action },
+    { label: "Log id", value: r.id },
+  );
+  logDetailDialog(OP_ACTION_LABELS[r.action] || r.action, rows);
 }
 
 // showCustDetail: open the full-info card for one customer-log (guest) row.
