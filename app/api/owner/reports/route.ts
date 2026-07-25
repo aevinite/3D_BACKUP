@@ -154,7 +154,9 @@ export async function GET(req: NextRequest) {
 
   try {
     // ── money reports: one bucketed summary drives sales/tax/discounts/cancellations ──
-    if (type === "sales" || type === "tax" || type === "discounts" || type === "cancellations") {
+    // The "daysummary" report reads the SAME money payload and additionally bundles the
+    // payment-mode settlement (one extra RPC per restaurant) so the day sheet is one round-trip.
+    if (type === "sales" || type === "tax" || type === "discounts" || type === "cancellations" || type === "daysummary") {
       const res = await sb.rpc("lfh_owner_sales_report", {
         p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: bucket,
       });
@@ -216,7 +218,19 @@ export async function GET(req: NextRequest) {
         });
         tax = { effectivePct: pct, components, configured: comps.length > 0 };
       }
-      return NextResponse.json({ type, range, bucket, rows, totals, tax });
+
+      // Day summary also needs the settlement split (how the money arrived). Same merge
+      // the /payments report uses; degrade gracefully if a restaurant's RPC fails.
+      let payments: { method: unknown; revenue: number; orders: number }[] | undefined;
+      if (type === "daysummary") {
+        const per = await mapLimit(ridList, 8, (id) =>
+          sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
+        const okData = per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]);
+        payments = mergeBy(okData, "method", ["revenue", "orders"])
+          .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))
+          .sort((a, b) => b.revenue - a.revenue);
+      }
+      return NextResponse.json({ type, range, bucket, rows, totals, tax, payments });
     }
 
     // ── breakdown reports: dishes / categories / payments / hourly ──
@@ -271,6 +285,16 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ error: "unknown report type" }, { status: 400 });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    // Supabase errors are plain objects ({code,message,…}), not Error instances — String(e)
+    // rendered "[object Object]". Surface the real message, and turn a statement-timeout
+    // (57014, the analytics scan under load) into advice the owner can act on.
+    const raw = e instanceof Error ? e.message
+      : (e && typeof e === "object" && "message" in e) ? String((e as { message: unknown }).message)
+      : String(e);
+    const code = e && typeof e === "object" && "code" in e ? String((e as { code: unknown }).code) : "";
+    const msg = (code === "57014" || /statement timeout/i.test(raw))
+      ? "This report took too long to build. Try a shorter period, or one restaurant at a time."
+      : raw;
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

@@ -169,6 +169,28 @@ export function HourlyBar({ data, color }: { data: { hour: number; orders: numbe
   );
 }
 
+// ── CountBar — a generic count-per-bucket bar (orders/volume, not money) ─────
+// Same visual language as TimeBar but the tooltip/axis are plain counts, not ₹.
+export function CountBar({ data, color, name = "Orders", height = 220 }: {
+  data: { label: string; value: number }[]; color: string; name?: string; height?: number;
+}) {
+  if (!data.length) return <Empty />;
+  const max = Math.max(1, ...data.map((d) => d.value));
+  return (
+    <div style={{ width: "100%", height }}>
+      <ResponsiveContainer>
+        <BarChart data={data} margin={{ left: 0, right: 12, top: 6, bottom: 4 }}>
+          <CartesianGrid stroke={GRID} vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" />
+          <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={34} allowDecimals={false} />
+          <Tooltip content={<CountTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
+          <Bar dataKey="value" name={name} fill={color} radius={[5, 5, 0, 0]} maxBarSize={46} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 // ── CategoryDonut ───────────────────────────────────────────────────────────
 const PALETTE = ["#34d399", "#5b8def", "#e0b341", "#e2607a", "#a36bd4", "#4bbdc9", "#e3935b", "#9aa84a"];
 export function CategoryDonut({ data }: { data: { category: string; revenue: number }[] }) {
