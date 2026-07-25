@@ -3,7 +3,8 @@
 // two-pane "Roster", sibling of the Access + Users pages). One owner can own
 // 1..N restaurants; a restaurant can have MANY owners (the restaurant_owners join
 // table, mig 097). Create the login ONCE, then attach/detach restaurants.
-//   LEFT rail  → searchable list of every owner (avatar, login, count, status).
+//   PINNED HEADER → title + clickable KPI filters + search + sort (never scrolls).
+//   LEFT rail  → the owner list (scrolls on its own).
 //   RIGHT pane → the selected owner: profile, restaurants owned (primary/co-owner
 //                badge + open-their-panel eye + remove), activity trail, danger zone.
 // Opening a panel carries &uid=<owner> so it lands on THAT owner's cockpit even when
@@ -18,6 +19,8 @@ type Owner = {
   lastSeenAt: string | null; createdAt: string; restaurants: OwnedRest[];
 };
 type Rest = { id: string; slug: string; name: string; active: boolean; hasOwner: boolean };
+type Filter = "all" | "active" | "multi" | "suspended";
+type Sort = "name" | "restaurants" | "recent" | "status";
 
 const card: React.CSSProperties = { background: "var(--card)", border: "var(--border)", borderRadius: 14, padding: 18 };
 const field: React.CSSProperties = { boxSizing: "border-box", padding: "10px 12px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 14, width: "100%" };
@@ -52,6 +55,8 @@ export default function AdminOwners() {
   const [err, setErr] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [sort, setSort] = useState<Sort>("name");
   // The owner shown in the RIGHT pane. Defaults to the first owner once loaded; on a
   // phone the pane is a drill-in (rail hidden while a person is open).
   const [selId, setSelId] = useState<string | null>(null);
@@ -71,14 +76,6 @@ export default function AdminOwners() {
   useEffect(() => { load(); }, [load]);
 
   const unowned = useMemo(() => rests.filter((r) => !r.hasOwner && r.active), [rests]);
-  const filteredOwners = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return owners;
-    return owners.filter((o) =>
-      o.name.toLowerCase().includes(q) ||
-      o.username.toLowerCase().includes(q) ||
-      o.restaurants.some((r) => r.name.toLowerCase().includes(q)));
-  }, [owners, query]);
   const kpis = useMemo(() => ({
     owners: owners.filter((o) => o.active).length,
     covered: rests.filter((r) => r.hasOwner).length,
@@ -87,79 +84,123 @@ export default function AdminOwners() {
     suspended: owners.filter((o) => !o.active).length,
   }), [owners, rests]);
 
+  // Which restaurant a search matched (so searching a RESTAURANT surfaces its owner and
+  // shows why the row is here). Empty when the query matched the person's name/login.
+  const matchedRestaurant = (o: Owner, q: string): string | null => {
+    if (!q) return null;
+    if (o.name.toLowerCase().includes(q) || o.username.toLowerCase().includes(q)) return null;
+    return o.restaurants.find((r) => r.name.toLowerCase().includes(q))?.name || null;
+  };
+
+  const visibleOwners = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let list = owners.filter((o) => {
+      if (filter === "active" && !o.active) return false;
+      if (filter === "suspended" && o.active) return false;
+      if (filter === "multi" && o.restaurants.length <= 1) return false;
+      if (!q) return true;
+      return o.name.toLowerCase().includes(q) || o.username.toLowerCase().includes(q) ||
+        o.restaurants.some((r) => r.name.toLowerCase().includes(q));
+    });
+    const by: Record<Sort, (a: Owner, b: Owner) => number> = {
+      name: (a, b) => a.name.localeCompare(b.name),
+      restaurants: (a, b) => b.restaurants.length - a.restaurants.length || a.name.localeCompare(b.name),
+      recent: (a, b) => (new Date(b.lastSeenAt || 0).getTime()) - (new Date(a.lastSeenAt || 0).getTime()) || a.name.localeCompare(b.name),
+      status: (a, b) => (Number(b.active) - Number(a.active)) || a.name.localeCompare(b.name),
+    };
+    return [...list].sort(by[sort]);
+  }, [owners, query, filter, sort]);
+
   // Keep a valid selection: pick the first owner once loaded / after filtering / after a
   // delete removes the selected one. Never auto-select on a phone (would hide the rail).
   const isPhone = typeof window !== "undefined" && !!window.matchMedia?.("(max-width: 860px)").matches;
   useEffect(() => {
     if (loading || isPhone) return;
-    if (selId && filteredOwners.some((o) => o.id === selId)) return;
-    setSelId(filteredOwners[0]?.id ?? null);
-  }, [loading, filteredOwners, selId, isPhone]);
+    if (selId && visibleOwners.some((o) => o.id === selId)) return;
+    setSelId(visibleOwners[0]?.id ?? null);
+  }, [loading, visibleOwners, selId, isPhone]);
   const selected = owners.find((o) => o.id === selId) || null;
+  const setF = (f: Filter) => setFilter((cur) => (cur === f ? "all" : f));
 
   return (
-    <>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 260 }}>
-          <h1 className="adm-page-h">Owners</h1>
-          <p className="adm-page-sub">One owner account owns <b>1 or many</b> restaurants — and a restaurant can have <b>several owners</b>. Pick a person on the left to manage them.</p>
+    <div className="own-page">
+      {/* ── PINNED HEADER ─────────────────────────────────────────────────── */}
+      <div className="own-head">
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <h1 className="adm-page-h" style={{ marginBottom: 2 }}>Owners</h1>
+            <p className="adm-page-sub" style={{ marginBottom: 0 }}>One owner owns <b>1 or many</b> restaurants — and a restaurant can have <b>several owners</b>.</p>
+          </div>
+          <button style={btn("#3b82f6")} onClick={() => setShowCreate(true)}><i className="fas fa-plus" style={{ marginRight: 7, fontSize: 11 }} aria-hidden="true" />New owner</button>
         </div>
-        <button style={btn("#3b82f6")} onClick={() => setShowCreate(true)}><i className="fas fa-plus" style={{ marginRight: 7, fontSize: 11 }} aria-hidden="true" />New owner</button>
+
+        {err ? <div style={{ ...card, borderColor: "#7f1d1d", color: "#fca5a5", margin: "10px 0 0", padding: 12 }}>{err}</div> : null}
+
+        {/* KPI strip — each card is a FILTER (tap to filter the list, tap again to clear) */}
+        <div className="own-kpis">
+          <KpiButton label="Active owners" value={loading ? "…" : kpis.owners} icon="fa-crown" color="#60a5fa" active={filter === "active"} onClick={() => setF("active")} />
+          <KpiButton label="Restaurants covered" value={loading ? "…" : `${kpis.covered} / ${kpis.total}`} icon="fa-store" color="#34d399" active={false} onClick={() => { setFilter("all"); setQuery(""); }} hint="Show all owners (clear filters)" />
+          <KpiButton label="Multi-restaurant" value={loading ? "…" : kpis.multi} icon="fa-layer-group" color="#fbbf24" active={filter === "multi"} onClick={() => setF("multi")} />
+          <KpiButton label="Suspended" value={loading ? "…" : kpis.suspended} icon="fa-ban" color="#f87171" active={filter === "suspended"} onClick={() => setF("suspended")} />
+        </div>
+
+        {/* No-owner warning */}
+        {unowned.length > 0 && (
+          <div style={{ ...card, padding: 11, marginTop: 10, borderColor: "#b45309", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, color: "#fcd34d" }}><i className="fas fa-triangle-exclamation" style={{ marginRight: 7 }} aria-hidden="true" />{unowned.length === 1 ? "1 restaurant has" : `${unowned.length} restaurants have`} no owner:</span>
+            {unowned.map((r) => <span key={r.id} style={{ ...chip, borderColor: "#b45309" }}><span style={{ ...dot, background: chipColor(r.id) }} />{r.name}</span>)}
+          </div>
+        )}
+
+        {/* Search + sort */}
+        <div className="own-tools">
+          <div style={{ position: "relative", flex: 1, minWidth: 180 }}>
+            <i className="fas fa-magnifying-glass" aria-hidden="true" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 12 }} />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search owners — or a restaurant to find its owner…" aria-label="Search owners or restaurants" style={{ ...field, paddingLeft: 32 }} />
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--muted)", whiteSpace: "nowrap" }}>
+            <i className="fas fa-arrow-down-short-wide" aria-hidden="true" />
+            <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="Sort owners"
+              style={{ ...field, width: "auto", padding: "9px 10px", cursor: "pointer" }}>
+              <option value="name">Name A–Z</option>
+              <option value="restaurants">Most restaurants</option>
+              <option value="recent">Recently active</option>
+              <option value="status">Status (active first)</option>
+            </select>
+          </label>
+        </div>
       </div>
 
-      {err ? <div style={{ ...card, borderColor: "#7f1d1d", color: "#fca5a5", margin: "12px 0", padding: 12 }}>{err}</div> : null}
-
-      {/* KPI strip */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, margin: "14px 0" }}>
-        <Kpi label="Active owners" value={loading ? "…" : kpis.owners} icon="fa-crown" color="#60a5fa" />
-        <Kpi label="Restaurants covered" value={loading ? "…" : `${kpis.covered} / ${kpis.total}`} icon="fa-store" color="#34d399" />
-        <Kpi label="Multi-restaurant owners" value={loading ? "…" : kpis.multi} icon="fa-layer-group" color="#fbbf24" />
-        <Kpi label="Suspended" value={loading ? "…" : kpis.suspended} icon="fa-ban" color="#f87171" />
-      </div>
-
-      {/* No-owner warning — an unowned ACTIVE restaurant has an unreachable owner panel */}
-      {unowned.length > 0 && (
-        <div style={{ ...card, padding: 12, marginBottom: 14, borderColor: "#b45309", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "#fcd34d" }}><i className="fas fa-triangle-exclamation" style={{ marginRight: 7 }} aria-hidden="true" />{unowned.length === 1 ? "1 restaurant has" : `${unowned.length} restaurants have`} no owner:</span>
-          {unowned.map((r) => <span key={r.id} style={{ ...chip, borderColor: "#b45309" }}><span style={{ ...dot, background: chipColor(r.id) }} />{r.name}</span>)}
-          <span style={{ fontSize: 12, color: "var(--muted)" }}>— attach them to an owner.</span>
-        </div>
-      )}
-
-      {/* ── Two-pane roster ─────────────────────────────────────────────────── */}
+      {/* ── TWO-PANE BODY (scrolls under the header) ──────────────────────── */}
       {loading ? (
-        <div style={{ ...card, color: "var(--muted)" }}>Loading…</div>
+        <div style={{ ...card, color: "var(--muted)", marginTop: 12 }}>Loading…</div>
       ) : owners.length === 0 ? (
-        <div style={{ ...card, color: "var(--muted)", textAlign: "center", padding: 40 }}>
+        <div style={{ ...card, color: "var(--muted)", textAlign: "center", padding: 40, marginTop: 12 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>No owners yet</div>
           <div style={{ fontSize: 13, marginBottom: 16 }}>Create your first owner and attach the restaurants they run.</div>
           <button style={btn("#3b82f6")} onClick={() => setShowCreate(true)}><i className="fas fa-plus" style={{ marginRight: 7, fontSize: 11 }} aria-hidden="true" />New owner</button>
         </div>
       ) : (
         <div className="own-pane">
-          {/* LEFT rail — search + people list */}
+          {/* LEFT rail — the owner list */}
           <div className={`own-rail${selected ? " has-sel" : ""}`}>
-            <div style={{ position: "relative", padding: 10, borderBottom: "var(--border)" }}>
-              <i className="fas fa-magnifying-glass" aria-hidden="true" style={{ position: "absolute", left: 21, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 12 }} />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search owners…" aria-label="Search owners" style={{ ...field, paddingLeft: 32 }} />
-            </div>
-            <div className="own-list">
-              {filteredOwners.length === 0 ? (
-                <div style={{ padding: 16, fontSize: 13, color: "var(--muted)" }}>No owners match “{query}”.</div>
-              ) : filteredOwners.map((o) => {
-                const on = o.id === selId;
-                return (
-                  <button key={o.id} className={`own-row${on ? " sel" : ""}`} onClick={() => setSelId(o.id)}>
-                    <span aria-hidden className="own-av" style={{ background: `${chipColor(o.id)}33`, color: chipColor(o.id) }}>{initials(o.name)}</span>
-                    <span style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
-                      <span className="own-nm">{o.name}{!o.active && <span style={{ fontSize: 10.5, color: "#fca5a5", fontWeight: 600 }}> · off</span>}</span>
-                      <span className="own-sub">@{o.username} · {o.restaurants.length} restaurant{o.restaurants.length === 1 ? "" : "s"}</span>
-                    </span>
-                    <span className={`own-cnt${!o.active ? " off" : ""}`}>{o.restaurants.length}</span>
-                  </button>
-                );
-              })}
-            </div>
+            {visibleOwners.length === 0 ? (
+              <div style={{ padding: 16, fontSize: 13, color: "var(--muted)" }}>No owners match your filter{query ? ` / “${query}”` : ""}.</div>
+            ) : visibleOwners.map((o) => {
+              const on = o.id === selId;
+              const match = matchedRestaurant(o, query.trim().toLowerCase());
+              return (
+                <button key={o.id} className={`own-row${on ? " sel" : ""}`} onClick={() => setSelId(o.id)}>
+                  <span aria-hidden className="own-av" style={{ background: `${chipColor(o.id)}33`, color: chipColor(o.id) }}>{initials(o.name)}</span>
+                  <span style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
+                    <span className="own-nm">{o.name}{!o.active && <span style={{ fontSize: 10.5, color: "#fca5a5", fontWeight: 600 }}> · off</span>}</span>
+                    <span className="own-sub">@{o.username} · {o.restaurants.length} restaurant{o.restaurants.length === 1 ? "" : "s"}</span>
+                    {match && <span className="own-match"><i className="fas fa-store" style={{ fontSize: 8.5, marginRight: 4 }} aria-hidden="true" />owns {match}</span>}
+                  </span>
+                  <span className={`own-cnt${!o.active ? " off" : ""}`}>{o.restaurants.length}</span>
+                </button>
+              );
+            })}
           </div>
 
           {/* RIGHT pane — the selected owner */}
@@ -183,46 +224,69 @@ export default function AdminOwners() {
         <CreateOwnerModal rests={rests}
           onClose={() => setShowCreate(false)}
           // Select the new owner AFTER the reload lands — setting selId before load()
-          // resolves let the auto-select effect (which runs against the stale list) reset
+          // resolves let the auto-select effect (running against the stale list) reset
           // it back to the first owner, so the detail pane showed the wrong person.
           onCreated={(id) => { setShowCreate(false); load().then(() => setSelId(id)); }} />
       )}
 
       <style jsx>{`
-        .own-pane { display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: start; }
-        .own-rail { background: var(--card); border: var(--border); border-radius: 14px; overflow: hidden; position: sticky; top: 12px; }
-        .own-list { max-height: 66vh; overflow-y: auto; }
+        .own-page { display: flex; flex-direction: column; overflow-x: hidden; }
+        .own-head { flex: none; }
+        .own-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+        .own-tools { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+        /* minmax(0,1fr): stop the detail column blowing out past its track when a child
+           has wide min-content (e.g. long activity UUIDs) — the clip-on-the-right bug. */
+        .own-pane { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 14px; align-items: stretch; margin-top: 12px; }
+        .own-rail { background: var(--card); border: var(--border); border-radius: 14px; overflow: hidden auto; min-height: 0; scrollbar-gutter: stable; }
+        .own-detail { min-width: 0; min-height: 0; overflow: hidden auto; scrollbar-gutter: stable; }
         .own-row { display: flex; align-items: center; gap: 11px; width: 100%; padding: 11px 12px; background: transparent; border: 0; border-bottom: var(--border); border-left: 3px solid transparent; cursor: pointer; transition: background .14s ease; text-align: left; }
         .own-row:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
         .own-row.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); border-left-color: var(--accent); }
         .own-av { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; font-weight: 800; font-size: 14px; flex: none; }
         .own-nm { display: block; font-weight: 700; font-size: 13.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .own-sub { display: block; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .own-match { display: block; font-size: 11px; color: var(--accent); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
         .own-cnt { font-size: 12px; font-weight: 800; color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); border-radius: 8px; padding: 3px 9px; flex: none; }
         .own-cnt.off { color: var(--muted); background: var(--muted2); }
+
+        /* Desktop: pinned header, list + detail scroll independently inside the admin
+           main scroll-port (which has a definite height: .adm is 100dvh, .adm-main flex:1). */
+        @media (min-width: 861px) {
+          :global(.adx-wrap) { height: 100%; }
+          .own-page { height: 100%; min-height: 0; }
+          .own-pane { flex: 1; min-height: 0; overflow: hidden; }
+        }
         @media (max-width: 860px) {
+          .own-kpis { grid-template-columns: repeat(2, 1fr); }
           .own-pane { grid-template-columns: 1fr; }
-          .own-rail { position: static; }
           .own-rail.has-sel { display: none; }
           .own-detail:not(.open) { display: none; }
-          .own-list { max-height: none; }
         }
       `}</style>
-    </>
+    </div>
   );
 }
 
-function Kpi({ label, value, icon, color }: { label: string; value: React.ReactNode; icon: string; color: string }) {
+// A KPI card that doubles as a FILTER toggle (owner 2026-07-25 — "click the top ones,
+// give us the list"). Highlighted with an accent ring when its filter is active.
+function KpiButton({ label, value, icon, color, active, onClick, hint }: {
+  label: string; value: React.ReactNode; icon: string; color: string; active: boolean; onClick: () => void; hint?: string;
+}) {
   return (
-    <div style={{ ...card, padding: 14, display: "flex", alignItems: "center", gap: 12 }}>
-      <span aria-hidden style={{ width: 34, height: 34, borderRadius: 10, background: `${color}22`, color, display: "grid", placeItems: "center", flex: "none" }}>
-        <i className={`fas ${icon}`} style={{ fontSize: 14 }} />
+    <button onClick={onClick} title={hint ? hint : `Show ${label.toLowerCase()}`} aria-pressed={active}
+      style={{
+        ...card, padding: 13, display: "flex", alignItems: "center", gap: 11, cursor: "pointer", textAlign: "left",
+        borderColor: active ? color : (card.border as string), boxShadow: active ? `0 0 0 2px ${color}` : undefined,
+        background: active ? `color-mix(in srgb, ${color} 12%, var(--card))` : (card.background as string), transition: "box-shadow .14s, border-color .14s",
+      }}>
+      <span aria-hidden style={{ width: 32, height: 32, borderRadius: 9, background: `${color}22`, color, display: "grid", placeItems: "center", flex: "none" }}>
+        <i className={`fas ${icon}`} style={{ fontSize: 13 }} />
       </span>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 10.5, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--muted)" }}>{label}</div>
-        <div style={{ fontSize: 21, fontWeight: 800, marginTop: 2 }}>{value}</div>
-      </div>
-    </div>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: "block", fontSize: 10, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+        <span style={{ display: "block", fontSize: 19, fontWeight: 800, marginTop: 1 }}>{value}</span>
+      </span>
+    </button>
   );
 }
 
@@ -309,7 +373,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
         </div>
       </div>
 
-      <div style={{ padding: 18, display: "grid", gap: 16 }}>
+      <div style={{ padding: 18, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16 }}>
         {mErr ? <div style={{ ...card, padding: 12, borderColor: "#7f1d1d", color: "#fca5a5" }}>{mErr}</div> : null}
 
         {/* Actions */}
@@ -344,7 +408,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
               <i className={`fas ${showAttach ? "fa-xmark" : "fa-plus"}`} style={{ fontSize: 10 }} aria-hidden="true" />{showAttach ? "Close" : "Assign restaurant"}</button>
           </div>
 
-          <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }}>
             {owner.restaurants.map((r) => (
               <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", border: "var(--border)", borderRadius: 11, flexWrap: "wrap" }}>
                 <span aria-hidden style={{ width: 30, height: 30, borderRadius: 8, background: chipColor(r.id), flex: "none" }} />
@@ -459,8 +523,6 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { setErr(j.error || "Could not create owner."); return; }
-      // Show the one-time password INSIDE the modal, then hand the new id up on "Done"
-      // so the roster selects the new person.
       setReveal({ id: j.id, name: j.name, password: j.password, warn: j.attachErrors && j.attachErrors.length ? `Heads-up: ${j.attachErrors.length} restaurant(s) couldn't be attached — add them from their card.` : undefined });
     } catch { setErr("Network error."); }
     finally { setBusy(false); creatingRef.current = false; }
