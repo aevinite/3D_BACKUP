@@ -182,7 +182,10 @@ export default function AdminOwners() {
       {showCreate && (
         <CreateOwnerModal rests={rests}
           onClose={() => setShowCreate(false)}
-          onCreated={(id) => { setShowCreate(false); load(); setSelId(id); }} />
+          // Select the new owner AFTER the reload lands — setting selId before load()
+          // resolves let the auto-select effect (which runs against the stale list) reset
+          // it back to the first owner, so the detail pane showed the wrong person.
+          onCreated={(id) => { setShowCreate(false); load().then(() => setSelId(id)); }} />
       )}
 
       <style jsx>{`
