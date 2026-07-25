@@ -541,25 +541,68 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
       cur.rev += r.revenue; cur.orders += r.paidOrders; cur.days += (r.revenue > 0 || r.paidOrders > 0) ? 1 : 0;
       by.set(wd, cur);
     }
+    const FULL: Record<string, string> = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
     const rows = NAMES.map((nm) => ({ nm, ...(by.get(nm) || { rev: 0, orders: 0, days: 0 }) }));
     const chart = rows.map((r) => ({ label: r.nm, revenue: r.rev }));
-    const best = rows.reduce((a, b) => (b.rev > a.rev ? b : a), rows[0]);
-    const wkRev = (by.get("Sat")?.rev || 0) + (by.get("Sun")?.rev || 0);
     const allRev = rows.reduce((a, r) => a + r.rev, 0);
+    // Only weekdays that actually occurred in the window can win/lose — a day that never
+    // came round (days === 0) isn't the "worst", it just wasn't in the period.
+    const seen = rows.filter((r) => r.days > 0);
+    const best = seen.length ? seen.reduce((a, b) => (b.rev > a.rev ? b : a), seen[0]) : null;
+    const worst = seen.length ? seen.reduce((a, b) => (b.rev < a.rev ? b : a), seen[0]) : null;
+    // Weekend (Sat+Sun) vs weekday (Mon–Fri): compare per-DAY averages, not totals, so a
+    // 2-day weekend isn't unfairly dwarfed by a 5-day working week.
+    const WKEND = new Set(["Sat", "Sun"]);
+    const wkRev = rows.filter((r) => WKEND.has(r.nm)).reduce((a, r) => a + r.rev, 0);
+    const wkDays = rows.filter((r) => WKEND.has(r.nm)).reduce((a, r) => a + r.days, 0);
+    const wdRev = rows.filter((r) => !WKEND.has(r.nm)).reduce((a, r) => a + r.rev, 0);
+    const wdDays = rows.filter((r) => !WKEND.has(r.nm)).reduce((a, r) => a + r.days, 0);
+    const wkAvg = wkDays ? wkRev / wkDays : 0;
+    const wdAvg = wdDays ? wdRev / wdDays : 0;
+    const gap = wdAvg ? ((wkAvg - wdAvg) / wdAvg) * 100 : 0;
+    const goodTint = { background: "color-mix(in srgb, var(--adm-ok) 11%, transparent)" };
+    const badTint = { background: "color-mix(in srgb, var(--adm-warn) 11%, transparent)" };
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Best weekday" tone="good" icon="fa-crown" big value={best.rev > 0 ? best.nm : "—"} sub={`${inr(best.rev)} total`} />
+          <Stat label="Best weekday" tone="good" icon="fa-crown" big value={best ? FULL[best.nm] : "—"} sub={best ? `${inr(best.rev)} · ${inr(best.days ? best.rev / best.days : 0)}/day` : "no data yet"} />
+          <Stat label="Slowest weekday" tone="warn" icon="fa-arrow-trend-down" value={worst ? FULL[worst.nm] : "—"} sub={worst ? `${inr(worst.rev)} · ${inr(worst.days ? worst.rev / worst.days : 0)}/day` : ""} />
           <Stat label="Weekend share" tone="info" icon="fa-champagne-glasses" value={allRev ? `${Math.round((wkRev / allRev) * 100)}%` : "0%"} sub="Sat + Sun of revenue" />
+          <Stat label="Weekend / day" tone="accent" icon="fa-calendar-day" value={inr(wkAvg)} sub={`across ${nfmt(wkDays)} day${wkDays === 1 ? "" : "s"}`} />
+          <Stat label="Weekday / day" tone="accent" icon="fa-calendar-day" value={inr(wdAvg)} sub={`across ${nfmt(wdDays)} day${wdDays === 1 ? "" : "s"}`} />
         </div>
+        {wkDays > 0 && wdDays > 0 && (
+          <p className="rs-note" style={{ marginBottom: 12 }}>
+            An average <b>weekend</b> day takes <b>{inr(wkAvg)}</b> versus <b>{inr(wdAvg)}</b> on a working day —{" "}
+            {Math.abs(gap) < 1 ? "about the same." : <><b>{Math.abs(Math.round(gap))}% {gap > 0 ? "more" : "less"}</b> on the weekend.</>}
+          </p>
+        )}
         <Panel title="Revenue by day of week" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={240} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={240} title="Which day earns most" /></div>
         </Panel>
-        <Panel title="Breakdown" pad={false}>
+        <Panel title="Breakdown" hint="each day added up across the period" pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
-              <thead><tr><th>Day</th><th className="num">Days counted</th><th className="num">Paid bills</th><th className="num">Revenue</th><th className="num">Avg / day</th></tr></thead>
-              <tbody>{rows.map((r) => <tr key={r.nm}><td>{r.nm}</td><td className="num">{r.days}</td><td className="num">{nfmt(r.orders)}</td><td className="num"><b>{inr(r.rev)}</b></td><td className="num">{inr(r.days ? r.rev / r.days : 0)}</td></tr>)}</tbody>
+              <thead><tr><th>Day</th><th className="num">Days counted</th><th className="num">Paid bills</th><th className="num">Revenue</th><th className="num">% of week</th><th className="num">Avg / day</th></tr></thead>
+              <tbody>{rows.map((r) => {
+                const isBest = best && r.nm === best.nm && r.rev > 0;
+                const isWorst = worst && r.nm === worst.nm && !isBest && r.days > 0;
+                return (
+                  <tr key={r.nm} style={isBest ? goodTint : isWorst ? badTint : undefined}>
+                    <td>{FULL[r.nm]}{isBest && <i className="fas fa-crown" aria-hidden style={{ color: "var(--adm-ok)", marginLeft: 6, fontSize: 10 }} />}{isWorst && <i className="fas fa-arrow-trend-down" aria-hidden style={{ color: "var(--adm-warn)", marginLeft: 6, fontSize: 10 }} />}</td>
+                    <td className="num">{r.days}</td><td className="num">{nfmt(r.orders)}</td>
+                    <td className="num"><b>{inr(r.rev)}</b></td>
+                    <td className="num">{allRev ? ((r.rev / allRev) * 100).toFixed(1) : "0.0"}%</td>
+                    <td className="num">{inr(r.days ? r.rev / r.days : 0)}</td>
+                  </tr>
+                );
+              })}</tbody>
+              <tfoot><tr>
+                <td>Total</td><td className="num">{nfmt(rows.reduce((a, r) => a + r.days, 0))}</td>
+                <td className="num">{nfmt(rows.reduce((a, r) => a + r.orders, 0))}</td>
+                <td className="num">{inr(allRev)}</td><td className="num">100%</td>
+                <td className="num">{inr((wkDays + wdDays) ? allRev / (wkDays + wdDays) : 0)}</td>
+              </tr></tfoot>
             </table>
           </div>
         </Panel>
@@ -913,22 +956,66 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
   if (sel === "hourly") {
     const hrs = (data.rows ?? []) as HourRow[];
     if (!hrs.length) return <EmptyCard text="No orders in this period yet." />;
+    // 12-hour clock label ("2 PM") — friendlier than "14:00" on a customer-facing report.
+    const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`;
     const totalOrders = hrs.reduce((a, h) => a + h.orders, 0);
     const totalRev = hrs.reduce((a, h) => a + h.revenue, 0);
-    const peak = [...hrs].sort((a, b) => b.revenue - a.revenue)[0];
-    const revSeries = Array.from({ length: 24 }, (_, h) => ({ label: `${h}:00`, revenue: hrs.find((x) => x.hour === h)?.revenue || 0 }));
+    const avgBill = totalOrders ? totalRev / totalOrders : 0;
+    const byRev = [...hrs].sort((a, b) => b.revenue - a.revenue);
+    const peak = byRev[0];
+    // "Quietest" only makes sense among hours that actually took an order.
+    const active = hrs.filter((h) => h.orders > 0).sort((a, b) => a.revenue - b.revenue);
+    const quietest = active[0] || null;
+    const top3 = byRev.slice(0, 3).filter((h) => h.revenue > 0);
+    const top3Rev = top3.reduce((a, h) => a + h.revenue, 0);
+    const top3Share = totalRev ? Math.round((top3Rev / totalRev) * 100) : 0;
+    const revSeries = Array.from({ length: 24 }, (_, h) => ({ label: hourLabel(h), value: hrs.find((x) => x.hour === h)?.revenue || 0 }));
+    const ordSeries = Array.from({ length: 24 }, (_, h) => ({ label: hourLabel(h), value: hrs.find((x) => x.hour === h)?.orders || 0 }));
+    const tableRows = active.slice().sort((a, b) => a.hour - b.hour);   // active hours, chronological
+    const goodTint = { background: "color-mix(in srgb, var(--adm-ok) 11%, transparent)" };
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Peak hour" tone="accent" icon="fa-fire" big value={`${peak.hour}:00`} sub={`${inr(peak.revenue)} · ${nfmt(peak.orders)} orders`} />
+          <Stat label="Peak hour" tone="accent" icon="fa-fire" big value={hourLabel(peak.hour)} sub={`${inr(peak.revenue)} · ${nfmt(peak.orders)} orders`} spark={ordSeries.map((s) => s.value)} />
+          <Stat label="Quietest hour" tone="info" icon="fa-moon" value={quietest ? hourLabel(quietest.hour) : "—"} sub={quietest ? `${inr(quietest.revenue)} · ${nfmt(quietest.orders)} orders` : "no orders yet"} />
           <Stat label="Total orders" tone="info" icon="fa-list-check" value={nfmt(totalOrders)} />
           <Stat label="Total revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(totalRev)} />
+          <Stat label="Avg bill" tone="good" icon="fa-scale-balanced" value={inr(avgBill)} sub="revenue ÷ orders" />
         </div>
+        {top3.length > 0 && (
+          <p className="rs-note" style={{ marginBottom: 12 }}>
+            Your three busiest hours — <b>{top3.map((h) => hourLabel(h.hour)).join(", ")}</b> — bring in{" "}
+            <b>{top3Share}%</b> of the period&apos;s revenue. Staff and stock for those windows first.
+          </p>
+        )}
         <Panel title="Revenue by hour" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={revSeries.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={240} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={revSeries} color={accent} money height={240} title="When the money comes in" /></div>
         </Panel>
         <Panel title="Orders by hour" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={Array.from({ length: 24 }, (_, h) => ({ label: `${h}:00`, value: hrs.find((x) => x.hour === h)?.orders || 0 }))} color={accent} money={false} name="Orders" height={210} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={ordSeries} color={accent} money={false} name="Orders" height={210} title="When it's busiest" /></div>
+        </Panel>
+        <Panel title="Hour by hour" hint="only hours with orders" pad={false}>
+          <div className="rs-tablewrap">
+            <table className="rs-table">
+              <thead><tr><th>Hour</th><th className="num">Orders</th><th className="num">Revenue</th><th className="num">% of revenue</th><th className="num">Avg bill</th></tr></thead>
+              <tbody>{tableRows.map((h) => {
+                const isPeak = h.hour === peak.hour && h.revenue > 0;
+                return (
+                  <tr key={h.hour} style={isPeak ? goodTint : undefined}>
+                    <td>{hourLabel(h.hour)}{isPeak && <i className="fas fa-fire" aria-hidden style={{ color: "var(--adm-ok)", marginLeft: 6, fontSize: 10 }} />}</td>
+                    <td className="num">{nfmt(h.orders)}</td>
+                    <td className="num"><b>{inr(h.revenue)}</b></td>
+                    <td className="num">{totalRev ? ((h.revenue / totalRev) * 100).toFixed(1) : "0.0"}%</td>
+                    <td className="num">{inr(h.orders ? h.revenue / h.orders : 0)}</td>
+                  </tr>
+                );
+              })}</tbody>
+              <tfoot><tr>
+                <td>Total</td><td className="num">{nfmt(totalOrders)}</td><td className="num">{inr(totalRev)}</td>
+                <td className="num">100%</td><td className="num">{inr(avgBill)}</td>
+              </tr></tfoot>
+            </table>
+          </div>
         </Panel>
       </>
     );
@@ -945,16 +1032,56 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
       return { ...p, rev, orders };
     });
     const totalRev = parts.reduce((a, p) => a + p.rev, 0);
+    const totalOrders = parts.reduce((a, p) => a + p.orders, 0);
     const best = parts.reduce((a, b) => (b.rev > a.rev ? b : a), parts[0]);
+    // "Quietest" among parts that actually took money — an empty part isn't the weakest.
+    const active = parts.filter((p) => p.rev > 0);
+    const weakest = active.length ? active.reduce((a, b) => (b.rev < a.rev ? b : a), active[0]) : null;
     const chart = parts.map((p) => ({ label: p.label, revenue: p.rev }));
+    const goodTint = { background: "color-mix(in srgb, var(--adm-ok) 11%, transparent)" };
+    const badTint = { background: "color-mix(in srgb, var(--adm-warn) 11%, transparent)" };
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Strongest part" tone="good" icon={best.icon} big value={best.rev > 0 ? best.label : "—"} sub={`${inr(best.rev)} · ${totalRev ? Math.round((best.rev / totalRev) * 100) : 0}%`} />
+          <Stat label="Strongest part" tone="good" icon={best.icon} big value={best.rev > 0 ? best.label : "—"} sub={best.rev > 0 ? `${inr(best.rev)} · ${totalRev ? Math.round((best.rev / totalRev) * 100) : 0}% of revenue` : "no data yet"} />
+          <Stat label="Quietest part" tone="warn" icon="fa-arrow-trend-down" value={weakest ? weakest.label : "—"} sub={weakest ? `${inr(weakest.rev)} · ${totalRev ? Math.round((weakest.rev / totalRev) * 100) : 0}% of revenue` : ""} />
           {parts.map((p) => <Stat key={p.label} label={p.label} tone="info" icon={p.icon} value={inr(p.rev)} sub={`${nfmt(p.orders)} orders`} />)}
         </div>
+        {best.rev > 0 && (
+          <p className="rs-note" style={{ marginBottom: 12 }}>
+            <b>{best.label}</b> is your money-maker — <b>{totalRev ? Math.round((best.rev / totalRev) * 100) : 0}%</b> of everything you take.
+            {weakest && weakest.label !== best.label && <> <b>{weakest.label}</b> is the quietest stretch; a small offer there can even out the day.</>}
+          </p>
+        )}
         <Panel title="Revenue by day part" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={230} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={230} title="How the day splits" /></div>
+        </Panel>
+        <Panel title="Breakdown" hint="each stretch of the day" pad={false}>
+          <div className="rs-tablewrap">
+            <table className="rs-table">
+              <thead><tr><th>Day part</th><th className="num">Orders</th><th className="num">Revenue</th><th className="num">% share</th><th className="num">Avg bill</th></tr></thead>
+              <tbody>{parts.map((p) => {
+                const isBest = p.label === best.label && p.rev > 0;
+                const isWorst = weakest && p.label === weakest.label && !isBest;
+                return (
+                  <tr key={p.label} style={isBest ? goodTint : isWorst ? badTint : undefined}>
+                    <td><i className={`fas ${p.icon}`} aria-hidden style={{ color: "var(--muted)", marginRight: 8, fontSize: 11, width: 14 }} />{p.label}
+                      {isBest && <i className="fas fa-crown" aria-hidden style={{ color: "var(--adm-ok)", marginLeft: 6, fontSize: 10 }} />}
+                      {isWorst && <i className="fas fa-arrow-trend-down" aria-hidden style={{ color: "var(--adm-warn)", marginLeft: 6, fontSize: 10 }} />}
+                    </td>
+                    <td className="num">{nfmt(p.orders)}</td>
+                    <td className="num"><b>{inr(p.rev)}</b></td>
+                    <td className="num">{totalRev ? ((p.rev / totalRev) * 100).toFixed(1) : "0.0"}%</td>
+                    <td className="num">{inr(p.orders ? p.rev / p.orders : 0)}</td>
+                  </tr>
+                );
+              })}</tbody>
+              <tfoot><tr>
+                <td>Total</td><td className="num">{nfmt(totalOrders)}</td><td className="num">{inr(totalRev)}</td>
+                <td className="num">100%</td><td className="num">{inr(totalOrders ? totalRev / totalOrders : 0)}</td>
+              </tr></tfoot>
+            </table>
+          </div>
         </Panel>
       </>
     );
