@@ -730,11 +730,14 @@ function Style() {
   .acc2 .ppill { display:inline-block; margin-top:3px; font-size:10.5px; font-weight:800; letter-spacing:.02em; padding:2px 9px; border-radius:20px; line-height:1.5; }
   .acc2 .acc2-rolechips .cdot { width:8px; height:8px; border-radius:50%; flex:none; }
   .acc2 .prow.on .av { color:#10131a; }  /* avatar stays role-coloured (inline bg) even when selected */
-  .acc2-head { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:2px 0 12px; }
-  .acc2-head-r { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  /* Header: title left, controls right on ONE row; when the width is tight they wrap to a
+     second line LEFT-aligned with a small 8px gap — never a big empty right-aligned band
+     (owner 2026-07-25 gap fix). */
+  .acc2-head { display:flex; align-items:center; justify-content:space-between; column-gap:16px; row-gap:8px; flex-wrap:wrap; margin:2px 0 12px; }
+  .acc2-head-r { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .acc2-save { font-size:12px; font-weight:700; color:var(--muted); min-width:60px; }
   .acc2-save.saved { color:var(--adm-ok); } .acc2-save.err { color:var(--adm-danger); }
-  .acc2-rsel { height:40px; border-radius:10px; border:var(--border); background:var(--card); color:var(--text); font-weight:700; font-size:13.5px; padding:0 10px; }
+  .acc2-rsel { height:40px; max-width:260px; border-radius:10px; border:var(--border); background:var(--card); color:var(--text); font-weight:700; font-size:13.5px; padding:0 10px; text-overflow:ellipsis; }
   .acc2-tabs { display:flex; gap:3px; background:var(--card); border:var(--border); border-radius:12px; padding:4px; }
   .acc2-tabs button { display:flex; align-items:center; gap:7px; min-height:40px; padding:0 16px; border-radius:9px; border:none; background:transparent; color:var(--muted); font-weight:700; font-size:13.5px; cursor:pointer; }
   .acc2-tabs button.on { background:var(--accent); color:#fff; }
