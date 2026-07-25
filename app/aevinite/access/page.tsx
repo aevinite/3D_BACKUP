@@ -97,6 +97,9 @@ const SHOT_BY_GROUP: Record<string, string> = {
 };
 const ROLE_ORDER: Record<string, number> = { owner: 0, manager: 1, tablet: 2, kitchen: 3 };
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", manager: "Manager", tablet: "Waiter", kitchen: "Kitchen" };
+// Per-role colours (owner 2026-07-25 — match the Users page: colour people by role, not one gold accent).
+const ROLE_COLOR: Record<string, string> = { owner: "#b491f0", manager: "#d4a574", tablet: "#60a5fa", kitchen: "#7ec88a" };
+const roleTint = (c: string) => `color-mix(in srgb, ${c} 16%, transparent)`;
 const ROLE_RELEVANCE: Record<string, string[]> = {
   manager: ["edit_menu", "give_discounts", "void_bills", "mark_paid", "print_invoice", "khata", "take_orders", "table_ops", "table_tags", "banquet", "view_dashboard", "view_ratings", "view_logs", "manage_staff", "edit_settings"],
   tablet: ["give_discounts", "mark_paid", "print_invoice", "khata", "take_orders", "table_ops", "table_tags", "void_bills"],
@@ -595,11 +598,16 @@ export default function Access2Page() {
           {pQuery && <button className="clr" onClick={() => setPQuery("")} aria-label="Clear search"><Icon n="x" s={13} /></button>}
         </div>
         <div className="acc2-rolechips">
-          {roleChips.map((r) => (
-            <button key={r} className={pRole === r ? "on" : ""} onClick={() => setPRole(r)}>
-              {rolePlural(r)} <b>{r === "all" ? allPeople.length : roleCounts[r]}</b>
-            </button>
-          ))}
+          {roleChips.map((r) => {
+            const c = r === "all" ? null : ROLE_COLOR[r];
+            const on = pRole === r;
+            return (
+              <button key={r} className={on ? "on" : ""} onClick={() => setPRole(r)}
+                style={on && c ? { borderColor: c, background: roleTint(c), color: "var(--text)" } : undefined}>
+                {c && <span className="cdot" style={{ background: c }} />}{rolePlural(r)} <b style={on && c ? { color: c } : undefined}>{r === "all" ? allPeople.length : roleCounts[r]}</b>
+              </button>
+            );
+          })}
         </div>
       </div>
     );
@@ -608,13 +616,16 @@ export default function Access2Page() {
     const list = shown.length === 0
       ? <div className="acc2-noone">No one matches.</div>
       : shown.map((u) => {
-        const hd = u.role !== lastRole ? <div className="prole" key={"h" + u.id}>{rolePlural(u.role)} · {roleCounts[u.role]}</div> : null;
+        const c = ROLE_COLOR[u.role] || "#94a3b8";
+        const sel = u.id === person.id;
+        const hd = u.role !== lastRole ? <div className="prole" key={"h" + u.id}><span className="pdot" style={{ background: c }} />{rolePlural(u.role)} · {roleCounts[u.role]}</div> : null;
         lastRole = u.role;
         const nOv = Object.keys(u.permissions || {}).length;
         return (<div key={u.id}>{hd}
-          <button className={`prow ${u.id === person.id ? "on" : ""}`} onClick={() => setPersonId(u.id)}>
-            <span className="av">{inits(u)}</span>
-            <span className="pi"><span className="nm">{u.name || u.username}</span><span className="mt">{ROLE_LABEL[u.role]}</span></span>
+          <button className={`prow ${sel ? "on" : ""}`} onClick={() => setPersonId(u.id)}
+            style={sel ? { borderLeftColor: c, background: roleTint(c) } : undefined}>
+            <span className="av" style={{ background: c, color: "#10131a" }}>{inits(u)}</span>
+            <span className="pi"><span className="nm">{u.name || u.username}</span><span className="ppill" style={{ color: c, background: roleTint(c) }}>{ROLE_LABEL[u.role]}</span></span>
             {nOv > 0 && <span className="ovr" title={`${nOv} custom rule${nOv > 1 ? "s" : ""}`}>{nOv}</span>}
           </button></div>);
       });
@@ -644,7 +655,7 @@ export default function Access2Page() {
         <nav className="acc2-plist adm-card">{railHead}{list}</nav>
         <div className="adm-card">
           <div className="acc2-pdh">
-            <span className="av">{inits(person)}</span>
+            <span className="av" style={{ background: ROLE_COLOR[person.role] || "#94a3b8", color: "#10131a" }}>{inits(person)}</span>
             <div className="pdh-i"><h3>{person.name || person.username}</h3><span>{ROLE_LABEL[person.role]}{rest ? " · " + rest.name : ""}</span></div>
             <div className="pdh-stats">
               <div><b>{allowedN}<span className="dn">/{caps.length}</span></b><small>Allowed</small></div>
@@ -712,20 +723,13 @@ function Toggle({ checked, disabled, onChange }: { checked: boolean; disabled?: 
 
 function Style() {
   return <style jsx global>{`
-  /* Access panel wears the BRAND GOLD accent (owner 2026-07-24) — scoped to .acc2 only,
-     so the rest of the admin console keeps its own accent. Every control reads var(--accent),
-     so this one override recolours the whole panel. */
-  .acc2 { max-width: 1180px; --accent:#d4af5a; --acc-ink:#3a2a08; }
-  /* Solid-gold surfaces need dark ink (the base rules hardcode #fff, unreadable on gold). */
-  .acc2 .acc2-tabs button.on,
-  .acc2 .prow.on .av,
-  .acc2 .acc2-pdh .av,
-  .acc2 .acc2-reach .rs.cur,
-  .acc2 .acc2-reach .rs.cur .rc,
-  .acc2 .acc2-limit .segs button.on,
-  .acc2 .tri3 button.on.v-pin,
-  .acc2 .acc2-chips .chip.on .box,
-  .acc2 .acc2-chips .chip .xb { color:var(--acc-ink); }
+  .acc2 { max-width: 1180px; }
+  /* People coloured by ROLE (owner 2026-07-25) — matches the Users page; no single gold accent. */
+  .acc2 .prole { display:flex; align-items:center; gap:8px; }
+  .acc2 .prole .pdot { width:8px; height:8px; border-radius:50%; flex:none; }
+  .acc2 .ppill { display:inline-block; margin-top:3px; font-size:10.5px; font-weight:800; letter-spacing:.02em; padding:2px 9px; border-radius:20px; line-height:1.5; }
+  .acc2 .acc2-rolechips .cdot { width:8px; height:8px; border-radius:50%; flex:none; }
+  .acc2 .prow.on .av { color:#10131a; }  /* avatar stays role-coloured (inline bg) even when selected */
   .acc2-head { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:6px 0 18px; }
   .acc2-head-r { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .acc2-save { font-size:12px; font-weight:700; color:var(--muted); min-width:60px; }
