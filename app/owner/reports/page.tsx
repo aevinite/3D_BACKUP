@@ -12,12 +12,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import {
-  ToggleChart, CategoryDonut, PaymentDonut, LeaderBar,
+  ToggleChart, PaymentDonut, LeaderBar,
   canonPayMethod, PAY_COLORS,
 } from "@/components/owner/Charts";
 import {
   REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, nfmt, type RKey, type DataKind,
 } from "@/components/owner/reports/kit";
+import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
+import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
 
 type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy";
 const RANGES: { k: Range; label: string }[] = [
@@ -78,12 +80,6 @@ function downloadCsv(filename: string, header: string[], rows: (string | number)
 // ── Menu-engineering quadrant (client-only view over the dishes payload) ──────
 type MI = { title: string; qty: number; revenue: number };
 type Klass = "star" | "workhorse" | "puzzle" | "dog";
-const KLASS: Record<Klass, { label: string; icon: string; sub: string; tip: string }> = {
-  star:      { label: "Stars",      icon: "fa-star",         sub: "Ordered a lot · priced high",  tip: "Your winners — show them off: top of the menu, photos, specials." },
-  workhorse: { label: "Workhorses", icon: "fa-horse",        sub: "Ordered a lot · low price",    tip: "Nudge the price up a little, or add a combo — easy extra money." },
-  puzzle:    { label: "Puzzles",    icon: "fa-puzzle-piece", sub: "Priced high · rarely ordered", tip: "Give them a photo, a clearer name, or a small offer to move them." },
-  dog:       { label: "Dogs",       icon: "fa-face-frown",   sub: "Low price · rarely ordered",   tip: "Mostly clutter — worth thinking about dropping." },
-};
 function median(arr: number[]): number {
   if (!arr.length) return 0;
   const s = [...arr].sort((a, b) => a - b), m = Math.floor(s.length / 2);
@@ -422,9 +418,16 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         </div>
 
         {series.length > 1 && (
-          <Panel title="Revenue through the period" pad={false}>
-            <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={220} /></div>
-          </Panel>
+          <>
+            <BestWorst
+              series={series.map((s) => ({ label: s.label, value: s.revenue }))}
+              money noun="income"
+              unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+            />
+            <Panel title="Revenue through the period" pad={false}>
+              <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={220} /></div>
+            </Panel>
+          </>
         )}
       </>
     );
@@ -445,6 +448,13 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         <Panel title="Revenue over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={240} /></div>
         </Panel>
+        {series.filter((s) => s.revenue > 0).length > 1 && (
+          <BestWorst
+            series={series.map((s) => ({ label: s.label, value: s.revenue }))}
+            money noun="revenue"
+            unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+          />
+        )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
       </>
     );
@@ -467,6 +477,14 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         <Panel title="Average bill over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={avgSeries.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money name="Avg bill" height={240} /></div>
         </Panel>
+        {withData.length > 1 && (
+          <BestWorst
+            series={avgSeries.map((s) => ({ label: s.label, value: s.revenue }))}
+            money noun="basket size"
+            title={`Fullest & thinnest ${bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}`}
+            unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+          />
+        )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} showAvg />
       </>
     );
@@ -476,18 +494,32 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
   if (sel === "volume") {
     if (!t) return <EmptyCard text="No orders in this period yet." />;
     const vol = mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.orders }));
-    const paidPct = t.orders ? (t.paidOrders / t.orders) * 100 : 0;
+    const placed = t.orders + t.cancelledOrders;
+    const paidPct = placed ? (t.paidOrders / placed) * 100 : 0;
+    const openOrders = Math.max(0, t.orders - t.paidOrders);   // placed, not cancelled, not yet paid
+    const unitWord = bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day";
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Orders placed" tone="info" icon="fa-list-check" big value={nfmt(t.orders)} spark={vol.map((v) => v.value)} />
-          <Stat label="Paid bills" tone="good" icon="fa-circle-check" value={nfmt(t.paidOrders)} sub={`${paidPct.toFixed(0)}% of orders`} />
-          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} />
-          <Stat label="Busiest bucket" tone="accent" icon="fa-fire" value={nfmt(vol.length ? Math.max(...vol.map((v) => v.value)) : 0)} sub="orders in one bucket" />
+          <Stat label="Orders placed" tone="info" icon="fa-list-check" big value={nfmt(placed)} sub={`${nfmt(t.paidOrders)} paid · ${nfmt(t.cancelledOrders)} cancelled`} spark={vol.map((v) => v.value)} />
+          <Stat label="Paid bills" tone="good" icon="fa-circle-check" value={nfmt(t.paidOrders)} sub={`${paidPct.toFixed(0)}% of placed`} />
+          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={placed ? `${((t.cancelledOrders / placed) * 100).toFixed(1)}% of placed` : ""} />
+          <Stat label={`Busiest ${unitWord}`} tone="accent" icon="fa-fire" value={nfmt(vol.length ? Math.max(...vol.map((v) => v.value)) : 0)} sub={`orders in one ${unitWord}`} />
         </div>
+        <SplitBar
+          title="Where the orders went"
+          segments={[
+            { label: "Paid", value: t.paidOrders, tone: "good" },
+            { label: "Open / unpaid", value: openOrders, tone: "info" },
+            { label: "Cancelled", value: t.cancelledOrders, tone: "bad" },
+          ]}
+        />
         <Panel title="Orders over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={vol} color={accent} money={false} name="Orders" height={240} /></div>
         </Panel>
+        {vol.filter((v) => v.value > 0).length > 1 && (
+          <BestWorst series={vol} money={false} noun="orders" unit={unitWord} />
+        )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
       </>
     );
@@ -504,25 +536,68 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
       cur.rev += r.revenue; cur.orders += r.paidOrders; cur.days += (r.revenue > 0 || r.paidOrders > 0) ? 1 : 0;
       by.set(wd, cur);
     }
+    const FULL: Record<string, string> = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
     const rows = NAMES.map((nm) => ({ nm, ...(by.get(nm) || { rev: 0, orders: 0, days: 0 }) }));
     const chart = rows.map((r) => ({ label: r.nm, revenue: r.rev }));
-    const best = rows.reduce((a, b) => (b.rev > a.rev ? b : a), rows[0]);
-    const wkRev = (by.get("Sat")?.rev || 0) + (by.get("Sun")?.rev || 0);
     const allRev = rows.reduce((a, r) => a + r.rev, 0);
+    // Only weekdays that actually occurred in the window can win/lose — a day that never
+    // came round (days === 0) isn't the "worst", it just wasn't in the period.
+    const seen = rows.filter((r) => r.days > 0);
+    const best = seen.length ? seen.reduce((a, b) => (b.rev > a.rev ? b : a), seen[0]) : null;
+    const worst = seen.length ? seen.reduce((a, b) => (b.rev < a.rev ? b : a), seen[0]) : null;
+    // Weekend (Sat+Sun) vs weekday (Mon–Fri): compare per-DAY averages, not totals, so a
+    // 2-day weekend isn't unfairly dwarfed by a 5-day working week.
+    const WKEND = new Set(["Sat", "Sun"]);
+    const wkRev = rows.filter((r) => WKEND.has(r.nm)).reduce((a, r) => a + r.rev, 0);
+    const wkDays = rows.filter((r) => WKEND.has(r.nm)).reduce((a, r) => a + r.days, 0);
+    const wdRev = rows.filter((r) => !WKEND.has(r.nm)).reduce((a, r) => a + r.rev, 0);
+    const wdDays = rows.filter((r) => !WKEND.has(r.nm)).reduce((a, r) => a + r.days, 0);
+    const wkAvg = wkDays ? wkRev / wkDays : 0;
+    const wdAvg = wdDays ? wdRev / wdDays : 0;
+    const gap = wdAvg ? ((wkAvg - wdAvg) / wdAvg) * 100 : 0;
+    const goodTint = { background: "color-mix(in srgb, var(--adm-ok) 11%, transparent)" };
+    const badTint = { background: "color-mix(in srgb, var(--adm-warn) 11%, transparent)" };
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Best weekday" tone="good" icon="fa-crown" big value={best.rev > 0 ? best.nm : "—"} sub={`${inr(best.rev)} total`} />
+          <Stat label="Best weekday" tone="good" icon="fa-crown" big value={best ? FULL[best.nm] : "—"} sub={best ? `${inr(best.rev)} · ${inr(best.days ? best.rev / best.days : 0)}/day` : "no data yet"} />
+          <Stat label="Slowest weekday" tone="warn" icon="fa-arrow-trend-down" value={worst ? FULL[worst.nm] : "—"} sub={worst ? `${inr(worst.rev)} · ${inr(worst.days ? worst.rev / worst.days : 0)}/day` : ""} />
           <Stat label="Weekend share" tone="info" icon="fa-champagne-glasses" value={allRev ? `${Math.round((wkRev / allRev) * 100)}%` : "0%"} sub="Sat + Sun of revenue" />
+          <Stat label="Weekend / day" tone="accent" icon="fa-calendar-day" value={inr(wkAvg)} sub={`across ${nfmt(wkDays)} day${wkDays === 1 ? "" : "s"}`} />
+          <Stat label="Weekday / day" tone="accent" icon="fa-calendar-day" value={inr(wdAvg)} sub={`across ${nfmt(wdDays)} day${wdDays === 1 ? "" : "s"}`} />
         </div>
+        {wkDays > 0 && wdDays > 0 && (
+          <p className="rs-note" style={{ marginBottom: 12 }}>
+            An average <b>weekend</b> day takes <b>{inr(wkAvg)}</b> versus <b>{inr(wdAvg)}</b> on a working day —{" "}
+            {Math.abs(gap) < 1 ? "about the same." : <><b>{Math.abs(Math.round(gap))}% {gap > 0 ? "more" : "less"}</b> on the weekend.</>}
+          </p>
+        )}
         <Panel title="Revenue by day of week" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={240} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={240} title="Which day earns most" /></div>
         </Panel>
-        <Panel title="Breakdown" pad={false}>
+        <Panel title="Breakdown" hint="each day added up across the period" pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
-              <thead><tr><th>Day</th><th className="num">Days counted</th><th className="num">Paid bills</th><th className="num">Revenue</th><th className="num">Avg / day</th></tr></thead>
-              <tbody>{rows.map((r) => <tr key={r.nm}><td>{r.nm}</td><td className="num">{r.days}</td><td className="num">{nfmt(r.orders)}</td><td className="num"><b>{inr(r.rev)}</b></td><td className="num">{inr(r.days ? r.rev / r.days : 0)}</td></tr>)}</tbody>
+              <thead><tr><th>Day</th><th className="num">Days counted</th><th className="num">Paid bills</th><th className="num">Revenue</th><th className="num">% of week</th><th className="num">Avg / day</th></tr></thead>
+              <tbody>{rows.map((r) => {
+                const isBest = best && r.nm === best.nm && r.rev > 0;
+                const isWorst = worst && r.nm === worst.nm && !isBest && r.days > 0;
+                return (
+                  <tr key={r.nm} style={isBest ? goodTint : isWorst ? badTint : undefined}>
+                    <td>{FULL[r.nm]}{isBest && <i className="fas fa-crown" aria-hidden style={{ color: "var(--adm-ok)", marginLeft: 6, fontSize: 10 }} />}{isWorst && <i className="fas fa-arrow-trend-down" aria-hidden style={{ color: "var(--adm-warn)", marginLeft: 6, fontSize: 10 }} />}</td>
+                    <td className="num">{r.days}</td><td className="num">{nfmt(r.orders)}</td>
+                    <td className="num"><b>{inr(r.rev)}</b></td>
+                    <td className="num">{allRev ? ((r.rev / allRev) * 100).toFixed(1) : "0.0"}%</td>
+                    <td className="num">{inr(r.days ? r.rev / r.days : 0)}</td>
+                  </tr>
+                );
+              })}</tbody>
+              <tfoot><tr>
+                <td>Total</td><td className="num">{nfmt(rows.reduce((a, r) => a + r.days, 0))}</td>
+                <td className="num">{nfmt(rows.reduce((a, r) => a + r.orders, 0))}</td>
+                <td className="num">{inr(allRev)}</td><td className="num">100%</td>
+                <td className="num">{inr((wkDays + wdDays) ? allRev / (wkDays + wdDays) : 0)}</td>
+              </tr></tfoot>
             </table>
           </div>
         </Panel>
@@ -533,14 +608,38 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
   // ── TAX / GST ──
   if (sel === "tax") {
     if (!t) return <EmptyCard text="No taxable sales in this period yet." />;
+    const taxable = t.subtotal - t.discount;                       // the value tax is charged on
+    const actualPct = taxable ? (t.tax / taxable) * 100 : 0;       // rate the numbers actually realised
+    const configuredPct = data.tax?.effectivePct ?? null;         // the rate that's set up
+    const rateOk = configuredPct == null || Math.abs(actualPct - configuredPct) < 0.5;
+    const avgTaxPerBill = t.paidOrders ? t.tax / t.paidOrders : 0;
+    const comps = data.tax?.components ?? [];
+    // Per-period filing view: split each period's tax across the set tax lines, integer-rounded
+    // so each row's parts still sum to that row's total tax (matches the printed-bill split).
+    const filingRows = (comps.length ? mrows.filter((r) => r.tax > 0) : []).map((r) => ({
+      bucket: r.bucket,
+      taxable: r.subtotal - r.discount,
+      tax: r.tax,
+      parts: roundToSum(comps.map((c) => (configuredPct ? r.tax * (c.rate / configuredPct) : r.tax / comps.length)), r.tax),
+    }));
+    const compTotals = comps.map((_, i) => filingRows.reduce((a, r) => a + r.parts[i], 0));
+    const filingTaxable = filingRows.reduce((a, r) => a + r.taxable, 0);
+    const filingTax = filingRows.reduce((a, r) => a + r.tax, 0);
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Tax collected" tone="accent" icon="fa-landmark" big value={inr(t.tax)} spark={mrows.map((r) => r.tax)} />
-          {data.tax && <Stat label="Tax rate" tone="info" icon="fa-percent" value={`${data.tax.effectivePct}%`} />}
-          <Stat label="Taxable sales" tone="accent" icon="fa-cart-shopping" value={inr(t.subtotal - t.discount)} sub="subtotal − discount" />
-          <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} />
+          <Stat label="Tax collected" tone="accent" icon="fa-landmark" big value={inr(t.tax)} sub={`${nfmt(t.paidOrders)} paid bills`} spark={mrows.map((r) => r.tax)} />
+          <Stat label="Taxable sales" tone="accent" icon="fa-cart-shopping" value={inr(taxable)} sub="subtotal − discount" />
+          <Stat label="Effective rate" tone={rateOk ? "good" : "warn"} icon="fa-percent" value={`${actualPct.toFixed(2)}%`}
+            sub={configuredPct != null ? (rateOk ? `matches the set ${configuredPct}%` : `set rate is ${configuredPct}%`) : "tax ÷ taxable sales"} />
+          <Stat label="Tax per bill" tone="info" icon="fa-receipt" value={inr(avgTaxPerBill)} sub="average" />
         </div>
+        {configuredPct != null && !rateOk && (
+          <p className="rs-note" style={{ marginTop: -4, marginBottom: 12 }}>
+            <i className="fas fa-triangle-exclamation" aria-hidden style={{ color: "var(--adm-warn)", marginRight: 6 }} />
+            The rate the bills actually realised ({actualPct.toFixed(2)}%) doesn&apos;t match the set rate ({configuredPct}%) — usually from tax-free or specially-priced items in this period. Worth a look before filing.
+          </p>
+        )}
         {data.tax ? (
           <Panel title="The split" hint="same total, shown the way the printed bill shows it">
             <div className="rs-tablewrap">
@@ -563,6 +662,25 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         <Panel title="Tax over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.tax }))} color={accent} money name="Tax" height={220} /></div>
         </Panel>
+        {filingRows.length > 0 && (
+          <Panel title="Tax by period — filing view" hint="taxable value and each tax line, per period" pad={false}>
+            <div className="rs-tablewrap">
+              <table className="rs-table">
+                <thead><tr><th>Period</th><th className="num">Taxable value</th>{comps.map((c) => <th key={c.label} className="num">{c.label} ({c.rate}%)</th>)}<th className="num">Total tax</th></tr></thead>
+                <tbody>{filingRows.map((r) => (
+                  <tr key={r.bucket}>
+                    <td>{bucketLabel(r.bucket, bucket)}</td>
+                    <td className="num">{inr(r.taxable)}</td>
+                    {r.parts.map((amt, i) => <td key={comps[i].label} className="num">{inr(amt)}</td>)}
+                    <td className="num"><b>{inr(r.tax)}</b></td>
+                  </tr>
+                ))}</tbody>
+                <tfoot><tr><td>Total</td><td className="num">{inr(filingTaxable)}</td>{compTotals.map((amt, i) => <td key={comps[i].label} className="num">{inr(amt)}</td>)}<td className="num">{inr(filingTax)}</td></tr></tfoot>
+              </table>
+            </div>
+            <p className="rs-note">Each period&apos;s tax is split across the set tax lines and rounded so the parts add back to that period&apos;s total — ready to copy into a return.</p>
+          </Panel>
+        )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
       </>
     );
@@ -573,11 +691,22 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
     if (!t) return <EmptyCard text="No sales in this period yet." />;
     const discRows = mrows.filter((r) => r.discount > 0);
     const effPct = t.subtotal ? (t.discount / t.subtotal) * 100 : 0;
-    const biggest = [...discRows].sort((a, b) => b.discount - a.discount)[0];
+    const byDisc = [...discRows].sort((a, b) => b.discount - a.discount);
+    const biggest = byDisc[0];
+    const totalDisc = discRows.reduce((a, r) => a + r.discount, 0);
+    const top5 = byDisc.slice(0, 5).map((r) => ({ id: r.bucket, name: bucketLabel(r.bucket, bucket), revenue: r.discount, orders: r.paidOrders, accentColor: accent }));
+    const top5Share = totalDisc ? (top5.reduce((a, d) => a + d.revenue, 0) / totalDisc) * 100 : 0;
+    // Trend: is the discount RATE (share of sales given away) rising or easing across the period?
+    const rateOf = (r: MoneyRow) => (r.subtotal ? (r.discount / r.subtotal) * 100 : 0);
+    const half = Math.floor(discRows.length / 2);
+    const firstAvg = half ? discRows.slice(0, half).reduce((a, r) => a + rateOf(r), 0) / half : 0;
+    const lastAvg = discRows.length - half ? discRows.slice(half).reduce((a, r) => a + rateOf(r), 0) / (discRows.length - half) : 0;
+    const trendDelta = lastAvg - firstAvg;
+    const trend = discRows.length < 4 ? "steady" : trendDelta > 0.5 ? "rising" : trendDelta < -0.5 ? "easing" : "steady";
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Discounts given" tone="warn" icon="fa-tag" big value={inr(t.discount)} spark={mrows.map((r) => r.discount)} />
+          <Stat label="Discounts given" tone="warn" icon="fa-tag" big value={inr(t.discount)} sub={`over ${nfmt(discRows.length)} day${discRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.discount)} />
           <Stat label="Effective rate" tone="warn" icon="fa-percent" value={`${effPct.toFixed(1)}%`} sub="of gross sales" />
           <Stat label="Revenue after discounts" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} />
           <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} />
@@ -586,11 +715,21 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         <Panel title="Discounts over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.discount }))} color={accent} money name="Discount" height={240} /></div>
         </Panel>
+        {top5.length > 0 && (
+          <Panel title="Biggest discount days" hint="top 5 by amount given away">
+            <LeaderBar data={top5} />
+            <p className="rs-note">
+              These {top5.length} day{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of everything discounted this period.
+              {" "}Discounting is <b>{trend}</b>{trend === "steady" ? " — the give-away rate is holding flat." : trend === "rising" ? ` — the give-away rate climbed from ~${firstAvg.toFixed(1)}% to ~${lastAvg.toFixed(1)}% of sales.` : ` — the give-away rate fell from ~${firstAvg.toFixed(1)}% to ~${lastAvg.toFixed(1)}% of sales.`}
+            </p>
+          </Panel>
+        )}
         <Panel title="Days with discounts" hint="only days a discount was given" pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
               <thead><tr><th>Period</th><th className="num">Paid bills</th><th className="num">Discount</th><th className="num">Revenue</th><th className="num">Disc. rate</th></tr></thead>
               <tbody>{discRows.length ? discRows.map((r) => <tr key={r.bucket}><td>{bucketLabel(r.bucket, bucket)}</td><td className="num">{nfmt(r.paidOrders)}</td><td className="num"><b>{inr(r.discount)}</b></td><td className="num">{inr(r.revenue)}</td><td className="num">{r.subtotal ? ((r.discount / r.subtotal) * 100).toFixed(1) : "0.0"}%</td></tr>) : <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--muted)", padding: 22 }}>No discounts were given in this period.</td></tr>}</tbody>
+              {discRows.length > 0 && <tfoot><tr><td>Total</td><td className="num">{nfmt(discRows.reduce((a, r) => a + r.paidOrders, 0))}</td><td className="num">{inr(totalDisc)}</td><td className="num">{inr(discRows.reduce((a, r) => a + r.revenue, 0))}</td><td className="num">{effPct.toFixed(1)}%</td></tr></tfoot>}
             </table>
           </div>
         </Panel>
@@ -604,23 +743,43 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
     const cxRows = mrows.filter((r) => r.cancelledOrders > 0);
     const placed = t.orders + t.cancelledOrders;
     const cxPct = placed ? (t.cancelledOrders / placed) * 100 : 0;
-    const worst = [...cxRows].sort((a, b) => b.cancelledValue - a.cancelledValue)[0];
+    const byLoss = [...cxRows].sort((a, b) => b.cancelledValue - a.cancelledValue);
+    const worst = byLoss[0];
+    const top5 = byLoss.slice(0, 5).map((r) => ({ id: r.bucket, name: bucketLabel(r.bucket, bucket), revenue: r.cancelledValue, orders: r.cancelledOrders, accentColor: accent }));
+    const top5Share = t.cancelledValue ? (top5.reduce((a, d) => a + d.revenue, 0) / t.cancelledValue) * 100 : 0;
+    const avgPerCx = t.cancelledOrders ? t.cancelledValue / t.cancelledOrders : 0;
+    // Health band on the cancel rate — plain words + a tone so the note reads at a glance.
+    const health = cxPct >= 8 ? { word: "high", tone: "var(--adm-danger)", icon: "fa-triangle-exclamation" }
+      : cxPct >= 4 ? { word: "worth watching", tone: "var(--adm-warn)", icon: "fa-circle-exclamation" }
+      : { word: "healthy", tone: "var(--adm-ok)", icon: "fa-circle-check" };
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Value lost" tone="bad" icon="fa-ban" big value={inr(t.cancelledValue)} spark={mrows.map((r) => r.cancelledValue)} />
+          <Stat label="Value lost" tone="bad" icon="fa-ban" big value={inr(t.cancelledValue)} sub={`over ${nfmt(cxRows.length)} day${cxRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.cancelledValue)} />
           <Stat label="Cancelled orders" tone="bad" icon="fa-circle-xmark" value={nfmt(t.cancelledOrders)} sub={`${cxPct.toFixed(1)}% of all placed`} />
+          <Stat label="Avg lost / cancel" tone="warn" icon="fa-scale-balanced" value={inr(avgPerCx)} />
           <Stat label="Kept revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} />
           <Stat label="Worst day" tone="warn" icon="fa-arrow-up" value={worst ? inr(worst.cancelledValue) : "—"} sub={worst ? bucketLabel(worst.bucket, bucket) : ""} />
         </div>
+        <p className="rs-note" style={{ marginTop: -4, marginBottom: 12 }}>
+          <i className={`fas ${health.icon}`} aria-hidden style={{ color: health.tone, marginRight: 6 }} />
+          Your cancel rate is <b>{cxPct.toFixed(1)}%</b> ({health.word}) — {nfmt(t.cancelledOrders)} of {nfmt(placed)} placed orders were voided, losing {inr(t.cancelledValue)} (about {inr(avgPerCx)} per cancel).
+        </p>
         <Panel title="Value lost over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.cancelledValue }))} color={accent} money name="Lost value" height={240} /></div>
         </Panel>
+        {top5.length > 0 && (
+          <Panel title="Worst cancellation days" hint="top 5 by value lost">
+            <LeaderBar data={top5} />
+            <p className="rs-note">These {top5.length} day{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of all the value lost to cancellations this period.</p>
+          </Panel>
+        )}
         <Panel title="Days with cancellations" hint="only days something was voided" pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
               <thead><tr><th>Period</th><th className="num">Cancelled orders</th><th className="num">Value lost</th><th className="num">Kept revenue</th></tr></thead>
               <tbody>{cxRows.length ? cxRows.map((r) => <tr key={r.bucket}><td>{bucketLabel(r.bucket, bucket)}</td><td className="num">{nfmt(r.cancelledOrders)}</td><td className="num"><b>{inr(r.cancelledValue)}</b></td><td className="num">{inr(r.revenue)}</td></tr>) : <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--muted)", padding: 22 }}>No cancellations in this period.</td></tr>}</tbody>
+              {cxRows.length > 0 && <tfoot><tr><td>Total</td><td className="num">{nfmt(t.cancelledOrders)}</td><td className="num">{inr(t.cancelledValue)}</td><td className="num">{inr(cxRows.reduce((a, r) => a + r.revenue, 0))}</td></tr></tfoot>}
             </table>
           </div>
         </Panel>
@@ -630,19 +789,64 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
 
   // ── PAYMENT SETTLEMENT ──
   if (sel === "payments") {
-    const pays = (data.rows ?? []) as PayRow[];
-    if (!pays.length) return <EmptyCard text="No payments recorded in this period." />;
+    const raw = (data.rows ?? []) as PayRow[];
+    if (!raw.length) return <EmptyCard text="No payments recorded in this period." />;
+    // Merge by canonical method (mirrors PaymentDonut) so the table and the donut agree.
+    const merged = new Map<string, PayRow & { method: string }>();
+    for (const p of raw) {
+      const method = canonPayMethod(p.method);
+      const row = merged.get(method) || { method, revenue: 0, orders: 0 };
+      row.revenue += p.revenue; row.orders += p.orders;
+      merged.set(method, row);
+    }
+    const pays = [...merged.values()].filter((p) => p.revenue > 0).sort((a, b) => b.revenue - a.revenue);
     const total = pays.reduce((a, p) => a + p.revenue, 0);
     const bills = pays.reduce((a, p) => a + p.orders, 0);
-    const top = [...pays].sort((a, b) => b.revenue - a.revenue)[0];
+    const top = pays[0];
+    const topShare = total ? (top.revenue / total) * 100 : 0;
+    const avgBill = bills ? total / bills : 0;
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(total)} />
+          <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(total)} sub={`${nfmt(bills)} bills settled`} />
           <Stat label="Bills settled" tone="info" icon="fa-receipt" value={nfmt(bills)} />
-          <Stat label="Top method" tone="good" icon="fa-wallet" value={canonPayMethod(top?.method)} sub={`${total ? Math.round((top.revenue / total) * 100) : 0}% of money`} />
+          <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avgBill)} />
+          <Stat label="Top method" tone="good" icon="fa-wallet" value={canonPayMethod(top?.method)} sub={`${Math.round(topShare)}% of money · ${nfmt(top?.orders || 0)} bills`} />
+          <Stat label="Methods used" tone="info" icon="fa-layer-group" value={nfmt(pays.length)} />
         </div>
-        <Panel title="How the money arrived"><PaymentDonut data={pays} /></Panel>
+        <div className="rs-grid two">
+          <Panel title="Per method" hint="bills, money and average" pad={false}>
+            <div className="rs-tablewrap">
+              <table className="rs-table">
+                <thead><tr><th>Method</th><th className="num">Bills</th><th className="num">Revenue</th><th className="num">% share</th><th className="num">Avg bill</th></tr></thead>
+                <tbody>{pays.map((p) => {
+                  const share = total ? (p.revenue / total) * 100 : 0;
+                  const dom = p.method === top.method;
+                  return (
+                    <tr key={p.method} style={dom ? { background: "color-mix(in srgb, var(--accent) 8%, transparent)" } : undefined}>
+                      <td>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 3, background: PAY_COLORS[p.method] || PAY_COLORS["Not recorded"], flexShrink: 0 }} />
+                          {p.method}
+                          {dom && <span className="rs-tag" style={{ background: "color-mix(in srgb, var(--accent) 16%, transparent)", color: "var(--accent)" }}>Top</span>}
+                        </span>
+                      </td>
+                      <td className="num">{nfmt(p.orders)}</td>
+                      <td className="num"><b>{inr(p.revenue)}</b></td>
+                      <td className="num">{share.toFixed(1)}%</td>
+                      <td className="num">{inr(p.orders ? p.revenue / p.orders : 0)}</td>
+                    </tr>
+                  );
+                })}</tbody>
+                <tfoot><tr><td>Total</td><td className="num">{nfmt(bills)}</td><td className="num">{inr(total)}</td><td className="num">100%</td><td className="num">{inr(avgBill)}</td></tr></tfoot>
+              </table>
+            </div>
+          </Panel>
+          <Panel title="How the money arrived"><PaymentDonut data={pays} /></Panel>
+        </div>
+        <p className="rs-note">
+          <b>{canonPayMethod(top?.method)}</b> is the dominant way guests pay — {Math.round(topShare)}% of collections ({inr(top.revenue)}) across {nfmt(top.orders)} bill{top.orders === 1 ? "" : "s"}.
+        </p>
       </>
     );
   }
@@ -651,118 +855,87 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
   if (sel === "dishes") {
     const dishes = (data.rows ?? []) as DishRow[];
     if (!dishes.length) return <EmptyCard text="No dish sales in this period." />;
-    const totalRev = dishes.reduce((a, d) => a + d.revenue, 0);
-    const totalQty = dishes.reduce((a, d) => a + d.qty, 0);
-    return (
-      <>
-        <div className="rs-kpis">
-          <Stat label="Item sales (list price)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} sub="menu price × paid qty" />
-          <Stat label="Units sold" tone="info" icon="fa-boxes-stacked" value={nfmt(totalQty)} />
-          <Stat label="Distinct dishes" tone="info" icon="fa-utensils" value={nfmt(dishes.length)} />
-          <Stat label="Top seller" tone="good" icon="fa-crown" value={dishes[0]?.title || "—"} sub={`${nfmt(dishes[0]?.qty || 0)} sold`} />
-        </div>
-        <Panel title="Top earners" hint="by item sales"><LeaderBar data={dishes.slice(0, 10).map((d) => ({ id: d.title, name: d.title, revenue: d.revenue, orders: d.qty, accentColor: accent }))} /></Panel>
-        <Panel title="Every dish" pad={false}>
-          <div className="rs-tablewrap">
-            <table className="rs-table">
-              <thead><tr><th>Dish</th><th className="num">Qty sold</th><th className="num">Item sales</th><th className="num">% of sales</th></tr></thead>
-              <tbody>{dishes.map((d) => <tr key={d.title}><td>{d.title}</td><td className="num">{nfmt(d.qty)}</td><td className="num"><b>{inr(d.revenue)}</b></td><td className="num">{totalRev ? ((d.revenue / totalRev) * 100).toFixed(1) : "0.0"}%</td></tr>)}</tbody>
-            </table>
-          </div>
-          <p className="rs-note">Item sales is menu list price × paid quantity — before discounts and tax — so it won&apos;t equal the net revenue on the Sales report.</p>
-        </Panel>
-      </>
-    );
+    return <DishesReport rows={dishes} />;
   }
 
   // ── CATEGORY MIX ──
   if (sel === "categories") {
     const cats = (data.rows ?? []) as CatRow[];
     if (!cats.length) return <EmptyCard text="No category sales in this period." />;
-    const totalRev = cats.reduce((a, c) => a + c.revenue, 0);
-    return (
-      <>
-        <div className="rs-kpis">
-          <Stat label="Item sales (list price)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} />
-          <Stat label="Categories" tone="info" icon="fa-layer-group" value={nfmt(cats.length)} />
-          <Stat label="Top category" tone="good" icon="fa-crown" value={cats[0]?.category || "—"} sub={`${totalRev ? Math.round((cats[0].revenue / totalRev) * 100) : 0}% of sales`} />
-        </div>
-        <div className="rs-grid two">
-          <Panel title="Every category" pad={false}>
-            <div className="rs-tablewrap">
-              <table className="rs-table">
-                <thead><tr><th>Category</th><th className="num">Qty</th><th className="num">Item sales</th><th className="num">%</th></tr></thead>
-                <tbody>{cats.map((c) => <tr key={c.category}><td>{c.category}</td><td className="num">{nfmt(c.qty)}</td><td className="num"><b>{inr(c.revenue)}</b></td><td className="num">{totalRev ? ((c.revenue / totalRev) * 100).toFixed(1) : "0.0"}%</td></tr>)}</tbody>
-              </table>
-            </div>
-          </Panel>
-          <Panel title="Share of sales"><CategoryDonut data={cats.map((c) => ({ category: c.category, revenue: c.revenue }))} /></Panel>
-        </div>
-      </>
-    );
+    return <CategoriesReport rows={cats} />;
   }
 
   // ── MENU ENGINEERING ──
   if (sel === "menu") {
-    const { dishes } = classifyMenu((data.rows ?? []) as MI[]);
-    if (!dishes.length) return <EmptyCard text="No dish sales in this period." />;
-    const byRev = [...dishes].sort((a, b) => b.revenue - a.revenue);
-    const count = (k: Klass) => dishes.filter((d) => d.klass === k).length;
-    const QORDER: Klass[] = ["star", "workhorse", "puzzle", "dog"];
-    return (
-      <>
-        <div className="rs-kpis">
-          {QORDER.map((k) => <Stat key={k} label={KLASS[k].label} tone={k === "star" ? "good" : k === "workhorse" ? "info" : k === "puzzle" ? "warn" : "bad"} icon={KLASS[k].icon} value={nfmt(count(k))} sub="dishes" />)}
-        </div>
-        <p className="rs-note" style={{ marginBottom: 12 }}>Every dish is grouped by how <b>often</b> it&apos;s ordered and how <b>pricey</b> it is. Uses menu price (not cost) — a per-dish cost field would make this profit-true.</p>
-        <div className="rs-quad">
-          {QORDER.map((k) => {
-            const list = byRev.filter((d) => d.klass === k);
-            return (
-              <div key={k} className={`rs-qbox ${k}`}>
-                <div className="rs-qh"><span className="qi"><i className={`fas ${KLASS[k].icon}`} aria-hidden /></span><b>{KLASS[k].label}</b><span className="qn">{list.length}</span></div>
-                <div className="rs-qsub">{KLASS[k].sub}</div>
-                <div className="rs-qtip">{KLASS[k].tip}</div>
-                <div className="rs-qchips">
-                  {list.length === 0 ? <span className="rs-qmore">none</span> : list.slice(0, 8).map((d) => <span key={d.title} className="rs-qchip" title={`${nfmt(d.qty)} sold · ₹${Math.round(d.price)} each`}>{d.title}</span>)}
-                  {list.length > 8 && <span className="rs-qmore">+{list.length - 8} more</span>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <Panel title="Product mix" hint="each dish's share of what sold" pad={false}>
-          <div className="rs-tablewrap">
-            <table className="rs-table">
-              <thead><tr><th>Dish</th><th>Group</th><th className="num">Sold</th><th className="num">% units</th><th className="num">Item sales</th><th className="num">% sales</th></tr></thead>
-              <tbody>{byRev.map((d) => <tr key={d.title}><td>{d.title}</td><td><span className={`rs-tag ${d.klass}`}>{KLASS[d.klass].label.replace(/s$/, "")}</span></td><td className="num">{nfmt(d.qty)}</td><td className="num">{(d.qtyShare * 100).toFixed(1)}%</td><td className="num"><b>{inr(d.revenue)}</b></td><td className="num">{(d.revShare * 100).toFixed(1)}%</td></tr>)}</tbody>
-            </table>
-          </div>
-        </Panel>
-      </>
-    );
+    const mrowsMenu = (data.rows ?? []) as MI[];
+    if (!classifyMenu(mrowsMenu).dishes.length) return <EmptyCard text="No dish sales in this period." />;
+    return <MenuReport rows={mrowsMenu} />;
   }
 
   // ── BUSY HOURS ──
   if (sel === "hourly") {
     const hrs = (data.rows ?? []) as HourRow[];
     if (!hrs.length) return <EmptyCard text="No orders in this period yet." />;
+    // 12-hour clock label ("2 PM") — friendlier than "14:00" on a customer-facing report.
+    const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`;
     const totalOrders = hrs.reduce((a, h) => a + h.orders, 0);
     const totalRev = hrs.reduce((a, h) => a + h.revenue, 0);
-    const peak = [...hrs].sort((a, b) => b.revenue - a.revenue)[0];
-    const revSeries = Array.from({ length: 24 }, (_, h) => ({ label: `${h}:00`, revenue: hrs.find((x) => x.hour === h)?.revenue || 0 }));
+    const avgBill = totalOrders ? totalRev / totalOrders : 0;
+    const byRev = [...hrs].sort((a, b) => b.revenue - a.revenue);
+    const peak = byRev[0];
+    // "Quietest" only makes sense among hours that actually took an order.
+    const active = hrs.filter((h) => h.orders > 0).sort((a, b) => a.revenue - b.revenue);
+    const quietest = active[0] || null;
+    const top3 = byRev.slice(0, 3).filter((h) => h.revenue > 0);
+    const top3Rev = top3.reduce((a, h) => a + h.revenue, 0);
+    const top3Share = totalRev ? Math.round((top3Rev / totalRev) * 100) : 0;
+    const revSeries = Array.from({ length: 24 }, (_, h) => ({ label: hourLabel(h), value: hrs.find((x) => x.hour === h)?.revenue || 0 }));
+    const ordSeries = Array.from({ length: 24 }, (_, h) => ({ label: hourLabel(h), value: hrs.find((x) => x.hour === h)?.orders || 0 }));
+    const tableRows = active.slice().sort((a, b) => a.hour - b.hour);   // active hours, chronological
+    const goodTint = { background: "color-mix(in srgb, var(--adm-ok) 11%, transparent)" };
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Peak hour" tone="accent" icon="fa-fire" big value={`${peak.hour}:00`} sub={`${inr(peak.revenue)} · ${nfmt(peak.orders)} orders`} />
+          <Stat label="Peak hour" tone="accent" icon="fa-fire" big value={hourLabel(peak.hour)} sub={`${inr(peak.revenue)} · ${nfmt(peak.orders)} orders`} spark={ordSeries.map((s) => s.value)} />
+          <Stat label="Quietest hour" tone="info" icon="fa-moon" value={quietest ? hourLabel(quietest.hour) : "—"} sub={quietest ? `${inr(quietest.revenue)} · ${nfmt(quietest.orders)} orders` : "no orders yet"} />
           <Stat label="Total orders" tone="info" icon="fa-list-check" value={nfmt(totalOrders)} />
           <Stat label="Total revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(totalRev)} />
+          <Stat label="Avg bill" tone="good" icon="fa-scale-balanced" value={inr(avgBill)} sub="revenue ÷ orders" />
         </div>
+        {top3.length > 0 && (
+          <p className="rs-note" style={{ marginBottom: 12 }}>
+            Your three busiest hours — <b>{top3.map((h) => hourLabel(h.hour)).join(", ")}</b> — bring in{" "}
+            <b>{top3Share}%</b> of the period&apos;s revenue. Staff and stock for those windows first.
+          </p>
+        )}
         <Panel title="Revenue by hour" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={revSeries.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={240} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={revSeries} color={accent} money height={240} title="When the money comes in" /></div>
         </Panel>
         <Panel title="Orders by hour" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={Array.from({ length: 24 }, (_, h) => ({ label: `${h}:00`, value: hrs.find((x) => x.hour === h)?.orders || 0 }))} color={accent} money={false} name="Orders" height={210} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={ordSeries} color={accent} money={false} name="Orders" height={210} title="When it's busiest" /></div>
+        </Panel>
+        <Panel title="Hour by hour" hint="only hours with orders" pad={false}>
+          <div className="rs-tablewrap">
+            <table className="rs-table">
+              <thead><tr><th>Hour</th><th className="num">Orders</th><th className="num">Revenue</th><th className="num">% of revenue</th><th className="num">Avg bill</th></tr></thead>
+              <tbody>{tableRows.map((h) => {
+                const isPeak = h.hour === peak.hour && h.revenue > 0;
+                return (
+                  <tr key={h.hour} style={isPeak ? goodTint : undefined}>
+                    <td>{hourLabel(h.hour)}{isPeak && <i className="fas fa-fire" aria-hidden style={{ color: "var(--adm-ok)", marginLeft: 6, fontSize: 10 }} />}</td>
+                    <td className="num">{nfmt(h.orders)}</td>
+                    <td className="num"><b>{inr(h.revenue)}</b></td>
+                    <td className="num">{totalRev ? ((h.revenue / totalRev) * 100).toFixed(1) : "0.0"}%</td>
+                    <td className="num">{inr(h.orders ? h.revenue / h.orders : 0)}</td>
+                  </tr>
+                );
+              })}</tbody>
+              <tfoot><tr>
+                <td>Total</td><td className="num">{nfmt(totalOrders)}</td><td className="num">{inr(totalRev)}</td>
+                <td className="num">100%</td><td className="num">{inr(avgBill)}</td>
+              </tr></tfoot>
+            </table>
+          </div>
         </Panel>
       </>
     );
@@ -779,16 +952,56 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
       return { ...p, rev, orders };
     });
     const totalRev = parts.reduce((a, p) => a + p.rev, 0);
+    const totalOrders = parts.reduce((a, p) => a + p.orders, 0);
     const best = parts.reduce((a, b) => (b.rev > a.rev ? b : a), parts[0]);
+    // "Quietest" among parts that actually took money — an empty part isn't the weakest.
+    const active = parts.filter((p) => p.rev > 0);
+    const weakest = active.length ? active.reduce((a, b) => (b.rev < a.rev ? b : a), active[0]) : null;
     const chart = parts.map((p) => ({ label: p.label, revenue: p.rev }));
+    const goodTint = { background: "color-mix(in srgb, var(--adm-ok) 11%, transparent)" };
+    const badTint = { background: "color-mix(in srgb, var(--adm-warn) 11%, transparent)" };
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Strongest part" tone="good" icon={best.icon} big value={best.rev > 0 ? best.label : "—"} sub={`${inr(best.rev)} · ${totalRev ? Math.round((best.rev / totalRev) * 100) : 0}%`} />
+          <Stat label="Strongest part" tone="good" icon={best.icon} big value={best.rev > 0 ? best.label : "—"} sub={best.rev > 0 ? `${inr(best.rev)} · ${totalRev ? Math.round((best.rev / totalRev) * 100) : 0}% of revenue` : "no data yet"} />
+          <Stat label="Quietest part" tone="warn" icon="fa-arrow-trend-down" value={weakest ? weakest.label : "—"} sub={weakest ? `${inr(weakest.rev)} · ${totalRev ? Math.round((weakest.rev / totalRev) * 100) : 0}% of revenue` : ""} />
           {parts.map((p) => <Stat key={p.label} label={p.label} tone="info" icon={p.icon} value={inr(p.rev)} sub={`${nfmt(p.orders)} orders`} />)}
         </div>
+        {best.rev > 0 && (
+          <p className="rs-note" style={{ marginBottom: 12 }}>
+            <b>{best.label}</b> is your money-maker — <b>{totalRev ? Math.round((best.rev / totalRev) * 100) : 0}%</b> of everything you take.
+            {weakest && weakest.label !== best.label && <> <b>{weakest.label}</b> is the quietest stretch; a small offer there can even out the day.</>}
+          </p>
+        )}
         <Panel title="Revenue by day part" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={230} /></div>
+          <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={230} title="How the day splits" /></div>
+        </Panel>
+        <Panel title="Breakdown" hint="each stretch of the day" pad={false}>
+          <div className="rs-tablewrap">
+            <table className="rs-table">
+              <thead><tr><th>Day part</th><th className="num">Orders</th><th className="num">Revenue</th><th className="num">% share</th><th className="num">Avg bill</th></tr></thead>
+              <tbody>{parts.map((p) => {
+                const isBest = p.label === best.label && p.rev > 0;
+                const isWorst = weakest && p.label === weakest.label && !isBest;
+                return (
+                  <tr key={p.label} style={isBest ? goodTint : isWorst ? badTint : undefined}>
+                    <td><i className={`fas ${p.icon}`} aria-hidden style={{ color: "var(--muted)", marginRight: 8, fontSize: 11, width: 14 }} />{p.label}
+                      {isBest && <i className="fas fa-crown" aria-hidden style={{ color: "var(--adm-ok)", marginLeft: 6, fontSize: 10 }} />}
+                      {isWorst && <i className="fas fa-arrow-trend-down" aria-hidden style={{ color: "var(--adm-warn)", marginLeft: 6, fontSize: 10 }} />}
+                    </td>
+                    <td className="num">{nfmt(p.orders)}</td>
+                    <td className="num"><b>{inr(p.rev)}</b></td>
+                    <td className="num">{totalRev ? ((p.rev / totalRev) * 100).toFixed(1) : "0.0"}%</td>
+                    <td className="num">{inr(p.orders ? p.rev / p.orders : 0)}</td>
+                  </tr>
+                );
+              })}</tbody>
+              <tfoot><tr>
+                <td>Total</td><td className="num">{nfmt(totalOrders)}</td><td className="num">{inr(totalRev)}</td>
+                <td className="num">100%</td><td className="num">{inr(totalOrders ? totalRev / totalOrders : 0)}</td>
+              </tr></tfoot>
+            </table>
+          </div>
         </Panel>
       </>
     );
