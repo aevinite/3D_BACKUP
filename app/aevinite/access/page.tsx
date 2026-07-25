@@ -316,7 +316,7 @@ export default function Access2Page() {
   return (
     <div className="acc2">
       <Style />
-      <nav className="adm-crumbs" style={{ marginBottom: 4 }}>
+      <nav className="adm-crumbs" style={{ marginBottom: 2 }}>
         <a href="/aevinite">Dashboard</a><span className="sep">›</span>
         <a href="/aevinite/restaurants">Restaurants</a><span className="sep">›</span>
         {/* Back to origin: if we arrived from a restaurant detail, this crumb reopens THAT
@@ -723,14 +723,14 @@ function Toggle({ checked, disabled, onChange }: { checked: boolean; disabled?: 
 
 function Style() {
   return <style jsx global>{`
-  .acc2 { max-width: 1180px; }
+  .acc2 { max-width: 1180px; margin-top:-8px; }
   /* People coloured by ROLE (owner 2026-07-25) — matches the Users page; no single gold accent. */
   .acc2 .prole { display:flex; align-items:center; gap:8px; }
   .acc2 .prole .pdot { width:8px; height:8px; border-radius:50%; flex:none; }
   .acc2 .ppill { display:inline-block; margin-top:3px; font-size:10.5px; font-weight:800; letter-spacing:.02em; padding:2px 9px; border-radius:20px; line-height:1.5; }
   .acc2 .acc2-rolechips .cdot { width:8px; height:8px; border-radius:50%; flex:none; }
   .acc2 .prow.on .av { color:#10131a; }  /* avatar stays role-coloured (inline bg) even when selected */
-  .acc2-head { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:6px 0 18px; }
+  .acc2-head { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:2px 0 12px; }
   .acc2-head-r { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .acc2-save { font-size:12px; font-weight:700; color:var(--muted); min-width:60px; }
   .acc2-save.saved { color:var(--adm-ok); } .acc2-save.err { color:var(--adm-danger); }
