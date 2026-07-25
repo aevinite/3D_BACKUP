@@ -14,7 +14,7 @@
 // a hard limit — never a whole-table read.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope } from "@/lib/ownerScope";
+import { ownerScope, inScope } from "@/lib/ownerScope";
 
 export const dynamic = "force-dynamic";
 
@@ -33,9 +33,17 @@ export async function GET(req: NextRequest) {
   let q = sb.from("staff_actions").select(COLS).order("created_at", { ascending: false }).limit(limit);
   // Owner never sees the admin's own actions or the direct-database-edit footprints.
   q = q.not("panel", "in", "(admin,db)");
-  // Restrict to the owner's restaurant(s). A real owner (or admin act-as one restaurant) is
-  // always scope.all === false with a concrete id list; only an admin scope=all skips this.
-  if (!scope.all) {
+  // Optional ?rid= — narrow to ONE selected restaurant (the top-strip restaurant pick / an
+  // admin act-as one restaurant), mirroring how /api/owner/reports scopes. Only honoured when
+  // that id is already in the caller's scope (an admin's scope is every restaurant), so it can
+  // only NARROW, never widen. Without it, fall back to the owner's full restaurant set.
+  const pinRid = url.searchParams.get("rid");
+  if (pinRid) {
+    if (!inScope(scope, pinRid)) return NextResponse.json({ actions: [] });
+    q = q.eq("restaurant_id", pinRid);
+  } else if (!scope.all) {
+    // Restrict to the owner's restaurant(s). A real owner (or admin act-as one restaurant) is
+    // always scope.all === false with a concrete id list; only an admin scope=all skips this.
     if (!scope.ids.length) return NextResponse.json({ actions: [] });
     q = q.in("restaurant_id", scope.ids);
   }
