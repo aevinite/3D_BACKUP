@@ -87,6 +87,7 @@ export type BillRecord = {
   amount: number;              // headline total (live orders; for a deleted bill, the removed total)
   paid: number;                // how much was actually collected
   orderCount: number;
+  invoiceGens: number;         // how many times a tax invoice was generated (>1 = re-issued)
   openedAt: string | null;
   closedAt: string | null;
   at: string | null;           // sort key (closed_at ?? created_at)
@@ -112,6 +113,7 @@ export function rollUpBill(session: BillSession, orders: BillOrder[], restaurant
     amount: gross(forTotal),
     paid: gross(paid),
     orderCount: orders.length,
+    invoiceGens: 0, // filled in by the ledger endpoint from invoice_events
     openedAt: session.opened_at,
     closedAt: session.closed_at,
     at: session.closed_at || session.created_at,

@@ -678,8 +678,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // THIS restaurant's first (service-role bypasses RLS), mirroring the editor invoice guard.
       const ownsGen = (await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
       if (!ownsGen) return err("That table isn't for this restaurant.", 404);
-      const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
-      if (error) throw new Error(error.message);
+      const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: null, p_actor: actor?.name || actor?.username || null });
+      if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened.", 409); throw new Error(error.message); }
       await log("invoice_generate", { detail: `session ${b}`, device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
     }

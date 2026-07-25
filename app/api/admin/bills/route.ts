@@ -52,7 +52,12 @@ export async function GET(req: NextRequest) {
         { action: string; actor: string | null; detail: string | null; created_at: string }[] | null;
       events = (byOrder || []).map((e) => ({ action: e.action, actor: e.actor, detail: e.detail, at: e.created_at }));
     }
-    return NextResponse.json({ trail: events });
+    // Invoice history — the append-only generate/void timeline for this bill (mig 189).
+    const invRows = (await sb.from("invoice_events").select("event, invoice_no, reason, actor, created_at")
+      .eq("session_id", trail).order("created_at", { ascending: true }).limit(50)).data as
+      { event: string; invoice_no: number | null; reason: string | null; actor: string | null; created_at: string }[] | null;
+    const invoiceHistory = (invRows || []).map((e) => ({ event: e.event, no: e.invoice_no, reason: e.reason, actor: e.actor, at: e.created_at }));
+    return NextResponse.json({ trail: events, invoiceHistory });
   }
 
   // ── The ledger list ─────────────────────────────────────────────────────────
@@ -81,6 +86,15 @@ export async function GET(req: NextRequest) {
   let bills = sessions
     .map((s) => rollUpBill(s, ordersBySession.get(s.id) || [], (s.restaurant_id && nameById.get(s.restaurant_id)) || "—"))
     .filter((b) => b.orderCount > 0 || b.billNo != null);
+
+  // How many times each bill's invoice was generated (>1 = re-issued after a void). One
+  // scoped read of the append-only invoice_events (mig 189), counted in JS.
+  if (sessionIds.length) {
+    const ev = (await sb.from("invoice_events").select("session_id").eq("event", "generate").in("session_id", sessionIds).limit(5000)).data as { session_id: string }[] | null;
+    const genBy = new Map<string, number>();
+    for (const e of ev || []) genBy.set(e.session_id, (genBy.get(e.session_id) || 0) + 1);
+    for (const b of bills) b.invoiceGens = genBy.get(b.sessionId) || 0;
+  }
 
   // Bucket counts BEFORE the state filter, so the filter chips always show totals.
   const counts: Record<string, number> = {};

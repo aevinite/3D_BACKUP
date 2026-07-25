@@ -8123,14 +8123,24 @@ function setTab(tab) {
 const _invBusy = new Set();
 async function generateInvoice(sid) {
   if (_invBusy.has(sid)) return;
+  // A RE-issue (a number already exists → the previous was voided) must say WHY — the
+  // reason is recorded in the invoice history. A first-ever issue needs no reason.
+  const ss = (state.board.sessions || []).find((s) => s.id === sid);
+  const isReissue = ss && ss.invoice_no != null;
+  let reason = null;
+  if (isReissue) {
+    reason = await promptDialog("This invoice was voided. Re-issuing assigns a NEW number — why are you re-issuing it?", { confirmLabel: "Re-issue invoice", placeholder: "corrected GST, fixed items…", required: true });
+    if (reason == null) return; // cancelled
+  }
   _invBusy.add(sid);
-  try { await api("POST", `/sessions/${sid}/invoice`); await loadOrders(); toast("Invoice generated", "ok"); }
+  try { await api("POST", `/sessions/${sid}/invoice`, reason ? { reason } : {}); await loadOrders(); toast(isReissue ? "Invoice re-issued" : "Invoice generated", "ok"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
   finally { _invBusy.delete(sid); }
 }
 async function voidInvoice(sid) {
-  if (!(await confirmDialog("Reopen this bill? Its invoice is voided (kept in records) and the bill unlocks for edits — a new invoice number is issued next time.", "Reopen bill"))) return;
-  const reason = (await promptDialog("Reason for voiding this invoice? (optional)", { confirmLabel: "Void invoice", placeholder: "optional — refund, correction…", required: false })) || null;
+  if (!(await confirmDialog("Reopen this bill? Its invoice is voided (kept in records) and the bill unlocks for edits — a new invoice number is issued next time. Only possible while the table is not settled.", "Reopen bill"))) return;
+  const reason = await promptDialog("Why are you voiding / reopening this invoice? (required)", { confirmLabel: "Void invoice", placeholder: "refund, correction, wrong GST…", required: true });
+  if (reason == null) return; // cancelled — a reason is required
   try { await api("POST", `/sessions/${sid}/void-invoice`, { reason }); await loadOrders(); toast("Invoice voided — bill reopened", "ok"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }

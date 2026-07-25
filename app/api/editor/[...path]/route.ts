@@ -1510,28 +1510,32 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const row = must(await sb.from("sessions").update({ auto_approve: value }).eq("id", b).eq("restaurant_id", rid).select());
       return ok(row[0] || null);
     }
-    // sessions/:id/invoice — GENERATE the tax invoice (assign a permanent number,
-    // lock the bill). Server-authoritative (totals computed from DB order rows).
+    // sessions/:id/invoice — GENERATE the tax invoice (assign a permanent number, lock the
+    // bill). Server-authoritative. A RE-issue (after a void) carries a reason and is REFUSED
+    // once the bill is settled (mig 189 enforces both — the invoice locks at settlement).
     if (a === "sessions" && c === "invoice") {
-      // lfh_generate_invoice takes only p_session (no tenant param) — confirm the session
-      // is THIS restaurant's first (service-role bypasses RLS; a foreign session id must not
-      // get an invoice generated against it).
+      // lfh_generate_invoice has no tenant param — confirm the session is THIS restaurant's
+      // first (service-role bypasses RLS; a foreign session id must not get an invoice).
       const ownsGen = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!ownsGen) return err("That table isn't for this restaurant.", 404);
-      const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b });
-      if (error) throw new Error(error.message);
-      await log("editor", "invoice_generate", { restaurant_id: rid, detail: `session ${b}`, device_id: dev });
+      const genReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
+      const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: genReason || null, p_actor: actorName });
+      if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw new Error(error.message); }
+      await log("editor", "invoice_generate", { restaurant_id: rid, detail: `session ${b}` + (genReason ? ` · ${genReason}` : ""), device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
     }
     // sessions/:id/void-invoice — VOID it (reopen the bill for edits; number kept in record).
+    // A reason is REQUIRED (owner: every reopen must say why). Refused once settled (mig 189).
     if (a === "sessions" && c === "void-invoice") {
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("void bills");
       // Confirm the session belongs to THIS restaurant before voiding (RPC has no tenant param).
       const ownsVoid = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!ownsVoid) return err("That table isn't for this restaurant.", 404);
-      const { data, error } = await sb.rpc("lfh_void_invoice", { p_session: b, p_reason: (body && body.reason) || null });
-      if (error) throw new Error(error.message);
-      await log("editor", "invoice_void", { restaurant_id: rid, detail: `session ${b}` + ((body && body.reason) ? ` · ${body.reason}` : ""), device_id: dev });
+      const voidReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
+      if (!voidReason) return err("A reason is required to void / reopen an invoice.", 400);
+      const { data, error } = await sb.rpc("lfh_void_invoice", { p_session: b, p_reason: voidReason, p_actor: actorName });
+      if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw new Error(error.message); }
+      await log("editor", "invoice_void", { restaurant_id: rid, detail: `session ${b} · ${voidReason}`, device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
     }
     if (a === "sessions" && c === "shift") {
