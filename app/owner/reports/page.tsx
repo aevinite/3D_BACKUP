@@ -16,7 +16,7 @@ import {
   canonPayMethod, PAY_COLORS,
 } from "@/components/owner/Charts";
 import {
-  REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, nfmt, type RKey, type DataKind,
+  REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, nfmt, scrollToId, type RKey, type DataKind,
 } from "@/components/owner/reports/kit";
 import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
 import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
@@ -251,7 +251,8 @@ export default function OwnerReports() {
         <Hub range={range} money={store[cacheKey("money", rid, range)]} restName={restName} accent={accent} onOpen={setSel} />
       ) : (
         <ReportView sel={sel} data={data} loading={entry?.loading} error={entry?.error}
-          range={range} accent={accent} restName={restName} singleRest={singleRest} />
+          range={range} accent={accent} restName={restName} singleRest={singleRest}
+          onOpenReport={(k) => setSel(k)} />
       )}
     </div>
   );
@@ -316,9 +317,10 @@ function Hub({ range, money, restName, accent, onOpen }: {
 }
 
 // ── The report view (title + loading/error, delegates body) ───────────────────
-function ReportView({ sel, data, loading, error, range, accent, restName, singleRest }: {
+function ReportView({ sel, data, loading, error, range, accent, restName, singleRest, onOpenReport }: {
   sel: RKey; data?: Payload; loading?: boolean; error?: string;
   range: Range; accent: string; restName: string; singleRest: boolean;
+  onOpenReport: (k: RKey) => void;
 }) {
   const meta = REPORTS[sel];
   const tone = meta.tone || "accent";
@@ -333,7 +335,7 @@ function ReportView({ sel, data, loading, error, range, accent, restName, single
       ) : loading || !data ? (
         <div className="rs-kpis">{[0, 1, 2, 3].map((i) => <div key={i} className="rs-stat tone-accent" style={{ opacity: .5 }}><div className="rs-stat-k">Loading…</div><div className="rs-stat-v">—</div></div>)}</div>
       ) : (
-        <ReportBody sel={sel} data={data} accent={accent} singleRest={singleRest} />
+        <ReportBody sel={sel} data={data} accent={accent} singleRest={singleRest} onOpenReport={onOpenReport} />
       )}
     </div>
   );
@@ -343,7 +345,7 @@ function EmptyCard({ text }: { text: string }) {
   return <Panel><div className="rs-empty"><i className="fas fa-inbox" aria-hidden />{text}</div></Panel>;
 }
 
-function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payload; accent: string; singleRest: boolean }) {
+function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey; data: Payload; accent: string; singleRest: boolean; onOpenReport: (k: RKey) => void }) {
   const bucket = data.bucket || "day";
   const t = data.totals;
   const mrows = (data.rows ?? []) as MoneyRow[];
@@ -364,8 +366,8 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
           <Stat label="Gross income" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} sub="net of discounts, tax included" spark={series.map((s) => s.revenue)} />
           <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} sub={`${nfmt(t.orders)} orders total`} />
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avg)} />
-          <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} />
-          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={`${inr(t.cancelledValue)} lost`} />
+          <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
+          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={`${inr(t.cancelledValue)} lost`} onClick={() => onOpenReport("cancellations")} title="Open the Cancellations report" />
         </div>
 
         <div className="rs-daysheet">
@@ -383,7 +385,9 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
             {!singleRest && <p className="rs-note">Pick one restaurant to see the CGST/SGST split (tax lines are set per restaurant).</p>}
           </Panel>
 
-          <Panel title="Settlement" hint="how the money arrived">
+          <Panel title="Settlement" hint="how the money arrived"
+            right={<button type="button" className="rs-drill" onClick={() => onOpenReport("payments")} title="Open the Payment settlement report">Full report <i className="fas fa-arrow-right" aria-hidden /></button>}>
+
             {pays.length === 0 ? <div className="rs-empty" style={{ padding: 20 }}>No payments recorded.</div> : (
               <div className="rs-paylist">
                 {pays.map((p) => {
@@ -439,11 +443,11 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Revenue (kept)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} spark={series.map((s) => s.revenue)} />
-          <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} />
+          <Stat label="Revenue (kept)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} spark={series.map((s) => s.revenue)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
+          <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} onClick={() => onOpenReport("volume")} title="Open the Order volume report" />
           <Stat label="Gross sales" tone="accent" icon="fa-cart-shopping" value={inr(t.subtotal)} />
-          <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} />
-          <Stat label="Discounts" tone="warn" icon="fa-tag" value={inr(t.discount)} />
+          <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
+          <Stat label="Discounts" tone="warn" icon="fa-tag" value={inr(t.discount)} onClick={() => onOpenReport("discounts")} title="Open the Discounts report" />
         </div>
         <Panel title="Revenue over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={240} /></div>
@@ -469,8 +473,8 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Average bill" tone="info" icon="fa-scale-balanced" big value={inr(avg)} sub="revenue ÷ paid bills" spark={avgSeries.map((s) => s.revenue)} />
-          <Stat label="Paid bills" tone="accent" icon="fa-receipt" value={nfmt(t.paidOrders)} />
+          <Stat label="Average bill" tone="info" icon="fa-scale-balanced" big value={inr(avg)} sub="revenue ÷ paid bills" spark={avgSeries.map((s) => s.revenue)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
+          <Stat label="Paid bills" tone="accent" icon="fa-receipt" value={nfmt(t.paidOrders)} onClick={() => onOpenReport("volume")} title="Open the Order volume report" />
           <Stat label="Highest bucket" tone="good" icon="fa-arrow-up" value={inr(withData.length ? Math.max(...withData) : 0)} />
           <Stat label="Lowest bucket" tone="warn" icon="fa-arrow-down" value={inr(withData.length ? Math.min(...withData) : 0)} />
         </div>
@@ -501,9 +505,9 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Orders placed" tone="info" icon="fa-list-check" big value={nfmt(placed)} sub={`${nfmt(t.paidOrders)} paid · ${nfmt(t.cancelledOrders)} cancelled`} spark={vol.map((v) => v.value)} />
+          <Stat label="Orders placed" tone="info" icon="fa-list-check" big value={nfmt(placed)} sub={`${nfmt(t.paidOrders)} paid · ${nfmt(t.cancelledOrders)} cancelled`} spark={vol.map((v) => v.value)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
           <Stat label="Paid bills" tone="good" icon="fa-circle-check" value={nfmt(t.paidOrders)} sub={`${paidPct.toFixed(0)}% of placed`} />
-          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={placed ? `${((t.cancelledOrders / placed) * 100).toFixed(1)}% of placed` : ""} />
+          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={placed ? `${((t.cancelledOrders / placed) * 100).toFixed(1)}% of placed` : ""} onClick={() => onOpenReport("cancellations")} title="Open the Cancellations report" />
           <Stat label={`Busiest ${unitWord}`} tone="accent" icon="fa-fire" value={nfmt(vol.length ? Math.max(...vol.map((v) => v.value)) : 0)} sub={`orders in one ${unitWord}`} />
         </div>
         <SplitBar
@@ -560,8 +564,8 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Best weekday" tone="good" icon="fa-crown" big value={best ? FULL[best.nm] : "—"} sub={best ? `${inr(best.rev)} · ${inr(best.days ? best.rev / best.days : 0)}/day` : "no data yet"} />
-          <Stat label="Slowest weekday" tone="warn" icon="fa-arrow-trend-down" value={worst ? FULL[worst.nm] : "—"} sub={worst ? `${inr(worst.rev)} · ${inr(worst.days ? worst.rev / worst.days : 0)}/day` : ""} />
+          <Stat label="Best weekday" tone="good" icon="fa-crown" big value={best ? FULL[best.nm] : "—"} sub={best ? `${inr(best.rev)} · ${inr(best.days ? best.rev / best.days : 0)}/day` : "no data yet"} onClick={best ? () => scrollToId("rs-weekday-breakdown") : undefined} title={best ? "Jump to the day-of-week breakdown" : undefined} />
+          <Stat label="Slowest weekday" tone="warn" icon="fa-arrow-trend-down" value={worst ? FULL[worst.nm] : "—"} sub={worst ? `${inr(worst.rev)} · ${inr(worst.days ? worst.rev / worst.days : 0)}/day` : ""} onClick={worst ? () => scrollToId("rs-weekday-breakdown") : undefined} title={worst ? "Jump to the day-of-week breakdown" : undefined} />
           <Stat label="Weekend share" tone="info" icon="fa-champagne-glasses" value={allRev ? `${Math.round((wkRev / allRev) * 100)}%` : "0%"} sub="Sat + Sun of revenue" />
           <Stat label="Weekend / day" tone="accent" icon="fa-calendar-day" value={inr(wkAvg)} sub={`across ${nfmt(wkDays)} day${wkDays === 1 ? "" : "s"}`} />
           <Stat label="Weekday / day" tone="accent" icon="fa-calendar-day" value={inr(wdAvg)} sub={`across ${nfmt(wdDays)} day${wdDays === 1 ? "" : "s"}`} />
@@ -575,7 +579,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         <Panel title="Revenue by day of week" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={240} title="Which day earns most" /></div>
         </Panel>
-        <Panel title="Breakdown" hint="each day added up across the period" pad={false}>
+        <Panel id="rs-weekday-breakdown" title="Breakdown" hint="each day added up across the period" pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
               <thead><tr><th>Day</th><th className="num">Days counted</th><th className="num">Paid bills</th><th className="num">Revenue</th><th className="num">% of week</th><th className="num">Avg / day</th></tr></thead>
@@ -628,7 +632,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Tax collected" tone="accent" icon="fa-landmark" big value={inr(t.tax)} sub={`${nfmt(t.paidOrders)} paid bills`} spark={mrows.map((r) => r.tax)} />
+          <Stat label="Tax collected" tone="accent" icon="fa-landmark" big value={inr(t.tax)} sub={`${nfmt(t.paidOrders)} paid bills`} spark={mrows.map((r) => r.tax)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
           <Stat label="Taxable sales" tone="accent" icon="fa-cart-shopping" value={inr(taxable)} sub="subtotal − discount" />
           <Stat label="Effective rate" tone={rateOk ? "good" : "warn"} icon="fa-percent" value={`${actualPct.toFixed(2)}%`}
             sub={configuredPct != null ? (rateOk ? `matches the set ${configuredPct}%` : `set rate is ${configuredPct}%`) : "tax ÷ taxable sales"} />
@@ -708,9 +712,9 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         <div className="rs-kpis">
           <Stat label="Discounts given" tone="warn" icon="fa-tag" big value={inr(t.discount)} sub={`over ${nfmt(discRows.length)} day${discRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.discount)} />
           <Stat label="Effective rate" tone="warn" icon="fa-percent" value={`${effPct.toFixed(1)}%`} sub="of gross sales" />
-          <Stat label="Revenue after discounts" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} />
+          <Stat label="Revenue after discounts" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} onClick={() => onOpenReport("sales")} title="Open the Sales trend report" />
           <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} />
-          <Stat label="Biggest day" tone="bad" icon="fa-arrow-up" value={biggest ? inr(biggest.discount) : "—"} sub={biggest ? bucketLabel(biggest.bucket, bucket) : ""} />
+          <Stat label="Biggest day" tone="bad" icon="fa-arrow-up" value={biggest ? inr(biggest.discount) : "—"} sub={biggest ? bucketLabel(biggest.bucket, bucket) : ""} onClick={biggest ? () => scrollToId("rs-disc-days") : undefined} title={biggest ? "Jump to the days-with-discounts table" : undefined} />
         </div>
         <Panel title="Discounts over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={mrows.map((r) => ({ label: bucketLabel(r.bucket, bucket), value: r.discount }))} color={accent} money name="Discount" height={240} /></div>
@@ -724,7 +728,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
             </p>
           </Panel>
         )}
-        <Panel title="Days with discounts" hint="only days a discount was given" pad={false}>
+        <Panel id="rs-disc-days" title="Days with discounts" hint="only days a discount was given" pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
               <thead><tr><th>Period</th><th className="num">Paid bills</th><th className="num">Discount</th><th className="num">Revenue</th><th className="num">Disc. rate</th></tr></thead>
@@ -758,8 +762,8 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
           <Stat label="Value lost" tone="bad" icon="fa-ban" big value={inr(t.cancelledValue)} sub={`over ${nfmt(cxRows.length)} day${cxRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.cancelledValue)} />
           <Stat label="Cancelled orders" tone="bad" icon="fa-circle-xmark" value={nfmt(t.cancelledOrders)} sub={`${cxPct.toFixed(1)}% of all placed`} />
           <Stat label="Avg lost / cancel" tone="warn" icon="fa-scale-balanced" value={inr(avgPerCx)} />
-          <Stat label="Kept revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} />
-          <Stat label="Worst day" tone="warn" icon="fa-arrow-up" value={worst ? inr(worst.cancelledValue) : "—"} sub={worst ? bucketLabel(worst.bucket, bucket) : ""} />
+          <Stat label="Kept revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} onClick={() => onOpenReport("sales")} title="Open the Sales trend report" />
+          <Stat label="Worst day" tone="warn" icon="fa-arrow-up" value={worst ? inr(worst.cancelledValue) : "—"} sub={worst ? bucketLabel(worst.bucket, bucket) : ""} onClick={worst ? () => scrollToId("rs-cx-days") : undefined} title={worst ? "Jump to the days-with-cancellations table" : undefined} />
         </div>
         <p className="rs-note" style={{ marginTop: -4, marginBottom: 12 }}>
           <i className={`fas ${health.icon}`} aria-hidden style={{ color: health.tone, marginRight: 6 }} />
@@ -774,7 +778,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
             <p className="rs-note">These {top5.length} day{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of all the value lost to cancellations this period.</p>
           </Panel>
         )}
-        <Panel title="Days with cancellations" hint="only days something was voided" pad={false}>
+        <Panel id="rs-cx-days" title="Days with cancellations" hint="only days something was voided" pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
               <thead><tr><th>Period</th><th className="num">Cancelled orders</th><th className="num">Value lost</th><th className="num">Kept revenue</th></tr></thead>
@@ -811,11 +815,11 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
           <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(total)} sub={`${nfmt(bills)} bills settled`} />
           <Stat label="Bills settled" tone="info" icon="fa-receipt" value={nfmt(bills)} />
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avgBill)} />
-          <Stat label="Top method" tone="good" icon="fa-wallet" value={canonPayMethod(top?.method)} sub={`${Math.round(topShare)}% of money · ${nfmt(top?.orders || 0)} bills`} />
-          <Stat label="Methods used" tone="info" icon="fa-layer-group" value={nfmt(pays.length)} />
+          <Stat label="Top method" tone="good" icon="fa-wallet" value={canonPayMethod(top?.method)} sub={`${Math.round(topShare)}% of money · ${nfmt(top?.orders || 0)} bills`} onClick={() => scrollToId("rs-pay-method")} title="Jump to the per-method table" />
+          <Stat label="Methods used" tone="info" icon="fa-layer-group" value={nfmt(pays.length)} onClick={() => scrollToId("rs-pay-method")} title="Jump to the per-method table" />
         </div>
         <div className="rs-grid two">
-          <Panel title="Per method" hint="bills, money and average" pad={false}>
+          <Panel id="rs-pay-method" title="Per method" hint="bills, money and average" pad={false}>
             <div className="rs-tablewrap">
               <table className="rs-table">
                 <thead><tr><th>Method</th><th className="num">Bills</th><th className="num">Revenue</th><th className="num">% share</th><th className="num">Avg bill</th></tr></thead>
@@ -855,21 +859,21 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
   if (sel === "dishes") {
     const dishes = (data.rows ?? []) as DishRow[];
     if (!dishes.length) return <EmptyCard text="No dish sales in this period." />;
-    return <DishesReport rows={dishes} />;
+    return <DishesReport rows={dishes} onOpenReport={onOpenReport} />;
   }
 
   // ── CATEGORY MIX ──
   if (sel === "categories") {
     const cats = (data.rows ?? []) as CatRow[];
     if (!cats.length) return <EmptyCard text="No category sales in this period." />;
-    return <CategoriesReport rows={cats} />;
+    return <CategoriesReport rows={cats} onOpenReport={onOpenReport} />;
   }
 
   // ── MENU ENGINEERING ──
   if (sel === "menu") {
     const mrowsMenu = (data.rows ?? []) as MI[];
     if (!classifyMenu(mrowsMenu).dishes.length) return <EmptyCard text="No dish sales in this period." />;
-    return <MenuReport rows={mrowsMenu} />;
+    return <MenuReport rows={mrowsMenu} onOpenReport={onOpenReport} />;
   }
 
   // ── BUSY HOURS ──
@@ -896,8 +900,8 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Peak hour" tone="accent" icon="fa-fire" big value={hourLabel(peak.hour)} sub={`${inr(peak.revenue)} · ${nfmt(peak.orders)} orders`} spark={ordSeries.map((s) => s.value)} />
-          <Stat label="Quietest hour" tone="info" icon="fa-moon" value={quietest ? hourLabel(quietest.hour) : "—"} sub={quietest ? `${inr(quietest.revenue)} · ${nfmt(quietest.orders)} orders` : "no orders yet"} />
+          <Stat label="Peak hour" tone="accent" icon="fa-fire" big value={hourLabel(peak.hour)} sub={`${inr(peak.revenue)} · ${nfmt(peak.orders)} orders`} spark={ordSeries.map((s) => s.value)} onClick={() => scrollToId("rs-hourly-table")} title="Jump to the hour-by-hour table" />
+          <Stat label="Quietest hour" tone="info" icon="fa-moon" value={quietest ? hourLabel(quietest.hour) : "—"} sub={quietest ? `${inr(quietest.revenue)} · ${nfmt(quietest.orders)} orders` : "no orders yet"} onClick={quietest ? () => scrollToId("rs-hourly-table") : undefined} title={quietest ? "Jump to the hour-by-hour table" : undefined} />
           <Stat label="Total orders" tone="info" icon="fa-list-check" value={nfmt(totalOrders)} />
           <Stat label="Total revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(totalRev)} />
           <Stat label="Avg bill" tone="good" icon="fa-scale-balanced" value={inr(avgBill)} sub="revenue ÷ orders" />
@@ -914,7 +918,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         <Panel title="Orders by hour" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={ordSeries} color={accent} money={false} name="Orders" height={210} title="When it's busiest" /></div>
         </Panel>
-        <Panel title="Hour by hour" hint="only hours with orders" pad={false}>
+        <Panel id="rs-hourly-table" title="Hour by hour" hint="only hours with orders" pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
               <thead><tr><th>Hour</th><th className="num">Orders</th><th className="num">Revenue</th><th className="num">% of revenue</th><th className="num">Avg bill</th></tr></thead>
@@ -963,8 +967,8 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Strongest part" tone="good" icon={best.icon} big value={best.rev > 0 ? best.label : "—"} sub={best.rev > 0 ? `${inr(best.rev)} · ${totalRev ? Math.round((best.rev / totalRev) * 100) : 0}% of revenue` : "no data yet"} />
-          <Stat label="Quietest part" tone="warn" icon="fa-arrow-trend-down" value={weakest ? weakest.label : "—"} sub={weakest ? `${inr(weakest.rev)} · ${totalRev ? Math.round((weakest.rev / totalRev) * 100) : 0}% of revenue` : ""} />
+          <Stat label="Strongest part" tone="good" icon={best.icon} big value={best.rev > 0 ? best.label : "—"} sub={best.rev > 0 ? `${inr(best.rev)} · ${totalRev ? Math.round((best.rev / totalRev) * 100) : 0}% of revenue` : "no data yet"} onClick={best.rev > 0 ? () => scrollToId("rs-daypart-breakdown") : undefined} title={best.rev > 0 ? "Jump to the day-part breakdown" : undefined} />
+          <Stat label="Quietest part" tone="warn" icon="fa-arrow-trend-down" value={weakest ? weakest.label : "—"} sub={weakest ? `${inr(weakest.rev)} · ${totalRev ? Math.round((weakest.rev / totalRev) * 100) : 0}% of revenue` : ""} onClick={weakest ? () => scrollToId("rs-daypart-breakdown") : undefined} title={weakest ? "Jump to the day-part breakdown" : undefined} />
           {parts.map((p) => <Stat key={p.label} label={p.label} tone="info" icon={p.icon} value={inr(p.rev)} sub={`${nfmt(p.orders)} orders`} />)}
         </div>
         {best.rev > 0 && (
@@ -976,7 +980,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
         <Panel title="Revenue by day part" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={chart.map((c) => ({ label: c.label, value: c.revenue }))} color={accent} money height={230} title="How the day splits" /></div>
         </Panel>
-        <Panel title="Breakdown" hint="each stretch of the day" pad={false}>
+        <Panel id="rs-daypart-breakdown" title="Breakdown" hint="each stretch of the day" pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
               <thead><tr><th>Day part</th><th className="num">Orders</th><th className="num">Revenue</th><th className="num">% share</th><th className="num">Avg bill</th></tr></thead>
@@ -1014,7 +1018,7 @@ function ReportBody({ sel, data, accent, singleRest }: { sel: RKey; data: Payloa
 function MoneyTable({ rows, totals, bucket, showAvg }: { rows: MoneyRow[]; totals: Totals; bucket: string; showAvg?: boolean }) {
   if (!rows.length) return <EmptyCard text="Nothing in this period." />;
   return (
-    <Panel title="By period" pad={false}>
+    <Panel id="rs-by-period" title="By period" pad={false}>
       <div className="rs-tablewrap">
         <table className="rs-table">
           <thead><tr><th>Period</th><th className="num">Orders</th><th className="num">Paid</th><th className="num">Subtotal</th><th className="num">Tax</th><th className="num">Discount</th><th className="num">Revenue</th>{showAvg && <th className="num">Avg bill</th>}<th className="num">Cancelled</th></tr></thead>
