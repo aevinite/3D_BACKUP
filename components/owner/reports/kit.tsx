@@ -116,7 +116,7 @@ export function Stat({ label, value, sub, tone = "accent", icon, delta, spark, b
       </div>
       <div className="rs-stat-v"><AnimatedStatValue value={value} /></div>
       {sub != null && <div className="rs-stat-sub">{sub}</div>}
-      {spark && spark.length > 1 && <div className="rs-stat-spark"><Spark points={spark} color="var(--tone-c)" width={128} height={30} /></div>}
+      {spark && spark.length > 1 && <div className="rs-stat-spark"><Spark points={spark} color="var(--accent)" width={128} height={30} /></div>}
     </div>
   );
 }
