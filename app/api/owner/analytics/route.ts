@@ -104,6 +104,14 @@ function prevTsWindowFor(range: string, from: string, to: string): { from: strin
   const f = Date.parse(from);
   if (range === "7d") return { from: new Date(f - 7 * DAY).toISOString(), to: from };
   if (range === "30d") return { from: new Date(f - 30 * DAY).toISOString(), to: from };
+  // "month" (the locked this-month-vs-last-month chart): previous window is the WHOLE
+  // previous calendar month, so the overlay lines up day-1↔day-1 by day-of-month.
+  if (range === "month") {
+    const istNow = new Date(Date.now() + 5.5 * 3600_000);
+    const y = istNow.getUTCFullYear(), m = istNow.getUTCMonth();
+    const start = (yy: number, mm: number) => Date.UTC(yy, mm, 1) - 5.5 * 3600_000;
+    return { from: new Date(start(y, m - 1)).toISOString(), to: new Date(start(y, m)).toISOString() };
+  }
   return prevWindowFor(range, from, to);
 }
 

@@ -24,7 +24,7 @@ import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import { asSuffix } from "@/lib/ownerPin";
 import {
   AreaTrend, TimeBar, LeaderBar, CategoryDonut, PaymentDonut, canonPayMethod,
-  DeltaChip, Spark, SparkArea, Heatmap, StackedDailyBars, RevenueVsPrev,
+  DeltaChip, Spark, SparkArea, Heatmap, StackedDailyBars, RevMonthCompare,
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
@@ -52,6 +52,7 @@ const PREV_LABEL: Record<Range, string> = {
 // Theme accent for every single-scope chart (owner 2026-07-26: "it should be green
 // everywhere" — Burger Barn's charts were rendering in its brown accent).
 const GREEN = "#34d399";
+const GRAY_LINE = "#9ca3af";   // "last month" reference line (neutral grey — clearly visible over the green area)
 const FALLBACK = GREEN;
 
 type Restaurant = {
@@ -441,6 +442,9 @@ export default function OwnerDashboard() {
     if (!ov) return;
     for (const r of neededRanges) if (!cache[`${scopeKey}|${r}`]) fetchPayload(scopeKey, r);
     if (!moneyCache[`${scopeKey}|${globalRange}`]) fetchMoney(scopeKey, globalRange);
+    // The "Revenue this month vs last month" chart is LOCKED to whole calendar months,
+    // independent of the range dropdown — fetch its own month payload once.
+    if (!cache[`${scopeKey}|month`]) fetchPayload(scopeKey, "month", { qs: "range=month" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ov, scopeKey, neededRanges, globalRange]);
 
@@ -451,6 +455,7 @@ export default function OwnerDashboard() {
   const tick = useCallback(() => {
     loadOverview();
     for (const r of neededRanges) fetchPayload(scopeKey, r);
+    fetchPayload(scopeKey, "month", { qs: "range=month" });
     fetchMoney(scopeKey, globalRange);
   }, [loadOverview, fetchPayload, fetchMoney, neededRanges, scopeKey, globalRange]);
   const tickRef = useRef(tick); tickRef.current = tick;
@@ -540,52 +545,48 @@ export default function OwnerDashboard() {
     return { rows, lines, stacked };
   }, [pl, globalRange]);
 
-  // Revenue THIS period vs the PREVIOUS equal-length period (replaces Busy hours, owner
-  // 2026-07-26). Works for group (total across restaurants) and single scope. Overlays
-  // day-i of this period on day-i of last, so the dashed line is directly comparable.
-  const revCompare = useMemo(() => {
-    const p = pl(globalRange);
-    if (!p) return [] as { label: string; cur: number; prev: number | null; __orders: number }[];
-    // current total revenue + orders per IST bucket (group sums across restaurants)
-    const curBy = new Map<string, { rev: number; ord: number }>();
+  // Revenue THIS calendar month vs LAST calendar month, aligned by day-of-month (day-1 over
+  // day-1), rendered as two clean lines like the multi-restaurant "Revenue over time" chart
+  // (owner 2026-07-26: light green = this month, dark green = last month, line only). LOCKED
+  // to whole months (own `month` payload), so it's always populated regardless of the range
+  // dropdown. Group scope sums across restaurants per day; single scope is per day.
+  const monthCompare = useMemo(() => {
+    const p = pl("month");
+    if (!p) return { rows: [] as Record<string, unknown>[], hasPrev: false };
+    const dom = (bucket: string) => new Date(Date.parse(bucket) + 5.5 * 3600_000).getUTCDate();
+    const curBy = new Map<number, { rev: number; ord: number }>();
     for (const t of p.timeseries) {
-      const k = istKey(new Date(t.bucket), globalRange);
-      const c = curBy.get(k) || { rev: 0, ord: 0 };
-      c.rev += t.revenue; c.ord += t.orders; curBy.set(k, c);
+      const d = dom(t.bucket);
+      const c = curBy.get(d) || { rev: 0, ord: 0 };
+      c.rev += t.revenue; c.ord += t.orders; curBy.set(d, c);
     }
-    // previous window revenue keyed by its OWN IST bucket
-    const prevBy = new Map<string, number>();
+    const prevBy = new Map<number, number>();
     for (const t of p.timeseriesPrev ?? []) {
-      const k = istKey(new Date(t.bucket), globalRange);
-      prevBy.set(k, (prevBy.get(k) || 0) + t.revenue);
+      const d = dom(t.bucket);
+      prevBy.set(d, (prevBy.get(d) || 0) + t.revenue);
     }
-    const exp = expectedBuckets(globalRange);
-    if (exp.length) {
-      // day/hour ranges: each current bucket's twin is the same bucket one whole window back
-      const shiftMs = (globalRange === "today" || globalRange === "yesterday" ? 1 : globalRange === "7d" ? 7 : 30) * DAY_MS;
-      return exp.map((e) => ({
-        label: e.label,
-        cur: curBy.get(e.key)?.rev ?? 0,
-        prev: prevBy.get(istKey(new Date(e.ms - shiftMs), globalRange)) ?? null,
-        __orders: curBy.get(e.key)?.ord ?? 0,
-      }));
+    const hasPrev = prevBy.size > 0;
+    const todayDom = new Date(Date.now() + 5.5 * 3600_000).getUTCDate();
+    const maxDay = Math.max(todayDom, ...(hasPrev ? [...prevBy.keys()] : [0]));
+    const rows: Record<string, unknown>[] = [];
+    for (let d = 1; d <= maxDay; d++) {
+      rows.push({
+        label: String(d),
+        cur: d <= todayDom ? (curBy.get(d)?.rev ?? 0) : null, // this month: real up to today, blank for future days
+        prev: hasPrev ? (prevBy.get(d) ?? 0) : null,
+        __orders: curBy.get(d)?.ord ?? 0,
+      });
     }
-    // month/all/custom (no fixed grid): ordinal zip of chronological current vs previous
-    const curKeys = Array.from(curBy.keys()).sort();
-    const prevVals = Array.from(prevBy.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([, v]) => v);
-    return curKeys.map((k, i) => ({
-      label: tsLabel(`${k}T00:00:00+05:30`, globalRange),
-      cur: curBy.get(k)?.rev ?? 0,
-      prev: i < prevVals.length ? prevVals[i] : null,
-      __orders: curBy.get(k)?.ord ?? 0,
-    }));
-  }, [pl, globalRange]);
-  // Human label for the previous period, matching the selected range.
-  const prevPeriodName = globalRange === "today" ? "Yesterday"
-    : globalRange === "yesterday" ? "Day before"
-    : globalRange === "7d" ? "Previous 7 days"
-    : globalRange === "30d" ? "Previous 30 days"
-    : "Previous period";
+    return { rows, hasPrev };
+  }, [pl]);
+  // This / last calendar-month names for the legend + card tag (IST).
+  const monthName = (mi: number) => new Date(Date.UTC(2000, ((mi % 12) + 12) % 12, 1)).toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
+  const istMonthIdx = new Date(Date.now() + 5.5 * 3600_000).getUTCMonth();
+  const thisMonthName = monthName(istMonthIdx);
+  const lastMonthName = monthName(istMonthIdx - 1);
+  // Names for the this-vs-last-month chart legend/tooltip.
+  const monthCurName = `This month · ${thisMonthName}`;
+  const monthPrevName = `Last month · ${lastMonthName}`;
 
   // Latest-active-week fallback (owner round-5: "the two datas are not even
   // showing"): if the pinned last-7-days window has zero orders but the main range
@@ -1010,13 +1011,13 @@ export default function OwnerDashboard() {
             </div>
           </div>
 
-          {/* Revenue vs previous period (replaced Busy hours, owner 2026-07-26 — the busy
-              heatmap below already covers hour-of-day) + category. */}
+          {/* This month vs last month (replaced Busy hours, owner 2026-07-26 — the busy
+              heatmap below already covers hour-of-day) + category. Locked to whole months. */}
           <div className="ow2-two" style={{ marginBottom: 12 }}>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue vs previous <span className="mut">· this period vs {prevPeriodName.toLowerCase()} · all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
-              {!trendPayload ? <div className="adm-empty">Loading…</div>
-                : <RevenueVsPrev data={revCompare} curName="This period" prevName={prevPeriodName} color={GREEN} />}
+              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName} · all {restCount} restaurants</span></span><span className="ow2-tag">{thisMonthName}</span></div>
+              {!pl("month") ? <div className="adm-empty">Loading…</div>
+                : <RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />}
             </div>
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue by category <span className="mut">· all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
@@ -1082,9 +1083,9 @@ export default function OwnerDashboard() {
 
           <div className="ow2-two">
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue vs previous <span className="mut">· this period vs {prevPeriodName.toLowerCase()}</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
-              {!trendPayload || trendPayload.scope !== "restaurant" ? <div className="adm-empty">Loading…</div>
-                : <RevenueVsPrev data={revCompare} curName="This period" prevName={prevPeriodName} color={GREEN} />}
+              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName}</span></span><span className="ow2-tag">{thisMonthName}</span></div>
+              {!pl("month") ? <div className="adm-empty">Loading…</div>
+                : <RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />}
             </div>
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>

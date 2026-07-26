@@ -173,56 +173,24 @@ export function AreaTrend({ data, lines, height = 260 }: {
 }
 const cssId = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_");
 
-// ── RevenueVsPrev — this period's revenue (solid area) over the PREVIOUS equal-length
-//    period (dashed line). Replaces "Busy hours" (owner 2026-07-26). Overlaid by ordinal
-//    bucket position: day-1 of this period sits above day-1 of last, so the two lines are
-//    directly comparable and answer "are we growing?" at a glance. ──────────────────────
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function VsTip({ active, payload, label, curName, prevName }: any) {
-  if (!active || !payload?.length) return null;
-  const row = payload[0]?.payload || {};
-  const cur = Number(row.cur) || 0, prev = Number(row.prev);
-  const hasPrev = Number.isFinite(prev) && prev > 0;
-  const delta = hasPrev ? Math.round(((cur - prev) / prev) * 100) : null;
-  return (
-    <TipBox>
-      {label != null && <div style={{ color: "var(--muted)", marginBottom: 4 }}>{label}</div>}
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <span style={{ width: 9, height: 9, borderRadius: 2, background: "#34d399", display: "inline-block" }} />
-        <b>{curName}</b>: {inr(cur)}
-      </div>
-      {hasPrev && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2 }}>
-          <span style={{ width: 9, height: 9, borderRadius: 2, background: "var(--muted)", display: "inline-block", opacity: 0.7 }} />
-          <b>{prevName}</b>: {inr(prev)}
-        </div>
-      )}
-      {delta != null && (
-        <div style={{ marginTop: 4, fontWeight: 700, color: delta >= 0 ? "#0ca30c" : "#e66767" }}>
-          {delta >= 0 ? "▲" : "▼"} {Math.abs(delta)}% vs {prevName.toLowerCase()}
-        </div>
-      )}
-    </TipBox>
-  );
-}
-export function RevenueVsPrev({ data, height = 260, curName = "This period", prevName = "Previous period", color = "#34d399" }: {
-  data: { label: string; cur: number; prev: number | null; __orders?: number }[];
-  height?: number; curName?: string; prevName?: string; color?: string;
+// ── RevMonthCompare — "this month vs last month" (owner 2026-07-26). THIS month is a
+//    green filled area (the gradient "light falling top→bottom" look the owner liked),
+//    LAST month is a plain grey reference line over it so it stays clearly visible. Data
+//    rows: { label, cur, prev, __orders }, aligned by day-of-month. ────────────────────
+export function RevMonthCompare({ data, height = 260, curName, prevName, curColor = "#34d399", prevColor = "#9ca3af" }: {
+  data: Record<string, unknown>[];
+  height?: number; curName: string; prevName: string; curColor?: string; prevColor?: string;
 }) {
-  const curVals = data.map((d) => Number(d.cur) || 0);
-  // Same dynamic-chart guard as the rest: a lone point is a stat, not a trend.
-  if (populated(curVals) < MIN_POINTS) return <NotEnough height={height} value={populated(curVals) === 1 ? inr(soleValue(curVals)) : undefined} />;
+  if (!data.length) return <Empty />;
   const hasPrev = data.some((d) => (Number(d.prev) || 0) > 0);
   const values = data.flatMap((d) => [Number(d.cur) || 0, ...(hasPrev ? [Number(d.prev) || 0] : [])]);
-  const gid = "own-g-revvsprev";
+  const gid = "own-g-monthcur";
   return (
     <div>
       <div className="own-legend" role="list">
-        <span className="own-leg" role="listitem"><span className="own-leg-dot" style={{ background: color }} aria-hidden="true" />{curName}</span>
+        <span className="own-leg" role="listitem"><span className="own-leg-dot" style={{ background: curColor }} aria-hidden="true" />{curName}</span>
         {hasPrev && (
-          <span className="own-leg" role="listitem">
-            <span className="own-leg-dot" style={{ background: "var(--muted)", opacity: 0.7, borderRadius: 1 }} aria-hidden="true" />{prevName}
-          </span>
+          <span className="own-leg" role="listitem"><span className="own-leg-dot" style={{ background: prevColor }} aria-hidden="true" />{prevName}</span>
         )}
       </div>
       <div style={{ width: "100%", height }}>
@@ -230,20 +198,20 @@ export function RevenueVsPrev({ data, height = 260, curName = "This period", pre
           <ComposedChart data={data} margin={{ left: 4, right: 10, top: 8, bottom: 4 }}>
             <defs>
               <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={color} stopOpacity={0.34} />
-                <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+                <stop offset="0%" stopColor={curColor} stopOpacity={0.4} />
+                <stop offset="100%" stopColor={curColor} stopOpacity={0.02} />
               </linearGradient>
             </defs>
             <CartesianGrid stroke={GRID} vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} minTickGap={24} />
             <YAxis domain={fitDomain(values)} tick={{ fontSize: 11, fill: AXIS }} tickFormatter={compact} width={48} allowDecimals={false} />
-            <Tooltip content={<VsTip curName={curName} prevName={prevName} />} cursor={{ stroke: "var(--muted)", strokeDasharray: "3 3", strokeOpacity: 0.5 }} />
-            {/* Previous line drawn FIRST so the current area sits on top of it. */}
+            <Tooltip content={<MoneyTip />} cursor={{ stroke: "var(--muted)", strokeDasharray: "3 3", strokeOpacity: 0.5 }} />
+            {/* grey LAST-month line drawn first, under the green area's stroke */}
             {hasPrev && (
-              <Line type="monotone" dataKey="prev" name={prevName} stroke="var(--muted)" strokeWidth={2}
-                strokeDasharray="5 5" dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--card)" }} />
+              <Line type="monotone" dataKey="prev" name={prevName} stroke={prevColor} strokeWidth={2}
+                dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--card)" }} />
             )}
-            <Area type="monotone" dataKey="cur" name={curName} stroke={color} strokeWidth={2.5}
+            <Area type="monotone" dataKey="cur" name={curName} stroke={curColor} strokeWidth={2.5}
               dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: "var(--card)" }} fill={`url(#${gid})`} />
           </ComposedChart>
         </ResponsiveContainer>
