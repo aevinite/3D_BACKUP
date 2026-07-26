@@ -266,7 +266,7 @@ const NR_OWNER_SECTIONS = [["menu", "Menu"], ["reports", "Reports"], ["staff", "
 const NR_MGR_POWERS = [["manage_staff", "Manage staff"], ["edit_menu", "Edit menu"], ["give_discounts", "Give discounts"], ["view_dashboard", "View dashboard"], ["void_bills", "Void / delete bills"], ["edit_settings", "Edit settings"], ["view_ratings", "View ratings"], ["table_tags", "Table types"], ["khata", "Pay Later (khata)"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT ops"], ["take_orders", "Take orders"], ["parcel", "Parcel / takeaway"]] as const;
 const NR_MODULES = [["table_tags", "Table types + Pay Later"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT operations"], ["take_orders", "Take orders (manager)"], ["parcel", "Parcel / takeaway"]] as const;
 const NR_TABLET_CAPS = [["tablet_discount", "Discounts"], ["tablet_mark_paid", "Mark paid"], ["tablet_invoice", "Invoice"], ["tablet_banquet", "Banquet"], ["tablet_table_tags", "Table types"], ["tablet_khata", "Pay Later"], ["tablet_table_ops", "Table & KOT ops"], ["tablet_take_orders", "Take orders"], ["tablet_parcel", "Parcel"]] as const;
-const NR_MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: false, table_ops: false, take_orders: false, parcel: false };
+const NR_MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: false, table_ops: false, take_orders: false, parcel: true };
 const NR_TABLET_DEFAULT: Record<string, "off" | "on" | "pin"> = { tablet_discount: "off", tablet_mark_paid: "off", tablet_invoice: "off", tablet_banquet: "off", tablet_table_tags: "off", tablet_khata: "off", tablet_table_ops: "off", tablet_take_orders: "on", tablet_parcel: "off" };
 // The SYSTEM defaults for a brand-new restaurant (matches lib/settingsClone + MP_DEFAULT +
 // owner absent=ON). All owner sections + power switches on; modules off; grants = MP_DEFAULT.
@@ -276,6 +276,7 @@ function systemAccess(): Access {
   for (const [k] of NR_MGR_POWERS) owner["power_" + k] = true;
   const features: Record<string, boolean> = {};
   for (const [m] of NR_MODULES) { features[m + "_allowed"] = false; features[m + "_owner_control"] = false; }
+  features.parcel_allowed = true; // parcel is ON for the manager by default (owner 2026-07-26)
   return { owner, manager: { ...NR_MP_DEFAULT }, tablet: { ...NR_TABLET_DEFAULT }, features };
 }
 // Merge a (possibly partial) saved access blob over the system defaults, so a missing key
