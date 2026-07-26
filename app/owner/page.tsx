@@ -796,11 +796,26 @@ export default function OwnerDashboard() {
       const comps: { label: string; amount: number }[] = (m && !m.error && m.tax?.components ? m.tax.components : [])
         .map((c: { label?: string; amount?: number }) => ({ label: String(c.label || "Tax"), amount: Number(c.amount) || 0 }))
         .filter((c: { amount: number }) => c.amount > 0);
+      // Day-by-day appendix straight from the sales-report rows (bucket grain rides
+      // on the payload: hour for today/yesterday, day for weeks/months, month for all).
+      const grain = m && !m.error ? String(m.bucket || "day") : "day";
+      const dlabel = (iso: string) => {
+        const dt = new Date(iso);
+        if (grain === "hour") return dt.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST });
+        if (grain === "month") return dt.toLocaleDateString("en-IN", { month: "short", year: "numeric", timeZone: IST });
+        return dt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: IST });
+      };
+      const daily = (m && !m.error ? (m.rows ?? []) : []).map((x: Record<string, unknown>) => ({
+        label: dlabel(String(x.bucket)), orders: Number(x.orders) || 0,
+        gross: Number(x.subtotal) || 0, discount: Number(x.discount) || 0,
+        tax: Number(x.tax) || 0, net: Number(x.revenue) || 0,
+      }));
       return {
         name: r.name, slug: r.slug,
         revenue: Number(a.kpis?.revenue) || 0, orders: Number(a.kpis?.orders) || 0,
         paidOrders: Number(a.kpis?.paidOrders ?? a.kpis?.orders) || 0,
         avg: Number(a.kpis?.avgOrder) || 0, share: 0,
+        prevRevenue: a.prev ? Number(a.prev.revenue) || 0 : null,
         billing: {
           gross: t ? Number(t.subtotal) || 0 : null,
           discount: t ? Number(t.discount) || 0 : null,
@@ -812,7 +827,9 @@ export default function OwnerDashboard() {
         },
         busiestHour: hour?.orders ? `${hour.hour}:00` : null,
         dishes: (a.dishes ?? []) as { title: string; qty: number; revenue: number }[],
+        categories: (a.categories ?? []) as { category: string; qty: number; revenue: number }[],
         payments: ((a.paymentMethods ?? []) as Pay[]).map((p) => ({ method: canonPayMethod(p.method), revenue: p.revenue, orders: p.orders })),
+        daily,
       };
     }));
     const totalRev = perRest.reduce((s, r) => s + r.revenue, 0);
@@ -836,6 +853,7 @@ export default function OwnerDashboard() {
       group: {
         revenue: totalRev, orders: perRest.reduce((s, r) => s + r.orders, 0), paidOrders,
         avg: paidOrders ? totalRev / paidOrders : 0,
+        prevRevenue: perRest.every((r) => r.prevRevenue != null) ? perRest.reduce((s, r) => s + (r.prevRevenue || 0), 0) : null,
         billing: {
           gross: bsum("gross"), discount: bsum("discount"),
           taxComponents: Array.from(gc.entries()).map(([label, amount]) => ({ label, amount })),

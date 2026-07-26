@@ -20,13 +20,17 @@ export type BillingDetails = {
   cancelledOrders: number | null;
   cancelledValue: number | null;
 };
+export type DailyRow = { label: string; orders: number; gross: number; discount: number; tax: number; net: number };
 export type ReportRestaurant = {
   name: string; slug: string;
   revenue: number; orders: number; paidOrders: number; avg: number; share: number;
+  prevRevenue: number | null;       // previous equal period (for the ▲/▼ line)
   billing: BillingDetails;
   busiestHour: string | null;
   dishes: { title: string; qty: number; revenue: number }[];
+  categories: { category: string; qty: number; revenue: number }[];
   payments: ReportPayments[];
+  daily: DailyRow[];                // day-by-day (or hour/month) breakdown appendix
 };
 export type ReportData = {
   scopeName: string;
@@ -34,6 +38,7 @@ export type ReportData = {
   generatedAt: string;
   group: {
     revenue: number; orders: number; paidOrders: number; avg: number;
+    prevRevenue: number | null;
     billing: BillingDetails;
     payments: ReportPayments[];
   };
@@ -55,8 +60,16 @@ function billingRows(b: BillingDetails): [string, string][] {
   for (const c of b.taxComponents) rows.push([`${c.label} collected`, inr(c.amount)]);
   if (b.taxTotal != null) rows.push(["Total GST collected", inr(b.taxTotal)]);
   rows.push(["Net amount (kept)", inr(b.net)]);
+  if (b.gross != null && b.gross > 0 && b.discount != null) rows.push(["Discount rate", pct(b.discount, b.gross)]);
   if (b.cancelledValue != null) rows.push(["Cancelled orders", `${nfmt(b.cancelledOrders || 0)} · ${inr(b.cancelledValue)} lost`]);
   return rows;
+}
+// "vs the previous equal period" — the one line every owner asks first.
+function prevLine(cur: number, prev: number | null): string {
+  if (prev == null || prev <= 0) return "";
+  const p = Math.round(((cur - prev) / prev) * 100);
+  const arrow = p > 0 ? "▲" : p < 0 ? "▼" : "•";
+  return `${arrow} ${p > 0 ? "+" : ""}${p}% vs previous period`;
 }
 function billingTableHtml(b: BillingDetails): string {
   return `<table class="kvt"><tbody>${billingRows(b).map(([l, v]) =>
@@ -71,6 +84,25 @@ function settlementHtml(pays: ReportPayments[]): string {
   </tbody></table>`;
 }
 
+function dailyHtml(rows: DailyRow[]): string {
+  if (rows.length < 2) return "";
+  // very long custom windows: keep the sheet printable — cap with an honest note
+  const cap = 92;
+  const shown = rows.length > cap ? rows.slice(-cap) : rows;
+  return `<h3>Day-by-day breakdown</h3>
+  ${rows.length > cap ? `<p class="mut">Showing the most recent ${cap} of ${rows.length} rows — download the CSV for the complete series.</p>` : ""}
+  <table><thead><tr><th>Period</th><th class="r">Orders</th><th class="r">Gross</th><th class="r">Discount</th><th class="r">GST</th><th class="r">Net</th></tr></thead><tbody>
+    ${shown.map((r) => `<tr><td>${esc(r.label)}</td><td class="r">${nfmt(r.orders)}</td><td class="r">${inr(r.gross)}</td><td class="r">${inr(r.discount)}</td><td class="r">${inr(r.tax)}</td><td class="r"><b>${inr(r.net)}</b></td></tr>`).join("")}
+  </tbody></table>`;
+}
+function categoriesHtml(cats: { category: string; qty: number; revenue: number }[]): string {
+  if (!cats.length) return "";
+  const total = cats.reduce((a, c) => a + c.revenue, 0);
+  return `<h3>Category mix</h3>
+  <table><thead><tr><th>Category</th><th class="r">Items sold</th><th class="r">Revenue</th><th class="r">Share</th></tr></thead><tbody>
+    ${cats.slice(0, 10).map((c) => `<tr><td>${esc(c.category)}</td><td class="r">${nfmt(c.qty)}</td><td class="r">${inr(c.revenue)}</td><td class="r">${pct(c.revenue, total)}</td></tr>`).join("")}
+  </tbody></table>`;
+}
 export function buildReportHtml(d: ReportData): string {
   const multi = d.restaurants.length > 1;
   const g = d.group;
@@ -81,7 +113,7 @@ export function buildReportHtml(d: ReportData): string {
     <section>
       <h2>Executive summary</h2>
       <div class="kvgrid">
-        ${kv("Net revenue", inr(g.revenue), "paid, net of discounts")}
+        ${kv("Net revenue", inr(g.revenue), prevLine(g.revenue, g.prevRevenue) || "paid, net of discounts")}
         ${kv("Orders", nfmt(g.orders), `${nfmt(g.paidOrders)} paid`)}
         ${kv("Average bill", inr(g.avg), "per paid order")}
         ${g.billing.taxTotal != null ? kv("Total GST", inr(g.billing.taxTotal), g.billing.taxComponents.map((c) => c.label).join(" + ") || "collected") : ""}
@@ -106,7 +138,7 @@ export function buildReportHtml(d: ReportData): string {
     <section class="rest ${multi ? "brk" : ""}">
       <h2>${multi ? `${i + 1}. ` : ""}${esc(r.name)}</h2>
       <div class="kvgrid">
-        ${kv("Net revenue", inr(r.revenue), multi ? `${Math.round(r.share * 100)}% of the group` : "paid, net of discounts")}
+        ${kv("Net revenue", inr(r.revenue), prevLine(r.revenue, r.prevRevenue) || (multi ? `${Math.round(r.share * 100)}% of the group` : "paid, net of discounts"))}
         ${kv("Orders", nfmt(r.orders), `${nfmt(r.paidOrders)} paid`)}
         ${kv("Average bill", inr(r.avg), "per paid order")}
         ${r.busiestHour ? kv("Busiest hour", r.busiestHour, "most orders") : ""}
@@ -115,11 +147,13 @@ export function buildReportHtml(d: ReportData): string {
         <div><h3>Billing &amp; tax details</h3>${billingTableHtml(r.billing)}</div>
         <div><h3>Settlement</h3>${settlementHtml(r.payments)}</div>
       </div>
+      ${categoriesHtml(r.categories)}
       ${r.dishes.length ? `
       <h3>Top dishes</h3>
       <table><thead><tr><th>#</th><th>Dish</th><th class="r">Sold</th><th class="r">Revenue</th><th class="r">Share</th></tr></thead><tbody>
         ${r.dishes.slice(0, 12).map((x, j) => `<tr><td>${j + 1}</td><td>${esc(x.title)}</td><td class="r">${nfmt(x.qty)}</td><td class="r">${inr(x.revenue)}</td><td class="r">${pct(x.revenue, r.dishes.reduce((a, y) => a + y.revenue, 0))}</td></tr>`).join("")}
       </tbody></table>` : `<p class="mut">No dish sales in this period.</p>`}
+      ${dailyHtml(r.daily)}
     </section>`).join("");
 
   return `<!doctype html><html><head><meta charset="utf-8"/>
@@ -201,6 +235,13 @@ export function buildReportTables(d: ReportData): ExportTable[] {
       head: ["#", "Dish", "Sold", "Revenue"],
       rows: r.dishes.slice(0, 15).map((x, j) => [j + 1, x.title, x.qty, Math.round(x.revenue)]),
     });
+    if (r.categories.length) {
+      out.push({ title: `${r.name} — category mix`, head: ["Category", "Items sold", "Revenue"], rows: r.categories.map((c) => [c.category, c.qty, Math.round(c.revenue)]) });
+    }
+    if (r.daily.length > 1) {
+      // CSV carries the COMPLETE series (the print sheet caps very long windows)
+      out.push({ title: `${r.name} — day-by-day breakdown`, head: ["Period", "Orders", "Gross", "Discount", "GST", "Net"], rows: r.daily.map((x) => [x.label, x.orders, Math.round(x.gross), Math.round(x.discount), Math.round(x.tax), Math.round(x.net)]) });
+    }
   }
   return out;
 }
