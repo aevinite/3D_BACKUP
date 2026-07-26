@@ -50,6 +50,7 @@ const GROUPS: NavGroup[] = [
       { href: "/aevinite/usage", label: "Usage & cost", icon: "fa-gauge-high" },
       { href: "/aevinite/billing", label: "Billing & plans", icon: "fa-file-invoice" },
       { href: "/aevinite/health", label: "System health", icon: "fa-heart-pulse" },
+      { href: "/aevinite/rate-limits", label: "Rate limits", icon: "fa-shield-halved" },
       { href: "/aevinite/settings", label: "Settings", icon: "fa-gear" },
     ],
   },

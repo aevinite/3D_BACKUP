@@ -12,7 +12,8 @@ import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
 
 type Alert = { restaurant_id: string; restaurantName: string; restaurantSlug: string; kind: "suspended" | "dormant"; detail: string };
 type ErrRow = { id: string; panel: string; action: string; detail: string | null; restaurant_id: string | null; restaurantName: string; created_at: string };
-type Feed = { tickets: TicketLike[]; openTicketCount: number; alerts: Alert[]; alertCount: number; errors: ErrRow[]; errorCount: number };
+type RlNotif = { id: string; key: string; subject: string; hit_count: number; max_count: number; last_at: string; restaurantName: string };
+type Feed = { tickets: TicketLike[]; openTicketCount: number; alerts: Alert[]; alertCount: number; errors: ErrRow[]; errorCount: number; rateLimits: RlNotif[]; rateLimitCount: number };
 
 export default function NotificationBell() {
   const [feed, setFeed] = useState<Feed | null>(null);
@@ -21,13 +22,13 @@ export default function NotificationBell() {
   const load = useCallback(() => {
     fetch("/api/admin/notifications", { cache: "no-store" })
       .then((r) => r.json())
-      .then((j) => { if (!j.error) setFeed({ tickets: j.tickets || [], openTicketCount: j.openTicketCount || 0, alerts: j.alerts || [], alertCount: j.alertCount || 0, errors: j.errors || [], errorCount: j.errorCount || 0 }); })
+      .then((j) => { if (!j.error) setFeed({ tickets: j.tickets || [], openTicketCount: j.openTicketCount || 0, alerts: j.alerts || [], alertCount: j.alertCount || 0, errors: j.errors || [], errorCount: j.errorCount || 0, rateLimits: j.rateLimits || [], rateLimitCount: j.rateLimitCount || 0 }); })
       .catch(() => { /* keep last-known feed; the badge just won't update this tick */ });
   }, []);
   useEffect(() => { load(); }, [load]);
   useActiveAutoRefresh(load, 60000);
 
-  const count = (feed?.openTicketCount || 0) + (feed?.alertCount || 0) + (feed?.errorCount || 0);
+  const count = (feed?.openTicketCount || 0) + (feed?.alertCount || 0) + (feed?.errorCount || 0) + (feed?.rateLimitCount || 0);
 
   return (
     <>
@@ -163,6 +164,31 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </section>
+
+          {/* Rate-limit hits (mig 205) */}
+          <section>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted)" }}>
+                Rate limits reached {(feed?.rateLimitCount || 0) > 0 && <span>· {feed?.rateLimitCount}</span>}
+              </div>
+              <a href="/aevinite/repair#rate-limits" onClick={onClose} style={{ marginLeft: "auto", fontSize: 12, color: "var(--accent)", fontWeight: 700 }}>Manage →</a>
+            </div>
+            {(feed?.rateLimits || []).length === 0 ? (
+              <div className="adm-empty" style={{ padding: "14px 12px", fontSize: 13 }}>No limits reached. 🎉</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {(feed?.rateLimits || []).map((h) => (
+                  <a key={h.id} href="/aevinite/repair#rate-limits" onClick={onClose} className="adm-card" style={{ display: "flex", alignItems: "flex-start", gap: 11, padding: "10px 12px", borderLeft: "3px solid var(--adm-danger, #e5484d)", textDecoration: "none", color: "inherit" }}>
+                    <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: "var(--adm-danger, #e5484d)", fontSize: 15, marginTop: 1 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.key.replace(/_/g, " ")} · {h.subject}</div>
+                      <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{h.restaurantName} · {h.hit_count}/{h.max_count} · {new Date(h.last_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+                    </div>
+                  </a>
+                ))}
               </div>
             )}
           </section>

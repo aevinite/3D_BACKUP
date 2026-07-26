@@ -6,6 +6,7 @@ import { loginUser, USER_COOKIE } from "@/lib/userAuth";
 import { isPanelEnabled, isRestaurantDeleted, ownerPanelEnabled } from "@/lib/panelAccess";
 import { getRestaurantBySlug } from "@/lib/tenant";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
+import { rateAllowed, subjectFor } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,18 @@ export async function POST(req: NextRequest) {
     restaurantId = rest.id;
   }
   const dev = deviceIdFrom(req);
+  // RATE LIMIT (mig 205): stop password guessing. Counted per username (+ restaurant when the
+  // door names one) BEFORE the credential lookup. The event label shows who + which restaurant,
+  // so the admin sees exactly whose login is being hammered. Fails open on any limiter glitch.
+  const uname = String(body?.username || "");
+  if (uname) {
+    const label = `"${uname.slice(0, 60)}"${body?.restaurant ? ` @ ${String(body.restaurant).slice(0, 40)}` : ""}`;
+    const okRate = await rateAllowed("staff_login", `${restaurantId || "*"}:${subjectFor(uname)}`, { restaurantId, label });
+    if (!okRate) {
+      await logAction("admin", "rate_limited", { actor: uname, device_id: dev, restaurant_id: restaurantId ?? null, detail: `login rate limit reached for ${label}` });
+      return NextResponse.json({ ok: false, error: "Too many attempts. Please wait a few minutes and try again." }, { status: 429 });
+    }
+  }
   const r = await loginUser(String(body?.username || ""), String(body?.password || ""), restaurantId);
   // transient = the credential lookup itself failed (DB blip) → 503 "try again",
   // NOT 401 "wrong password" (stress test 2026-07-03).

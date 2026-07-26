@@ -28,6 +28,9 @@ type Issue = TicketLike & { restaurantName: string; restaurantSlug?: string; sta
 type Risk = { id: string; name: string; slug: string; plan: string | null; reason: string };
 type Onb = { id: string; name: string; slug: string; ageDays: number; reason: string };
 type AttData = { atRisk: Risk[]; onboarding: Onb[]; generatedAt: string };
+// Rate-limit hits (mig 205) — a configurable limit was reached; shown here with Fix/Change/Allow.
+type RlHit = { id: string; restaurant_id: string; restaurant_name: string | null; key: string; subject: string; subject_label: string | null; hit_count: number; max_count: number; window_seconds: number; last_at: string };
+const rlPer = (s: number) => (s % 3600 === 0 ? `${s / 3600}h` : s % 60 === 0 ? `${s / 60} min` : `${s}s`);
 
 type Op = "void_bill" | "delete_order" | "refire_order" | "unstick_table" | "edit_time";
 
@@ -109,6 +112,9 @@ export default function AdminRepair() {
   const [att, setAtt] = useState<AttData | null>(null);
   const [attErr, setAttErr] = useState(false);
 
+  // Rate-limit hits (mig 205) — a configurable limit was reached (all restaurants).
+  const [rlHits, setRlHits] = useState<RlHit[]>([]);
+
   useEffect(() => {
     (async () => {
       const r = await adminFetch<{ restaurants: Restaurant[] }>("/api/admin/restaurants");
@@ -132,7 +138,7 @@ export default function AdminRepair() {
     setErrLoading(true);
     // ?scope=all forces the platform-wide complaints view (an admin's act-as cookie would
     // otherwise silently collapse it to one restaurant — same fix the old Tickets page used).
-    const [e, q, h, iss, at] = await Promise.all([
+    const [e, q, h, iss, at, rl] = await Promise.all([
       // ?unresolved=1 — only errors nobody has cleared yet (mig 181 resolved_at). Resolving one
       // (or a landed fix, via the mig 183 trigger) drops it off this list; the full Logs page
       // still shows resolved rows. Without this the board could never be emptied.
@@ -141,12 +147,14 @@ export default function AdminRepair() {
       adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
       adminFetch<{ issues: Issue[] }>("/api/owner/issues?scope=all"),
       adminFetch<AttData>("/api/admin/attention"),
+      adminFetch<{ events: RlHit[] }>("/api/admin/rate-limits"),
     ]);
     if (e.ok) setErrors(e.data.actions || []);
     if (q.ok) setRequests(q.data.requests || []);
     if (h.ok) setRuns(h.data.runs || []);
     if (iss.ok) { setIssues(iss.data.issues || []); setIssuesErr(false); } else setIssuesErr(true);
     if (at.ok) { setAtt(at.data); setAttErr(false); } else setAttErr(true);
+    if (rl.ok) setRlHits(rl.data.events || []);
     setErrLoading(false);
   }, []);
   useEffect(() => { loadHub(); }, [loadHub]);
@@ -221,6 +229,32 @@ export default function AdminRepair() {
     if (!r.ok) { toast(r.error || "Couldn't update that.", "err"); loadHub(); }
   };
 
+  // Rate-limit hit actions (mig 205). Allow = reset that subject's counter so a genuine customer
+  // gets through now; Dismiss = clear the row; Fix = hand it to Claude. Optimistic removal.
+  const rlAllow = async (h: RlHit) => {
+    setRlHits((prev) => prev.filter((x) => x.id !== h.id));
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "allow", event_id: h.id }),
+    });
+    if (r.ok) toast("Allowed — their counter is reset."); else { toast(r.error || "Couldn't allow.", "err"); loadHub(); }
+  };
+  const rlDismiss = async (h: RlHit) => {
+    setRlHits((prev) => prev.filter((x) => x.id !== h.id));
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "dismiss", event_id: h.id }),
+    });
+    if (!r.ok) { toast(r.error || "Couldn't dismiss.", "err"); loadHub(); }
+  };
+  const rlFix = async (h: RlHit) => {
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
+      body: JSON.stringify({ note: `Rate limit "${h.key}" reached by ${h.subject_label || h.subject}${h.restaurant_name ? ` at ${h.restaurant_name}` : ""} (${h.hit_count} in ${rlPer(h.window_seconds)}). Is this real abuse or is the limit too tight?`, restaurant_id: h.restaurant_id !== "00000000-0000-0000-0000-000000000000" ? h.restaurant_id : null, mode: "overnight" }),
+    });
+    if (r.ok) toast("Sent to Claude for the 2:30 AM robot."); else toast(r.error || "Couldn't send.", "err");
+  };
+
   // Resolve / reopen a complaint (admin is in scope for every restaurant). Optimistic flip.
   const setTicketStatus = async (id: string, status: "resolved" | "open") => {
     setTicketBusy(id);
@@ -262,6 +296,9 @@ export default function AdminRepair() {
         <a className={`rp-pill${groups.length ? " alert" : " ok"}`} href="#problems" title="Jump to problems">
           <i className={`fas ${groups.length ? "fa-triangle-exclamation" : "fa-circle-check"}`} aria-hidden="true" />
           <span className="n">{errLoading ? "…" : errors.length}</span><span>problem{errors.length === 1 ? "" : "s"} (24h)</span>
+        </a>
+        <a className={`rp-pill${rlHits.length ? " alert" : ""}`} href="#rate-limits" title="Jump to rate-limit hits">
+          <i className="fas fa-gauge-high" aria-hidden="true" /><span className="n">{errLoading ? "…" : rlHits.length}</span><span>limit{rlHits.length === 1 ? "" : "s"} reached</span>
         </a>
         <a className={`rp-pill${openTickets ? " warn" : ""}`} href="#complaints" title="Jump to complaints">
           <i className="fas fa-flag" aria-hidden="true" /><span className="n">{openTickets}</span><span>open complaint{openTickets === 1 ? "" : "s"}</span>
@@ -353,6 +390,49 @@ export default function AdminRepair() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* ── Rate limits reached (mig 205) ──────────────────────────────── */}
+      <div className="rp-sec-h" id="rate-limits">
+        <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: rlHits.length ? "var(--adm-danger)" : "var(--muted)" }} />
+        <h2>Rate limits reached</h2>
+        {rlHits.length ? <span className="rp-chip danger">{rlHits.length}</span> : null}
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>someone hit a wall · all restaurants</span>
+        <Link href="/aevinite/rate-limits" className="adm-btn" style={{ marginLeft: "auto", fontSize: 12 }}><i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Manage limits</Link>
+      </div>
+      {errLoading && rlHits.length === 0 ? (
+        <div className="adm-empty">Checking…</div>
+      ) : rlHits.length === 0 ? (
+        <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> No rate limits have been reached.</div>
+      ) : (
+        <div style={{ marginBottom: 6 }}>
+          {rlHits.map((h) => (
+            <div key={h.id} className="rp-err">
+              <span className="rp-err-bar" style={{ background: "var(--adm-danger)" }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
+                  <b style={{ fontSize: 13.5 }}>{h.key.replace(/_/g, " ")}</b>
+                  <span className="rp-chip danger">{h.hit_count} / {h.max_count} per {rlPer(h.window_seconds)}</span>
+                  {h.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{h.restaurant_name}</span> : null}
+                  <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(h.last_at)}</span>
+                </div>
+                <div className="adm-muted" style={{ fontSize: 12.5 }}>Who: <b style={{ color: "var(--text)" }}>{h.subject_label || h.subject}</b></div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>
+                  <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => rlAllow(h)} title="Real customer — reset their counter so they get through now">
+                    <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Allow
+                  </button>
+                  <Link className="adm-btn" style={{ fontSize: 12 }} href={`/aevinite/rate-limits#rule-${h.key}`} title="Change this limit">
+                    <i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Change rate limit
+                  </Link>
+                  <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => rlFix(h)} title="Hand it to Claude to investigate">
+                    <i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 6 }} />Fix
+                  </button>
+                  <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={() => rlDismiss(h)} title="Clear from the board">Dismiss</button>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
