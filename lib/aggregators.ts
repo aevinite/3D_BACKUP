@@ -10,6 +10,8 @@
 // and we POST status back (confirm/preparing/ready). We never poll them.
 
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { platformLadder } from "@/lib/tableTags";
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 
 export type AggSource = "zomato" | "swiggy";
 
@@ -56,11 +58,18 @@ export function normalizeIncoming(source: AggSource, payload: Record<string, any
   return { externalId, customer, phone, items, total };
 }
 
-// Insert a normalized inbound order via the same RPC the test button uses.
-export async function ingestIncoming(source: AggSource, payload: Record<string, any>) {
+// Insert a normalized inbound order via the same RPC the test button uses. Gated (mig 209)
+// by the target restaurant's Platform module AND that this channel is turned on — an off
+// restaurant/channel can never receive real app orders. (restaurantId defaults to #1, matching
+// the RPC's default, until the webhook resolves the tenant from the payload.)
+export async function ingestIncoming(source: AggSource, payload: Record<string, any>, restaurantId: string = DEFAULT_RESTAURANT_ID) {
+  if (!(await platformLadder(restaurantId)).effective) throw new Error("platform disabled for this restaurant");
+  const chRow = (await sb.from("settings").select("platform_channels").eq("restaurant_id", restaurantId).maybeSingle()).data as
+    { platform_channels?: Record<string, { on?: boolean }> } | null;
+  if (chRow?.platform_channels?.[source]?.on !== true) throw new Error(`${source} channel is off for this restaurant`);
   const n = normalizeIncoming(source, payload);
   const { data, error } = await sb.rpc("lfh_platform_insert", {
-    p_source: source, p_external_id: n.externalId, p_customer: n.customer, p_phone: n.phone, p_items: n.items, p_total: n.total,
+    p_source: source, p_external_id: n.externalId, p_customer: n.customer, p_phone: n.phone, p_items: n.items, p_total: n.total, p_restaurant_id: restaurantId,
   });
   if (error) throw new Error(error.message);
   return Array.isArray(data) ? data[0] : data;

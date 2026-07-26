@@ -100,6 +100,13 @@ export function cleanClonedSettings(
   base.parcel_owner_control = false;
   base.parcel_enabled = true;
   base.tablet_parcel = "off";
+  // Platform board module (mig 209): unlike existing restaurants (backfilled ON), a NEW
+  // restaurant starts OFF — it's opt-in (admin turns it on once the restaurant is on the
+  // delivery apps). Channels start empty (none live). owner-transfer off, owner toggle neutral-ON.
+  base.platform_allowed = false;
+  base.platform_owner_control = false;
+  base.platform_enabled = true;
+  base.platform_channels = {};
   // The auto-print-KOT capability itself (not just its entitlement) must also start OFF, so a
   // later entitlement grant doesn't immediately auto-print KOTs without the owner choosing to. (mig 107.)
   base.auto_print_kot = false;

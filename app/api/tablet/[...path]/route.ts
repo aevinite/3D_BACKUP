@@ -550,7 +550,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const cust = String(customer || "").trim().slice(0, 120) || "Parcel";
       const ext = `PARCEL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const ins = await sb.rpc("lfh_platform_insert", {
-        p_source: "takeaway", p_external_id: ext, p_customer: cust,
+        p_source: "parcel", p_external_id: ext, p_customer: cust,
         p_phone: String(phone || "").trim().slice(0, 40) || null,
         p_items: picked, p_total: total, p_restaurant_id: rid,
       });

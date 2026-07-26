@@ -36,7 +36,10 @@ export const MP_DEFAULT: Record<string, boolean> = {
   void_bills: false, edit_settings: false, view_ratings: false, table_tags: false,
   // parcel: ON for managers by default (owner 2026-07-26 — common counter task; admin can
   // still switch the module off per restaurant). Its tablet cap stays 'off' below.
-  khata: false, banquet: false, table_ops: false, take_orders: false, parcel: true,
+  // platform: ON for managers by default (matches parcel — the board was manager-visible
+  // everywhere before mig 209). The module itself is off for NEW restaurants, so the whoami
+  // overlay hides it until the admin turns the module on; then the manager has it immediately.
+  khata: false, banquet: false, table_ops: false, take_orders: false, parcel: true, platform: true,
 };
 
 // New-restaurant DEFAULT tablet caps (mirrors lib/settingsClone.ts). take_orders 'on'.

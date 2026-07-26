@@ -87,3 +87,10 @@ export const takeOrdersLadder = (rid: string) =>
 // rung starts OFF (unlike take_orders), so no restaurant gets it until the admin grants it.
 export const parcelLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "parcel_allowed", control: "parcel_owner_control", enabled: "parcel_enabled" });
+
+// Platform board (Zomato / Swiggy / Website takeaway) — the 🛵 Platform tab (mig 209). A rung
+// on a PRE-EXISTING feature: _allowed is BACKFILLED true for every restaurant that existed at
+// mig 209 (the board was already live for all of them), while new restaurants default OFF.
+// Which channels are actually live is a separate per-restaurant config (settings.platform_channels).
+export const platformLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "platform_allowed", control: "platform_owner_control", enabled: "platform_enabled" });

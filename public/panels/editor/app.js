@@ -411,6 +411,7 @@ async function loadAll() {
   const brandEl = document.getElementById("brandRest");
   if (brandEl) brandEl.textContent = restName ? "· " + restName : "";
   syncBanquetTab(); // Banquet tab follows the admin entitlement (mig 130)
+  syncPlatformTab(); // Platform tab follows the platform/parcel modules (mig 209)
   $("#conn").textContent = "connected";
   $("#conn").className = "conn ok";
   renderList();
@@ -2837,6 +2838,10 @@ let dashRange = (() => { try { const v = localStorage.getItem("lfh_dash_range");
 // `live` + `platformToday` fields the /stats endpoint adds.
 function dashTodayBox(s) {
   const live = s.live || {}; const pt = s.platformToday || { count: 0, revenue: 0 };
+  // Which platform channels are actually live for this restaurant (mig 209) — a restaurant not
+  // on the delivery apps shouldn't show empty Zomato/Swiggy cards. Default all ON if the server
+  // didn't say (older cache), so nothing vanishes unexpectedly.
+  const ch = s.channelsOn || { zomato: true, swiggy: true, website: true, parcel: true };
   // The "Today" money card shows PAID-only revenue, so its order count must be the PAID
   // activity too (paid dine-in orders + accepted platform orders) — pairing paid-only ₹ with
   // an all-orders (incl. unpaid) count read inconsistently.
@@ -2848,9 +2853,10 @@ function dashTodayBox(s) {
     <div class="dash-today-h">Right now <span class="sub">· live across every channel</span></div>
     <div class="dash-today-strip">
       ${card("dine", "fa-chair", "Dine-in", live.dineIn || 0, "tables running")}
-      ${card("z", "fa-bolt", "Zomato", live.zomato || 0, "live orders")}
-      ${card("s", "fa-bowl-food", "Swiggy", live.swiggy || 0, "live orders")}
-      ${card("t", "fa-bag-shopping", "Takeaway", live.takeaway || 0, "live orders")}
+      ${ch.zomato ? card("z", "fa-bolt", "Zomato", live.zomato || 0, "live orders") : ""}
+      ${ch.swiggy ? card("s", "fa-bowl-food", "Swiggy", live.swiggy || 0, "live orders") : ""}
+      ${ch.website ? card("t", "fa-globe", "Website", live.takeaway || 0, "live orders") : ""}
+      ${ch.parcel ? card("p", "fa-bag-shopping", "Parcel", live.parcel || 0, "at the counter") : ""}
       ${card("tot", "fa-indian-rupee-sign", "Today", inr(totalRev), totalOrders + " paid orders")}
     </div>
   </div>`;
@@ -2985,8 +2991,9 @@ async function loadDashboard(useCache) {
   const prev = s.prev || {};
   const disc = s.discounts || { total: 0, count: 0, max: null };
   const chan = s.channels || {};
-  const onlineRev = (chan.zomato?.rev || 0) + (chan.swiggy?.rev || 0) + (chan.takeaway?.rev || 0);
-  const onlineCnt = (chan.zomato?.count || 0) + (chan.swiggy?.count || 0) + (chan.takeaway?.count || 0);
+  // "Online / off-premise" = every non-dine-in channel: the delivery apps + website + counter parcels.
+  const onlineRev = (chan.zomato?.rev || 0) + (chan.swiggy?.rev || 0) + (chan.takeaway?.rev || 0) + (chan.parcel?.rev || 0);
+  const onlineCnt = (chan.zomato?.count || 0) + (chan.swiggy?.count || 0) + (chan.takeaway?.count || 0) + (chan.parcel?.count || 0);
   const revSub = [
     s.paid ? `avg <b>${inr(s.avgOrder)}</b>/bill` : "no paid bills yet",
     s.taxCollected > 0 ? `tax <b>${inr(s.taxCollected)}</b>` : "",
@@ -3141,7 +3148,7 @@ async function loadDashboard(useCache) {
     emptyCard("chDay", "Day parts", "No orders in this range yet.");
   }
   // Channels — dine-in vs the delivery apps, with click-to-hide legend rows.
-  const CH_META = { dinein: ["Dine-in", "#b97f35"], zomato: ["Zomato", "#e23744"], swiggy: ["Swiggy", "#fc8019"], takeaway: ["Takeaway", "#6b7280"] };
+  const CH_META = { dinein: ["Dine-in", "#b97f35"], zomato: ["Zomato", "#e23744"], swiggy: ["Swiggy", "#fc8019"], takeaway: ["Website", "#0ea5e9"], parcel: ["Parcel", "#6b7280"] };
   const chRows = Object.entries(chan)
     .map(([k, v]) => ({ k, name: (CH_META[k] || [k])[0], color: (CH_META[k] || [, "#6b7280"])[1], rev: v.rev || 0, count: v.count || 0 }))
     .filter((c) => c.rev > 0).sort((a, b) => b.rev - a.rev);
@@ -3644,7 +3651,7 @@ ${row("Paid bills", di.paidCount + " · " + inr(di.paidNet))}
 ${row("Unpaid bills", di.unpaidCount + " · " + inr(di.unpaidNet))}
 ${row("Cancelled orders", di.cancelled)}
 ${di.tips > 0 ? row("Tips collected (staff)", inr(di.tips), true) : ""}
-<div class="sec">Platform (Zomato / Swiggy / takeaway)</div>
+<div class="sec">Platform (Zomato / Swiggy / Website / Parcel)</div>
 ${row("Orders", z.platform.count)}
 ${row("Revenue", inr(z.platform.revenue), true)}
 <div class="sec">Invoices</div>
@@ -8208,7 +8215,8 @@ async function unblockLog(id) {
 const PLAT_META = {
   zomato:   { label: "Zomato",   cls: "z" },
   swiggy:   { label: "Swiggy",   cls: "s" },
-  takeaway: { label: "Takeaway", cls: "t" },
+  takeaway: { label: "Website",  cls: "t" }, // the restaurant's own site (mig 209)
+  parcel:   { label: "Parcel",   cls: "p" }, // staff-punched counter parcel — never "Takeaway"
   other:    { label: "Other",    cls: "o" },
 };
 const platMoney = (n) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
@@ -8229,11 +8237,12 @@ function platCardHtml(o) {
   if (o.status === "new") action = `<button class="btn primary" data-plat-act="accepted" data-plat-id="${esc(o.id)}">Accept</button><button class="btn ghost" data-plat-act="cancelled" data-plat-id="${esc(o.id)}" title="Reject">✕</button>`;
   else if (o.status === "accepted" || o.status === "preparing") action = `<button class="btn primary" data-plat-act="ready" data-plat-id="${esc(o.id)}">Mark ready</button>`;
   else if (o.status === "ready") action = `<button class="btn primary" data-plat-act="handed_over" data-plat-id="${esc(o.id)}">Hand over</button>`;
-  // Payment is tracked only for TAKEAWAY/parcel (Zomato/Swiggy are prepaid by the platform).
-  // Unpaid → a "Collect" button that settles it (pay-on-pickup); paid → a PAID pill.
-  const showPay = o.source === "takeaway";
+  // Payment is tracked for a counter PARCEL and a WEBSITE order (both may be pay-on-pickup);
+  // Zomato/Swiggy are prepaid by the platform. Unpaid → a "Collect" button that settles it;
+  // paid → a PAID pill.
+  const showPay = o.source === "parcel" || o.source === "takeaway";
   const paidPill = showPay ? (o.paid ? `<span class="plat-paid">PAID</span>` : `<span class="plat-unpaid">UNPAID</span>`) : "";
-  const collect = (showPay && !o.paid) ? `<button class="btn ghost plat-collect" data-plat-pay="${esc(o.id)}" title="Take payment for this parcel">💰 Collect</button>` : "";
+  const collect = (showPay && !o.paid) ? `<button class="btn ghost plat-collect" data-plat-pay="${esc(o.id)}" title="Take payment for this order">💰 Collect</button>` : "";
   return `<div class="plat-card ${m.cls}">
     <div class="plat-ch"><span class="plat-badge ${m.cls}">${esc(m.label)}</span><span class="plat-kot">#${esc(o.kot_no ?? "—")}</span>${paidPill}<span class="plat-age">${esc(platAge(o.created_at))}</span></div>
     <div class="plat-cust">${esc(o.customer_name || "—")}</div>
@@ -8254,9 +8263,28 @@ function platformHtml() {
   // order auto-accepts, so an always-empty New column + its Accept/Reject buttons were dead,
   // misleading UI. It reappears automatically if a real integration ever sends a 'new' order.
   const newCol = cols.new.length ? col("new", "🆕 New") : "";
+  // Header title + subtitle built from what's actually live for this restaurant (mig 209): the
+  // delivery channels that are on, plus parcels. A restaurant with only parcels reads "Parcels".
+  const ch = state.platformChannels || {};
+  const platOn = state.platformOn !== false;
+  const parcelOn = state.parcelOn === true;
+  const chLabels = [];
+  if (platOn) { if (ch.zomato) chLabels.push("Zomato"); if (ch.swiggy) chLabels.push("Swiggy"); if (ch.website) chLabels.push("Website"); }
+  const title = (platOn && chLabels.length) ? "Platform" : "Parcels";
+  const subParts = [...chLabels]; if (parcelOn) subParts.push("Parcels");
+  const sub = subParts.length ? `<span class="sub">· ${subParts.join(" · ")}</span>` : "";
+  // "Simulate order" — the demo/representation control (no API keys needed). Shows a channel
+  // picker of the live delivery channels; each simulates a realistic order on that channel.
+  const simChannels = platOn ? [["zomato", "Zomato"], ["swiggy", "Swiggy"], ["website", "Website"]].filter(([k]) => ch[k]) : [];
+  const simMenu = simChannels.length
+    ? `<div class="plat-sim">
+        <button class="btn" id="platSim" title="Add a demo order to try the flow">＋ Simulate order ▾</button>
+        <div class="plat-sim-menu" id="platSimMenu" hidden>${simChannels.map(([k, l]) => `<button class="btn ghost" data-plat-sim="${k}">${esc(l)}</button>`).join("")}</div>
+      </div>` : "";
   return `<div class="ed-head plat-head">
-      <h2>Platform <span class="sub">· Zomato · Swiggy · Takeaway</span></h2>
+      <h2>${title} ${sub}</h2>
       <div class="plat-head-actions">
+        ${simMenu}
         <button class="btn" id="platRefresh" title="Refresh">↻</button>
       </div>
     </div>
@@ -8266,6 +8294,17 @@ function platformHtml() {
 }
 function bindPlatform() {
   const rf = document.getElementById("platRefresh"); if (rf) rf.onclick = loadPlatform;
+  // Simulate-order menu (demo mode): toggle the channel picker; a pick fires POST /platform/test.
+  const sim = document.getElementById("platSim"); const simMenu = document.getElementById("platSimMenu");
+  if (sim && simMenu) {
+    sim.onclick = (e) => { e.stopPropagation(); simMenu.hidden = !simMenu.hidden; };
+    document.addEventListener("click", () => { simMenu.hidden = true; }, { once: true });
+    simMenu.querySelectorAll("[data-plat-sim]").forEach((b) => b.onclick = async (e) => {
+      e.stopPropagation(); simMenu.hidden = true; b.disabled = true;
+      try { await api("POST", "/platform/test", { channel: b.dataset.platSim }); toast("Demo order added ✓", "ok"); await loadPlatform(); }
+      catch (err) { toast("Failed: " + err.message, "err"); }
+    });
+  }
   document.querySelectorAll("[data-plat-act]").forEach((b) => b.onclick = async () => {
     b.disabled = true;
     try { await api("POST", `/platform/${b.dataset.platId}/status`, { status: b.dataset.platAct }); await loadPlatform(); }
@@ -8287,12 +8326,25 @@ function updatePlatformBadge() {
 }
 let platSeq = 0; // own latest-wins guard so platform loads never cancel the board loaders
 async function loadPlatform() {
+  // Skip the poll entirely when BOTH the platform and parcel modules are off for this
+  // restaurant (mig 209) — no board to show, and hitting GET /platform would 403 every tick.
+  // (Admin/owner higher-view still polls so the X-ray board works.) Falls through if settings
+  // aren't loaded yet (first call) so the initial fetch still runs.
+  const s = state.data.settings;
+  if (s && !(XRAY_WHO && XRAY_WHO.higherView)) {
+    const platEff = s.platform_allowed === true && (s.platform_owner_control !== true || s.platform_enabled !== false);
+    const parcelEff = s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
+    if (!platEff && !parcelEff) { state.data.platform = []; updatePlatformBadge(); return; }
+  }
   const seq = ++platSeq;
   try {
     const res = await api("GET", "/platform");
     if (seq !== platSeq) return;
     state.data.platform = res.orders || [];
     state.platformToggles = res.toggles || {};
+    state.platformChannels = res.channels || {};   // which delivery channels are live (mig 209)
+    state.platformOn = res.platform_on;             // is the platform module effective
+    state.parcelOn = res.parcel_on;                 // is the parcel module effective
     updatePlatformBadge();
     if (state.tab === "platform") renderEditor();
   } catch { /* keep last good board */ }
@@ -9120,6 +9172,24 @@ function syncBanquetTab() {
   if (!show && state.tab === "banquet") setTab("items");
 }
 
+// Show/hide the Platform tab from the modules (mig 209). The 🛵 board shows delivery orders
+// (platform module) AND/OR staff parcels (parcel module), so the tab is visible when EITHER is
+// effective. A real manager also needs the matching owner→manager grant; admin/owner (higherView)
+// always see it. If the remembered tab is Platform but both modules got revoked, fall back to floor.
+function syncPlatformTab() {
+  const btn = document.querySelector('.tabs .tab[data-tab="platform"]');
+  if (!btn) return;
+  const s = state.data.settings || {};
+  const platEff = s.platform_allowed === true && (s.platform_owner_control !== true || s.platform_enabled !== false);
+  const parcelEff = s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
+  const higher = !XRAY_WHO || XRAY_WHO.higherView;
+  // Granted if a higher role, OR the manager has EITHER power for whichever module is on.
+  const granted = higher || (platEff && xrayGrantedForManager("platform")) || (parcelEff && xrayGrantedForManager("parcel"));
+  const show = (platEff || parcelEff) && granted;
+  btn.hidden = !show;
+  if (!show && state.tab === "platform") setTab("tables");
+}
+
 // Extend XRAY_TABS as more tabs become permission-gated. Grant rule matches the
 // server's managerCan(): a manager is granted ONLY when the flag is explicitly true.
 // ══════════════════════════════════════════════════════════════════════════════
@@ -9143,7 +9213,7 @@ const XRAY_TABS = [
 // tinted for a higher role. The server enforces each flag regardless (managerCan).
 const XRAY_CONTROLS = [
   { selector: "[data-take-order]", flag: "take_orders", label: "Take orders" },
-  { selector: "[data-new-parcel]", flag: "parcel", label: "New parcel (takeaway)" },
+  { selector: "[data-new-parcel]", flag: "parcel", label: "New parcel" },
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
   { selector: "#sxKot", flag: "table_ops", label: "Table & KOT operations" },
@@ -9540,6 +9610,9 @@ document.addEventListener("click", (e) => {
 });
 
 api("GET", "/whoami").then((w) => { XRAY_WHO = w; applyHierarchyView();
+  // The module tabs (Banquet, Platform) grant depends on WHO is viewing, so re-sync them once
+  // whoami resolves (they first paint with higher-view assumed while whoami is still pending).
+  try { syncBanquetTab(); syncPlatformTab(); } catch (e) {}
   // Repaint the active view now that we know WHO is viewing — the floor first paints
   // before whoami resolves, so admin-view-only cues (e.g. a VIP/guest tag when the
   // feature is off for staff) were missing until a click forced a redraw (owner

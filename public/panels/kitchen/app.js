@@ -10,11 +10,12 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const state = { orders: [], items: [], dishes: [], platform: [], platformAccept: false, knownIds: null, muted: localStorage.getItem("kds_muted") === "1" };
-// Platform (Zomato/Swiggy/takeaway) source badges shown on a platform ticket.
+// Platform (Zomato/Swiggy/Website/Parcel) source badges shown on a platform ticket.
 const PLAT_META = {
-  zomato:   { label: "ZOMATO",   cls: "z" },
-  swiggy:   { label: "SWIGGY",   cls: "s" },
-  takeaway: { label: "TAKEAWAY", cls: "t" },
+  zomato:   { label: "ZOMATO",  cls: "z" },
+  swiggy:   { label: "SWIGGY",  cls: "s" },
+  takeaway: { label: "WEBSITE", cls: "t" }, // the restaurant's own site (mig 209)
+  parcel:   { label: "PARCEL",  cls: "p" }, // staff counter parcel — never "Takeaway"
   other:    { label: "PLATFORM", cls: "o" },
 };
 // Which layout the cook is using: "columns" (New/Cooking/Ready) or "wall" (every

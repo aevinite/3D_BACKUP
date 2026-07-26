@@ -158,7 +158,8 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .src-badge { font-size: 13px; font-weight: 900; color: #fff; padding: 3px 10px; border-radius: 8px; letter-spacing: .04em; }
 .src-badge.z { background: #e23744; }
 .src-badge.s { background: #fc8019; }
-.src-badge.t { background: #6f9a6a; }
+.src-badge.t { background: #0ea5e9; }   /* Website */
+.src-badge.p { background: #6b7280; }   /* Parcel */
 .src-badge.o { background: var(--blue); color: #201500; }
 .plat-cust-line { color: var(--muted); font-size: 13.5px; margin: -2px 0 8px; }
 

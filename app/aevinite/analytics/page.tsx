@@ -31,7 +31,7 @@ type Data = {
   bySource: { source: string; orders: number }[];
 };
 
-const SOURCE_LABEL: Record<string, string> = { dine_in: "Dine-in", zomato: "Zomato", swiggy: "Swiggy", takeaway: "Takeaway", other: "Other" };
+const SOURCE_LABEL: Record<string, string> = { dine_in: "Dine-in", zomato: "Zomato", swiggy: "Swiggy", takeaway: "Website", parcel: "Parcel", other: "Other" };
 const RANGE_LABEL: Record<Range, string> = { today: "Today", "7d": "Last 7 days", "30d": "Last 30 days" };
 const nf = new Intl.NumberFormat("en-IN");
 
