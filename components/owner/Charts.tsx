@@ -8,7 +8,8 @@
 //     but the top of the domain is EXACTLY the data max — no headroom.
 // Series colour = each restaurant's own accent. ₹ tooltips. All charts sit in
 // fixed-height responsive boxes so cards never jump while loading.
-import { useState } from "react";
+import { useState, Fragment, type CSSProperties } from "react";
+import { useBackClose } from "@/lib/backStack";
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -572,42 +573,133 @@ export function TrendLine({ data, lines }: { data: Record<string, unknown>[]; li
   return <AreaTrend data={data} lines={lines} height={230} />;
 }
 
-// ── Heatmap — day-of-week × hour busy grid (owner merge redesign, 2026-07-26) ──
-// Pure divs (no Recharts): 7 rows (Sun..Sat, postgres dow order) × 24 cells, colour
-// intensity = orders share of the busiest cell. Hover shows the exact count.
+// ── Heatmap — day-of-week × hour busy grid (interactive redesign, 2026-07-26) ──
+// Sequential magnitude viz (dataviz skill: ONE hue, light→dark by value). It now
+// follows the owner's chosen top range (was pinned to the last 7 days) and is fully
+// interactive:
+//   · Orders ⇄ Revenue metric toggle — instant, repaints intensity + readout (both
+//     numbers travel in every payload, so toggling needs no refetch → zero egress).
+//   · Click any cell → a readout of that exact day + hour (orders AND ₹).
+//   · A less→more legend so the colour actually carries meaning.
+//   · ⤢ Enlarge → a big, keyboard-focusable modal (the inline cells are far under a
+//     44px tap target; the modal is the accessible large-cell view). Registered in
+//     the back-button manager so hardware-back closes it first.
 const DOW_LB = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DOW_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const hr12 = (h: number) => `${h % 12 || 12}${h < 12 ? "am" : "pm"}`;
-export function Heatmap({ data, accent }: { data: { dow: number; hr: number; orders: number }[]; accent: string }) {
+const hrRange = (h: number) => `${hr12(h)}–${hr12((h + 1) % 24)}`;
+type HeatCell = { dow: number; hr: number; orders: number; revenue?: number };
+
+const hmBtn: CSSProperties = { background: "var(--bg)", border: "var(--border)", color: "var(--text)", width: 28, height: 28, borderRadius: 8, cursor: "pointer", fontSize: 12, display: "inline-flex", alignItems: "center", justifyContent: "center" };
+const hmOverlay: CSSProperties = { position: "fixed", inset: 0, zIndex: 120, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, background: "rgba(5,8,14,.6)", backdropFilter: "blur(3px)" };
+const hmCard: CSSProperties = { background: "var(--card)", border: "var(--border)", borderRadius: 16, padding: 20, width: "min(960px, 96vw)", maxHeight: "92vh", overflow: "auto", boxShadow: "0 24px 70px rgba(0,0,0,.5)" };
+
+export function Heatmap({ data, accent, rangeLabel }: { data: HeatCell[]; accent: string; rangeLabel?: string }) {
+  const hasRevenue = data.some((d) => (d.revenue ?? 0) > 0);
+  const [metric, setMetric] = useState<"orders" | "revenue">("orders");
+  const [sel, setSel] = useState<{ dow: number; hr: number } | null>(null);
+  const [big, setBig] = useState(false);
+  useBackClose("owner-heatmap-zoom", big, () => setBig(false));
+
   if (!data.length || !data.some((d) => d.orders > 0)) return <Empty />;
-  const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
-  for (const d of data) if (d.dow >= 0 && d.dow < 7 && d.hr >= 0 && d.hr < 24) grid[d.dow][d.hr] = d.orders;
+
+  const m: "orders" | "revenue" = hasRevenue ? metric : "orders";
+  // Two grids so flipping the metric is instant (no refetch): orders + paid revenue.
+  const gOrders: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+  const gRev: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+  for (const d of data) if (d.dow >= 0 && d.dow < 7 && d.hr >= 0 && d.hr < 24) {
+    gOrders[d.dow][d.hr] = d.orders;
+    gRev[d.dow][d.hr] = d.revenue ?? 0;
+  }
+  const grid = m === "revenue" ? gRev : gOrders;
   const max = Math.max(1, ...grid.flat());
-  const marks = [0, 4, 8, 12, 16, 20, 23];
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "34px repeat(24, 1fr)", gap: 3, minWidth: 430 }}>
-        <div />
-        {Array.from({ length: 24 }, (_, h) => (
-          <div key={h} style={{ fontSize: 9, color: "var(--muted)", textAlign: "center", whiteSpace: "nowrap" }}>{marks.includes(h) ? hr12(h) : ""}</div>
-        ))}
-        {grid.map((row, d) => (
-          <FragmentRow key={d} label={DOW_LB[d]} row={row} max={max} accent={accent} />
-        ))}
+  const selVal = sel ? { orders: gOrders[sel.dow][sel.hr], revenue: gRev[sel.dow][sel.hr] } : null;
+  const toggle = (dow: number, hr: number) => setSel((s) => (s && s.dow === dow && s.hr === hr ? null : { dow, hr }));
+  const cellTip = (d: number, h: number) => `${DOW_LB[d]} ${hrRange(h)} · ${gOrders[d][h].toLocaleString("en-IN")} order${gOrders[d][h] === 1 ? "" : "s"}${hasRevenue ? ` · ${inr(gRev[d][h])}` : ""}`;
+
+  const controls = (large: boolean) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+      {hasRevenue ? (
+        <div style={{ display: "inline-flex", background: "var(--bg)", border: "var(--border)", borderRadius: 9, padding: 2, gap: 2 }}>
+          {(["orders", "revenue"] as const).map((k) => (
+            <button key={k} onClick={() => setMetric(k)}
+              style={{ border: "none", cursor: "pointer", font: "inherit", fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 7, background: m === k ? accent : "transparent", color: m === k ? "#06251a" : "var(--muted)" }}>
+              {k === "orders" ? "Orders" : "Revenue"}
+            </button>
+          ))}
+        </div>
+      ) : <span />}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+        {selVal
+          ? <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text)" }}>{DOW_LB[sel!.dow]} · {hrRange(sel!.hr)} · {selVal.orders.toLocaleString("en-IN")} order{selVal.orders === 1 ? "" : "s"}{hasRevenue ? ` · ${inr(selVal.revenue)}` : ""}</span>
+          : <span style={{ fontSize: 11, color: "var(--muted)" }}>Tap a cell for details</span>}
+        {!large && <button onClick={() => setBig(true)} title="Enlarge" aria-label="Enlarge heatmap" style={hmBtn}><i className="fas fa-up-right-and-down-left-from-center" aria-hidden="true" /></button>}
       </div>
     </div>
   );
-}
-function FragmentRow({ label, row, max, accent }: { label: string; row: number[]; max: number; accent: string }) {
+
+  const gridView = (large: boolean) => {
+    const minCell = large ? 22 : 12, rad = large ? 5 : 3, labelEvery = large ? 2 : 4;
+    const labelFs = large ? 10 : 9, dayFs = large ? 12 : 10.5, colW = large ? 40 : 34;
+    return (
+      <div style={{ overflowX: "auto" }}>
+        <div style={{ display: "grid", gridTemplateColumns: `${colW}px repeat(24, 1fr)`, gap: large ? 4 : 3, minWidth: large ? minCell * 24 + colW : 430 }}>
+          <div />
+          {Array.from({ length: 24 }, (_, h) => (
+            <div key={h} style={{ fontSize: labelFs, color: "var(--muted)", textAlign: "center", whiteSpace: "nowrap" }}>{h % labelEvery === 0 ? hr12(h) : ""}</div>
+          ))}
+          {grid.map((row, d) => (
+            <Fragment key={d}>
+              <div style={{ fontSize: dayFs, color: sel?.dow === d ? "var(--text)" : "var(--muted)", fontWeight: sel?.dow === d ? 800 : 500, display: "flex", alignItems: "center" }}>{DOW_LB[d]}</div>
+              {row.map((v, h) => {
+                const on = sel?.dow === d && sel?.hr === h;
+                return (
+                  <div key={h} onClick={() => toggle(d, h)} title={cellTip(d, h)} role="button" tabIndex={large ? 0 : -1}
+                    aria-label={`${DOW_FULL[d]} ${hrRange(h)}, ${gOrders[d][h]} orders${hasRevenue ? `, ${inr(gRev[d][h])}` : ""}`}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(d, h); } }}
+                    style={{
+                      aspectRatio: "1", borderRadius: rad, minWidth: minCell, cursor: "pointer",
+                      background: v > 0 ? `color-mix(in srgb, ${accent} ${Math.max(8, Math.round((v / max) * 100))}%, transparent)` : "rgba(128,128,128,.08)",
+                      boxShadow: on ? `0 0 0 2px ${accent}` : "none",
+                    }} />
+                );
+              })}
+            </Fragment>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const legend = (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 10, color: "var(--muted)" }}>
+      <span>Less</span>
+      {[10, 30, 55, 80, 100].map((p) => (
+        <span key={p} style={{ width: 16, height: 10, borderRadius: 2, background: `color-mix(in srgb, ${accent} ${p}%, transparent)` }} />
+      ))}
+      <span>More</span>
+      <span style={{ marginLeft: "auto" }}>{m === "revenue" ? "revenue" : "orders"} · day × hour</span>
+    </div>
+  );
+
   return (
     <>
-      <div style={{ fontSize: 10.5, color: "var(--muted)", display: "flex", alignItems: "center" }}>{label}</div>
-      {row.map((v, h) => (
-        <div key={h} title={`${label} ${hr12(h)} · ${v.toLocaleString("en-IN")} order${v === 1 ? "" : "s"}`}
-          style={{
-            aspectRatio: "1", borderRadius: 3, minWidth: 12,
-            background: v > 0 ? `color-mix(in srgb, ${accent} ${Math.max(8, Math.round((v / max) * 100))}%, transparent)` : "rgba(128,128,128,.08)",
-          }} />
-      ))}
+      {controls(false)}
+      {gridView(false)}
+      {legend}
+      {big && (
+        <div role="dialog" aria-label="Busy heatmap enlarged" style={hmOverlay} onClick={(e) => { if (e.target === e.currentTarget) setBig(false); }}>
+          <div style={hmCard}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <b style={{ fontSize: 15 }}>Busy heatmap{rangeLabel ? <span style={{ color: "var(--muted)", fontWeight: 600 }}> · {rangeLabel}</span> : null}</b>
+              <button onClick={() => setBig(false)} aria-label="Close" style={hmBtn}>✕</button>
+            </div>
+            {controls(true)}
+            {gridView(true)}
+            {legend}
+          </div>
+        </div>
+      )}
     </>
   );
 }
