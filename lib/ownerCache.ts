@@ -95,10 +95,15 @@ export async function cachedOwnerPayload<T extends object>(opts: {
     return { ...(existing.payload as T), cachedAt: existing.computed_at as string, cached: true };
   }
 
-  // Cold or forced → the only time the caller waits.
-  const payload = await compute();
-  let fp: string | null = null;
-  try { fp = fingerprint ? await fingerprint() : null; } catch { fp = null; }
+  // Cold or forced → the only time the caller waits. The change-detector and the payload
+  // are independent reads, so run them SIDE-BY-SIDE — the wait is max(compute, fingerprint)
+  // instead of their sum (a manual Refresh used to pay both back-to-back). A fingerprint
+  // taken during the compute is safe either way: at worst the next check sees "changed"
+  // once more and does one extra recompute — it can never mark stale data fresh.
+  const [payload, fp] = await Promise.all([
+    compute(),
+    fingerprint ? fingerprint().catch(() => null) : Promise.resolve(null),
+  ]);
   const now = nowIso();
   await sb.from(TABLE).upsert(
     { cache_key: key, payload, fingerprint: fp, computed_at: now, last_viewed_at: now },
