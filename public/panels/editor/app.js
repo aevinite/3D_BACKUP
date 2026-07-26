@@ -1210,6 +1210,11 @@ const ACCESS_CAPS = [
   // Order-taking (mig 178) — the manager→tablet rung for taking orders. Always shown
   // (not module-gated); defaults 'on' so the tablet keeps taking orders out of the box.
   { key: "tablet_take_orders", label: "Take orders" },
+  // Parcel / takeaway (mig 197) — the manager→tablet rung for the 🥡 New Parcel button.
+  // Was MISSING here (2026-07-26): the waiter cap is server-enforced (tabletPerm) and both
+  // the admin + owner screens expose it, but the MANAGER's own Access card couldn't set it
+  // or a per-waiter override. Module-gated like table_ops below (no dead UI when off).
+  { key: "tablet_parcel", label: "Parcel / takeaway orders" },
 ];
 // The Access cards' cap list, minus modules this restaurant doesn't have.
 function accessCapsFor() {
@@ -1220,6 +1225,7 @@ function accessCapsFor() {
     if (c.key === "tablet_table_tags" || c.key === "tablet_khata") return tagsOn;
     if (c.key === "tablet_table_ops") return s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
     if (c.key === "tablet_take_orders") return s.take_orders_allowed === true && (s.take_orders_owner_control !== true || s.take_orders_enabled !== false);
+    if (c.key === "tablet_parcel") return s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
     return true;
   });
 }
@@ -9011,6 +9017,12 @@ const XRAY_TABS = [
   // handled by applyMenuReadonly() below, called from applyHierarchyView.
   { tab: "ratings", flag: "view_ratings", label: "Guest ratings" },
   { tab: "general", flag: "edit_settings", label: "Settings" },
+  // Activity log (owner 2026-07-26): the "Activity log" manager power now hides the Log tab
+  // for a real manager when it's revoked, instead of the tab lingering and its contents
+  // 403-ing. view_logs is ABSENT-means-ON (whoami resolves effectivePowers.view_logs=true by
+  // default), so this is non-breaking — the tab only disappears once the owner explicitly
+  // switches it off; admin/owner keep it (tinted).
+  { tab: "log", flag: "view_logs", label: "Activity log" },
 ];
 // Phase 2 (the ladder, 2026-07-06): permission-gated CONTROLS inside tabs. Matched by
 // CSS selector on every repaint (MutationObserver below), so a live-poll re-render can
