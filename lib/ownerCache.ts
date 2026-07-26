@@ -15,6 +15,13 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 
 const TABLE = "owner_analytics_cache";
 
+// Keys whose background revalidate is running in THIS instance right now — so several
+// concurrent stale views (or a poll that fires alongside a view) don't each kick off the
+// same heavy recompute. Combined with the DB re-read guard below, a stale key recomputes at
+// most once per turnover. (Per-instance is enough: cross-instance dupes are rare and the
+// re-read guard still catches them.)
+const inflight = new Set<string>();
+
 // The set of restaurants a cached read covers → a stable key part. `null` ids = admin
 // whole-platform view. A real owner's set is sorted so member order never splits the key.
 export function scopeKeyOf(rid: string | null, all: boolean, ids: string[]): string {
@@ -50,21 +57,27 @@ export async function cachedOwnerPayload<T extends object>(opts: {
   // (or a poll that already refreshed) don't all recompute the same key; skips the heavy
   // compute when the fingerprint shows nothing changed.
   const revalidate = async () => {
-    const cur = (await sb.from(TABLE).select("computed_at, fingerprint").eq("cache_key", key).maybeSingle()).data;
-    if (cur && Date.now() - Date.parse(cur.computed_at as string) < maxAgeMs) return; // someone beat us
-    if (fingerprint && cur) {
-      const fp = await fingerprint().catch(() => null);
-      if (fp && fp === cur.fingerprint) { // unchanged → just mark fresh, no recompute
-        await sb.from(TABLE).update({ computed_at: nowIso() }).eq("cache_key", key);
-        return;
+    if (inflight.has(key)) return;                 // already refreshing in this instance
+    inflight.add(key);
+    try {
+      const cur = (await sb.from(TABLE).select("computed_at, fingerprint").eq("cache_key", key).maybeSingle()).data;
+      if (cur && Date.now() - Date.parse(cur.computed_at as string) < maxAgeMs) return; // someone beat us
+      if (fingerprint && cur) {
+        const fp = await fingerprint().catch(() => null);
+        if (fp && fp === cur.fingerprint) { // unchanged → just mark fresh, no recompute
+          await sb.from(TABLE).update({ computed_at: nowIso() }).eq("cache_key", key);
+          return;
+        }
       }
+      const payload = await compute();
+      const fp2 = fingerprint ? await fingerprint().catch(() => null) : null;
+      await sb.from(TABLE).upsert(
+        { cache_key: key, payload, fingerprint: fp2, computed_at: nowIso(), last_viewed_at: nowIso() },
+        { onConflict: "cache_key" },
+      );
+    } finally {
+      inflight.delete(key);
     }
-    const payload = await compute();
-    const fp2 = fingerprint ? await fingerprint().catch(() => null) : null;
-    await sb.from(TABLE).upsert(
-      { cache_key: key, payload, fingerprint: fp2, computed_at: nowIso(), last_viewed_at: nowIso() },
-      { onConflict: "cache_key" },
-    );
   };
 
   const existing = force ? null

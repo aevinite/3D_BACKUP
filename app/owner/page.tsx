@@ -232,6 +232,19 @@ export default function OwnerDashboard() {
   // Latest-wins guard (the app's standard stale-refresh fix): tag every load and drop
   // any response that lands after a newer one started — so a slow earlier fetch can't
   // overwrite the range you just switched to (owner audit 2026-07-06).
+  // Instant range/drill switching: cache the last good payload per (restaurant|group, range)
+  // in memory, so flipping to a range tab you've already opened this session repaints from
+  // memory (0 network), then refreshes underneath — no skeleton flash. Client-side sibling of
+  // the server snapshot cache. activeRidRef keeps the current scope readable in the hydrate
+  // effect without adding it as a dep (which would re-fire mid-load and blank fresh data).
+  type Snap = { group: GroupA | null; rest: RestA | null; money: MoneyTotals | null; moneyErr: boolean; updatedAt: string | null };
+  const snap = useRef(new Map<string, Snap>());
+  const putSnap = (key: string, patch: Partial<Snap>) => {
+    const cur = snap.current.get(key) || { group: null, rest: null, money: null, moneyErr: false, updatedAt: null };
+    snap.current.set(key, { ...cur, ...patch });
+  };
+  const activeRidRef = useRef(activeRid); activeRidRef.current = activeRid;
+
   const loadSeq = useRef(0);
   const load = useCallback(async (opts?: { withRecords?: boolean; refresh?: boolean }) => {
     const myGen = ++loadSeq.current;
@@ -239,6 +252,8 @@ export default function OwnerDashboard() {
     try {
       const rg = range;
       const j = (r: Response) => r.json();
+      // client-cache key for this load's scope+range (mirrors the hydrate effect below).
+      const sk = (rid: string | null) => `${rid ?? "grp"}|${rg}`;
       // All-time "records" (an unbounded scan) is fetched only on first load / range change /
       // manual refresh — NOT on the 60s auto-refresh, which keeps the last records value
       // (audit 2026-07-07). The flag rides on the restaurant-scope analytics calls only.
@@ -263,8 +278,8 @@ export default function OwnerDashboard() {
       // it lands, guarded by the same latest-wins check so a stale response can't repaint.
       const loadMoney = (rid: string | null) => {
         fetch(moneyUrl(rid), { cache: "no-store" }).then(j)
-          .then((m) => { if (!fresh()) return; if (m.error) { setMoney(null); setMoneyErr(true); } else { setMoney(m.totals); setMoneyErr(false); if (m.cachedAt) setUpdatedAt(m.cachedAt); } })
-          .catch(() => { if (fresh()) { setMoney(null); setMoneyErr(true); } });
+          .then((m) => { if (!fresh()) return; if (m.error) { setMoney(null); setMoneyErr(true); putSnap(sk(rid), { money: null, moneyErr: true }); } else { setMoney(m.totals); setMoneyErr(false); if (m.cachedAt) setUpdatedAt(m.cachedAt); putSnap(sk(rid), { money: m.totals, moneyErr: false, updatedAt: m.cachedAt ?? null }); } })
+          .catch(() => { if (fresh()) { setMoney(null); setMoneyErr(true); putSnap(sk(rid), { money: null, moneyErr: true }); } });
       };
       if (view.level === "home") {
         const o: Overview = await fetchOwnerOverview(scp) as Overview;
@@ -276,8 +291,10 @@ export default function OwnerDashboard() {
           const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then(j);
           if (a.error) throw new Error(a.error);
           if (!fresh()) return;
-          setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null })); setGroup(null);
+          const mergedRest = { ...a, records: a.records ?? snap.current.get(sk(rid))?.rest?.records ?? null };
+          setRest(mergedRest); setGroup(null);
           if (a.cachedAt) setUpdatedAt(a.cachedAt);
+          putSnap(sk(rid), { rest: mergedRest, group: null, updatedAt: a.cachedAt ?? null });
           loadMoney(rid);
         } else {
           const g = await fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}${refQ}`, { cache: "no-store" }).then(j);
@@ -285,6 +302,7 @@ export default function OwnerDashboard() {
           if (!fresh()) return;
           setGroup(g); setRest(null);
           if (g.cachedAt) setUpdatedAt(g.cachedAt);
+          putSnap(sk(null), { group: g, rest: null, updatedAt: g.cachedAt ?? null });
           loadMoney(null);
         }
       } else {
@@ -292,8 +310,10 @@ export default function OwnerDashboard() {
         const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then(j);
         if (a.error) throw new Error(a.error);
         if (!fresh()) return;
-        setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null }));
+        const mergedRest = { ...a, records: a.records ?? snap.current.get(sk(rid))?.rest?.records ?? null };
+        setRest(mergedRest);
         if (a.cachedAt) setUpdatedAt(a.cachedAt);
+        putSnap(sk(rid), { rest: mergedRest, updatedAt: a.cachedAt ?? null });
         loadMoney(rid);
       }
       if (fresh()) setErr(null);
@@ -310,11 +330,15 @@ export default function OwnerDashboard() {
     }
   }, [view, range]);
 
-  // Clear stale analytics the moment the range or drilled restaurant changes, so the
-  // charts show a brief "Loading…" instead of flashing an all-zero chart under the NEW
-  // range's labels (old data re-buckets to zeros). Auto-refresh does NOT change these,
-  // so it never triggers this clear — no 60s flicker (owner audit 2026-07-06).
-  useEffect(() => { setRest(null); setGroup(null); setMoney(null); setMoneyErr(false); }, [range, view]);
+  // On a range/drill change: repaint INSTANTLY from the client cache if we've seen this
+  // (scope, range) this session, else clear to a brief "Loading…" (so the chart never flashes
+  // an all-zero plot under the NEW range's labels). Either way load() then refreshes it.
+  // Auto-refresh does NOT change range/view, so it never triggers this — no poll flicker.
+  useEffect(() => {
+    const s = snap.current.get(`${activeRidRef.current ?? "grp"}|${range}`);
+    if (s) { setGroup(s.group); setRest(s.rest); setMoney(s.money); setMoneyErr(s.moneyErr); setUpdatedAt(s.updatedAt); }
+    else { setRest(null); setGroup(null); setMoney(null); setMoneyErr(false); }
+  }, [range, view]);
 
   const loadRef = useRef(load); loadRef.current = load;
   // First load + every range/restaurant change fetches the all-time records; the auto-refresh
