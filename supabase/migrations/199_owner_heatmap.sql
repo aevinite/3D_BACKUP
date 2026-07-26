@@ -1,4 +1,4 @@
--- 197_owner_heatmap.sql
+-- 199_owner_heatmap.sql
 -- Day-of-week × hour "busy heatmap" for the owner dashboard (2026-07-26 merge redesign).
 --
 -- One tiny pre-summed grid (≤ 7×24 rows) per call — the dashboard's new heatmap card

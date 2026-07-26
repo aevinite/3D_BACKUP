@@ -1,4 +1,4 @@
--- 198_sales_report_index_friendly.sql
+-- 200_sales_report_index_friendly.sql
 -- Fix the owner Sales report (and every money report built on it — sales / tax /
 -- discounts / cancellations / day-summary) timing out on wide windows (12-month view
 -- was a hard statement_timeout, ~12s for ONE restaurant — owner round-6, phase-5).
