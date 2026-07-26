@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
   // re-raise it; "mark unread" clears seen_at to re-surface one. Excluding resolved keeps the bell
   // in step with the dashboard "Fix problems" count, so resolving an error clears it everywhere.
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const [ticketsQ, countQ, restQ, errorsQ, errorCountQ] = await Promise.all([
+  const [ticketsQ, countQ, restQ, errorsQ, errorCountQ, rlQ, rlCountQ] = await Promise.all([
     sb.from("issues")
       .select("id, restaurant_id, subject, body, raised_by, raised_role, created_at, image_url, audio_url")
       .eq("status", "open").order("created_at", { ascending: false }).limit(TICKET_LIMIT),
@@ -37,6 +37,10 @@ export async function GET(req: NextRequest) {
     sb.from("staff_actions").select("id, panel, action, detail, restaurant_id, created_at")
       .eq("level", "error").is("seen_at", null).is("resolved_at", null).gte("created_at", since24h).order("created_at", { ascending: false }).limit(10),
     sb.from("staff_actions").select("id", { count: "exact", head: true }).eq("level", "error").is("seen_at", null).is("resolved_at", null).gte("created_at", since24h),
+    // Rate-limit hits (mig 205): open events, newest first, capped + true count for the badge.
+    sb.from("rate_limit_events").select("id, restaurant_id, key, subject_label, subject, hit_count, max_count, last_at")
+      .eq("status", "open").order("last_at", { ascending: false }).limit(10),
+    sb.from("rate_limit_events").select("id", { count: "exact", head: true }).eq("status", "open"),
   ]);
   // Surface a failed read — otherwise a broken tickets/restaurants query silently shows an
   // empty bell (no tickets, and NO suspended-restaurant alerts) as if everything's clear (audit).
@@ -62,6 +66,13 @@ export async function GET(req: NextRequest) {
   }
   alerts.sort((a, b) => a.restaurantName.localeCompare(b.restaurantName));
 
+  // Rate-limit hits (non-fatal): a configurable limit was reached.
+  const rateLimits = (rlQ.data || []).map((e) => ({
+    id: e.id, key: e.key, subject: e.subject_label || e.subject, hit_count: e.hit_count, max_count: e.max_count, last_at: e.last_at,
+    restaurantName: e.restaurant_id && e.restaurant_id !== "00000000-0000-0000-0000-000000000000" ? (nameOf[e.restaurant_id] || "—") : "Platform",
+  }));
+  const rateLimitCount = rlCountQ.count ?? rateLimits.length;
+
   return NextResponse.json({
     tickets,                                          // up to 30 newest open tickets (for the list)
     openTicketCount: countQ.count ?? tickets.length,  // TRUE open total (for the badge)
@@ -69,6 +80,8 @@ export async function GET(req: NextRequest) {
     alertCount: alerts.length,
     errors,                                           // up to 10 newest app errors (last 24h)
     errorCount,                                        // TRUE error total in the last 24h
+    rateLimits,                                        // up to 10 newest rate-limit hits
+    rateLimitCount,                                    // TRUE open rate-limit-hit total
     healthOk: true,
     checkedAt: new Date().toISOString(),
   });

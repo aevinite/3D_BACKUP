@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, adminPassword } from "@/lib/staffAuth";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { throttleStatus, throttleFail, throttleReset, clientIp } from "@/lib/loginThrottle";
+import { rateAllowed } from "@/lib/rateLimit";
 
 const ADMIN_MAX_FAILS = 10;             // wrong tries from one IP before a lockout
 const ADMIN_LOCK_MS = 5 * 60 * 1000;    // lockout length (5 minutes)
@@ -33,6 +34,14 @@ export async function POST(req: NextRequest) {
   const st = await throttleStatus(throttleKey);
   if (st.locked) {
     await logAction("admin", "login_blocked", { device_id: dev, detail: `admin login blocked — ${ip} is locked out (too many wrong tries)` });
+    return NextResponse.redirect(new URL(`/staff-login?locked=1&next=${encodeURIComponent(next)}`, req.url), 303);
+  }
+
+  // Configurable admin-login limit (mig 205) — ships DISABLED so the owner is never locked out
+  // of the god-panel; a no-op unless the admin deliberately turns 'admin_login' on. Separate from
+  // the IP lockout above, which stays as the always-on backstop.
+  if (!(await rateAllowed("admin_login", `admin:${ip}`, { label: `admin password from ${ip}` }))) {
+    await logAction("admin", "rate_limited", { device_id: dev, detail: `admin login rate limit reached from ${ip}` });
     return NextResponse.redirect(new URL(`/staff-login?locked=1&next=${encodeURIComponent(next)}`, req.url), 303);
   }
 

@@ -16,6 +16,7 @@ import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { softDeleteOrders } from "@/lib/softDelete";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
+import { rateAllowed } from "@/lib/rateLimit";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
@@ -53,7 +54,13 @@ async function managerPinGate(req: NextRequest, body: any, rid: string): Promise
   const throttleKey = `pin:${rid}:${deviceIdFrom(req) || "nodev"}`;
   const check = await verifyManagerPin(body?.managerPin || "", rid, throttleKey);
   if (!check.ok) {
-    return check.locked
+    // Configurable manager-PIN limit (mig 205), layered on the built-in lockout so a device
+    // that keeps trying wrong PINs surfaces in the admin Problems section. Only counts a real
+    // PIN attempt (managerPin present), never every gated action.
+    const overLimit = body?.managerPin
+      ? !(await rateAllowed("manager_pin", `${rid}:${deviceIdFrom(req) || "nodev"}`, { restaurantId: rid, label: "Tablet PIN device" }))
+      : false;
+    return (check.locked || overLimit)
       ? { allow: false, resp: NextResponse.json({ error: "Too many wrong PINs — wait a minute and try again.", locked: true }, { status: 429 }) }
       : { allow: false, resp: NextResponse.json({ error: "A manager PIN is required for this.", needPin: true }, { status: 403 }) };
   }
