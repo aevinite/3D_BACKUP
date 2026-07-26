@@ -1282,7 +1282,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const paid = must(await sb.from("orders").select("id, payment_method")
         .eq("session_id", openSess.id).eq("restaurant_id", rid)
         .eq("payment_status", "paid").gte("paid_at", cutoff)) as { id: string; payment_method: string | null }[];
-      if (!paid.length) return ok({ ok: true, count: 0 });
+      // Nothing within the grace window to reopen. Returning ok({count:0}) made the client
+      // show a green "Bill reopened" toast while NOTHING changed — a silent money mismatch.
+      // Match the editor's behaviour: tell the user plainly it can't be reopened here. (sweep C2)
+      if (!paid.length) return err("This bill was settled more than 30 minutes ago and can no longer be reopened here — ask an admin to correct it.", 409);
       // Common revert: unpaid again + clear the paid stamp and HOW it was paid.
       // tip:0 — reverting the settle un-collects the payment, and the TIP went with it; leaving
       // it makes a re-pay-without-tip keep the old tip, which the Z-report counts again. (sweep C2)
