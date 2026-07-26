@@ -2511,7 +2511,10 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       }
       // Stamp/clear the settle timestamps as their gating flags flip.
       if (patch.payment_status === "paid") patch.paid_at = new Date().toISOString();
-      if (patch.payment_status === "pending") patch.paid_at = null;
+      // Reverting to unpaid un-collects the payment — the TIP went with that payment, so
+      // clear it too. Otherwise a re-pay without a new tip leaves the old tip on the order
+      // and the Z-report's "tips collected" (SUM orders.tip over paid) counts it again. (sweep C2)
+      if (patch.payment_status === "pending") { patch.paid_at = null; patch.tip = 0; }
       if (patch.archived === true) patch.archived_at = new Date().toISOString();
       if (patch.archived === false) patch.archived_at = null;
       if (patch.status === "cancelled") patch.cancelled_at = new Date().toISOString();

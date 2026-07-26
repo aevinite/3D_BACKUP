@@ -1284,7 +1284,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         .eq("payment_status", "paid").gte("paid_at", cutoff)) as { id: string; payment_method: string | null }[];
       if (!paid.length) return ok({ ok: true, count: 0 });
       // Common revert: unpaid again + clear the paid stamp and HOW it was paid.
-      const base = { payment_status: "pending", paid_at: null, payment_method: null, payment_note: null };
+      // tip:0 — reverting the settle un-collects the payment, and the TIP went with it; leaving
+      // it makes a re-pay-without-tip keep the old tip, which the Z-report counts again. (sweep C2)
+      const base = { payment_status: "pending", paid_at: null, payment_method: null, payment_note: null, tip: 0 };
       // "On the house" ALSO stamped a 100% discount (discount = subtotal); reversing the
       // settle must strip that too, or the bill would read ₹0 due yet unpaid. Regular /
       // split settles keep whatever discount they had.
