@@ -755,15 +755,17 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
   );
 }
 
-// Quick on/off for a restaurant's MAIN operational features (banquet, auto-print KOT), a
+// Quick on/off for a restaurant's MAIN operational features (platform, banquet), a
 // shortcut so you don't have to open the full Access screen for the common ones (owner
 // 2026-07-25). Each switch shows/sets the EFFECTIVE state (is it actually live for staff) and
 // writes the SAME settings columns the Access screen reads — so the two are always in sync
 // (single source of truth; no duplicated value). Fine-tune the full ladder in Access below.
+// NOTE: auto-print KOT is NOT here — it lives ONLY in the Settings tab's "KOT printing"
+// section (owner 2026-07-26). Having it in both places showed two toggles that shared one
+// saved value but not one on-screen state, so they looked out of sync — one control now.
 const QUICK_FEATURES = [
   { key: "platform", label: "Platform board (Zomato / Swiggy)", hint: "The 🛵 online-delivery board in the manager panel. Turn it off for restaurants that aren't on the delivery apps. Choose which channels are live below." },
   { key: "banquet", label: "Banquet billing", hint: "Per-plate event billing that runs without a table." },
-  { key: "auto_print_kot", label: "Auto-print KOT", hint: "Kitchen tickets print themselves as orders come in." },
 ] as const;
 type QuickKey = (typeof QUICK_FEATURES)[number]["key"];
 
@@ -835,7 +837,7 @@ function QuickFeaturesCard({ restaurant }: { restaurant: Restaurant }) {
       .then((r) => r.json())
       .then((j) => {
         if (j.error || typeof j.banquet === "undefined") { setLoadErr(true); return; }
-        setState({ platform: !!j.platform, banquet: !!j.banquet, auto_print_kot: !!j.auto_print_kot });
+        setState({ platform: !!j.platform, banquet: !!j.banquet });
       })
       .catch(() => setLoadErr(true));
   }, [restaurant.id]);
@@ -849,7 +851,7 @@ function QuickFeaturesCard({ restaurant }: { restaurant: Restaurant }) {
     try {
       const r = await fetch("/api/admin/restaurants/quick-features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, feature: key, on: next }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      setState({ platform: !!d.platform, banquet: !!d.banquet, auto_print_kot: !!d.auto_print_kot }); // trust the server's effective read
+      setState({ platform: !!d.platform, banquet: !!d.banquet }); // trust the server's effective read
     } catch (e) {
       setState((s) => (s ? { ...s, [key]: !next } : s)); // revert
       setErr(e instanceof Error ? e.message : String(e));
