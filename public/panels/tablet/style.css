@@ -283,7 +283,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .toast.bad { border-color: rgba(239,68,68,0.55); }
 .toast .toast-x { margin-left: auto; background: none; border: none; color: var(--muted, #9aa); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; border-radius: 6px; }
 .toast .toast-x:hover { color: var(--text, #fff); background: rgba(255,255,255,0.08); }
-.confirm-overlay { position: fixed; inset: 0; background: rgba(3,7,16,0.65); display: grid; place-items: center; z-index: 60; }
+/* Confirm dialog must sit ABOVE every other overlay — it is often raised FROM inside one
+   (e.g. the dish-edit modal at z-index 99990, the options overlay at 100000). At z-index 60
+   it rendered behind the dish-edit modal, making "Send back to kitchen" (un-serve) and
+   "Remove from all" un-tappable — the only un-serve path. Keep it topmost. */
+.confirm-overlay { position: fixed; inset: 0; background: rgba(3,7,16,0.65); display: grid; place-items: center; z-index: 100002; }
 /* the [hidden] attribute must win over display:grid — else it blocks taps at rest */
 .confirm-overlay[hidden] { display: none; }
 .confirm-box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; width: min(92vw, 380px); }

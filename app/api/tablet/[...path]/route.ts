@@ -790,6 +790,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // sessions/:id/shift — move the whole party (session + orders + calls) to
     // another table, atomically, via the service-role RPC.
     if (a === "sessions" && c === "shift") {
+      // Table-ops gate, same as merge / move-dish (they're all KOT ▾ table operations):
+      // shifting a whole party is a table-op, so it must honour the tablet_table_ops ladder
+      // (off/pin/on) — it was ungated before, so a restaurant with table-ops set to PIN/off
+      // could still shift parties from the tablet. actor null = admin act-as (X-ray bypass).
+      if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      { const gsh = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gsh.allow) return gsh.resp; }
       const to = String((body && body.to) || "").trim();
       // lfh_staff_shift_table derives the restaurant from the session itself and
       // checks the target table within that same restaurant — no rid needed here.
@@ -1049,6 +1055,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // orders/:id/move — move a SINGLE order (and its dish rows) to another table's
     // open session. Distinct from sessions/:id/shift (which moves the whole party).
     if (a === "orders" && c === "move") {
+      // Table-ops gate, same as merge / move-dish / shift: moving a whole order to another
+      // table is a KOT ▾ table-op and must honour the tablet_table_ops ladder (off/pin/on).
+      // It was ungated before. actor null = admin act-as (X-ray bypass).
+      if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403);
+      { const gmo = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gmo.allow) return gmo.resp; }
       const to = String((body && body.to) || "").trim();
       if (!/^\d+$/.test(to)) return err("valid target table required");
       // Reject a target table that doesn't exist (1..table_count) — same guard as place-order.
