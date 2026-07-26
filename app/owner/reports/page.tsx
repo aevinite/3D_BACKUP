@@ -743,7 +743,11 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
             <p className="rs-note">Each period&apos;s tax is split across the set tax lines and rounded so the parts add back to that period&apos;s total — ready to copy into a return.</p>
           </Panel>
         )}
-        <MoneyTable rows={mrows} totals={t} bucket={bucket} />
+        {/* The filing view already IS the tax report's by-period table; the generic
+            money table only duplicates Period+Tax here (orders/revenue belong in Sales).
+            Keep it ONLY as a fallback when no tax lines are configured, so the report
+            still shows a by-period breakdown (owner round-6, phase-6 no-duplicate rule). */}
+        {filingRows.length === 0 && <MoneyTable rows={mrows} totals={t} bucket={bucket} />}
       </>
     );
   }
