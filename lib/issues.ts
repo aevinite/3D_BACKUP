@@ -5,6 +5,7 @@
 // (multipart → public `issue-media` bucket → URL), then the issue row is inserted
 // with those URLs. Service-role only; callers gate the request themselves.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { sendOwnerAlert } from "@/lib/alerts";
 
 export const ISSUE_BUCKET = "issue-media";
 
@@ -73,6 +74,22 @@ export async function raiseIssue(input: RaiseIssueInput): Promise<void> {
     raised_role: input.raisedRole,
     image_url: clean(input.imageUrl),
     audio_url: clean(input.audioUrl),
-  });
+  }).select("id").single();
   if (ins.error) throw new Error(ins.error.message);
+
+  // Ping the owner's phone (ntfy / Telegram via lib/alerts) the moment a complaint is
+  // raised. A complaint is a deliberate human action — not an error burst — so EVERY one
+  // should alert; the grouping key is the new row id, so the 15-min dedup never collapses
+  // two different complaints into one ping. Best-effort: sendOwnerAlert never throws and
+  // no-ops when no alert channel is configured, so it can't break raising the complaint.
+  try {
+    const { data: rest } = await sb.from("restaurants").select("name").eq("id", input.rid).maybeSingle();
+    const where = rest?.name ? ` · ${rest.name}` : "";
+    await sendOwnerAlert(
+      `🚩 New complaint${where}: ${subject} — from ${input.raisedBy} (${input.raisedRole})`,
+      `complaint:${ins.data?.id ?? Date.now()}`,
+    );
+  } catch {
+    /* alerting is best-effort; the complaint is already saved */
+  }
 }

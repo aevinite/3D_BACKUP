@@ -2,7 +2,7 @@
 // Owner · Feedback & issues — TWO tabs:
 //   · Guest ratings — the star-ratings diners leave (feedback table). View the average
 //     + distribution, read comments, and mark each one handled / add an internal note.
-//   · Staff issues — problems staff flagged; resolve/reopen inline.
+//   · Complaints — problems staff flagged via the 🚩 button; resolve/reopen inline.
 // Both are scoped server-side (ownerScope) and gated by their admin entitlement
 // (ratings / issues) — a tab hides itself if the admin switched that section off.
 // A 60s backstop refresh (paused while the tab is hidden) keeps new items appearing
@@ -159,8 +159,8 @@ export default function OwnerFeedback() {
 
   return (
     <>
-      <h1 className="adm-page-h">Feedback &amp; issues</h1>
-      <p className="adm-page-sub">What your guests rated and what your staff flagged — read it, handle it, mark it done.</p>
+      <h1 className="adm-page-h">Feedback &amp; complaints</h1>
+      <p className="adm-page-sub">What your guests rated and the complaints your staff raised — read it, handle it, mark it done.</p>
 
       {bothOff ? (
         <div className="adm-card"><div className="adm-empty">This section isn&apos;t enabled for your restaurant — contact Aevidine.</div></div>
@@ -169,7 +169,7 @@ export default function OwnerFeedback() {
         {/* Tabs (hide a tab the admin switched off) */}
         <div className="own-range" style={{ marginBottom: 14 }}>
           {!ratingsOff && <button className={tab === "ratings" ? "on" : ""} onClick={() => setTab("ratings")}>Guest ratings{summary ? ` · ${summary.total}` : ""}</button>}
-          {!issuesOff && <button className={tab === "issues" ? "on" : ""} onClick={() => setTab("issues")}>Staff issues · {openCount}</button>}
+          {!issuesOff && <button className={tab === "issues" ? "on" : ""} onClick={() => setTab("issues")}>Complaints · {openCount}</button>}
           <button className="adm-btn" style={{ marginLeft: "auto" }} onClick={loadAll}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
         </div>
 
@@ -279,13 +279,13 @@ export default function OwnerFeedback() {
             </div>
             {iErr && issues === null ? (
               <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>
-                Couldn&apos;t load issues — this is a loading error, not &ldquo;all clear.&rdquo;{" "}
+                Couldn&apos;t load complaints — this is a loading error, not &ldquo;all clear.&rdquo;{" "}
                 <button className="adm-btn" style={{ marginLeft: 6 }} onClick={loadIssues}>Try again</button>
               </div>
             ) : issues === null ? (
-              <div className="adm-empty">Loading issues…</div>
+              <div className="adm-empty">Loading complaints…</div>
             ) : issueRows.length === 0 ? (
-              <div className="adm-empty">{iFilter === "open" ? "No open issues — all clear. 🎉" : "No issues raised yet."}</div>
+              <div className="adm-empty">{iFilter === "open" ? "No open complaints — all clear. 🎉" : "No complaints raised yet."}</div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {issueRows.map((i) => {

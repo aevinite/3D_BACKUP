@@ -67,7 +67,9 @@ export default function OwnerActivity() {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
           <div className="own-range" style={{ margin: 0 }}>
             <button className={level === "" ? "on" : ""} onClick={() => setLevel("")}>All</button>
-            <button className={level === "error" ? "on" : ""} onClick={() => setLevel("error")}>⚠️ Errors</button>
+            {/* No "Errors" filter here: raw app/system faults (level='error') are technical
+                support signals, not for the owner — they're excluded server-side in
+                /api/owner/oplog and surface only on the admin side (owner 2026-07-26). */}
             <button className={level === "warn" ? "on" : ""} onClick={() => setLevel("warn")}>Notable</button>
             <button className={level === "info" ? "on" : ""} onClick={() => setLevel("info")}>Info</button>
           </div>
