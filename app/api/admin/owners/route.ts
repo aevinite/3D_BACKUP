@@ -7,11 +7,15 @@
 //           login ONCE (password shown once) and attach any number of restaurants.
 //   PATCH → { owner_id, action: "attach"|"detach" (+restaurant_id) |
 //             "reset_password" (+password?) | "set_active" (+active) | "rename" (+name) }
+//   POST  → also { action:"restore_owner"|"purge_owner", owner_id } for the recycle bin.
 //   GET ?id=<owner_id>  → one owner's ACTIVITY feed (staff_actions rows that name
 //           them — their own logins/actions + admin actions done TO them).
-//   DELETE ?id=<owner_id> → PERMANENT erase (owner rule 2026-07-06: suspend FIRST,
-//           then delete; a deleted owner can never be restored). Restaurants they
-//           owned fall back to a co-owner or to "no owner" (warning strip).
+//   GET ?deleted=1      → the RECYCLE BIN: owners that were soft-deleted (mig 208),
+//           with the 90-day retention countdown + whether they're purge-eligible.
+//   DELETE ?id=<owner_id> → move the owner to the RECYCLE BIN (soft-delete, mig 208;
+//           owner rule 2026-07-06: suspend FIRST). Reversible via restore_owner for
+//           90 days, then purge_owner erases it for good (that permanent step hands
+//           their restaurants to a co-owner or to "no owner"). Mirrors restaurants.
 // Admin-gated (same cookie as the rest of /aevinite), service-role.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
@@ -21,6 +25,7 @@ import { logAction, redactMoney } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
+const RETENTION_DAYS = 90; // a binned owner is restorable for this long, then purgeable (matches restaurants)
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 const ok = (d: unknown, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
@@ -82,10 +87,39 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // ── ?deleted=1 → the RECYCLE BIN: only binned owners, with the retention
+  // countdown + whether they're yet eligible to purge. Kept separate from the
+  // main list so a binned owner never leaks back into the live table.
+  if (new URL(req.url).searchParams.get("deleted") === "1") {
+    const [binQ, linksQ] = await Promise.all([
+      sb.from("staff_users").select("id, username, name, deleted_at, deleted_by, delete_reason")
+        .eq("role", "owner").not("deleted_at", "is", null).order("deleted_at", { ascending: false }),
+      sb.from("restaurant_owners").select("user_id"),
+    ]);
+    if (binQ.error) return bad(binQ.error.message, 500);
+    const owned = new Map<string, number>();
+    for (const l of linksQ.data || []) owned.set(l.user_id, (owned.get(l.user_id) || 0) + 1);
+    const now = Date.now();
+    const trashed = (binQ.data || []).map((o) => {
+      const deletedAt = o.deleted_at as string;
+      const purgeEligibleAt = new Date(new Date(deletedAt).getTime() + RETENTION_DAYS * 86400000).toISOString();
+      const daysLeft = Math.max(0, Math.ceil((new Date(purgeEligibleAt).getTime() - now) / 86400000));
+      return {
+        id: o.id, username: o.username, name: o.name || o.username,
+        deletedAt, deletedBy: o.deleted_by || null, reason: o.delete_reason || null,
+        restaurants: owned.get(o.id) || 0,
+        purgeEligibleAt, daysLeft, canPurge: now >= new Date(purgeEligibleAt).getTime(),
+      };
+    });
+    return ok({ trashed, retentionDays: RETENTION_DAYS });
+  }
+
   const [ownersQ, linksQ, restQ] = await Promise.all([
+    // deleted_at IS NULL → the live/suspended list; binned owners are hidden here
+    // (they live in the recycle bin above).
     sb.from("staff_users")
       .select("id, username, name, active, last_seen_at, created_at")
-      .eq("role", "owner").order("created_at", { ascending: true }),
+      .eq("role", "owner").is("deleted_at", null).order("created_at", { ascending: true }),
     sb.from("restaurant_owners").select("restaurant_id, user_id"),
     sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name"),
   ]);
@@ -132,7 +166,49 @@ async function attach(ownerId: string, rid: string): Promise<string | null> {
 export async function POST(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   let body: any = {}; try { body = await req.json(); } catch {}
-  if (String(body?.action || "") !== "create_owner") return bad("Unknown action.");
+  const action = String(body?.action || "");
+
+  // ── restore_owner — bring a binned owner back. They return SUSPENDED (active
+  // stays false, exactly as they were before binning) so they can't silently sign
+  // in; the admin flips Restore in the Owners list to reactivate. Their restaurant
+  // links were kept intact, so ownership comes straight back. Clears bin fields. ──
+  if (action === "restore_owner") {
+    const ownerId = String(body?.owner_id || "");
+    if (!ownerId) return bad("Missing owner_id.");
+    const o = (await sb.from("staff_users").select("id, username, name, role, deleted_at").eq("id", ownerId).limit(1)).data?.[0];
+    if (!o || o.role !== "owner") return bad("That user isn't an owner.", 404);
+    if (!o.deleted_at) return bad("That owner isn't in the recycle bin.", 409);
+    const { error } = await sb.from("staff_users")
+      .update({ deleted_at: null, deleted_by: null, delete_reason: null }).eq("id", ownerId);
+    if (error) return bad(error.message, 500);
+    await logAction("admin", "owner_restore_from_bin", { actor: "admin", restaurant_id: null, detail: `restored owner "${o.name || o.username}" from recycle bin (still suspended) · owner ${ownerId}` });
+    return ok({ ok: true, restored: true });
+  }
+
+  // ── purge_owner — PERMANENT, irreversible erase of a binned owner. Allowed ONLY
+  // once the 90-day retention window has elapsed (checked here — there is no early
+  // override). This is the old permanent delete: hand each restaurant's primary to
+  // a co-owner (or clear it), drop the join rows, delete the staff_users row. The
+  // audit trail (staff_actions) is kept on purpose. ────────────────────────────
+  if (action === "purge_owner") {
+    const ownerId = String(body?.owner_id || "");
+    if (!ownerId) return bad("Missing owner_id.");
+    const o = (await sb.from("staff_users").select("id, username, name, role, deleted_at").eq("id", ownerId).limit(1)).data?.[0];
+    if (!o || o.role !== "owner") return bad("That user isn't an owner.", 404);
+    if (!o.deleted_at) return bad("Only an owner in the recycle bin can be purged.", 409);
+    const eligibleAt = new Date(o.deleted_at as string).getTime() + RETENTION_DAYS * 86400000;
+    if (Date.now() < eligibleAt) {
+      const daysLeft = Math.ceil((eligibleAt - Date.now()) / 86400000);
+      return bad(`Locked for ${daysLeft} more day(s) — an owner can only be purged ${RETENTION_DAYS} days after deletion.`, 423);
+    }
+    const who = o.name || o.username;
+    const res = await hardDeleteOwner(ownerId);
+    if (res.error) return bad(res.error, 500);
+    await logAction("admin", "owner_purge", { actor: "admin", restaurant_id: null, detail: `PERMANENTLY purged owner "${who}" (${ownerId}) · ${res.released} restaurant(s) released` });
+    return ok({ ok: true, purged: true });
+  }
+
+  if (action !== "create_owner") return bad("Unknown action.");
 
   const display = String(body?.name ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
@@ -228,9 +304,10 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (action === "delete_forever") {
-    // Kept for API symmetry, but the real handler is DELETE below — reject here so
-    // no one wires a PATCH to a destructive action by accident.
-    return bad("Use DELETE /api/admin/owners?id=… for permanent deletion.", 405);
+    // Kept for API symmetry — reject here so no one wires a PATCH to a destructive
+    // action by accident. DELETE now moves to the recycle bin; POST purge_owner is
+    // the permanent step (after 90 days).
+    return bad("Use DELETE /api/admin/owners?id=… to bin, or POST purge_owner to remove permanently.", 405);
   }
 
   if (action === "rename") {
@@ -247,25 +324,12 @@ export async function PATCH(req: NextRequest) {
   return bad("Unknown action.");
 }
 
-// ── DELETE ?id=<owner_id> — PERMANENT, irreversible owner erase. ─────────────
-// Owner's rule (2026-07-06): deletion is a TWO-STEP flow — the account must be
-// SUSPENDED first (that's the reversible step), then delete forever. There is no
-// restore: the staff_users row is gone, every live session dies with it, and the
-// restaurants they owned hand primary to a co-owner or become "no owner" (the
-// Owners page warning strip picks those up). Their activity rows in
-// staff_actions are kept on purpose — the audit trail must outlive the account.
-export async function DELETE(req: NextRequest) {
-  if (!(await admin(req))) return bad("unauthorized", 401);
-  const ownerId = new URL(req.url).searchParams.get("id") || "";
-  if (!ownerId) return bad("Missing id.");
-  const o = (await sb.from("staff_users").select("id, username, name, role, active").eq("id", ownerId).limit(1)).data?.[0];
-  if (!o || o.role !== "owner") return bad("That user isn't an owner.", 404);
-  if (o.active) return bad("Suspend this owner first — deletion is permanent and only allowed on a suspended account.", 409);
-  const who = o.name || o.username;
-
-  // Hand off / clear the PRIMARY pointer on every restaurant they owned, then
-  // revoke the memberships. Same rule as detach: owner_user_id must never point
-  // at someone without a membership row.
+// The old permanent-delete guts, now used ONLY by purge_owner (after the 90-day
+// bin lock). Hands each restaurant's PRIMARY pointer to a remaining co-owner (or
+// clears it — owner_user_id must never point at someone with no membership), drops
+// the join rows, then deletes the staff_users row. Returns how many restaurants
+// were released. staff_actions rows are kept on purpose (audit outlives account).
+async function hardDeleteOwner(ownerId: string): Promise<{ error?: string; released: number }> {
   const links = (await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId)).data || [];
   for (const l of links) {
     const rid = l.restaurant_id as string;
@@ -273,16 +337,40 @@ export async function DELETE(req: NextRequest) {
     if (r?.owner_user_id === ownerId) {
       const next = (await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).neq("user_id", ownerId).limit(1)).data?.[0];
       const set = await sb.from("restaurants").update({ owner_user_id: next?.user_id ?? null }).eq("id", rid);
-      if (set.error) return bad(set.error.message, 500);
+      if (set.error) return { error: set.error.message, released: 0 };
     }
   }
   const delLinks = await sb.from("restaurant_owners").delete().eq("user_id", ownerId);
-  if (delLinks.error) return bad(delLinks.error.message, 500);
+  if (delLinks.error) return { error: delLinks.error.message, released: 0 };
   const delUser = await sb.from("staff_users").delete().eq("id", ownerId);
-  if (delUser.error) return bad(delUser.error.message, 500);
-  await logAction("admin", "owner_delete_forever", {
+  if (delUser.error) return { error: delUser.error.message, released: 0 };
+  return { released: links.length };
+}
+
+// ── DELETE ?id=<owner_id> — move the owner to the RECYCLE BIN (soft-delete). ──
+// Owner's rule (2026-07-06): the account must be SUSPENDED first (the reversible
+// step). Binning sets deleted_at so the owner drops out of the Owners list; their
+// login is already dead (suspended). NOTHING is erased — restaurant links + primary
+// pointers stay intact, so a Restore from the bin brings ownership straight back.
+// After 90 days they can be permanently purged (POST purge_owner). Mirrors the
+// restaurant recycle bin (soft_delete_restaurant, mig 128/208).
+export async function DELETE(req: NextRequest) {
+  if (!(await admin(req))) return bad("unauthorized", 401);
+  const url = new URL(req.url);
+  const ownerId = url.searchParams.get("id") || "";
+  if (!ownerId) return bad("Missing id.");
+  const o = (await sb.from("staff_users").select("id, username, name, role, active, deleted_at").eq("id", ownerId).limit(1)).data?.[0];
+  if (!o || o.role !== "owner") return bad("That user isn't an owner.", 404);
+  if (o.active) return bad("Suspend this owner first — deleting only moves a suspended account to the recycle bin.", 409);
+  if (o.deleted_at) return bad("That owner is already in the recycle bin.", 409);
+  const reason = (url.searchParams.get("reason") || "").trim().slice(0, 300) || null;
+  const who = o.name || o.username;
+  const { error } = await sb.from("staff_users")
+    .update({ deleted_at: new Date().toISOString(), deleted_by: "admin", delete_reason: reason }).eq("id", ownerId);
+  if (error) return bad(error.message, 500);
+  await logAction("admin", "owner_soft_delete", {
     actor: "admin", restaurant_id: null, // platform-level (mig 156)
-    detail: `PERMANENTLY deleted owner "${who}" (${ownerId}) · ${links.length} restaurant(s) released`,
+    detail: `moved owner "${who}" to recycle bin${reason ? ` · reason: ${reason}` : ""} · owner ${ownerId}`,
   });
   return ok({ ok: true, deleted: true });
 }

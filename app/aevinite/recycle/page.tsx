@@ -1,9 +1,9 @@
 "use client";
-// Admin · Recycle bin — restaurants that were DELETED (soft-deleted, mig 128). Each
-// sits here for 90 days: it can be RESTORED any time, and only AFTER 90 days can it
-// be PERMANENTLY purged. The purge button stays locked (with a countdown) until the
-// retention window elapses — there is no early-purge override. Purge is irreversible,
-// so it needs a type-the-name confirm and offers a one-click data backup first.
+// Admin · Recycle bin — things that were DELETED (soft-deleted) sit here for 90
+// days: RESTORE any time, and only AFTER 90 days can they be PERMANENTLY purged.
+// Two kinds live here now: deleted RESTAURANTS (mig 128) and deleted OWNERS (mig
+// 208). Each purge button stays locked (with a countdown) until the retention
+// window elapses — there is no early-purge override. Purge is irreversible.
 import { useCallback, useEffect, useState } from "react";
 
 type Trashed = {
@@ -12,20 +12,33 @@ type Trashed = {
   purgeEligibleAt: string; daysLeft: number; canPurge: boolean;
 };
 
+type OwnerTrashed = {
+  id: string; username: string; name: string; restaurants: number;
+  deletedAt: string; deletedBy: string | null; reason: string | null;
+  purgeEligibleAt: string; daysLeft: number; canPurge: boolean;
+};
+
 const fmtDate = (iso: string) => { try { return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); } catch { return iso; } };
 
 export default function RecycleBin() {
   const [list, setList] = useState<Trashed[] | null>(null);
+  const [owners, setOwners] = useState<OwnerTrashed[] | null>(null);
   const [retentionDays, setRetentionDays] = useState(90);
   const [msg, setMsg] = useState<string | null>(null);
+  const [ownerMsg, setOwnerMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setMsg(null);
+    setMsg(null); setOwnerMsg(null);
     try {
       const j = await (await fetch("/api/admin/restaurants?deleted=1", { cache: "no-store" })).json();
       if (!j.error) { setList(j.trashed || []); if (j.retentionDays) setRetentionDays(j.retentionDays); }
       else { setMsg(j.error); setList([]); } // show the error + Retry, not a perpetual "Loading…" (audit 2026-07-08)
     } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); setList([]); }
+    try {
+      const j = await (await fetch("/api/admin/owners?deleted=1", { cache: "no-store" })).json();
+      if (!j.error) { setOwners(j.trashed || []); if (j.retentionDays) setRetentionDays(j.retentionDays); }
+      else { setOwnerMsg(j.error); setOwners([]); }
+    } catch (e) { setOwnerMsg(e instanceof Error ? e.message : String(e)); setOwners([]); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -38,19 +51,34 @@ export default function RecycleBin() {
       </nav>
       <h1 className="adm-page-h">Recycle bin</h1>
       <p className="adm-page-sub">
-        Deleted restaurants stay here for <b>{retentionDays} days</b>. Restore any of them any time. A restaurant can only be
+        Deleted restaurants and owners stay here for <b>{retentionDays} days</b>. Restore any of them any time. Anything can only be
         <b> permanently removed</b> once its {retentionDays} days are up — until then, purge is locked for everyone.
       </p>
 
+      <h2 style={{ fontSize: 15, fontWeight: 700, margin: "18px 0 8px" }}>Deleted restaurants</h2>
       <div className="adm-card">
         {msg && <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>{msg} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>}
         {list === null ? (
           <div className="adm-empty">Loading…</div>
         ) : list.length === 0 ? (
-          <div className="adm-empty">{msg ? "" : "The recycle bin is empty — no deleted restaurants."}</div>
+          <div className="adm-empty">{msg ? "" : "No deleted restaurants."}</div>
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
             {list.map((r) => <BinRow key={r.id} r={r} onChanged={load} />)}
+          </div>
+        )}
+      </div>
+
+      <h2 style={{ fontSize: 15, fontWeight: 700, margin: "22px 0 8px" }}>Deleted owners</h2>
+      <div className="adm-card">
+        {ownerMsg && <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>{ownerMsg} <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>}
+        {owners === null ? (
+          <div className="adm-empty">Loading…</div>
+        ) : owners.length === 0 ? (
+          <div className="adm-empty">{ownerMsg ? "" : "No deleted owners."}</div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {owners.map((o) => <OwnerBinRow key={o.id} o={o} onChanged={load} />)}
           </div>
         )}
       </div>
@@ -170,6 +198,102 @@ function BinRow({ r, onChanged }: { r: Trashed; onChanged: () => void }) {
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="adm-btn danger" disabled={busy || !nameMatches} onClick={purge}>
               <i className="fas fa-fire" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Purging…" : "Permanently delete"}
+            </button>
+            <button className="adm-btn" disabled={busy} onClick={() => { setPurgeOpen(false); setConfirmName(""); setErr(null); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {err && !purgeOpen && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
+    </div>
+  );
+}
+
+// Deleted OWNER row (mig 208). Restore brings them back SUSPENDED (reactivate from
+// the Owners list). Purge is the old permanent delete — locked until 90 days — and
+// releases their restaurants to a co-owner / "no owner". No data-backup step: an
+// owner is just a login; its restaurants aren't erased.
+function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [purgeOpen, setPurgeOpen] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+
+  const nameMatches = confirmName.trim().toLowerCase() === o.username.trim().toLowerCase();
+
+  const restore = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch("/api/admin/owners", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restore_owner", owner_id: o.id }),
+      });
+      const d = await res.json(); if (!res.ok) throw new Error(d.error || "Couldn't restore.");
+      onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+  };
+
+  const purge = async () => {
+    if (!nameMatches) { setErr("Type the owner's exact username to confirm."); return; }
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch("/api/admin/owners", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "purge_owner", owner_id: o.id }),
+      });
+      const d = await res.json(); if (!res.ok) throw new Error(d.error || "Couldn't purge.");
+      onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+  };
+
+  return (
+    <div style={{ border: "var(--border)", borderRadius: 12, padding: 14, background: "var(--bg)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>{o.name} <span className="adm-muted" style={{ fontWeight: 400, fontSize: 12.5 }}>@{o.username}</span></div>
+          <div className="adm-muted" style={{ fontSize: 12.5 }}>{o.restaurants} restaurant{o.restaurants === 1 ? "" : "s"} still linked (returned on restore)</div>
+          <div className="adm-muted" style={{ fontSize: 12, marginTop: 4 }}>
+            Deleted {fmtDate(o.deletedAt)}{o.deletedBy ? ` by ${o.deletedBy}` : ""}{o.reason ? ` · “${o.reason}”` : ""}
+          </div>
+        </div>
+        <span className="adm-chip" style={o.canPurge
+          ? { background: "color-mix(in srgb, var(--adm-danger) 20%, transparent)", color: "var(--adm-danger)" }
+          : { background: "var(--muted2, rgba(120,120,120,0.18))", color: "var(--muted)" }}>
+          {o.canPurge ? "Ready to remove" : `${o.daysLeft} day${o.daysLeft === 1 ? "" : "s"} left`}
+        </span>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
+        <button className="adm-btn primary" disabled={busy} onClick={restore} title="Bring the owner back, suspended (reactivate from the Owners list)">
+          <i className="fas fa-rotate-left" style={{ marginRight: 7 }} aria-hidden="true" />Restore (suspended)
+        </button>
+        <span style={{ flex: 1 }} />
+        {o.canPurge ? (
+          !purgeOpen && (
+            <button className="adm-btn danger" disabled={busy} onClick={() => { setPurgeOpen(true); setErr(null); }}>
+              <i className="fas fa-fire" style={{ marginRight: 7 }} aria-hidden="true" />Delete permanently…
+            </button>
+          )
+        ) : (
+          <button className="adm-btn" disabled title={`Locked until ${fmtDate(o.purgeEligibleAt)}`} style={{ opacity: 0.6, cursor: "not-allowed" }}>
+            <i className="fas fa-lock" style={{ marginRight: 7 }} aria-hidden="true" />Purge locked until {fmtDate(o.purgeEligibleAt)}
+          </button>
+        )}
+      </div>
+
+      {purgeOpen && o.canPurge && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "var(--border)", display: "grid", gap: 10, maxWidth: 460 }}>
+          <p className="hint" style={{ margin: 0, color: "var(--adm-danger)" }}>
+            This permanently deletes the owner login <b>{o.name}</b>. Their {o.restaurants} restaurant{o.restaurants === 1 ? "" : "s"} are handed to a co-owner or become “no owner” — the restaurants themselves are NOT deleted. This cannot be undone.
+          </p>
+          <label style={{ fontSize: 12.5 }}>
+            Type <b style={{ fontFamily: "ui-monospace, monospace" }}>{o.username}</b> to confirm
+            <input value={confirmName} onChange={(e) => setConfirmName(e.target.value)} disabled={busy} autoFocus placeholder={o.username}
+              style={{ width: "100%", marginTop: 4, padding: "8px 11px", borderRadius: 8, border: nameMatches ? "1px solid var(--adm-danger)" : "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />
+          </label>
+          {err && <span style={{ color: "var(--adm-danger)", fontSize: 12.5 }}>{err}</span>}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="adm-btn danger" disabled={busy || !nameMatches} onClick={purge}>
+              <i className="fas fa-fire" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Removing…" : "Permanently delete"}
             </button>
             <button className="adm-btn" disabled={busy} onClick={() => { setPurgeOpen(false); setConfirmName(""); setErr(null); }}>Cancel</button>
           </div>
