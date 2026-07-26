@@ -382,6 +382,18 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
             onClick={() => { const nn = prompt(`New name / login for ${owner.name}:`, owner.name); if (nn && nn.trim() && nn.trim() !== owner.name) run(async () => { await patch({ owner_id: owner.id, action: "rename", name: nn.trim() }); }); }}><i className="fas fa-pen" style={ic} aria-hidden="true" />Rename</button>
           <button style={actBtn} disabled={busy}
             onClick={() => { if (confirm(`Set a NEW password for ${owner.name}? They'll be logged out everywhere.`)) run(async () => { const j = await patch({ owner_id: owner.id, action: "reset_password" }); setPwReveal(j.password); }); }}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
+          {/* Visit: jump straight into THIS owner's panel from here (owner ask 2026-07-26) —
+              starts on their primary restaurant; multi-restaurant owners can switch inside.
+              Same act-as link as the per-restaurant "Open panel" (no password, invisible). */}
+          {owner.restaurants.length > 0 && (() => {
+            const home = owner.restaurants.find((r) => r.primary) || owner.restaurants[0];
+            return (
+              <a style={{ ...actBtn, textDecoration: "none", color: "#60a5fa" }}
+                title={`Open ${owner.name}'s owner panel${owner.restaurants.length > 1 ? ` (opens on ${home.name})` : ""} — no password, invisible to them`}
+                href={panelHref(home.id, owner.id)} target="_blank" rel="noreferrer">
+                <i className="fas fa-eye" style={ic} aria-hidden="true" />Visit panel</a>
+            );
+          })()}
           <button style={{ ...actBtn, color: owner.active ? "#fca5a5" : "#86efac" }} disabled={busy}
             onClick={() => { if (confirm(owner.active ? `Suspend ${owner.name}? They're logged out immediately and can't sign in.` : `Restore ${owner.name}'s access?`)) run(async () => { await patch({ owner_id: owner.id, action: "set_active", active: !owner.active }); }); }}>
             <i className={`fas ${owner.active ? "fa-ban" : "fa-rotate-left"}`} style={ic} aria-hidden="true" />{owner.active ? "Suspend" : "Restore"}</button>
