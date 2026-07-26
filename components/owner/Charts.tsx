@@ -429,7 +429,8 @@ export function SparkArea({ points, color, height = 34 }: { points: number[]; co
         </linearGradient>
       </defs>
       <path d={`${line} L${w},${height} L0,${height} Z`} fill={`url(#${gid})`} />
-      <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.85" vectorEffect="non-scaling-stroke" />
+      {/* thin, calm line — the thick stroke read as chunky (owner round-3) */}
+      <path d={line} fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }

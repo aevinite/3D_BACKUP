@@ -31,6 +31,7 @@ import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { reportRealtime } from "@/lib/connectionStatus";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 import { useBackClose } from "@/lib/backStack";
+import { buildReportHtml, buildReportTables, type ReportData, type ReportPayments, type ExportTable } from "@/components/owner/ownerReportDoc";
 
 const DAY_MS = 86400000;
 type Range = "today" | "yesterday" | "7d" | "30d" | "all";
@@ -158,7 +159,7 @@ function timeAgo(iso: string): string {
 }
 
 // ── Per-card range dropdown (the global tab bar's replacement) ────────────────
-function RangeDrop({ id, value, onChange, compactBtn }: { id: string; value: Range; onChange: (r: Range) => void; compactBtn?: boolean }) {
+function RangeDrop({ id, value, onChange, compactBtn, main }: { id: string; value: Range; onChange: (r: Range) => void; compactBtn?: boolean; main?: boolean }) {
   const [open, setOpen] = useState(false);
   // Project rule: every popup registers with the back-stack manager (self-noops closed).
   useBackClose(`owner-rng-${id}`, open, () => setOpen(false));
@@ -173,7 +174,7 @@ function RangeDrop({ id, value, onChange, compactBtn }: { id: string; value: Ran
   const cur = RANGES.find((r) => r.k === value)!;
   return (
     <span className="owr" data-rng={id}>
-      <button type="button" className={`owr-btn${compactBtn ? " sm" : ""}`} title={rangeSpanText(value)}
+      <button type="button" className={`owr-btn${compactBtn ? " sm" : ""}${main ? " main" : ""}`} title={rangeSpanText(value)}
         aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {cur.label} <i className="fas fa-chevron-down" aria-hidden="true" />
       </button>
@@ -194,6 +195,10 @@ function RangeDrop({ id, value, onChange, compactBtn }: { id: string; value: Ran
         .owr-btn.sm { padding: 3px 8px; font-size: 10.5px; }
         .owr-btn:hover { color: var(--accent); border-color: var(--accent); }
         .owr-btn i { font-size: 9px; opacity: .7; }
+        .owr-btn.main { background: color-mix(in srgb, #34d399 16%, transparent); border: 1px solid #34d399; color: #059669; font-size: 12.5px; font-weight: 800; padding: 7px 14px; border-radius: 10px; }
+        .owr-btn.main:hover { background: color-mix(in srgb, #34d399 26%, transparent); color: #047857; }
+        :global([data-skin="dark"]) .owr-btn.main { color: #34d399; }
+        :global([data-skin="dark"]) .owr-btn.main:hover { color: #6ee7b7; }
         /* z-index above sibling cards + NEVER clipped: the KPI cards must keep
            overflow visible for this to escape (owner bug, round-2 2026-07-26). */
         .owr-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 90; min-width: 210px; display: flex; flex-direction: column; background: var(--card); border: var(--border); border-radius: 12px; padding: 5px; box-shadow: 0 16px 40px rgba(0,0,0,.45); }
@@ -206,14 +211,16 @@ function RangeDrop({ id, value, onChange, compactBtn }: { id: string; value: Ran
   );
 }
 
-// ── D1-style KPI card: sparkline inside, delta chip, own range dropdown ───────
-function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill }: {
+// ── D1-style KPI card: sparkline inside, delta chip; the whole card is a LINK
+// into the matching report (owner round-3: "the top five box … should take you
+// to the report section").
+function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }: {
   k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };
   prevTitle?: string; sub?: string; loading?: boolean; spark?: number[];
-  pill?: string;
+  pill?: string; href?: string;
 }) {
-  return (
-    <div className="adm-stat owx-kpi ow2-kpi">
+  const body = (
+    <>
       <div className="ow2-kt">
         <span className="k">{k}</span>
         {pill ? <span className="ow2-live">{pill}</span> : null}
@@ -226,25 +233,35 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill }: {
       {spark && spark.length >= 2 && !loading && (
         <div className="ow2-spark" aria-hidden="true"><SparkArea points={spark} color={GREEN} height={34} /></div>
       )}
-      <style jsx>{`
-        /* overflow must stay VISIBLE so the range popup escapes the card (round-2 bug:
-           overflow hidden clipped the dropdown and made it unusable). The spark clips
-           itself instead via its own rounded wrapper. */
-        .ow2-kpi { position: relative; padding-bottom: 30px; }
-        .ow2-kt { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-        .ow2-kt .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
-        .ow2-live { font-size: 10px; font-weight: 800; color: ${GREEN}; background: color-mix(in srgb, ${GREEN} 14%, transparent); border-radius: 999px; padding: 2px 8px; }
-        .ow2-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
-        .ow2-spark { position: absolute; left: 0; right: 0; bottom: 0; opacity: .55; pointer-events: none; overflow: hidden; border-radius: 0 0 12px 12px; }
-      `}</style>
-    </div>
+    </>
+  );
+  const styles = (
+    <style jsx global>{`
+      /* overflow must stay VISIBLE so popups escape the card (round-2 bug: overflow
+         hidden clipped the dropdown). The spark clips itself via its rounded wrapper. */
+      .ow2-kpi { position: relative; padding-bottom: 30px; }
+      .ow2-kpi.ow2-click { cursor: pointer; text-decoration: none; color: inherit; display: block; transition: border-color .15s, transform .15s; }
+      .ow2-kpi.ow2-click:hover { border-color: var(--accent); transform: translateY(-2px); }
+      .ow2-kt { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .ow2-kt .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
+      .ow2-live { font-size: 10px; font-weight: 800; color: ${GREEN}; background: color-mix(in srgb, ${GREEN} 14%, transparent); border-radius: 999px; padding: 2px 8px; }
+      .ow2-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+      .ow2-spark { position: absolute; left: 0; right: 0; bottom: 0; opacity: .55; pointer-events: none; overflow: hidden; border-radius: 0 0 12px 12px; }
+    `}</style>
+  );
+  return href ? (
+    <Link href={href} className="adm-stat owx-kpi ow2-kpi ow2-click" title="Open the full report">{body}{styles}</Link>
+  ) : (
+    <div className="adm-stat owx-kpi ow2-kpi">{body}{styles}</div>
   );
 }
 
-// ── Report ▾ — Print / CSV / Excel of what's on screen (owner 2026-07-26) ─────
-type ExportTable = { title: string; head: string[]; rows: (string | number)[][] };
-function ReportMenu({ tables, filename }: { tables: ExportTable[]; filename: string }) {
+// ── Report ▾ — a PROFESSIONAL auto-generated report (owner round-3): group summary
+// + every restaurant individually, as a print document / CSV / Excel — never a
+// screenshot of the UI. Data is gathered on click from the (cached) owner APIs.
+function ReportMenu({ gather, filename }: { gather: () => Promise<ReportData>; filename: string }) {
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   useBackClose("owner-report-menu", open, () => setOpen(false));
   useEffect(() => {
     if (!open) return;
@@ -264,30 +281,49 @@ function ReportMenu({ tables, filename }: { tables: ExportTable[]; filename: str
     const s = String(v ?? "");
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const asCsv = () => {
+  const asCsv = (tables: ExportTable[]) => {
     const parts = tables.map((t) => [t.title, t.head.map(esc).join(","), ...t.rows.map((r) => r.map(esc).join(","))].join("\n"));
     // ﻿ BOM so Excel opens the ₹ column as UTF-8, not mojibake.
     download(new Blob(["﻿" + parts.join("\n\n")], { type: "text/csv;charset=utf-8" }), `${filename}.csv`);
   };
-  const asExcel = () => {
+  const asExcel = (tables: ExportTable[]) => {
     // The .xls HTML-table format — opens natively in Excel/Numbers/Sheets, zero deps.
     const html = `<html><head><meta charset="utf-8"></head><body>` + tables.map((t) =>
       `<h3>${t.title}</h3><table border="1"><tr>${t.head.map((h) => `<th>${h}</th>`).join("")}</tr>` +
       t.rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("") + `</table>`).join("<br/>") + `</body></html>`;
     download(new Blob([html], { type: "application/vnd.ms-excel" }), `${filename}.xls`);
   };
+  // Gather (auto-generate "at that time"), then hand to the chosen format. The print
+  // tab must open SYNCHRONOUSLY inside the click (popup blockers), so open it first
+  // and write the finished document into it once the data lands.
+  const run = async (kind: "print" | "csv" | "xls") => {
+    setOpen(false);
+    if (busy) return;
+    setBusy(true);
+    const tab = kind === "print" ? window.open("", "_blank") : null;
+    if (tab) tab.document.write("<title>Preparing report…</title><body style='font-family:sans-serif;padding:40px;color:#333'>Preparing your report…</body>");
+    try {
+      const data = await gather();
+      if (kind === "print" && tab) {
+        tab.document.open(); tab.document.write(buildReportHtml(data)); tab.document.close();
+      } else if (kind === "csv") asCsv(buildReportTables(data));
+      else if (kind === "xls") asExcel(buildReportTables(data));
+    } catch {
+      if (tab) { tab.document.open(); tab.document.write("<body style='font-family:sans-serif;padding:40px'>Couldn't build the report — close this tab and try again.</body>"); tab.document.close(); }
+    } finally { setBusy(false); }
+  };
   return (
     <span className="ow2-report" style={{ position: "relative", display: "inline-flex" }}>
-      <button className="adm-btn" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
-        <i className="fas fa-file-export" style={{ marginRight: 6 }} aria-hidden="true" />Report
-        <i className="fas fa-chevron-down" style={{ marginLeft: 6, fontSize: 9, opacity: .7 }} aria-hidden="true" />
+      <button className="adm-btn" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} disabled={busy}>
+        <i className={`fas ${busy ? "fa-spinner fa-spin" : "fa-file-export"}`} style={{ marginRight: 6 }} aria-hidden="true" />{busy ? "Preparing…" : "Report"}
+        {!busy && <i className="fas fa-chevron-down" style={{ marginLeft: 6, fontSize: 9, opacity: .7 }} aria-hidden="true" />}
       </button>
       {open && (
-        <span role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 40, minWidth: 190, display: "flex", flexDirection: "column", background: "var(--card)", border: "var(--border)", borderRadius: 12, padding: 5, boxShadow: "0 14px 34px rgba(0,0,0,.35)" }}>
+        <span role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 90, minWidth: 210, display: "flex", flexDirection: "column", background: "var(--card)", border: "var(--border)", borderRadius: 12, padding: 5, boxShadow: "0 14px 34px rgba(0,0,0,.35)" }}>
           {[
-            { ic: "fa-print", lb: "Print", hint: "printer / save as PDF", fn: () => { setOpen(false); setTimeout(() => window.print(), 60); } },
-            { ic: "fa-file-csv", lb: "Download CSV", hint: "opens anywhere", fn: () => { setOpen(false); asCsv(); } },
-            { ic: "fa-file-excel", lb: "Download Excel", hint: ".xls for spreadsheets", fn: () => { setOpen(false); asExcel(); } },
+            { ic: "fa-print", lb: "Print report", hint: "full document · printer / PDF", fn: () => run("print") },
+            { ic: "fa-file-csv", lb: "Download CSV", hint: "group + every restaurant", fn: () => run("csv") },
+            { ic: "fa-file-excel", lb: "Download Excel", hint: ".xls · group + every restaurant", fn: () => run("xls") },
           ].map((o) => (
             <button key={o.lb} role="menuitem" onClick={o.fn}
               style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", borderRadius: 8, padding: "8px 10px", font: "inherit", fontSize: 12.5, fontWeight: 700, color: "inherit", cursor: "pointer", textAlign: "left" }}>
@@ -580,7 +616,12 @@ export default function OwnerDashboard() {
       const key = tSort.k === "today" ? "today" : tSort.k;
       return ((a[key as "revenue"] as number) - (b[key as "revenue"] as number)) * dir;
     });
-    return rows.map((r) => ({ ...r, rank: rank.get(r.id)! }));
+    // <=3 restaurants: identity colours join the green theme too (round-3 — the
+    // table dots/share bars were still showing brown/orange accents at this tier).
+    return rows.map((r) => {
+      const rk = rank.get(r.id)!;
+      return { ...r, rank: rk, accent: restCount <= 3 ? GREEN_SHADES[(rk - 1) % GREEN_SHADES.length] : r.accent };
+    });
   }, [ov, single, pl, globalRange, tq, tSort]);
   const th = (k: typeof tSort.k, label: string, left?: boolean) => (
     <th className={left ? "l" : undefined} onClick={() => setTSort((s) => ({ k, asc: s.k === k ? !s.asc : false }))}
@@ -592,9 +633,11 @@ export default function OwnerDashboard() {
 
   // Best / needs-attention callouts (multi) — momentum = 2nd half vs 1st half of the
   // trend range's own series (accurate, zero extra fetches).
+  // Only for 4+ restaurants (owner round-3), and the two cards must NEVER name the
+  // same restaurant — the top performer is skipped when picking "needs attention".
   const callouts = useMemo(() => {
     const p = pl(globalRange);
-    if (!p || p.scope !== "group" || p.restaurantRevenue.length < 2) return null;
+    if (!p || p.scope !== "group" || p.restaurantRevenue.length <= 3) return null;
     const total = p.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
     const best = p.restaurantRevenue[0];
     const halves = new Map<string, { a: number; b: number }>();
@@ -609,6 +652,7 @@ export default function OwnerDashboard() {
     }
     let watch: { name: string; pct: number } | null = null;
     for (const r of p.restaurantRevenue) {
+      if (best && r.id === best.id) continue; // never the same restaurant twice
       const h = halves.get(r.id);
       if (!h || h.a <= 0) continue;
       const pct = ((h.b - h.a) / h.a) * 100;
@@ -696,27 +740,61 @@ export default function OwnerDashboard() {
   }, [drawerRid, pl, globalRange]);
 
   // ── Report export tables for the current view ──
-  const exportTables = useMemo((): ExportTable[] => {
-    const out: ExportTable[] = [];
-    const p = pl(globalRange);
-    if (!single && view.level === "home") {
-      out.push({
-        title: `Restaurants · ${RANGE_LABEL[globalRange]}`,
-        head: ["#", "Restaurant", "Revenue", "Orders", "Avg check", "Today", "Open tables", "Status"],
-        rows: tableRows.map((r) => [r.rank, r.name, Math.round(r.revenue), r.orders, Math.round(r.avg), Math.round(r.today), r.openTables, r.active ? "Active" : "Off"]),
-      });
+  // Gather the professional report "at that time" (owner round-3): group summary +
+  // EVERY restaurant individually. All reads hit the compute-on-view cached APIs
+  // (mig 196 + the new restaurant-scope cache), so even 7 restaurants gather fast.
+  const gatherReport = async (): Promise<ReportData> => {
+    if (!ov) throw new Error("not loaded yet");
+    const range = globalRange;
+    const list = activeRid ? ov.restaurants.filter((r) => r.id === activeRid) : ov.restaurants;
+    const perRest = await Promise.all(list.map(async (r) => {
+      const [a, m] = await Promise.all([
+        fetch(`/api/owner/analytics?range=${range}&rid=${r.id}&compare=1${scp}`, { cache: "no-store" }).then((x) => x.json()),
+        fetch(`/api/owner/reports?type=sales&range=${range}&rid=${r.id}${scp}`, { cache: "no-store" }).then((x) => x.json()).catch(() => null),
+      ]);
+      if (a.error) throw new Error(a.error);
+      const hour = [...(a.hourly ?? [])].sort((x: { orders: number }, y: { orders: number }) => y.orders - x.orders)[0];
+      const t = m && !m.error ? m.totals : null;
+      return {
+        name: r.name, slug: r.slug,
+        revenue: Number(a.kpis?.revenue) || 0, orders: Number(a.kpis?.orders) || 0,
+        paidOrders: Number(a.kpis?.paidOrders ?? a.kpis?.orders) || 0,
+        avg: Number(a.kpis?.avgOrder) || 0, share: 0,
+        discount: t ? Number(t.discount) || 0 : null,
+        cancelledOrders: t ? Number(t.cancelledOrders) || 0 : null,
+        cancelledValue: t ? Number(t.cancelledValue) || 0 : null,
+        busiestHour: hour?.orders ? `${hour.hour}:00` : null,
+        dishes: (a.dishes ?? []) as { title: string; qty: number; revenue: number }[],
+        payments: ((a.paymentMethods ?? []) as Pay[]).map((p) => ({ method: canonPayMethod(p.method), revenue: p.revenue, orders: p.orders })),
+      };
+    }));
+    const totalRev = perRest.reduce((s, r) => s + r.revenue, 0);
+    perRest.forEach((r) => { r.share = totalRev ? r.revenue / totalRev : 0; });
+    perRest.sort((a, b) => b.revenue - a.revenue);
+    const gp = new Map<string, ReportPayments>();
+    for (const r of perRest) for (const p of r.payments) {
+      const c = gp.get(p.method) || { method: p.method, revenue: 0, orders: 0 };
+      c.revenue += p.revenue; c.orders += p.orders; gp.set(p.method, c);
     }
-    if (p) {
-      const rows = (p.scope === "restaurant" ? restTrend : groupTrend.rows).map((r) => [String(r.label), Math.round(Number(r.Revenue) || 0), Number(r.__orders) || 0]);
-      out.push({ title: `Revenue over time · ${RANGE_LABEL[globalRange]}`, head: ["Bucket", "Revenue", "Orders"], rows });
-    }
-    if (p?.scope === "restaurant") {
-      out.push({ title: `Dishes · ${RANGE_LABEL[globalRange]}`, head: ["Dish", "Qty", "Revenue"], rows: (pl(globalRange) as RestA | undefined)?.dishes?.map((d) => [d.title, d.qty, Math.round(d.revenue)]) ?? [] });
-      out.push({ title: `Payments · ${RANGE_LABEL[globalRange]}`, head: ["Method", "Bills", "Revenue"], rows: ((pl(globalRange) as RestA | undefined)?.paymentMethods ?? []).map((m) => [canonPayMethod(m.method), m.orders, Math.round(m.revenue)]) });
-    }
-    return out;
-  }, [pl, globalRange, single, view.level, tableRows, restTrend, groupTrend]);
-  const exportName = `aevidine-dashboard-${new Date().toISOString().slice(0, 10)}`;
+    const paidOrders = perRest.reduce((s, r) => s + r.paidOrders, 0);
+    const sum = (k: "discount" | "cancelledOrders" | "cancelledValue") =>
+      perRest.every((r) => r[k] != null) ? perRest.reduce((s, r) => s + (r[k] || 0), 0) : null;
+    return {
+      scopeName: activeRid ? (list[0]?.name ?? "Restaurant") : `All ${list.length} restaurants`,
+      periodLabel: rangeSpanText(range),
+      generatedAt: new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST }),
+      group: {
+        revenue: totalRev, orders: perRest.reduce((s, r) => s + r.orders, 0), paidOrders,
+        avg: paidOrders ? totalRev / paidOrders : 0,
+        discount: sum("discount"), cancelledOrders: sum("cancelledOrders"), cancelledValue: sum("cancelledValue"),
+        payments: Array.from(gp.values()).sort((a, b) => b.revenue - a.revenue),
+      },
+      restaurants: perRest,
+    };
+  };
+  const exportName = `aevidine-report-${new Date().toISOString().slice(0, 10)}`;
+  // KPI boxes deep-link into the matching report (round-3).
+  const reportHref = (t: string) => (scopePin ? `/owner/reports?rid=${scopePin}${asSuffix()}&open=${t}` : `/owner/reports?open=${t}`);
 
   const goHome = () => setView({ level: "home" });
   const openFull = (rid: string) => { setDrawerRid(null); setView({ level: "restaurant", rid }); };
@@ -731,19 +809,52 @@ export default function OwnerDashboard() {
   const trendPayload = pl(globalRange);
   const records = activeRid ? recs[activeRid] : null;
 
+  // Highlights live at the BOTTOM of the page now (owner round-3: "we don't require
+  // this information at the top"). Callouts only exist for 4+ restaurants.
+  const highlights = view.level !== "dish" && (insights.length > 0 || callouts) ? (
+    <div style={{ marginTop: 12 }}>
+      {callouts && view.level === "home" && !single && (callouts.best || callouts.watch) && (
+        <div className="ow2-callouts">
+          {callouts.best && (
+            <div className="ow2-co good" style={{ borderLeft: `3px solid ${GREEN}` }}>
+              <span className="ic">🏆</span>
+              <span><small>Top performer · {RANGE_LABEL[globalRange]}</small><b>{callouts.best.name}</b>
+                <i>{inr(callouts.best.revenue)} · {Math.round(callouts.best.share * 100)}% of revenue</i></span>
+            </div>
+          )}
+          {callouts.watch && (
+            /* RED, not orange/brown (owner round-3) — inline so no cascade can dilute it */
+            <div className="ow2-co warn" style={{ borderLeft: "3px solid #ef4444" }}>
+              <span className="ic">⚠️</span>
+              <span><small>Needs attention</small><b>{callouts.watch.name}</b>
+                <i style={{ color: "#ef4444" }}>trending {Math.round(callouts.watch.pct)}% inside this period</i></span>
+            </div>
+          )}
+        </div>
+      )}
+      {insights.length > 0 && (
+        <div className="owx-insights" style={{ marginTop: 12 }}>
+          {insights.map((ins, i) => (
+            <span key={i} className="owx-insight"><i className={`fas ${ins.icon}`} aria-hidden="true" />{ins.text}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : null;
+
   const kpiRow = (
     <div className="adm-stats ow2-stats">
-      <Kpi k="Revenue" v={kMain?.revenue ?? 0} money loading={!kMain}
+      <Kpi k="Revenue" href={reportHref("sales")} v={kMain?.revenue ?? 0} money loading={!kMain}
         delta={kMain?.prev ? { now: kMain.revenue, prev: kMain.prev.revenue } : undefined}
         prevTitle={PREV_LABEL[globalRange]} sub={PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
-      <Kpi k="Orders" v={kMain?.orders ?? 0} loading={!kMain}
+      <Kpi k="Orders" href={reportHref("daysummary")} v={kMain?.orders ?? 0} loading={!kMain}
         sub={kMain && kMain.paidOrders !== kMain.orders ? `${kMain.paidOrders} paid · rest still open` : PREV_LABEL[globalRange] || "whole history"}
         delta={kMain?.prev ? { now: kMain.orders, prev: kMain.prev.orders } : undefined}
         prevTitle={PREV_LABEL[globalRange]} spark={sparkOf(globalRange, "orders")} />
-      <Kpi k="Avg order" v={kMain?.avg ?? 0} money loading={!kMain} sub="per paid order" />
-      <Kpi k="Today so far" v={todayRev} money loading={!ov} pill="● live"
+      <Kpi k="Avg order" href={reportHref("sales")} v={kMain?.avg ?? 0} money loading={!kMain} sub="per paid order" />
+      <Kpi k="Today so far" href={reportHref("daysummary")} v={todayRev} money loading={!ov} pill="● live"
         sub={`${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
-      <Kpi k="Lost to cancellations" v={money === "err" ? "—" : ((money as MoneyTotals | undefined)?.cancelledValue ?? 0)} money
+      <Kpi k="Lost to cancellations" href={reportHref("cancellations")} v={money === "err" ? "—" : ((money as MoneyTotals | undefined)?.cancelledValue ?? 0)} money
         loading={!money}
         sub={money === "err" ? "couldn't total for this range" : ((money as MoneyTotals | undefined)?.cancelledOrders ? `${(money as MoneyTotals).cancelledOrders} order${(money as MoneyTotals).cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
     </div>
@@ -760,10 +871,10 @@ export default function OwnerDashboard() {
           {/* THE main range — one dropdown for every graph on the page (owner round-2).
               Picking it also resets the five KPI boxes; each box can still override. */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
-            <RangeDrop id="global" value={globalRange} onChange={setGlobalRange} />
+            <RangeDrop id="global" value={globalRange} onChange={setGlobalRange} main />
             <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{rangeSpanText(globalRange)}</span>
           </div>
-          <ReportMenu tables={exportTables} filename={exportName} />
+          <ReportMenu gather={gatherReport} filename={exportName} />
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
             <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now — recomputes the live numbers">
               <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
@@ -775,39 +886,12 @@ export default function OwnerDashboard() {
 
       {err && <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 16 }}><b>Couldn&apos;t load.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span></div>}
 
-      {/* Insight strip — the panel talks like a person, not a spreadsheet */}
-      {insights.length > 0 && view.level !== "dish" && (
-        <div className="owx-insights">
-          {insights.map((ins, i) => (
-            <span key={i} className="owx-insight"><i className={`fas ${ins.icon}`} aria-hidden="true" />{ins.text}</span>
-          ))}
-        </div>
-      )}
 
       {/* ═══════ HOME · MULTI ═══════ */}
       {view.level === "home" && !single && (
         <>
           {kpiRow}
 
-          {/* Best / needs-attention callouts (surprise add — from data already loaded) */}
-          {callouts && (callouts.best || callouts.watch) && (
-            <div className="ow2-callouts">
-              {callouts.best && (
-                <div className="ow2-co good">
-                  <span className="ic">🏆</span>
-                  <span><small>Top performer · {RANGE_LABEL[globalRange]}</small><b>{callouts.best.name}</b>
-                    <i>{inr(callouts.best.revenue)} · {Math.round(callouts.best.share * 100)}% of revenue</i></span>
-                </div>
-              )}
-              {callouts.watch && (
-                <div className="ow2-co warn">
-                  <span className="ic">⚠️</span>
-                  <span><small>Needs attention</small><b>{callouts.watch.name}</b>
-                    <i>trending {Math.round(callouts.watch.pct)}% inside this period</i></span>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Group revenue — 2–3 restaurants: Samsung-style stacked daily bars in
               green shades · 4+: "Who earns more" + the per-restaurant multi-line
@@ -918,6 +1002,8 @@ export default function OwnerDashboard() {
                 : <div className="adm-empty">Loading…</div>}
             </div>
           </div>
+
+          {highlights}
         </>
       )}
 
@@ -1051,6 +1137,8 @@ export default function OwnerDashboard() {
                 )}
             </div>
           </div>
+
+          {highlights}
         </>
       )}
 
@@ -1133,7 +1221,8 @@ export default function OwnerDashboard() {
         .ow2-callouts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
         .ow2-co { display: flex; align-items: center; gap: 12px; border: var(--border); border-radius: 12px; padding: 12px 15px; }
         .ow2-co.good { border-left: 3px solid ${GREEN}; }
-        .ow2-co.warn { border-left: 3px solid #d97706; }
+        .ow2-co.warn { border-left: 3px solid var(--adm-danger, #ef4444); }
+        .ow2-co.warn i { color: var(--adm-danger, #ef4444); }
         .ow2-co .ic { font-size: 20px; }
         .ow2-co small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
         .ow2-co b { display: block; font-size: 14.5px; line-height: 1.3; }

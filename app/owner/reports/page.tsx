@@ -116,6 +116,13 @@ export default function OwnerReports() {
   // fires against the wrong scope in the meantime. "" = all restaurants.
   const [rid, setRid] = useState<string>("");
   const [sel, setSel] = useState<RKey | "">("");         // "" = hub
+  // Deep link from the dashboard's KPI boxes (owner round-3: "the top five box …
+  // should take you to the report section"): /owner/reports?open=<type> lands on
+  // that report directly instead of the hub.
+  useEffect(() => {
+    const open = new URLSearchParams(window.location.search).get("open");
+    if (open) setSel(open as RKey);
+  }, []);
   const [range, setRange] = useState<Range>("30d");
   const [store, setStore] = useState<Record<string, Entry>>({});
 

@@ -206,26 +206,31 @@ export async function GET(req: NextRequest) {
       new Date(fromMs).toISOString(),
       ...stepsBack.map((d) => new Date(fromMs - d * DAY).toISOString()),
     ];
-    const [meta, ts, dishes, cats, hourly, heat, openT, pm, sameHour, payTrend, records] = await Promise.all([
+    // Compute-on-view cached like the group scope (owner round-3: "auto calculate…
+    // it should show number only, very fast — the live site is already optimized").
+    // LIVE bits stay OUTSIDE the cache: open-tables (a now-count) and the unbounded
+    // all-time records (fetched once per restaurant on demand).
+    const restBase = await cachedOwnerPayload({
+      key: `analytics:v3:rest:${rid}:${range}:c${compare ? 1 : 0}`,
+      force: sp.get("refresh") === "1",
+      fingerprint: () => ordersFingerprint([rid], from, to),
+      compute: async () => {
+    const [meta, ts, dishes, cats, hourly, heat, pm, sameHour, payTrend] = await Promise.all([
       sb.from("restaurants").select("id, slug, name, accent_color, hero_title").eq("id", rid).maybeSingle(),
       sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: bucket }),
       sb.rpc("lfh_owner_dish_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_hourly", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_heatmap", { p_restaurant_id: rid, p_from: from, p_to: to }),
-      sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open"),
       sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sameHourStarts.length
         ? sb.rpc("lfh_owner_samehour_compare", { p_restaurant_id: rid, p_starts: sameHourStarts, p_elapsed: `${Math.round(elapsedMs / 1000)} seconds` })
         : Promise.resolve({ data: [], error: null }),
       sb.rpc("lfh_owner_payment_trend", { p_restaurant_id: rid, p_from: new Date(Date.now() - 14 * DAY).toISOString(), p_to: to }),
-      wantRecords
-        ? sb.rpc("lfh_owner_records", { p_restaurant_id: rid })
-        : Promise.resolve({ data: null, error: null }),
     ]);
     if (meta.error) throw meta.error;
-    if (!meta.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
-    for (const e of [ts, dishes, cats, hourly, heat, pm, sameHour, payTrend, records]) if (e.error) throw e.error;
+    if (!meta.data) throw new Error("restaurant not found");
+    for (const e of [ts, dishes, cats, hourly, heat, pm, sameHour, payTrend]) if (e.error) throw e.error;
 
     const dishRows = (dishes.data ?? []).map((r: Record<string, unknown>) => ({
       title: r.title, qty: Number(r.qty) || 0, revenue: num(r.revenue),
@@ -235,6 +240,7 @@ export async function GET(req: NextRequest) {
     }));
     const revenue = num(tsRows.reduce((a: number, r: { revenue: number }) => a + r.revenue, 0));
     const orders = tsRows.reduce((a: number, r: { orders: number }) => a + r.orders, 0);
+    void 0; // (kept structure below unchanged — still inside the cached compute)
     // Avg order = PAID revenue ÷ PAID order count (both from paid-only sources). `orders` above
     // counts ALL non-cancelled orders (incl. open/unpaid), so revenue/orders understated the
     // average and made it drift UPWARD as open tables settled with no new orders. paid-count
@@ -245,10 +251,10 @@ export async function GET(req: NextRequest) {
     // `orders` counts ALL non-cancelled (incl. open/unpaid) while revenue+avgOrder are
     // PAID-only — so Revenue ÷ Orders ≠ Avg order and looks like a wrong number. Ship
     // `paidOrders` too so the dashboard can label the tile honestly (owner audit 2026-07-06).
-    return NextResponse.json({
+    return {
       scope: "restaurant", range, prev,
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
-      kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, openTables: openT.count || 0, topDish: dishRows[0]?.title || "—" },
+      kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, openTables: 0, topDish: dishRows[0]?.title || "—" },
       timeseries: tsRows,
       dishes: dishRows,
       categories: (cats.data ?? []).map((r: Record<string, unknown>) => ({ category: r.category, qty: Number(r.qty) || 0, revenue: num(r.revenue) })),
@@ -262,8 +268,20 @@ export async function GET(req: NextRequest) {
       payTrend: ((payTrend.data ?? []) as Record<string, unknown>[]).map((r) => ({
         day: r.day, method: String(r.method || "Not recorded"), revenue: num(r.revenue),
       })),
-      records: records.data ?? null,
+    };
+      },
     });
+
+    // LIVE add-ons, outside the cache: the open-tables now-count (must never freeze)
+    // and the on-demand all-time records (unbounded scan, once per restaurant).
+    const openT = await sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open");
+    const kpis = { ...(restBase as { kpis: Record<string, unknown> }).kpis, openTables: openT.count || 0 };
+    let records: unknown = null;
+    if (wantRecords) {
+      const r = await sb.rpc("lfh_owner_records", { p_restaurant_id: rid });
+      if (!r.error) records = r.data ?? null;
+    }
+    return NextResponse.json({ ...restBase, kpis, records });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }
