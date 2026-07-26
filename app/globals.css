@@ -4324,7 +4324,18 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 @media (max-width: 560px) {
   .owx-path .root { display: none; }
   .owx-switch { max-width: 150px; }
-  .owx-top-nav { gap: 8px; }
+  /* min-width:0 + flex lets the left cluster shrink; child truncation (.owx-scope .lbl
+     ellipsis + .owx-switch max-width:150px) does the actual clipping. Do NOT add
+     overflow:hidden here — it would clip the restaurant-switcher dropdown (.owx-switch-pop,
+     absolutely positioned below this nav) on phone, hiding "switch restaurant" for
+     multi-restaurant owners. (work-checker caught this) */
+  .owx-top-nav { gap: 8px; min-width: 0; flex: 1 1 auto; }
+  /* Compact the connection badge to just its signal bars on narrow phones — the full
+     "Connected ▾" pill was colliding with the truncated "Owner overview" switcher title
+     at ~360px (sweep C2 visual). The right control cluster keeps its space; the label +
+     chevron are still available by tapping the badge (the popup is unaffected). */
+  .owx-top .lfh-conn-txt, .owx-top .lfh-conn-ms, .owx-top .lfh-conn-chev, .owx-top .lfh-conn-n { display: none; }
+  .owx-top .lfh-conn-badge { padding: 0 7px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .owx-navlink, .owx-chip, .owx .adm-btn, .owx-side { transition: none; }
