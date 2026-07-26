@@ -1838,6 +1838,11 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
   .to-list { max-height: 42vh; }
   .to-cart { flex: 1 1 auto; }
   .to-lines { max-height: 28vh; }
+  /* On phone the modal body scrolls as one column, so the footer with "Send to kitchen"
+     started below the fold — a waiter had to scroll to find the primary action. Pin it to
+     the bottom of the scrolling body so Send is always visible (matches the table-detail
+     modal's sticky foot). (sweep M2) */
+  .to-foot { position: sticky; bottom: 0; z-index: 4; background: var(--panel-2); box-shadow: 0 -6px 14px rgba(0,0,0,.18); }
 }
 
 /* ---- bill breakdown card ---- */
