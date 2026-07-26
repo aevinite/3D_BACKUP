@@ -20,7 +20,7 @@ export type BillingDetails = {
   cancelledOrders: number | null;
   cancelledValue: number | null;
 };
-export type DailyRow = { label: string; orders: number; gross: number; discount: number; tax: number; net: number };
+export type DailyRow = { label: string; iso: string; orders: number; gross: number; discount: number; tax: number; net: number };
 export type ReportRestaurant = {
   name: string; slug: string;
   revenue: number; orders: number; paidOrders: number; avg: number; share: number;
@@ -31,6 +31,8 @@ export type ReportRestaurant = {
   categories: { category: string; qty: number; revenue: number }[];
   payments: ReportPayments[];
   daily: DailyRow[];                // day-by-day (or hour/month) breakdown appendix
+  dailyGrain: string;               // hour | day | month — weekday table needs day grain
+  hourly: { hour: number; orders: number; revenue: number }[];
 };
 export type ReportData = {
   scopeName: string;
@@ -41,6 +43,9 @@ export type ReportData = {
     prevRevenue: number | null;
     billing: BillingDetails;
     payments: ReportPayments[];
+    // Pay Later (khata) liability — a point-in-time "as of today" figure, shown only
+    // when the module is on and there is anything outstanding (NOT period-scoped).
+    khata: { outstanding: number; people: number; collectedMonth: number } | null;
   };
   restaurants: ReportRestaurant[];
 };
@@ -95,6 +100,68 @@ function dailyHtml(rows: DailyRow[]): string {
     ${shown.map((r) => `<tr><td>${esc(r.label)}</td><td class="r">${nfmt(r.orders)}</td><td class="r">${inr(r.gross)}</td><td class="r">${inr(r.discount)}</td><td class="r">${inr(r.tax)}</td><td class="r"><b>${inr(r.net)}</b></td></tr>`).join("")}
   </tbody></table>`;
 }
+const DOW_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+// Day-of-week performance — which weekdays actually carry the business (Toast/PetPooja
+// staple). Needs day-grain rows spanning at least a week.
+function weekdayRows(daily: DailyRow[], grain: string): { name: string; days: number; net: number; orders: number }[] {
+  if (grain !== "day" || daily.length < 7) return [];
+  const agg = DOW_NAMES.map((name) => ({ name, days: 0, net: 0, orders: 0 }));
+  for (const r of daily) {
+    const d = new Date(r.iso);
+    if (Number.isNaN(d.getTime())) continue;
+    // IST weekday of the bucket
+    const dow = new Date(d.getTime() + 5.5 * 3600_000).getUTCDay();
+    agg[dow].days += 1; agg[dow].net += r.net; agg[dow].orders += r.orders;
+  }
+  return agg.filter((a) => a.days > 0);
+}
+function weekdayHtml(daily: DailyRow[], grain: string): string {
+  const rows = weekdayRows(daily, grain);
+  if (rows.length < 4) return "";
+  const best = rows.reduce((a, b) => (b.net / b.days > a.net / a.days ? b : a), rows[0]);
+  return `<h3>Day-of-week performance</h3>
+  <table><thead><tr><th>Weekday</th><th class="r">Days</th><th class="r">Avg net / day</th><th class="r">Total net</th><th class="r">Orders</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr${r.name === best.name ? ' style="font-weight:700"' : ""}><td>${r.name}${r.name === best.name ? " ★" : ""}</td><td class="r">${r.days}</td><td class="r">${inr(r.net / r.days)}</td><td class="r">${inr(r.net)}</td><td class="r">${nfmt(r.orders)}</td></tr>`).join("")}
+  </tbody></table>`;
+}
+// Dayparts — breakfast/lunch/evening/dinner/late-night split from the hourly pattern.
+const DAYPARTS: { name: string; from: number; to: number }[] = [
+  { name: "Breakfast (6–11)", from: 6, to: 11 }, { name: "Lunch (11–15)", from: 11, to: 15 },
+  { name: "Evening (15–19)", from: 15, to: 19 }, { name: "Dinner (19–23)", from: 19, to: 23 },
+  { name: "Late night (23–6)", from: 23, to: 30 },
+];
+function daypartRows(hourly: { hour: number; orders: number; revenue: number }[]): { name: string; orders: number; revenue: number }[] {
+  if (!hourly.some((h) => h.orders > 0)) return [];
+  return DAYPARTS.map((p) => {
+    let orders = 0, revenue = 0;
+    for (const h of hourly) {
+      const hh = h.hour < 6 ? h.hour + 24 : h.hour; // fold 0–5 into the late-night band
+      if (hh >= p.from && hh < p.to) { orders += h.orders; revenue += h.revenue; }
+    }
+    return { name: p.name, orders, revenue };
+  }).filter((p) => p.orders > 0);
+}
+function daypartsHtml(hourly: { hour: number; orders: number; revenue: number }[]): string {
+  const rows = daypartRows(hourly);
+  if (rows.length < 2) return "";
+  const total = rows.reduce((a, r) => a + r.revenue, 0);
+  return `<h3>Dayparts — when the money comes in</h3>
+  <table><thead><tr><th>Daypart</th><th class="r">Orders</th><th class="r">Revenue</th><th class="r">Share</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr><td>${r.name}</td><td class="r">${nfmt(r.orders)}</td><td class="r">${inr(r.revenue)}</td><td class="r">${pct(r.revenue, total)}</td></tr>`).join("")}
+  </tbody></table>`;
+}
+// Menu-engineering tag (Lightspeed-style 2×2): popularity (qty) × unit price medians.
+function dishTag(d: { qty: number; revenue: number }, qtyMed: number, priceMed: number): string {
+  const price = d.qty > 0 ? d.revenue / d.qty : 0;
+  if (d.qty >= qtyMed && price >= priceMed) return "⭐ Star";
+  if (d.qty >= qtyMed) return "Crowd favourite";
+  if (price >= priceMed) return "Hidden gem";
+  return "Rethink";
+}
+function medians(dishes: { qty: number; revenue: number }[]): { qtyMed: number; priceMed: number } {
+  const med = (a: number[]) => { const x = [...a].sort((p, q) => p - q); const m = x.length >> 1; return x.length ? (x.length % 2 ? x[m] : (x[m - 1] + x[m]) / 2) : 0; };
+  return { qtyMed: med(dishes.map((d) => d.qty)), priceMed: med(dishes.map((d) => (d.qty ? d.revenue / d.qty : 0))) };
+}
 function categoriesHtml(cats: { category: string; qty: number; revenue: number }[]): string {
   if (!cats.length) return "";
   const total = cats.reduce((a, c) => a + c.revenue, 0);
@@ -124,6 +191,14 @@ export function buildReportHtml(d: ReportData): string {
         <div><h3>Billing &amp; tax details</h3>${billingTableHtml(g.billing)}</div>
         <div><h3>Settlement — how the money arrived</h3>${settlementHtml(g.payments)}</div>
       </div>
+      ${g.khata && g.khata.outstanding > 0 ? `
+      <h3>Pay Later (khata) — as of today</h3>
+      <table class="kvt"><tbody>
+        <tr><td>Outstanding with customers</td><td class="r"><b>${inr(g.khata.outstanding)}</b></td></tr>
+        <tr><td>People who owe</td><td class="r"><b>${nfmt(g.khata.people)}</b></td></tr>
+        <tr><td>Collected this month</td><td class="r"><b>${inr(g.khata.collectedMonth)}</b></td></tr>
+      </tbody></table>
+      <p class="mut" style="font-size:9.5px">A point-in-time balance — not limited to the report period.</p>` : ""}
     </section>`;
 
   const comparison = multi ? `
@@ -148,11 +223,14 @@ export function buildReportHtml(d: ReportData): string {
         <div><h3>Settlement</h3>${settlementHtml(r.payments)}</div>
       </div>
       ${categoriesHtml(r.categories)}
-      ${r.dishes.length ? `
+      ${daypartsHtml(r.hourly)}
+      ${weekdayHtml(r.daily, r.dailyGrain)}
+      ${r.dishes.length ? (() => { const { qtyMed, priceMed } = medians(r.dishes); return `
       <h3>Top dishes</h3>
-      <table><thead><tr><th>#</th><th>Dish</th><th class="r">Sold</th><th class="r">Revenue</th><th class="r">Share</th></tr></thead><tbody>
-        ${r.dishes.slice(0, 12).map((x, j) => `<tr><td>${j + 1}</td><td>${esc(x.title)}</td><td class="r">${nfmt(x.qty)}</td><td class="r">${inr(x.revenue)}</td><td class="r">${pct(x.revenue, r.dishes.reduce((a, y) => a + y.revenue, 0))}</td></tr>`).join("")}
-      </tbody></table>` : `<p class="mut">No dish sales in this period.</p>`}
+      <table><thead><tr><th>#</th><th>Dish</th><th class="r">Sold</th><th class="r">Revenue</th><th class="r">Share</th><th>Verdict</th></tr></thead><tbody>
+        ${r.dishes.slice(0, 12).map((x, j) => `<tr><td>${j + 1}</td><td>${esc(x.title)}</td><td class="r">${nfmt(x.qty)}</td><td class="r">${inr(x.revenue)}</td><td class="r">${pct(x.revenue, r.dishes.reduce((a, y) => a + y.revenue, 0))}</td><td>${dishTag(x, qtyMed, priceMed)}</td></tr>`).join("")}
+      </tbody></table>
+      <p class="mut" style="font-size:9.5px">Verdict: ⭐ Star = sells a lot at a good price · Crowd favourite = sells a lot, cheap · Hidden gem = pricey but under-ordered (promote it) · Rethink = neither (re-price, rework or drop).</p>`; })() : `<p class="mut">No dish sales in this period.</p>`}
       ${dailyHtml(r.daily)}
     </section>`).join("");
 
@@ -214,6 +292,9 @@ export function buildReportTables(d: ReportData): ExportTable[] {
   if (g.payments.length) {
     out.push({ title: "Settlement — all", head: ["Method", "Bills", "Amount"], rows: g.payments.map((p) => [p.method, p.orders, Math.round(p.revenue)]) });
   }
+  if (g.khata && g.khata.outstanding > 0) {
+    out.push({ title: "Pay Later (khata) — as of today", head: ["Item", "Value"], rows: [["Outstanding with customers", Math.round(g.khata.outstanding)], ["People who owe", g.khata.people], ["Collected this month", Math.round(g.khata.collectedMonth)]] });
+  }
   if (d.restaurants.length > 1) {
     out.push({
       title: "Restaurant comparison",
@@ -230,11 +311,16 @@ export function buildReportTables(d: ReportData): ExportTable[] {
     if (r.payments.length) {
       out.push({ title: `${r.name} — settlement`, head: ["Method", "Bills", "Amount"], rows: r.payments.map((p) => [p.method, p.orders, Math.round(p.revenue)]) });
     }
+    { const { qtyMed, priceMed } = medians(r.dishes);
     out.push({
       title: `${r.name} — top dishes`,
-      head: ["#", "Dish", "Sold", "Revenue"],
-      rows: r.dishes.slice(0, 15).map((x, j) => [j + 1, x.title, x.qty, Math.round(x.revenue)]),
-    });
+      head: ["#", "Dish", "Sold", "Revenue", "Verdict"],
+      rows: r.dishes.slice(0, 15).map((x, j) => [j + 1, x.title, x.qty, Math.round(x.revenue), dishTag(x, qtyMed, priceMed)]),
+    }); }
+    { const dp = daypartRows(r.hourly);
+      if (dp.length > 1) out.push({ title: `${r.name} — dayparts`, head: ["Daypart", "Orders", "Revenue"], rows: dp.map((x) => [x.name, x.orders, Math.round(x.revenue)]) }); }
+    { const wd = weekdayRows(r.daily, r.dailyGrain);
+      if (wd.length >= 4) out.push({ title: `${r.name} — day-of-week performance`, head: ["Weekday", "Days", "Avg net/day", "Total net", "Orders"], rows: wd.map((x) => [x.name, x.days, Math.round(x.net / x.days), Math.round(x.net), x.orders]) }); }
     if (r.categories.length) {
       out.push({ title: `${r.name} — category mix`, head: ["Category", "Items sold", "Revenue"], rows: r.categories.map((c) => [c.category, c.qty, Math.round(c.revenue)]) });
     }

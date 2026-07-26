@@ -806,7 +806,7 @@ export default function OwnerDashboard() {
         return dt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit", timeZone: IST });
       };
       const daily = (m && !m.error ? (m.rows ?? []) : []).map((x: Record<string, unknown>) => ({
-        label: dlabel(String(x.bucket)), orders: Number(x.orders) || 0,
+        label: dlabel(String(x.bucket)), iso: String(x.bucket), orders: Number(x.orders) || 0,
         gross: Number(x.subtotal) || 0, discount: Number(x.discount) || 0,
         tax: Number(x.tax) || 0, net: Number(x.revenue) || 0,
       }));
@@ -829,7 +829,8 @@ export default function OwnerDashboard() {
         dishes: (a.dishes ?? []) as { title: string; qty: number; revenue: number }[],
         categories: (a.categories ?? []) as { category: string; qty: number; revenue: number }[],
         payments: ((a.paymentMethods ?? []) as Pay[]).map((p) => ({ method: canonPayMethod(p.method), revenue: p.revenue, orders: p.orders })),
-        daily,
+        daily, dailyGrain: grain,
+        hourly: (a.hourly ?? []) as { hour: number; orders: number; revenue: number }[],
       };
     }));
     const totalRev = perRest.reduce((s, r) => s + r.revenue, 0);
@@ -839,6 +840,17 @@ export default function OwnerDashboard() {
     for (const r of perRest) for (const p of r.payments) {
       const c = gp.get(p.method) || { method: p.method, revenue: 0, orders: 0 };
       c.revenue += p.revenue; c.orders += p.orders; gp.set(p.method, c);
+    }
+    // Pay Later liability (as of today) — owner-scope-wide, so only when the report
+    // covers the owner's WHOLE scope (all restaurants, or a single-restaurant owner).
+    let khata: { outstanding: number; people: number; collectedMonth: number } | null = null;
+    if (!activeRid || ov.restaurants.length === 1) {
+      try {
+        const k = await fetch(`/api/owner/khata${scopePin ? `?rid=${scopePin}${asSuffix()}` : ""}`, { cache: "no-store" }).then((x) => x.json());
+        if (k?.summary && Number(k.summary.totalOutstanding) > 0) {
+          khata = { outstanding: Number(k.summary.totalOutstanding) || 0, people: Number(k.summary.peopleCount) || 0, collectedMonth: Number(k.summary.collectedMonth) || 0 };
+        }
+      } catch { /* khata line is optional — never block the report */ }
     }
     const paidOrders = perRest.reduce((s, r) => s + r.paidOrders, 0);
     const bsum = (k: "gross" | "discount" | "taxTotal" | "cancelledOrders" | "cancelledValue") =>
@@ -861,6 +873,7 @@ export default function OwnerDashboard() {
           cancelledOrders: bsum("cancelledOrders"), cancelledValue: bsum("cancelledValue"),
         },
         payments: Array.from(gp.values()).sort((a, b) => b.revenue - a.revenue),
+        khata,
       },
       restaurants: perRest,
     };
