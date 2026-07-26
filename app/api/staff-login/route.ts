@@ -30,11 +30,20 @@ export async function POST(req: NextRequest) {
   // Only allow same-site relative paths as the redirect target (no open redirect).
   const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/aevinite";
 
+  // The client form fetches with Accept: application/json so it can keep the typed password,
+  // show "N attempts left" and auto-clear the error — without a full page reload. A no-JS
+  // browser posts the plain form (Accept: text/html) and still gets the classic redirects.
+  const wantsJson = (req.headers.get("accept") || "").includes("application/json");
+  const bad = (extra: Record<string, unknown>) =>
+    wantsJson
+      ? NextResponse.json({ ok: false, ...extra }, { status: 401 })
+      : NextResponse.redirect(new URL(`/staff-login?${extra.locked ? "locked=1" : "bad=1"}&next=${encodeURIComponent(next)}`, req.url), 303);
+
   // Locked out? Refuse before even checking the password, and log the attempt.
   const st = await throttleStatus(throttleKey);
   if (st.locked) {
     await logAction("admin", "login_blocked", { device_id: dev, detail: `admin login blocked — ${ip} is locked out (too many wrong tries)` });
-    return NextResponse.redirect(new URL(`/staff-login?locked=1&next=${encodeURIComponent(next)}`, req.url), 303);
+    return bad({ locked: true });
   }
 
   // Configurable admin-login limit (mig 205) — ships DISABLED so the owner is never locked out
@@ -42,14 +51,15 @@ export async function POST(req: NextRequest) {
   // the IP lockout above, which stays as the always-on backstop.
   if (!(await rateAllowed("admin_login", `admin:${ip}`, { label: `admin password from ${ip}` }))) {
     await logAction("admin", "rate_limited", { device_id: dev, detail: `admin login rate limit reached from ${ip}` });
-    return NextResponse.redirect(new URL(`/staff-login?locked=1&next=${encodeURIComponent(next)}`, req.url), 303);
+    return bad({ locked: true });
   }
 
   const expected = adminPassword();
   if (!expected || password.length > MAX_PASSWORD_LEN || password !== expected) {
-    await throttleFail(throttleKey, ADMIN_MAX_FAILS, ADMIN_LOCK_MS);
+    const t = await throttleFail(throttleKey, ADMIN_MAX_FAILS, ADMIN_LOCK_MS);
     await logAction("admin", "login_failed", { device_id: dev, detail: `wrong admin password from ${ip}` });
-    return NextResponse.redirect(new URL(`/staff-login?bad=1&next=${encodeURIComponent(next)}`, req.url), 303);
+    // Just locked by THIS miss → tell them it's locked; otherwise surface attempts left.
+    return bad(t.locked ? { locked: true } : { attemptsLeft: t.attemptsLeft });
   }
 
   // Correct: clear the counter and record the successful admin sign-in.
@@ -57,7 +67,9 @@ export async function POST(req: NextRequest) {
   await logAction("admin", "login", { actor: "admin", device_id: dev, detail: `admin signed in from ${ip}` });
 
   const token = await sha256hex(expected);
-  const res = NextResponse.redirect(new URL(next, req.url), 303);
+  const res = wantsJson
+    ? NextResponse.json({ ok: true, next })
+    : NextResponse.redirect(new URL(next, req.url), 303);
   res.cookies.set(AUTH_COOKIE, token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 604800 });
   res.cookies.set(FLAG_COOKIE, "1", { httpOnly: false, sameSite: "lax", path: "/", maxAge: 604800 });
   return res;
