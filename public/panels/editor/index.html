@@ -68,6 +68,9 @@
         <!-- Dishes tab only: enter multi-select to mark many dishes sold-out/available or delete. -->
         <button id="bulkBtn" class="btn" type="button" hidden title="Select several dishes at once">☑︎ Select</button>
         <button id="newBtn" class="btn primary">+ New</button>
+        <!-- Live suggestions dropdown: top matches as you type; click to open in the
+             editor. Built by renderSearchSuggest() in app.js. -->
+        <div id="searchSuggest" class="search-suggest" role="listbox" hidden></div>
       </div>
       <!-- Category filter chips (Dishes tab only): tap a category to see just its
            dishes. Built by renderCatFilter() in app.js; hidden on other tabs. -->
