@@ -209,6 +209,11 @@ function toast(msg, type = "ok", action, ms) {
 // outside). Calling code does: if (await confirmDialog(...)) { ...do it... }.
 function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
   return new Promise((resolve) => {
+    // Singleton guard: a confirm is modal, so there is never a legitimate reason to stack
+    // two. A fast double-click on an action (e.g. "Send to kitchen") fired this twice before
+    // the trigger button disabled, stacking two identical dialogs — confirming both could
+    // place a duplicate. If one is already open, suppress this second call (resolve "no").
+    if (document.querySelector(".confirm-overlay")) { resolve(false); return; }
     const wrap = document.createElement("div");
     // opts.floorwide marks confirms that hit EVERY table at once (Close all).
     // They get a deliberately different, scarier look so muscle-memory built on
