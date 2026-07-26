@@ -149,6 +149,7 @@ export default function SessionGate() {
   const accessReqRef = useRef(false); // guards against stacking duplicate waiter-call requests (bug #18)
   const settled = useRef(false); // whether we've already reported how this action ended
   const joining = useRef(false); // blocks DOUBLE-TAPS on the join buttons (a second tap while one join is in flight would create a duplicate membership)
+  const reqBusy = useRef(false); // blocks DOUBLE-TAPS on "Request a waiter" — a 2nd tap while the first request is in flight would POST twice (sweep C4)
   const videoRef = useRef<HTMLVideoElement | null>(null); // the camera preview on the scan screen
   const scanStream = useRef<MediaStream | null>(null); // the live camera feed while scanning
   const scanTimer = useRef<ReturnType<typeof setInterval> | null>(null); // the repeating "look for a QR" check
@@ -620,6 +621,11 @@ export default function SessionGate() {
   // Formal "request a waiter to your table" — used when location can't be
   // confirmed, or as the escape hatch on a table someone else holds.
   const doRequest = async (type: "open" | "access") => {
+    // Double-tap guard set BEFORE the await: a fast second tap would otherwise fire a
+    // second requestAccess before accessReqRef is set, creating a duplicate request. (sweep C4)
+    if (reqBusy.current) return;
+    reqBusy.current = true;
+    try {
     const p = pending.current!;
     // The "access" (call-a-waiter) path has NO watcher, so it can't auto-send the order;
     // only the "open" path does. Drive the request_sent copy off this (audit fix S1).
@@ -639,6 +645,7 @@ export default function SessionGate() {
     // request_sent; Cancel just closes it (fireDone is once-only, so this is safe). (S1)
     if (type === "access") fireDone({ ok: false, reason: "cancelled", action: pending.current?.action });
     setStep("request_sent");
+    } finally { reqBusy.current = false; }
   };
   // From the "not open" screen: tell staff, then keep waiting — proceedWhenOpen
   // (already running) auto-continues the moment they open the table. NAME-FIRST
@@ -649,9 +656,13 @@ export default function SessionGate() {
   const doRequestOpen = async () => {
     // Name is collected on this SAME screen — if it's blank, stay put and say why.
     if (!name.trim()) { setNote("Add your name so staff know who's asking."); return; }
+    if (reqBusy.current) return;              // double-tap guard before the await (sweep C4)
+    reqBusy.current = true;
+    try {
     setReqAutoSend(true); // the not-open watcher (proceedWhenOpen) is running → auto-send is real
     const p = pending.current!; await requestAccess(p.table, "open", name.trim(), null, ridRef.current);
     setStep("request_sent");
+    } finally { reqBusy.current = false; }
   };
   // The "request_name" screen's submit: validate, then send the open request with
   // the name attached (doRequestOpen now passes the name through).
