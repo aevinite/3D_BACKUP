@@ -8,9 +8,14 @@
 // query shapes (sales/avgbill/volume/weekday/tax/discounts/cancellations all read ONE
 // bucketed money payload; daypart re-slices hourly; menu re-slices dishes) so the studio
 // is rich without being egress-heavy. Charts adopt the SELECTED restaurant's brand accent.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { inr, inrP } from "@/components/admin/shared";
+import { useBackClose } from "@/lib/backStack";
 import { asSuffix } from "@/lib/ownerPin";
+
+// useLayoutEffect on the client, useEffect on the server (Next SSR) — lets us restore scroll
+// BEFORE the browser paints, with no SSR "useLayoutEffect does nothing" warning.
+const useIso = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import {
   ToggleChart, PaymentDonut, LeaderBar,
@@ -139,6 +144,27 @@ export default function OwnerReports() {
     const open = new URLSearchParams(window.location.search).get("open");
     if (open) setSel(open as RKey);
   }, []);
+
+  // ── Scroll memory (owner 2026-07-26: "when I click back it takes me to the top — it
+  // should keep me where I was"). The owner panel scrolls INSIDE `.adm-main`, not the
+  // window, so save/restore THAT element's scrollTop. Opening a report jumps to the top of
+  // the report; going back to the hub restores exactly where the owner was browsing.
+  const scroller = () => (typeof document === "undefined" ? null : document.querySelector<HTMLElement>(".adm-main"));
+  const hubScroll = useRef(0);
+  const openReport = useCallback((k: RKey) => {
+    setSel((cur) => { if (cur === "") { const el = scroller(); if (el) hubScroll.current = el.scrollTop; } return k; });
+  }, []);
+  const backToHub = useCallback(() => setSel(""), []);
+  // Restore the right scroll position AFTER the view swaps, before the browser paints.
+  useIso(() => {
+    const el = scroller();
+    if (!el) return;
+    if (sel) el.scrollTop = 0;                 // opened a report → start at its top
+    else el.scrollTop = hubScroll.current;     // back on the hub → where we left off
+  }, [sel]);
+  // The mobile/desktop BACK button (and browser back) closes the open report back to the
+  // hub instead of leaving the panel — same back-layer contract every owner overlay uses.
+  useBackClose("owner-report-view", !!sel, backToHub);
   const [range, setRange] = useState<Range>("30d");
   const [day, setDay] = useState<string>(istToday());          // Day summary's single date
   const [cFrom, setCFrom] = useState<string>(istToday());       // Custom range from…
@@ -259,7 +285,7 @@ export default function OwnerReports() {
         <div>
           {sel && (
             <div className="rs-crumb">
-              <button onClick={() => setSel("")}><i className="fas fa-arrow-left" aria-hidden /> Reports</button>
+              <button onClick={backToHub}><i className="fas fa-arrow-left" aria-hidden /> Reports</button>
               <span>/</span><span style={{ color: "var(--text)" }}>{REPORTS[sel].label}</span>
             </div>
           )}
@@ -315,11 +341,11 @@ export default function OwnerReports() {
       </div>
 
       {!sel ? (
-        <Hub range={range} money={entry} restName={restName} accent={accent} onOpen={setSel} />
+        <Hub range={range} money={entry} restName={restName} accent={accent} onOpen={openReport} />
       ) : (
         <ReportView sel={sel} data={data} loading={entry?.loading} error={entry?.error}
           range={range} rangeText={effLabel} accent={accent} restName={restName} singleRest={singleRest}
-          onOpenReport={(k) => setSel(k)} />
+          onOpenReport={openReport} />
       )}
     </div>
   );
