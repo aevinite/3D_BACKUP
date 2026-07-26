@@ -17,6 +17,21 @@ import { entitledSubset } from "@/lib/ownerEntitlements";
 export const dynamic = "force-dynamic";
 
 const DAY = 86_400_000;
+
+// The busy-hours heatmap is a RECENCY pattern, and its aggregate is the one analytics
+// query that times out on a huge window (the "All time" range = 2020→now made it hit the
+// statement timeout, 500'd the WHOLE dashboard — every other query is fine). Bound it to
+// the last ~90 days regardless of the selected range, never earlier than the range's own
+// start. A 90-day busy-hours grid is fully representative; all-time was never meaningful.
+const HEAT_MAX_DAYS = 90;
+// Clamp the heatmap window to the last ~90 days OF THE SELECTED WINDOW — anchored to the
+// window's own END (`to`), NOT wall-clock now. Anchoring to now would invert the window
+// (from > to) for a historical range — e.g. the dashboard's "most recent week with
+// activity" fallback for a restaurant quiet >90 days — and blank the very grid it's meant
+// to fill. For today/7d/30d/month/all, `to ≈ now`, so this is identical to now-90d.
+function heatFrom(from: string, to: string): string {
+  return new Date(Math.max(Date.parse(from), Date.parse(to) - HEAT_MAX_DAYS * DAY)).toISOString();
+}
 // Window for a range. "today" = since 05:00 IST business-day start (matches the
 // counters + lfh_owner_overview). Others are rolling windows ending now.
 function windowFor(range: string, sp?: URLSearchParams): { from: string; to: string; bucket: string } {
@@ -151,11 +166,13 @@ export async function GET(req: NextRequest) {
         sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket, p_ids: pIds }),
         // Busy heatmap (mig 197): one ≤7×24 pre-summed grid across the caller's own
         // restaurants — p_ids pushes the scope into the DB, same rule as the calls above.
-        sb.rpc("lfh_owner_heatmap", { p_restaurant_id: null, p_from: from, p_to: to, p_ids: pIds }),
+        sb.rpc("lfh_owner_heatmap", { p_restaurant_id: null, p_from: heatFrom(from, to), p_to: to, p_ids: pIds }),
       ]);
       if (rev.error) throw rev.error;
       if (ts.error) throw ts.error;
-      if (heat.error) throw heat.error;
+      // Heatmap is NON-FATAL: a slow/failed busy-hours grid must never wedge the whole
+      // dashboard (it did on "All time"). On error, `heat.data ?? []` below yields an empty
+      // grid and every other number/chart still renders.
       // An owner only ever sees their OWN restaurants; admin sees all. These RPCs
       // return one row per restaurant, so we filter the tiny pre-summed rows here.
       const restaurantRevenue = (rev.data ?? [])
@@ -251,7 +268,7 @@ export async function GET(req: NextRequest) {
       sb.rpc("lfh_owner_dish_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_hourly", { p_restaurant_id: rid, p_from: from, p_to: to }),
-      sb.rpc("lfh_owner_heatmap", { p_restaurant_id: rid, p_from: from, p_to: to }),
+      sb.rpc("lfh_owner_heatmap", { p_restaurant_id: rid, p_from: heatFrom(from, to), p_to: to }),
       sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sameHourStarts.length
         ? sb.rpc("lfh_owner_samehour_compare", { p_restaurant_id: rid, p_starts: sameHourStarts, p_elapsed: `${Math.round(elapsedMs / 1000)} seconds` })
@@ -260,7 +277,10 @@ export async function GET(req: NextRequest) {
     ]);
     if (meta.error) throw meta.error;
     if (!meta.data) throw new Error("restaurant not found");
-    for (const e of [ts, dishes, cats, hourly, heat, pm, sameHour, payTrend]) if (e.error) throw e.error;
+    // `heat` is deliberately EXCLUDED — the heatmap is non-fatal (see heatFrom): its error
+    // must not throw, or one slow busy-hours grid wedges the whole dashboard. `heat.data ?? []`
+    // below degrades to an empty grid.
+    for (const e of [ts, dishes, cats, hourly, pm, sameHour, payTrend]) if (e.error) throw e.error;
 
     const dishRows = (dishes.data ?? []).map((r: Record<string, unknown>) => ({
       title: r.title, qty: Number(r.qty) || 0, revenue: num(r.revenue),
