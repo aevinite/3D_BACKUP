@@ -10,7 +10,7 @@ import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { notifyAggregator } from "@/lib/aggregators";
-import { panelRestaurantId } from "@/lib/panelScope";
+import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 
 export const dynamic = "force-dynamic";
@@ -114,6 +114,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
+    // A missing client id arrives as literal "undefined"/"null"/"NaN" — reject before it
+    // reaches a uuid query and throws the "invalid input syntax for type uuid" route_error.
+    if (emptyIdSegment(b) || emptyIdSegment(c)) return err("Missing id — please refresh and try again.");
     const body = await readBody(req);
     const dev = deviceIdFrom(req); // which device (kitchen screen) is acting
     // A staff-blocked device can't do anything from the kitchen screen.

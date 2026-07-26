@@ -15,7 +15,7 @@ import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { softDeleteOrders } from "@/lib/softDelete";
 import { maybeAutoSettle } from "@/lib/autoSettle";
-import { panelRestaurantId } from "@/lib/panelScope";
+import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
@@ -394,6 +394,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
+    // A missing client id arrives as the literal "undefined"/"null"/"NaN" — reject before it
+    // reaches a uuid query and throws the "invalid input syntax for type uuid" route_error.
+    if (emptyIdSegment(b) || emptyIdSegment(c)) return err("Missing id — please refresh and try again.");
     const body = await readBody(req);
     const dev = deviceIdFrom(req); // which tablet/device is acting
     // A staff-blocked device can't do anything from the tablet.
