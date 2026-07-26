@@ -296,6 +296,239 @@ const actBtn: React.CSSProperties = { border: "var(--border)", background: "var(
 const ic: React.CSSProperties = { fontSize: 11 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Shared modal kit — replaces the old native confirm()/prompt() browser boxes with
+// on-theme dialogs (owner ask 2026-07-26). All plug into useAdminModal, so each one
+// gets Escape-to-close, phone-Back-to-close, focus-trap and background scroll-lock.
+// ─────────────────────────────────────────────────────────────────────────────
+const TONE = {
+  danger: { c: "#f87171", bg: "rgba(248,113,113,.14)", cta: "linear-gradient(135deg,#ef4444,#b91c1c)" },
+  ok: { c: "#34d399", bg: "rgba(52,211,153,.14)", cta: "linear-gradient(135deg,#22c55e,#16a34a)" },
+  blue: { c: "#60a5fa", bg: "rgba(96,165,250,.14)", cta: "linear-gradient(135deg,#3b82f6,#2563eb)" },
+} as const;
+type Tone = keyof typeof TONE;
+type Fact = { i: string; c?: string; t: React.ReactNode };
+
+const ghostBtn: React.CSSProperties = { background: "transparent", border: "var(--border)", color: "var(--text)", borderRadius: 11, padding: "11px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer" };
+const ctaBtn = (tone: Tone): React.CSSProperties => ({ border: 0, borderRadius: 11, padding: "11px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", color: "#fff", background: TONE[tone].cta, display: "inline-flex", alignItems: "center", gap: 8 });
+const modalCard: React.CSSProperties = { pointerEvents: "auto", background: "var(--card)", border: "var(--border)", borderRadius: 18, boxShadow: "0 0 0 1px rgba(34,211,238,.10), 0 30px 70px -30px #000", maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden" };
+
+// Scrim + centred dialog wrapper. Every modal below renders through this.
+function ModalShell({ id, onClose, width = 460, label, children }: {
+  id: string; onClose: () => void; width?: number; label: string; children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useAdminModal(ref, id, onClose);
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(3px)", zIndex: 1000 }} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+        <div ref={ref} role="dialog" aria-modal="true" aria-label={label} style={{ ...modalCard, width: `min(96vw, ${width}px)` }}>
+          {children}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ModalHead({ tone, icon, title, sub, subColor }: { tone: Tone; icon: string; title: string; sub?: string; subColor?: string }) {
+  return (
+    <div style={{ display: "flex", gap: 14, alignItems: "flex-start", padding: "20px 20px 4px" }}>
+      <span aria-hidden style={{ width: 46, height: 46, borderRadius: 13, display: "grid", placeItems: "center", fontSize: 19, flex: "none", background: TONE[tone].bg, color: TONE[tone].c }}><i className={`fas ${icon}`} /></span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-.01em", margin: 0 }}>{title}</h2>
+        {sub ? <p style={{ fontSize: 12.5, color: subColor || "var(--muted)", margin: "3px 0 0", lineHeight: 1.5 }}>{sub}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function FactList({ facts, danger }: { facts: Fact[]; danger?: boolean }) {
+  return (
+    <div style={{ display: "grid", gap: 8, border: danger ? "1px solid #7f1d1d" : "var(--border)", borderRadius: 12, padding: 12, background: danger ? "rgba(127,29,29,.10)" : "rgba(255,255,255,.015)" }}>
+      {facts.map((f, i) => (
+        <div key={i} style={{ display: "flex", gap: 10, fontSize: 12.5, alignItems: "flex-start" }}>
+          <i className={`fas ${f.i}`} aria-hidden="true" style={{ width: 15, textAlign: "center", marginTop: 2, flex: "none", color: f.c || "var(--muted)" }} />
+          <div>{f.t}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OwnerChip({ owner }: { owner: Owner }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 12px", border: "var(--border)", borderRadius: 12, background: "rgba(255,255,255,.02)" }}>
+      <span aria-hidden style={{ width: 38, height: 38, borderRadius: 11, background: `${chipColor(owner.id)}33`, color: chipColor(owner.id), display: "grid", placeItems: "center", fontWeight: 800, fontSize: 14, flex: "none" }}>{initials(owner.name)}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 750, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner.name}</div>
+        <div style={{ fontSize: 11.5, color: "var(--muted)" }}>@{owner.username}</div>
+      </div>
+      <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", padding: "3px 8px", borderRadius: 999, background: owner.active ? TONE.ok.bg : TONE.danger.bg, color: owner.active ? TONE.ok.c : TONE.danger.c }}>{owner.active ? "Active" : "Suspended"}</span>
+    </div>
+  );
+}
+
+function RestChip({ r }: { r: OwnedRest }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 12px", border: "var(--border)", borderRadius: 12, background: "rgba(255,255,255,.02)" }}>
+      <span aria-hidden style={{ width: 30, height: 30, borderRadius: 8, background: chipColor(r.id), flex: "none" }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
+        <div style={{ fontSize: 11.5, marginTop: 1 }}>{r.primary ? <span style={{ color: "#fbbf24", fontWeight: 700 }}>Primary owner</span> : <span style={{ color: "#60a5fa", fontWeight: 700 }}>Co-owner</span>}</div>
+      </div>
+    </div>
+  );
+}
+
+// Generic confirm dialog: header + optional chip + a "what happens" list + Cancel/CTA.
+// Powers Suspend, Restore, Reset-password and Remove-restaurant.
+export type ConfirmCfg = {
+  tone: Tone; icon: string; title: string; sub?: string;
+  ownerChip?: boolean; chip?: React.ReactNode; facts: Fact[];
+  ctaLabel: string; ctaTone?: Tone; ctaIcon?: string; onYes: () => void;
+};
+function ConfirmModal({ cfg, owner, onConfirm, onClose }: {
+  cfg: ConfirmCfg; owner: Owner; onConfirm: () => void; onClose: () => void;
+}) {
+  const ctaTone = cfg.ctaTone || cfg.tone;
+  return (
+    <ModalShell id="admin-owner-confirm" onClose={onClose} width={440} label={cfg.title}>
+      <ModalHead tone={cfg.tone} icon={cfg.icon} title={cfg.title} sub={cfg.sub} subColor={cfg.tone === "danger" ? "#fca5a5" : undefined} />
+      <div style={{ padding: "14px 20px 4px", display: "grid", gap: 12 }}>
+        {cfg.ownerChip ? <OwnerChip owner={owner} /> : cfg.chip}
+        <FactList facts={cfg.facts} />
+      </div>
+      <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", padding: "16px 20px 20px" }}>
+        <button style={ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={ctaBtn(ctaTone)} onClick={onConfirm}><i className={`fas ${cfg.ctaIcon || cfg.icon}`} aria-hidden="true" />{cfg.ctaLabel}</button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// Rename dialog — a single labelled field (replaces the native prompt()).
+function RenameModal({ owner, busy, onSave, onClose }: { owner: Owner; busy: boolean; onSave: (name: string) => void; onClose: () => void }) {
+  const [name, setName] = useState(owner.name);
+  const valid = !!name.trim() && name.trim() !== owner.name;
+  const submit = (e: React.FormEvent) => { e.preventDefault(); if (valid && !busy) onSave(name.trim()); };
+  return (
+    <ModalShell id="admin-owner-rename" onClose={onClose} width={440} label={`Rename ${owner.name}`}>
+      <form onSubmit={submit}>
+        <ModalHead tone="blue" icon="fa-pen" title={`Rename ${owner.name}`} sub="This is also their login — they sign in with the new name." />
+        <div style={{ padding: "14px 20px 4px", display: "grid", gap: 8 }}>
+          <label style={{ ...label }}>New name / login
+            <input value={name} onChange={(e) => setName(e.target.value)} style={field} autoFocus required maxLength={80} />
+          </label>
+        </div>
+        <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", padding: "16px 20px 20px" }}>
+          <button type="button" style={ghostBtn} onClick={onClose}>Cancel</button>
+          <button type="submit" style={{ ...ctaBtn("blue"), opacity: valid && !busy ? 1 : 0.4, cursor: valid && !busy ? "pointer" : "not-allowed" }} disabled={!valid || busy}><i className="fas fa-check" aria-hidden="true" />Save name</button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
+// Permanent-delete dialog — folds the old confirm()+prompt() into one card. The red
+// button stays disabled until the typed text matches the username (case-insensitive).
+function DeleteForeverModal({ owner, busy, onConfirm, onClose }: { owner: Owner; busy: boolean; onConfirm: () => void; onClose: () => void }) {
+  const [typed, setTyped] = useState("");
+  const v = typed.trim().toLowerCase();
+  const match = v === owner.username.toLowerCase();
+  const hint = !v
+    ? { c: "var(--muted)", i: "fa-keyboard", t: "Waiting for the username…" }
+    : match ? { c: TONE.ok.c, i: "fa-circle-check", t: "Matches — delete is armed." }
+      : { c: "#fbbf24", i: "fa-circle-exclamation", t: "Doesn’t match yet." };
+  return (
+    <ModalShell id="admin-owner-delete" onClose={onClose} width={460} label={`Delete ${owner.name} forever`}>
+      <ModalHead tone="danger" icon="fa-triangle-exclamation" title={`Delete ${owner.name} forever?`} sub="This cannot be undone." subColor="#fca5a5" />
+      <div style={{ padding: "14px 20px 4px", display: "grid", gap: 12 }}>
+        <FactList danger facts={[
+          { i: "fa-store", c: "#fbbf24", t: <>Their restaurants fall back to a <b>co-owner</b>, or to <b>&ldquo;no owner&rdquo;</b></> },
+          { i: "fa-right-from-bracket", c: "#f87171", t: <>Signed out everywhere and the login is <b>removed</b></> },
+          { i: "fa-clipboard-list", c: "#34d399", t: <>The <b>activity log is kept</b> for your records</> },
+        ]} />
+        <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Type <b style={{ color: "var(--text)" }}>{owner.username}</b> to confirm:</div>
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={owner.username} autoComplete="off" spellCheck={false} aria-label="Type the username to confirm deletion"
+          style={{ ...field, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 15, borderColor: match ? "#7f1d1d" : undefined }}
+          onKeyDown={(e) => { if (e.key === "Enter" && match && !busy) onConfirm(); }} />
+        <div style={{ fontSize: 11.5, display: "flex", alignItems: "center", gap: 6, color: hint.c }}><i className={`fas ${hint.i}`} aria-hidden="true" />{hint.t}</div>
+      </div>
+      <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", padding: "16px 20px 20px" }}>
+        <button style={ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={{ ...ctaBtn("danger"), opacity: match && !busy ? 1 : 0.4, cursor: match && !busy ? "pointer" : "not-allowed" }} disabled={!match || busy} onClick={onConfirm}><i className="fas fa-trash-can" aria-hidden="true" />Delete forever</button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// Big searchable restaurant picker (owner ask 2026-07-26 — "a whole big pop up with
+// search"). Multi-select so several can be attached in one go; "needs an owner"
+// restaurants surface first so an unowned one is never lost.
+function AssignRestaurantModal({ owner, attachable, busy, onAssign, onClose }: {
+  owner: Owner; attachable: Rest[]; busy: boolean; onAssign: (ids: string[]) => void; onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const ql = q.trim().toLowerCase();
+  const avail = useMemo(() => attachable.filter((r) => r.name.toLowerCase().includes(ql)), [attachable, ql]);
+  const needs = avail.filter((r) => !r.hasOwner);
+  const have = avail.filter((r) => r.hasOwner);
+  const toggle = (id: string) => setPicked((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const n = picked.size;
+
+  const Row = (r: Rest) => {
+    const on = picked.has(r.id);
+    return (
+      <button key={r.id} type="button" onClick={() => toggle(r.id)}
+        style={{ display: "flex", gap: 12, alignItems: "center", width: "100%", padding: "11px 14px", background: on ? "var(--muted2)" : "transparent", border: 0, borderTop: "var(--border)", color: "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 14 }}>
+        <span aria-hidden style={{ width: 20, height: 20, borderRadius: 6, border: on ? 0 : "1.6px solid var(--muted)", background: on ? "var(--accent)" : "transparent", color: "#04121a", display: "grid", placeItems: "center", fontSize: 11, fontWeight: 900, flex: "none" }}>{on ? <i className="fas fa-check" /> : null}</span>
+        <span aria-hidden style={{ width: 26, height: 26, borderRadius: 8, background: chipColor(r.id), flex: "none" }} />
+        <span style={{ flex: 1, fontWeight: 600 }}>{r.name}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: r.hasOwner ? "var(--muted)" : "#fbbf24" }}>{r.hasOwner ? "co-own" : "needs an owner"}</span>
+      </button>
+    );
+  };
+  const ghead = (txt: string, color?: string): React.CSSProperties => ({ fontSize: 10.5, letterSpacing: ".09em", textTransform: "uppercase", color: color || "var(--muted)", padding: "10px 14px 6px", position: "sticky", top: 0, background: "var(--card)" });
+
+  return (
+    <ModalShell id="admin-owner-assign" onClose={onClose} width={560} label="Assign a restaurant">
+      <ModalHead tone="blue" icon="fa-store" title="Assign a restaurant" sub={undefined} />
+      <div style={{ padding: "0 20px", marginTop: -6 }}>
+        <p style={{ fontSize: 12.5, color: "var(--muted)", margin: "0 0 12px", lineHeight: 1.5 }}>Pick one or many for <b style={{ color: "var(--text)" }}>{owner.name}</b> — a restaurant can have several owners.</p>
+        <div style={{ position: "relative", marginBottom: 12 }}>
+          <i className="fas fa-magnifying-glass" aria-hidden="true" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 13 }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search restaurants…" aria-label="Search restaurants" autoComplete="off" autoFocus
+            style={{ ...field, padding: "13px 14px 13px 38px", fontSize: 14.5 }} />
+        </div>
+      </div>
+      <div style={{ padding: "0 20px", overflow: "auto", flex: 1, minHeight: 0 }}>
+        <div style={{ border: "var(--border)", borderRadius: 12, overflow: "hidden" }}>
+          {avail.length === 0 ? (
+            <div style={{ padding: 24, textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+              {attachable.length === 0 ? "They already own every restaurant." : <><i className="fas fa-magnifying-glass" style={{ opacity: .4, fontSize: 20 }} aria-hidden="true" /><div style={{ marginTop: 8 }}>No restaurant matches “{q}”.</div></>}
+            </div>
+          ) : (
+            <>
+              {needs.length > 0 && <div style={ghead(`Needs an owner · ${needs.length}`, "#fbbf24")}>Needs an owner · {needs.length}</div>}
+              {needs.map(Row)}
+              {have.length > 0 && <div style={ghead(`Already has owners · ${have.length}`)}>Already has owners · {have.length}</div>}
+              {have.map(Row)}
+            </>
+          )}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 9, alignItems: "center", padding: "16px 20px 20px" }}>
+        <span style={{ fontSize: 12, color: "var(--muted)", marginRight: "auto" }}>{n ? `${n} selected` : "Nothing selected"}</span>
+        <button style={ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={{ ...ctaBtn("blue"), opacity: n && !busy ? 1 : 0.4, cursor: n && !busy ? "pointer" : "not-allowed" }} disabled={!n || busy} onClick={() => onAssign(Array.from(picked))}>
+          <i className="fas fa-check" aria-hidden="true" />{n ? `Assign ${n} restaurant${n > 1 ? "s" : ""}` : "Assign"}</button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OwnerDetail — the RIGHT pane. Everything about one owner: profile + actions,
 // the restaurants they own (add / remove / open-their-panel), the activity trail,
 // and the suspend-first permanent-delete zone. Activity is fetched ONCE per owner.
@@ -311,7 +544,10 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
   const [created, setCreated] = useState<string | null>(owner.createdAt || null);
   const [mErr, setMErr] = useState("");
   const [pwReveal, setPwReveal] = useState<string | null>(null);
-  const [showAttach, setShowAttach] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+  const [showRename, setShowRename] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmCfg | null>(null);
   const attachable = rests.filter((r) => !owner.restaurants.some((x) => x.id === r.id));
 
   async function patch(payload: object): Promise<any> {
@@ -336,17 +572,28 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
     return () => { dead = true; };
   }, [owner.id]);
 
-  const attachRestaurant = (rid: string) => { setShowAttach(false); run(async () => { await patch({ owner_id: owner.id, action: "attach", restaurant_id: rid }); }); };
-  const detachRestaurant = (r: OwnedRest) => {
-    if (!confirm(`Remove "${r.name}" from ${owner.name}? They immediately stop seeing its numbers.`)) return;
-    run(async () => { await patch({ owner_id: owner.id, action: "detach", restaurant_id: r.id }); });
+  // Attach one or many restaurants in a single action (the big picker is multi-select).
+  const assignRestaurants = (ids: string[]) => {
+    setShowAssign(false);
+    if (!ids.length) return;
+    run(async () => { for (const rid of ids) await patch({ owner_id: owner.id, action: "attach", restaurant_id: rid }); });
   };
+  // Remove-restaurant → the shared confirm dialog (was a native confirm()).
+  const detachRestaurant = (r: OwnedRest) => setConfirm({
+    tone: "danger", icon: "fa-link-slash", ctaLabel: "Remove restaurant", ctaTone: "danger",
+    title: `Remove ${r.name}?`, sub: `${owner.name} stops seeing this restaurant’s numbers immediately.`,
+    chip: <RestChip r={r} />,
+    facts: [
+      { i: "fa-eye-slash", c: "#f87171", t: "They immediately lose access to its numbers" },
+      { i: "fa-store", t: <>The restaurant keeps running — only <b>this owner link</b> is removed</> },
+      { i: "fa-user-group", t: "Other owners (if any) keep their access" },
+    ],
+    onYes: () => run(async () => { await patch({ owner_id: owner.id, action: "detach", restaurant_id: r.id }); }),
+  });
 
-  async function deleteForever() {
-    if (!confirm(`Delete ${owner.name} FOREVER?\n\nThis cannot be undone. Their restaurants fall back to a co-owner or to "no owner". The activity log is kept.`)) return;
-    const typed = prompt(`Type their username (${owner.username}) to confirm the permanent delete:`);
-    if (typed === null) return;
-    if (typed.trim().toLowerCase() !== owner.username.toLowerCase()) { setMErr("Username didn't match — nothing was deleted."); return; }
+  // Permanent delete — the modal's type-to-confirm gate already guards it, so this just runs it.
+  async function doDelete() {
+    setShowDelete(false);
     setMErr(""); setBusy(true);
     try {
       const r = await fetch(`/api/admin/owners?id=${encodeURIComponent(owner.id)}`, { method: "DELETE" });
@@ -378,10 +625,18 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={actBtn} disabled={busy} onClick={() => setShowRename(true)}><i className="fas fa-pen" style={ic} aria-hidden="true" />Rename</button>
           <button style={actBtn} disabled={busy}
-            onClick={() => { const nn = prompt(`New name / login for ${owner.name}:`, owner.name); if (nn && nn.trim() && nn.trim() !== owner.name) run(async () => { await patch({ owner_id: owner.id, action: "rename", name: nn.trim() }); }); }}><i className="fas fa-pen" style={ic} aria-hidden="true" />Rename</button>
-          <button style={actBtn} disabled={busy}
-            onClick={() => { if (confirm(`Set a NEW password for ${owner.name}? They'll be logged out everywhere.`)) run(async () => { const j = await patch({ owner_id: owner.id, action: "reset_password" }); setPwReveal(j.password); }); }}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
+            onClick={() => setConfirm({
+              tone: "blue", icon: "fa-key", ctaLabel: "Reset password", ctaTone: "blue",
+              title: `Reset ${owner.name}’s password?`, sub: "A new one-time password is generated and shown once.",
+              ownerChip: true,
+              facts: [
+                { i: "fa-key", c: "#60a5fa", t: <>A <b>new password</b> is shown once — copy it right then</> },
+                { i: "fa-right-from-bracket", c: "#fbbf24", t: "They’re logged out everywhere" },
+              ],
+              onYes: () => run(async () => { const j = await patch({ owner_id: owner.id, action: "reset_password" }); setPwReveal(j.password); }),
+            })}><i className="fas fa-key" style={ic} aria-hidden="true" />Reset password</button>
           {/* Visit: jump straight into THIS owner's panel from here (owner ask 2026-07-26) —
               starts on their primary restaurant; multi-restaurant owners can switch inside.
               Same act-as link as the per-restaurant "Open panel" (no password, invisible). */}
@@ -395,7 +650,25 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
             );
           })()}
           <button style={{ ...actBtn, color: owner.active ? "#fca5a5" : "#86efac" }} disabled={busy}
-            onClick={() => { if (confirm(owner.active ? `Suspend ${owner.name}? They're logged out immediately and can't sign in.` : `Restore ${owner.name}'s access?`)) run(async () => { await patch({ owner_id: owner.id, action: "set_active", active: !owner.active }); }); }}>
+            onClick={() => setConfirm(owner.active ? {
+              tone: "danger", icon: "fa-ban", ctaLabel: "Suspend owner", ctaTone: "danger",
+              title: `Suspend ${owner.name}?`, sub: "Reversible — you can restore them any time.", ownerChip: true,
+              facts: [
+                { i: "fa-right-from-bracket", c: "#f87171", t: <><b>Logged out</b> everywhere at once</> },
+                { i: "fa-lock", c: "#fbbf24", t: "Can’t sign in until you restore" },
+                { i: "fa-store", t: "Their restaurants keep running normally" },
+              ],
+              onYes: () => run(async () => { await patch({ owner_id: owner.id, action: "set_active", active: false }); }),
+            } : {
+              tone: "ok", icon: "fa-rotate-left", ctaLabel: "Restore access", ctaTone: "ok",
+              title: `Restore ${owner.name}’s access?`, sub: "They can sign in again right away.", ownerChip: true,
+              facts: [
+                { i: "fa-right-to-bracket", c: "#34d399", t: <>Can <b>log in</b> again immediately</> },
+                { i: "fa-store", c: "#60a5fa", t: "Sees their restaurants’ numbers again" },
+                { i: "fa-clock-rotate-left", t: "Nothing was lost while suspended" },
+              ],
+              onYes: () => run(async () => { await patch({ owner_id: owner.id, action: "set_active", active: true }); }),
+            })}>
             <i className={`fas ${owner.active ? "fa-ban" : "fa-rotate-left"}`} style={ic} aria-hidden="true" />{owner.active ? "Suspend" : "Restore"}</button>
         </div>
 
@@ -416,8 +689,8 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
             <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", flex: 1 }}>Owns {owner.restaurants.length} restaurant{owner.restaurants.length === 1 ? "" : "s"}</div>
             <button style={{ ...chip, borderStyle: "dashed", color: "#60a5fa", cursor: "pointer", background: "transparent", padding: "7px 11px" }} disabled={busy}
-              onClick={() => setShowAttach((s) => !s)}>
-              <i className={`fas ${showAttach ? "fa-xmark" : "fa-plus"}`} style={{ fontSize: 10 }} aria-hidden="true" />{showAttach ? "Close" : "Assign restaurant"}</button>
+              onClick={() => setShowAssign(true)}>
+              <i className="fas fa-plus" style={{ fontSize: 10 }} aria-hidden="true" />Assign restaurant</button>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 8 }}>
@@ -441,22 +714,6 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
             ))}
             {owner.restaurants.length === 0 && <div style={{ fontSize: 12.5, color: "var(--muted)", padding: "6px 2px" }}>No restaurants yet — assign one above.</div>}
           </div>
-
-          {/* Assign picker */}
-          {showAttach && (
-            <div style={{ border: "var(--border)", borderRadius: 10, maxHeight: 220, overflowY: "auto", marginTop: 8 }}>
-              {attachable.length === 0 && <div style={{ padding: 10, fontSize: 12.5, color: "var(--muted)" }}>They already own every restaurant.</div>}
-              {attachable.map((r) => (
-                <button key={r.id} disabled={busy} style={{ display: "flex", gap: 9, alignItems: "center", width: "100%", padding: "9px 12px", background: "transparent", border: 0, borderTop: "var(--border)", color: "var(--text)", fontSize: 13, cursor: "pointer", textAlign: "left" }}
-                  onClick={() => attachRestaurant(r.id)}>
-                  <i className="fas fa-plus" style={{ fontSize: 10, color: "#60a5fa" }} aria-hidden="true" />
-                  <span style={{ ...dot, background: chipColor(r.id) }} />
-                  <span style={{ flex: 1 }}>{r.name}</span>
-                  <span style={{ fontSize: 11, color: r.hasOwner ? "var(--muted)" : "#fcd34d" }}>{r.hasOwner ? "co-own" : "no owner yet"}</span>
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* Activity trail */}
@@ -492,11 +749,29 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
               <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
                 This owner is suspended. Deleting is <b>permanent</b> — no restore. Their restaurants fall to a co-owner or become &ldquo;no owner&rdquo;; the activity log is kept.
               </div>
-              <button style={btn("#991b1b")} disabled={busy} onClick={deleteForever}><i className="fas fa-trash-can" style={{ marginRight: 6, fontSize: 11 }} aria-hidden="true" />Delete forever</button>
+              <button style={btn("#991b1b")} disabled={busy} onClick={() => setShowDelete(true)}><i className="fas fa-trash-can" style={{ marginRight: 6, fontSize: 11 }} aria-hidden="true" />Delete forever</button>
             </>
           )}
         </div>
       </div>
+
+      {/* ── Dialogs (replace the old native confirm()/prompt() boxes) ── */}
+      {confirm && (
+        <ConfirmModal cfg={confirm} owner={owner}
+          onClose={() => setConfirm(null)}
+          onConfirm={() => { const y = confirm.onYes; setConfirm(null); y(); }} />
+      )}
+      {showRename && (
+        <RenameModal owner={owner} busy={busy} onClose={() => setShowRename(false)}
+          onSave={(name) => { setShowRename(false); run(async () => { await patch({ owner_id: owner.id, action: "rename", name }); }); }} />
+      )}
+      {showAssign && (
+        <AssignRestaurantModal owner={owner} attachable={attachable} busy={busy}
+          onClose={() => setShowAssign(false)} onAssign={assignRestaurants} />
+      )}
+      {showDelete && (
+        <DeleteForeverModal owner={owner} busy={busy} onClose={() => setShowDelete(false)} onConfirm={doDelete} />
+      )}
 
       <style jsx>{`
         .own-back { display: none; }
