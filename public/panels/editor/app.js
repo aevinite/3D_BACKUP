@@ -3559,6 +3559,41 @@ ${row("Voided today", z.invoicesVoided)}
   w.document.close();
 }
 
+// A small CUSTOMER receipt for a parcel — same thermal recipe as the Z-report/bill
+// (≤66mm centred, no browser header/footer). Printed on "Pay now & print".
+// o = { kot, items:[{title,qty,price}], total, customer, method, paid }.
+function printParcelReceipt(o) {
+  const set = state.data.settings || {};
+  const name = set.restaurant_name || "Restaurant";
+  const w = window.open("", "_blank", "width=380,height=680");
+  if (!w) { toast("Allow popups to print the receipt", "err"); return; }
+  const lines = (o.items || []).map((it) =>
+    `<div class="ln"><span>${esc(it.qty)}× ${esc(it.title)}</span><span>${inr((Number(it.price) || 0) * it.qty)}</span></div>`).join("");
+  w.document.write(`<!doctype html><title>Parcel receipt${o.kot != null ? " #" + esc(o.kot) : ""}</title>
+<style>
+  @page{margin:0}
+  @media print{body{margin:0 !important;padding:2mm 5mm !important}.ln,.grand{break-inside:avoid}}
+  body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:20px;color:#111}
+  h2{font-family:Georgia,serif;font-size:18px;margin:0;text-align:center}
+  .sub{text-align:center;color:#444;font-size:10.5px;margin:3px 0 10px}
+  .tag{text-align:center;font-weight:700;letter-spacing:.1em;border-top:1px solid #111;border-bottom:1px solid #111;padding:4px 0;margin:8px 0}
+  .ln{display:flex;justify-content:space-between;padding:3px 0;font-variant-numeric:tabular-nums}
+  .grand{display:flex;justify-content:space-between;border-top:2px solid #111;margin-top:8px;padding-top:8px;font-weight:700;font-size:15px}
+  .paid{text-align:center;margin-top:8px;font-weight:700}
+  .foot{text-align:center;color:#777;font-size:9px;margin-top:12px}
+</style>
+<h2>${esc(name)}</h2>
+<div class="sub">${set.gstin ? "GSTIN " + esc(set.gstin) + "<br/>" : ""}${esc(new Date().toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))}</div>
+<div class="tag">🥡 PARCEL / TAKEAWAY${o.kot != null ? " · #" + esc(o.kot) : ""}</div>
+${o.customer ? `<div class="sub" style="margin:6px 0">${esc(o.customer)}</div>` : ""}
+${lines}
+<div class="grand"><span>TOTAL</span><span>${inr(o.total || 0)}</span></div>
+<div class="paid">${o.paid ? "PAID · " + esc(String(o.method || "cash").toUpperCase()) : "PAY ON PICKUP"}</div>
+<div class="foot">Thank you!</div>
+<script>setTimeout(()=>print(),300)<\/script>`);
+  w.document.close();
+}
+
 // ---------- Features tab: per-restaurant on/off switches ----------
 // The catalogue of GUEST-FACING switches. Each key matches lib/features.ts in
 // the menu app (absent in the DB = the default below). The four backend-only
@@ -6657,6 +6692,8 @@ function openTakeOrder(table, rerender, opts = {}) {
         const r = await api("POST", "/parcel", { items, allergies, note: orderNote || null, customer: custName || null, phone: custPhone || null, paid: payNow, method: payNow ? "cash" : null });
         if (r && r.queued) { toast("Saved ✓ — the parcel will send when you're back online.", "ok"); close(); return; }
         toast(r && r.kot_no != null ? `Parcel sent! Ticket #${r.kot_no}${payNow ? " · paid" : " · pay on pickup"}` : "Parcel sent to the kitchen", "ok");
+        // "Pay now & print" → a customer receipt for the counter printer (pay-on-pickup doesn't).
+        if (payNow) { try { printParcelReceipt({ kot: r && r.kot_no, items: cart.map((c) => ({ title: c.title, qty: c.qty, price: c.price })), total: cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0), customer: custName, method: "cash", paid: true }); } catch {} }
         close();
         try { loadPlatform(); } catch {}
         if (rerender) rerender();
@@ -8981,7 +9018,7 @@ const XRAY_TABS = [
 // tinted for a higher role. The server enforces each flag regardless (managerCan).
 const XRAY_CONTROLS = [
   { selector: "[data-take-order]", flag: "take_orders", label: "Take orders" },
-  { selector: "[data-new-parcel]", flag: "take_orders", label: "New parcel (takeaway)" },
+  { selector: "[data-new-parcel]", flag: "parcel", label: "New parcel (takeaway)" },
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
   { selector: "#sxKot", flag: "table_ops", label: "Table & KOT operations" },

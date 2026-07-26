@@ -22,7 +22,7 @@ import { USER_COOKIE, userFromCookie, hashSecret, normalizeLoginName, type Role 
 import { logAction } from "@/lib/oplog";
 import { mergeOwnerEntitlements, MANAGER_POWER_FLAGS, powerEntitled } from "@/lib/ownerEntitlements";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
-import { banquetLadder, tableTagsLadder, tableOpsLadder, takeOrdersLadder } from "@/lib/tableTags";
+import { banquetLadder, tableTagsLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
 
 // GAP-B (owner ceiling): a tablet cap gated by an admin module may only be granted to a
 // waiter if that module is EFFECTIVE for the restaurant. The money caps (discount/mark_paid/
@@ -34,6 +34,7 @@ const CAP_MODULE_GATE: Record<string, (rid: string) => Promise<{ effective: bool
   tablet_khata: tableTagsLadder,
   tablet_table_ops: tableOpsLadder,
   tablet_take_orders: takeOrdersLadder,
+  tablet_parcel: parcelLadder,
 };
 
 export const dynamic = "force-dynamic";
@@ -164,7 +165,7 @@ export async function GET(req: NextRequest) {
   const modsByRid: Record<string, Record<string, boolean>> = {};
   if (ids.length) {
     const { data: setRows } = await sb.from("settings")
-      .select("restaurant_id, banquet_allowed, banquet_owner_control, banquet_enabled, table_tags_allowed, table_tags_owner_control, table_tags_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled, take_orders_allowed, take_orders_owner_control, take_orders_enabled")
+      .select("restaurant_id, banquet_allowed, banquet_owner_control, banquet_enabled, table_tags_allowed, table_tags_owner_control, table_tags_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled, take_orders_allowed, take_orders_owner_control, take_orders_enabled, parcel_allowed, parcel_owner_control, parcel_enabled")
       .in("restaurant_id", ids);
     const eff = (r: any, a: string, c: string, e: string) => r?.[a] === true && (r?.[c] !== true || r?.[e] !== false);
     for (const r of (setRows || []) as any[]) modsByRid[r.restaurant_id] = {
@@ -172,6 +173,7 @@ export async function GET(req: NextRequest) {
       table_tags: eff(r, "table_tags_allowed", "table_tags_owner_control", "table_tags_enabled"),
       table_ops: eff(r, "table_ops_allowed", "table_ops_owner_control", "table_ops_enabled"),
       take_orders: eff(r, "take_orders_allowed", "take_orders_owner_control", "take_orders_enabled"),
+      parcel: eff(r, "parcel_allowed", "parcel_owner_control", "parcel_enabled"),
     };
   }
   return ok({ actor: s.actor, restaurants: s.restaurants.map((r) => ({ ...slim(r), modules: modsByRid[r.id] || {} })), staff });
@@ -265,7 +267,7 @@ export async function PATCH(req: NextRequest) {
     //   • MANAGER powers (the bare flag, e.g. give_discounts) — per-person override for a
     //     MANAGER, two-state on|off; enforced by managerCan (Option B, 2026-07-24). A key
     //     the enforcer doesn't read would be a dead grant, so both lists are the enforced set.
-    const TABLET_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders"];
+    const TABLET_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders", "tablet_parcel"];
     const POWER_KEYS = MANAGER_POWER_FLAGS as readonly string[];
     const patch = body?.permissions;
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing permissions object.");

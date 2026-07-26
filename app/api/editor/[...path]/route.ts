@@ -27,7 +27,7 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
-import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -326,6 +326,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // when the admin switches the module off for this restaurant.
       const tOrd = await takeOrdersLadder(rid);
       if (!tOrd.effective) effectivePowers.take_orders = false;
+      // Parcel / takeaway module (mig 197): same rule — the 🥡 New Parcel button dies when
+      // the admin hasn't switched the module on for this restaurant.
+      const parc = await parcelLadder(rid);
+      if (!parc.effective) effectivePowers.parcel = false;
       // Finer edit-menu sub-limits (owner 2026-07-24): mirror menuSubAllowed's resolution so
       // the panel can HIDE a create/delete button a restricted MANAGER isn't allowed, instead
       // of showing-then-refusing it. Same rule as the server: admin/owner get full menu editing
@@ -349,7 +353,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // Delete-a-bill sub-permission (default OFF) — lets the panel show the "🗑 Delete bill"
         // button only when the owner ticked it (admin/owner always true). (owner, 2026-07-24)
         canDeleteBill: await canDeleteBill(g, rid),
-        features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective, table_ops: tOps.effective, take_orders: tOrd.effective },
+        features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective, table_ops: tOps.effective, take_orders: tOrd.effective, parcel: parc.effective },
       });
     }
 
@@ -1216,8 +1220,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // Titles/prices are resolved SERVER-SIDE (never trust the client cart); total is the
     // item subtotal, matching how every other platform order stores `total`.
     if (a === "parcel" && path.length === 1) {
-      if (!(await takeOrdersLadder(rid)).effective) return err("Order-taking isn't enabled for this restaurant.", 403);
-      if (!(await managerCan(g, rid, "take_orders"))) return permDenied("take new orders");
+      if (!(await parcelLadder(rid)).effective) return err("Parcel / takeaway isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "parcel"))) return permDenied("take parcel / takeaway orders");
       const { items, customer, phone, note, allergies, paid, method } = body || {};
       if (!Array.isArray(items) || !items.length) return err("items required");
       // The client sends only {id, qty, note}; resolve title+price from OUR menu (rid-scoped).
