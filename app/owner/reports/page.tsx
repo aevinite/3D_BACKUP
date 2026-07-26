@@ -9,7 +9,7 @@
 // bucketed money payload; daypart re-slices hourly; menu re-slices dishes) so the studio
 // is rich without being egress-heavy. Charts adopt the SELECTED restaurant's brand accent.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { inr } from "@/components/admin/shared";
+import { inr, inrP } from "@/components/admin/shared";
 import { asSuffix } from "@/lib/ownerPin";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import {
@@ -66,15 +66,20 @@ function bucketLabel(iso: string, bucket: string): string {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: TZ });
 }
 
-// Split a list into whole numbers that STILL sum to a target integer (largest-remainder),
-// so the CGST/SGST rupees always add back to the displayed Total tax.
-function roundToSum(vals: number[], target: number): number[] {
-  const floors = vals.map((v) => Math.floor(v));
-  const out = [...floors];
-  let rem = Math.round(target) - floors.reduce((a, b) => a + b, 0);
-  const order = vals.map((v, i) => ({ i, frac: v - Math.floor(v) })).sort((a, b) => b.frac - a.frac);
-  for (let k = 0; k < order.length && rem > 0; k++) { out[order[k].i]++; rem--; }
-  return out;
+// Split a tax total across its lines PROPORTIONALLY to their rates, to the paise, with the
+// last line absorbing the rounding remainder so the parts ALWAYS add back to the total
+// exactly. Paise (not whole rupees) is the fix for the owner's "both are 2.5% — why is CGST
+// ₹81,370 but SGST ₹81,369?" — an odd total (₹162,739) splits to ₹81,369.50 + ₹81,369.50,
+// two EQUAL halves. Mirrors the server's own split (route.ts) so screen == printed bill.
+function splitTax(rates: number[], target: number): number[] {
+  const sum = rates.reduce((a, r) => a + r, 0) || 1;
+  const p2 = (v: number) => Math.round(v * 100) / 100;
+  let running = 0;
+  return rates.map((r, i) => {
+    const amt = i === rates.length - 1 ? p2(target - running) : p2(target * (r / sum));
+    running = p2(running + amt);
+    return amt;
+  });
 }
 
 function downloadCsv(filename: string, header: string[], rows: (string | number)[][]) {
@@ -343,11 +348,12 @@ function Hub({ range, money, restName, accent, onOpen }: {
       <div className="rs-overview">
         <div className="rs-ov-eyebrow">{restName} · {rangeLabel(range)}</div>
         <div className="rs-ov-val"><AnimatedNumber value={t?.revenue || 0} money loading={loading} /></div>
-        <div className="rs-ov-sub">Net revenue kept in this period{money?.error ? " — couldn't load" : ""}</div>
+        <div className="rs-ov-sub">Total collected this period — GST included{money?.error ? " — couldn't load" : ""}</div>
         <div className="rs-ov-kpis">
+          <div className="k"><span className="lbl">Net sales</span><span className="v"><AnimatedNumber value={Math.max(0, (t?.subtotal || 0) - (t?.discount || 0))} money loading={loading} /></span></div>
           <div className="k"><span className="lbl">Paid bills</span><span className="v"><AnimatedNumber value={t?.paidOrders || 0} format={nfmt} loading={loading} /></span></div>
           <div className="k"><span className="lbl">Avg bill</span><span className="v"><AnimatedNumber value={avg} money loading={loading} /></span></div>
-          <div className="k"><span className="lbl">Tax collected</span><span className="v"><AnimatedNumber value={t?.tax || 0} money loading={loading} /></span></div>
+          <div className="k"><span className="lbl">GST collected</span><span className="v"><AnimatedNumber value={t?.tax || 0} money loading={loading} /></span></div>
           <div className="k"><span className="lbl">Discounts</span><span className="v"><AnimatedNumber value={t?.discount || 0} money loading={loading} /></span></div>
         </div>
         <div className="rs-ov-chart">
@@ -441,12 +447,13 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
     const payTotal = pays.reduce((a, p) => a + p.revenue, 0);
     const avg = t.paidOrders ? t.revenue / t.paidOrders : 0;
     const taxLines = data.tax
-      ? roundToSum(data.tax.components.map((c) => c.amount), t.tax).map((amt, i) => ({ label: data.tax!.components[i].label, rate: data.tax!.components[i].rate, amt }))
+      ? splitTax(data.tax.components.map((c) => c.rate), t.tax).map((amt, i) => ({ label: data.tax!.components[i].label, rate: data.tax!.components[i].rate, amt }))
       : [];
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Gross income" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} sub="net of discounts, tax included" spark={series.map((s) => s.revenue)} />
+          <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} sub="everything guests paid — GST included" spark={series.map((s) => s.revenue)} />
+          <Stat label="Net sales" tone="good" icon="fa-sack-dollar" value={inr(t.subtotal - t.discount)} sub="your earnings, before GST" />
           <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} sub={`${nfmt(t.orders)} orders total`} />
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avg)} />
           <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
@@ -454,18 +461,20 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
         </div>
 
         <div className="rs-daysheet">
-          <Panel title="Billing details" hint="what the bills added up to">
+          <Panel title="Where the money came from" hint="from item prices to money collected">
             <div className="rs-lines">
-              <div className="rs-line"><span className="lbl">Gross sales (subtotal)</span><span className="val">{inr(t.subtotal)}</span></div>
+              <div className="rs-line"><span className="lbl">Item sales <span style={{ color: "var(--muted)", fontWeight: 500 }}>· menu prices</span></span><span className="val">{inr(t.subtotal)}</span></div>
               <div className="rs-line"><span className="lbl">Discounts given</span><span className="val neg">− {inr(t.discount)}</span></div>
-              <div className="rs-line"><span className="lbl">Taxable sales</span><span className="val">{inr(t.subtotal - t.discount)}</span></div>
-              {taxLines.length > 0
-                ? taxLines.map((l) => <div key={l.label} className="rs-line sub"><span className="lbl">{l.label} ({l.rate}%)</span><span className="val">{inr(l.amt)}</span></div>)
-                : <div className="rs-line"><span className="lbl">Tax</span><span className="val">{inr(t.tax)}</span></div>}
-              <div className="rs-line"><span className="lbl">Total tax</span><span className="val">{inr(t.tax)}</span></div>
-              <div className="rs-line total"><span className="lbl">Net total</span><span className="val">{inr(t.revenue)}</span></div>
+              <div className="rs-line"><span className="lbl"><b>Net sales</b> <span style={{ color: "var(--muted)", fontWeight: 500 }}>· your earnings, GST is charged on this</span></span><span className="val"><b>{inr(t.subtotal - t.discount)}</b></span></div>
+              <div className="rs-line"><span className="lbl">GST collected <span style={{ color: "var(--muted)", fontWeight: 500 }}>· held for the government</span></span><span className="val">+ {inr(t.tax)}</span></div>
+              {taxLines.length > 0 && taxLines.map((l) => <div key={l.label} className="rs-line sub"><span className="lbl">{l.label} ({l.rate}%)</span><span className="val">{inrP(l.amt)}</span></div>)}
+              <div className="rs-line total"><span className="lbl">Total collected</span><span className="val">{inr(t.revenue)}</span></div>
             </div>
-            {!singleRest && <p className="rs-note">Pick one restaurant to see the CGST/SGST split (tax lines are set per restaurant).</p>}
+            <p className="rs-note">
+              <b>Total collected</b> is every rupee guests paid — it includes the {inr(t.tax)} GST, which isn&apos;t yours to keep.
+              Your actual sales are the <b>Net sales</b> line ({inr(t.subtotal - t.discount)}).
+              {!singleRest && " Pick one restaurant to see its CGST/SGST split."}
+            </p>
           </Panel>
 
           <Panel title="Settlement" hint="how the money arrived"
@@ -526,10 +535,10 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Revenue (kept)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} spark={series.map((s) => s.revenue)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
-          <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} onClick={() => onOpenReport("volume")} title="Open the Order volume report" />
-          <Stat label="Gross sales" tone="accent" icon="fa-cart-shopping" value={inr(t.subtotal)} />
-          <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
+          <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} sub="everything guests paid — GST included" spark={series.map((s) => s.revenue)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
+          <Stat label="Net sales" tone="good" icon="fa-sack-dollar" value={inr(t.subtotal - t.discount)} sub="your earnings, before GST" />
+          <Stat label="Item sales" tone="info" icon="fa-cart-shopping" value={inr(t.subtotal)} sub="menu prices, before discount" />
+          <Stat label="GST collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} sub="held for the government" onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
           <Stat label="Discounts" tone="warn" icon="fa-tag" value={inr(t.discount)} onClick={() => onOpenReport("discounts")} title="Open the Discounts report" />
         </div>
         <Panel title="Revenue over time" pad={false}>
@@ -707,7 +716,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
       bucket: r.bucket,
       taxable: r.subtotal - r.discount,
       tax: r.tax,
-      parts: roundToSum(comps.map((c) => (configuredPct ? r.tax * (c.rate / configuredPct) : r.tax / comps.length)), r.tax),
+      parts: splitTax(comps.map((c) => c.rate), r.tax),
     }));
     const compTotals = comps.map((_, i) => filingRows.reduce((a, r) => a + r.parts[i], 0));
     const filingTaxable = filingRows.reduce((a, r) => a + r.taxable, 0);
@@ -733,10 +742,10 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
               <table className="rs-table">
                 <thead><tr><th>Tax line</th><th className="num">Rate</th><th className="num">Collected</th></tr></thead>
                 <tbody>
-                  <tr><td><b>Total tax</b></td><td className="num">{data.tax.effectivePct}%</td><td className="num"><b>{inr(t.tax)}</b></td></tr>
-                  {roundToSum(data.tax.components.map((c) => c.amount), t.tax).map((amt, i) => {
+                  <tr><td><b>Total tax</b></td><td className="num">{data.tax.effectivePct}%</td><td className="num"><b>{inrP(t.tax)}</b></td></tr>
+                  {splitTax(data.tax.components.map((c) => c.rate), t.tax).map((amt, i) => {
                     const c = data.tax!.components[i];
-                    return <tr key={c.label}><td>{c.label}</td><td className="num">{c.rate}%</td><td className="num">{inr(amt)}</td></tr>;
+                    return <tr key={c.label}><td>{c.label}</td><td className="num">{c.rate}%</td><td className="num">{inrP(amt)}</td></tr>;
                   })}
                 </tbody>
               </table>
@@ -758,11 +767,11 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
                   <tr key={r.bucket}>
                     <td>{bucketLabel(r.bucket, bucket)}</td>
                     <td className="num">{inr(r.taxable)}</td>
-                    {r.parts.map((amt, i) => <td key={comps[i].label} className="num">{inr(amt)}</td>)}
+                    {r.parts.map((amt, i) => <td key={comps[i].label} className="num">{inrP(amt)}</td>)}
                     <td className="num"><b>{inr(r.tax)}</b></td>
                   </tr>
                 ))}</tbody>
-                <tfoot><tr><td>Total</td><td className="num">{inr(filingTaxable)}</td>{compTotals.map((amt, i) => <td key={comps[i].label} className="num">{inr(amt)}</td>)}<td className="num">{inr(filingTax)}</td></tr></tfoot>
+                <tfoot><tr><td>Total</td><td className="num">{inr(filingTaxable)}</td>{compTotals.map((amt, i) => <td key={comps[i].label} className="num">{inrP(amt)}</td>)}<td className="num">{inrP(filingTax)}</td></tr></tfoot>
               </table>
             </div>
             <p className="rs-note">Each period&apos;s tax is split across the set tax lines and rounded so the parts add back to that period&apos;s total — ready to copy into a return.</p>
@@ -1108,7 +1117,7 @@ function MoneyTable({ rows, totals, bucket, showAvg }: { rows: MoneyRow[]; total
     <Panel id="rs-by-period" title="By period" pad={false}>
       <div className="rs-tablewrap">
         <table className="rs-table">
-          <thead><tr><th>Period</th><th className="num">Orders</th><th className="num">Paid</th><th className="num">Subtotal</th><th className="num">Tax</th><th className="num">Discount</th><th className="num">Revenue</th>{showAvg && <th className="num">Avg bill</th>}<th className="num">Cancelled</th></tr></thead>
+          <thead><tr><th>Period</th><th className="num">Orders</th><th className="num">Paid</th><th className="num">Item sales</th><th className="num">GST</th><th className="num">Discount</th><th className="num">Total collected</th>{showAvg && <th className="num">Avg bill</th>}<th className="num">Cancelled</th></tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.bucket}>
