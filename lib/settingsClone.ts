@@ -91,10 +91,10 @@ export function cleanClonedSettings(
   base.take_orders_allowed = true;
   base.take_orders_owner_control = false;
   base.take_orders_enabled = true;
-  // Parcel / takeaway module (mig 197): a brand-new premium module — starts fully OFF for a
-  // new restaurant (admin must switch it on), owner-transfer off, owner toggle neutral-ON,
-  // tablet cap off. (Same fresh-start rule as table_tags/banquet, NOT the take_orders exception.)
-  base.parcel_allowed = false;
+  // Parcel / takeaway module (migs 197-198): ON for the MANAGER by default (owner 2026-07-26 —
+  // common counter task; admin can still switch it off per restaurant), OWNER-transfer off,
+  // owner toggle neutral-ON, and the TABLET cap OFF (waiters don't get takeaway by default).
+  base.parcel_allowed = true;
   base.parcel_owner_control = false;
   base.parcel_enabled = true;
   base.tablet_parcel = "off";

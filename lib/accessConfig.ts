@@ -34,7 +34,9 @@ export const FEATURE_SWITCHES = [
 export const MP_DEFAULT: Record<string, boolean> = {
   manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true,
   void_bills: false, edit_settings: false, view_ratings: false, table_tags: false,
-  khata: false, banquet: false, table_ops: false, take_orders: false, parcel: false,
+  // parcel: ON for managers by default (owner 2026-07-26 — common counter task; admin can
+  // still switch the module off per restaurant). Its tablet cap stays 'off' below.
+  khata: false, banquet: false, table_ops: false, take_orders: false, parcel: true,
 };
 
 // New-restaurant DEFAULT tablet caps (mirrors lib/settingsClone.ts). take_orders 'on'.
