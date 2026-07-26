@@ -34,8 +34,10 @@ export async function throttleStatus(key: string): Promise<ThrottleStatus> {
 
 // Record ONE wrong try. Past `maxFails` consecutive misses, lock the key for
 // `lockMs` and reset the counter (so the next window starts clean), exactly like
-// the staff_users lockout. Fire-and-forget from the caller's point of view.
-export async function throttleFail(key: string, maxFails: number, lockMs: number): Promise<void> {
+// the staff_users lockout. Returns how many tries remain before a lock (0 when this
+// miss triggered the lock) so the login screen can warn "N attempts left"; callers
+// that don't need it can ignore the value.
+export async function throttleFail(key: string, maxFails: number, lockMs: number): Promise<{ attemptsLeft: number; locked: boolean }> {
   try {
     const { data } = await sb
       .from("login_throttle")
@@ -43,13 +45,16 @@ export async function throttleFail(key: string, maxFails: number, lockMs: number
       .eq("key", key)
       .limit(1);
     const next = (data?.[0]?.fail_count || 0) + 1;
+    const locked = next >= maxFails;
     const row: { key: string; fail_count: number; locked_until: string | null; updated_at: string } =
-      next >= maxFails
+      locked
         ? { key, fail_count: 0, locked_until: new Date(Date.now() + lockMs).toISOString(), updated_at: new Date().toISOString() }
         : { key, fail_count: next, locked_until: null, updated_at: new Date().toISOString() };
     await sb.from("login_throttle").upsert(row, { onConflict: "key" });
+    return { attemptsLeft: locked ? 0 : Math.max(0, maxFails - next), locked };
   } catch {
     /* fail-open: never let a throttle write break the login flow */
+    return { attemptsLeft: maxFails, locked: false };
   }
 }
 
