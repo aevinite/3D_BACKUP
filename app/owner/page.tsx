@@ -317,11 +317,14 @@ export default function OwnerDashboard() {
   useEffect(() => { setRest(null); setGroup(null); setMoney(null); setMoneyErr(false); }, [range, view]);
 
   const loadRef = useRef(load); loadRef.current = load;
-  // First load + every range/restaurant change fetches the all-time records; the 60s
-  // auto-refresh below deliberately does NOT (it keeps the last records value).
+  // First load + every range/restaurant change fetches the all-time records; the auto-refresh
+  // below deliberately does NOT (it keeps the last records value).
   useEffect(() => { load({ withRecords: true }); }, [load]);
   const [refreshing, setRefreshing] = useState(false);
-  useActiveAutoRefresh(() => loadRef.current(), 60000);
+  // Poll every 3 min, not 60s: the snapshot cache only turns over every ~5 min (and a stale
+  // view already refreshes itself in the background), so a 60s poll was 3× the network/DB
+  // chatter for no extra freshness — this cuts background load, esp. with many tabs open.
+  useActiveAutoRefresh(() => loadRef.current(), 180000);
   // Stop the spinner when the fetch actually finishes, not on a blind 600ms timer (which
   // "finished" while a slow query was still loading, audit 2026-07-09). Keep a small floor
   // so a very fast refresh still shows a brief spin instead of an imperceptible flicker.
