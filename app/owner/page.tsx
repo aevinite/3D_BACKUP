@@ -23,8 +23,8 @@ import Link from "next/link";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import { asSuffix } from "@/lib/ownerPin";
 import {
-  AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod,
-  DeltaChip, Spark, SparkArea, Heatmap, StackedDailyBars,
+  AreaTrend, TimeBar, LeaderBar, CategoryDonut, PaymentDonut, canonPayMethod,
+  DeltaChip, Spark, SparkArea, Heatmap, StackedDailyBars, RevenueVsPrev,
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
@@ -61,10 +61,11 @@ type Restaurant = {
 type Overview = { restaurants: Restaurant[]; totals: { revenueToday: number; ordersToday: number; openTables: number; restaurantCount: number }; entitlements?: Record<string, boolean> };
 type GroupRev = { id: string; slug: string; name: string; accentColor: string; revenue: number; orders: number };
 type TsRow = { bucket: string; restaurantId?: string; revenue: number; orders: number };
+type TsPrevRow = { bucket: string; revenue: number };
 type Pay = { method: string; revenue: number; orders: number };
 type HeatRow = { dow: number; hr: number; orders: number; revenue: number };
 type Prev = { revenue: number; orders: number } | null;
-type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow[]; paymentMethods: Pay[]; heatmap?: HeatRow[]; categories?: { category: string; qty: number; revenue: number }[]; prev: Prev; cachedAt?: string };
+type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; paymentMethods: Pay[]; heatmap?: HeatRow[]; categories?: { category: string; qty: number; revenue: number }[]; prev: Prev; cachedAt?: string };
 type Dish = { title: string; qty: number; revenue: number };
 type Records = {
   bestDay?: { date: string; revenue: number } | null;
@@ -77,7 +78,7 @@ type RestA = {
   scope: "restaurant"; prev: Prev;
   restaurant: { id: string; slug: string; name: string; accentColor: string; heroTitle: string };
   kpis: { revenue: number; orders: number; paidOrders?: number; avgOrder: number; openTables: number; topDish: string };
-  timeseries: TsRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
+  timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
   hourly: { hour: number; orders: number; revenue: number }[]; paymentMethods: Pay[];
   heatmap?: HeatRow[]; records?: Records; cachedAt?: string;
 };
@@ -122,9 +123,9 @@ function istKey(d: Date, range: Range): string {
   if (range === "today" || range === "yesterday") return `${p.year}-${p.month}-${p.day} ${p.hour}`;
   return `${p.year}-${p.month}-${p.day}`;
 }
-function expectedBuckets(range: Range): { key: string; label: string }[] {
+function expectedBuckets(range: Range): { key: string; label: string; ms: number }[] {
   const now = new Date();
-  const out: { key: string; label: string }[] = [];
+  const out: { key: string; label: string; ms: number }[] = [];
   if (range === "today" || range === "yesterday") {
     // Hour keys aligned to the server's 05:00-IST business day (bug H5) — "today"
     // stops at the current hour so future hours aren't zero-padded.
@@ -132,13 +133,13 @@ function expectedBuckets(range: Range): { key: string; label: string }[] {
     const endMs = range === "yesterday" ? startMs + DAY_MS - 1 : now.getTime();
     for (let t = startMs; t <= endMs; t += 3600_000) {
       const d = new Date(t);
-      out.push({ key: istKey(d, range), label: d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST }) });
+      out.push({ key: istKey(d, range), label: d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST }), ms: t });
     }
   } else if (range === "7d" || range === "30d") {
     const n = range === "7d" ? 7 : 30;
     for (let i = n - 1; i >= 0; i--) {
       const d = new Date(now); d.setDate(d.getDate() - i);
-      out.push({ key: istKey(d, range), label: d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST }) });
+      out.push({ key: istKey(d, range), label: d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST }), ms: d.getTime() });
     }
   }
   return out;
@@ -539,6 +540,53 @@ export default function OwnerDashboard() {
     return { rows, lines, stacked };
   }, [pl, globalRange]);
 
+  // Revenue THIS period vs the PREVIOUS equal-length period (replaces Busy hours, owner
+  // 2026-07-26). Works for group (total across restaurants) and single scope. Overlays
+  // day-i of this period on day-i of last, so the dashed line is directly comparable.
+  const revCompare = useMemo(() => {
+    const p = pl(globalRange);
+    if (!p) return [] as { label: string; cur: number; prev: number | null; __orders: number }[];
+    // current total revenue + orders per IST bucket (group sums across restaurants)
+    const curBy = new Map<string, { rev: number; ord: number }>();
+    for (const t of p.timeseries) {
+      const k = istKey(new Date(t.bucket), globalRange);
+      const c = curBy.get(k) || { rev: 0, ord: 0 };
+      c.rev += t.revenue; c.ord += t.orders; curBy.set(k, c);
+    }
+    // previous window revenue keyed by its OWN IST bucket
+    const prevBy = new Map<string, number>();
+    for (const t of p.timeseriesPrev ?? []) {
+      const k = istKey(new Date(t.bucket), globalRange);
+      prevBy.set(k, (prevBy.get(k) || 0) + t.revenue);
+    }
+    const exp = expectedBuckets(globalRange);
+    if (exp.length) {
+      // day/hour ranges: each current bucket's twin is the same bucket one whole window back
+      const shiftMs = (globalRange === "today" || globalRange === "yesterday" ? 1 : globalRange === "7d" ? 7 : 30) * DAY_MS;
+      return exp.map((e) => ({
+        label: e.label,
+        cur: curBy.get(e.key)?.rev ?? 0,
+        prev: prevBy.get(istKey(new Date(e.ms - shiftMs), globalRange)) ?? null,
+        __orders: curBy.get(e.key)?.ord ?? 0,
+      }));
+    }
+    // month/all/custom (no fixed grid): ordinal zip of chronological current vs previous
+    const curKeys = Array.from(curBy.keys()).sort();
+    const prevVals = Array.from(prevBy.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([, v]) => v);
+    return curKeys.map((k, i) => ({
+      label: tsLabel(`${k}T00:00:00+05:30`, globalRange),
+      cur: curBy.get(k)?.rev ?? 0,
+      prev: i < prevVals.length ? prevVals[i] : null,
+      __orders: curBy.get(k)?.ord ?? 0,
+    }));
+  }, [pl, globalRange]);
+  // Human label for the previous period, matching the selected range.
+  const prevPeriodName = globalRange === "today" ? "Yesterday"
+    : globalRange === "yesterday" ? "Day before"
+    : globalRange === "7d" ? "Previous 7 days"
+    : globalRange === "30d" ? "Previous 30 days"
+    : "Previous period";
+
   // Latest-active-week fallback (owner round-5: "the two datas are not even
   // showing"): if the pinned last-7-days window has zero orders but the main range
   // does have activity, fetch the newest 7 IST days that HAD orders as a custom
@@ -567,15 +615,6 @@ export default function OwnerDashboard() {
   const fmtD = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
   const weekTagText = weekFallback ? `week of ${fmtD(weekFallback.from)} – ${fmtD(weekFallback.to)}` : "last 7 days";
   const weekTagTitle = weekFallback ? "The current week has no orders yet — showing the most recent week with activity." : rangeSpanText(WEEK);
-
-  // Group busy-hours, derived from the pinned-week heatmap (no extra fetch).
-  const groupHourly = useMemo(() => {
-    const p = pl(weekKey);
-    if (!p || p.scope !== "group" || !p.heatmap) return null;
-    const hrs = Array.from({ length: 24 }, (_, h) => ({ hour: h, orders: 0 }));
-    for (const c of p.heatmap) if (c.hr >= 0 && c.hr < 24) hrs[c.hr].orders += c.orders;
-    return hrs.some((h) => h.orders > 0) ? hrs : null;
-  }, [pl, weekKey]);
 
   // ── multi-restaurant table (all multi tiers — owner: design #4) ──
   const [tq, setTq] = useState("");
@@ -971,12 +1010,13 @@ export default function OwnerDashboard() {
             </div>
           </div>
 
-          {/* Busy hours + category — these two were single-view-only before; the owner
-              wants them on the group home too (round-2: "this both thing were good"). */}
+          {/* Revenue vs previous period (replaced Busy hours, owner 2026-07-26 — the busy
+              heatmap below already covers hour-of-day) + category. */}
           <div className="ow2-two" style={{ marginBottom: 12 }}>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy hours <span className="mut">· orders by hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
-              {groupHourly ? <HourlyBar data={groupHourly} color={GREEN} /> : <div className="adm-empty">Loading…</div>}
+              <div className="ow2-ct"><span>Revenue vs previous <span className="mut">· this period vs {prevPeriodName.toLowerCase()} · all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              {!trendPayload ? <div className="adm-empty">Loading…</div>
+                : <RevenueVsPrev data={revCompare} curName="This period" prevName={prevPeriodName} color={GREEN} />}
             </div>
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue by category <span className="mut">· all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
@@ -1042,10 +1082,9 @@ export default function OwnerDashboard() {
 
           <div className="ow2-two">
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy hours <span className="mut">· orders by hour</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
-              {(pl(weekKey) as RestA | undefined)?.hourly
-                ? <HourlyBar data={(pl(weekKey) as RestA).hourly} color={GREEN} />
-                : <div className="adm-empty">Loading…</div>}
+              <div className="ow2-ct"><span>Revenue vs previous <span className="mut">· this period vs {prevPeriodName.toLowerCase()}</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              {!trendPayload || trendPayload.scope !== "restaurant" ? <div className="adm-empty">Loading…</div>
+                : <RevenueVsPrev data={revCompare} curName="This period" prevName={prevPeriodName} color={GREEN} />}
             </div>
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>

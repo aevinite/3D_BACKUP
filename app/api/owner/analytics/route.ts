@@ -94,6 +94,19 @@ function prevWindowFor(range: string, from: string, to: string): { from: string;
   return { from: new Date(f - span).toISOString(), to: new Date(f).toISOString() };
 }
 
+// Window to fetch for the "this period vs previous" OVERLAY line. The overlay aligns
+// day-1↔day-1, so its previous window must be the current one shifted back by its OWN
+// WHOLE-day length — not prevWindowFor's partial span (7d spans ~6.x days of real time,
+// which would drop the earliest overlay day and draw a fake zero). Hour ranges and whole-
+// month/custom ranges reuse the equal-span step-back (already whole-period there).
+function prevTsWindowFor(range: string, from: string, to: string): { from: string; to: string } | null {
+  if (range === "all") return null;
+  const f = Date.parse(from);
+  if (range === "7d") return { from: new Date(f - 7 * DAY).toISOString(), to: from };
+  if (range === "30d") return { from: new Date(f - 30 * DAY).toISOString(), to: from };
+  return prevWindowFor(range, from, to);
+}
+
 const num = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
 
 // Paid revenue + orders summed over a window (tiny pre-summed rows), scoped to
@@ -137,6 +150,7 @@ export async function GET(req: NextRequest) {
   // cache keys must distinguish two different custom windows
   const rangeKey = range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : range;
   const prevWin = compare ? prevWindowFor(range, from, to) : null;
+  const prevTsWin = compare ? prevTsWindowFor(range, from, to) : null;
 
   try {
     if (!rid) {
@@ -145,10 +159,11 @@ export async function GET(req: NextRequest) {
       // (?refresh=1) forces a live recompute. Keyed by the already-authorized scope.
       const gIds = scope.all ? [] : scope.ids;
       const groupPayload = await cachedOwnerPayload({
-        // v2: payload gained `heatmap` (mig 197); v3: gained `categories` — each shape
-        // change bumps the version so stale snapshots can't serve field-less JSON
-        // verbatim until their fingerprint happens to change (found 2026-07-26).
-        key: `analytics:v4:group:${scopeKeyOf(null, scope.all, gIds)}:${rangeKey}:c${compare ? 1 : 0}`,
+        // v2: payload gained `heatmap` (mig 197); v3: gained `categories`; v5: gained
+        // `timeseriesPrev` (revenue-vs-previous-period overlay) — each shape change bumps
+        // the version so stale snapshots can't serve field-less JSON verbatim until their
+        // fingerprint happens to change (found 2026-07-26).
+        key: `analytics:v5:group:${scopeKeyOf(null, scope.all, gIds)}:${rangeKey}:c${compare ? 1 : 0}`,
         force: sp.get("refresh") === "1",
         fingerprint: () => ordersFingerprint(scope.all ? null : gIds, from, to),
         compute: async () => {
@@ -161,6 +176,12 @@ export async function GET(req: NextRequest) {
       const pmP = Promise.all(pmIds.map((id) => sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
       const catScopedP = scope.all ? null : Promise.all(scope.ids.map((id) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
       const prevP = prevWin ? windowTotals(pIds, prevWin.from, prevWin.to) : Promise.resolve(null);
+      // Previous-period revenue PER BUCKET (same grain), for the "this period vs previous"
+      // overlay that replaces Busy hours. ONE extra pre-summed RPC, only inside the cached
+      // compute — so it runs at most on a ~5-min recompute, never on a plain snapshot read.
+      const prevTsP = prevTsWin
+        ? sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: prevTsWin.from, p_to: prevTsWin.to, p_bucket: bucket, p_ids: pIds })
+        : Promise.resolve(null);
       const [rev, ts, heat] = await Promise.all([
         sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to, p_ids: pIds }),
         sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket, p_ids: pIds }),
@@ -226,10 +247,30 @@ export async function GET(req: NextRequest) {
       }
       const categories = Array.from(catByName.values()).sort((a, b) => b.revenue - a.revenue);
       const prev = await prevP;
+      // Sum the previous window's per-restaurant rows into ONE total per bucket (the overlay
+      // is a whole-group total line, not per-restaurant). Non-fatal: a failed prev query just
+      // yields an empty array and the current line still draws.
+      const prevTs = await prevTsP;
+      // Cap to the window END: the day-grain RPC (mig 190 `hist` CTE) filters p_from but
+      // NOT p_to — it always runs to the rollup watermark (~now). Existing callers end
+      // "now" so never saw it; this is the first PAST-ending window, so we drop any bucket
+      // at/after prevTsWin.to here (tiny pre-summed rows; the filter, not a wider fetch).
+      const prevCut = prevTsWin ? Date.parse(prevTsWin.to) : Infinity;
+      const prevByBucket = new Map<string, number>();
+      if (prevTs && !prevTs.error) {
+        for (const r of (prevTs.data ?? []) as Record<string, unknown>[]) {
+          const b = String(r.bucket);
+          if (Date.parse(b) >= prevCut) continue;
+          prevByBucket.set(b, num((prevByBucket.get(b) || 0) + (Number(r.revenue) || 0)));
+        }
+      }
+      const timeseriesPrev = Array.from(prevByBucket.entries())
+        .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+        .map(([bucket, revenue]) => ({ bucket, revenue }));
       const heatmap = ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({
         dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue),
       }));
-      return { scope: "group", range, restaurantRevenue, timeseries, paymentMethods, categories, heatmap, prev };
+      return { scope: "group", range, restaurantRevenue, timeseries, timeseriesPrev, paymentMethods, categories, heatmap, prev };
         },
       });
       return NextResponse.json(groupPayload);
@@ -258,11 +299,11 @@ export async function GET(req: NextRequest) {
     // LIVE bits stay OUTSIDE the cache: open-tables (a now-count) and the unbounded
     // all-time records (fetched once per restaurant on demand).
     const restBase = await cachedOwnerPayload({
-      key: `analytics:v4:rest:${rid}:${rangeKey}:c${compare ? 1 : 0}`,
+      key: `analytics:v5:rest:${rid}:${rangeKey}:c${compare ? 1 : 0}`,
       force: sp.get("refresh") === "1",
       fingerprint: () => ordersFingerprint([rid], from, to),
       compute: async () => {
-    const [meta, ts, dishes, cats, hourly, heat, pm, sameHour, payTrend] = await Promise.all([
+    const [meta, ts, dishes, cats, hourly, heat, pm, sameHour, payTrend, prevTs] = await Promise.all([
       sb.from("restaurants").select("id, slug, name, accent_color, hero_title").eq("id", rid).maybeSingle(),
       sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: bucket }),
       sb.rpc("lfh_owner_dish_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
@@ -274,6 +315,11 @@ export async function GET(req: NextRequest) {
         ? sb.rpc("lfh_owner_samehour_compare", { p_restaurant_id: rid, p_starts: sameHourStarts, p_elapsed: `${Math.round(elapsedMs / 1000)} seconds` })
         : Promise.resolve({ data: [], error: null }),
       sb.rpc("lfh_owner_payment_trend", { p_restaurant_id: rid, p_from: new Date(Date.now() - 14 * DAY).toISOString(), p_to: to }),
+      // Previous-period revenue per bucket for the "this period vs previous" overlay. Same
+      // grain as the current trend; non-fatal (excluded from the throw loop below).
+      prevTsWin
+        ? sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: rid, p_from: prevTsWin.from, p_to: prevTsWin.to, p_bucket: bucket })
+        : Promise.resolve({ data: [], error: null }),
     ]);
     if (meta.error) throw meta.error;
     if (!meta.data) throw new Error("restaurant not found");
@@ -297,6 +343,13 @@ export async function GET(req: NextRequest) {
     // comes from the payment breakdown (already fetched, WHERE payment_status='paid'). (owner 2026-07-06)
     const paidOrders = (pm.data ?? []).reduce((a: number, r: Record<string, unknown>) => a + (Number(r.orders) || 0), 0);
     const prev = prevWin ? await windowTotals([rid], prevWin.from, prevWin.to) : null;
+    // Previous window's revenue per bucket (ascending) for the overlay line. Non-fatal.
+    // Cap to the window END — the day-grain RPC ignores p_to (mig 190 `hist`, see group note).
+    const prevCut = prevTsWin ? Date.parse(prevTsWin.to) : Infinity;
+    const tsPrevRows = (prevTs.error ? [] : (prevTs.data ?? []))
+      .map((r: Record<string, unknown>) => ({ bucket: r.bucket, revenue: num(r.revenue) }))
+      .filter((r: { bucket: unknown }) => Date.parse(String(r.bucket)) < prevCut)
+      .sort((a: { bucket: unknown }, b: { bucket: unknown }) => (String(a.bucket) < String(b.bucket) ? -1 : 1));
 
     // `orders` counts ALL non-cancelled (incl. open/unpaid) while revenue+avgOrder are
     // PAID-only — so Revenue ÷ Orders ≠ Avg order and looks like a wrong number. Ship
@@ -306,6 +359,7 @@ export async function GET(req: NextRequest) {
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
       kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, openTables: 0, topDish: dishRows[0]?.title || "—" },
       timeseries: tsRows,
+      timeseriesPrev: tsPrevRows,
       dishes: dishRows,
       categories: (cats.data ?? []).map((r: Record<string, unknown>) => ({ category: r.category, qty: Number(r.qty) || 0, revenue: num(r.revenue) })),
       hourly: (hourly.data ?? []).map((r: Record<string, unknown>) => ({ hour: Number(r.hour) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
