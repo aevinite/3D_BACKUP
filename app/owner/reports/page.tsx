@@ -23,6 +23,7 @@ import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
 import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
 import { ReportMenu } from "@/components/owner/OwnerReportButton";
 import { gatherOwnerReport } from "@/lib/ownerReportGather";
+import { SectionExport } from "@/components/owner/reports/sectionExport";
 
 type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy" | "all" | "custom";
 const RANGES: { k: Range; label: string }[] = [
@@ -220,34 +221,6 @@ export default function OwnerReports() {
   const accent = "var(--accent)";
   const singleRest = !!rid;
 
-  const exportCsv = () => {
-    if (!sel || !data) return;
-    const meta = REPORTS[sel];
-    const stamp = new Date().toISOString().slice(0, 10);
-    const win = isDayKind ? day : range === "custom" ? `${cFrom}_${cTo}` : range;
-    const name = `${meta.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${win}-${stamp}.csv`;
-    const m = (data.rows ?? []) as MoneyRow[];
-    const t = data.totals;
-    if (meta.kind === "money" || meta.kind === "daysummary") {
-      const header = ["Period", "Orders", "Paid", "Subtotal", "Tax", "Discount", "Revenue", "Cancelled", "Lost value"];
-      const rows: (string | number)[][] = m.map((r) => [bucketLabel(r.bucket, data.bucket || "day"), r.orders, r.paidOrders, r.subtotal, r.tax, r.discount, r.revenue, r.cancelledOrders, r.cancelledValue]);
-      if (t) rows.push(["Total", t.orders, t.paidOrders, t.subtotal, t.tax, t.discount, t.revenue, t.cancelledOrders, t.cancelledValue]);
-      if (sel === "tax" && data.tax) {
-        rows.push([], ["Tax split", "Rate %", "Collected"], ["Total tax", data.tax.effectivePct, t?.tax ?? 0]);
-        for (const c of data.tax.components) rows.push([c.label, c.rate, c.amount]);
-      }
-      downloadCsv(name, header, rows);
-    } else if (meta.kind === "dishes") {
-      downloadCsv(name, ["Dish", "Qty", "Item sales (list price)"], ((data.rows ?? []) as DishRow[]).map((r) => [r.title, r.qty, r.revenue]));
-    } else if (meta.kind === "categories") {
-      downloadCsv(name, ["Category", "Qty", "Item sales (list price)"], ((data.rows ?? []) as CatRow[]).map((r) => [r.category, r.qty, r.revenue]));
-    } else if (meta.kind === "payments") {
-      downloadCsv(name, ["Method", "Bills", "Revenue"], ((data.rows ?? []) as PayRow[]).map((r) => [canonPayMethod(r.method), r.orders, r.revenue]));
-    } else if (meta.kind === "hourly") {
-      downloadCsv(name, ["Hour", "Orders", "Revenue"], ((data.rows ?? []) as HourRow[]).map((r) => [`${r.hour}:00`, r.orders, r.revenue]));
-    }
-  };
-
   return (
     <div className="rs-root">
       <ReportsStyles />
@@ -294,13 +267,11 @@ export default function OwnerReports() {
           </div>
         )}
         {sel ? (
+          /* Phase 3: professional section-scoped Print / CSV / Excel (was a raw CSV +
+             UI print). Builds a clean standalone document for THIS report + period. */
           <div className="rs-actions">
-            <button className="rs-btn" onClick={exportCsv} disabled={!data} title="Download this report as a CSV (Excel/Sheets)">
-              <i className="fas fa-download" aria-hidden /> CSV
-            </button>
-            <button className="rs-btn" onClick={() => window.print()} disabled={!data} title="Print or save as PDF">
-              <i className="fas fa-print" aria-hidden /> Print
-            </button>
+            {data && <SectionExport filename={`${REPORTS[sel].label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${isDayKind ? day : range === "custom" ? `${cFrom}_${cTo}` : range}-${new Date().toISOString().slice(0, 10)}`}
+              ctx={{ meta: REPORTS[sel], data, restName, periodLabel: effLabel, isTax: sel === "tax", bucketLabel }} />}
           </div>
         ) : (
           /* On the hub: the SAME ask-first compiled statement as the dashboard's Report
