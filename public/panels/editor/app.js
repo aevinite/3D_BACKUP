@@ -9011,6 +9011,12 @@ const XRAY_TABS = [
   // handled by applyMenuReadonly() below, called from applyHierarchyView.
   { tab: "ratings", flag: "view_ratings", label: "Guest ratings" },
   { tab: "general", flag: "edit_settings", label: "Settings" },
+  // Activity log (owner 2026-07-26): the "Activity log" manager power now hides the Log tab
+  // for a real manager when it's revoked, instead of the tab lingering and its contents
+  // 403-ing. view_logs is ABSENT-means-ON (whoami resolves effectivePowers.view_logs=true by
+  // default), so this is non-breaking — the tab only disappears once the owner explicitly
+  // switches it off; admin/owner keep it (tinted).
+  { tab: "log", flag: "view_logs", label: "Activity log" },
 ];
 // Phase 2 (the ladder, 2026-07-06): permission-gated CONTROLS inside tabs. Matched by
 // CSS selector on every repaint (MutationObserver below), so a live-poll re-render can

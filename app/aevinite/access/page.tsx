@@ -73,11 +73,32 @@ const OPTS = { owner: "owner_opts", manager: "manager_opts", waiter: "waiter_opt
 const SIDE_META: Record<Side, { label: string; icon: string }> = {
   owner: { label: "Owner can…", icon: "crown" }, manager: { label: "Manager can…", icon: "users" }, waiter: { label: "Waiter can…", icon: "user" },
 };
-// The per-user override is stored+enforced under the tablet_* column key (staff_users.permissions,
-// mig 115, read by tabletPerm) — NOT the capability id. MODULE-SCOPE so it's never in the TDZ when
-// resolved()/holders() run during render (moving it inside the component crashed the panel — a
-// hoisted fn called it before the const initialised). Falls back to id for caps with no column.
-const permKey = (p: Perm) => p.tablet || p.id;
+// The staff_users.permissions KEY under which a per-person override is actually ENFORCED —
+// ROLE-DEPENDENT, because each role's server gate reads a different key (mig 115). Getting
+// this wrong = a switch that saves but is never read (owner 2026-07-26: "nothing working-but-
+// not-existing"). The old `p.tablet || p.id` used the tablet_* key for EVERY role, so a
+// manager override for a tablet-column power (give_discounts, khata, take_orders, parcel,
+// table_ops, table_tags, banquet) was written to tablet_* while managerCan reads the bare
+// flag — silently dead. Correct mapping:
+//   • tablet (waiter): the tablet_* tri-state column, read by tabletPerm. tabletNew caps
+//     (void_bills) are enforced via access_config elsewhere, so there is NO per-person key.
+//   • manager: the BARE power flag, read by managerCan. fixedTop caps (mark_paid/print_invoice
+//     — managers always have them) have no manager gate, so no per-person key.
+//   • kitchen / owner: no per-person enforcement path at all.
+// Returns null when no real control exists → the UI shows a plain explanatory line, never a
+// fake toggle. MODULE-SCOPE so resolved()/holders() (hoisted) never hit it in the TDZ.
+function overrideKey(p: Perm, role: string): string | null {
+  if (role === "tablet") return p.waiter && p.tablet ? p.tablet : null;
+  if (role === "manager") return p.power || null;
+  return null;
+}
+// Why a row has no per-person toggle (shown in place of the tri-state) — honest, role-specific.
+function noOverrideReason(p: Perm, role: string): string {
+  if (role === "manager" && p.fixedTop) return "Managers always have this — only waiters can be limited per person.";
+  if (role === "tablet" && p.tabletNew) return "Set for all waiters on the card above — there’s no per-person override for this one.";
+  if (role === "kitchen") return "The kitchen app doesn’t use this.";
+  return "No per-person setting applies to this role.";
+}
 // A real-panel screenshot PER FEATURE, shown in the (i) popover so the admin can see WHERE
 // the thing lives in the app (the exact control ringed + a path banner across the top).
 // Files in public/admin-help/<perm.id>.png, captured by the re-runnable script
@@ -584,12 +605,14 @@ export default function Access2Page() {
     if (u.role === "owner") base = lvl >= 1;
     else if (u.role === "manager") base = lvl >= 2;
     else if (u.role === "tablet") base = lvl >= 3 && !!p.waiter;
-    const ov = u.permissions?.[permKey(p)] || "default";
+    const key = overrideKey(p, u.role);
+    const ov = (key && u.permissions?.[key]) || "default";
     const eff = ov === "on" || ov === "pin" ? true : ov === "off" ? false : base;
     return { base, eff, ov };
   }
   function setOverride(u: Staff, p: Perm, v: string) {
-    const key = permKey(p);
+    const key = overrideKey(p, u.role);
+    if (!key) return; // no enforceable per-person control for this role (UI shows a line, not buttons)
     setStaff((prev) => prev.map((x) => x.id === u.id ? { ...x, permissions: { ...(x.permissions || {}), [key]: v } } : x));
     fetch("/api/owner/staff", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id, action: "set_permissions", permissions: { [key]: v } }) }).catch(() => {});
   }
@@ -690,6 +713,7 @@ export default function Access2Page() {
 
   function CapRow({ u, p, whoMode }: { u: Staff; p: Perm; whoMode?: boolean }) {
     const { base, eff, ov } = resolved(u, p);
+    const key = overrideKey(p, u.role);
     const pinnable = u.role === "tablet" && p.waiter;
     const opts: [string, string][] = pinnable
       ? [["default", "Follows restaurant"], ["on", "On"], ["pin", "On, PIN"], ["off", "Off"]]
@@ -699,15 +723,24 @@ export default function Access2Page() {
         {whoMode && <span className="av sm">{(u.name || u.username).split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>}
         <div className="body">
           <div className="nm">{whoMode ? (u.name || u.username) : p.name}{whoMode && <span className={`hasit ${eff ? "y" : "n"}`}>{eff ? "Has it" : "Does not"}</span>}<InfoBtn p={p} /></div>
-          <div className="ds">{whoMode ? `${ROLE_LABEL[u.role]} · ${ov === "default" ? "follows restaurant" : "overridden to " + ov.toUpperCase()}` : (ov === "default" ? `Follows the restaurant — currently ${base ? "on" : "off"}.` : `Overridden — restaurant says ${base ? "on" : "off"}.`)}</div>
+          {/* No enforceable per-person key for this role → state the fact, don't render a toggle
+              that would save but never be read (the dead-switch class this fix removes). */}
+          <div className="ds">{!key
+            ? noOverrideReason(p, u.role) + (base ? " Currently on for them." : "")
+            : whoMode ? `${ROLE_LABEL[u.role]} · ${ov === "default" ? "follows restaurant" : "overridden to " + ov.toUpperCase()}`
+            : (ov === "default" ? `Follows the restaurant — currently ${base ? "on" : "off"}.` : `Overridden — restaurant says ${base ? "on" : "off"}.`)}</div>
         </div>
-        <div className="tri3">
-          {opts.map(([v, l]) => (
-            <button key={v} className={`${ov === v || (v === "on" && ov === "pin" && !pinnable) ? "on" : ""} v-${v}`} onClick={() => setOverride(u, p, v)}>
-              {v === "on" && <Icon n="check" s={12} />}{v === "off" && <Icon n="minus" s={12} />}{v === "pin" && <Icon n="key" s={12} />}{l}{v === "default" && <b>{base ? "ON" : "OFF"}</b>}
-            </button>
-          ))}
-        </div>
+        {key ? (
+          <div className="tri3">
+            {opts.map(([v, l]) => (
+              <button key={v} className={`${ov === v || (v === "on" && ov === "pin" && !pinnable) ? "on" : ""} v-${v}`} onClick={() => setOverride(u, p, v)}>
+                {v === "on" && <Icon n="check" s={12} />}{v === "off" && <Icon n="minus" s={12} />}{v === "pin" && <Icon n="key" s={12} />}{l}{v === "default" && <b>{base ? "ON" : "OFF"}</b>}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="caprow-fixed">{base ? "Always on" : "—"}</span>
+        )}
       </div>
     );
   }
@@ -882,6 +915,9 @@ function Style() {
   .caprow .av.sm { width:32px; height:32px; border-radius:9px; display:grid; place-items:center; font-size:11px; font-weight:800; background:var(--muted2); flex:none; }
   .caprow .body { flex:1; min-width:170px; } .caprow .nm { font-size:13.5px; font-weight:700; display:flex; align-items:center; gap:8px; } .caprow .ds { font-size:11.5px; color:var(--muted); margin-top:2px; }
   .caprow .hasit { font-size:10px; font-weight:800; padding:2px 7px; border-radius:99px; } .caprow .hasit.y { background:color-mix(in srgb,var(--adm-ok) 16%,transparent); color:var(--adm-ok); } .caprow .hasit.n { background:var(--muted2); color:var(--muted); }
+  /* Shown instead of the tri-state when a role has no enforceable per-person control
+     (manager fixedTop / waiter tabletNew / kitchen) — a quiet fact, not a fake button. */
+  .caprow-fixed { flex:none; font-size:11px; font-weight:700; color:var(--muted); background:var(--bg); border:var(--border); border-radius:8px; padding:8px 12px; white-space:nowrap; }
   .tri3 { display:flex; gap:3px; background:var(--bg); border:var(--border); border-radius:10px; padding:3px; flex:none; }
   .tri3 button { display:flex; align-items:center; gap:5px; min-height:38px; padding:0 11px; border-radius:7px; border:none; background:none; color:var(--muted); font-weight:700; font-size:12px; cursor:pointer; }
   .tri3 button b { font-family:ui-monospace,monospace; font-size:10px; opacity:.8; }
@@ -920,5 +956,16 @@ function Style() {
   .acc2-pdh .pdh-stats b .dn { font-size:13px; color:var(--muted); font-weight:700; }
   .acc2-pdh .pdh-stats small { font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:700; }
   @media (max-width:900px){ .acc2-rail-wrap,.acc2-pp{ grid-template-columns:1fr; } .acc2-rail,.acc2-plist{ position:static; max-height:none; } .acc2-pdh .pdh-stats{ gap:12px; } }
+  /* Phone (owner 2026-07-26): the ladder-card header used to cram the title into a thin
+     column beside the reach tag + toggle + chevron (one word per line). Stack it — title
+     takes the full width, the tag/toggle/chevron drop to a spread-out row below. Same for
+     the per-person cap rows (name over the tri-state) and guest switch rows. */
+  @media (max-width:560px){
+    .acc2-ph { flex-direction:column; gap:9px; }
+    .acc2-ph-c { width:100%; justify-content:space-between; }
+    .caprow { align-items:stretch; }
+    .caprow .tri3, .caprow .caprow-fixed { align-self:flex-start; }
+    .acc2-sw { flex-wrap:wrap; }
+  }
   `}</style>;
 }
