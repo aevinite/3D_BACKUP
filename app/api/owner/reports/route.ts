@@ -193,22 +193,30 @@ export async function GET(req: NextRequest) {
       // One bucketed fetch — reused for the main window AND for the sparse auto-drill
       // (below), so both go through the identical scope/merge/mapping path.
       const salesRows = async (f: string, t: string, bkt: string) => {
-        const res = await sb.rpc("lfh_owner_sales_report", { p_restaurant_id: rid, p_from: f, p_to: t, p_bucket: bkt });
-        if (res.error) throw res.error;
-        // all-restaurants for a scoped owner: the RPC can't filter by ownership, so
-        // sum each owned restaurant separately and merge the tiny bucket rows.
-        let raw = (res.data ?? []) as Row[];
-        if (!rid && !scope.all) {
-          const per = await mapLimit(scope.ids, 8, (id) =>
-            sb.rpc("lfh_owner_sales_report", { p_restaurant_id: id, p_from: f, p_to: t, p_bucket: bkt }));
-          // Degrade gracefully: ONE restaurant's RPC failing must not blank the WHOLE
-          // all-restaurants report — keep the healthy restaurants, only surface an error
-          // when EVERY restaurant failed (audit 2026-07-09).
-          const okData = per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]);
-          if (!okData.length && per.length) throw per.find((p) => p.error)?.error || new Error("Report failed");
-          raw = mergeBy(okData, "bucket",
-            ["orders", "paid_orders", "subtotal", "tax", "discount", "revenue", "cancelled_orders", "cancelled_value"]);
-          raw.sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)));
+        let raw: Row[];
+        if (rid || scope.all) {
+          // one restaurant, or admin all-restaurants (NULL scope) — already a single call.
+          const res = await sb.rpc("lfh_owner_sales_report", { p_restaurant_id: rid, p_from: f, p_to: t, p_bucket: bkt });
+          if (res.error) throw res.error;
+          raw = (res.data ?? []) as Row[];
+        } else {
+          // scoped owner: ONE grouped call over the owned set (mig 203) instead of N round-
+          // trips — the RPC sums per bucket across p_ids exactly like the old JS merge did.
+          const grp = await sb.rpc("lfh_owner_sales_report", { p_restaurant_id: null, p_from: f, p_to: t, p_bucket: bkt, p_ids: scope.ids });
+          if (!grp.error) {
+            raw = (grp.data ?? []) as Row[];
+          } else {
+            // Fallback: if the grouped call errors, sum each owned restaurant separately so one
+            // issue can't blank the WHOLE report; only surface an error if EVERY one failed
+            // (audit 2026-07-09).
+            const per = await mapLimit(scope.ids, 8, (id) =>
+              sb.rpc("lfh_owner_sales_report", { p_restaurant_id: id, p_from: f, p_to: t, p_bucket: bkt }));
+            const okData = per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]);
+            if (!okData.length && per.length) throw per.find((p) => p.error)?.error || new Error("Report failed");
+            raw = mergeBy(okData, "bucket",
+              ["orders", "paid_orders", "subtotal", "tax", "discount", "revenue", "cancelled_orders", "cancelled_value"]);
+            raw.sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)));
+          }
         }
         return raw.map((r) => ({
           bucket: r.bucket,
@@ -278,10 +286,23 @@ export async function GET(req: NextRequest) {
       // the /payments report uses; degrade gracefully if a restaurant's RPC fails.
       let payments: { method: unknown; revenue: number; orders: number }[] | undefined;
       if (type === "daysummary") {
-        const per = await mapLimit(ridList, 8, (id) =>
-          sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
-        const okData = per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]);
-        payments = mergeBy(okData, "method", ["revenue", "orders"])
+        let payRaw: Row[];
+        if (!rid && !scope.all) {
+          // scoped owner: ONE grouped call (mig 203) — the RPC already sums per method across
+          // p_ids. Fall back to the per-restaurant merge if it errors (degrade gracefully).
+          const grp = await sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: null, p_from: from, p_to: to, p_ids: scope.ids });
+          if (!grp.error) {
+            payRaw = (grp.data ?? []) as Row[];
+          } else {
+            const per = await mapLimit(scope.ids, 8, (id) =>
+              sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
+            payRaw = mergeBy(per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]), "method", ["revenue", "orders"]);
+          }
+        } else {
+          const one = await sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to });
+          payRaw = (one.data ?? []) as Row[];
+        }
+        payments = payRaw
           .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))
           .sort((a, b) => b.revenue - a.revenue);
       }
