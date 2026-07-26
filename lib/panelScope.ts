@@ -36,3 +36,13 @@ export function panelRestaurantId(
 
 // Convenience for handlers whose `req` is a NextRequest.
 export type ScopeReq = NextRequest;
+
+// A path segment that is really a MISSING client value. When a staff panel builds a URL
+// like `/api/tablet/resolve-call/${id}` and `id` is undefined/null/NaN, the segment arrives
+// as the literal string "undefined" (or "null"/"NaN"). Used as a UUID it makes Postgres throw
+// `invalid input syntax for type uuid: "undefined"` — which the route catch logs as a scary
+// route_error 500. None of these strings is ever a valid path arg here, so reject them up front
+// with a clean 400 instead. (owner, 2026-07-26 — kill the "uuid: undefined" route_error class.)
+export function emptyIdSegment(v: string | undefined): boolean {
+  return v === "undefined" || v === "null" || v === "NaN";
+}

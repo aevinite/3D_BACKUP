@@ -17,7 +17,7 @@ import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap
 import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
-import { panelRestaurantId } from "@/lib/panelScope";
+import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { raiseIssue } from "@/lib/issues";
 import { effectiveTaxRate, taxComponents } from "@/lib/tax";
@@ -1137,6 +1137,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;
+    // A missing client id arrives as literal "undefined"/"null"/"NaN" — reject before it
+    // reaches a uuid query and throws the "invalid input syntax for type uuid" route_error.
+    if (emptyIdSegment(b) || emptyIdSegment(c)) return err("Missing id — please refresh and try again.");
     const body = await readBody(req);
     const dev = deviceIdFrom(req); // which device (this editor screen) is acting
 
@@ -2448,6 +2451,8 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;
+    // "undefined"/"null"/"NaN" id → clean 400 (a truthy string would slip past `&& id` below).
+    if (emptyIdSegment(id)) return err("Missing id — please refresh and try again.");
     const body = await readBody(req);
 
     if (a === "orders" && id) {
@@ -2542,6 +2547,8 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     const [a, id] = path;
+    // "undefined"/"null"/"NaN" id → clean 400 (a truthy string would slip past `&& id` below).
+    if (emptyIdSegment(id)) return err("Missing id — please refresh and try again.");
 
     if (a === "orders" && id) {
       // Bill deletion is owner-gated (least-privilege) + always logged — same rule as the
