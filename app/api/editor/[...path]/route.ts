@@ -1339,7 +1339,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // integration can tell demo orders apart.
     if (a === "platform" && b === "test") {
       if (g.user && !(await platformLadder(rid)).effective) return err("The Platform board isn't enabled for this restaurant.", 403);
-      if (!(await managerCan(g, rid, "platform"))) return permDenied("use the Platform board");
+      // Simulate is a DEMO/representation tool, NOT an operational action — restrict it to the
+      // admin (g.user === null) and the owner. Real floor staff must never be able to add fake
+      // orders to live revenue (the reason the old "test order" button was removed). The manager
+      // panel hides the button for them too; this is the server-side guard.
+      if (g.user && g.user.role !== "owner") return err("Only the owner or admin can add demo platform orders.", 403);
       // Only simulate on a channel that's actually turned on for this restaurant.
       const chRow = must(await sb.from("settings").select("platform_channels").eq("restaurant_id", rid).maybeSingle()) as { platform_channels?: Record<string, { on?: boolean }> } | null;
       const chan = chRow?.platform_channels || {};

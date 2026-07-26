@@ -8273,12 +8273,15 @@ function platformHtml() {
   const title = (platOn && chLabels.length) ? "Platform" : "Parcels";
   const subParts = [...chLabels]; if (parcelOn) subParts.push("Parcels");
   const sub = subParts.length ? `<span class="sub">· ${subParts.join(" · ")}</span>` : "";
-  // "Simulate order" — the demo/representation control (no API keys needed). Shows a channel
-  // picker of the live delivery channels; each simulates a realistic order on that channel.
-  const simChannels = platOn ? [["zomato", "Zomato"], ["swiggy", "Swiggy"], ["website", "Website"]].filter(([k]) => ch[k]) : [];
+  // "Simulate order" — the demo/representation control (no API keys needed). ADMIN/OWNER ONLY:
+  // it's a demo tool, so real floor staff never see it (they'd otherwise be able to add fake
+  // orders to live revenue — the reason the old test button was removed). The server refuses a
+  // non-owner staff request too. Shows a channel picker of the live delivery channels.
+  const canSimulate = !!(XRAY_WHO && XRAY_WHO.higherView);
+  const simChannels = (platOn && canSimulate) ? [["zomato", "Zomato"], ["swiggy", "Swiggy"], ["website", "Website"]].filter(([k]) => ch[k]) : [];
   const simMenu = simChannels.length
     ? `<div class="plat-sim">
-        <button class="btn" id="platSim" title="Add a demo order to try the flow">＋ Simulate order ▾</button>
+        <button class="btn" id="platSim" title="Add a demo order to try the flow (owner / admin only)">＋ Simulate order ▾</button>
         <div class="plat-sim-menu" id="platSimMenu" hidden>${simChannels.map(([k, l]) => `<button class="btn ghost" data-plat-sim="${k}">${esc(l)}</button>`).join("")}</div>
       </div>` : "";
   return `<div class="ed-head plat-head">
