@@ -2129,9 +2129,16 @@ function openDiscountModal(order, opts = {}) {
       const raw = payInput.value.trim();
       if (raw === "") { blank = true; discAmount = clamp(current, 0, maxDisc); }
       else {
-        // "They pay P" (tax-incl) → discount d = base − P/(1+rate), clamped to the food base.
-        const p = clamp(parseFloat(raw), 0, payFor(0));
-        discAmount = clamp(round2(base - p / (1 + rate)), 0, maxDisc);
+        // A NEGATIVE (or non-numeric) "they pay" used to clamp to 0 → they-pay ₹0 → a silent
+        // 100%-off comp of the whole bill. Treat it as "no change" (like blank) so a stray
+        // "-50" paste can't zero a bill. A real 100% comp is still reachable by typing 0. (sweep C2)
+        const pf = parseFloat(raw);
+        if (!(pf >= 0)) { blank = true; discAmount = clamp(current, 0, maxDisc); }
+        else {
+          // "They pay P" (tax-incl) → discount d = base − P/(1+rate), clamped to the food base.
+          const p = clamp(pf, 0, payFor(0));
+          discAmount = clamp(round2(base - p / (1 + rate)), 0, maxDisc);
+        }
       }
     } else {
       const raw = pctInput.value.trim();
@@ -2760,9 +2767,12 @@ function renderOrderMode() {
 let sendingOrder = false;
 async function sendOrder() {
   if (sendingOrder) return;
-  const count = state.cart.reduce((s, l) => s + l.qty, 0);
-  if (!(await confirmDialog(`Send ${count} item${count > 1 ? "s" : ""} to the kitchen for table ${state.table}?`))) return;
+  // Claim the guard BEFORE the confirm dialog — otherwise a rapid double/triple-tap on SEND
+  // opens the confirm (and reaches the success toast) more than once, showing two "Sent!"
+  // toasts even though only one order is placed. Release it if the waiter cancels. (sweep C2)
   sendingOrder = true;
+  const count = state.cart.reduce((s, l) => s + l.qty, 0);
+  if (!(await confirmDialog(`Send ${count} item${count > 1 ? "s" : ""} to the kitchen for table ${state.table}?`))) { sendingOrder = false; return; }
   const sendBtn = document.getElementById("sendOrder");
   if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }
   try {
