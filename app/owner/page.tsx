@@ -88,9 +88,11 @@ type Act = { id: string; panel: string; action: string; actor: string | null; ta
 
 // Range model (owner round-2, 2026-07-26): ONE main dropdown top-right drives
 // EVERYTHING — the KPI boxes and every graph ("it is for how much? for all the
-// graphs"; owner: the boxes should have "only the main one"). Busy-hours + heatmap
-// are PINNED to the last 7 days (weekly-rhythm data — the click-to-enlarge +
-// previous-week ‹ › paging is the deferred detail view).
+// graphs"; owner: the boxes should have "only the main one"). The Busy HEATMAP now
+// follows that main range too (owner 2026-07-26: "it should be shown from how much
+// we have selected … and be clickable and interactive") — see the interactive
+// Heatmap in Charts.tsx. Only Busy-HOURS stays PINNED to the last 7 days (a stable
+// weekly rhythm; the weekFallback below finds the newest active week when empty).
 const WEEK: Range = "7d";
 // 2–3 restaurants: the split daily bars stay in the THEME's green family — light +
 // dark green, a third non-brown colour only if needed (owner round-2: "only brown
@@ -987,9 +989,9 @@ export default function OwnerDashboard() {
           {/* Heatmap + payments, side by side (group scope) */}
           <div className="ow2-two">
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
-              {(pl(weekKey) as GroupA | undefined)?.heatmap
-                ? <Heatmap data={(pl(weekKey) as GroupA).heatmap!} accent={GREEN} />
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              {(pl(globalRange) as GroupA | undefined)?.heatmap
+                ? <Heatmap data={(pl(globalRange) as GroupA).heatmap!} accent={GREEN} rangeLabel={RANGES.find((r) => r.k === globalRange)!.label} />
                 : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
@@ -1055,9 +1057,9 @@ export default function OwnerDashboard() {
 
           <div className="ow2-two" style={{ marginTop: 12 }}>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
-              {(pl(weekKey) as RestA | undefined)?.heatmap
-                ? <Heatmap data={(pl(weekKey) as RestA).heatmap!} accent={GREEN} />
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              {(pl(globalRange) as RestA | undefined)?.heatmap
+                ? <Heatmap data={(pl(globalRange) as RestA).heatmap!} accent={GREEN} rangeLabel={RANGES.find((r) => r.k === globalRange)!.label} />
                 : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
