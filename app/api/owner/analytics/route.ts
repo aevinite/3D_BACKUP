@@ -19,10 +19,32 @@ export const dynamic = "force-dynamic";
 const DAY = 86_400_000;
 // Window for a range. "today" = since 05:00 IST business-day start (matches the
 // counters + lfh_owner_overview). Others are rolling windows ending now.
-function windowFor(range: string): { from: string; to: string; bucket: string } {
+function windowFor(range: string, sp?: URLSearchParams): { from: string; to: string; bucket: string } {
   const now = Date.now();
   const to = new Date(now).toISOString();
   if (range === "all") return { from: "2020-01-01T00:00:00Z", to, bucket: "day" };
+  // custom: exact IST day range from the report dialog (owner round-4: "from which
+  // to which date you want the report"). Inclusive dates; bad input → 30d fallback.
+  if (range === "custom" && sp) {
+    const f = sp.get("from"), t2 = sp.get("to");
+    const ok = (x: string | null) => !!x && /^\d{4}-\d{2}-\d{2}$/.test(x);
+    if (ok(f) && ok(t2)) {
+      const pf = Date.parse(f + "T00:00:00+05:30");
+      const pt = Math.min(Date.parse(t2 + "T00:00:00+05:30") + DAY, now);
+      if (Number.isFinite(pf) && pt > pf) {
+        return { from: new Date(pf).toISOString(), to: new Date(pt).toISOString(), bucket: pt - pf > 3 * DAY ? "day" : "hour" };
+      }
+    }
+    return windowFor("30d");
+  }
+  // whole IST months (mirrors the reports route)
+  if (range === "month" || range === "lastmonth") {
+    const istNow = new Date(now + 5.5 * 3600_000);
+    const y = istNow.getUTCFullYear(), m = istNow.getUTCMonth();
+    const start = (yy: number, mm: number) => Date.UTC(yy, mm, 1) - 5.5 * 3600_000;
+    if (range === "month") return { from: new Date(start(y, m)).toISOString(), to, bucket: "day" };
+    return { from: new Date(start(y, m - 1)).toISOString(), to: new Date(start(y, m)).toISOString(), bucket: "day" };
+  }
   // 7d / 30d: EXACTLY N whole IST calendar days ending today (inclusive), aligned to
   // 00:00 IST. A rolling now−N×24h window instead spilled into a partial (N+1)th IST
   // day whose day-bucket the client's whole-day zero-filled axis drops — so the chart
@@ -96,7 +118,9 @@ export async function GET(req: NextRequest) {
     if (!allowed.length) return NextResponse.json({ error: "Reports aren't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
     scope.ids = allowed;
   }
-  const { from, to, bucket } = windowFor(range);
+  const { from, to, bucket } = windowFor(range, sp);
+  // cache keys must distinguish two different custom windows
+  const rangeKey = range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : range;
   const prevWin = compare ? prevWindowFor(range, from, to) : null;
 
   try {
@@ -109,7 +133,7 @@ export async function GET(req: NextRequest) {
         // v2: payload gained `heatmap` (mig 197); v3: gained `categories` — each shape
         // change bumps the version so stale snapshots can't serve field-less JSON
         // verbatim until their fingerprint happens to change (found 2026-07-26).
-        key: `analytics:v3:group:${scopeKeyOf(null, scope.all, gIds)}:${range}:c${compare ? 1 : 0}`,
+        key: `analytics:v4:group:${scopeKeyOf(null, scope.all, gIds)}:${rangeKey}:c${compare ? 1 : 0}`,
         force: sp.get("refresh") === "1",
         fingerprint: () => ordersFingerprint(scope.all ? null : gIds, from, to),
         compute: async () => {
@@ -211,7 +235,7 @@ export async function GET(req: NextRequest) {
     // LIVE bits stay OUTSIDE the cache: open-tables (a now-count) and the unbounded
     // all-time records (fetched once per restaurant on demand).
     const restBase = await cachedOwnerPayload({
-      key: `analytics:v3:rest:${rid}:${range}:c${compare ? 1 : 0}`,
+      key: `analytics:v4:rest:${rid}:${rangeKey}:c${compare ? 1 : 0}`,
       force: sp.get("refresh") === "1",
       fingerprint: () => ordersFingerprint([rid], from, to),
       compute: async () => {

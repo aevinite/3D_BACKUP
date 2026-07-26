@@ -256,84 +256,121 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
   );
 }
 
-// ── Report ▾ — a PROFESSIONAL auto-generated report (owner round-3): group summary
-// + every restaurant individually, as a print document / CSV / Excel — never a
-// screenshot of the UI. Data is gathered on click from the (cached) owner APIs.
-function ReportMenu({ gather, filename }: { gather: () => Promise<ReportData>; filename: string }) {
+// ── Report — ask-first dialog (owner round-4: "before printing it should ask for
+// how many days / month / from which to which date"), then auto-generate the
+// professional compiled document (billing + GST + settlement) as Print/CSV/Excel.
+const REPORT_PERIODS: { k: string; label: string }[] = [
+  { k: "today", label: "Today" }, { k: "yesterday", label: "Yesterday" },
+  { k: "7d", label: "Last 7 days" }, { k: "30d", label: "Last 30 days" },
+  { k: "month", label: "This month" }, { k: "lastmonth", label: "Last month" },
+  { k: "all", label: "All time" }, { k: "custom", label: "Custom dates…" },
+];
+function ReportMenu({ gather, filename }: { gather: (qs: string, label: string) => Promise<ReportData>; filename: string }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  useBackClose("owner-report-menu", open, () => setOpen(false));
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement | null)?.closest?.(".ow2-report")) setOpen(false);
-    };
-    document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
-  }, [open]);
+  const [period, setPeriod] = useState("30d");
+  const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+  const [dFrom, setDFrom] = useState(new Date(Date.now() + 5.5 * 3600_000 - 29 * DAY_MS).toISOString().slice(0, 10));
+  const [dTo, setDTo] = useState(today);
+  useBackClose("owner-report-modal", open, () => setOpen(false));
   const download = (blob: Blob, name: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
   };
-  const esc = (v: string | number) => {
-    const s = String(v ?? "");
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  const escCsv = (v: string | number) => {
+    const x = String(v ?? "");
+    return /[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x;
   };
   const asCsv = (tables: ExportTable[]) => {
-    const parts = tables.map((t) => [t.title, t.head.map(esc).join(","), ...t.rows.map((r) => r.map(esc).join(","))].join("\n"));
-    // ﻿ BOM so Excel opens the ₹ column as UTF-8, not mojibake.
-    download(new Blob(["﻿" + parts.join("\n\n")], { type: "text/csv;charset=utf-8" }), `${filename}.csv`);
+    const parts = tables.map((t) => [t.title, t.head.map(escCsv).join(","), ...t.rows.map((r) => r.map(escCsv).join(","))].join("\n"));
+    download(new Blob(["\ufeff" + parts.join("\n\n")], { type: "text/csv;charset=utf-8" }), `${filename}.csv`);
   };
   const asExcel = (tables: ExportTable[]) => {
-    // The .xls HTML-table format — opens natively in Excel/Numbers/Sheets, zero deps.
     const html = `<html><head><meta charset="utf-8"></head><body>` + tables.map((t) =>
       `<h3>${t.title}</h3><table border="1"><tr>${t.head.map((h) => `<th>${h}</th>`).join("")}</tr>` +
       t.rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("") + `</table>`).join("<br/>") + `</body></html>`;
     download(new Blob([html], { type: "application/vnd.ms-excel" }), `${filename}.xls`);
   };
-  // Gather (auto-generate "at that time"), then hand to the chosen format. The print
-  // tab must open SYNCHRONOUSLY inside the click (popup blockers), so open it first
-  // and write the finished document into it once the data lands.
+  const custom = period === "custom";
+  const customOk = !custom || (dFrom <= dTo && !!dFrom && !!dTo);
+  const qs = custom ? `range=custom&from=${dFrom}&to=${dTo}` : `range=${period}`;
+  const fdate = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const label = custom ? `${fdate(dFrom)} – ${fdate(dTo)}` : (REPORT_PERIODS.find((x) => x.k === period)?.label ?? period);
+  // The print tab must open synchronously inside the click (popup blockers) —
+  // open it first, write the finished document into it once the data lands.
   const run = async (kind: "print" | "csv" | "xls") => {
-    setOpen(false);
-    if (busy) return;
+    if (busy || !customOk) return;
     setBusy(true);
     const tab = kind === "print" ? window.open("", "_blank") : null;
     if (tab) tab.document.write("<title>Preparing report…</title><body style='font-family:sans-serif;padding:40px;color:#333'>Preparing your report…</body>");
     try {
-      const data = await gather();
-      if (kind === "print" && tab) {
-        tab.document.open(); tab.document.write(buildReportHtml(data)); tab.document.close();
-      } else if (kind === "csv") asCsv(buildReportTables(data));
+      const data = await gather(qs, label);
+      if (kind === "print" && tab) { tab.document.open(); tab.document.write(buildReportHtml(data)); tab.document.close(); }
+      else if (kind === "csv") asCsv(buildReportTables(data));
       else if (kind === "xls") asExcel(buildReportTables(data));
+      setOpen(false);
     } catch {
       if (tab) { tab.document.open(); tab.document.write("<body style='font-family:sans-serif;padding:40px'>Couldn't build the report — close this tab and try again.</body>"); tab.document.close(); }
     } finally { setBusy(false); }
   };
   return (
-    <span className="ow2-report" style={{ position: "relative", display: "inline-flex" }}>
-      <button className="adm-btn" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open} disabled={busy}>
-        <i className={`fas ${busy ? "fa-spinner fa-spin" : "fa-file-export"}`} style={{ marginRight: 6 }} aria-hidden="true" />{busy ? "Preparing…" : "Report"}
-        {!busy && <i className="fas fa-chevron-down" style={{ marginLeft: 6, fontSize: 9, opacity: .7 }} aria-hidden="true" />}
+    <>
+      <button className="adm-btn" onClick={() => setOpen(true)}>
+        <i className="fas fa-file-export" style={{ marginRight: 6 }} aria-hidden="true" />Report
       </button>
       {open && (
-        <span role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 90, minWidth: 210, display: "flex", flexDirection: "column", background: "var(--card)", border: "var(--border)", borderRadius: 12, padding: 5, boxShadow: "0 14px 34px rgba(0,0,0,.35)" }}>
-          {[
-            { ic: "fa-print", lb: "Print report", hint: "full document · printer / PDF", fn: () => run("print") },
-            { ic: "fa-file-csv", lb: "Download CSV", hint: "group + every restaurant", fn: () => run("csv") },
-            { ic: "fa-file-excel", lb: "Download Excel", hint: ".xls · group + every restaurant", fn: () => run("xls") },
-          ].map((o) => (
-            <button key={o.lb} role="menuitem" onClick={o.fn}
-              style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", borderRadius: 8, padding: "8px 10px", font: "inherit", fontSize: 12.5, fontWeight: 700, color: "inherit", cursor: "pointer", textAlign: "left" }}>
-              <i className={`fas ${o.ic}`} style={{ width: 16, color: "var(--accent)" }} aria-hidden="true" />
-              <span>{o.lb}<small style={{ display: "block", fontSize: 10, color: "var(--muted)", fontWeight: 500 }}>{o.hint}</small></span>
-            </button>
-          ))}
-        </span>
+        <div className="owrp-wrap" role="dialog" aria-label="Generate report">
+          <div className="owrp-back" onClick={() => !busy && setOpen(false)} aria-hidden="true" />
+          <div className="owrp">
+            <header>
+              <div><h3>Generate report</h3><p>Pick the period, then choose a format — the report compiles billing, GST and settlement for every restaurant.</p></div>
+              <button className="x" onClick={() => setOpen(false)} aria-label="Close" disabled={busy}>✕</button>
+            </header>
+            <div className="owrp-periods" role="listbox" aria-label="Period">
+              {REPORT_PERIODS.map((x) => (
+                <button key={x.k} role="option" aria-selected={period === x.k} className={period === x.k ? "on" : ""} onClick={() => setPeriod(x.k)}>{x.label}</button>
+              ))}
+            </div>
+            {custom && (
+              <div className="owrp-dates">
+                <label>From <input type="date" value={dFrom} max={dTo} onChange={(e) => setDFrom(e.target.value)} /></label>
+                <i className="fas fa-arrow-right" aria-hidden="true" />
+                <label>To <input type="date" value={dTo} min={dFrom} max={today} onChange={(e) => setDTo(e.target.value)} /></label>
+              </div>
+            )}
+            <footer>
+              <span className="owrp-hint">{busy ? "Compiling your report…" : `Report for: ${label}`}</span>
+              <span className="owrp-btns">
+                <button className="adm-btn" disabled={busy || !customOk} onClick={() => run("print")}><i className={`fas ${busy ? "fa-spinner fa-spin" : "fa-print"}`} aria-hidden="true" /> Print</button>
+                <button className="adm-btn" disabled={busy || !customOk} onClick={() => run("csv")}><i className="fas fa-file-csv" aria-hidden="true" /> CSV</button>
+                <button className="adm-btn" disabled={busy || !customOk} onClick={() => run("xls")}><i className="fas fa-file-excel" aria-hidden="true" /> Excel</button>
+              </span>
+            </footer>
+          </div>
+          <style jsx>{`
+            .owrp-wrap { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; }
+            .owrp-back { position: absolute; inset: 0; background: rgba(5,8,14,.55); backdrop-filter: blur(2px); }
+            .owrp { position: relative; width: min(560px, 94vw); background: var(--card); border: var(--border); border-radius: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.45); padding: 18px 20px; }
+            .owrp header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+            .owrp h3 { margin: 0; font-size: 16px; }
+            .owrp header p { margin: 4px 0 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+            .owrp .x { background: var(--bg); border: var(--border); color: var(--text); width: 30px; height: 30px; border-radius: 9px; font-size: 13px; cursor: pointer; flex: none; }
+            .owrp-periods { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+            .owrp-periods button { background: var(--bg); border: var(--border); border-radius: 9px; padding: 8px 6px; font: inherit; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; }
+            .owrp-periods button.on { background: color-mix(in srgb, ${GREEN} 16%, transparent); border-color: ${GREEN}; color: var(--text); }
+            .owrp-dates { display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; color: var(--muted); }
+            .owrp-dates label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; }
+            .owrp-dates input { background: var(--bg); border: var(--border); border-radius: 8px; padding: 7px 9px; font: inherit; font-size: 12.5px; color: var(--text); color-scheme: dark light; }
+            .owrp footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+            .owrp-hint { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+            .owrp-btns { display: inline-flex; gap: 8px; }
+            @media (max-width: 560px) { .owrp-periods { grid-template-columns: repeat(2, 1fr); } }
+          `}</style>
+        </div>
       )}
-    </span>
+    </>
   );
 }
 
@@ -743,26 +780,36 @@ export default function OwnerDashboard() {
   // Gather the professional report "at that time" (owner round-3): group summary +
   // EVERY restaurant individually. All reads hit the compute-on-view cached APIs
   // (mig 196 + the new restaurant-scope cache), so even 7 restaurants gather fast.
-  const gatherReport = async (): Promise<ReportData> => {
+  const gatherReport = async (periodQs: string, periodLabel: string): Promise<ReportData> => {
     if (!ov) throw new Error("not loaded yet");
-    const range = globalRange;
     const list = activeRid ? ov.restaurants.filter((r) => r.id === activeRid) : ov.restaurants;
     const perRest = await Promise.all(list.map(async (r) => {
       const [a, m] = await Promise.all([
-        fetch(`/api/owner/analytics?range=${range}&rid=${r.id}&compare=1${scp}`, { cache: "no-store" }).then((x) => x.json()),
-        fetch(`/api/owner/reports?type=sales&range=${range}&rid=${r.id}${scp}`, { cache: "no-store" }).then((x) => x.json()).catch(() => null),
+        fetch(`/api/owner/analytics?${periodQs}&rid=${r.id}&compare=1${scp}`, { cache: "no-store" }).then((x) => x.json()),
+        fetch(`/api/owner/reports?type=sales&${periodQs}&rid=${r.id}${scp}`, { cache: "no-store" }).then((x) => x.json()).catch(() => null),
       ]);
       if (a.error) throw new Error(a.error);
       const hour = [...(a.hourly ?? [])].sort((x: { orders: number }, y: { orders: number }) => y.orders - x.orders)[0];
       const t = m && !m.error ? m.totals : null;
+      // The tax config rides on the sales report (lfh_owner_sales_report + settings):
+      // components = the configured CGST/SGST/… lines with their collected amounts.
+      const comps: { label: string; amount: number }[] = (m && !m.error && m.tax?.components ? m.tax.components : [])
+        .map((c: { label?: string; amount?: number }) => ({ label: String(c.label || "Tax"), amount: Number(c.amount) || 0 }))
+        .filter((c: { amount: number }) => c.amount > 0);
       return {
         name: r.name, slug: r.slug,
         revenue: Number(a.kpis?.revenue) || 0, orders: Number(a.kpis?.orders) || 0,
         paidOrders: Number(a.kpis?.paidOrders ?? a.kpis?.orders) || 0,
         avg: Number(a.kpis?.avgOrder) || 0, share: 0,
-        discount: t ? Number(t.discount) || 0 : null,
-        cancelledOrders: t ? Number(t.cancelledOrders) || 0 : null,
-        cancelledValue: t ? Number(t.cancelledValue) || 0 : null,
+        billing: {
+          gross: t ? Number(t.subtotal) || 0 : null,
+          discount: t ? Number(t.discount) || 0 : null,
+          taxComponents: comps,
+          taxTotal: t ? Number(t.tax) || 0 : null,
+          net: t ? Number(t.revenue) || 0 : (Number(a.kpis?.revenue) || 0),
+          cancelledOrders: t ? Number(t.cancelledOrders) || 0 : null,
+          cancelledValue: t ? Number(t.cancelledValue) || 0 : null,
+        },
         busiestHour: hour?.orders ? `${hour.hour}:00` : null,
         dishes: (a.dishes ?? []) as { title: string; qty: number; revenue: number }[],
         payments: ((a.paymentMethods ?? []) as Pay[]).map((p) => ({ method: canonPayMethod(p.method), revenue: p.revenue, orders: p.orders })),
@@ -777,16 +824,24 @@ export default function OwnerDashboard() {
       c.revenue += p.revenue; c.orders += p.orders; gp.set(p.method, c);
     }
     const paidOrders = perRest.reduce((s, r) => s + r.paidOrders, 0);
-    const sum = (k: "discount" | "cancelledOrders" | "cancelledValue") =>
-      perRest.every((r) => r[k] != null) ? perRest.reduce((s, r) => s + (r[k] || 0), 0) : null;
+    const bsum = (k: "gross" | "discount" | "taxTotal" | "cancelledOrders" | "cancelledValue") =>
+      perRest.every((r) => r.billing[k] != null) ? perRest.reduce((s, r) => s + (r.billing[k] || 0), 0) : null;
+    // Group tax components: sum by label across restaurants (CGST + CGST, SGST + SGST…).
+    const gc = new Map<string, number>();
+    for (const r of perRest) for (const c of r.billing.taxComponents) gc.set(c.label, (gc.get(c.label) || 0) + c.amount);
     return {
       scopeName: activeRid ? (list[0]?.name ?? "Restaurant") : `All ${list.length} restaurants`,
-      periodLabel: rangeSpanText(range),
+      periodLabel,
       generatedAt: new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST }),
       group: {
         revenue: totalRev, orders: perRest.reduce((s, r) => s + r.orders, 0), paidOrders,
         avg: paidOrders ? totalRev / paidOrders : 0,
-        discount: sum("discount"), cancelledOrders: sum("cancelledOrders"), cancelledValue: sum("cancelledValue"),
+        billing: {
+          gross: bsum("gross"), discount: bsum("discount"),
+          taxComponents: Array.from(gc.entries()).map(([label, amount]) => ({ label, amount })),
+          taxTotal: bsum("taxTotal"), net: totalRev,
+          cancelledOrders: bsum("cancelledOrders"), cancelledValue: bsum("cancelledValue"),
+        },
         payments: Array.from(gp.values()).sort((a, b) => b.revenue - a.revenue),
       },
       restaurants: perRest,
@@ -847,11 +902,11 @@ export default function OwnerDashboard() {
       <Kpi k="Revenue" href={reportHref("sales")} v={kMain?.revenue ?? 0} money loading={!kMain}
         delta={kMain?.prev ? { now: kMain.revenue, prev: kMain.prev.revenue } : undefined}
         prevTitle={PREV_LABEL[globalRange]} sub={PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
-      <Kpi k="Orders" href={reportHref("daysummary")} v={kMain?.orders ?? 0} loading={!kMain}
+      <Kpi k="Orders" href={reportHref("volume")} v={kMain?.orders ?? 0} loading={!kMain}
         sub={kMain && kMain.paidOrders !== kMain.orders ? `${kMain.paidOrders} paid · rest still open` : PREV_LABEL[globalRange] || "whole history"}
         delta={kMain?.prev ? { now: kMain.orders, prev: kMain.prev.orders } : undefined}
         prevTitle={PREV_LABEL[globalRange]} spark={sparkOf(globalRange, "orders")} />
-      <Kpi k="Avg order" href={reportHref("sales")} v={kMain?.avg ?? 0} money loading={!kMain} sub="per paid order" />
+      <Kpi k="Avg order" href={reportHref("avgbill")} v={kMain?.avg ?? 0} money loading={!kMain} sub="per paid order" />
       <Kpi k="Today so far" href={reportHref("daysummary")} v={todayRev} money loading={!ov} pill="● live"
         sub={`${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
       <Kpi k="Lost to cancellations" href={reportHref("cancellations")} v={money === "err" ? "—" : ((money as MoneyTotals | undefined)?.cancelledValue ?? 0)} money
@@ -976,11 +1031,11 @@ export default function OwnerDashboard() {
               wants them on the group home too (round-2: "this both thing were good"). */}
           <div className="ow2-two" style={{ marginBottom: 12 }}>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy hours <span className="mut">· orders by hour</span></span><span className="ow2-tag" title={rangeSpanText(WEEK)}>last 7 days</span></div>
+              <div className="ow2-ct"><span>Busy hours <span className="mut">· orders by hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(WEEK)}>last 7 days</span></div>
               {groupHourly ? <HourlyBar data={groupHourly} color={GREEN} /> : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Revenue by category <span className="mut">· all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as GroupA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as GroupA).categories!} />
                 : <div className="adm-empty">Loading…</div>}
@@ -990,13 +1045,13 @@ export default function OwnerDashboard() {
           {/* Heatmap + payments, side by side (group scope) */}
           <div className="ow2-two">
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour</span></span><span className="ow2-tag" title={rangeSpanText(WEEK)}>last 7 days</span></div>
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(WEEK)}>last 7 days</span></div>
               {(pl(WEEK) as GroupA | undefined)?.heatmap
                 ? <Heatmap data={(pl(WEEK) as GroupA).heatmap!} accent={GREEN} />
                 : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid · all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as GroupA | undefined)?.paymentMethods
                 ? <PaymentDonut data={(pl(globalRange) as GroupA).paymentMethods} />
                 : <div className="adm-empty">Loading…</div>}
@@ -1049,7 +1104,7 @@ export default function OwnerDashboard() {
                 : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Revenue by category <span className="mut">· all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as RestA).categories} />
                 : <div className="adm-empty">Loading…</div>}
