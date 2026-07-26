@@ -24,7 +24,19 @@ import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint } from "@/lib/ownerCa
 export const dynamic = "force-dynamic";
 
 const DAY = 86_400_000;
-function windowFor(range: string): { from: string; to: string; bucket: string } {
+function windowFor(range: string, sp?: URLSearchParams): { from: string; to: string; bucket: string } {
+  // custom: exact IST day range from the owner report dialog (round-4). Inclusive
+  // dates, day buckets; bad input falls back to the last 30 days.
+  if (range === "custom" && sp) {
+    const f = sp.get("from"), t2 = sp.get("to");
+    const ok = (x: string | null) => !!x && /^\d{4}-\d{2}-\d{2}$/.test(x);
+    if (ok(f) && ok(t2)) {
+      const pf = Date.parse(f + "T00:00:00+05:30");
+      const pt = Math.min(Date.parse(t2 + "T00:00:00+05:30") + 86_400_000, Date.now());
+      if (Number.isFinite(pf) && pt > pf) return { from: new Date(pf).toISOString(), to: new Date(pt).toISOString(), bucket: "day" };
+    }
+    return windowFor("30d");
+  }
   const now = Date.now();
   const to = new Date(now).toISOString();
   // "all" = unbounded, matching /api/owner/analytics (from 2020) so the dashboard's money
@@ -77,7 +89,7 @@ type Row = Record<string, unknown>;
 // "today" for the DATA but was still echoed back verbatim in the response, so the
 // client title (which looks range up in a fixed table) rendered blank (bug L-…).
 // Normalising here means `range` in the payload is ALWAYS a known key.
-const VALID_RANGES = new Set(["today", "yesterday", "7d", "30d", "month", "lastmonth", "12m", "fy", "all"]);
+const VALID_RANGES = new Set(["today", "yesterday", "7d", "30d", "month", "lastmonth", "12m", "fy", "all", "custom"]);
 
 // Fetch EVERY restaurant id, paging past PostgREST's default row cap. The admin
 // "all restaurants" merge for dishes/categories/hourly must cover the SAME universe
@@ -148,7 +160,7 @@ export async function GET(req: NextRequest) {
     if (!allowed.length) return NextResponse.json({ error: "Reports aren't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
     scope.ids = allowed;
   }
-  const { from, to, bucket } = windowFor(range);
+  const { from, to, bucket } = windowFor(range, sp);
 
   // The restaurants this call may touch (for the merged all-restaurants shapes).
   const ridList: (string | null)[] = rid ? [rid] : scope.all ? [null] : scope.ids;
@@ -159,7 +171,7 @@ export async function GET(req: NextRequest) {
   // ?refresh=1 (the Refresh button) forces a live recompute + re-store. Keyed by the already-
   // authorized scope, so isolation is unchanged. `cachedAt`/`cached` ride along for the UI.
   const scopeIds = scope.all ? [] : scope.ids;
-  const cacheKey = `reports:v1:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range}`;
+  const cacheKey = `reports:v1:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : range}`;
   const force = sp.get("refresh") === "1";
   const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
 

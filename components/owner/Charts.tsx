@@ -87,6 +87,9 @@ function TipBox({ children }: { children: React.ReactNode }) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function MoneyTip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
+  // Rows may carry a hidden `__orders` count (owner 2026-07-26: "the graph should also
+  // show the number of orders when you hover") — shown as one extra plain line.
+  const orders = payload[0]?.payload?.__orders;
   return (
     <TipBox>
       {label != null && <div style={{ color: "var(--muted)", marginBottom: 4 }}>{label}</div>}
@@ -96,6 +99,9 @@ function MoneyTip({ active, payload, label }: any) {
           <b>{p.name}</b>: {inr(p.value)}
         </div>
       ))}
+      {orders != null && Number(orders) > 0 && (
+        <div style={{ color: "var(--muted)", marginTop: 4 }}>{Number(orders).toLocaleString("en-IN")} order{Number(orders) === 1 ? "" : "s"}</div>
+      )}
     </TipBox>
   );
 }
@@ -142,7 +148,7 @@ export function AreaTrend({ data, lines, height = 260 }: {
             <defs>
               {lines.map((l) => (
                 <linearGradient key={l.key} id={`own-g-${cssId(l.key)}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={l.color} stopOpacity={0.28} />
+                  <stop offset="0%" stopColor={l.color} stopOpacity={0.36} />
                   <stop offset="100%" stopColor={l.color} stopOpacity={0.02} />
                 </linearGradient>
               ))}
@@ -150,10 +156,12 @@ export function AreaTrend({ data, lines, height = 260 }: {
             <CartesianGrid stroke={GRID} vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} minTickGap={24} />
             <YAxis domain={fitDomain(values)} tick={{ fontSize: 11, fill: AXIS }} tickFormatter={compact} width={48} allowDecimals={false} />
-            <Tooltip content={<MoneyTip />} />
+            {/* Crosshair + ringed active dot = the "pretty" hover from the design demos
+                the owner asked to match (2026-07-26). */}
+            <Tooltip content={<MoneyTip />} cursor={{ stroke: "var(--muted)", strokeDasharray: "3 3", strokeOpacity: 0.5 }} />
             {lines.map((l) => (
               <Area key={l.key} type="monotone" dataKey={l.key} name={l.name} stroke={l.color}
-                strokeWidth={2.25} dot={false} activeDot={{ r: 4 }}
+                strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: "var(--card)" }}
                 fill={single ? `url(#own-g-${cssId(l.key)})` : "transparent"} />
             ))}
           </AreaChart>
@@ -267,17 +275,45 @@ export function CountBar({ data, color, name = "Orders", height = 220 }: {
 const PALETTE = ["#34d399", "#5b8def", "#e0b341", "#e2607a", "#a36bd4", "#4bbdc9", "#e3935b", "#9aa84a"];
 export function CategoryDonut({ data }: { data: { category: string; revenue: number }[] }) {
   if (!data.length) return <Empty />;
+  // DYNAMIC legend (owner round-5): the old bottom legend wrapped into a wall of
+  // text with 25+ categories and squeezed the donut. Now the legend fills the RIGHT
+  // column first; past its capacity a LEFT column joins; past both, the text steps
+  // down a size. The donut always keeps the middle. Sorted by revenue so the labels
+  // an owner actually cares about are always at the top of the columns.
+  const sorted = [...data].map((d, i) => ({ ...d, color: PALETTE[i % PALETTE.length] })).sort((a, b) => b.revenue - a.revenue);
+  const n = sorted.length;
+  const perCol = 9;                                   // comfortable rows per side column
+  const twoCols = n > perCol;
+  const small = n > perCol * 2;                       // both sides full → smaller text
+  const right = twoCols ? sorted.filter((_, i) => i % 2 === 0) : sorted;
+  const left = twoCols ? sorted.filter((_, i) => i % 2 === 1) : [];
+  const total = sorted.reduce((a, d) => a + d.revenue, 0) || 1;
+  const legendCol = (items: typeof sorted) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: small ? 3 : 5, minWidth: 0, flex: "1 1 0", maxHeight: 230, overflowY: "auto" }}>
+      {items.map((d) => (
+        <span key={d.category} title={`${d.category} · ${inr(d.revenue)} · ${Math.round((d.revenue / total) * 100)}%`}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: small ? 10 : 11.5, fontWeight: 600, color: "var(--muted)", minWidth: 0 }}>
+          <span style={{ width: small ? 8 : 9, height: small ? 8 : 9, borderRadius: 3, background: d.color, flexShrink: 0 }} aria-hidden="true" />
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.category}</span>
+          <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums", color: "var(--text)", flexShrink: 0 }}>{Math.round((d.revenue / total) * 100)}%</span>
+        </span>
+      ))}
+    </div>
+  );
   return (
-    <div style={{ width: "100%", height: 230 }}>
-      <ResponsiveContainer>
-        <PieChart>
-          <Pie data={data} dataKey="revenue" nameKey="category" innerRadius={52} outerRadius={86} paddingAngle={2} stroke="var(--card)">
-            {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
-          </Pie>
-          <Tooltip content={<MoneyTip />} />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
-        </PieChart>
-      </ResponsiveContainer>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
+      {left.length > 0 && legendCol(left)}
+      <div style={{ width: 190, height: 210, flexShrink: 0 }}>
+        <ResponsiveContainer>
+          <PieChart>
+            <Pie data={sorted} dataKey="revenue" nameKey="category" innerRadius={52} outerRadius={86} paddingAngle={2} stroke="var(--card)">
+              {sorted.map((d, i) => <Cell key={i} fill={d.color} />)}
+            </Pie>
+            <Tooltip content={<MoneyTip />} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      {legendCol(right)}
     </div>
   );
 }
@@ -400,6 +436,44 @@ export function PayTrendStack({ data }: { data: { day: string; method: string; r
 }
 
 // ── Spark — tiny inline sparkline for KPI tiles (pure SVG, no axes) ─────────
+// ── SparkArea — full-width gradient mini-trend for KPI cards (D1 look, 2026-07-26).
+// preserveAspectRatio="none" lets it stretch across the whole card bottom.
+export function SparkArea({ points, color, height = 34, animate = false }: { points: number[]; color: string; height?: number; animate?: boolean }) {
+  if (points.length < 2) return null;
+  const w = 300;
+  const max = Math.max(...points, 1), min = Math.min(...points, 0);
+  const span = max - min || 1;
+  const step = w / (points.length - 1);
+  const X = (i: number) => (i * step).toFixed(1);
+  const Y = (v: number) => (height - 3 - ((v - min) / span) * (height - 6)).toFixed(1);
+  const line = points.map((v, i) => `${i === 0 ? "M" : "L"}${X(i)},${Y(v)}`).join(" ");
+  const gid = "spa" + Math.random().toString(36).slice(2, 7);
+  return (
+    <svg width="100%" height={height} viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" aria-hidden="true" style={{ display: "block" }}>
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity={0.3} />
+          <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+        </linearGradient>
+      </defs>
+      <path d={`${line} L${w},${height} L0,${height} Z`} fill={`url(#${gid})`} className={animate ? "spa-fill" : undefined} />
+      {/* thin, calm line — the thick stroke read as chunky (owner round-3).
+          animate=true draws the line in (pathLength=1 → dashoffset 1→0). */}
+      <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.75"
+        vectorEffect="non-scaling-stroke" pathLength={animate ? 1 : undefined} className={animate ? "spa-line" : undefined} />
+      {animate && (
+        <style>{`
+          .spa-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: spaDraw 1.1s ease-out forwards; }
+          .spa-fill { opacity: 0; animation: spaFade .8s ease-out .35s forwards; }
+          @keyframes spaDraw { to { stroke-dashoffset: 0; } }
+          @keyframes spaFade { to { opacity: 1; } }
+          @media (prefers-reduced-motion: reduce) { .spa-line { animation: none; stroke-dashoffset: 0; } .spa-fill { animation: none; opacity: 1; } }
+        `}</style>
+      )}
+    </svg>
+  );
+}
+
 export function Spark({ points, color, width = 72, height = 26 }: { points: number[]; color: string; width?: number; height?: number }) {
   if (points.length < 2) return null;
   const [lo, hi] = fitDomain(points);
@@ -496,4 +570,83 @@ export function ToggleChart({ data, color, money = true, height = 240, name, tit
 export const RevenueBar = LeaderBar;
 export function TrendLine({ data, lines }: { data: Record<string, unknown>[]; lines: { key: string; name: string; color: string }[]; money?: boolean }) {
   return <AreaTrend data={data} lines={lines} height={230} />;
+}
+
+// ── Heatmap — day-of-week × hour busy grid (owner merge redesign, 2026-07-26) ──
+// Pure divs (no Recharts): 7 rows (Sun..Sat, postgres dow order) × 24 cells, colour
+// intensity = orders share of the busiest cell. Hover shows the exact count.
+const DOW_LB = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const hr12 = (h: number) => `${h % 12 || 12}${h < 12 ? "am" : "pm"}`;
+export function Heatmap({ data, accent }: { data: { dow: number; hr: number; orders: number }[]; accent: string }) {
+  if (!data.length || !data.some((d) => d.orders > 0)) return <Empty />;
+  const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+  for (const d of data) if (d.dow >= 0 && d.dow < 7 && d.hr >= 0 && d.hr < 24) grid[d.dow][d.hr] = d.orders;
+  const max = Math.max(1, ...grid.flat());
+  const marks = [0, 4, 8, 12, 16, 20, 23];
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "34px repeat(24, 1fr)", gap: 3, minWidth: 430 }}>
+        <div />
+        {Array.from({ length: 24 }, (_, h) => (
+          <div key={h} style={{ fontSize: 9, color: "var(--muted)", textAlign: "center", whiteSpace: "nowrap" }}>{marks.includes(h) ? hr12(h) : ""}</div>
+        ))}
+        {grid.map((row, d) => (
+          <FragmentRow key={d} label={DOW_LB[d]} row={row} max={max} accent={accent} />
+        ))}
+      </div>
+    </div>
+  );
+}
+function FragmentRow({ label, row, max, accent }: { label: string; row: number[]; max: number; accent: string }) {
+  return (
+    <>
+      <div style={{ fontSize: 10.5, color: "var(--muted)", display: "flex", alignItems: "center" }}>{label}</div>
+      {row.map((v, h) => (
+        <div key={h} title={`${label} ${hr12(h)} · ${v.toLocaleString("en-IN")} order${v === 1 ? "" : "s"}`}
+          style={{
+            aspectRatio: "1", borderRadius: 3, minWidth: 12,
+            background: v > 0 ? `color-mix(in srgb, ${accent} ${Math.max(8, Math.round((v / max) * 100))}%, transparent)` : "rgba(128,128,128,.08)",
+          }} />
+      ))}
+    </>
+  );
+}
+
+// ── StackedDailyBars — 2–3 restaurants: each day = ONE bar split by restaurant ──
+// (owner 2026-07-26, Samsung-screen-time style). Hover = per-restaurant dot + name
+// + ₹ (MoneyTip already renders exactly that); the restaurant legend sits top-right.
+export function StackedDailyBars({ data, lines, height = 260 }: {
+  data: Record<string, unknown>[];
+  lines: { key: string; name: string; color: string }[];
+  height?: number;
+}) {
+  if (!data.length || !lines.length) return <Empty />;
+  const totals = data.map((row) => lines.reduce((a, l) => a + (Number(row[l.key]) || 0), 0));
+  if (populated(totals) < MIN_POINTS) return <NotEnough height={height} value={populated(totals) === 1 ? inr(soleValue(totals)) : undefined} />;
+  const max = Math.max(1, ...totals);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "flex-end", flexWrap: "wrap", gap: "4px 14px", marginBottom: 8 }} role="list">
+        {lines.map((l) => (
+          <span key={l.key} role="listitem" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 3, background: l.color, display: "inline-block" }} aria-hidden="true" />{l.name}
+          </span>
+        ))}
+      </div>
+      <ScrollX count={data.length} height={height}>
+        <ResponsiveContainer>
+          <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
+            <CartesianGrid stroke={GRID} vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={16} />
+            <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
+            <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
+            {lines.map((l, i) => (
+              <Bar key={l.key} dataKey={l.key} name={l.name} stackId="day" fill={l.color}
+                radius={i === lines.length - 1 ? [5, 5, 0, 0] : [0, 0, 0, 0]} maxBarSize={42} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </ScrollX>
+    </div>
+  );
 }

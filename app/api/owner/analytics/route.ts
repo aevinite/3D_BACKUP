@@ -19,10 +19,32 @@ export const dynamic = "force-dynamic";
 const DAY = 86_400_000;
 // Window for a range. "today" = since 05:00 IST business-day start (matches the
 // counters + lfh_owner_overview). Others are rolling windows ending now.
-function windowFor(range: string): { from: string; to: string; bucket: string } {
+function windowFor(range: string, sp?: URLSearchParams): { from: string; to: string; bucket: string } {
   const now = Date.now();
   const to = new Date(now).toISOString();
   if (range === "all") return { from: "2020-01-01T00:00:00Z", to, bucket: "day" };
+  // custom: exact IST day range from the report dialog (owner round-4: "from which
+  // to which date you want the report"). Inclusive dates; bad input → 30d fallback.
+  if (range === "custom" && sp) {
+    const f = sp.get("from"), t2 = sp.get("to");
+    const ok = (x: string | null) => !!x && /^\d{4}-\d{2}-\d{2}$/.test(x);
+    if (ok(f) && ok(t2)) {
+      const pf = Date.parse(f + "T00:00:00+05:30");
+      const pt = Math.min(Date.parse(t2 + "T00:00:00+05:30") + DAY, now);
+      if (Number.isFinite(pf) && pt > pf) {
+        return { from: new Date(pf).toISOString(), to: new Date(pt).toISOString(), bucket: pt - pf > 3 * DAY ? "day" : "hour" };
+      }
+    }
+    return windowFor("30d");
+  }
+  // whole IST months (mirrors the reports route)
+  if (range === "month" || range === "lastmonth") {
+    const istNow = new Date(now + 5.5 * 3600_000);
+    const y = istNow.getUTCFullYear(), m = istNow.getUTCMonth();
+    const start = (yy: number, mm: number) => Date.UTC(yy, mm, 1) - 5.5 * 3600_000;
+    if (range === "month") return { from: new Date(start(y, m)).toISOString(), to, bucket: "day" };
+    return { from: new Date(start(y, m - 1)).toISOString(), to: new Date(start(y, m)).toISOString(), bucket: "day" };
+  }
   // 7d / 30d: EXACTLY N whole IST calendar days ending today (inclusive), aligned to
   // 00:00 IST. A rolling now−N×24h window instead spilled into a partial (N+1)th IST
   // day whose day-bucket the client's whole-day zero-filled axis drops — so the chart
@@ -96,7 +118,9 @@ export async function GET(req: NextRequest) {
     if (!allowed.length) return NextResponse.json({ error: "Reports aren't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
     scope.ids = allowed;
   }
-  const { from, to, bucket } = windowFor(range);
+  const { from, to, bucket } = windowFor(range, sp);
+  // cache keys must distinguish two different custom windows
+  const rangeKey = range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : range;
   const prevWin = compare ? prevWindowFor(range, from, to) : null;
 
   try {
@@ -106,18 +130,32 @@ export async function GET(req: NextRequest) {
       // (?refresh=1) forces a live recompute. Keyed by the already-authorized scope.
       const gIds = scope.all ? [] : scope.ids;
       const groupPayload = await cachedOwnerPayload({
-        key: `analytics:v1:group:${scopeKeyOf(null, scope.all, gIds)}:${range}:c${compare ? 1 : 0}`,
+        // v2: payload gained `heatmap` (mig 197); v3: gained `categories` — each shape
+        // change bumps the version so stale snapshots can't serve field-less JSON
+        // verbatim until their fingerprint happens to change (found 2026-07-26).
+        key: `analytics:v4:group:${scopeKeyOf(null, scope.all, gIds)}:${rangeKey}:c${compare ? 1 : 0}`,
         force: sp.get("refresh") === "1",
         fingerprint: () => ordersFingerprint(scope.all ? null : gIds, from, to),
         compute: async () => {
       const allow = scope.all ? null : new Set(scope.ids);
       const pIds = scope.all ? null : scope.ids; // DB-side scope (mig 138) — no whole-platform scan
-      const [rev, ts] = await Promise.all([
+      // Speed (owner round-5): every independent read starts NOW and runs concurrently —
+      // the payment/category per-restaurant fan-outs and the prev-window totals used to
+      // wait for the base block, serialising 3 extra round-trips into the compute time.
+      const pmIds: (string | null)[] = scope.all ? [null] : scope.ids;
+      const pmP = Promise.all(pmIds.map((id) => sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      const catScopedP = scope.all ? null : Promise.all(scope.ids.map((id) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      const prevP = prevWin ? windowTotals(pIds, prevWin.from, prevWin.to) : Promise.resolve(null);
+      const [rev, ts, heat] = await Promise.all([
         sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to, p_ids: pIds }),
         sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket, p_ids: pIds }),
+        // Busy heatmap (mig 197): one ≤7×24 pre-summed grid across the caller's own
+        // restaurants — p_ids pushes the scope into the DB, same rule as the calls above.
+        sb.rpc("lfh_owner_heatmap", { p_restaurant_id: null, p_from: from, p_to: to, p_ids: pIds }),
       ]);
       if (rev.error) throw rev.error;
       if (ts.error) throw ts.error;
+      if (heat.error) throw heat.error;
       // An owner only ever sees their OWN restaurants; admin sees all. These RPCs
       // return one row per restaurant, so we filter the tiny pre-summed rows here.
       const restaurantRevenue = (rev.data ?? [])
@@ -137,8 +175,7 @@ export async function GET(req: NextRequest) {
       // + fixed 2026-07-04). Admin (scope.all) may sum all; a scoped owner sums ONLY
       // their own restaurants (one tiny call each) and we merge by method.
       const pmByMethod = new Map<string, { method: string; revenue: number; orders: number }>();
-      const pmIds: (string | null)[] = scope.all ? [null] : scope.ids;
-      const pmRes = await Promise.all(pmIds.map((id) => sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      const pmRes = await pmP;
       for (const r of pmRes) {
         if (r.error) throw r.error;
         for (const row of (r.data ?? []) as Record<string, unknown>[]) {
@@ -150,8 +187,32 @@ export async function GET(req: NextRequest) {
         }
       }
       const paymentMethods = Array.from(pmByMethod.values()).sort((a, b) => b.revenue - a.revenue);
-      const prev = prevWin ? await windowTotals(pIds, prevWin.from, prevWin.to) : null;
-      return { scope: "group", range, restaurantRevenue, timeseries, paymentMethods, prev };
+      // Category split across the group (round-2: the owner wants "Revenue by category"
+      // on the multi home too). lfh_owner_category_breakdown is per-restaurant, so —
+      // exactly like the payment breakdown above — a scoped owner sums their own
+      // restaurants (one tiny pre-summed call each) and we merge by category name.
+      // scope.all (admin) merges across every restaurant id from the revenue rows.
+      const catByName = new Map<string, { category: string; qty: number; revenue: number }>();
+      // scoped owners: already in flight; admin all-view needs the rev rows to know the ids
+      const catRes = catScopedP ? await catScopedP : await Promise.all(
+        ((rev.data ?? []).map((r: Record<string, unknown>) => r.restaurant_id as string))
+          .map((id: string) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      for (const r of catRes) {
+        if (r.error) throw r.error;
+        for (const row of (r.data ?? []) as Record<string, unknown>[]) {
+          const c = String(row.category ?? "Other");
+          const cur = catByName.get(c) || { category: c, qty: 0, revenue: 0 };
+          cur.qty += Number(row.qty) || 0;
+          cur.revenue = num(cur.revenue + (Number(row.revenue) || 0));
+          catByName.set(c, cur);
+        }
+      }
+      const categories = Array.from(catByName.values()).sort((a, b) => b.revenue - a.revenue);
+      const prev = await prevP;
+      const heatmap = ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({
+        dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue),
+      }));
+      return { scope: "group", range, restaurantRevenue, timeseries, paymentMethods, categories, heatmap, prev };
         },
       });
       return NextResponse.json(groupPayload);
@@ -175,25 +236,31 @@ export async function GET(req: NextRequest) {
       new Date(fromMs).toISOString(),
       ...stepsBack.map((d) => new Date(fromMs - d * DAY).toISOString()),
     ];
-    const [meta, ts, dishes, cats, hourly, openT, pm, sameHour, payTrend, records] = await Promise.all([
+    // Compute-on-view cached like the group scope (owner round-3: "auto calculate…
+    // it should show number only, very fast — the live site is already optimized").
+    // LIVE bits stay OUTSIDE the cache: open-tables (a now-count) and the unbounded
+    // all-time records (fetched once per restaurant on demand).
+    const restBase = await cachedOwnerPayload({
+      key: `analytics:v4:rest:${rid}:${rangeKey}:c${compare ? 1 : 0}`,
+      force: sp.get("refresh") === "1",
+      fingerprint: () => ordersFingerprint([rid], from, to),
+      compute: async () => {
+    const [meta, ts, dishes, cats, hourly, heat, pm, sameHour, payTrend] = await Promise.all([
       sb.from("restaurants").select("id, slug, name, accent_color, hero_title").eq("id", rid).maybeSingle(),
       sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: bucket }),
       sb.rpc("lfh_owner_dish_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_hourly", { p_restaurant_id: rid, p_from: from, p_to: to }),
-      sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open"),
+      sb.rpc("lfh_owner_heatmap", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sameHourStarts.length
         ? sb.rpc("lfh_owner_samehour_compare", { p_restaurant_id: rid, p_starts: sameHourStarts, p_elapsed: `${Math.round(elapsedMs / 1000)} seconds` })
         : Promise.resolve({ data: [], error: null }),
       sb.rpc("lfh_owner_payment_trend", { p_restaurant_id: rid, p_from: new Date(Date.now() - 14 * DAY).toISOString(), p_to: to }),
-      wantRecords
-        ? sb.rpc("lfh_owner_records", { p_restaurant_id: rid })
-        : Promise.resolve({ data: null, error: null }),
     ]);
     if (meta.error) throw meta.error;
-    if (!meta.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
-    for (const e of [ts, dishes, cats, hourly, pm, sameHour, payTrend, records]) if (e.error) throw e.error;
+    if (!meta.data) throw new Error("restaurant not found");
+    for (const e of [ts, dishes, cats, hourly, heat, pm, sameHour, payTrend]) if (e.error) throw e.error;
 
     const dishRows = (dishes.data ?? []).map((r: Record<string, unknown>) => ({
       title: r.title, qty: Number(r.qty) || 0, revenue: num(r.revenue),
@@ -203,6 +270,7 @@ export async function GET(req: NextRequest) {
     }));
     const revenue = num(tsRows.reduce((a: number, r: { revenue: number }) => a + r.revenue, 0));
     const orders = tsRows.reduce((a: number, r: { orders: number }) => a + r.orders, 0);
+    void 0; // (kept structure below unchanged — still inside the cached compute)
     // Avg order = PAID revenue ÷ PAID order count (both from paid-only sources). `orders` above
     // counts ALL non-cancelled orders (incl. open/unpaid), so revenue/orders understated the
     // average and made it drift UPWARD as open tables settled with no new orders. paid-count
@@ -213,14 +281,15 @@ export async function GET(req: NextRequest) {
     // `orders` counts ALL non-cancelled (incl. open/unpaid) while revenue+avgOrder are
     // PAID-only — so Revenue ÷ Orders ≠ Avg order and looks like a wrong number. Ship
     // `paidOrders` too so the dashboard can label the tile honestly (owner audit 2026-07-06).
-    return NextResponse.json({
+    return {
       scope: "restaurant", range, prev,
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
-      kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, openTables: openT.count || 0, topDish: dishRows[0]?.title || "—" },
+      kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, openTables: 0, topDish: dishRows[0]?.title || "—" },
       timeseries: tsRows,
       dishes: dishRows,
       categories: (cats.data ?? []).map((r: Record<string, unknown>) => ({ category: r.category, qty: Number(r.qty) || 0, revenue: num(r.revenue) })),
       hourly: (hourly.data ?? []).map((r: Record<string, unknown>) => ({ hour: Number(r.hour) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
+      heatmap: ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({ dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
       paymentMethods: (pm.data ?? []).map((r: Record<string, unknown>) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 })),
       // sameHour rows come back newest-first (window_start DESC) = the order we sent.
       sameHour: ((sameHour.data ?? []) as Record<string, unknown>[]).map((r) => ({
@@ -229,8 +298,20 @@ export async function GET(req: NextRequest) {
       payTrend: ((payTrend.data ?? []) as Record<string, unknown>[]).map((r) => ({
         day: r.day, method: String(r.method || "Not recorded"), revenue: num(r.revenue),
       })),
-      records: records.data ?? null,
+    };
+      },
     });
+
+    // LIVE add-ons, outside the cache: the open-tables now-count (must never freeze)
+    // and the on-demand all-time records (unbounded scan, once per restaurant).
+    const openT = await sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open");
+    const kpis = { ...(restBase as { kpis: Record<string, unknown> }).kpis, openTables: openT.count || 0 };
+    let records: unknown = null;
+    if (wantRecords) {
+      const r = await sb.rpc("lfh_owner_records", { p_restaurant_id: rid });
+      if (!r.error) records = r.data ?? null;
+    }
+    return NextResponse.json({ ...restBase, kpis, records });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
   }

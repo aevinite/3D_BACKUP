@@ -21,15 +21,25 @@ import {
 } from "@/components/owner/reports/kit";
 import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
 import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
+import { ReportMenu } from "@/components/owner/OwnerReportButton";
+import { gatherOwnerReport } from "@/lib/ownerReportGather";
+import { SectionExport } from "@/components/owner/reports/sectionExport";
 
-type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy";
+type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy" | "all" | "custom";
 const RANGES: { k: Range; label: string }[] = [
   { k: "today", label: "Today" }, { k: "yesterday", label: "Yesterday" },
   { k: "7d", label: "7 days" }, { k: "30d", label: "30 days" },
   { k: "month", label: "This month" }, { k: "lastmonth", label: "Last month" },
   { k: "12m", label: "12 months" }, { k: "fy", label: "FY (Apr–Mar)" },
+  { k: "all", label: "All time" }, { k: "custom", label: "Custom…" },
 ];
 const rangeLabel = (r: Range) => RANGES.find((x) => x.k === r)?.label ?? r;
+// A "Day summary" is inherently ONE day — it must NOT carry a 7d/30d toggle (owner
+// round-6). These report kinds get a single-DATE control instead of the range seg;
+// under the hood a chosen day is fetched as range=custom with from=to=that day.
+const DAY_KINDS = new Set<DataKind>(["daysummary"]);
+const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+const yesterdayIso = () => new Date(Date.now() + 5.5 * 3600_000 - 86_400_000).toISOString().slice(0, 10);
 
 type Rest = { id: string; name: string; accent: string };
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
@@ -116,7 +126,17 @@ export default function OwnerReports() {
   // fires against the wrong scope in the meantime. "" = all restaurants.
   const [rid, setRid] = useState<string>("");
   const [sel, setSel] = useState<RKey | "">("");         // "" = hub
+  // Deep link from the dashboard's KPI boxes (owner round-3: "the top five box …
+  // should take you to the report section"): /owner/reports?open=<type> lands on
+  // that report directly instead of the hub.
+  useEffect(() => {
+    const open = new URLSearchParams(window.location.search).get("open");
+    if (open) setSel(open as RKey);
+  }, []);
   const [range, setRange] = useState<Range>("30d");
+  const [day, setDay] = useState<string>(istToday());          // Day summary's single date
+  const [cFrom, setCFrom] = useState<string>(istToday());       // Custom range from…
+  const [cTo, setCTo] = useState<string>(istToday());           // …to
   const [store, setStore] = useState<Record<string, Entry>>({});
 
   // Admin act-as scope pin (mirrors app/owner/page.tsx): rides on every call so a second
@@ -145,16 +165,27 @@ export default function OwnerReports() {
     }).catch(() => setReady(true));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cacheKey = (kind: DataKind, r: string, rg: Range) => `${kind}|${r}|${rg}`;
+  // The effective backend window for the ACTIVE report: a day-kind report is always a
+  // single day (range=custom, from=to=day); a report on the "Custom…" range uses the
+  // date pickers; everything else is the plain named range.
+  const effFor = (kind: DataKind, rg: Range): { range: Range; from?: string; to?: string } =>
+    DAY_KINDS.has(kind) ? { range: "custom", from: day, to: day }
+    : rg === "custom" ? { range: "custom", from: cFrom, to: cTo }
+    : { range: rg };
+  const cacheKey = (kind: DataKind, r: string, rg: Range) => {
+    const e = effFor(kind, rg);
+    return `${kind}|${r}|${e.range}${e.from ? `|${e.from}|${e.to}` : ""}`;
+  };
   // A key is fetched at most once (period/rid/kind combos are stable) — dedup via a ref so
   // React StrictMode's double-invoke can't double-fetch, and no stale `store` closure.
   const started = useRef<Set<string>>(new Set());
-  const ensure = useCallback((kind: DataKind, r: string, rg: Range) => {
-    const ck = `${kind}|${r}|${rg}`;
+  const ensure = useCallback((kind: DataKind, r: string, rg: Range, eff: { range: Range; from?: string; to?: string }) => {
+    const ck = `${kind}|${r}|${eff.range}${eff.from ? `|${eff.from}|${eff.to}` : ""}`;
     if (started.current.has(ck)) return;
     started.current.add(ck);
     setStore((s) => ({ ...s, [ck]: { loading: true } }));
-    const q = new URLSearchParams({ type: apiType(kind), range: rg });
+    const q = new URLSearchParams({ type: apiType(kind), range: eff.range });
+    if (eff.from) { q.set("from", eff.from); q.set("to", eff.to as string); }
     if (r) q.set("rid", r);
     if (scopePin) q.set("scope", scopePin);
     fetch(`/api/owner/reports?${q}`, { cache: "no-store" })
@@ -170,7 +201,17 @@ export default function OwnerReports() {
   }, [scopePin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeKind: DataKind = sel ? REPORTS[sel].kind : "money";
-  useEffect(() => { if (ready) ensure(activeKind, rid, range); }, [ready, activeKind, rid, range, ensure]);
+  const isDayKind = DAY_KINDS.has(activeKind);
+  const fdate = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const effLabel = isDayKind ? fdate(day) : range === "custom" ? `${fdate(cFrom)} – ${fdate(cTo)}` : rangeLabel(range);
+  const isCustom = !isDayKind && range === "custom";
+  const customOk = !isCustom || (cFrom <= cTo && !!cFrom && !!cTo);
+  useEffect(() => {
+    if (!ready) return;
+    if (isCustom && !customOk) return;                      // wait for a valid custom range
+    ensure(activeKind, rid, range, effFor(activeKind, range));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, activeKind, rid, range, day, cFrom, cTo, ensure]);
 
   const entry = store[cacheKey(activeKind, rid, range)];
   const data = entry?.data;
@@ -179,33 +220,6 @@ export default function OwnerReports() {
   // a brown/orange/red chart inside the green owner console read as a bug (owner 2026-07-25).
   const accent = "var(--accent)";
   const singleRest = !!rid;
-
-  const exportCsv = () => {
-    if (!sel || !data) return;
-    const meta = REPORTS[sel];
-    const stamp = new Date().toISOString().slice(0, 10);
-    const name = `${meta.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${range}-${stamp}.csv`;
-    const m = (data.rows ?? []) as MoneyRow[];
-    const t = data.totals;
-    if (meta.kind === "money" || meta.kind === "daysummary") {
-      const header = ["Period", "Orders", "Paid", "Subtotal", "Tax", "Discount", "Revenue", "Cancelled", "Lost value"];
-      const rows: (string | number)[][] = m.map((r) => [bucketLabel(r.bucket, data.bucket || "day"), r.orders, r.paidOrders, r.subtotal, r.tax, r.discount, r.revenue, r.cancelledOrders, r.cancelledValue]);
-      if (t) rows.push(["Total", t.orders, t.paidOrders, t.subtotal, t.tax, t.discount, t.revenue, t.cancelledOrders, t.cancelledValue]);
-      if (sel === "tax" && data.tax) {
-        rows.push([], ["Tax split", "Rate %", "Collected"], ["Total tax", data.tax.effectivePct, t?.tax ?? 0]);
-        for (const c of data.tax.components) rows.push([c.label, c.rate, c.amount]);
-      }
-      downloadCsv(name, header, rows);
-    } else if (meta.kind === "dishes") {
-      downloadCsv(name, ["Dish", "Qty", "Item sales (list price)"], ((data.rows ?? []) as DishRow[]).map((r) => [r.title, r.qty, r.revenue]));
-    } else if (meta.kind === "categories") {
-      downloadCsv(name, ["Category", "Qty", "Item sales (list price)"], ((data.rows ?? []) as CatRow[]).map((r) => [r.category, r.qty, r.revenue]));
-    } else if (meta.kind === "payments") {
-      downloadCsv(name, ["Method", "Bills", "Revenue"], ((data.rows ?? []) as PayRow[]).map((r) => [canonPayMethod(r.method), r.orders, r.revenue]));
-    } else if (meta.kind === "hourly") {
-      downloadCsv(name, ["Hour", "Orders", "Revenue"], ((data.rows ?? []) as HourRow[]).map((r) => [`${r.hour}:00`, r.orders, r.revenue]));
-    }
-  };
 
   return (
     <div className="rs-root">
@@ -231,28 +245,50 @@ export default function OwnerReports() {
             {rests.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         )}
-        <div className="rs-seg" role="tablist" aria-label="Period">
-          {RANGES.map((r) => (
-            <button key={r.k} role="tab" aria-selected={range === r.k} className={range === r.k ? "on" : ""} onClick={() => setRange(r.k)}>{r.label}</button>
-          ))}
-        </div>
-        {sel && (
+        {/* Day summary is ONE day → a date control, never a 7d/30d toggle (owner round-6). */}
+        {isDayKind ? (
+          <div className="rs-seg" role="group" aria-label="Day">
+            <button aria-pressed={day === istToday()} className={day === istToday() ? "on" : ""} onClick={() => setDay(istToday())}>Today</button>
+            <button aria-pressed={day === yesterdayIso()} className={day === yesterdayIso() ? "on" : ""} onClick={() => setDay(yesterdayIso())}>Yesterday</button>
+            <input type="date" className="rs-date" value={day} max={istToday()} onChange={(e) => setDay(e.target.value)} aria-label="Pick a date" />
+          </div>
+        ) : (
+          <div className="rs-seg" role="tablist" aria-label="Period">
+            {RANGES.map((r) => (
+              <button key={r.k} role="tab" aria-selected={range === r.k} className={range === r.k ? "on" : ""} onClick={() => setRange(r.k)}>{r.label}</button>
+            ))}
+          </div>
+        )}
+        {isCustom && (
+          <div className="rs-custom">
+            <input type="date" className="rs-date" value={cFrom} max={cTo} onChange={(e) => setCFrom(e.target.value)} aria-label="From date" />
+            <i className="fas fa-arrow-right" aria-hidden />
+            <input type="date" className="rs-date" value={cTo} min={cFrom} max={istToday()} onChange={(e) => setCTo(e.target.value)} aria-label="To date" />
+          </div>
+        )}
+        {sel ? (
+          /* Phase 3: professional section-scoped Print / CSV / Excel (was a raw CSV +
+             UI print). Builds a clean standalone document for THIS report + period. */
           <div className="rs-actions">
-            <button className="rs-btn" onClick={exportCsv} disabled={!data} title="Download this report as a CSV (Excel/Sheets)">
-              <i className="fas fa-download" aria-hidden /> CSV
-            </button>
-            <button className="rs-btn" onClick={() => window.print()} disabled={!data} title="Print or save as PDF">
-              <i className="fas fa-print" aria-hidden /> Print
-            </button>
+            {data && <SectionExport filename={`${REPORTS[sel].label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${isDayKind ? day : range === "custom" ? `${cFrom}_${cTo}` : range}-${new Date().toISOString().slice(0, 10)}`}
+              ctx={{ meta: REPORTS[sel], data, restName, periodLabel: effLabel, isTax: sel === "tax", bucketLabel }} />}
+          </div>
+        ) : (
+          /* On the hub: the SAME ask-first compiled statement as the dashboard's Report
+             button (owner round-6: "the main section will have the same report as the
+             dashboard"). Generates billing + GST + settlement + per-restaurant sections. */
+          <div className="rs-actions">
+            <ReportMenu filename={`aevidine-report-${new Date().toISOString().slice(0, 10)}`}
+              gather={(qs, label) => gatherOwnerReport({ restaurants: rests, activeRid: rid || null, scopePin, asSuffix: asSuffix(), periodQs: qs, periodLabel: label })} />
           </div>
         )}
       </div>
 
       {!sel ? (
-        <Hub range={range} money={store[cacheKey("money", rid, range)]} restName={restName} accent={accent} onOpen={setSel} />
+        <Hub range={range} money={entry} restName={restName} accent={accent} onOpen={setSel} />
       ) : (
         <ReportView sel={sel} data={data} loading={entry?.loading} error={entry?.error}
-          range={range} accent={accent} restName={restName} singleRest={singleRest}
+          range={range} rangeText={effLabel} accent={accent} restName={restName} singleRest={singleRest}
           onOpenReport={(k) => setSel(k)} />
       )}
     </div>
@@ -321,19 +357,19 @@ function Hub({ range, money, restName, accent, onOpen }: {
 }
 
 // ── The report view (title + loading/error, delegates body) ───────────────────
-function ReportView({ sel, data, loading, error, range, accent, restName, singleRest, onOpenReport }: {
+function ReportView({ sel, data, loading, error, range, rangeText, accent, restName, singleRest, onOpenReport }: {
   sel: RKey; data?: Payload; loading?: boolean; error?: string;
-  range: Range; accent: string; restName: string; singleRest: boolean;
+  range: Range; rangeText: string; accent: string; restName: string; singleRest: boolean;
   onOpenReport: (k: RKey) => void;
 }) {
   const meta = REPORTS[sel];
   const tone = meta.tone || "accent";
   return (
     <div className={`rs-report tone-${tone}`} id="rs-print">
-      <PrintHead restName={restName} title={meta.label} period={rangeLabel(range)} />
+      <PrintHead restName={restName} title={meta.label} period={rangeText} />
       <div className="rs-rtitle">
         <span className="cic"><i className={`fas ${meta.icon}`} aria-hidden /></span>
-        <div><h2>{meta.label}</h2><div className="scope">{restName} · {rangeLabel(range)}</div></div>
+        <div><h2>{meta.label}</h2><div className="scope">{restName} · {rangeText}</div></div>
       </div>
       {error ? (
         <Panel><div className="rs-empty"><i className="fas fa-triangle-exclamation" aria-hidden />{error}</div></Panel>
@@ -358,6 +394,16 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   // day/month → hourly/daily), so a single-bar period fills out. KPI cards + the
   // GST-style tables keep using the daily `mrows`/`bucket` untouched.
   const chartBucket = data.drillBucket || bucket;
+  // The "best/worst" panels + "busiest …" labels describe the CHART series, which may
+  // be auto-drilled (a single day → hourly). Label them by the CHART's grain, not the
+  // un-drilled window — otherwise a single day's hourly chart reads "Best DAY: 1 pm"
+  // instead of "Best HOUR: 1 pm" (owner round-6, phase-4 review).
+  const chartUnit: "month" | "hour" | "day" = chartBucket === "month" ? "month" : chartBucket === "hour" ? "hour" : "day";
+  // rowUnit describes the TABLE/mrows grain (day / month / hour) — used by the money
+  // reports whose day-level analysis reads mrows directly (discounts, cancellations),
+  // so a 12-month view says "month" and a today view says "hour", not always "day".
+  const rowUnit: "month" | "hour" | "day" = bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day";
+  const RowUnit = rowUnit[0].toUpperCase() + rowUnit.slice(1);
   const drillRows = (data.drillRows as MoneyRow[] | undefined) ?? [];
   const chartRows = drillRows.length ? drillRows : mrows;
   const cser = (pick: (r: MoneyRow) => number) => chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), value: pick(r) }));
@@ -438,7 +484,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
             <BestWorst
               series={series.map((s) => ({ label: s.label, value: s.revenue }))}
               money noun="income"
-              unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+              unit={chartUnit}
             />
             <Panel title="Revenue through the period" pad={false}>
               <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={220} /></div>
@@ -468,7 +514,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           <BestWorst
             series={series.map((s) => ({ label: s.label, value: s.revenue }))}
             money noun="revenue"
-            unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+            unit={chartUnit}
           />
         )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
@@ -497,8 +543,8 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           <BestWorst
             series={avgSeries.map((s) => ({ label: s.label, value: s.revenue }))}
             money noun="basket size"
-            title={`Fullest & thinnest ${bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}`}
-            unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+            title={`Fullest & thinnest ${chartUnit}`}
+            unit={chartUnit}
           />
         )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} showAvg />
@@ -513,7 +559,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
     const placed = t.orders + t.cancelledOrders;
     const paidPct = placed ? (t.paidOrders / placed) * 100 : 0;
     const openOrders = Math.max(0, t.orders - t.paidOrders);   // placed, not cancelled, not yet paid
-    const unitWord = bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day";
+    const unitWord = chartUnit;
     return (
       <>
         <div className="rs-kpis">
@@ -697,7 +743,11 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
             <p className="rs-note">Each period&apos;s tax is split across the set tax lines and rounded so the parts add back to that period&apos;s total — ready to copy into a return.</p>
           </Panel>
         )}
-        <MoneyTable rows={mrows} totals={t} bucket={bucket} />
+        {/* The filing view already IS the tax report's by-period table; the generic
+            money table only duplicates Period+Tax here (orders/revenue belong in Sales).
+            Keep it ONLY as a fallback when no tax lines are configured, so the report
+            still shows a by-period breakdown (owner round-6, phase-6 no-duplicate rule). */}
+        {filingRows.length === 0 && <MoneyTable rows={mrows} totals={t} bucket={bucket} />}
       </>
     );
   }
@@ -722,25 +772,25 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Discounts given" tone="warn" icon="fa-tag" big value={inr(t.discount)} sub={`over ${nfmt(discRows.length)} day${discRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.discount)} />
+          <Stat label="Discounts given" tone="warn" icon="fa-tag" big value={inr(t.discount)} sub={`over ${nfmt(discRows.length)} ${rowUnit}${discRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.discount)} />
           <Stat label="Effective rate" tone="warn" icon="fa-percent" value={`${effPct.toFixed(1)}%`} sub="of gross sales" />
           <Stat label="Revenue after discounts" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} onClick={() => onOpenReport("sales")} title="Open the Sales trend report" />
           <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} />
-          <Stat label="Biggest day" tone="bad" icon="fa-arrow-up" value={biggest ? inr(biggest.discount) : "—"} sub={biggest ? bucketLabel(biggest.bucket, bucket) : ""} onClick={biggest ? () => scrollToId("rs-disc-days") : undefined} title={biggest ? "Jump to the days-with-discounts table" : undefined} />
+          <Stat label={`Biggest ${rowUnit}`} tone="bad" icon="fa-arrow-up" value={biggest ? inr(biggest.discount) : "—"} sub={biggest ? bucketLabel(biggest.bucket, bucket) : ""} onClick={biggest ? () => scrollToId("rs-disc-days") : undefined} title={biggest ? "Jump to the days-with-discounts table" : undefined} />
         </div>
         <Panel title="Discounts over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={cser((r) => r.discount)} color={accent} money name="Discount" height={240} /></div>
         </Panel>
         {top5.length > 0 && (
-          <Panel title="Biggest discount days" hint="top 5 by amount given away">
+          <Panel title={`Biggest discount ${rowUnit}s`} hint="top 5 by amount given away">
             <LeaderBar data={top5} />
             <p className="rs-note">
-              These {top5.length} day{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of everything discounted this period.
+              These {top5.length} {rowUnit}{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of everything discounted this period.
               {" "}Discounting is <b>{trend}</b>{trend === "steady" ? " — the give-away rate is holding flat." : trend === "rising" ? ` — the give-away rate climbed from ~${firstAvg.toFixed(1)}% to ~${lastAvg.toFixed(1)}% of sales.` : ` — the give-away rate fell from ~${firstAvg.toFixed(1)}% to ~${lastAvg.toFixed(1)}% of sales.`}
             </p>
           </Panel>
         )}
-        <Panel id="rs-disc-days" title="Days with discounts" hint="only days a discount was given" pad={false}>
+        <Panel id="rs-disc-days" title={`${RowUnit}s with discounts`} hint={`only ${rowUnit}s a discount was given`} pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
               <thead><tr><th>Period</th><th className="num">Paid bills</th><th className="num">Discount</th><th className="num">Revenue</th><th className="num">Disc. rate</th></tr></thead>
@@ -771,11 +821,11 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Value lost" tone="bad" icon="fa-ban" big value={inr(t.cancelledValue)} sub={`over ${nfmt(cxRows.length)} day${cxRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.cancelledValue)} />
+          <Stat label="Value lost" tone="bad" icon="fa-ban" big value={inr(t.cancelledValue)} sub={`over ${nfmt(cxRows.length)} ${rowUnit}${cxRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.cancelledValue)} />
           <Stat label="Cancelled orders" tone="bad" icon="fa-circle-xmark" value={nfmt(t.cancelledOrders)} sub={`${cxPct.toFixed(1)}% of all placed`} />
           <Stat label="Avg lost / cancel" tone="warn" icon="fa-scale-balanced" value={inr(avgPerCx)} />
           <Stat label="Kept revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} onClick={() => onOpenReport("sales")} title="Open the Sales trend report" />
-          <Stat label="Worst day" tone="warn" icon="fa-arrow-up" value={worst ? inr(worst.cancelledValue) : "—"} sub={worst ? bucketLabel(worst.bucket, bucket) : ""} onClick={worst ? () => scrollToId("rs-cx-days") : undefined} title={worst ? "Jump to the days-with-cancellations table" : undefined} />
+          <Stat label={`Worst ${rowUnit}`} tone="warn" icon="fa-arrow-up" value={worst ? inr(worst.cancelledValue) : "—"} sub={worst ? bucketLabel(worst.bucket, bucket) : ""} onClick={worst ? () => scrollToId("rs-cx-days") : undefined} title={worst ? "Jump to the days-with-cancellations table" : undefined} />
         </div>
         <p className="rs-note" style={{ marginTop: -4, marginBottom: 12 }}>
           <i className={`fas ${health.icon}`} aria-hidden style={{ color: health.tone, marginRight: 6 }} />
@@ -785,12 +835,12 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           <div style={{ padding: 12 }}><ToggleChart data={cser((r) => r.cancelledValue)} color={accent} money name="Lost value" height={240} /></div>
         </Panel>
         {top5.length > 0 && (
-          <Panel title="Worst cancellation days" hint="top 5 by value lost">
+          <Panel title={`Worst cancellation ${rowUnit}s`} hint="top 5 by value lost">
             <LeaderBar data={top5} />
-            <p className="rs-note">These {top5.length} day{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of all the value lost to cancellations this period.</p>
+            <p className="rs-note">These {top5.length} {rowUnit}{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of all the value lost to cancellations this period.</p>
           </Panel>
         )}
-        <Panel id="rs-cx-days" title="Days with cancellations" hint="only days something was voided" pad={false}>
+        <Panel id="rs-cx-days" title={`${RowUnit}s with cancellations`} hint={`only ${rowUnit}s something was voided`} pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
               <thead><tr><th>Period</th><th className="num">Cancelled orders</th><th className="num">Value lost</th><th className="num">Kept revenue</th></tr></thead>

@@ -1,30 +1,39 @@
 "use client";
-// Owner · Dashboard (redesign 2026-07-04, tiers extended 2026-07-06) — ADAPTIVE
-// by restaurant count:
-//   · 1 restaurant  → the dashboard IS that restaurant (hero header + charts up
-//     front — a "who earns more" bar with one bar is useless, owner's complaint).
-//   · 2 restaurants → head-to-head comparison + two-line trend.
-//   · 3–9           → leaderboard bar + multi-line trend + card grid; click drills in
-//     (5+ caps the trend at the top-5 lines so it stays readable).
-//   · 10+           → HQ mode: ONE sortable, searchable table (cards would be a wall
-//     of noise); scales to 50+. Sidebar (OwnerShell) always lists every restaurant.
-// Every KPI carries a ▲/▼ delta vs the previous equal-length period,
-// and an insight strip says in plain words what the numbers mean. All data arrives
-// pre-aggregated from /api/owner/{overview,analytics,reports} (tiny rows, mig-113
-// paid-only rule everywhere). Refresh: activity-gated ~60s + manual — no websocket.
+// Owner · Dashboard — MERGED redesign (owner-approved 2026-07-26, spec in memory
+// "owner-dashboard-merge-spec"). What changed vs the 2026-07-04 adaptive dashboard:
+//   · NO global range tabs — every card carries its OWN small range dropdown
+//     ("half the graphs didn't react to the global switch, so it looked broken").
+//     Data is cached client-side PER (scope, range): cards sharing a range share one
+//     fetch, and switching a card only fetches that range once (egress-safe).
+//   · Top row = FIVE KPI cards (Revenue / Orders / Avg order / Today so far / Lost
+//     to cancellations) with a sparkline living inside each card — no open-tables card.
+//   · Breadcrumb merged into the shell's top strip (Owner › Dashboard › <name>) via
+//     the lfh:owner-crumb event — the second heading row is gone.
+//   · Single-restaurant view: revenue trend (tooltip shows ₹ AND orders), busy hours,
+//     category donut, payment donut (the ONLY payment chart — same-hour + 14-day
+//     stacked bars removed), NEW day×hour heatmap (mig 197), records, every-dish list,
+//     recent-activity mini feed. Charts are theme-emerald — never the restaurant accent.
+//   · Multi-restaurant: 2–3 → Samsung-style stacked daily bars (one bar per day,
+//     split by restaurant); every multi tier gets ONE sortable table; a row click
+//     slides a summary drawer from the right with "View in full detail" → the
+//     restaurant's own dashboard (the owner's 3-phase drill).
+//   · Report ▾ (top right): Print / CSV / Excel of what's currently on screen.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import { asSuffix } from "@/lib/ownerPin";
 import {
-  AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod, DeltaChip,
-  SameHourBar, PayTrendStack,
+  AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod,
+  DeltaChip, Spark, SparkArea, Heatmap, StackedDailyBars,
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
-import RangeSlider from "@/components/owner/RangeSlider";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { reportRealtime } from "@/lib/connectionStatus";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
+import { useBackClose } from "@/lib/backStack";
+import { buildReportHtml, buildReportTables, type ReportData, type ExportTable } from "@/components/owner/ownerReportDoc";
+import { gatherOwnerReport } from "@/lib/ownerReportGather";
+import { ReportMenu } from "@/components/owner/OwnerReportButton";
 
 const DAY_MS = 86400000;
 type Range = "today" | "yesterday" | "7d" | "30d" | "all";
@@ -33,12 +42,16 @@ const RANGES: { k: Range; label: string }[] = [
   { k: "7d", label: "7 days" }, { k: "30d", label: "30 days" }, { k: "all", label: "All time" },
 ];
 const RANGE_LABEL: Record<Range, string> = {
-  today: "today", yesterday: "yesterday", "7d": "the last 7 days", "30d": "the last 30 days", all: "all time",
+  today: "today", yesterday: "yesterday", "7d": "last 7 days", "30d": "last 30 days", all: "all time",
 };
 const PREV_LABEL: Record<Range, string> = {
   today: "vs yesterday (same hours)", yesterday: "vs the day before", "7d": "vs the 7 days before",
   "30d": "vs the 30 days before", all: "",
 };
+// Theme accent for every single-scope chart (owner 2026-07-26: "it should be green
+// everywhere" — Burger Barn's charts were rendering in its brown accent).
+const GREEN = "#34d399";
+const FALLBACK = GREEN;
 
 type Restaurant = {
   id: string; slug: string; name: string; active: boolean; accentColor: string;
@@ -48,43 +61,45 @@ type Overview = { restaurants: Restaurant[]; totals: { revenueToday: number; ord
 type GroupRev = { id: string; slug: string; name: string; accentColor: string; revenue: number; orders: number };
 type TsRow = { bucket: string; restaurantId?: string; revenue: number; orders: number };
 type Pay = { method: string; revenue: number; orders: number };
+type HeatRow = { dow: number; hr: number; orders: number; revenue: number };
 type Prev = { revenue: number; orders: number } | null;
-type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow[]; paymentMethods: Pay[]; prev: Prev };
+type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow[]; paymentMethods: Pay[]; heatmap?: HeatRow[]; categories?: { category: string; qty: number; revenue: number }[]; prev: Prev; cachedAt?: string };
 type Dish = { title: string; qty: number; revenue: number };
+type Records = {
+  bestDay?: { date: string; revenue: number } | null;
+  bigBill?: { table: string | null; revenue: number } | null;
+  fastHour?: { at: string; orders: number } | null;
+  starDish?: { title: string; qty: number } | null;
+  regulars?: number | null;
+} | null;
 type RestA = {
   scope: "restaurant"; prev: Prev;
   restaurant: { id: string; slug: string; name: string; accentColor: string; heroTitle: string };
   kpis: { revenue: number; orders: number; paidOrders?: number; avgOrder: number; openTables: number; topDish: string };
   timeseries: TsRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
   hourly: { hour: number; orders: number; revenue: number }[]; paymentMethods: Pay[];
-  sameHour?: { start: string; revenue: number; orders: number }[];
-  payTrend?: { day: string; method: string; revenue: number }[];
-  records?: {
-    bestDay?: { date: string; revenue: number } | null;
-    bigBill?: { table: string | null; revenue: number } | null;
-    fastHour?: { at: string; orders: number } | null;
-    starDish?: { title: string; qty: number } | null;
-    regulars?: number | null;
-  } | null;
+  heatmap?: HeatRow[]; records?: Records; cachedAt?: string;
 };
+type Payload = GroupA | RestA;
 type MoneyTotals = { revenue: number; discount: number; cancelledOrders: number; cancelledValue: number; tax: number };
 type View = { level: "home" } | { level: "restaurant"; rid: string } | { level: "dish"; rid: string; dish: string };
+type Act = { id: string; panel: string; action: string; actor: string | null; table_number: string | null; created_at: string };
 
-const FALLBACK = "#34d399";
-// Labels for the same-elapsed-time comparison windows, per range. Order matches
-// the API: [current, the period right before, same weekday last week, 4 weeks back].
-const SAMEHOUR_LABEL: Partial<Record<Range, string[]>> = {
-  today: ["Today (till now)", "Yesterday (till now)", "Last week (till now)", "4 weeks ago (till now)"],
-  yesterday: ["Yesterday", "Day before", "Same day last week", "4 weeks before"],
-  "7d": ["This week", "Week before", "2 weeks back", "4 weeks back"],
-  "30d": ["These 30 days", "30 days before", "60 days back", "90 days back"],
-};
+// Range model (owner round-2, 2026-07-26): ONE main dropdown top-right drives
+// EVERYTHING — the KPI boxes and every graph ("it is for how much? for all the
+// graphs"; owner: the boxes should have "only the main one"). Busy-hours + heatmap
+// are PINNED to the last 7 days (weekly-rhythm data — the click-to-enlarge +
+// previous-week ‹ › paging is the deferred detail view).
+const WEEK: Range = "7d";
+// 2–3 restaurants: the split daily bars stay in the THEME's green family — light +
+// dark green, a third non-brown colour only if needed (owner round-2: "only brown
+// doesn't make sense"). Identity accent colours are for the many-tier only.
+const GREEN_SHADES = ["#34d399", "#0f766e", "#a3e635"];
 
 const IST = "Asia/Kolkata";
-// Some RPCs return a zone-LESS IST wall-clock timestamp (e.g. "2026-06-28T00:00:00").
-// `new Date(that)` reads it in the VIEWER's local zone, and re-applying timeZone:IST
-// then shifts it for anyone outside India (owner audit 2026-07-06). Treat a zone-less
-// value as UTC so the exact wall-clock numbers print regardless of where it's viewed.
+// Some RPCs return a zone-LESS IST wall-clock timestamp — see the note in the old
+// dashboard (owner audit 2026-07-06): treat zone-less as UTC so numbers print the same
+// wherever they're viewed.
 function istWall(ts: string, opts: Intl.DateTimeFormatOptions): string {
   const zoneless = /T/.test(ts) && !/[Z+]|[+-]\d\d:?\d\d$/.test(ts);
   const d = new Date(zoneless ? ts + "Z" : ts);
@@ -95,9 +110,8 @@ function tsLabel(iso: string, range: Range): string {
   if (range === "today" || range === "yesterday") return d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST });
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
 }
-// A stable IST key for a bucket instant, at the range's granularity — used to line
-// timeseries rows up against a COMPLETE bucket sequence so days/hours with no sales
-// show as a zero, not a hidden gap that makes the trend lie (found 2026-07-05).
+// Stable IST bucket key (hour or day grain) — lines timeseries rows up against the
+// COMPLETE expected bucket sequence so no-sales periods show as zeros (2026-07-05).
 function istKey(d: Date, range: Range): string {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
     timeZone: IST, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23",
@@ -105,18 +119,12 @@ function istKey(d: Date, range: Range): string {
   if (range === "today" || range === "yesterday") return `${p.year}-${p.month}-${p.day} ${p.hour}`;
   return `${p.year}-${p.month}-${p.day}`;
 }
-// The full ordered list of buckets we EXPECT for a range (so gaps become zeros). "all"
-// is unbounded, so it's left to whatever the data spans (no fill).
 function expectedBuckets(range: Range): { key: string; label: string }[] {
   const now = new Date();
   const out: { key: string; label: string }[] = [];
   if (range === "today" || range === "yesterday") {
-    // Align the hourly buckets to the SERVER's 05:00-IST business day, not the
-    // calendar day. Before this, the client built calendar-day hour keys while the
-    // server bucketed by the 05:00-IST business day, so between 00:00 and 05:00 IST
-    // the two key sequences never intersected and the chart went blank (bug H5).
-    // "today" also stops at the current hour so future hours aren't zero-padded
-    // (which used to drag the whole line down to zero for the rest of the day).
+    // Hour keys aligned to the server's 05:00-IST business day (bug H5) — "today"
+    // stops at the current hour so future hours aren't zero-padded.
     const startMs = Date.parse(businessDayStartIso(now)) - (range === "yesterday" ? DAY_MS : 0);
     const endMs = range === "yesterday" ? startMs + DAY_MS - 1 : now.getTime();
     for (let t = startMs; t <= endMs; t += 3600_000) {
@@ -132,9 +140,7 @@ function expectedBuckets(range: Range): { key: string; label: string }[] {
   }
   return out;
 }
-
-// Plain-language "exact days" caption under the range control, so the owner always
-// knows the precise window a number covers (part of the 2026-07-06 range redesign).
+// Exact-days caption for a range — shown as the dropdown's tooltip.
 function rangeSpanText(k: Range): string {
   const now = new Date();
   const f = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
@@ -144,30 +150,6 @@ function rangeSpanText(k: Range): string {
   if (k === "30d") return `${f(new Date(now.getTime() - 29 * DAY_MS))} – ${f(now)} (30 days)`;
   return `Everything up to ${f(now)}`;
 }
-
-// AnimatedNumber (count-up, loading-aware) now lives in @/components/owner/AnimatedNumber
-// so every owner page shares one animation. Imported at the top of this file.
-
-function Kpi({ k, v, money, delta, prevTitle, sub, loading }: {
-  k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };
-  prevTitle?: string; sub?: string; loading?: boolean;
-}) {
-  // While loading the number shows a calm shimmer, then counts up once to the real value —
-  // no fake rolling figure, no inline sparkline cramped against the delta (owner 2026-07-25).
-  return (
-    <div className="adm-stat owx-kpi">
-      <div className="k">{k}</div>
-      <div className="row">
-        <div className="v">{typeof v === "number" ? <AnimatedNumber value={v} loading={loading} money={money} /> : v}</div>
-        {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
-      </div>
-      {sub && !loading && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
-}
-
-// "updated X ago" for the cached-snapshot timestamp (mig 196). Coarse on purpose — only
-// roughly how stale the numbers are matters, not the exact second.
 function timeAgo(iso: string): string {
   const s = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
   if (s < 45) return "just now";
@@ -178,330 +160,694 @@ function timeAgo(iso: string): string {
   return `${Math.round(h / 24)} d ago`;
 }
 
+// ── Per-card range dropdown (the global tab bar's replacement) ────────────────
+function RangeDrop({ id, value, onChange, compactBtn, main }: { id: string; value: Range; onChange: (r: Range) => void; compactBtn?: boolean; main?: boolean }) {
+  const [open, setOpen] = useState(false);
+  // Project rule: every popup registers with the back-stack manager (self-noops closed).
+  useBackClose(`owner-rng-${id}`, open, () => setOpen(false));
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest?.(`[data-rng="${id}"]`)) setOpen(false);
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [open, id]);
+  const cur = RANGES.find((r) => r.k === value)!;
+  return (
+    <span className="owr" data-rng={id}>
+      <button type="button" className={`owr-btn${compactBtn ? " sm" : ""}${main ? " main" : ""}`} title={rangeSpanText(value)}
+        aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {cur.label} <i className="fas fa-chevron-down" aria-hidden="true" />
+      </button>
+      {open && (
+        <span className="owr-pop" role="listbox" aria-label="Range">
+          {RANGES.map((r) => (
+            <button key={r.k} type="button" role="option" aria-selected={r.k === value}
+              className={r.k === value ? "on" : ""}
+              onClick={() => { onChange(r.k); setOpen(false); }}>
+              {r.label}<small>{rangeSpanText(r.k)}</small>
+            </button>
+          ))}
+        </span>
+      )}
+      <style jsx>{`
+        .owr { position: relative; display: inline-flex; }
+        .owr-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--bg); border: var(--border); border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; white-space: nowrap; }
+        .owr-btn.sm { padding: 3px 8px; font-size: 10.5px; }
+        .owr-btn:hover { color: var(--accent); border-color: var(--accent); }
+        .owr-btn i { font-size: 9px; opacity: .7; }
+        .owr-btn.main { background: color-mix(in srgb, #34d399 16%, transparent); border: 1px solid #34d399; color: #059669; font-size: 12.5px; font-weight: 800; padding: 7px 14px; border-radius: 10px; }
+        .owr-btn.main:hover { background: color-mix(in srgb, #34d399 26%, transparent); color: #047857; }
+        :global([data-skin="dark"]) .owr-btn.main { color: #34d399; }
+        :global([data-skin="dark"]) .owr-btn.main:hover { color: #6ee7b7; }
+        /* z-index above sibling cards + NEVER clipped: the KPI cards must keep
+           overflow visible for this to escape (owner bug, round-2 2026-07-26). */
+        .owr-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 90; min-width: 210px; display: flex; flex-direction: column; background: var(--card); border: var(--border); border-radius: 12px; padding: 5px; box-shadow: 0 16px 40px rgba(0,0,0,.45); }
+        .owr-pop button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; background: none; border: none; border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 12.5px; font-weight: 700; color: inherit; cursor: pointer; text-align: left; }
+        .owr-pop button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+        .owr-pop button.on { color: var(--accent); }
+        .owr-pop button small { font-size: 10px; color: var(--muted); font-weight: 500; }
+      `}</style>
+    </span>
+  );
+}
+
+// ── D1-style KPI card: sparkline inside, delta chip; the whole card is a LINK
+// into the matching report (owner round-3: "the top five box … should take you
+// to the report section").
+function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }: {
+  k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };
+  prevTitle?: string; sub?: string; loading?: boolean; spark?: number[];
+  pill?: string; href?: string;
+}) {
+  const body = (
+    <>
+      <div className="ow2-kt">
+        <span className="k">{k}</span>
+        {pill ? <span className="ow2-live">{pill}</span> : null}
+      </div>
+      <div className="row">
+        <div className="v">{typeof v === "number" ? <AnimatedNumber value={v} loading={loading} money={money} /> : v}</div>
+        {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
+      </div>
+      {sub && !loading && <div className="ow2-sub">{sub}</div>}
+      {spark && spark.length >= 2 && !loading && (
+        <div className="ow2-spark" aria-hidden="true"><SparkArea points={spark} color={GREEN} height={34} /></div>
+      )}
+    </>
+  );
+  const styles = (
+    <style jsx global>{`
+      /* overflow must stay VISIBLE so popups escape the card (round-2 bug: overflow
+         hidden clipped the dropdown). The spark clips itself via its rounded wrapper. */
+      .ow2-kpi { position: relative; padding-bottom: 30px; }
+      .ow2-kpi.ow2-click { cursor: pointer; text-decoration: none; color: inherit; display: block; transition: border-color .15s, transform .15s; }
+      .ow2-kpi.ow2-click:hover { border-color: var(--accent); transform: translateY(-2px); }
+      .ow2-kt { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .ow2-kt .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
+      .ow2-live { font-size: 10px; font-weight: 800; color: ${GREEN}; background: color-mix(in srgb, ${GREEN} 14%, transparent); border-radius: 999px; padding: 2px 8px; }
+      .ow2-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+      .ow2-spark { position: absolute; left: 0; right: 0; bottom: 0; opacity: .55; pointer-events: none; overflow: hidden; border-radius: 0 0 12px 12px; }
+    `}</style>
+  );
+  return href ? (
+    <Link href={href} className="adm-stat owx-kpi ow2-kpi ow2-click" title="Open the full report">{body}{styles}</Link>
+  ) : (
+    <div className="adm-stat owx-kpi ow2-kpi">{body}{styles}</div>
+  );
+}
+
 export default function OwnerDashboard() {
   const [view, setView] = useState<View>({ level: "home" });
-  // Default to "30 days", not "today": on a quiet day "today" lands on ₹0 + empty charts,
-  // so the dashboard opens on a meaningful window instead (owner 2026-07-25).
-  const [range, setRange] = useState<Range>("30d");
+  // The MAIN range (top-right): the one dropdown the whole page follows — KPI boxes
+  // and graphs alike (owner round-2: "only the main one"). Default 30 days.
+  const [globalRange, setGlobalRange] = useState<Range>("30d");
   const [ov, setOv] = useState<Overview | null>(null);
-  const [group, setGroup] = useState<GroupA | null>(null);
-  const [rest, setRest] = useState<RestA | null>(null);
-  const [money, setMoney] = useState<MoneyTotals | null>(null); // discounts + lost business tiles
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null); // when the cached snapshot was computed (mig 196)
-  // The money tiles come from a heavier reports scan that CAN legitimately fail/time out on
-  // the all-time whole-platform view (the pre-aggregated analytics call still succeeds). When
-  // it can't be computed we mark it, so the "Lost to cancellations" tile shows an honest "—"
-  // instead of rolling in its loading animation forever (bug, 2026-07-25).
-  const [moneyErr, setMoneyErr] = useState(false);
+  // Payload cache — key `${scopeKey}|${range}`; cards sharing a range share ONE fetch,
+  // and a range the owner already looked at repaints instantly (session-cached).
+  const [cache, setCache] = useState<Record<string, Payload>>({});
+  const [moneyCache, setMoneyCache] = useState<Record<string, MoneyTotals | "err">>({});
+  const [recs, setRecs] = useState<Record<string, Records>>({});
+  const [acts, setActs] = useState<Act[] | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [dishSort, setDishSort] = useState<"revenue" | "qty">("revenue");
-  // If an ADMIN opened this cockpit for a specific restaurant, the URL carries
-  // ?rid=<id>. Pin EVERY API call to that scope (as ?scope=) so a second tab — which
-  // overwrites the browser-wide act-as cookie — can never repaint or WRITE to this
-  // tab under a different restaurant (bug C1, 2026-07-05). A real logged-in owner has
-  // no ?rid= and is scoped by their own cookie, so this is null and nothing changes.
+  const inflight = useRef<Set<string>>(new Set());
+  // Admin tab pin (bug C1): ?rid= rides on EVERY call so a second tab's act-as cookie
+  // can never repaint this one under a different restaurant.
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
-  // Hero quick-links must keep the admin's tab pin (same rule as OwnerShell.withRid).
   const withPin = (href: string) => (scopePin ? `${href}?rid=${scopePin}${asSuffix()}` : href);
+  const scp = scopePin ? `&scope=${scopePin}${asSuffix()}` : "";
 
   const single = ov?.restaurants.length === 1;
-  // With ONE restaurant the home page IS that restaurant — resolve its id once known.
   const homeRid = single ? ov!.restaurants[0].id : null;
   const activeRid = view.level === "home" ? homeRid : (view as { rid: string }).rid;
   const restCount = ov?.restaurants.length ?? 0;
-  const hq = restCount >= 10; // HQ table mode — cards/charts don't scale past ~9
+  const scopeKey = activeRid ?? "group";
+  const pl = useCallback((range: string): Payload | undefined => cache[`${scopeKey}|${range}`], [cache, scopeKey]);
+  const moneyOf = (range: Range): MoneyTotals | "err" | undefined => moneyCache[`${scopeKey}|${range}`];
 
-  // HQ table controls (hooks must run unconditionally; cheap when unused).
-  const [hqQuery, setHqQuery] = useState("");
-  const [hqSort, setHqSort] = useState<"revenue" | "orders" | "openTables" | "name">("revenue");
-
-  // The sidebar's "My restaurants" rows (OwnerShell) open a restaurant from ANY
-  // page: same-page clicks arrive as this event, cross-page ones as ?focus=<rid>.
+  // Refresh-proof drill (owner round-5: "if you refresh it, it comes backwards").
+  // The panel runs under the back-stack history manager, which OWNS pushState/popstate
+  // for the hardware-back peel — so a URL query would be stomped by it (and it's a
+  // project hard-rule not to hand-roll history in a component). We persist the open
+  // restaurant/dish in sessionStorage instead: survives F5, invisible to the back
+  // manager, per-tab, and scoped by the admin ?rid pin so two admin tabs don't clash.
+  const drillKey = `owner_drill${scopePin ? `:${scopePin}` : ""}`;
+  const drillRestored = useRef(false);
+  // Sidebar "My restaurants" rows open a restaurant from any page (event / ?focus=).
   useEffect(() => {
     const focus = new URLSearchParams(window.location.search).get("focus");
-    if (focus) setView({ level: "restaurant", rid: focus });
+    if (focus) { setView({ level: "restaurant", rid: focus }); drillRestored.current = true; }
+    else {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(drillKey) || "null");
+        if (saved && saved.level && saved.rid) setView(saved);
+      } catch { /* ignore */ }
+    }
+    drillRestored.current = true;
     const onOpen = (e: Event) => {
       const rid = (e as CustomEvent).detail?.rid as string | null | undefined;
       setView(rid ? { level: "restaurant", rid } : { level: "home" });
     };
     window.addEventListener("lfh:owner-open-restaurant", onOpen);
     return () => window.removeEventListener("lfh:owner-open-restaurant", onOpen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Latest-wins guard (the app's standard stale-refresh fix): tag every load and drop
-  // any response that lands after a newer one started — so a slow earlier fetch can't
-  // overwrite the range you just switched to (owner audit 2026-07-06).
-  // Instant range/drill switching: cache the last good payload per (restaurant|group, range)
-  // in memory, so flipping to a range tab you've already opened this session repaints from
-  // memory (0 network), then refreshes underneath — no skeleton flash. Client-side sibling of
-  // the server snapshot cache. activeRidRef keeps the current scope readable in the hydrate
-  // effect without adding it as a dep (which would re-fire mid-load and blank fresh data).
-  type Snap = { group: GroupA | null; rest: RestA | null; money: MoneyTotals | null; moneyErr: boolean; updatedAt: string | null };
-  const snap = useRef(new Map<string, Snap>());
-  const putSnap = (key: string, patch: Partial<Snap>) => {
-    const cur = snap.current.get(key) || { group: null, rest: null, money: null, moneyErr: false, updatedAt: null };
-    snap.current.set(key, { ...cur, ...patch });
-  };
-  const activeRidRef = useRef(activeRid); activeRidRef.current = activeRid;
-
-  const loadSeq = useRef(0);
-  const load = useCallback(async (opts?: { withRecords?: boolean; refresh?: boolean }) => {
-    const myGen = ++loadSeq.current;
-    const fresh = () => myGen === loadSeq.current;
+  // Persist the current drill (only after the initial restore, so we never overwrite
+  // a saved drill with the transient "home" of first paint).
+  useEffect(() => {
+    if (!drillRestored.current) return;
     try {
-      const rg = range;
-      const j = (r: Response) => r.json();
-      // client-cache key for this load's scope+range (mirrors the hydrate effect below).
-      const sk = (rid: string | null) => `${rid ?? "grp"}|${rg}`;
-      // All-time "records" (an unbounded scan) is fetched only on first load / range change /
-      // manual refresh — NOT on the 60s auto-refresh, which keeps the last records value
-      // (audit 2026-07-07). The flag rides on the restaurant-scope analytics calls only.
-      const recQ = opts?.withRecords ? "&records=1" : "";
-      // Refresh button (or first load) forces a live recompute of the compute-on-view cache
-      // (mig 196); a normal auto-refresh serves the instant cached snapshot. `updatedAt`
-      // tracks when the snapshot was computed so the bar can say "updated X ago".
+      if (view.level === "home") sessionStorage.removeItem(drillKey);
+      else sessionStorage.setItem(drillKey, JSON.stringify(view));
+    } catch { /* ignore */ }
+  }, [view, drillKey]);
+
+  // Merged breadcrumb (owner 2026-07-26): the restaurant/dish tail renders in the
+  // SHELL's top strip (Owner › Dashboard › …), not as a second heading row here.
+  useEffect(() => {
+    const tail: string[] = [];
+    if (!single && view.level !== "home") {
+      const name = ov?.restaurants.find((r) => r.id === (view as { rid: string }).rid)?.name;
+      if (name) tail.push(name);
+    }
+    if (view.level === "dish") tail.push(view.dish);
+    window.dispatchEvent(new CustomEvent("lfh:owner-crumb", { detail: { tail } }));
+    return () => { window.dispatchEvent(new CustomEvent("lfh:owner-crumb", { detail: { tail: [] } })); };
+  }, [view, ov, single]);
+
+  // ── data layer: fetch one (scope, range) payload if missing ──
+  const fetchPayload = useCallback(async (sk: string, range: string, opts?: { force?: boolean; refresh?: boolean; qs?: string }) => {
+    const key = `${sk}|${range}`;
+    if (inflight.current.has(key)) return;
+    inflight.current.add(key);
+    try {
+      const rid = sk === "group" ? null : sk;
+      // records ride ONCE per restaurant (unbounded scan — not worth re-running per range).
+      const recQ = rid && !(rid in ((recsRef.current) || {})) ? "&records=1" : "";
       const refQ = opts?.refresh ? "&refresh=1" : "";
-      // The tab's scope pin (admin-in-one-restaurant) rides on EVERY call so the
-      // shared act-as cookie can't hijack this tab (C1). Null for a real owner.
-      const scp = scopePin ? `&scope=${scopePin}${asSuffix()}` : "";
-      // range=all now maps to an unbounded reports window (mig M11) — pass it through so the
-      // money tiles cover the same span as the all-time revenue KPIs (was collapsed to 12m).
-      const moneyUrl = (rid: string | null) =>
-        `/api/owner/reports?type=sales&range=${rg}${rid ? `&rid=${rid}` : ""}${scp}${refQ}`;
-      // The money tiles (discounts / lost-to-cancellations) come from a SEPARATE, heavier
-      // reports scan. For range=all that scan is an unbounded, whole-history month rollup
-      // and is far slower than the pre-aggregated analytics call — so it must NEVER gate the
-      // revenue/orders KPIs or the charts. Before, both rode ONE `await Promise.all`, so the
-      // slow all-time money scan kept `group` null and the tiles stuck in their loading roll
-      // with empty charts (bug, 2026-07-25). Fire it independently; it fills its own tile when
-      // it lands, guarded by the same latest-wins check so a stale response can't repaint.
-      const loadMoney = (rid: string | null) => {
-        fetch(moneyUrl(rid), { cache: "no-store" }).then(j)
-          .then((m) => { if (!fresh()) return; if (m.error) { setMoney(null); setMoneyErr(true); putSnap(sk(rid), { money: null, moneyErr: true }); } else { setMoney(m.totals); setMoneyErr(false); if (m.cachedAt) setUpdatedAt(m.cachedAt); putSnap(sk(rid), { money: m.totals, moneyErr: false, updatedAt: m.cachedAt ?? null }); } })
-          .catch(() => { if (fresh()) { setMoney(null); setMoneyErr(true); putSnap(sk(rid), { money: null, moneyErr: true }); } });
-      };
-      if (view.level === "home") {
-        const o: Overview = await fetchOwnerOverview(scp) as Overview;
-        if ((o as unknown as { error?: string }).error) throw new Error((o as unknown as { error: string }).error);
-        if (!fresh()) return;
-        setOv(o);
-        if (o.restaurants.length === 1) {
-          const rid = o.restaurants[0].id;
-          const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then(j);
-          if (a.error) throw new Error(a.error);
-          if (!fresh()) return;
-          const mergedRest = { ...a, records: a.records ?? snap.current.get(sk(rid))?.rest?.records ?? null };
-          setRest(mergedRest); setGroup(null);
-          if (a.cachedAt) setUpdatedAt(a.cachedAt);
-          putSnap(sk(rid), { rest: mergedRest, group: null, updatedAt: a.cachedAt ?? null });
-          loadMoney(rid);
-        } else {
-          const g = await fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}${refQ}`, { cache: "no-store" }).then(j);
-          if (g.error) throw new Error(g.error);
-          if (!fresh()) return;
-          setGroup(g); setRest(null);
-          if (g.cachedAt) setUpdatedAt(g.cachedAt);
-          putSnap(sk(null), { group: g, rest: null, updatedAt: g.cachedAt ?? null });
-          loadMoney(null);
-        }
-      } else {
-        const rid = (view as { rid: string }).rid;
-        const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then(j);
-        if (a.error) throw new Error(a.error);
-        if (!fresh()) return;
-        const mergedRest = { ...a, records: a.records ?? snap.current.get(sk(rid))?.rest?.records ?? null };
-        setRest(mergedRest);
-        if (a.cachedAt) setUpdatedAt(a.cachedAt);
-        putSnap(sk(rid), { rest: mergedRest, updatedAt: a.cachedAt ?? null });
-        loadMoney(rid);
-      }
-      if (fresh()) setErr(null);
-      // The owner panel has NO realtime socket — it polls. So IT drives the connection
-      // light: a successful load = healthy (green), a failed one = amber. Without this the
-      // badge was hard-stuck on green "Live" even while the dashboard showed "Couldn't load"
-      // (audit 2026-07-07). It deliberately shows NO "ms" — the refresh time is dominated by
-      // heavy analytics QUERY time, not connection latency, so a slow query would falsely
-      // look like a bad link (owner 2026-07-08). Badge stays a calm "Connected".
+      const a = await fetch(`/api/owner/analytics?${opts?.qs ?? `range=${range}`}${rid ? `&rid=${rid}` : ""}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then((r) => r.json());
+      if (a.error) throw new Error(a.error);
+      setCache((c) => ({ ...c, [key]: a }));
+      if (a.cachedAt) setUpdatedAt(a.cachedAt);
+      if (rid && a.records) setRecs((m) => ({ ...m, [rid]: a.records }));
+      setErr(null);
       reportRealtime("online");
     } catch (e) {
-      if (fresh()) setErr(e instanceof Error ? e.message : String(e));
+      setErr(e instanceof Error ? e.message : String(e));
+      reportRealtime("weak");
+    } finally {
+      inflight.current.delete(key);
+    }
+  }, [scp]);
+  const recsRef = useRef(recs); recsRef.current = recs;
+
+  const fetchMoney = useCallback(async (sk: string, range: Range, opts?: { refresh?: boolean }) => {
+    const key = `money:${sk}|${range}`;
+    if (inflight.current.has(key)) return;
+    inflight.current.add(key);
+    try {
+      const rid = sk === "group" ? null : sk;
+      const refQ = opts?.refresh ? "&refresh=1" : "";
+      const m = await fetch(`/api/owner/reports?type=sales&range=${range}${rid ? `&rid=${rid}` : ""}${scp}${refQ}`, { cache: "no-store" }).then((r) => r.json());
+      setMoneyCache((c) => ({ ...c, [`${sk}|${range}`]: m.error ? "err" : m.totals }));
+      if (m.cachedAt) setUpdatedAt(m.cachedAt);
+    } catch {
+      setMoneyCache((c) => ({ ...c, [`${sk}|${range}`]: "err" }));
+    } finally {
+      inflight.current.delete(key);
+    }
+  }, [scp]);
+
+  // Recent activity mini feed (single/drilled view) — 6 rows, scoped, egress-tiny.
+  const fetchActs = useCallback(async (rid: string) => {
+    try {
+      const j = await fetch(`/api/owner/oplog?limit=6&rid=${rid}${scopePin ? `&scope=${scopePin}${asSuffix()}` : ""}`, { cache: "no-store" }).then((r) => r.json());
+      setActs(Array.isArray(j.actions) ? j.actions : null);
+    } catch { setActs(null); }
+  }, [scopePin]);
+
+  // The distinct (scope, range) keys the CURRENT view's cards need: the main range
+  // (all graphs), any KPI overrides, and the pinned week for busy-hours/heatmap.
+  const neededRanges = useMemo(() => Array.from(new Set<Range>([globalRange, WEEK])), [globalRange]);
+
+  // Overview first (identity + today-so-far numbers), then ensure every needed payload.
+  const loadOverview = useCallback(async () => {
+    try {
+      const o = (await fetchOwnerOverview(scp)) as Overview;
+      if ((o as unknown as { error?: string }).error) throw new Error((o as unknown as { error: string }).error);
+      setOv(o);
+      setErr(null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
       reportRealtime("weak");
     }
-  }, [view, range]);
+  }, [scp]);
+  useEffect(() => { loadOverview(); }, [loadOverview]);
 
-  // On a range/drill change: repaint INSTANTLY from the client cache if we've seen this
-  // (scope, range) this session, else clear to a brief "Loading…" (so the chart never flashes
-  // an all-zero plot under the NEW range's labels). Either way load() then refreshes it.
-  // Auto-refresh does NOT change range/view, so it never triggers this — no poll flicker.
   useEffect(() => {
-    const s = snap.current.get(`${activeRidRef.current ?? "grp"}|${range}`);
-    if (s) { setGroup(s.group); setRest(s.rest); setMoney(s.money); setMoneyErr(s.moneyErr); setUpdatedAt(s.updatedAt); }
-    else { setRest(null); setGroup(null); setMoney(null); setMoneyErr(false); }
-  }, [range, view]);
+    if (!ov) return;
+    for (const r of neededRanges) if (!cache[`${scopeKey}|${r}`]) fetchPayload(scopeKey, r);
+    if (!moneyCache[`${scopeKey}|${globalRange}`]) fetchMoney(scopeKey, globalRange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ov, scopeKey, neededRanges, globalRange]);
 
-  const loadRef = useRef(load); loadRef.current = load;
-  // First load + every range/restaurant change fetches the all-time records; the auto-refresh
-  // below deliberately does NOT (it keeps the last records value).
-  useEffect(() => { load({ withRecords: true }); }, [load]);
+  useEffect(() => { if (activeRid) { setActs(null); fetchActs(activeRid); } }, [activeRid, fetchActs]);
+
+  // Auto-refresh (activity-gated 60s): overview + the payloads in use. Group payloads
+  // are compute-on-view cached server-side (mig 196), so this stays cheap.
+  const tick = useCallback(() => {
+    loadOverview();
+    for (const r of neededRanges) fetchPayload(scopeKey, r);
+    fetchMoney(scopeKey, globalRange);
+  }, [loadOverview, fetchPayload, fetchMoney, neededRanges, scopeKey, globalRange]);
+  const tickRef = useRef(tick); tickRef.current = tick;
+  useActiveAutoRefresh(() => tickRef.current(), 60000);
+
   const [refreshing, setRefreshing] = useState(false);
-  // Poll every 3 min, not 60s: the snapshot cache only turns over every ~5 min (and a stale
-  // view already refreshes itself in the background), so a 60s poll was 3× the network/DB
-  // chatter for no extra freshness — this cuts background load, esp. with many tabs open.
-  useActiveAutoRefresh(() => loadRef.current(), 180000);
-  // Stop the spinner when the fetch actually finishes, not on a blind 600ms timer (which
-  // "finished" while a slow query was still loading, audit 2026-07-09). Keep a small floor
-  // so a very fast refresh still shows a brief spin instead of an imperceptible flicker.
   const manualRefresh = () => {
     setRefreshing(true);
     const started = Date.now();
-    Promise.resolve(loadRef.current({ withRecords: true, refresh: true })).finally(() => {
+    const jobs: Promise<unknown>[] = [loadOverview()];
+    for (const r of neededRanges) jobs.push(fetchPayload(scopeKey, r, { refresh: true }));
+    jobs.push(fetchMoney(scopeKey, globalRange, { refresh: true }));
+    if (activeRid) jobs.push(fetchActs(activeRid));
+    Promise.allSettled(jobs).finally(() => {
       const wait = Math.max(0, 400 - (Date.now() - started));
       setTimeout(() => setRefreshing(false), wait);
     });
   };
-  const goHome = () => { setView({ level: "home" }); if (!single) setRest(null); };
 
-  // ── shape group timeseries → multi-line rows {label,[name]:rev} ──
-  const trendData = useMemo(() => {
-    if (!group) return { rows: [] as Record<string, unknown>[], lines: [] as { key: string; name: string; color: string }[] };
-    // Key each series by restaurant ID, never by display name — two restaurants can share
-    // a name, and keying by name silently merges their two lines into one (found 2026-07-05).
-    // Show a line for EVERY restaurant in view — no hidden top-N cap (owner 2026-07-25: "if
-    // there are 100 I want 100 listed"). This branch only runs for the 2–9 tier anyway (10+
-    // uses the sortable HQ table), and the legend now wraps/scrolls to fit any count.
-    const lines = group.restaurantRevenue.map((r) => ({ key: r.id, name: r.name, color: r.accentColor || FALLBACK }));
-    const byKey = new Map<string, Record<string, unknown>>();
-    for (const t of group.timeseries) {
-      const k = istKey(new Date(t.bucket), range);
-      if (!byKey.has(k)) byKey.set(k, { label: tsLabel(t.bucket, range) });
-      if (t.restaurantId) (byKey.get(k)!)[t.restaurantId] = t.revenue;
+  // ── derived: KPI values from each card's own range ──
+  const kpiOf = useCallback((range: Range) => {
+    const p = pl(range);
+    if (!p) return null;
+    if (p.scope === "restaurant") {
+      return { revenue: p.kpis.revenue, orders: p.kpis.orders, paidOrders: p.kpis.paidOrders ?? p.kpis.orders, avg: p.kpis.avgOrder, prev: p.prev, ts: p.timeseries };
     }
-    // Zero-fill: plot the COMPLETE bucket sequence so a no-sales day/hour shows as a
-    // gap-to-zero, not an invisible skip that makes the trend denser than reality.
-    const expected = expectedBuckets(range);
-    if (!expected.length) return { rows: Array.from(byKey.values()), lines };
-    const rows = expected.map((e) => {
-      const found = byKey.get(e.key) || {};
-      const row: Record<string, unknown> = { label: e.label };
-      for (const l of lines) row[l.key] = Number(found[l.key]) || 0;
+    const revenue = p.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
+    const orders = p.restaurantRevenue.reduce((a, r) => a + r.orders, 0);
+    const paidOrders = p.paymentMethods.reduce((a, m) => a + (m.orders || 0), 0);
+    return { revenue, orders, paidOrders, avg: paidOrders ? revenue / paidOrders : 0, prev: p.prev, ts: p.timeseries };
+  }, [pl]);
+
+  // Sparkline points (per bucket) for a range — group sums across restaurants.
+  const sparkOf = useCallback((range: Range, kind: "revenue" | "orders") => {
+    const k = kpiOf(range);
+    if (!k) return undefined;
+    const by = new Map<string, number>();
+    for (const t of k.ts) {
+      const key = istKey(new Date(t.bucket), range);
+      by.set(key, (by.get(key) || 0) + (kind === "revenue" ? t.revenue : t.orders));
+    }
+    const exp = expectedBuckets(range);
+    const pts = exp.length ? exp.map((e) => by.get(e.key) ?? 0) : Array.from(by.values());
+    return pts.length >= 2 ? pts : undefined;
+  }, [kpiOf]);
+
+  // Trend rows for the main chart (single scope) — carries __orders for the tooltip.
+  const restTrend = useMemo(() => {
+    const p = pl(globalRange);
+    if (!p || p.scope !== "restaurant") return [];
+    const by = new Map<string, { rev: number; ord: number }>();
+    for (const t of p.timeseries) by.set(istKey(new Date(t.bucket), globalRange), { rev: t.revenue, ord: t.orders });
+    const exp = expectedBuckets(globalRange);
+    if (!exp.length) return p.timeseries.map((t) => ({ label: tsLabel(t.bucket, globalRange), Revenue: t.revenue, __orders: t.orders }));
+    return exp.map((e) => ({ label: e.label, Revenue: by.get(e.key)?.rev ?? 0, __orders: by.get(e.key)?.ord ?? 0 }));
+  }, [pl, globalRange]);
+
+  // Group trend (multi):
+  //   · 2–3 restaurants → Samsung-style stacked daily bars in GREEN SHADES (round-2:
+  //     no brown/orange at this tier — identity colours are for the many-tier only);
+  //   · 4+ → the multi-line per-restaurant trend in accent colours, side-by-side with
+  //     "Who earns more" (round-2: "this was the best one" — restored).
+  const groupTrend = useMemo(() => {
+    const p = pl(globalRange);
+    if (!p || p.scope !== "group") return { rows: [] as Record<string, unknown>[], lines: [] as { key: string; name: string; color: string }[], stacked: false };
+    const stacked = p.restaurantRevenue.length >= 2 && p.restaurantRevenue.length <= 3;
+    const lines = p.restaurantRevenue.map((r, i) => ({
+      key: r.id, name: r.name,
+      color: stacked ? GREEN_SHADES[i % GREEN_SHADES.length] : (r.accentColor || FALLBACK),
+    }));
+    const by = new Map<string, Record<string, number>>();
+    for (const t of p.timeseries) {
+      const k = istKey(new Date(t.bucket), globalRange);
+      const row = by.get(k) || {};
+      if (t.restaurantId) row[t.restaurantId] = (row[t.restaurantId] || 0) + t.revenue;
+      row.__orders = (row.__orders || 0) + t.orders;
+      by.set(k, row);
+    }
+    const exp = expectedBuckets(globalRange);
+    const keys = exp.length ? exp : Array.from(by.keys()).sort().map((k) => ({ key: k, label: k }));
+    const rows = keys.map((e) => {
+      const found = by.get(e.key) || {};
+      const row: Record<string, unknown> = { label: e.label, __orders: found.__orders || 0 };
+      for (const l of lines) row[l.key] = found[l.key] || 0;
       return row;
     });
-    return { rows, lines };
-  }, [group, range]);
+    return { rows, lines, stacked };
+  }, [pl, globalRange]);
 
-  const restTrend = useMemo(() => {
-    const byKey = new Map<string, number>();
-    for (const t of (rest?.timeseries ?? [])) byKey.set(istKey(new Date(t.bucket), range), t.revenue);
-    const expected = expectedBuckets(range);
-    if (!expected.length) return (rest?.timeseries ?? []).map((t) => ({ label: tsLabel(t.bucket, range), Revenue: t.revenue }));
-    return expected.map((e) => ({ label: e.label, Revenue: byKey.get(e.key) ?? 0 }));
-  }, [rest, range]);
+  // Latest-active-week fallback (owner round-5: "the two datas are not even
+  // showing"): if the pinned last-7-days window has zero orders but the main range
+  // does have activity, fetch the newest 7 IST days that HAD orders as a custom
+  // window and label the cards with those dates.
+  const weekFallback = useMemo(() => {
+    const wp = pl(WEEK);
+    if (!wp) return null; // still loading — don't decide yet
+    const active = wp.scope === "restaurant"
+      ? (wp.hourly ?? []).some((h) => h.orders > 0)
+      : ((wp as GroupA).heatmap ?? []).some((c) => c.orders > 0);
+    if (active) return null;
+    const base = pl(globalRange);
+    const ts = base?.timeseries ?? [];
+    let maxMs = 0;
+    for (const t of ts) if ((t.orders || 0) > 0) maxMs = Math.max(maxMs, Date.parse(t.bucket));
+    if (!maxMs) return null;
+    const istDay = (ms: number) => new Date(ms + 5.5 * 3600_000).toISOString().slice(0, 10);
+    const to = istDay(maxMs), from = istDay(maxMs - 6 * DAY_MS);
+    return { key: `latestwk:${from}:${to}`, qs: `range=custom&from=${from}&to=${to}`, from, to };
+  }, [pl, globalRange]);
+  useEffect(() => {
+    if (weekFallback && !cache[`${scopeKey}|${weekFallback.key}`]) fetchPayload(scopeKey, weekFallback.key, { qs: weekFallback.qs });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekFallback, scopeKey]);
+  const weekKey = weekFallback?.key ?? WEEK;
+  const fmtD = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  const weekTagText = weekFallback ? `week of ${fmtD(weekFallback.from)} – ${fmtD(weekFallback.to)}` : "last 7 days";
+  const weekTagTitle = weekFallback ? "The current week has no orders yet — showing the most recent week with activity." : rangeSpanText(WEEK);
 
-  // ── plain-language insights, derived from data already on screen (no extra fetch) ──
+  // Group busy-hours, derived from the pinned-week heatmap (no extra fetch).
+  const groupHourly = useMemo(() => {
+    const p = pl(weekKey);
+    if (!p || p.scope !== "group" || !p.heatmap) return null;
+    const hrs = Array.from({ length: 24 }, (_, h) => ({ hour: h, orders: 0 }));
+    for (const c of p.heatmap) if (c.hr >= 0 && c.hr < 24) hrs[c.hr].orders += c.orders;
+    return hrs.some((h) => h.orders > 0) ? hrs : null;
+  }, [pl, weekKey]);
+
+  // ── multi-restaurant table (all multi tiers — owner: design #4) ──
+  const [tq, setTq] = useState("");
+  const [tSort, setTSort] = useState<{ k: "rank" | "name" | "today" | "revenue" | "orders" | "avg" | "openTables"; asc: boolean }>({ k: "revenue", asc: false });
+  const tableRows = useMemo(() => {
+    if (!ov || single) return [];
+    const p = pl(globalRange);
+    const revById = new Map((p?.scope === "group" ? p.restaurantRevenue : []).map((r) => [r.id, r]));
+    // per-restaurant sparkline from the group timeseries of the table's range
+    const sparks = new Map<string, number[]>();
+    if (p?.scope === "group") {
+      const byRest = new Map<string, Map<string, number>>();
+      for (const t of p.timeseries) {
+        if (!t.restaurantId) continue;
+        const m = byRest.get(t.restaurantId) || new Map<string, number>();
+        const k = istKey(new Date(t.bucket), globalRange);
+        m.set(k, (m.get(k) || 0) + t.revenue);
+        byRest.set(t.restaurantId, m);
+      }
+      const exp = expectedBuckets(globalRange);
+      for (const [rid, m] of byRest) sparks.set(rid, exp.length ? exp.map((e) => m.get(e.key) ?? 0) : Array.from(m.values()));
+    }
+    const total = Math.max(1, Array.from(revById.values()).reduce((a, r) => a + r.revenue, 0));
+    const base = ov.restaurants.map((r) => {
+      const g = revById.get(r.id);
+      const revenue = g?.revenue ?? 0, orders = g?.orders ?? 0;
+      return {
+        id: r.id, slug: r.slug, name: r.name, active: r.active, accent: r.accentColor || FALLBACK,
+        revenue, orders, avg: orders ? revenue / orders : 0, share: revenue / total,
+        openTables: r.openTables, today: r.revenueToday, ordersToday: r.ordersToday,
+        revenueAll: r.revenueAll, ordersAll: r.ordersAll, spark: sparks.get(r.id),
+      };
+    });
+    const rank = new Map([...base].sort((a, b) => b.revenue - a.revenue).map((r, i) => [r.id, i + 1]));
+    const q = tq.trim().toLowerCase();
+    const rows = q ? base.filter((r) => r.name.toLowerCase().includes(q) || r.slug.toLowerCase().includes(q)) : base;
+    const dir = tSort.asc ? 1 : -1;
+    rows.sort((a, b) => {
+      if (tSort.k === "name") return a.name.localeCompare(b.name) * dir;
+      if (tSort.k === "rank") return ((rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0)) * dir;
+      const key = tSort.k === "today" ? "today" : tSort.k;
+      return ((a[key as "revenue"] as number) - (b[key as "revenue"] as number)) * dir;
+    });
+    // <=3 restaurants: identity colours join the green theme too (round-3 — the
+    // table dots/share bars were still showing brown/orange accents at this tier).
+    return rows.map((r) => {
+      const rk = rank.get(r.id)!;
+      return { ...r, rank: rk, accent: restCount <= 3 ? GREEN_SHADES[(rk - 1) % GREEN_SHADES.length] : r.accent };
+    });
+  }, [ov, single, pl, globalRange, tq, tSort]);
+  const th = (k: typeof tSort.k, label: string, left?: boolean) => (
+    <th className={left ? "l" : undefined} onClick={() => setTSort((s) => ({ k, asc: s.k === k ? !s.asc : false }))}
+      role="columnheader" aria-sort={tSort.k === k ? (tSort.asc ? "ascending" : "descending") : "none"}
+      style={{ cursor: "pointer" }}>
+      {label} {tSort.k === k && <i className={`fas fa-caret-${tSort.asc ? "up" : "down"}`} aria-hidden="true" />}
+    </th>
+  );
+
+  // Best / needs-attention callouts (multi) — momentum = 2nd half vs 1st half of the
+  // trend range's own series (accurate, zero extra fetches).
+  // Only for 4+ restaurants (owner round-3), and the two cards must NEVER name the
+  // same restaurant — the top performer is skipped when picking "needs attention".
+  const callouts = useMemo(() => {
+    const p = pl(globalRange);
+    if (!p || p.scope !== "group" || p.restaurantRevenue.length <= 3) return null;
+    const total = p.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
+    const best = p.restaurantRevenue[0];
+    const halves = new Map<string, { a: number; b: number }>();
+    const buckets = Array.from(new Set(p.timeseries.map((t) => t.bucket))).sort();
+    const mid = Math.floor(buckets.length / 2);
+    const rankIdx = new Map(buckets.map((b, i) => [b, i]));
+    for (const t of p.timeseries) {
+      if (!t.restaurantId) continue;
+      const h = halves.get(t.restaurantId) || { a: 0, b: 0 };
+      if ((rankIdx.get(t.bucket) ?? 0) < mid) h.a += t.revenue; else h.b += t.revenue;
+      halves.set(t.restaurantId, h);
+    }
+    let watchId: string | null = null, watchPct = 0;
+    for (const r of p.restaurantRevenue) {
+      if (best && r.id === best.id) continue; // never the same restaurant twice
+      const h = halves.get(r.id);
+      if (!h || h.a <= 0) continue;
+      const pct = ((h.b - h.a) / h.a) * 100;
+      if (pct < -5 && (!watchId || pct < watchPct)) { watchId = r.id; watchPct = pct; }
+    }
+    // Per-restaurant sparkline points (revenue by bucket) for the centre draw-in graph.
+    const sparkFor = (rid: string) => {
+      const by = new Map<string, number>();
+      for (const t of p.timeseries) if (t.restaurantId === rid) by.set(t.bucket, (by.get(t.bucket) || 0) + t.revenue);
+      return buckets.map((bk) => by.get(bk) ?? 0);
+    };
+    const watchR = watchId ? p.restaurantRevenue.find((r) => r.id === watchId)! : null;
+    return {
+      best: best ? { id: best.id, name: best.name, revenue: best.revenue, share: total ? best.revenue / total : 0, spark: sparkFor(best.id) } : null,
+      watch: watchR ? { id: watchR.id, name: watchR.name, pct: watchPct, spark: sparkFor(watchR.id) } : null,
+    };
+  }, [pl, globalRange]);
+
+  // ── plain-language insights (derived from data already on screen) ──
   const insights = useMemo(() => {
     const out: { icon: string; text: string }[] = [];
-    const rl = RANGE_LABEL[range];
-    if (rest) {
-      const k = rest.kpis;
-      if (rest.prev && rest.prev.revenue > 0 && k.revenue > 0) {
-        const pct = Math.round(((k.revenue - rest.prev.revenue) / rest.prev.revenue) * 100);
-        if (pct >= 300) out.push({ icon: "fa-arrow-trend-up", text: `Revenue is ${Math.round(k.revenue / rest.prev.revenue)}× the period before` });
-        else if (Math.abs(pct) >= 3) out.push({ icon: pct > 0 ? "fa-arrow-trend-up" : "fa-arrow-trend-down", text: `Revenue is ${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% ${PREV_LABEL[range]}` });
+    const rl = RANGE_LABEL[globalRange];
+    const p = pl(globalRange);
+    const money = moneyOf(globalRange);
+    if (p?.scope === "restaurant") {
+      const k = p.kpis;
+      if (p.prev && p.prev.revenue > 0 && k.revenue > 0) {
+        const pct = Math.round(((k.revenue - p.prev.revenue) / p.prev.revenue) * 100);
+        if (pct >= 300) out.push({ icon: "fa-arrow-trend-up", text: `Revenue is ${Math.round(k.revenue / p.prev.revenue)}× the period before` });
+        else if (Math.abs(pct) >= 3) out.push({ icon: pct > 0 ? "fa-arrow-trend-up" : "fa-arrow-trend-down", text: `Revenue is ${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% ${PREV_LABEL[globalRange]}` });
       }
-      const busiest = [...rest.hourly].sort((a, b) => b.orders - a.orders)[0];
+      const busiest = [...p.hourly].sort((a, b) => b.orders - a.orders)[0];
       if (busiest?.orders) out.push({ icon: "fa-clock", text: `Busiest at ${busiest.hour}:00 — ${busiest.orders} order${busiest.orders === 1 ? "" : "s"}` });
-      const total = rest.dishes.reduce((a, d) => a + d.revenue, 0);
-      if (rest.dishes[0] && total > 0) out.push({ icon: "fa-utensils", text: `${rest.dishes[0].title} makes ${Math.round((rest.dishes[0].revenue / total) * 100)}% of dish revenue` });
-      if (money && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to ${money.cancelledOrders} cancelled order${money.cancelledOrders === 1 ? "" : "s"} ${rl}` });
-      // Only call out a payment method the staff actually recorded — "Not recorded
-      // is 100% of payments" is true but useless.
-      const payRows = (rest.paymentMethods ?? []).map((p) => ({ ...p, method: canonPayMethod(p.method) }));
-      const pay = payRows.filter((p) => p.method !== "Not recorded").sort((a, b) => b.revenue - a.revenue)[0];
-      const payTotal = payRows.reduce((a, p) => a + p.revenue, 0);
+      const total = p.dishes.reduce((a, d) => a + d.revenue, 0);
+      if (p.dishes[0] && total > 0) out.push({ icon: "fa-utensils", text: `${p.dishes[0].title} makes ${Math.round((p.dishes[0].revenue / total) * 100)}% of dish revenue` });
+      if (money && money !== "err" && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to ${money.cancelledOrders} cancelled order${money.cancelledOrders === 1 ? "" : "s"} ${RANGE_LABEL[globalRange]}` });
+      const payRows = (p.paymentMethods ?? []).map((x) => ({ ...x, method: canonPayMethod(x.method) }));
+      const pay = payRows.filter((x) => x.method !== "Not recorded").sort((a, b) => b.revenue - a.revenue)[0];
+      const payTotal = payRows.reduce((a, x) => a + x.revenue, 0);
       if (pay && payTotal > 0 && pay.revenue / payTotal >= 0.15)
         out.push({ icon: "fa-wallet", text: `${pay.method} is ${Math.round((pay.revenue / payTotal) * 100)}% of payments` });
-    } else if (group) {
-      const total = group.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
-      if (group.prev && group.prev.revenue > 0 && total > 0) {
-        const pct = Math.round(((total - group.prev.revenue) / group.prev.revenue) * 100);
-        if (pct >= 300) out.push({ icon: "fa-arrow-trend-up", text: `Group revenue is ${Math.round(total / group.prev.revenue)}× the period before` });
-        else if (Math.abs(pct) >= 3) out.push({ icon: pct > 0 ? "fa-arrow-trend-up" : "fa-arrow-trend-down", text: `Group revenue is ${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% ${PREV_LABEL[range]}` });
+    } else if (p?.scope === "group") {
+      const total = p.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
+      if (p.prev && p.prev.revenue > 0 && total > 0) {
+        const pct = Math.round(((total - p.prev.revenue) / p.prev.revenue) * 100);
+        if (pct >= 300) out.push({ icon: "fa-arrow-trend-up", text: `Group revenue is ${Math.round(total / p.prev.revenue)}× the period before` });
+        else if (Math.abs(pct) >= 3) out.push({ icon: pct > 0 ? "fa-arrow-trend-up" : "fa-arrow-trend-down", text: `Group revenue is ${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% ${PREV_LABEL[globalRange]}` });
       }
-      const top = group.restaurantRevenue[0];
-      if (top && total > 0 && group.restaurantRevenue.length > 1)
+      const top = p.restaurantRevenue[0];
+      if (top && total > 0 && p.restaurantRevenue.length > 1)
         out.push({ icon: "fa-trophy", text: `${top.name} leads with ${Math.round((top.revenue / total) * 100)}% of revenue ${rl}` });
-      if (money && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to cancellations ${rl}` });
-      if (money && money.discount > 0 && total > 0) out.push({ icon: "fa-tag", text: `${inr(money.discount)} given as discounts` });
+      if (money && money !== "err" && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to cancellations ${RANGE_LABEL[globalRange]}` });
+      if (money && money !== "err" && money.discount > 0 && total > 0) out.push({ icon: "fa-tag", text: `${inr(money.discount)} given as discounts` });
     }
     return out.slice(0, 4);
-  }, [rest, group, money, range]);
+  }, [pl, globalRange, globalRange, moneyCache, scopeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dishView = useMemo(() => {
     if (view.level !== "dish") return null;
-    // Distinguish "still loading" from "loaded, but this dish had no sales in this range".
-    // Before, both returned null and the view hung on a permanent false "Loading dish…" when
-    // you switched to a range where the dish didn't sell (audit 2026-07-09). Also treat a
-    // stale `rest` from a different restaurant as still-loading (kills the switch flash).
-    if (!rest || rest.restaurant.id !== view.rid) return "loading" as const;
-    const total = rest.dishes.reduce((a, d) => a + d.revenue, 0) || 1;
-    const idx = rest.dishes.findIndex((d) => d.title === view.dish);
-    const d = rest.dishes[idx];
-    return d ? { d, rank: idx + 1, share: Math.round((d.revenue / total) * 100), of: rest.dishes.length } : ("missing" as const);
-  }, [view, rest]);
+    const p = pl(globalRange);
+    if (!p || p.scope !== "restaurant" || p.restaurant.id !== view.rid) return "loading" as const;
+    const total = p.dishes.reduce((a, d) => a + d.revenue, 0) || 1;
+    const idx = p.dishes.findIndex((d) => d.title === view.dish);
+    const d = p.dishes[idx];
+    return d ? { d, rank: idx + 1, share: Math.round((d.revenue / total) * 100), of: p.dishes.length, dishes: p.dishes } : ("missing" as const);
+  }, [view, pl, globalRange]);
 
-  const groupTotals = useMemo(() => {
-    if (!group) return null;
-    return {
-      revenue: group.restaurantRevenue.reduce((a, r) => a + r.revenue, 0),
-      // `orders` counts ALL non-cancelled orders (incl. open/unpaid); `paidOrders` comes from
-      // the payment breakdown (paid-only), so the tile can say "N paid · rest still open" like
-      // the single-restaurant view — otherwise Revenue (paid-only) ÷ Orders looked wrong on the
-      // group home with open tables and no explanation (audit 2026-07-07).
-      orders: group.restaurantRevenue.reduce((a, r) => a + r.orders, 0),
-      paidOrders: group.paymentMethods.reduce((a, p) => a + (p.orders || 0), 0),
-    };
-  }, [group]);
+  // ── drawer (multi): row click → summary from data ALREADY loaded (zero fetches) ──
+  const [drawerRid, setDrawerRid] = useState<string | null>(null);
+  useBackClose("owner-rest-drawer", !!drawerRid, () => setDrawerRid(null));
+  const drawer = useMemo(() => {
+    if (!drawerRid || !ov) return null;
+    const r = ov.restaurants.find((x) => x.id === drawerRid);
+    if (!r) return null;
+    const row = tableRows.find((x) => x.id === drawerRid);
+    return { r, row };
+  }, [drawerRid, ov, tableRows]);
+  // The drawer's mini chart — a real labelled gradient trend (round-2: "see how
+  // pretty the before graph looks — make it like that"), from data already loaded.
+  const drawerTrend = useMemo(() => {
+    if (!drawerRid) return [];
+    const p = pl(globalRange);
+    if (!p || p.scope !== "group") return [];
+    const by = new Map<string, { rev: number; ord: number }>();
+    for (const t of p.timeseries) {
+      if (t.restaurantId !== drawerRid) continue;
+      const k = istKey(new Date(t.bucket), globalRange);
+      const cur = by.get(k) || { rev: 0, ord: 0 };
+      cur.rev += t.revenue; cur.ord += t.orders;
+      by.set(k, cur);
+    }
+    const exp = expectedBuckets(globalRange);
+    if (!exp.length) return [];
+    return exp.map((e) => ({ label: e.label, Revenue: by.get(e.key)?.rev ?? 0, __orders: by.get(e.key)?.ord ?? 0 }));
+  }, [drawerRid, pl, globalRange]);
 
-  // HQ (10+) table rows: overview (live today/tables) merged with the range revenue,
-  // filtered by the search box, sorted by the active column. Rank is ALWAYS by range
-  // revenue so "#3" keeps meaning "3rd best earner" whatever the sort.
-  const hqRows = useMemo(() => {
-    if (!hq || !ov) return [];
-    const revById = new Map((group?.restaurantRevenue ?? []).map((r) => [r.id, r]));
-    const base = ov.restaurants.map((r) => ({
-      id: r.id, slug: r.slug, name: r.name, active: r.active, accent: r.accentColor || FALLBACK,
-      revenue: revById.get(r.id)?.revenue ?? 0, orders: revById.get(r.id)?.orders ?? 0,
-      openTables: r.openTables, revenueToday: r.revenueToday,
-    }));
-    const rank = new Map([...base].sort((a, b) => b.revenue - a.revenue).map((r, i) => [r.id, i + 1]));
-    const q = hqQuery.trim().toLowerCase();
-    const rows = q ? base.filter((r) => r.name.toLowerCase().includes(q) || r.slug.toLowerCase().includes(q)) : base;
-    rows.sort((a, b) => (hqSort === "name" ? a.name.localeCompare(b.name) : (b[hqSort] as number) - (a[hqSort] as number)));
-    return rows.map((r) => ({ ...r, rank: rank.get(r.id)! }));
-  }, [hq, ov, group, hqQuery, hqSort]);
-  const hqMaxRev = Math.max(1, ...hqRows.map((r) => r.revenue));
+  // ── Report export tables for the current view ──
+  // Gather the professional report "at that time" (owner round-3): group summary +
+  // EVERY restaurant individually. All reads hit the compute-on-view cached APIs
+  // (mig 196 + the new restaurant-scope cache), so even 7 restaurants gather fast.
+  // The full compiled statement — now a thin call into the shared gatherer so the
+  // /owner/reports hub generates the byte-identical report (owner round-6).
+  const gatherReport = (periodQs: string, periodLabel: string): Promise<ReportData> => {
+    if (!ov) throw new Error("not loaded yet");
+    return gatherOwnerReport({ restaurants: ov.restaurants, activeRid, scopePin, asSuffix: asSuffix(), periodQs, periodLabel });
+  };
+  const exportName = `aevidine-report-${new Date().toISOString().slice(0, 10)}`;
+  // KPI boxes deep-link into the matching report (round-3).
+  const reportHref = (t: string) => (scopePin ? `/owner/reports?rid=${scopePin}${asSuffix()}&open=${t}` : `/owner/reports?open=${t}`);
 
-  const two = !!group && group.restaurantRevenue.length === 2;
+  const goHome = () => setView({ level: "home" });
+  const openFull = (rid: string) => { setDrawerRid(null); setView({ level: "restaurant", rid }); };
+
+  // Today-so-far numbers (from the overview — no extra call).
+  const todayRow = activeRid ? ov?.restaurants.find((r) => r.id === activeRid) : null;
+  const todayRev = activeRid ? (todayRow?.revenueToday ?? 0) : (ov?.totals.revenueToday ?? 0);
+  const todayOrd = activeRid ? (todayRow?.ordersToday ?? 0) : (ov?.totals.ordersToday ?? 0);
+
+  const kMain = kpiOf(globalRange);
+  const money = moneyOf(globalRange);
+  const trendPayload = pl(globalRange);
+  const records = activeRid ? recs[activeRid] : null;
+
+  // Highlights live at the BOTTOM of the page now (owner round-3: "we don't require
+  // this information at the top"). Callouts only exist for 4+ restaurants.
+  const highlights = view.level !== "dish" && (insights.length > 0 || callouts) ? (
+    <div style={{ marginTop: 12 }}>
+      {/* Split banner (owner round-5 pick #2): green ½ vs red ½ scoreboard, each half
+          clickable into that restaurant, with a draw-in sparkline filling the middle.
+          Styles are GLOBAL (namespaced under .ow2-split): `highlights` is an extracted
+          const, so styled-jsx's *scoped* class is never added to its elements. */}
+      <style jsx global>{`
+        .ow2-split { display: grid; grid-template-columns: 1fr 1fr; border: var(--border); border-radius: 14px; overflow: hidden; margin-bottom: 12px; background: var(--card); }
+        .ow2-split .oh { display: flex; align-items: center; gap: 13px; padding: 14px 18px; min-height: 82px; background: none; border: none; font: inherit; color: inherit; text-align: left; cursor: pointer; overflow: hidden; transition: filter .15s; }
+        .ow2-split .oh.good { background: linear-gradient(90deg, color-mix(in srgb, ${GREEN} 14%, transparent), transparent 78%); }
+        .ow2-split .oh.warn { border-left: var(--border); background: linear-gradient(270deg, color-mix(in srgb, #ef4444 12%, transparent), transparent 78%); }
+        .ow2-split .oh.warn .txt { text-align: right; }
+        .ow2-split .oh:hover { filter: brightness(1.05); }
+        .ow2-split .oh.ghost { cursor: default; }
+        .ow2-split .ic { font-size: 22px; flex: none; align-self: flex-start; margin-top: 2px; }
+        .ow2-split .txt { flex: none; min-width: 0; }
+        .ow2-split .txt small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+        .ow2-split .txt b { display: block; font-size: 17px; font-weight: 800; line-height: 1.25; margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ow2-split .txt i { display: block; font-style: normal; font-size: 12.5px; color: var(--muted); }
+        .ow2-split .txt em { font-style: normal; font-weight: 800; color: ${GREEN}; }
+        .ow2-split .txt em.r { color: #ef4444; }
+        .ow2-split .mid { flex: none; width: clamp(90px, 26%, 200px); height: 46px; display: flex; align-items: center; opacity: .9; }
+        .ow2-split .oh.good .mid { margin-left: auto; }
+        .ow2-split .oh.warn .mid { margin-right: auto; }
+        .ow2-split .mid svg { width: 100%; }
+        @media (max-width: 820px) { .ow2-split .mid { display: none; } }
+        @media (max-width: 620px) { .ow2-split { grid-template-columns: 1fr; } .ow2-split .oh.warn { border-left: none; border-top: var(--border); } .ow2-split .oh.warn .txt { text-align: left; } }
+      `}</style>
+      {callouts && view.level === "home" && !single && (callouts.best || callouts.watch) && (
+        <div className="ow2-split">
+          {callouts.best ? (
+            <button className="oh good" onClick={() => setDrawerRid(callouts.best!.id)} title={`Open ${callouts.best.name}`}>
+              <span className="ic">🏆</span>
+              <span className="txt"><small>Top performer · {RANGE_LABEL[globalRange]}</small>
+                <b>{callouts.best.name}</b>
+                <i><em>{inr(callouts.best.revenue)}</em> · {Math.round(callouts.best.share * 100)}% of revenue</i></span>
+              <span className="mid" aria-hidden="true"><SparkArea points={callouts.best.spark} color="#10b981" height={44} animate /></span>
+            </button>
+          ) : <span className="oh ghost" />}
+          {callouts.watch ? (
+            <button className="oh warn" onClick={() => setDrawerRid(callouts.watch!.id)} title={`Open ${callouts.watch.name}`}>
+              <span className="mid" aria-hidden="true"><SparkArea points={callouts.watch.spark} color="#ef4444" height={44} animate /></span>
+              <span className="txt"><small>Needs attention</small>
+                <b>{callouts.watch.name}</b>
+                <i>trending <em className="r">▼ {Math.abs(Math.round(callouts.watch.pct))}%</em> this period</i></span>
+              <span className="ic">⚠️</span>
+            </button>
+          ) : <span className="oh ghost" />}
+        </div>
+      )}
+      {insights.length > 0 && (
+        <div className="owx-insights" style={{ marginTop: 12 }}>
+          {insights.map((ins, i) => (
+            <span key={i} className="owx-insight"><i className={`fas ${ins.icon}`} aria-hidden="true" />{ins.text}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  const kpiRow = (
+    <div className="adm-stats ow2-stats">
+      <Kpi k="Revenue" href={reportHref("sales")} v={kMain?.revenue ?? 0} money loading={!kMain}
+        delta={kMain?.prev ? { now: kMain.revenue, prev: kMain.prev.revenue } : undefined}
+        prevTitle={PREV_LABEL[globalRange]} sub={PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
+      <Kpi k="Orders" href={reportHref("volume")} v={kMain?.orders ?? 0} loading={!kMain}
+        sub={kMain && kMain.paidOrders !== kMain.orders ? `${kMain.paidOrders} paid · rest still open` : PREV_LABEL[globalRange] || "whole history"}
+        delta={kMain?.prev ? { now: kMain.orders, prev: kMain.prev.orders } : undefined}
+        prevTitle={PREV_LABEL[globalRange]} spark={sparkOf(globalRange, "orders")} />
+      <Kpi k="Avg order" href={reportHref("avgbill")} v={kMain?.avg ?? 0} money loading={!kMain} sub="per paid order" />
+      <Kpi k="Today so far" href={reportHref("daysummary")} v={todayRev} money loading={!ov} pill="● live"
+        sub={`${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
+      <Kpi k="Lost to cancellations" href={reportHref("cancellations")} v={money === "err" ? "—" : ((money as MoneyTotals | undefined)?.cancelledValue ?? 0)} money
+        loading={!money}
+        sub={money === "err" ? "couldn't total for this range" : ((money as MoneyTotals | undefined)?.cancelledOrders ? `${(money as MoneyTotals).cancelledOrders} order${(money as MoneyTotals).cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
+    </div>
+  );
 
   return (
     <>
-      {/* Breadcrumb + range */}
-      <div className="own-bar">
-        <div className="own-crumb">
-          <button className={view.level === "home" ? "cur" : "lnk"} onClick={goHome}>
-            {single ? (ov?.restaurants[0]?.name || "Dashboard") : "All restaurants"}
-          </button>
-          {!single && view.level !== "home" && rest && (<>
-            <span className="sep">›</span>
-            <button className={view.level === "restaurant" ? "cur" : "lnk"} onClick={() => setView({ level: "restaurant", rid: (view as { rid: string }).rid })}>{rest.restaurant.name}</button>
-          </>)}
-          {view.level === "dish" && (<><span className="sep">›</span><span className="cur">{view.dish}</span></>)}
-        </div>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
-          <RangeSlider items={RANGES} value={range} onChange={setRange} caption={rangeSpanText(range)} />
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, marginTop: 2 }}>
-            <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now — recomputes the live numbers (normal views show a stored snapshot to stay instant)">
+      {/* Toolbar — Report ▾ + Refresh (the global range tabs are GONE by design) */}
+      <div className="ow2-bar">
+        {!single && view.level !== "home" ? (
+          <button className="ow2-back" onClick={goHome}><i className="fas fa-arrow-left" aria-hidden="true" /> All restaurants</button>
+        ) : <span className="ow2-title">{single ? "Dashboard" : `Your ${restCount || "…"} restaurant${restCount === 1 ? "" : "s"}`}</span>}
+        <div className="ow2-tools">
+          {/* THE main range — one dropdown for every graph on the page (owner round-2).
+              Picking it also resets the five KPI boxes; each box can still override. */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+            <RangeDrop id="global" value={globalRange} onChange={setGlobalRange} main />
+            <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{rangeSpanText(globalRange)}</span>
+          </div>
+          <ReportMenu gather={gatherReport} filename={exportName} />
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+            <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now — recomputes the live numbers">
               <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
             </button>
             {updatedAt && !refreshing && <span style={{ fontSize: 10.5, color: "var(--muted)" }}>updated {timeAgo(updatedAt)}</span>}
@@ -511,155 +857,130 @@ export default function OwnerDashboard() {
 
       {err && <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 16 }}><b>Couldn&apos;t load.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span></div>}
 
-      {/* Insight strip — the panel talks like a person, not a spreadsheet */}
-      {insights.length > 0 && view.level !== "dish" && (
-        <div className="owx-insights">
-          {insights.map((ins, i) => (
-            <span key={i} className="owx-insight"><i className={`fas ${ins.icon}`} aria-hidden="true" />{ins.text}</span>
-          ))}
-        </div>
-      )}
 
-      {/* ═══════ HOME · MULTI (2 and 3+) ═══════ */}
+      {/* ═══════ HOME · MULTI ═══════ */}
       {view.level === "home" && !single && (
         <>
-          <div className="adm-stats">
-            <Kpi k={`Revenue (${RANGE_LABEL[range]})`} v={groupTotals?.revenue ?? 0} money loading={!group}
-              delta={group?.prev ? { now: groupTotals?.revenue ?? 0, prev: group.prev.revenue } : undefined}
-              prevTitle={PREV_LABEL[range]} />
-            <Kpi k="Orders" v={groupTotals?.orders ?? 0} loading={!group}
-              sub={groupTotals && groupTotals.paidOrders !== groupTotals.orders ? `${groupTotals.paidOrders} paid · rest still open` : undefined}
-              delta={group?.prev ? { now: groupTotals?.orders ?? 0, prev: group.prev.orders } : undefined}
-              prevTitle={PREV_LABEL[range]} />
-            <Kpi k="Open tables now" v={ov?.totals.openTables ?? 0} />
-            <Kpi k="Lost to cancellations" v={moneyErr ? "—" : (money?.cancelledValue ?? 0)} money loading={!money && !moneyErr}
-              sub={moneyErr ? "couldn't total for this range" : (money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
-          </div>
+          {kpiRow}
 
-          {hq ? (
-            /* ── 10+ restaurants → HQ mode: one sortable, searchable table ── */
-            <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
-              <div className="hq-bar">
-                <span className="hq-search">
-                  <i className="fas fa-magnifying-glass" aria-hidden="true" />
-                  <input value={hqQuery} onChange={(e) => setHqQuery(e.target.value)} placeholder={`Search ${restCount} restaurants…`} aria-label="Search restaurants" />
-                  {hqQuery && <button className="hq-x" onClick={() => setHqQuery("")} aria-label="Clear search">×</button>}
-                </span>
-                <span className="hq-sorts" role="tablist" aria-label="Sort by">
-                  {([["revenue", `Revenue (${RANGE_LABEL[range]})`], ["orders", "Orders"], ["openTables", "Open tables"], ["name", "A–Z"]] as const).map(([k, lb]) => (
-                    <button key={k} role="tab" aria-selected={hqSort === k} className={hqSort === k ? "on" : ""} onClick={() => setHqSort(k)}>{lb}</button>
-                  ))}
-                </span>
+
+          {/* Group revenue — 2–3 restaurants: Samsung-style stacked daily bars in
+              green shades · 4+: "Who earns more" + the per-restaurant multi-line
+              trend, side by side (owner round-2: "this was the best one"). */}
+          {groupTrend.stacked ? (
+            <div className="adm-card" style={{ marginBottom: 12 }}>
+              <div className="ow2-ct">
+                <span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"} · each bar split by restaurant</span></span>
+                <span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
               </div>
-              <div className="hq-scroll">
-                <table className="hq-table">
-                  <thead><tr>
-                    <th className="rk">#</th><th style={{ textAlign: "left" }}>Restaurant</th>
-                    <th>Revenue ({RANGE_LABEL[range]})</th><th>Orders</th><th>Today</th><th>Open tables</th><th>Status</th><th aria-hidden="true" />
-                  </tr></thead>
-                  <tbody>
-                    {hqRows.length === 0 && (
-                      <tr><td colSpan={8} className="hq-empty">{ov ? "No restaurant matches that search." : "Loading…"}</td></tr>
-                    )}
-                    {hqRows.map((r) => (
-                      <tr key={r.id} className="hq-row" onClick={() => setView({ level: "restaurant", rid: r.id })}
-                        tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") setView({ level: "restaurant", rid: r.id }); }}>
-                        <td className="rk">{r.rank}</td>
-                        <td style={{ textAlign: "left" }}>
-                          <span className="hq-nm"><span className="sw" style={{ background: r.accent }} aria-hidden="true" />{r.name}</span>
-                        </td>
-                        <td>
-                          <b><AnimatedNumber value={r.revenue} money /></b>
-                          <span className="hq-meter" aria-hidden="true"><span style={{ width: `${Math.round((r.revenue / hqMaxRev) * 100)}%`, background: r.accent }} /></span>
-                        </td>
-                        <td className="mut"><AnimatedNumber value={r.orders} /></td>
-                        <td className="mut"><AnimatedNumber value={r.revenueToday} money /></td>
-                        <td className="mut"><AnimatedNumber value={r.openTables} /></td>
-                        <td><span className={`own-pill ${r.active ? "on" : "off"}`}>{r.active ? "Active" : "Off"}</span></td>
-                        <td className="go"><i className="fas fa-chevron-right" aria-hidden="true" /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : (<>
-          {two ? (
-            /* ── exactly TWO restaurants → head-to-head ── */
-            <div className="own-charts">
-              <div className="adm-card">
-                <div className="own-ctitle">Head to head <span>· {RANGE_LABEL[range]}</span></div>
-                <div className="own-h2h">
-                  {group!.restaurantRevenue.map((r) => {
-                    const o = ov?.restaurants.find((x) => x.id === r.id);
-                    const max = Math.max(1, ...group!.restaurantRevenue.map((x) => x.revenue));
-                    return (
-                      <button key={r.id} className="own-h2h-col" style={{ ["--rcol" as string]: r.accentColor || FALLBACK }} onClick={() => setView({ level: "restaurant", rid: r.id })}>
-                        <div className="nm">{r.name}</div>
-                        <div className="rev"><AnimatedNumber value={r.revenue} money /></div>
-                        <div className="meter"><span style={{ width: `${(r.revenue / max) * 100}%` }} /></div>
-                        <div className="meta"><AnimatedNumber value={r.orders} /> orders · {o?.openTables ?? 0} open tables</div>
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="own-hint">Tip: tap a side to open that restaurant</div>
-              </div>
-              <div className="adm-card">
-                <div className="own-ctitle">Revenue over time <span>· {range === "today" || range === "yesterday" ? "by hour" : "by day"}</span></div>
-                <AreaTrend data={trendData.rows} lines={trendData.lines} />
-              </div>
+              {!trendPayload ? <div className="adm-empty">Loading…</div>
+                : <StackedDailyBars data={groupTrend.rows} lines={groupTrend.lines} />}
             </div>
           ) : (
-            /* ── 3+ restaurants → leaderboard + multi-line trend ── */
-            <div className="own-charts">
+            <div className="ow2-two" style={{ marginBottom: 12 }}>
               <div className="adm-card">
-                <div className="own-ctitle">Who earns more <span>· tap a bar to open</span></div>
-                <LeaderBar data={(group?.restaurantRevenue ?? []).map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: r.accentColor || FALLBACK }))}
-                  onSelect={(id) => setView({ level: "restaurant", rid: id })} />
+                <div className="ow2-ct"><span>Who earns more <span className="mut">· tap a bar to open</span></span>
+                  <span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+                {!trendPayload || trendPayload.scope !== "group" ? <div className="adm-empty">Loading…</div>
+                  : <LeaderBar data={trendPayload.restaurantRevenue.map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: r.accentColor || FALLBACK }))}
+                      onSelect={(id) => setDrawerRid(id)} />}
               </div>
               <div className="adm-card">
-                <div className="own-ctitle">Revenue over time <span>· {range === "today" || range === "yesterday" ? "by hour" : "by day"}</span></div>
-                <AreaTrend data={trendData.rows} lines={trendData.lines} />
+                <div className="ow2-ct"><span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"}</span></span></div>
+                {!trendPayload ? <div className="adm-empty">Loading…</div>
+                  : <AreaTrend data={groupTrend.rows} lines={groupTrend.lines} />}
               </div>
             </div>
           )}
 
-          <h2 className="own-h2">Restaurants</h2>
-          <div className="own-grid">
-            {!ov && <div className="adm-empty" style={{ gridColumn: "1 / -1" }}>Loading…</div>}
-            {ov?.restaurants.map((r) => (
-              <button key={r.id} className="adm-card own-card" style={{ ["--rcol" as string]: r.accentColor }} onClick={() => setView({ level: "restaurant", rid: r.id })}>
-                <span className="own-accent" aria-hidden="true" />
-                <div className="own-head">
-                  <div style={{ minWidth: 0, textAlign: "left" }}>
-                    <div className="own-name" title={r.name}>{r.name}</div>
-                    <div className="adm-muted mono" style={{ fontSize: 11 }}>{r.slug}</div>
-                  </div>
-                  <span className={`own-pill ${r.active ? "on" : "off"}`}>{r.active ? "Active" : "Off"}</span>
-                </div>
-                <div className="own-today">
-                  <div className="own-cell"><div className="k">Orders today</div><div className="v"><AnimatedNumber value={r.ordersToday} /></div></div>
-                  <div className="own-cell"><div className="k">Revenue today</div><div className="v"><AnimatedNumber value={r.revenueToday} money /></div></div>
-                  <div className="own-cell"><div className="k">Open tables</div><div className="v"><AnimatedNumber value={r.openTables} /></div></div>
-                </div>
-                <div className="own-foot">
-                  <span><i className="fas fa-receipt" aria-hidden="true" /> <AnimatedNumber value={r.ordersAll} /> all-time</span>
-                  <span><i className="fas fa-indian-rupee-sign" aria-hidden="true" /> <AnimatedNumber value={r.revenueAll} money /> all-time</span>
-                  <span className="own-open">Open <i className="fas fa-arrow-right" aria-hidden="true" /></span>
-                </div>
-              </button>
-            ))}
+          {/* THE table (design #4) — every multi tier. Click a row → side drawer. */}
+          <div className="adm-card" style={{ padding: 0, overflow: "hidden", marginBottom: 12 }}>
+            <div className="hq-bar">
+              <span className="hq-search">
+                <i className="fas fa-magnifying-glass" aria-hidden="true" />
+                <input value={tq} onChange={(e) => setTq(e.target.value)} placeholder={`Search ${restCount} restaurants…`} aria-label="Search restaurants" />
+                {tq && <button className="hq-x" onClick={() => setTq("")} aria-label="Clear search">×</button>}
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>
+                Revenue window · {RANGE_LABEL[globalRange]}
+              </span>
+            </div>
+            <div className="hq-scroll">
+              <table className="hq-table ow2-table">
+                <thead><tr>
+                  {th("rank", "#", true)}
+                  {th("name", "Restaurant", true)}
+                  {th("today", "Today")}
+                  {th("revenue", `Revenue (${RANGE_LABEL[globalRange]})`)}
+                  {th("orders", "Orders")}
+                  {th("avg", "Avg check")}
+                  <th className="hide-m">Trend</th>
+                  <th className="hide-m">Share</th>
+                  {th("openTables", "Open")}
+                  <th aria-hidden="true" />
+                </tr></thead>
+                <tbody>
+                  {tableRows.length === 0 && (
+                    <tr><td colSpan={10} className="hq-empty">{ov ? "No restaurant matches that search." : "Loading…"}</td></tr>
+                  )}
+                  {tableRows.map((r) => (
+                    <tr key={r.id} className="hq-row" onClick={() => setDrawerRid(r.id)}
+                      tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") setDrawerRid(r.id); }}>
+                      <td className="rk l">{r.rank}</td>
+                      <td className="l"><span className="hq-nm"><span className="sw" style={{ background: r.accent }} aria-hidden="true" />{r.name}</span></td>
+                      <td className="mut"><AnimatedNumber value={r.today} money /></td>
+                      <td><b><AnimatedNumber value={r.revenue} money /></b></td>
+                      <td className="mut"><AnimatedNumber value={r.orders} /></td>
+                      <td className="mut"><AnimatedNumber value={r.avg} money /></td>
+                      <td className="hide-m">{r.spark && r.spark.length >= 2 ? <Spark points={r.spark} color={GREEN} width={84} height={22} /> : <span className="mut">—</span>}</td>
+                      <td className="hide-m"><span className="hq-meter" aria-hidden="true"><span style={{ width: `${Math.round(r.share * 100)}%`, background: r.accent }} /></span><span style={{ fontSize: 11 }}>{Math.round(r.share * 100)}%</span></td>
+                      <td className="mut"><AnimatedNumber value={r.openTables} /></td>
+                      <td className="go"><i className="fas fa-chevron-right" aria-hidden="true" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-          </>)}
+
+          {/* Busy hours + category — these two were single-view-only before; the owner
+              wants them on the group home too (round-2: "this both thing were good"). */}
+          <div className="ow2-two" style={{ marginBottom: 12 }}>
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Busy hours <span className="mut">· orders by hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
+              {groupHourly ? <HourlyBar data={groupHourly} color={GREEN} /> : <div className="adm-empty">Loading…</div>}
+            </div>
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Revenue by category <span className="mut">· all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              {(pl(globalRange) as GroupA | undefined)?.categories
+                ? <CategoryDonut data={(pl(globalRange) as GroupA).categories!} />
+                : <div className="adm-empty">Loading…</div>}
+            </div>
+          </div>
+
+          {/* Heatmap + payments, side by side (group scope) */}
+          <div className="ow2-two">
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
+              {(pl(weekKey) as GroupA | undefined)?.heatmap
+                ? <Heatmap data={(pl(weekKey) as GroupA).heatmap!} accent={GREEN} />
+                : <div className="adm-empty">Loading…</div>}
+            </div>
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid · all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              {(pl(globalRange) as GroupA | undefined)?.paymentMethods
+                ? <PaymentDonut data={(pl(globalRange) as GroupA).paymentMethods} />
+                : <div className="adm-empty">Loading…</div>}
+            </div>
+          </div>
+
+          {highlights}
         </>
       )}
 
-      {/* ═══════ SINGLE-OWNER HERO — identity + one-tap jumps (2026-07-06 polish):
-          with one restaurant there's no portfolio to browse, so the dashboard opens
-          with WHO you are and the three places you actually go next. ═══════ */}
+      {/* ═══════ SINGLE-OWNER HERO — identity + one-tap jumps ═══════ */}
       {view.level === "home" && single && ov && (
-        <div className="own-hero" style={{ ["--rcol" as string]: ov.restaurants[0].accentColor || FALLBACK }}>
+        <div className="own-hero" style={{ ["--rcol" as string]: GREEN }}>
           <div className="own-hero-id">
             <div className="own-hero-name">{ov.restaurants[0].name}</div>
             <div className="own-hero-sub">
@@ -668,8 +989,6 @@ export default function OwnerDashboard() {
               <span className="live"><i className="fas fa-chair" aria-hidden="true" /> {ov.restaurants[0].openTables} table{ov.restaurants[0].openTables === 1 ? "" : "s"} open now</span>
             </div>
           </div>
-          {/* The ladder (mig 133): a section the admin removed loses its hero shortcut
-              too, not just its nav link — absent map = everything on (older server). */}
           <div className="own-hero-links">
             {ov.entitlements?.reports !== false && <Link href={withPin("/owner/reports")} className="own-hero-link"><i className="fas fa-file-invoice" aria-hidden="true" /> Reports</Link>}
             {ov.entitlements?.staff !== false && <Link href={withPin("/owner/staff")} className="own-hero-link"><i className="fas fa-users-gear" aria-hidden="true" /> Staff &amp; powers</Link>}
@@ -680,9 +999,118 @@ export default function OwnerDashboard() {
 
       {/* ═══════ RESTAURANT (drill-down, or HOME when there's only one) ═══════ */}
       {((view.level === "home" && single) || view.level === "restaurant") && activeRid && (
-        <RestaurantView rest={rest && rest.restaurant.id === activeRid ? rest : null} money={money} moneyErr={moneyErr} range={range} restTrend={restTrend}
-          dishSort={dishSort} setDishSort={setDishSort}
-          onDish={(title) => setView({ level: "dish", rid: activeRid, dish: title })} />
+        <>
+          {kpiRow}
+          <div className="adm-card" style={{ marginBottom: 12 }}>
+            <div className="ow2-ct">
+              <span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"}</span></span>
+              <span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
+            </div>
+            {!trendPayload || trendPayload.scope !== "restaurant" ? <div className="adm-empty">Loading…</div>
+              : restTrend.length >= 9
+                ? <AreaTrend data={restTrend} lines={[{ key: "Revenue", name: "Revenue", color: GREEN }]} />
+                : <TimeBar data={restTrend.map((r) => ({ label: String(r.label), revenue: Number(r.Revenue) || 0, __orders: Number(r.__orders) || 0 })) as { label: string; revenue: number }[]} color={GREEN} />}
+          </div>
+
+          <div className="ow2-two">
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Busy hours <span className="mut">· orders by hour</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
+              {(pl(weekKey) as RestA | undefined)?.hourly
+                ? <HourlyBar data={(pl(weekKey) as RestA).hourly} color={GREEN} />
+                : <div className="adm-empty">Loading…</div>}
+            </div>
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              {(pl(globalRange) as RestA | undefined)?.categories
+                ? <CategoryDonut data={(pl(globalRange) as RestA).categories} />
+                : <div className="adm-empty">Loading…</div>}
+            </div>
+          </div>
+
+          <div className="ow2-two" style={{ marginTop: 12 }}>
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
+              {(pl(weekKey) as RestA | undefined)?.heatmap
+                ? <Heatmap data={(pl(weekKey) as RestA).heatmap!} accent={GREEN} />
+                : <div className="adm-empty">Loading…</div>}
+            </div>
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              {(pl(globalRange) as RestA | undefined)?.paymentMethods && ((pl(globalRange) as RestA).paymentMethods.reduce((a, m) => a + m.revenue, 0) > 0)
+                ? <PaymentDonut data={(pl(globalRange) as RestA).paymentMethods} />
+                : (pl(globalRange) ? <div className="adm-empty">No recorded payments in this range.</div> : <div className="adm-empty">Loading…</div>)}
+            </div>
+          </div>
+
+          {/* Records strip — the numbers worth bragging about */}
+          {records && (records.bestDay || records.starDish) && (
+            <div className="adm-card" style={{ marginTop: 12 }}>
+              <div className="ow2-ct"><span>Your records <span className="mut">· the numbers worth bragging about</span></span></div>
+              <div className="rv-recs">
+                {records.bestDay && (
+                  <div className="rv-rec"><span className="e">🏆</span><span><small>BEST DAY EVER</small><b><AnimatedNumber value={records.bestDay.revenue} money /></b>
+                    <i>{new Date(records.bestDay.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: IST })} — beat it!</i></span></div>
+                )}
+                {records.starDish && (
+                  <div className="rv-rec"><span className="e">👑</span><span><small>STAR DISH · 30 DAYS</small><b>{records.starDish.title}</b>
+                    <i>{records.starDish.qty} plates</i></span></div>
+                )}
+                {records.fastHour && (
+                  <div className="rv-rec"><span className="e">⚡</span><span><small>BUSIEST HOUR EVER</small><b><AnimatedNumber value={records.fastHour.orders} /> orders</b>
+                    <i>{istWall(records.fastHour.at, { day: "numeric", month: "short", hour: "numeric", hour12: true })}</i></span></div>
+                )}
+                {records.bigBill && (
+                  <div className="rv-rec"><span className="e">💎</span><span><small>BIGGEST BILL</small><b><AnimatedNumber value={records.bigBill.revenue} money /></b>
+                    <i>{records.bigBill.table ? `table ${records.bigBill.table}` : "one sitting"}</i></span></div>
+                )}
+                {(records.regulars ?? 0) > 0 && (
+                  <div className="rv-rec"><span className="e">🔁</span><span><small>REGULARS · 30 DAYS</small><b><AnimatedNumber value={records.regulars ?? 0} /> returning guests</b>
+                    <i>same name, 2+ visits</i></span></div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="ow2-two" style={{ marginTop: 12 }}>
+            {/* Every dish — tap one for detail */}
+            <div className="adm-card">
+              <div className="ow2-ct">
+                <span>Every dish <span className="mut">· tap one for detail</span></span>
+                <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                  <span className="rv-sort">
+                    <button className={dishSort === "revenue" ? "on" : ""} onClick={() => setDishSort("revenue")}>By revenue</button>
+                    <button className={dishSort === "qty" ? "on" : ""} onClick={() => setDishSort("qty")}>By qty</button>
+                  </span>
+                </span>
+              </div>
+              <DishList payload={pl(globalRange) as RestA | undefined} sort={dishSort}
+                onDish={(t) => setView({ level: "dish", rid: activeRid, dish: t })} />
+            </div>
+            {/* Recent activity — the owner's mini log (surprise add) */}
+            <div className="adm-card">
+              <div className="ow2-ct">
+                <span>Recent activity <span className="mut">· who did what</span></span>
+                {ov?.entitlements?.activity !== false && <Link href={withPin("/owner/activity")} className="ow2-seeall">See all <i className="fas fa-arrow-right" aria-hidden="true" /></Link>}
+              </div>
+              {!acts ? <div className="adm-empty">Loading…</div>
+                : acts.length === 0 ? <div className="adm-empty">Nothing yet.</div>
+                : (
+                  <div className="ow2-acts">
+                    {acts.map((a) => (
+                      <div key={a.id} className="ow2-act">
+                        <span className={`pn pn-${a.panel}`}>{a.panel}</span>
+                        <span className="tx">{a.action}{a.table_number ? ` · table ${a.table_number}` : ""}</span>
+                        <span className="who">{a.actor || "—"}</span>
+                        <span className="when">{timeAgo(a.created_at)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          </div>
+
+          {highlights}
+        </>
       )}
 
       {/* ═══════ DISH ═══════ */}
@@ -691,15 +1119,15 @@ export default function OwnerDashboard() {
           {dishView === "loading" || dishView === null ? <div className="adm-empty">Loading dish…</div>
           : dishView === "missing" ? (
             <div className="adm-empty">
-              No sales for <b>{view.dish}</b> in {RANGES.find((r) => r.k === range)?.label?.toLowerCase()}.{" "}
+              No sales for <b>{view.dish}</b> in {RANGE_LABEL[globalRange]}.{" "}
               <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setView({ level: "restaurant", rid: view.rid })}>
                 <i className="fas fa-arrow-left" aria-hidden="true" /> Back to restaurant
               </button>
             </div>
           ) : (<>
-            <div className="own-dish-h" style={{ ["--rcol" as string]: rest?.restaurant.accentColor || FALLBACK }}>
+            <div className="own-dish-h" style={{ ["--rcol" as string]: GREEN }}>
               <div className="own-dish-name">{dishView.d.title}</div>
-              <div className="adm-muted">at {rest?.restaurant.name} · {RANGES.find((r) => r.k === range)?.label}</div>
+              <div className="adm-muted">{RANGE_LABEL[globalRange]}</div>
             </div>
             <div className="adm-stats" style={{ marginTop: 14 }}>
               <div className="adm-stat"><div className="k">Revenue</div><div className="v"><AnimatedNumber value={dishView.d.revenue} money /></div></div>
@@ -707,52 +1135,95 @@ export default function OwnerDashboard() {
               <div className="adm-stat"><div className="k">Share of revenue</div><div className="v">{dishView.share}%</div></div>
               <div className="adm-stat"><div className="k">Rank by revenue</div><div className="v">#{dishView.rank}<span style={{ fontSize: 13, color: "var(--muted)" }}> / {dishView.of}</span></div></div>
             </div>
-            <div className="own-ctitle" style={{ marginTop: 18 }}>How it compares <span>· revenue vs other dishes</span></div>
-            <LeaderBar data={(rest?.dishes ?? []).slice(0, 12).map((d) => ({ id: d.title, name: d.title, revenue: d.revenue, orders: d.qty, accentColor: d.title === dishView.d.title ? (rest?.restaurant.accentColor || FALLBACK) : "rgba(128,128,128,.35)" }))}
+            <div className="ow2-ct" style={{ marginTop: 18 }}><span>How it compares <span className="mut">· revenue vs other dishes</span></span></div>
+            <LeaderBar data={dishView.dishes.slice(0, 12).map((d) => ({ id: d.title, name: d.title, revenue: d.revenue, orders: d.qty, accentColor: d.title === dishView.d.title ? GREEN : "rgba(128,128,128,.35)" }))}
               onSelect={(title) => setView({ level: "dish", rid: (view as { rid: string }).rid, dish: title })} />
           </>)}
         </div>
       )}
 
+      {/* ═══════ DRAWER — phase 2 of the 3-phase drill (multi only) ═══════ */}
+      {drawer && (
+        <div className="ow2-drawer-wrap" role="dialog" aria-label={`${drawer.r.name} summary`}>
+          <div className="ow2-drawer-back" onClick={() => setDrawerRid(null)} aria-hidden="true" />
+          <aside className="ow2-drawer">
+            <header>
+              <span className="hq-nm" style={{ fontSize: 15 }}><span className="sw" style={{ background: drawer.row?.accent || GREEN }} aria-hidden="true" />{drawer.r.name}</span>
+              <button className="x" onClick={() => setDrawerRid(null)} aria-label="Close">✕</button>
+            </header>
+            <div className="bd">
+              <div className="dstats">
+                <div><small>Today</small><b><AnimatedNumber value={drawer.r.revenueToday} money /></b><i>{drawer.r.ordersToday} orders</i></div>
+                <div><small>Revenue · {RANGE_LABEL[globalRange]}</small><b><AnimatedNumber value={drawer.row?.revenue ?? 0} money /></b><i>{drawer.row?.orders ?? 0} orders</i></div>
+                <div><small>Avg check</small><b><AnimatedNumber value={drawer.row?.avg ?? 0} money /></b><i>per order</i></div>
+                <div><small>Open tables</small><b><AnimatedNumber value={drawer.r.openTables} /></b><i>right now</i></div>
+              </div>
+              {drawerTrend.length >= 2 && (
+                <div className="dspark"><small>Trend · {RANGE_LABEL[globalRange]}</small>
+                  <AreaTrend data={drawerTrend} lines={[{ key: "Revenue", name: "Revenue", color: GREEN }]} height={170} /></div>
+              )}
+              <div className="dall">
+                <span><i className="fas fa-receipt" aria-hidden="true" /> {drawer.r.ordersAll.toLocaleString("en-IN")} orders all-time</span>
+                <span><i className="fas fa-indian-rupee-sign" aria-hidden="true" /> {inr(drawer.r.revenueAll)} all-time</span>
+                <span className={`own-pill ${drawer.r.active ? "on" : "off"}`}>{drawer.r.active ? "Active" : "Off"}</span>
+              </div>
+            </div>
+            <footer>
+              <button className="full" onClick={() => openFull(drawer.r.id)}>
+                View in full detail <i className="fas fa-arrow-right" aria-hidden="true" />
+              </button>
+            </footer>
+          </aside>
+        </div>
+      )}
+
       <style jsx>{`
-        .own-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-        .own-crumb { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 800; min-width: 0; }
-        .own-crumb button { background: none; border: none; font: inherit; padding: 0; }
-        .own-crumb .lnk { color: var(--muted); cursor: pointer; }
-        .own-crumb .lnk:hover { color: var(--accent); text-decoration: underline; }
-        .own-crumb .cur { color: var(--text, inherit); cursor: default; }
-        .own-crumb .sep { color: var(--muted); font-weight: 400; }
-        .own-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
-        .own-ctitle { font-size: 13px; font-weight: 800; margin-bottom: 10px; }
-        .own-ctitle span { color: var(--muted); font-weight: 500; }
-        .own-hint { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
-        .own-h2 { font-size: 12px; font-weight: 800; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-        .own-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
-        .own-card { position: relative; overflow: hidden; padding-left: 22px; text-align: left; cursor: pointer; transition: border-color .15s; width: 100%; font: inherit; color: inherit; }
-        .own-card:hover { border-color: var(--rcol, var(--accent)); }
-        .own-accent { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rcol, var(--accent)); }
-        .own-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
-        .own-name { font-size: 15px; font-weight: 800; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .own-pill { font-size: 10px; font-weight: 800; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; flex-shrink: 0; }
-        .own-pill.on { background: color-mix(in srgb, var(--adm-ok) 18%, transparent); color: var(--adm-ok); }
-        .own-pill.off { background: rgba(120,120,120,.18); color: var(--muted); }
-        .own-today { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
-        .own-cell .k { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-        .own-cell .v { font-size: 18px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
-        .own-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-top: 10px; border-top: var(--border); font-size: 12px; color: var(--muted); }
-        .own-foot i { opacity: .7; margin-right: 4px; }
-        .own-open { margin-left: auto; color: var(--rcol, var(--accent)); font-weight: 700; }
-        .own-h2h { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .own-h2h-col { border: var(--border); border-radius: 10px; padding: 12px; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; transition: border-color .15s; }
-        .own-h2h-col:hover { border-color: var(--rcol); }
-        .own-h2h-col .nm { font-weight: 800; font-size: 13.5px; color: var(--rcol); }
-        .own-h2h-col .rev { font-size: 22px; font-weight: 800; margin: 4px 0 6px; font-variant-numeric: tabular-nums; }
-        .own-h2h-col .meter { height: 7px; border-radius: 4px; background: rgba(128,128,128,.14); overflow: hidden; }
-        .own-h2h-col .meter span { display: block; height: 100%; border-radius: 4px; background: var(--rcol); }
-        .own-h2h-col .meta { font-size: 11.5px; color: var(--muted); margin-top: 7px; }
+        .ow2-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+        .ow2-title { font-size: 17px; font-weight: 800; }
+        .ow2-back { display: inline-flex; align-items: center; gap: 8px; background: none; border: var(--border); border-radius: 9px; padding: 7px 13px; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
+        .ow2-back:hover { color: var(--accent); border-color: var(--accent); }
+        .ow2-tools { display: flex; gap: 10px; align-items: flex-start; }
+        .ow2-stats { margin-bottom: 12px; }
+        :global(.ow2-stats) { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+        .ow2-ct { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 800; margin-bottom: 10px; flex-wrap: wrap; }
+        .ow2-ct .mut { color: var(--muted); font-weight: 500; }
+        .ow2-tag { font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--bg); border: var(--border); border-radius: 8px; padding: 3px 9px; white-space: nowrap; }
+        .ow2-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        /* table */
+        .hq-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border-bottom: var(--border); }
+        .hq-search { flex: 1 1 220px; display: flex; align-items: center; gap: 9px; border: var(--border); background: var(--bg); border-radius: 9px; padding: 7px 12px; color: var(--muted); }
+        .hq-search input { flex: 1; min-width: 0; background: none; border: none; outline: none; font: inherit; font-size: 13px; color: var(--text); }
+        .hq-search i { font-size: 12px; }
+        .hq-x { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; padding: 0 2px; line-height: 1; }
+        .hq-scroll { overflow: auto; max-height: 64vh; }
+        .hq-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .hq-table th { position: sticky; top: 0; background: var(--card); z-index: 1; text-align: right; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; padding: 9px 12px; border-bottom: var(--border); white-space: nowrap; user-select: none; }
+        .hq-table th:hover { color: var(--accent); }
+        .hq-table th.l, .hq-table td.l { text-align: left; }
+        .hq-table td { padding: 9px 12px; border-bottom: var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .hq-table .rk { width: 30px; color: var(--muted); font-weight: 800; font-size: 11.5px; }
+        .hq-row { cursor: pointer; }
+        .hq-row:hover td, .hq-row:focus-visible td { background: var(--muted2); }
+        .hq-nm { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .hq-nm .sw { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+        .hq-meter { display: inline-block; vertical-align: middle; width: 52px; height: 7px; border-radius: 4px; background: rgba(128,128,128,.14); overflow: hidden; margin-right: 8px; }
+        .hq-meter span { display: block; height: 100%; border-radius: 4px; }
+        .hq-table .mut { color: var(--muted); }
+        .hq-table .go i { color: var(--muted); font-size: 11px; }
+        .hq-empty { text-align: center !important; color: var(--muted); padding: 26px 12px !important; }
+        /* dish view bits reused */
         .own-dish-h { border-left: 4px solid var(--rcol); padding-left: 12px; }
         .own-dish-name { font-size: 22px; font-weight: 800; }
-        /* ── single-owner hero ── */
+        .rv-sort { display: inline-flex; gap: 2px; }
+        .rv-sort button { background: none; border: var(--border); padding: 4px 10px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
+        .rv-sort button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .rv-recs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+        .rv-rec { flex: 1 1 190px; min-width: 170px; display: flex; gap: 11px; align-items: center; border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 11px 14px; }
+        .rv-rec .e { font-size: 20px; }
+        .rv-rec small { display: block; font-size: 9.5px; color: var(--muted); font-weight: 800; letter-spacing: 0.5px; }
+        .rv-rec b { display: block; font-size: 14px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+        .rv-rec i { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); }
+        /* hero */
         .own-hero { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border: var(--border); border-left: 4px solid var(--rcol); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; background: linear-gradient(90deg, color-mix(in srgb, var(--rcol) 9%, transparent), transparent 55%); }
         .own-hero-id { min-width: 0; flex: 1; }
         .own-hero-name { font-size: 20px; font-weight: 800; line-height: 1.2; }
@@ -763,174 +1234,73 @@ export default function OwnerDashboard() {
         :global(.own-hero-link) { display: inline-flex; align-items: center; gap: 8px; border: var(--border); background: var(--card); border-radius: 9px; padding: 8px 13px; font-size: 12.5px; font-weight: 700; color: var(--text) !important; text-decoration: none; transition: border-color .15s; }
         :global(.own-hero-link:hover) { border-color: var(--rcol); }
         :global(.own-hero-link i) { color: var(--rcol); font-size: 12px; }
-        /* ── HQ mode (10+ restaurants) ── */
-        .hq-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border-bottom: var(--border); }
-        .hq-search { flex: 1 1 220px; display: flex; align-items: center; gap: 9px; border: var(--border); background: var(--bg); border-radius: 9px; padding: 7px 12px; color: var(--muted); }
-        .hq-search input { flex: 1; min-width: 0; background: none; border: none; outline: none; font: inherit; font-size: 13px; color: var(--text); }
-        .hq-search i { font-size: 12px; }
-        .hq-x { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; padding: 0 2px; line-height: 1; }
-        .hq-sorts { display: inline-flex; background: var(--bg); border: var(--border); border-radius: 9px; padding: 3px; gap: 2px; flex-wrap: wrap; }
-        .hq-sorts button { background: none; border: none; padding: 5px 11px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; white-space: nowrap; }
-        .hq-sorts button.on { background: var(--accent); color: #fff; }
-        .hq-scroll { overflow: auto; max-height: 64vh; }
-        .hq-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .hq-table th { position: sticky; top: 0; background: var(--card); z-index: 1; text-align: right; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; padding: 9px 12px; border-bottom: var(--border); white-space: nowrap; }
-        .hq-table td { padding: 9px 12px; border-bottom: var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-        .hq-table .rk { width: 30px; text-align: left; color: var(--muted); font-weight: 800; font-size: 11.5px; }
-        .hq-row { cursor: pointer; }
-        .hq-row:hover td, .hq-row:focus-visible td { background: var(--muted2); }
-        .hq-nm { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .hq-nm .sw { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
-        .hq-meter { display: inline-block; vertical-align: middle; width: 64px; height: 7px; border-radius: 4px; background: rgba(128,128,128,.14); overflow: hidden; margin-left: 10px; }
-        .hq-meter span { display: block; height: 100%; border-radius: 4px; }
-        .hq-table .mut { color: var(--muted); }
-        .hq-table .go i { color: var(--muted); font-size: 11px; }
-        .hq-empty { text-align: center !important; color: var(--muted); padding: 26px 12px !important; }
-        @media (max-width: 760px) { .own-charts { grid-template-columns: 1fr; } .own-h2h { grid-template-columns: 1fr; } .hq-meter { display: none; } .hq-table .mut { display: none; } .hq-table th:nth-child(4), .hq-table th:nth-child(5), .hq-table th:nth-child(6) { display: none; } .own-hero-links { width: 100%; } :global(.own-hero-link) { flex: 1; justify-content: center; } }
+        .own-pill { font-size: 10px; font-weight: 800; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; flex-shrink: 0; }
+        .own-pill.on { background: color-mix(in srgb, var(--adm-ok) 18%, transparent); color: var(--adm-ok); }
+        .own-pill.off { background: rgba(120,120,120,.18); color: var(--muted); }
+        /* recent activity */
+        :global(.ow2-seeall) { font-size: 11.5px; font-weight: 700; color: var(--accent) !important; text-decoration: none; }
+        :global(.ow2-seeall i) { font-size: 10px; margin-left: 4px; }
+        .ow2-acts { display: flex; flex-direction: column; gap: 2px; }
+        .ow2-act { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; padding: 8px 6px; border-radius: 8px; font-size: 12.5px; }
+        .ow2-act:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+        .ow2-act .pn { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 999px; background: rgba(128,128,128,.14); color: var(--muted); }
+        .ow2-act .tx { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ow2-act .who { color: var(--muted); font-size: 11.5px; }
+        .ow2-act .when { color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+        /* drawer */
+        .ow2-drawer-wrap { position: fixed; inset: 0; z-index: 90; }
+        .ow2-drawer-back { position: absolute; inset: 0; background: rgba(5,8,14,.55); backdrop-filter: blur(2px); animation: ow2fade .2s ease-out; }
+        .ow2-drawer { position: absolute; top: 0; right: 0; height: 100%; width: min(400px, 94vw); background: var(--card); border-left: var(--border); box-shadow: -18px 0 50px rgba(0,0,0,.4); display: flex; flex-direction: column; animation: ow2slide .24s cubic-bezier(.4,0,.2,1); }
+        @keyframes ow2slide { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @keyframes ow2fade { from { opacity: 0; } to { opacity: 1; } }
+        .ow2-drawer header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 18px; border-bottom: var(--border); }
+        .ow2-drawer .x { background: var(--bg); border: var(--border); color: var(--text); width: 32px; height: 32px; border-radius: 9px; font-size: 13px; cursor: pointer; }
+        .ow2-drawer .bd { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+        .dstats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .dstats > div { border: var(--border); border-radius: 11px; padding: 11px 13px; }
+        .dstats small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+        .dstats b { display: block; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+        .dstats i { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); }
+        .dspark { border: var(--border); border-radius: 11px; padding: 11px 13px; }
+        .dspark small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+        .dall { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12px; color: var(--muted); }
+        .dall i { opacity: .7; margin-right: 4px; }
+        .ow2-drawer footer { padding: 14px 18px; border-top: var(--border); }
+        .ow2-drawer .full { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; background: var(--accent); color: #06251a; border: none; border-radius: 11px; padding: 12px; font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer; }
+        .ow2-drawer .full:hover { filter: brightness(1.08); }
+        @media (max-width: 1080px) { :global(.ow2-stats) { grid-template-columns: repeat(3, 1fr) !important; } }
+        @media (max-width: 760px) {
+          :global(.ow2-stats) { grid-template-columns: repeat(2, 1fr) !important; }
+          .ow2-two, .ow2-callouts { grid-template-columns: 1fr; }
+          .hq-table .hide-m { display: none; }
+          .hq-table th:nth-child(3), .hq-table td:nth-child(3), .hq-table th:nth-child(6), .hq-table td:nth-child(6) { display: none; }
+          .ow2-act .who { display: none; }
+        }
       `}</style>
     </>
   );
 }
 
-// ── Restaurant detail (also the HOME layout when the owner has one restaurant) ──
-function RestaurantView({ rest, money, moneyErr, range, restTrend, dishSort, setDishSort, onDish }: {
-  rest: RestA | null; money: MoneyTotals | null; moneyErr: boolean; range: Range; restTrend: Record<string, unknown>[];
-  dishSort: "revenue" | "qty"; setDishSort: (s: "revenue" | "qty") => void; onDish: (t: string) => void;
-}) {
-  if (!rest) return <div className="adm-empty">Loading restaurant…</div>;
-  const accent = rest.restaurant.accentColor || FALLBACK;
-  const dishes = [...rest.dishes].sort((a, b) => (dishSort === "revenue" ? b.revenue - a.revenue : b.qty - a.qty));
+// ── Every-dish list (kept from the old view, range now per-card) ──────────────
+function DishList({ payload, sort, onDish }: { payload?: RestA; sort: "revenue" | "qty"; onDish: (t: string) => void }) {
+  if (!payload) return <div className="adm-empty">Loading…</div>;
+  const dishes = [...payload.dishes].sort((a, b) => (sort === "revenue" ? b.revenue - a.revenue : b.qty - a.qty));
   const maxRev = Math.max(1, ...dishes.map((d) => d.revenue));
-  const k = rest.kpis;
-  const payTotal = (rest.paymentMethods ?? []).reduce((a, p) => a + p.revenue, 0);
-  // These two cards are independent: the same-hour comparison needs comparison windows,
-  // but the 14-day payment trend always has data. They used to share ONE render guard,
-  // so on the All-time view (no sameHour) the payment trend silently vanished too — now
-  // each has its own guard (fixed 2026-07-06).
-  const showSameHour = (rest.sameHour ?? []).length >= 2 && (rest.sameHour ?? []).some((w) => w.revenue > 0);
-  const showPayTrend = (rest.payTrend ?? []).length > 0;
   return (
-    <>
-      <div className="adm-stats">
-        <Kpi k="Revenue" v={k.revenue} money
-          delta={rest.prev ? { now: k.revenue, prev: rest.prev.revenue } : undefined}
-          prevTitle={PREV_LABEL[range]} />
-        <Kpi k="Orders" v={k.orders}
-          sub={k.paidOrders != null && k.paidOrders !== k.orders ? `${k.paidOrders} paid · rest still open` : undefined}
-          delta={rest.prev ? { now: k.orders, prev: rest.prev.orders } : undefined} prevTitle={PREV_LABEL[range]} />
-        <Kpi k="Avg order" v={k.avgOrder} money sub="per paid order" />
-        <Kpi k="Open tables now" v={k.openTables} />
-        <Kpi k="Lost to cancellations" v={moneyErr ? "—" : (money?.cancelledValue ?? 0)} money loading={!money && !moneyErr}
-          sub={moneyErr ? "couldn't total for this range" : (money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
-      </div>
-      <div className="rv-charts">
-        <div className="adm-card" style={{ gridColumn: "1 / -1" }}>
-          <div className="rv-ct">Revenue over time <span>· {range === "today" || range === "yesterday" ? "by hour" : "by day"}</span></div>
-          {restTrend.length >= 9
-            ? <AreaTrend data={restTrend} lines={[{ key: "Revenue", name: "Revenue", color: accent }]} />
-            : <TimeBar data={restTrend.map((r) => ({ label: String(r.label), revenue: Number(r.Revenue) || 0 }))} color={accent} />}
-        </div>
-        <div className="adm-card"><div className="rv-ct">Busy hours <span>· orders by hour</span></div><HourlyBar data={rest.hourly} color={accent} /></div>
-        <div className="adm-card"><div className="rv-ct">Revenue by category</div><CategoryDonut data={rest.categories} /></div>
-      </div>
-
-      {/* "Is today actually good?" — every window cut at the SAME elapsed time
-          (today-till-5pm vs last-week-till-5pm), so the comparison never lies. The
-          14-day payment trend rides alongside it but has its OWN guard so it survives
-          ranges (e.g. All-time) where the same-hour comparison has nothing to show. */}
-      {(showSameHour || showPayTrend) && (
-        <div className="rv-charts" style={{ marginTop: 12, gridTemplateColumns: showSameHour && showPayTrend ? undefined : "1fr" }}>
-          {showSameHour && (
-            <div className="adm-card">
-              <div className="rv-ct">Is {range === "today" ? "today" : "this period"} actually good? <span>· all cut at the same time of day</span></div>
-              <SameHourBar accent={accent} data={(rest.sameHour ?? []).map((w, i) => ({
-                label: SAMEHOUR_LABEL[range]?.[i] ?? new Date(w.start).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST }),
-                revenue: w.revenue,
-              }))} />
-            </div>
-          )}
-          {showPayTrend && (
-            <div className="adm-card">
-              <div className="rv-ct">How money arrives <span>· last 14 days by payment method</span></div>
-              <PayTrendStack data={rest.payTrend ?? []} />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Payment split — how the money actually arrives */}
-      {payTotal > 0 && (
-        <div className="adm-card" style={{ marginTop: 12 }}>
-          <div className="rv-ct">Payment methods <span>· how customers paid</span></div>
-          <PaymentDonut data={rest.paymentMethods ?? []} />
-        </div>
-      )}
-
-      {/* Records strip — the numbers worth bragging about (all-time + 30d) */}
-      {rest.records && (rest.records.bestDay || rest.records.starDish) && (
-        <div className="adm-card" style={{ marginTop: 12 }}>
-          <div className="rv-ct">Your records <span>· the numbers worth bragging about</span></div>
-          <div className="rv-recs">
-            {rest.records.bestDay && (
-              <div className="rv-rec"><span className="e">🏆</span><span><small>BEST DAY EVER</small><b><AnimatedNumber value={rest.records.bestDay.revenue} money /></b>
-                <i>{new Date(rest.records.bestDay.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: IST })} — beat it!</i></span></div>
-            )}
-            {rest.records.starDish && (
-              <div className="rv-rec"><span className="e">👑</span><span><small>STAR DISH · 30 DAYS</small><b>{rest.records.starDish.title}</b>
-                <i>{rest.records.starDish.qty} plates</i></span></div>
-            )}
-            {rest.records.fastHour && (
-              <div className="rv-rec"><span className="e">⚡</span><span><small>BUSIEST HOUR EVER</small><b><AnimatedNumber value={rest.records.fastHour.orders} /> orders</b>
-                <i>{istWall(rest.records.fastHour.at, { day: "numeric", month: "short", hour: "numeric", hour12: true })}</i></span></div>
-            )}
-            {rest.records.bigBill && (
-              <div className="rv-rec"><span className="e">💎</span><span><small>BIGGEST BILL</small><b><AnimatedNumber value={rest.records.bigBill.revenue} money /></b>
-                <i>{rest.records.bigBill.table ? `table ${rest.records.bigBill.table}` : "one sitting"}</i></span></div>
-            )}
-            {(rest.records.regulars ?? 0) > 0 && (
-              <div className="rv-rec"><span className="e">🔁</span><span><small>REGULARS · 30 DAYS</small><b><AnimatedNumber value={rest.records.regulars ?? 0} /> returning guests</b>
-                <i>same name, 2+ visits</i></span></div>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div className="adm-card" style={{ marginTop: 12 }}>
-        <div className="rv-ct" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>Every dish <span style={{ color: "var(--muted)", fontWeight: 500 }}>· tap one for detail</span></span>
-          <span className="rv-sort">
-            <button className={dishSort === "revenue" ? "on" : ""} onClick={() => setDishSort("revenue")}>By revenue</button>
-            <button className={dishSort === "qty" ? "on" : ""} onClick={() => setDishSort("qty")}>By qty</button>
-          </span>
-        </div>
-        <div className="rv-dishes">
-          {dishes.length === 0 && <div className="adm-empty">No dish sales in this range.</div>}
-          {dishes.map((d) => (
-            <button key={d.title} className="rv-dish" onClick={() => onDish(d.title)}>
-              <span className="rv-dn">{d.title}</span>
-              <span className="rv-bar"><span style={{ width: `${(d.revenue / maxRev) * 100}%`, background: accent }} /></span>
-              <span className="rv-q">{d.qty} sold</span>
-              <span className="rv-r">{inr(d.revenue)}</span>
-              <i className="fas fa-chevron-right" aria-hidden="true" />
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className="rv-dishes">
+      {dishes.length === 0 && <div className="adm-empty">No dish sales in this range.</div>}
+      {dishes.map((d) => (
+        <button key={d.title} className="rv-dish" onClick={() => onDish(d.title)}>
+          <span className="rv-dn">{d.title}</span>
+          <span className="rv-bar"><span style={{ width: `${(d.revenue / maxRev) * 100}%`, background: GREEN }} /></span>
+          <span className="rv-q">{d.qty} sold</span>
+          <span className="rv-r">{inr(d.revenue)}</span>
+          <i className="fas fa-chevron-right" aria-hidden="true" />
+        </button>
+      ))}
       <style jsx>{`
-        .rv-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .rv-ct { font-size: 13px; font-weight: 800; margin-bottom: 10px; }
-        .rv-ct span { color: var(--muted); font-weight: 500; }
-        .rv-sort { display: inline-flex; gap: 2px; }
-        .rv-sort button { background: none; border: var(--border); padding: 4px 10px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
-        .rv-sort button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-        .rv-recs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
-        .rv-rec { flex: 1 1 190px; min-width: 170px; display: flex; gap: 11px; align-items: center; border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 11px 14px; }
-        .rv-rec .e { font-size: 20px; }
-        .rv-rec small { display: block; font-size: 9.5px; color: var(--muted); font-weight: 800; letter-spacing: 0.5px; }
-        .rv-rec b { display: block; font-size: 14px; line-height: 1.3; font-variant-numeric: tabular-nums; }
-        .rv-rec i { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); }
-        .rv-dishes { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
-        .rv-dish { display: grid; grid-template-columns: minmax(120px, 1.4fr) 2fr auto auto auto; align-items: center; gap: 12px; padding: 9px 8px; border: none; border-radius: 8px; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; }
+        .rv-dishes { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; max-height: 420px; overflow-y: auto; }
+        .rv-dish { display: grid; grid-template-columns: minmax(110px, 1.4fr) 1.6fr auto auto auto; align-items: center; gap: 12px; padding: 9px 8px; border: none; border-radius: 8px; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; }
         .rv-dish:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
         .rv-dn { font-weight: 700; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .rv-bar { height: 8px; border-radius: 4px; background: rgba(128,128,128,.14); overflow: hidden; }
@@ -938,8 +1308,8 @@ function RestaurantView({ rest, money, moneyErr, range, restTrend, dishSort, set
         .rv-q { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
         .rv-r { font-weight: 800; font-variant-numeric: tabular-nums; min-width: 70px; text-align: right; }
         .rv-dish i { color: var(--muted); font-size: 11px; }
-        @media (max-width: 760px) { .rv-charts { grid-template-columns: 1fr; } .rv-dish { grid-template-columns: 1fr auto auto; } .rv-bar { display: none; } }
+        @media (max-width: 760px) { .rv-dish { grid-template-columns: 1fr auto auto; } .rv-bar { display: none; } }
       `}</style>
-    </>
+    </div>
   );
 }

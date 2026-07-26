@@ -207,6 +207,10 @@ export function ReportsStyles() {
       .rs-seg button { border: none; background: none; color: var(--muted); font: inherit; font-size: 12px; font-weight: 700; padding: 6px 11px; border-radius: 7px; cursor: pointer; transition: background .15s ease, color .15s ease; }
       .rs-seg button:hover { color: var(--text); }
       .rs-seg button.on { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+      .rs-date { border: none; background: none; color: var(--text); font: inherit; font-size: 12px; font-weight: 700; padding: 5px 8px; border-radius: 7px; cursor: pointer; color-scheme: dark light; }
+      .rs-date:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+      .rs-custom { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); background: var(--card); border: 1px solid var(--border-c); border-radius: 10px; padding: 3px 8px; }
+      .rs-custom .rs-date { border: 1px solid var(--border-c); }
       .rs-actions { display: flex; gap: 8px; margin-left: auto; }
       .rs-btn { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px; border-radius: 9px; border: 1px solid var(--border-c); background: var(--card); color: var(--text); font-size: 12.5px; font-weight: 700; cursor: pointer; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
       .rs-btn:hover { background: var(--muted2); }
