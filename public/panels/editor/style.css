@@ -2238,12 +2238,16 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
 .lfh-tip.on { opacity: 1; transform: none; }
 
 /* ── Parcel / takeaway quick-order (2026-07-25) ─────────────────────────────── */
-/* Customer name/phone row in the parcel modal head (parcel mode only). */
-.to-cust { display: flex; gap: 8px; margin-top: 10px; }
+/* Customer name/phone row in the parcel modal head (parcel mode only). On a wide modal
+   it sits to the RIGHT of the title; on a narrow phone it wraps to its own full-width row
+   (the head is otherwise a no-wrap flex row, which clipped the phone field at ~360px). */
+.tbl-modal-head:has(.to-cust) { flex-wrap: wrap; }
+.to-cust { display: flex; gap: 8px; margin-top: 10px; flex: 1 1 240px; min-width: 0; }
 .to-cust input { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--line);
   color: var(--text); border-radius: 9px; padding: 9px 11px; font-size: 13px; font-weight: 500; }
 .to-cust input:focus { outline: none; border-color: var(--gold); }
 .to-cust .to-cust-phone { max-width: 44%; }
+@media (max-width: 560px) { .to-cust { flex-basis: 100%; margin-top: 12px; } .to-cust .to-cust-phone { max-width: 42%; } }
 /* Two pay buttons in the parcel footer (Pay now / Pay on pickup). */
 .to-pay { display: flex; gap: 8px; flex: 1; }
 .to-pay .btn { flex: 1; justify-content: center; white-space: nowrap; }
