@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import AdminShell from "@/components/admin/AdminShell";
 import { AdminToastProvider } from "@/components/admin/toast";
+import AutoFitNumbers from "@/components/AutoFitNumbers";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const store = await cookies();
@@ -16,5 +17,5 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // dark→light flash on load for admins who chose light mode (mirrors the owner layout).
   const skinCookie = store.get("aevidine_skin")?.value;
   const initialSkin = skinCookie === "light" || skinCookie === "dark" ? skinCookie : undefined;
-  return <AdminShell initialSkin={initialSkin}><AdminToastProvider>{children}</AdminToastProvider></AdminShell>;
+  return <AdminShell initialSkin={initialSkin}><AdminToastProvider><AutoFitNumbers />{children}</AdminToastProvider></AdminShell>;
 }

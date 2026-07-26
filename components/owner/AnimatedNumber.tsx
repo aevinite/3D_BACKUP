@@ -6,6 +6,7 @@
 // ease-out). Respects prefers-reduced-motion (snaps straight to the value). Pure UI.
 import { useEffect, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
+import { FIT_STYLE, useFitNumber } from "@/components/FitNumber";
 
 function usePrefersReducedMotion(): boolean {
   const [reduce, setReduce] = useState(false);
@@ -61,12 +62,17 @@ export function AnimatedNumber({ value, loading, money, format, className }: {
 }) {
   const disp = useAnimatedValue(value, loading);
   const fmt = format ?? (money ? inr : (n: number) => Math.round(n).toLocaleString("en-US"));
+  // Auto-fit: shrink the font when the figure outgrows its tile (see components/FitNumber).
+  // Keyed on the rendered text, so it re-measures every count-up frame — mid-roll digits only
+  // ever grow, so this reads as the number settling into the exact size that fits.
+  const text = fmt(Math.round(disp));
+  const fitRef = useFitNumber<HTMLSpanElement>(loading ? null : text);
   if (loading) return <span key="skel" className={`anim-num anim-skel${className ? " " + className : ""}`} aria-hidden="true" />;
   // Round before formatting — a custom `format` (e.g. the en-IN count formatter) would
   // otherwise print the fractional mid-roll value as "5,216.473" (a broken-looking bill count).
   // key differs from the skeleton so the number REMOUNTS on reveal → the fade/slide-in runs
   // once; live (non-loading) value changes keep the same node and just count the delta.
-  return <span key="num" className={`anim-num anim-num-in${className ? " " + className : ""}`}>{fmt(Math.round(disp))}</span>;
+  return <span key="num" ref={fitRef} style={FIT_STYLE} className={`anim-num anim-num-in${className ? " " + className : ""}`}>{text}</span>;
 }
 
 // String-aware API: takes an already-formatted value (e.g. inr()/nfmt() output) and animates
@@ -78,10 +84,12 @@ export function AnimatedStatValue({ value, loading }: { value: React.ReactNode; 
     ? { pre: "", num: value, locale: "en-US", suf: "" }
     : parseFormatted(value);
   const disp = useAnimatedValue(parsed ? parsed.num : 0, loading);
+  const text = parsed ? parsed.pre + Math.round(disp).toLocaleString(parsed.locale) + parsed.suf : "";
+  const fitRef = useFitNumber<HTMLSpanElement>(!parsed || loading ? null : text);
   if (!parsed) return <>{value}</>;
   if (loading) return <span key="skel" className="anim-num anim-skel" aria-hidden="true" />;
-  return <span key="num" className="anim-num anim-num-in">
-    {parsed.pre + Math.round(disp).toLocaleString(parsed.locale) + parsed.suf}
+  return <span key="num" ref={fitRef} style={FIT_STYLE} className="anim-num anim-num-in">
+    {text}
   </span>;
 }
 
