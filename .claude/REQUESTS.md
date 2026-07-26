@@ -393,3 +393,16 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
 - [ ] Independent work-checker PASS, then merge + live-verify.
 
 - [x] **Round 2 — manager Settings→Access missing parcel cap.** Added `tablet_parcel` to `ACCESS_CAPS` + its module-gate in `accessCapsFor()` (public/panels/editor/app.js). A manager can now set the waiter parcel cap + per-waiter parcel overrides from their own panel (was server-enforced + in admin/owner screens but absent here). Verified live: accessCapsFor() includes tablet_parcel when the module is on; Access section renders the row.
+
+## 2026-07-26 — /bug-test QA-investigator system
+
+- [x] **`/bug-test <target>` skill built + verified.** Project skill at
+  `.claude/skills/bug-test/` (SKILL.md + references: safe-wording, interaction-card,
+  device-matrix, subagent-template) — recursive living-map sweep of one panel/feature:
+  drive every click, prove every number against the dev DB, cross-panel instant-update
+  checks, fix→verify→small-PR loop, phone pass (A35/iPhone/safe-area), repeat until a
+  clean pass; classifier-safe wording baked in. Shared helper `scripts/sweep/login.mjs`
+  merged via PR #455 (live in deploy bec6517). VERIFIED by dry run on the kitchen panel:
+  DB recompute 17 = board API 17 = rendered tickets 17; kitchen order confirmed on its
+  table in the tablet; 0 console errors. Owner invokes: `/bug-test manager` (etc.),
+  one target per session, up to ~7 parallel sessions.

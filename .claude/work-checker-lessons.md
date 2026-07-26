@@ -327,3 +327,19 @@ reproduce IN that view (ungranted power) — and a generic tint that recolours t
 never be applied blindly to filled buttons.
 
 - **A `const` helper used by a hoisted function inside a React component body = TDZ crash.** Moving permKey (const arrow) above resolved() looked fine, but resolved() (a hoisted `function`) runs during render via holders() BEFORE the const initialises → "ReferenceError: permKey is not defined" crashed the whole /aevinite/access panel. Define such pure helpers at MODULE scope. tsc + local build did NOT catch it (only the live interaction did). Load the page and click, don't just build. (2026-07-24)
+- 2026-07-26 owner-dashboard v2: I verified dropdowns EXISTED in the DOM but never CLICKED one — the popup was clipped by the card's overflow:hidden and unusable. Lesson: for any new popup/dropdown, headless-verify the OPEN state (click it, assert the menu is visible + clickable), not just presence.
+- 2026-07-26 owner report v1: I designed the "professional report" from my own head instead of studying the reference the owner pointed at (PetPooja-style day summary: CGST/SGST/GST totals, settlement split, billing details, net amount). When the owner says "check how X does it", actually mirror X's fields before designing.
+
+## Bug sweeps must be ADVERSARIAL, not confirmation testing (2026-07-26)
+The /bug-test skill's first tablet pass found ZERO bugs — because it was confirmation
+testing ("does place-order reach the kitchen? yes ✅"), not bug hunting. The owner's
+proven bulletproof + bug-hunter process finds 3-8/panel because it's adversarial: assume
+everything is broken, then attack the edges (junk/boundary input, oversized/negative
+money, double/concurrent submits, refresh mid-flow, offline, the multi-panel Sync
+Matrix). The moment I ran ONE adversarial probe, it found a real MEDIUM bug: concurrent
+identical /order requests create a duplicate (no warning) OR 500 — non-atomic
+read-check-then-insert. Lesson: "no bugs found" without evidence of adversarial testing =
+a failed/shallow sweep, not a pass. Fixed the skill (interaction-card mindset section +
+edge checklist + Sync Matrix + empty-report-is-invalid). His bulletproof/bug-hunter live
+parked in ~/.claude/toolbox (re-enable cmd in toolbox/INDEX.md) — proven, adversarial.
+- 2026-07-26 owner dashboard: claimed "bulletproof/complete" but the owner immediately found a scoping bug — drilled-into-one-restaurant view showed "Revenue by category · all N restaurants" + group payment data. My verifies checked the group HOME + reports but never clicked INTO a restaurant and checked each card's scope/label. Lesson: for a scope-sensitive UI, the review MUST drive every drill state (home/2/3+/drilled/dish) and assert each card's data+label matches the CURRENT scope, before saying done. A python str.replace of a shared JSX snippet hits BOTH group and drill blocks — always grep for all occurrences after.
