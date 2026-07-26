@@ -399,6 +399,11 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   // un-drilled window — otherwise a single day's hourly chart reads "Best DAY: 1 pm"
   // instead of "Best HOUR: 1 pm" (owner round-6, phase-4 review).
   const chartUnit: "month" | "hour" | "day" = chartBucket === "month" ? "month" : chartBucket === "hour" ? "hour" : "day";
+  // rowUnit describes the TABLE/mrows grain (day / month / hour) — used by the money
+  // reports whose day-level analysis reads mrows directly (discounts, cancellations),
+  // so a 12-month view says "month" and a today view says "hour", not always "day".
+  const rowUnit: "month" | "hour" | "day" = bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day";
+  const RowUnit = rowUnit[0].toUpperCase() + rowUnit.slice(1);
   const drillRows = (data.drillRows as MoneyRow[] | undefined) ?? [];
   const chartRows = drillRows.length ? drillRows : mrows;
   const cser = (pick: (r: MoneyRow) => number) => chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), value: pick(r) }));
@@ -763,25 +768,25 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Discounts given" tone="warn" icon="fa-tag" big value={inr(t.discount)} sub={`over ${nfmt(discRows.length)} day${discRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.discount)} />
+          <Stat label="Discounts given" tone="warn" icon="fa-tag" big value={inr(t.discount)} sub={`over ${nfmt(discRows.length)} ${rowUnit}${discRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.discount)} />
           <Stat label="Effective rate" tone="warn" icon="fa-percent" value={`${effPct.toFixed(1)}%`} sub="of gross sales" />
           <Stat label="Revenue after discounts" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} onClick={() => onOpenReport("sales")} title="Open the Sales trend report" />
           <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} />
-          <Stat label="Biggest day" tone="bad" icon="fa-arrow-up" value={biggest ? inr(biggest.discount) : "—"} sub={biggest ? bucketLabel(biggest.bucket, bucket) : ""} onClick={biggest ? () => scrollToId("rs-disc-days") : undefined} title={biggest ? "Jump to the days-with-discounts table" : undefined} />
+          <Stat label={`Biggest ${rowUnit}`} tone="bad" icon="fa-arrow-up" value={biggest ? inr(biggest.discount) : "—"} sub={biggest ? bucketLabel(biggest.bucket, bucket) : ""} onClick={biggest ? () => scrollToId("rs-disc-days") : undefined} title={biggest ? "Jump to the days-with-discounts table" : undefined} />
         </div>
         <Panel title="Discounts over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={cser((r) => r.discount)} color={accent} money name="Discount" height={240} /></div>
         </Panel>
         {top5.length > 0 && (
-          <Panel title="Biggest discount days" hint="top 5 by amount given away">
+          <Panel title={`Biggest discount ${rowUnit}s`} hint="top 5 by amount given away">
             <LeaderBar data={top5} />
             <p className="rs-note">
-              These {top5.length} day{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of everything discounted this period.
+              These {top5.length} {rowUnit}{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of everything discounted this period.
               {" "}Discounting is <b>{trend}</b>{trend === "steady" ? " — the give-away rate is holding flat." : trend === "rising" ? ` — the give-away rate climbed from ~${firstAvg.toFixed(1)}% to ~${lastAvg.toFixed(1)}% of sales.` : ` — the give-away rate fell from ~${firstAvg.toFixed(1)}% to ~${lastAvg.toFixed(1)}% of sales.`}
             </p>
           </Panel>
         )}
-        <Panel id="rs-disc-days" title="Days with discounts" hint="only days a discount was given" pad={false}>
+        <Panel id="rs-disc-days" title={`${RowUnit}s with discounts`} hint={`only ${rowUnit}s a discount was given`} pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
               <thead><tr><th>Period</th><th className="num">Paid bills</th><th className="num">Discount</th><th className="num">Revenue</th><th className="num">Disc. rate</th></tr></thead>
@@ -812,11 +817,11 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Value lost" tone="bad" icon="fa-ban" big value={inr(t.cancelledValue)} sub={`over ${nfmt(cxRows.length)} day${cxRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.cancelledValue)} />
+          <Stat label="Value lost" tone="bad" icon="fa-ban" big value={inr(t.cancelledValue)} sub={`over ${nfmt(cxRows.length)} ${rowUnit}${cxRows.length === 1 ? "" : "s"}`} spark={mrows.map((r) => r.cancelledValue)} />
           <Stat label="Cancelled orders" tone="bad" icon="fa-circle-xmark" value={nfmt(t.cancelledOrders)} sub={`${cxPct.toFixed(1)}% of all placed`} />
           <Stat label="Avg lost / cancel" tone="warn" icon="fa-scale-balanced" value={inr(avgPerCx)} />
           <Stat label="Kept revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(t.revenue)} onClick={() => onOpenReport("sales")} title="Open the Sales trend report" />
-          <Stat label="Worst day" tone="warn" icon="fa-arrow-up" value={worst ? inr(worst.cancelledValue) : "—"} sub={worst ? bucketLabel(worst.bucket, bucket) : ""} onClick={worst ? () => scrollToId("rs-cx-days") : undefined} title={worst ? "Jump to the days-with-cancellations table" : undefined} />
+          <Stat label={`Worst ${rowUnit}`} tone="warn" icon="fa-arrow-up" value={worst ? inr(worst.cancelledValue) : "—"} sub={worst ? bucketLabel(worst.bucket, bucket) : ""} onClick={worst ? () => scrollToId("rs-cx-days") : undefined} title={worst ? "Jump to the days-with-cancellations table" : undefined} />
         </div>
         <p className="rs-note" style={{ marginTop: -4, marginBottom: 12 }}>
           <i className={`fas ${health.icon}`} aria-hidden style={{ color: health.tone, marginRight: 6 }} />
@@ -826,12 +831,12 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           <div style={{ padding: 12 }}><ToggleChart data={cser((r) => r.cancelledValue)} color={accent} money name="Lost value" height={240} /></div>
         </Panel>
         {top5.length > 0 && (
-          <Panel title="Worst cancellation days" hint="top 5 by value lost">
+          <Panel title={`Worst cancellation ${rowUnit}s`} hint="top 5 by value lost">
             <LeaderBar data={top5} />
-            <p className="rs-note">These {top5.length} day{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of all the value lost to cancellations this period.</p>
+            <p className="rs-note">These {top5.length} {rowUnit}{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of all the value lost to cancellations this period.</p>
           </Panel>
         )}
-        <Panel id="rs-cx-days" title="Days with cancellations" hint="only days something was voided" pad={false}>
+        <Panel id="rs-cx-days" title={`${RowUnit}s with cancellations`} hint={`only ${rowUnit}s something was voided`} pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
               <thead><tr><th>Period</th><th className="num">Cancelled orders</th><th className="num">Value lost</th><th className="num">Kept revenue</th></tr></thead>
