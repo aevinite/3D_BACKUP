@@ -1020,7 +1020,7 @@ export default function OwnerDashboard() {
                 : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue by category <span className="mut">· all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as RestA).categories} />
                 : <div className="adm-empty">Loading…</div>}
