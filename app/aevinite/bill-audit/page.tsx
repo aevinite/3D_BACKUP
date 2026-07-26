@@ -288,7 +288,7 @@ function Stat({ icon, tone, k, v, sub }: { icon: IconName; tone: string; k: stri
       <div style={{ fontSize: 11.5, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".6px", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ color: tone, display: "inline-flex" }}><Ico n={icon} s={14} /></span>{k}
       </div>
-      <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.5px", fontVariantNumeric: "tabular-nums" }}>{v}</div>
+      <div className="fit-num" style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.5px", fontVariantNumeric: "tabular-nums" }}>{v}</div>
       <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>{sub}</div>
     </div>
   );

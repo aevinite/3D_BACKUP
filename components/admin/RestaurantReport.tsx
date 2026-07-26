@@ -112,7 +112,7 @@ export default function RestaurantReport({ restaurantId, restaurantName, onBack 
               sessions written in this range. This is a row-count figure, <b>not bytes and not a billing number</b>;
               real per-tenant database egress isn&apos;t queryable, so this is the closest honest stand-in.
             </p>
-            <div style={{ fontSize: 30, fontWeight: 800 }}>{report.usage.activityVolume.toLocaleString("en-US")}</div>
+            <div className="fit-num" style={{ fontSize: 30, fontWeight: 800 }}>{report.usage.activityVolume.toLocaleString("en-US")}</div>
             <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
               {report.usage.orders} orders · {report.usage.orderItems} order-items · {report.usage.activityLogEvents} activity-log events · {report.usage.sessions} sessions
             </p>

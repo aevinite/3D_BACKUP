@@ -20,6 +20,7 @@ import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { tableTagsLadder } from "@/lib/tableTags";
 import OwnerShell from "@/components/owner/OwnerShell";
 import OwnerReconnecting from "@/components/owner/OwnerReconnecting";
+import AutoFitNumbers from "@/components/AutoFitNumbers";
 
 export default async function OwnerLayout({ children }: { children: React.ReactNode }) {
   const store = await cookies();
@@ -62,7 +63,7 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
     // Pay Later nav shows if the module is on for ANY owned restaurant (per-restaurant data
     // is filtered by the API). Injected as a synthetic section key the nav gate reads.
     ents.khata_book = (await Promise.all(ownedIds.map((id) => tableTagsLadder(id)))).some((l) => l.effective);
-    return <OwnerShell initialSkin={initialSkin} entitlements={ents}>{children}</OwnerShell>;
+    return <OwnerShell initialSkin={initialSkin} entitlements={ents}><AutoFitNumbers />{children}</OwnerShell>;
   }
 
   // 2) ADMIN viewing a specific restaurant (act-as) → top-power, invisible view.
@@ -75,6 +76,7 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
     adminEnts.khata_book = (await tableTagsLadder(acting)).effective;
     return (
       <OwnerShell adminViewing restaurantName={r?.name || "this restaurant"} initialSkin={initialSkin} entitlements={adminEnts}>
+        <AutoFitNumbers />
         {children}
       </OwnerShell>
     );
