@@ -7441,6 +7441,12 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill) {
   // the discount can't exceed the food's pre-tax value (beyond which they'd just pay ₹0).
   pctInput.oninput = () => { const p = clamp(parseFloat(pctInput.value), 0, 100); discAmount = round2((base * p) / 100); paint("pct"); };
   amtInput.oninput = () => { discAmount = clamp(parseFloat(amtInput.value), 0, maxDisc); paint("amt"); };
+  // On blur, snap the field the user was typing in to the CLAMPED value — while typing we
+  // leave it raw (caret-safe), but once they leave it the box shouldn't keep showing an
+  // over-limit / negative figure that disagrees with the applied discount + "They pay". A
+  // full paint() (no "typing" arg) refreshes both fields from the clamped discAmount.
+  pctInput.onblur = () => paint();
+  amtInput.onblur = () => paint();
   wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { discAmount = round2((base * Number(c.dataset.pct)) / 100); paint(); }));
 
   const close = () => wrap.remove();

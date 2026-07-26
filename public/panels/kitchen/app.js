@@ -550,15 +550,20 @@ function reprintOrder(id) {
 
 // ── the 86 board (sold-out toggles) ──────────────────────────────────────────
 function renderDishes() {
-  const q = ($("#dishSearch").value || "").toLowerCase();
+  // Trim so a stray space / spaces-only search isn't treated as a real query that matches
+  // nothing (it used to blank the whole drawer).
+  const q = ($("#dishSearch").value || "").trim().toLowerCase();
   const list = state.dishes.filter((d) => !q || (d.title || "").toLowerCase().includes(q));
-  const html = list.map((d) => {
+  const rows = list.map((d) => {
     const out = (d.tags || []).includes("sold-out");
     return `<div class="dish-row ${out ? "is-out" : ""}">
       <span class="dtitle">${esc(d.title)}<small>${esc(d.category || "")}</small></span>
       <button class="btn ${out ? "danger" : ""}" data-86="${esc(d.id)}" data-out="${out ? "1" : "0"}">${out ? "SOLD OUT" : "available"}</button>
     </div>`;
   }).join("");
+  // Never show a blank drawer: an empty result gets an honest message (a cook who mistypes
+  // couldn't tell if the board broke), otherwise nothing seeded yet.
+  const html = rows || `<div class="dish-row" style="justify-content:center;opacity:.65;pointer-events:none">${q ? `No dishes match “${esc(q)}”` : "No dishes on the menu yet"}</div>`;
   // Skip the rebuild when nothing changed (audit 2026-07-07): a poll while the drawer is
   // open used to blow away #dishList on EVERY refresh, which (a) lost the search box's focus/
   // caret mid-type and (b) orphaned the button node the optimistic toggle + UNDO closure hold,
