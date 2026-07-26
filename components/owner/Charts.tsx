@@ -275,17 +275,45 @@ export function CountBar({ data, color, name = "Orders", height = 220 }: {
 const PALETTE = ["#34d399", "#5b8def", "#e0b341", "#e2607a", "#a36bd4", "#4bbdc9", "#e3935b", "#9aa84a"];
 export function CategoryDonut({ data }: { data: { category: string; revenue: number }[] }) {
   if (!data.length) return <Empty />;
+  // DYNAMIC legend (owner round-5): the old bottom legend wrapped into a wall of
+  // text with 25+ categories and squeezed the donut. Now the legend fills the RIGHT
+  // column first; past its capacity a LEFT column joins; past both, the text steps
+  // down a size. The donut always keeps the middle. Sorted by revenue so the labels
+  // an owner actually cares about are always at the top of the columns.
+  const sorted = [...data].map((d, i) => ({ ...d, color: PALETTE[i % PALETTE.length] })).sort((a, b) => b.revenue - a.revenue);
+  const n = sorted.length;
+  const perCol = 9;                                   // comfortable rows per side column
+  const twoCols = n > perCol;
+  const small = n > perCol * 2;                       // both sides full → smaller text
+  const right = twoCols ? sorted.filter((_, i) => i % 2 === 0) : sorted;
+  const left = twoCols ? sorted.filter((_, i) => i % 2 === 1) : [];
+  const total = sorted.reduce((a, d) => a + d.revenue, 0) || 1;
+  const legendCol = (items: typeof sorted) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: small ? 3 : 5, minWidth: 0, flex: "1 1 0", maxHeight: 230, overflowY: "auto" }}>
+      {items.map((d) => (
+        <span key={d.category} title={`${d.category} · ${inr(d.revenue)} · ${Math.round((d.revenue / total) * 100)}%`}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: small ? 10 : 11.5, fontWeight: 600, color: "var(--muted)", minWidth: 0 }}>
+          <span style={{ width: small ? 8 : 9, height: small ? 8 : 9, borderRadius: 3, background: d.color, flexShrink: 0 }} aria-hidden="true" />
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.category}</span>
+          <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums", color: "var(--text)", flexShrink: 0 }}>{Math.round((d.revenue / total) * 100)}%</span>
+        </span>
+      ))}
+    </div>
+  );
   return (
-    <div style={{ width: "100%", height: 230 }}>
-      <ResponsiveContainer>
-        <PieChart>
-          <Pie data={data} dataKey="revenue" nameKey="category" innerRadius={52} outerRadius={86} paddingAngle={2} stroke="var(--card)">
-            {data.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
-          </Pie>
-          <Tooltip content={<MoneyTip />} />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
-        </PieChart>
-      </ResponsiveContainer>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
+      {left.length > 0 && legendCol(left)}
+      <div style={{ width: 190, height: 210, flexShrink: 0 }}>
+        <ResponsiveContainer>
+          <PieChart>
+            <Pie data={sorted} dataKey="revenue" nameKey="category" innerRadius={52} outerRadius={86} paddingAngle={2} stroke="var(--card)">
+              {sorted.map((d, i) => <Cell key={i} fill={d.color} />)}
+            </Pie>
+            <Tooltip content={<MoneyTip />} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+      {legendCol(right)}
     </div>
   );
 }
@@ -410,7 +438,7 @@ export function PayTrendStack({ data }: { data: { day: string; method: string; r
 // ── Spark — tiny inline sparkline for KPI tiles (pure SVG, no axes) ─────────
 // ── SparkArea — full-width gradient mini-trend for KPI cards (D1 look, 2026-07-26).
 // preserveAspectRatio="none" lets it stretch across the whole card bottom.
-export function SparkArea({ points, color, height = 34 }: { points: number[]; color: string; height?: number }) {
+export function SparkArea({ points, color, height = 34, animate = false }: { points: number[]; color: string; height?: number; animate?: boolean }) {
   if (points.length < 2) return null;
   const w = 300;
   const max = Math.max(...points, 1), min = Math.min(...points, 0);
@@ -428,9 +456,20 @@ export function SparkArea({ points, color, height = 34 }: { points: number[]; co
           <stop offset="100%" stopColor={color} stopOpacity={0.02} />
         </linearGradient>
       </defs>
-      <path d={`${line} L${w},${height} L0,${height} Z`} fill={`url(#${gid})`} />
-      {/* thin, calm line — the thick stroke read as chunky (owner round-3) */}
-      <path d={line} fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" opacity="0.7" vectorEffect="non-scaling-stroke" />
+      <path d={`${line} L${w},${height} L0,${height} Z`} fill={`url(#${gid})`} className={animate ? "spa-fill" : undefined} />
+      {/* thin, calm line — the thick stroke read as chunky (owner round-3).
+          animate=true draws the line in (pathLength=1 → dashoffset 1→0). */}
+      <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.75"
+        vectorEffect="non-scaling-stroke" pathLength={animate ? 1 : undefined} className={animate ? "spa-line" : undefined} />
+      {animate && (
+        <style>{`
+          .spa-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: spaDraw 1.1s ease-out forwards; }
+          .spa-fill { opacity: 0; animation: spaFade .8s ease-out .35s forwards; }
+          @keyframes spaDraw { to { stroke-dashoffset: 0; } }
+          @keyframes spaFade { to { opacity: 1; } }
+          @media (prefers-reduced-motion: reduce) { .spa-line { animation: none; stroke-dashoffset: 0; } .spa-fill { animation: none; opacity: 1; } }
+        `}</style>
+      )}
     </svg>
   );
 }

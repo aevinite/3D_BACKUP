@@ -402,20 +402,45 @@ export default function OwnerDashboard() {
   const activeRid = view.level === "home" ? homeRid : (view as { rid: string }).rid;
   const restCount = ov?.restaurants.length ?? 0;
   const scopeKey = activeRid ?? "group";
-  const pl = useCallback((range: Range): Payload | undefined => cache[`${scopeKey}|${range}`], [cache, scopeKey]);
+  const pl = useCallback((range: string): Payload | undefined => cache[`${scopeKey}|${range}`], [cache, scopeKey]);
   const moneyOf = (range: Range): MoneyTotals | "err" | undefined => moneyCache[`${scopeKey}|${range}`];
 
+  // Refresh-proof drill (owner round-5: "if you refresh it, it comes backwards").
+  // The panel runs under the back-stack history manager, which OWNS pushState/popstate
+  // for the hardware-back peel — so a URL query would be stomped by it (and it's a
+  // project hard-rule not to hand-roll history in a component). We persist the open
+  // restaurant/dish in sessionStorage instead: survives F5, invisible to the back
+  // manager, per-tab, and scoped by the admin ?rid pin so two admin tabs don't clash.
+  const drillKey = `owner_drill${scopePin ? `:${scopePin}` : ""}`;
+  const drillRestored = useRef(false);
   // Sidebar "My restaurants" rows open a restaurant from any page (event / ?focus=).
   useEffect(() => {
     const focus = new URLSearchParams(window.location.search).get("focus");
-    if (focus) setView({ level: "restaurant", rid: focus });
+    if (focus) { setView({ level: "restaurant", rid: focus }); drillRestored.current = true; }
+    else {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(drillKey) || "null");
+        if (saved && saved.level && saved.rid) setView(saved);
+      } catch { /* ignore */ }
+    }
+    drillRestored.current = true;
     const onOpen = (e: Event) => {
       const rid = (e as CustomEvent).detail?.rid as string | null | undefined;
       setView(rid ? { level: "restaurant", rid } : { level: "home" });
     };
     window.addEventListener("lfh:owner-open-restaurant", onOpen);
     return () => window.removeEventListener("lfh:owner-open-restaurant", onOpen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Persist the current drill (only after the initial restore, so we never overwrite
+  // a saved drill with the transient "home" of first paint).
+  useEffect(() => {
+    if (!drillRestored.current) return;
+    try {
+      if (view.level === "home") sessionStorage.removeItem(drillKey);
+      else sessionStorage.setItem(drillKey, JSON.stringify(view));
+    } catch { /* ignore */ }
+  }, [view, drillKey]);
 
   // Merged breadcrumb (owner 2026-07-26): the restaurant/dish tail renders in the
   // SHELL's top strip (Owner › Dashboard › …), not as a second heading row here.
@@ -431,7 +456,7 @@ export default function OwnerDashboard() {
   }, [view, ov, single]);
 
   // ── data layer: fetch one (scope, range) payload if missing ──
-  const fetchPayload = useCallback(async (sk: string, range: Range, opts?: { force?: boolean; refresh?: boolean }) => {
+  const fetchPayload = useCallback(async (sk: string, range: string, opts?: { force?: boolean; refresh?: boolean; qs?: string }) => {
     const key = `${sk}|${range}`;
     if (inflight.current.has(key)) return;
     inflight.current.add(key);
@@ -440,7 +465,7 @@ export default function OwnerDashboard() {
       // records ride ONCE per restaurant (unbounded scan — not worth re-running per range).
       const recQ = rid && !(rid in ((recsRef.current) || {})) ? "&records=1" : "";
       const refQ = opts?.refresh ? "&refresh=1" : "";
-      const a = await fetch(`/api/owner/analytics?range=${range}${rid ? `&rid=${rid}` : ""}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then((r) => r.json());
+      const a = await fetch(`/api/owner/analytics?${opts?.qs ?? `range=${range}`}${rid ? `&rid=${rid}` : ""}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then((r) => r.json());
       if (a.error) throw new Error(a.error);
       setCache((c) => ({ ...c, [key]: a }));
       if (a.cachedAt) setUpdatedAt(a.cachedAt);
@@ -602,14 +627,43 @@ export default function OwnerDashboard() {
     return { rows, lines, stacked };
   }, [pl, globalRange]);
 
+  // Latest-active-week fallback (owner round-5: "the two datas are not even
+  // showing"): if the pinned last-7-days window has zero orders but the main range
+  // does have activity, fetch the newest 7 IST days that HAD orders as a custom
+  // window and label the cards with those dates.
+  const weekFallback = useMemo(() => {
+    const wp = pl(WEEK);
+    if (!wp) return null; // still loading — don't decide yet
+    const active = wp.scope === "restaurant"
+      ? (wp.hourly ?? []).some((h) => h.orders > 0)
+      : ((wp as GroupA).heatmap ?? []).some((c) => c.orders > 0);
+    if (active) return null;
+    const base = pl(globalRange);
+    const ts = base?.timeseries ?? [];
+    let maxMs = 0;
+    for (const t of ts) if ((t.orders || 0) > 0) maxMs = Math.max(maxMs, Date.parse(t.bucket));
+    if (!maxMs) return null;
+    const istDay = (ms: number) => new Date(ms + 5.5 * 3600_000).toISOString().slice(0, 10);
+    const to = istDay(maxMs), from = istDay(maxMs - 6 * DAY_MS);
+    return { key: `latestwk:${from}:${to}`, qs: `range=custom&from=${from}&to=${to}`, from, to };
+  }, [pl, globalRange]);
+  useEffect(() => {
+    if (weekFallback && !cache[`${scopeKey}|${weekFallback.key}`]) fetchPayload(scopeKey, weekFallback.key, { qs: weekFallback.qs });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekFallback, scopeKey]);
+  const weekKey = weekFallback?.key ?? WEEK;
+  const fmtD = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  const weekTagText = weekFallback ? `week of ${fmtD(weekFallback.from)} – ${fmtD(weekFallback.to)}` : "last 7 days";
+  const weekTagTitle = weekFallback ? "The current week has no orders yet — showing the most recent week with activity." : rangeSpanText(WEEK);
+
   // Group busy-hours, derived from the pinned-week heatmap (no extra fetch).
   const groupHourly = useMemo(() => {
-    const p = pl(WEEK);
+    const p = pl(weekKey);
     if (!p || p.scope !== "group" || !p.heatmap) return null;
     const hrs = Array.from({ length: 24 }, (_, h) => ({ hour: h, orders: 0 }));
     for (const c of p.heatmap) if (c.hr >= 0 && c.hr < 24) hrs[c.hr].orders += c.orders;
     return hrs.some((h) => h.orders > 0) ? hrs : null;
-  }, [pl]);
+  }, [pl, weekKey]);
 
   // ── multi-restaurant table (all multi tiers — owner: design #4) ──
   const [tq, setTq] = useState("");
@@ -687,15 +741,25 @@ export default function OwnerDashboard() {
       if ((rankIdx.get(t.bucket) ?? 0) < mid) h.a += t.revenue; else h.b += t.revenue;
       halves.set(t.restaurantId, h);
     }
-    let watch: { name: string; pct: number } | null = null;
+    let watchId: string | null = null, watchPct = 0;
     for (const r of p.restaurantRevenue) {
       if (best && r.id === best.id) continue; // never the same restaurant twice
       const h = halves.get(r.id);
       if (!h || h.a <= 0) continue;
       const pct = ((h.b - h.a) / h.a) * 100;
-      if (pct < -5 && (!watch || pct < watch.pct)) watch = { name: r.name, pct };
+      if (pct < -5 && (!watchId || pct < watchPct)) { watchId = r.id; watchPct = pct; }
     }
-    return { best: best ? { name: best.name, revenue: best.revenue, share: total ? best.revenue / total : 0 } : null, watch };
+    // Per-restaurant sparkline points (revenue by bucket) for the centre draw-in graph.
+    const sparkFor = (rid: string) => {
+      const by = new Map<string, number>();
+      for (const t of p.timeseries) if (t.restaurantId === rid) by.set(t.bucket, (by.get(t.bucket) || 0) + t.revenue);
+      return buckets.map((bk) => by.get(bk) ?? 0);
+    };
+    const watchR = watchId ? p.restaurantRevenue.find((r) => r.id === watchId)! : null;
+    return {
+      best: best ? { id: best.id, name: best.name, revenue: best.revenue, share: total ? best.revenue / total : 0, spark: sparkFor(best.id) } : null,
+      watch: watchR ? { id: watchR.id, name: watchR.name, pct: watchPct, spark: sparkFor(watchR.id) } : null,
+    };
   }, [pl, globalRange]);
 
   // ── plain-language insights (derived from data already on screen) ──
@@ -899,23 +963,52 @@ export default function OwnerDashboard() {
   // this information at the top"). Callouts only exist for 4+ restaurants.
   const highlights = view.level !== "dish" && (insights.length > 0 || callouts) ? (
     <div style={{ marginTop: 12 }}>
+      {/* Split banner (owner round-5 pick #2): green ½ vs red ½ scoreboard, each half
+          clickable into that restaurant, with a draw-in sparkline filling the middle.
+          Styles are GLOBAL (namespaced under .ow2-split): `highlights` is an extracted
+          const, so styled-jsx's *scoped* class is never added to its elements. */}
+      <style jsx global>{`
+        .ow2-split { display: grid; grid-template-columns: 1fr 1fr; border: var(--border); border-radius: 14px; overflow: hidden; margin-bottom: 12px; background: var(--card); }
+        .ow2-split .oh { display: flex; align-items: center; gap: 13px; padding: 14px 18px; min-height: 82px; background: none; border: none; font: inherit; color: inherit; text-align: left; cursor: pointer; overflow: hidden; transition: filter .15s; }
+        .ow2-split .oh.good { background: linear-gradient(90deg, color-mix(in srgb, ${GREEN} 14%, transparent), transparent 78%); }
+        .ow2-split .oh.warn { border-left: var(--border); background: linear-gradient(270deg, color-mix(in srgb, #ef4444 12%, transparent), transparent 78%); }
+        .ow2-split .oh.warn .txt { text-align: right; }
+        .ow2-split .oh:hover { filter: brightness(1.05); }
+        .ow2-split .oh.ghost { cursor: default; }
+        .ow2-split .ic { font-size: 22px; flex: none; align-self: flex-start; margin-top: 2px; }
+        .ow2-split .txt { flex: none; min-width: 0; }
+        .ow2-split .txt small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+        .ow2-split .txt b { display: block; font-size: 17px; font-weight: 800; line-height: 1.25; margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ow2-split .txt i { display: block; font-style: normal; font-size: 12.5px; color: var(--muted); }
+        .ow2-split .txt em { font-style: normal; font-weight: 800; color: ${GREEN}; }
+        .ow2-split .txt em.r { color: #ef4444; }
+        .ow2-split .mid { flex: none; width: clamp(90px, 26%, 200px); height: 46px; display: flex; align-items: center; opacity: .9; }
+        .ow2-split .oh.good .mid { margin-left: auto; }
+        .ow2-split .oh.warn .mid { margin-right: auto; }
+        .ow2-split .mid svg { width: 100%; }
+        @media (max-width: 820px) { .ow2-split .mid { display: none; } }
+        @media (max-width: 620px) { .ow2-split { grid-template-columns: 1fr; } .ow2-split .oh.warn { border-left: none; border-top: var(--border); } .ow2-split .oh.warn .txt { text-align: left; } }
+      `}</style>
       {callouts && view.level === "home" && !single && (callouts.best || callouts.watch) && (
-        <div className="ow2-callouts">
-          {callouts.best && (
-            <div className="ow2-co good" style={{ borderLeft: `3px solid ${GREEN}` }}>
+        <div className="ow2-split">
+          {callouts.best ? (
+            <button className="oh good" onClick={() => setDrawerRid(callouts.best!.id)} title={`Open ${callouts.best.name}`}>
               <span className="ic">🏆</span>
-              <span><small>Top performer · {RANGE_LABEL[globalRange]}</small><b>{callouts.best.name}</b>
-                <i>{inr(callouts.best.revenue)} · {Math.round(callouts.best.share * 100)}% of revenue</i></span>
-            </div>
-          )}
-          {callouts.watch && (
-            /* RED, not orange/brown (owner round-3) — inline so no cascade can dilute it */
-            <div className="ow2-co warn" style={{ borderLeft: "3px solid #ef4444" }}>
+              <span className="txt"><small>Top performer · {RANGE_LABEL[globalRange]}</small>
+                <b>{callouts.best.name}</b>
+                <i><em>{inr(callouts.best.revenue)}</em> · {Math.round(callouts.best.share * 100)}% of revenue</i></span>
+              <span className="mid" aria-hidden="true"><SparkArea points={callouts.best.spark} color="#10b981" height={44} animate /></span>
+            </button>
+          ) : <span className="oh ghost" />}
+          {callouts.watch ? (
+            <button className="oh warn" onClick={() => setDrawerRid(callouts.watch!.id)} title={`Open ${callouts.watch.name}`}>
+              <span className="mid" aria-hidden="true"><SparkArea points={callouts.watch.spark} color="#ef4444" height={44} animate /></span>
+              <span className="txt"><small>Needs attention</small>
+                <b>{callouts.watch.name}</b>
+                <i>trending <em className="r">▼ {Math.abs(Math.round(callouts.watch.pct))}%</em> this period</i></span>
               <span className="ic">⚠️</span>
-              <span><small>Needs attention</small><b>{callouts.watch.name}</b>
-                <i style={{ color: "#ef4444" }}>trending {Math.round(callouts.watch.pct)}% inside this period</i></span>
-            </div>
-          )}
+            </button>
+          ) : <span className="oh ghost" />}
         </div>
       )}
       {insights.length > 0 && (
@@ -1062,7 +1155,7 @@ export default function OwnerDashboard() {
               wants them on the group home too (round-2: "this both thing were good"). */}
           <div className="ow2-two" style={{ marginBottom: 12 }}>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy hours <span className="mut">· orders by hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(WEEK)}>last 7 days</span></div>
+              <div className="ow2-ct"><span>Busy hours <span className="mut">· orders by hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
               {groupHourly ? <HourlyBar data={groupHourly} color={GREEN} /> : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
@@ -1076,9 +1169,9 @@ export default function OwnerDashboard() {
           {/* Heatmap + payments, side by side (group scope) */}
           <div className="ow2-two">
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(WEEK)}>last 7 days</span></div>
-              {(pl(WEEK) as GroupA | undefined)?.heatmap
-                ? <Heatmap data={(pl(WEEK) as GroupA).heatmap!} accent={GREEN} />
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
+              {(pl(weekKey) as GroupA | undefined)?.heatmap
+                ? <Heatmap data={(pl(weekKey) as GroupA).heatmap!} accent={GREEN} />
                 : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
@@ -1129,9 +1222,9 @@ export default function OwnerDashboard() {
 
           <div className="ow2-two">
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy hours <span className="mut">· orders by hour</span></span><span className="ow2-tag" title={rangeSpanText(WEEK)}>last 7 days</span></div>
-              {(pl(WEEK) as RestA | undefined)?.hourly
-                ? <HourlyBar data={(pl(WEEK) as RestA).hourly} color={GREEN} />
+              <div className="ow2-ct"><span>Busy hours <span className="mut">· orders by hour</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
+              {(pl(weekKey) as RestA | undefined)?.hourly
+                ? <HourlyBar data={(pl(weekKey) as RestA).hourly} color={GREEN} />
                 : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
@@ -1144,9 +1237,9 @@ export default function OwnerDashboard() {
 
           <div className="ow2-two" style={{ marginTop: 12 }}>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour</span></span><span className="ow2-tag" title={rangeSpanText(WEEK)}>last 7 days</span></div>
-              {(pl(WEEK) as RestA | undefined)?.heatmap
-                ? <Heatmap data={(pl(WEEK) as RestA).heatmap!} accent={GREEN} />
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour</span></span><span className="ow2-tag" title={weekTagTitle}>{weekTagText}</span></div>
+              {(pl(weekKey) as RestA | undefined)?.heatmap
+                ? <Heatmap data={(pl(weekKey) as RestA).heatmap!} accent={GREEN} />
                 : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
@@ -1304,15 +1397,6 @@ export default function OwnerDashboard() {
         .ow2-ct .mut { color: var(--muted); font-weight: 500; }
         .ow2-tag { font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--bg); border: var(--border); border-radius: 8px; padding: 3px 9px; white-space: nowrap; }
         .ow2-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .ow2-callouts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-        .ow2-co { display: flex; align-items: center; gap: 12px; border: var(--border); border-radius: 12px; padding: 12px 15px; }
-        .ow2-co.good { border-left: 3px solid ${GREEN}; }
-        .ow2-co.warn { border-left: 3px solid var(--adm-danger, #ef4444); }
-        .ow2-co.warn i { color: var(--adm-danger, #ef4444); }
-        .ow2-co .ic { font-size: 20px; }
-        .ow2-co small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
-        .ow2-co b { display: block; font-size: 14.5px; line-height: 1.3; }
-        .ow2-co i { display: block; font-style: normal; font-size: 11.5px; color: var(--muted); }
         /* table */
         .hq-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border-bottom: var(--border); }
         .hq-search { flex: 1 1 220px; display: flex; align-items: center; gap: 9px; border: var(--border); background: var(--bg); border-radius: 9px; padding: 7px 12px; color: var(--muted); }

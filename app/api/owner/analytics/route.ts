@@ -139,6 +139,13 @@ export async function GET(req: NextRequest) {
         compute: async () => {
       const allow = scope.all ? null : new Set(scope.ids);
       const pIds = scope.all ? null : scope.ids; // DB-side scope (mig 138) — no whole-platform scan
+      // Speed (owner round-5): every independent read starts NOW and runs concurrently —
+      // the payment/category per-restaurant fan-outs and the prev-window totals used to
+      // wait for the base block, serialising 3 extra round-trips into the compute time.
+      const pmIds: (string | null)[] = scope.all ? [null] : scope.ids;
+      const pmP = Promise.all(pmIds.map((id) => sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      const catScopedP = scope.all ? null : Promise.all(scope.ids.map((id) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      const prevP = prevWin ? windowTotals(pIds, prevWin.from, prevWin.to) : Promise.resolve(null);
       const [rev, ts, heat] = await Promise.all([
         sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to, p_ids: pIds }),
         sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket, p_ids: pIds }),
@@ -168,8 +175,7 @@ export async function GET(req: NextRequest) {
       // + fixed 2026-07-04). Admin (scope.all) may sum all; a scoped owner sums ONLY
       // their own restaurants (one tiny call each) and we merge by method.
       const pmByMethod = new Map<string, { method: string; revenue: number; orders: number }>();
-      const pmIds: (string | null)[] = scope.all ? [null] : scope.ids;
-      const pmRes = await Promise.all(pmIds.map((id) => sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      const pmRes = await pmP;
       for (const r of pmRes) {
         if (r.error) throw r.error;
         for (const row of (r.data ?? []) as Record<string, unknown>[]) {
@@ -186,11 +192,11 @@ export async function GET(req: NextRequest) {
       // exactly like the payment breakdown above — a scoped owner sums their own
       // restaurants (one tiny pre-summed call each) and we merge by category name.
       // scope.all (admin) merges across every restaurant id from the revenue rows.
-      const catIds: string[] = scope.all
-        ? (rev.data ?? []).map((r: Record<string, unknown>) => r.restaurant_id as string)
-        : scope.ids;
       const catByName = new Map<string, { category: string; qty: number; revenue: number }>();
-      const catRes = await Promise.all(catIds.map((id) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      // scoped owners: already in flight; admin all-view needs the rev rows to know the ids
+      const catRes = catScopedP ? await catScopedP : await Promise.all(
+        ((rev.data ?? []).map((r: Record<string, unknown>) => r.restaurant_id as string))
+          .map((id: string) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
       for (const r of catRes) {
         if (r.error) throw r.error;
         for (const row of (r.data ?? []) as Record<string, unknown>[]) {
@@ -202,7 +208,7 @@ export async function GET(req: NextRequest) {
         }
       }
       const categories = Array.from(catByName.values()).sort((a, b) => b.revenue - a.revenue);
-      const prev = prevWin ? await windowTotals(pIds, prevWin.from, prevWin.to) : null;
+      const prev = await prevP;
       const heatmap = ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({
         dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue),
       }));
