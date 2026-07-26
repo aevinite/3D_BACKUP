@@ -1,30 +1,36 @@
 "use client";
-// Owner · Dashboard (redesign 2026-07-04, tiers extended 2026-07-06) — ADAPTIVE
-// by restaurant count:
-//   · 1 restaurant  → the dashboard IS that restaurant (hero header + charts up
-//     front — a "who earns more" bar with one bar is useless, owner's complaint).
-//   · 2 restaurants → head-to-head comparison + two-line trend.
-//   · 3–9           → leaderboard bar + multi-line trend + card grid; click drills in
-//     (5+ caps the trend at the top-5 lines so it stays readable).
-//   · 10+           → HQ mode: ONE sortable, searchable table (cards would be a wall
-//     of noise); scales to 50+. Sidebar (OwnerShell) always lists every restaurant.
-// Every KPI carries a ▲/▼ delta vs the previous equal-length period,
-// and an insight strip says in plain words what the numbers mean. All data arrives
-// pre-aggregated from /api/owner/{overview,analytics,reports} (tiny rows, mig-113
-// paid-only rule everywhere). Refresh: activity-gated ~60s + manual — no websocket.
+// Owner · Dashboard — MERGED redesign (owner-approved 2026-07-26, spec in memory
+// "owner-dashboard-merge-spec"). What changed vs the 2026-07-04 adaptive dashboard:
+//   · NO global range tabs — every card carries its OWN small range dropdown
+//     ("half the graphs didn't react to the global switch, so it looked broken").
+//     Data is cached client-side PER (scope, range): cards sharing a range share one
+//     fetch, and switching a card only fetches that range once (egress-safe).
+//   · Top row = FIVE KPI cards (Revenue / Orders / Avg order / Today so far / Lost
+//     to cancellations) with a sparkline living inside each card — no open-tables card.
+//   · Breadcrumb merged into the shell's top strip (Owner › Dashboard › <name>) via
+//     the lfh:owner-crumb event — the second heading row is gone.
+//   · Single-restaurant view: revenue trend (tooltip shows ₹ AND orders), busy hours,
+//     category donut, payment donut (the ONLY payment chart — same-hour + 14-day
+//     stacked bars removed), NEW day×hour heatmap (mig 197), records, every-dish list,
+//     recent-activity mini feed. Charts are theme-emerald — never the restaurant accent.
+//   · Multi-restaurant: 2–3 → Samsung-style stacked daily bars (one bar per day,
+//     split by restaurant); every multi tier gets ONE sortable table; a row click
+//     slides a summary drawer from the right with "View in full detail" → the
+//     restaurant's own dashboard (the owner's 3-phase drill).
+//   · Report ▾ (top right): Print / CSV / Excel of what's currently on screen.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import { asSuffix } from "@/lib/ownerPin";
 import {
-  AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod, DeltaChip,
-  SameHourBar, PayTrendStack,
+  AreaTrend, TimeBar, LeaderBar, HourlyBar, CategoryDonut, PaymentDonut, canonPayMethod,
+  DeltaChip, Spark, Heatmap, StackedDailyBars,
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
-import RangeSlider from "@/components/owner/RangeSlider";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { reportRealtime } from "@/lib/connectionStatus";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
+import { useBackClose } from "@/lib/backStack";
 
 const DAY_MS = 86400000;
 type Range = "today" | "yesterday" | "7d" | "30d" | "all";
@@ -33,12 +39,16 @@ const RANGES: { k: Range; label: string }[] = [
   { k: "7d", label: "7 days" }, { k: "30d", label: "30 days" }, { k: "all", label: "All time" },
 ];
 const RANGE_LABEL: Record<Range, string> = {
-  today: "today", yesterday: "yesterday", "7d": "the last 7 days", "30d": "the last 30 days", all: "all time",
+  today: "today", yesterday: "yesterday", "7d": "last 7 days", "30d": "last 30 days", all: "all time",
 };
 const PREV_LABEL: Record<Range, string> = {
   today: "vs yesterday (same hours)", yesterday: "vs the day before", "7d": "vs the 7 days before",
   "30d": "vs the 30 days before", all: "",
 };
+// Theme accent for every single-scope chart (owner 2026-07-26: "it should be green
+// everywhere" — Burger Barn's charts were rendering in its brown accent).
+const GREEN = "#34d399";
+const FALLBACK = GREEN;
 
 type Restaurant = {
   id: string; slug: string; name: string; active: boolean; accentColor: string;
@@ -48,43 +58,41 @@ type Overview = { restaurants: Restaurant[]; totals: { revenueToday: number; ord
 type GroupRev = { id: string; slug: string; name: string; accentColor: string; revenue: number; orders: number };
 type TsRow = { bucket: string; restaurantId?: string; revenue: number; orders: number };
 type Pay = { method: string; revenue: number; orders: number };
+type HeatRow = { dow: number; hr: number; orders: number; revenue: number };
 type Prev = { revenue: number; orders: number } | null;
-type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow[]; paymentMethods: Pay[]; prev: Prev };
+type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow[]; paymentMethods: Pay[]; heatmap?: HeatRow[]; prev: Prev; cachedAt?: string };
 type Dish = { title: string; qty: number; revenue: number };
+type Records = {
+  bestDay?: { date: string; revenue: number } | null;
+  bigBill?: { table: string | null; revenue: number } | null;
+  fastHour?: { at: string; orders: number } | null;
+  starDish?: { title: string; qty: number } | null;
+  regulars?: number | null;
+} | null;
 type RestA = {
   scope: "restaurant"; prev: Prev;
   restaurant: { id: string; slug: string; name: string; accentColor: string; heroTitle: string };
   kpis: { revenue: number; orders: number; paidOrders?: number; avgOrder: number; openTables: number; topDish: string };
   timeseries: TsRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
   hourly: { hour: number; orders: number; revenue: number }[]; paymentMethods: Pay[];
-  sameHour?: { start: string; revenue: number; orders: number }[];
-  payTrend?: { day: string; method: string; revenue: number }[];
-  records?: {
-    bestDay?: { date: string; revenue: number } | null;
-    bigBill?: { table: string | null; revenue: number } | null;
-    fastHour?: { at: string; orders: number } | null;
-    starDish?: { title: string; qty: number } | null;
-    regulars?: number | null;
-  } | null;
+  heatmap?: HeatRow[]; records?: Records; cachedAt?: string;
 };
+type Payload = GroupA | RestA;
 type MoneyTotals = { revenue: number; discount: number; cancelledOrders: number; cancelledValue: number; tax: number };
 type View = { level: "home" } | { level: "restaurant"; rid: string } | { level: "dish"; rid: string; dish: string };
+type Act = { id: string; panel: string; action: string; actor: string | null; table_number: string | null; created_at: string };
 
-const FALLBACK = "#34d399";
-// Labels for the same-elapsed-time comparison windows, per range. Order matches
-// the API: [current, the period right before, same weekday last week, 4 weeks back].
-const SAMEHOUR_LABEL: Partial<Record<Range, string[]>> = {
-  today: ["Today (till now)", "Yesterday (till now)", "Last week (till now)", "4 weeks ago (till now)"],
-  yesterday: ["Yesterday", "Day before", "Same day last week", "4 weeks before"],
-  "7d": ["This week", "Week before", "2 weeks back", "4 weeks back"],
-  "30d": ["These 30 days", "30 days before", "60 days back", "90 days back"],
+// Every card that owns a range dropdown (owner 2026-07-26: per-section ranges).
+type CardId = "rev" | "ord" | "avg" | "cancel" | "trend" | "hours" | "cats" | "pay" | "heat" | "dishes" | "table";
+const CARD_DEFAULTS: Record<CardId, Range> = {
+  rev: "30d", ord: "30d", avg: "30d", cancel: "30d",
+  trend: "30d", hours: "30d", cats: "30d", pay: "30d", heat: "30d", dishes: "30d", table: "30d",
 };
 
 const IST = "Asia/Kolkata";
-// Some RPCs return a zone-LESS IST wall-clock timestamp (e.g. "2026-06-28T00:00:00").
-// `new Date(that)` reads it in the VIEWER's local zone, and re-applying timeZone:IST
-// then shifts it for anyone outside India (owner audit 2026-07-06). Treat a zone-less
-// value as UTC so the exact wall-clock numbers print regardless of where it's viewed.
+// Some RPCs return a zone-LESS IST wall-clock timestamp — see the note in the old
+// dashboard (owner audit 2026-07-06): treat zone-less as UTC so numbers print the same
+// wherever they're viewed.
 function istWall(ts: string, opts: Intl.DateTimeFormatOptions): string {
   const zoneless = /T/.test(ts) && !/[Z+]|[+-]\d\d:?\d\d$/.test(ts);
   const d = new Date(zoneless ? ts + "Z" : ts);
@@ -95,9 +103,8 @@ function tsLabel(iso: string, range: Range): string {
   if (range === "today" || range === "yesterday") return d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST });
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
 }
-// A stable IST key for a bucket instant, at the range's granularity — used to line
-// timeseries rows up against a COMPLETE bucket sequence so days/hours with no sales
-// show as a zero, not a hidden gap that makes the trend lie (found 2026-07-05).
+// Stable IST bucket key (hour or day grain) — lines timeseries rows up against the
+// COMPLETE expected bucket sequence so no-sales periods show as zeros (2026-07-05).
 function istKey(d: Date, range: Range): string {
   const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
     timeZone: IST, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23",
@@ -105,18 +112,12 @@ function istKey(d: Date, range: Range): string {
   if (range === "today" || range === "yesterday") return `${p.year}-${p.month}-${p.day} ${p.hour}`;
   return `${p.year}-${p.month}-${p.day}`;
 }
-// The full ordered list of buckets we EXPECT for a range (so gaps become zeros). "all"
-// is unbounded, so it's left to whatever the data spans (no fill).
 function expectedBuckets(range: Range): { key: string; label: string }[] {
   const now = new Date();
   const out: { key: string; label: string }[] = [];
   if (range === "today" || range === "yesterday") {
-    // Align the hourly buckets to the SERVER's 05:00-IST business day, not the
-    // calendar day. Before this, the client built calendar-day hour keys while the
-    // server bucketed by the 05:00-IST business day, so between 00:00 and 05:00 IST
-    // the two key sequences never intersected and the chart went blank (bug H5).
-    // "today" also stops at the current hour so future hours aren't zero-padded
-    // (which used to drag the whole line down to zero for the rest of the day).
+    // Hour keys aligned to the server's 05:00-IST business day (bug H5) — "today"
+    // stops at the current hour so future hours aren't zero-padded.
     const startMs = Date.parse(businessDayStartIso(now)) - (range === "yesterday" ? DAY_MS : 0);
     const endMs = range === "yesterday" ? startMs + DAY_MS - 1 : now.getTime();
     for (let t = startMs; t <= endMs; t += 3600_000) {
@@ -132,9 +133,7 @@ function expectedBuckets(range: Range): { key: string; label: string }[] {
   }
   return out;
 }
-
-// Plain-language "exact days" caption under the range control, so the owner always
-// knows the precise window a number covers (part of the 2026-07-06 range redesign).
+// Exact-days caption for a range — shown as the dropdown's tooltip.
 function rangeSpanText(k: Range): string {
   const now = new Date();
   const f = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
@@ -144,30 +143,6 @@ function rangeSpanText(k: Range): string {
   if (k === "30d") return `${f(new Date(now.getTime() - 29 * DAY_MS))} – ${f(now)} (30 days)`;
   return `Everything up to ${f(now)}`;
 }
-
-// AnimatedNumber (count-up, loading-aware) now lives in @/components/owner/AnimatedNumber
-// so every owner page shares one animation. Imported at the top of this file.
-
-function Kpi({ k, v, money, delta, prevTitle, sub, loading }: {
-  k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };
-  prevTitle?: string; sub?: string; loading?: boolean;
-}) {
-  // While loading the number shows a calm shimmer, then counts up once to the real value —
-  // no fake rolling figure, no inline sparkline cramped against the delta (owner 2026-07-25).
-  return (
-    <div className="adm-stat owx-kpi">
-      <div className="k">{k}</div>
-      <div className="row">
-        <div className="v">{typeof v === "number" ? <AnimatedNumber value={v} loading={loading} money={money} /> : v}</div>
-        {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
-      </div>
-      {sub && !loading && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
-}
-
-// "updated X ago" for the cached-snapshot timestamp (mig 196). Coarse on purpose — only
-// roughly how stale the numbers are matters, not the exact second.
 function timeAgo(iso: string): string {
   const s = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
   if (s < 45) return "just now";
@@ -178,46 +153,177 @@ function timeAgo(iso: string): string {
   return `${Math.round(h / 24)} d ago`;
 }
 
+// ── Per-card range dropdown (the global tab bar's replacement) ────────────────
+function RangeDrop({ id, value, onChange, compactBtn }: { id: string; value: Range; onChange: (r: Range) => void; compactBtn?: boolean }) {
+  const [open, setOpen] = useState(false);
+  // Project rule: every popup registers with the back-stack manager (self-noops closed).
+  useBackClose(`owner-rng-${id}`, open, () => setOpen(false));
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest?.(`[data-rng="${id}"]`)) setOpen(false);
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [open, id]);
+  const cur = RANGES.find((r) => r.k === value)!;
+  return (
+    <span className="owr" data-rng={id}>
+      <button type="button" className={`owr-btn${compactBtn ? " sm" : ""}`} title={rangeSpanText(value)}
+        aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {cur.label} <i className="fas fa-chevron-down" aria-hidden="true" />
+      </button>
+      {open && (
+        <span className="owr-pop" role="listbox" aria-label="Range">
+          {RANGES.map((r) => (
+            <button key={r.k} type="button" role="option" aria-selected={r.k === value}
+              className={r.k === value ? "on" : ""}
+              onClick={() => { onChange(r.k); setOpen(false); }}>
+              {r.label}<small>{rangeSpanText(r.k)}</small>
+            </button>
+          ))}
+        </span>
+      )}
+      <style jsx>{`
+        .owr { position: relative; display: inline-flex; }
+        .owr-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--bg); border: var(--border); border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; white-space: nowrap; }
+        .owr-btn.sm { padding: 3px 8px; font-size: 10.5px; }
+        .owr-btn:hover { color: var(--accent); border-color: var(--accent); }
+        .owr-btn i { font-size: 9px; opacity: .7; }
+        .owr-pop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 40; min-width: 200px; display: flex; flex-direction: column; background: var(--card); border: var(--border); border-radius: 12px; padding: 5px; box-shadow: 0 14px 34px rgba(0,0,0,.35); }
+        .owr-pop button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; background: none; border: none; border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 12.5px; font-weight: 700; color: inherit; cursor: pointer; text-align: left; }
+        .owr-pop button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+        .owr-pop button.on { color: var(--accent); }
+        .owr-pop button small { font-size: 10px; color: var(--muted); font-weight: 500; }
+      `}</style>
+    </span>
+  );
+}
+
+// ── D1-style KPI card: sparkline inside, delta chip, own range dropdown ───────
+function Kpi({ id, k, v, money, delta, prevTitle, sub, loading, spark, range, onRange, pill }: {
+  id?: string; k: string; v: number | string; money?: boolean; delta?: { now: number; prev: number | null };
+  prevTitle?: string; sub?: string; loading?: boolean; spark?: number[]; range?: Range; onRange?: (r: Range) => void;
+  pill?: string;
+}) {
+  return (
+    <div className="adm-stat owx-kpi ow2-kpi">
+      <div className="ow2-kt">
+        <span className="k">{k}</span>
+        {range && onRange && id ? <RangeDrop id={id} value={range} onChange={onRange} compactBtn /> :
+          pill ? <span className="ow2-live">{pill}</span> : null}
+      </div>
+      <div className="row">
+        <div className="v">{typeof v === "number" ? <AnimatedNumber value={v} loading={loading} money={money} /> : v}</div>
+        {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
+      </div>
+      {sub && !loading && <div className="ow2-sub">{sub}</div>}
+      {spark && spark.length >= 2 && !loading && (
+        <div className="ow2-spark" aria-hidden="true"><Spark points={spark} color={GREEN} width={150} height={30} /></div>
+      )}
+      <style jsx>{`
+        .ow2-kpi { position: relative; overflow: hidden; }
+        .ow2-kt { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .ow2-kt .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
+        .ow2-live { font-size: 10px; font-weight: 800; color: ${GREEN}; background: color-mix(in srgb, ${GREEN} 14%, transparent); border-radius: 999px; padding: 2px 8px; }
+        .ow2-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+        .ow2-spark { position: absolute; right: 0; bottom: 0; opacity: .45; pointer-events: none; }
+      `}</style>
+    </div>
+  );
+}
+
+// ── Report ▾ — Print / CSV / Excel of what's on screen (owner 2026-07-26) ─────
+type ExportTable = { title: string; head: string[]; rows: (string | number)[][] };
+function ReportMenu({ tables, filename }: { tables: ExportTable[]; filename: string }) {
+  const [open, setOpen] = useState(false);
+  useBackClose("owner-report-menu", open, () => setOpen(false));
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest?.(".ow2-report")) setOpen(false);
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [open]);
+  const download = (blob: Blob, name: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
+  const esc = (v: string | number) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const asCsv = () => {
+    const parts = tables.map((t) => [t.title, t.head.map(esc).join(","), ...t.rows.map((r) => r.map(esc).join(","))].join("\n"));
+    // ﻿ BOM so Excel opens the ₹ column as UTF-8, not mojibake.
+    download(new Blob(["﻿" + parts.join("\n\n")], { type: "text/csv;charset=utf-8" }), `${filename}.csv`);
+  };
+  const asExcel = () => {
+    // The .xls HTML-table format — opens natively in Excel/Numbers/Sheets, zero deps.
+    const html = `<html><head><meta charset="utf-8"></head><body>` + tables.map((t) =>
+      `<h3>${t.title}</h3><table border="1"><tr>${t.head.map((h) => `<th>${h}</th>`).join("")}</tr>` +
+      t.rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("") + `</table>`).join("<br/>") + `</body></html>`;
+    download(new Blob([html], { type: "application/vnd.ms-excel" }), `${filename}.xls`);
+  };
+  return (
+    <span className="ow2-report" style={{ position: "relative", display: "inline-flex" }}>
+      <button className="adm-btn" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
+        <i className="fas fa-file-export" style={{ marginRight: 6 }} aria-hidden="true" />Report
+        <i className="fas fa-chevron-down" style={{ marginLeft: 6, fontSize: 9, opacity: .7 }} aria-hidden="true" />
+      </button>
+      {open && (
+        <span role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 40, minWidth: 190, display: "flex", flexDirection: "column", background: "var(--card)", border: "var(--border)", borderRadius: 12, padding: 5, boxShadow: "0 14px 34px rgba(0,0,0,.35)" }}>
+          {[
+            { ic: "fa-print", lb: "Print", hint: "printer / save as PDF", fn: () => { setOpen(false); setTimeout(() => window.print(), 60); } },
+            { ic: "fa-file-csv", lb: "Download CSV", hint: "opens anywhere", fn: () => { setOpen(false); asCsv(); } },
+            { ic: "fa-file-excel", lb: "Download Excel", hint: ".xls for spreadsheets", fn: () => { setOpen(false); asExcel(); } },
+          ].map((o) => (
+            <button key={o.lb} role="menuitem" onClick={o.fn}
+              style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", borderRadius: 8, padding: "8px 10px", font: "inherit", fontSize: 12.5, fontWeight: 700, color: "inherit", cursor: "pointer", textAlign: "left" }}>
+              <i className={`fas ${o.ic}`} style={{ width: 16, color: "var(--accent)" }} aria-hidden="true" />
+              <span>{o.lb}<small style={{ display: "block", fontSize: 10, color: "var(--muted)", fontWeight: 500 }}>{o.hint}</small></span>
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export default function OwnerDashboard() {
   const [view, setView] = useState<View>({ level: "home" });
-  // Default to "30 days", not "today": on a quiet day "today" lands on ₹0 + empty charts,
-  // so the dashboard opens on a meaningful window instead (owner 2026-07-25).
-  const [range, setRange] = useState<Range>("30d");
+  const [cr, setCr] = useState<Record<CardId, Range>>(CARD_DEFAULTS);
+  const setCardRange = (id: CardId) => (r: Range) => setCr((c) => ({ ...c, [id]: r }));
   const [ov, setOv] = useState<Overview | null>(null);
-  const [group, setGroup] = useState<GroupA | null>(null);
-  const [rest, setRest] = useState<RestA | null>(null);
-  const [money, setMoney] = useState<MoneyTotals | null>(null); // discounts + lost business tiles
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null); // when the cached snapshot was computed (mig 196)
-  // The money tiles come from a heavier reports scan that CAN legitimately fail/time out on
-  // the all-time whole-platform view (the pre-aggregated analytics call still succeeds). When
-  // it can't be computed we mark it, so the "Lost to cancellations" tile shows an honest "—"
-  // instead of rolling in its loading animation forever (bug, 2026-07-25).
-  const [moneyErr, setMoneyErr] = useState(false);
+  // Payload cache — key `${scopeKey}|${range}`; cards sharing a range share ONE fetch,
+  // and a range the owner already looked at repaints instantly (session-cached).
+  const [cache, setCache] = useState<Record<string, Payload>>({});
+  const [moneyCache, setMoneyCache] = useState<Record<string, MoneyTotals | "err">>({});
+  const [recs, setRecs] = useState<Record<string, Records>>({});
+  const [acts, setActs] = useState<Act[] | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [dishSort, setDishSort] = useState<"revenue" | "qty">("revenue");
-  // If an ADMIN opened this cockpit for a specific restaurant, the URL carries
-  // ?rid=<id>. Pin EVERY API call to that scope (as ?scope=) so a second tab — which
-  // overwrites the browser-wide act-as cookie — can never repaint or WRITE to this
-  // tab under a different restaurant (bug C1, 2026-07-05). A real logged-in owner has
-  // no ?rid= and is scoped by their own cookie, so this is null and nothing changes.
+  const inflight = useRef<Set<string>>(new Set());
+  // Admin tab pin (bug C1): ?rid= rides on EVERY call so a second tab's act-as cookie
+  // can never repaint this one under a different restaurant.
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
-  // Hero quick-links must keep the admin's tab pin (same rule as OwnerShell.withRid).
   const withPin = (href: string) => (scopePin ? `${href}?rid=${scopePin}${asSuffix()}` : href);
+  const scp = scopePin ? `&scope=${scopePin}${asSuffix()}` : "";
 
   const single = ov?.restaurants.length === 1;
-  // With ONE restaurant the home page IS that restaurant — resolve its id once known.
   const homeRid = single ? ov!.restaurants[0].id : null;
   const activeRid = view.level === "home" ? homeRid : (view as { rid: string }).rid;
   const restCount = ov?.restaurants.length ?? 0;
-  const hq = restCount >= 10; // HQ table mode — cards/charts don't scale past ~9
+  const scopeKey = activeRid ?? "group";
+  const pl = useCallback((range: Range): Payload | undefined => cache[`${scopeKey}|${range}`], [cache, scopeKey]);
+  const moneyOf = (range: Range): MoneyTotals | "err" | undefined => moneyCache[`${scopeKey}|${range}`];
 
-  // HQ table controls (hooks must run unconditionally; cheap when unused).
-  const [hqQuery, setHqQuery] = useState("");
-  const [hqSort, setHqSort] = useState<"revenue" | "orders" | "openTables" | "name">("revenue");
-
-  // The sidebar's "My restaurants" rows (OwnerShell) open a restaurant from ANY
-  // page: same-page clicks arrive as this event, cross-page ones as ?focus=<rid>.
+  // Sidebar "My restaurants" rows open a restaurant from any page (event / ?focus=).
   useEffect(() => {
     const focus = new URLSearchParams(window.location.search).get("focus");
     if (focus) setView({ level: "restaurant", rid: focus });
@@ -229,252 +335,400 @@ export default function OwnerDashboard() {
     return () => window.removeEventListener("lfh:owner-open-restaurant", onOpen);
   }, []);
 
-  // Latest-wins guard (the app's standard stale-refresh fix): tag every load and drop
-  // any response that lands after a newer one started — so a slow earlier fetch can't
-  // overwrite the range you just switched to (owner audit 2026-07-06).
-  const loadSeq = useRef(0);
-  const load = useCallback(async (opts?: { withRecords?: boolean; refresh?: boolean }) => {
-    const myGen = ++loadSeq.current;
-    const fresh = () => myGen === loadSeq.current;
+  // Merged breadcrumb (owner 2026-07-26): the restaurant/dish tail renders in the
+  // SHELL's top strip (Owner › Dashboard › …), not as a second heading row here.
+  useEffect(() => {
+    const tail: string[] = [];
+    if (!single && view.level !== "home") {
+      const name = ov?.restaurants.find((r) => r.id === (view as { rid: string }).rid)?.name;
+      if (name) tail.push(name);
+    }
+    if (view.level === "dish") tail.push(view.dish);
+    window.dispatchEvent(new CustomEvent("lfh:owner-crumb", { detail: { tail } }));
+    return () => { window.dispatchEvent(new CustomEvent("lfh:owner-crumb", { detail: { tail: [] } })); };
+  }, [view, ov, single]);
+
+  // ── data layer: fetch one (scope, range) payload if missing ──
+  const fetchPayload = useCallback(async (sk: string, range: Range, opts?: { force?: boolean; refresh?: boolean }) => {
+    const key = `${sk}|${range}`;
+    if (inflight.current.has(key)) return;
+    inflight.current.add(key);
     try {
-      const rg = range;
-      const j = (r: Response) => r.json();
-      // All-time "records" (an unbounded scan) is fetched only on first load / range change /
-      // manual refresh — NOT on the 60s auto-refresh, which keeps the last records value
-      // (audit 2026-07-07). The flag rides on the restaurant-scope analytics calls only.
-      const recQ = opts?.withRecords ? "&records=1" : "";
-      // Refresh button (or first load) forces a live recompute of the compute-on-view cache
-      // (mig 196); a normal auto-refresh serves the instant cached snapshot. `updatedAt`
-      // tracks when the snapshot was computed so the bar can say "updated X ago".
+      const rid = sk === "group" ? null : sk;
+      // records ride ONCE per restaurant (unbounded scan — not worth re-running per range).
+      const recQ = rid && !(rid in ((recsRef.current) || {})) ? "&records=1" : "";
       const refQ = opts?.refresh ? "&refresh=1" : "";
-      // The tab's scope pin (admin-in-one-restaurant) rides on EVERY call so the
-      // shared act-as cookie can't hijack this tab (C1). Null for a real owner.
-      const scp = scopePin ? `&scope=${scopePin}${asSuffix()}` : "";
-      // range=all now maps to an unbounded reports window (mig M11) — pass it through so the
-      // money tiles cover the same span as the all-time revenue KPIs (was collapsed to 12m).
-      const moneyUrl = (rid: string | null) =>
-        `/api/owner/reports?type=sales&range=${rg}${rid ? `&rid=${rid}` : ""}${scp}${refQ}`;
-      // The money tiles (discounts / lost-to-cancellations) come from a SEPARATE, heavier
-      // reports scan. For range=all that scan is an unbounded, whole-history month rollup
-      // and is far slower than the pre-aggregated analytics call — so it must NEVER gate the
-      // revenue/orders KPIs or the charts. Before, both rode ONE `await Promise.all`, so the
-      // slow all-time money scan kept `group` null and the tiles stuck in their loading roll
-      // with empty charts (bug, 2026-07-25). Fire it independently; it fills its own tile when
-      // it lands, guarded by the same latest-wins check so a stale response can't repaint.
-      const loadMoney = (rid: string | null) => {
-        fetch(moneyUrl(rid), { cache: "no-store" }).then(j)
-          .then((m) => { if (!fresh()) return; if (m.error) { setMoney(null); setMoneyErr(true); } else { setMoney(m.totals); setMoneyErr(false); if (m.cachedAt) setUpdatedAt(m.cachedAt); } })
-          .catch(() => { if (fresh()) { setMoney(null); setMoneyErr(true); } });
-      };
-      if (view.level === "home") {
-        const o: Overview = await fetchOwnerOverview(scp) as Overview;
-        if ((o as unknown as { error?: string }).error) throw new Error((o as unknown as { error: string }).error);
-        if (!fresh()) return;
-        setOv(o);
-        if (o.restaurants.length === 1) {
-          const rid = o.restaurants[0].id;
-          const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then(j);
-          if (a.error) throw new Error(a.error);
-          if (!fresh()) return;
-          setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null })); setGroup(null);
-          if (a.cachedAt) setUpdatedAt(a.cachedAt);
-          loadMoney(rid);
-        } else {
-          const g = await fetch(`/api/owner/analytics?range=${rg}&compare=1${scp}${refQ}`, { cache: "no-store" }).then(j);
-          if (g.error) throw new Error(g.error);
-          if (!fresh()) return;
-          setGroup(g); setRest(null);
-          if (g.cachedAt) setUpdatedAt(g.cachedAt);
-          loadMoney(null);
-        }
-      } else {
-        const rid = (view as { rid: string }).rid;
-        const a = await fetch(`/api/owner/analytics?range=${rg}&rid=${rid}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then(j);
-        if (a.error) throw new Error(a.error);
-        if (!fresh()) return;
-        setRest((prev) => ({ ...a, records: a.records ?? prev?.records ?? null }));
-        if (a.cachedAt) setUpdatedAt(a.cachedAt);
-        loadMoney(rid);
-      }
-      if (fresh()) setErr(null);
-      // The owner panel has NO realtime socket — it polls. So IT drives the connection
-      // light: a successful load = healthy (green), a failed one = amber. Without this the
-      // badge was hard-stuck on green "Live" even while the dashboard showed "Couldn't load"
-      // (audit 2026-07-07). It deliberately shows NO "ms" — the refresh time is dominated by
-      // heavy analytics QUERY time, not connection latency, so a slow query would falsely
-      // look like a bad link (owner 2026-07-08). Badge stays a calm "Connected".
+      const a = await fetch(`/api/owner/analytics?range=${range}${rid ? `&rid=${rid}` : ""}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then((r) => r.json());
+      if (a.error) throw new Error(a.error);
+      setCache((c) => ({ ...c, [key]: a }));
+      if (a.cachedAt) setUpdatedAt(a.cachedAt);
+      if (rid && a.records) setRecs((m) => ({ ...m, [rid]: a.records }));
+      setErr(null);
       reportRealtime("online");
     } catch (e) {
-      if (fresh()) setErr(e instanceof Error ? e.message : String(e));
+      setErr(e instanceof Error ? e.message : String(e));
+      reportRealtime("weak");
+    } finally {
+      inflight.current.delete(key);
+    }
+  }, [scp]);
+  const recsRef = useRef(recs); recsRef.current = recs;
+
+  const fetchMoney = useCallback(async (sk: string, range: Range, opts?: { refresh?: boolean }) => {
+    const key = `money:${sk}|${range}`;
+    if (inflight.current.has(key)) return;
+    inflight.current.add(key);
+    try {
+      const rid = sk === "group" ? null : sk;
+      const refQ = opts?.refresh ? "&refresh=1" : "";
+      const m = await fetch(`/api/owner/reports?type=sales&range=${range}${rid ? `&rid=${rid}` : ""}${scp}${refQ}`, { cache: "no-store" }).then((r) => r.json());
+      setMoneyCache((c) => ({ ...c, [`${sk}|${range}`]: m.error ? "err" : m.totals }));
+      if (m.cachedAt) setUpdatedAt(m.cachedAt);
+    } catch {
+      setMoneyCache((c) => ({ ...c, [`${sk}|${range}`]: "err" }));
+    } finally {
+      inflight.current.delete(key);
+    }
+  }, [scp]);
+
+  // Recent activity mini feed (single/drilled view) — 6 rows, scoped, egress-tiny.
+  const fetchActs = useCallback(async (rid: string) => {
+    try {
+      const j = await fetch(`/api/owner/oplog?limit=6&rid=${rid}${scopePin ? `&scope=${scopePin}${asSuffix()}` : ""}`, { cache: "no-store" }).then((r) => r.json());
+      setActs(Array.isArray(j.actions) ? j.actions : null);
+    } catch { setActs(null); }
+  }, [scopePin]);
+
+  // The distinct (scope, range) keys the CURRENT view's cards need.
+  const neededRanges = useMemo(() => {
+    const ranges = new Set<Range>([cr.rev, cr.ord, cr.avg, cr.trend]);
+    if (scopeKey !== "group") { ranges.add(cr.hours); ranges.add(cr.cats); ranges.add(cr.pay); ranges.add(cr.dishes); }
+    ranges.add(cr.heat);
+    if (scopeKey === "group") ranges.add(cr.table);
+    return Array.from(ranges);
+  }, [cr, scopeKey]);
+
+  // Overview first (identity + today-so-far numbers), then ensure every needed payload.
+  const loadOverview = useCallback(async () => {
+    try {
+      const o = (await fetchOwnerOverview(scp)) as Overview;
+      if ((o as unknown as { error?: string }).error) throw new Error((o as unknown as { error: string }).error);
+      setOv(o);
+      setErr(null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
       reportRealtime("weak");
     }
-  }, [view, range]);
+  }, [scp]);
+  useEffect(() => { loadOverview(); }, [loadOverview]);
 
-  // Clear stale analytics the moment the range or drilled restaurant changes, so the
-  // charts show a brief "Loading…" instead of flashing an all-zero chart under the NEW
-  // range's labels (old data re-buckets to zeros). Auto-refresh does NOT change these,
-  // so it never triggers this clear — no 60s flicker (owner audit 2026-07-06).
-  useEffect(() => { setRest(null); setGroup(null); setMoney(null); setMoneyErr(false); }, [range, view]);
+  useEffect(() => {
+    if (!ov) return;
+    for (const r of neededRanges) if (!cache[`${scopeKey}|${r}`]) fetchPayload(scopeKey, r);
+    if (!moneyCache[`${scopeKey}|${cr.cancel}`]) fetchMoney(scopeKey, cr.cancel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ov, scopeKey, neededRanges, cr.cancel]);
 
-  const loadRef = useRef(load); loadRef.current = load;
-  // First load + every range/restaurant change fetches the all-time records; the 60s
-  // auto-refresh below deliberately does NOT (it keeps the last records value).
-  useEffect(() => { load({ withRecords: true }); }, [load]);
+  useEffect(() => { if (activeRid) { setActs(null); fetchActs(activeRid); } }, [activeRid, fetchActs]);
+
+  // Auto-refresh (activity-gated 60s): overview + the payloads in use. Group payloads
+  // are compute-on-view cached server-side (mig 196), so this stays cheap.
+  const tick = useCallback(() => {
+    loadOverview();
+    for (const r of neededRanges) fetchPayload(scopeKey, r);
+    fetchMoney(scopeKey, cr.cancel);
+  }, [loadOverview, fetchPayload, fetchMoney, neededRanges, scopeKey, cr.cancel]);
+  const tickRef = useRef(tick); tickRef.current = tick;
+  useActiveAutoRefresh(() => tickRef.current(), 60000);
+
   const [refreshing, setRefreshing] = useState(false);
-  useActiveAutoRefresh(() => loadRef.current(), 60000);
-  // Stop the spinner when the fetch actually finishes, not on a blind 600ms timer (which
-  // "finished" while a slow query was still loading, audit 2026-07-09). Keep a small floor
-  // so a very fast refresh still shows a brief spin instead of an imperceptible flicker.
   const manualRefresh = () => {
     setRefreshing(true);
     const started = Date.now();
-    Promise.resolve(loadRef.current({ withRecords: true, refresh: true })).finally(() => {
+    const jobs: Promise<unknown>[] = [loadOverview()];
+    for (const r of neededRanges) jobs.push(fetchPayload(scopeKey, r, { refresh: true }));
+    jobs.push(fetchMoney(scopeKey, cr.cancel, { refresh: true }));
+    if (activeRid) jobs.push(fetchActs(activeRid));
+    Promise.allSettled(jobs).finally(() => {
       const wait = Math.max(0, 400 - (Date.now() - started));
       setTimeout(() => setRefreshing(false), wait);
     });
   };
-  const goHome = () => { setView({ level: "home" }); if (!single) setRest(null); };
 
-  // ── shape group timeseries → multi-line rows {label,[name]:rev} ──
-  const trendData = useMemo(() => {
-    if (!group) return { rows: [] as Record<string, unknown>[], lines: [] as { key: string; name: string; color: string }[] };
-    // Key each series by restaurant ID, never by display name — two restaurants can share
-    // a name, and keying by name silently merges their two lines into one (found 2026-07-05).
-    // Show a line for EVERY restaurant in view — no hidden top-N cap (owner 2026-07-25: "if
-    // there are 100 I want 100 listed"). This branch only runs for the 2–9 tier anyway (10+
-    // uses the sortable HQ table), and the legend now wraps/scrolls to fit any count.
-    const lines = group.restaurantRevenue.map((r) => ({ key: r.id, name: r.name, color: r.accentColor || FALLBACK }));
-    const byKey = new Map<string, Record<string, unknown>>();
-    for (const t of group.timeseries) {
-      const k = istKey(new Date(t.bucket), range);
-      if (!byKey.has(k)) byKey.set(k, { label: tsLabel(t.bucket, range) });
-      if (t.restaurantId) (byKey.get(k)!)[t.restaurantId] = t.revenue;
+  // ── derived: KPI values from each card's own range ──
+  const kpiOf = useCallback((range: Range) => {
+    const p = pl(range);
+    if (!p) return null;
+    if (p.scope === "restaurant") {
+      return { revenue: p.kpis.revenue, orders: p.kpis.orders, paidOrders: p.kpis.paidOrders ?? p.kpis.orders, avg: p.kpis.avgOrder, prev: p.prev, ts: p.timeseries };
     }
-    // Zero-fill: plot the COMPLETE bucket sequence so a no-sales day/hour shows as a
-    // gap-to-zero, not an invisible skip that makes the trend denser than reality.
-    const expected = expectedBuckets(range);
-    if (!expected.length) return { rows: Array.from(byKey.values()), lines };
-    const rows = expected.map((e) => {
-      const found = byKey.get(e.key) || {};
-      const row: Record<string, unknown> = { label: e.label };
-      for (const l of lines) row[l.key] = Number(found[l.key]) || 0;
+    const revenue = p.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
+    const orders = p.restaurantRevenue.reduce((a, r) => a + r.orders, 0);
+    const paidOrders = p.paymentMethods.reduce((a, m) => a + (m.orders || 0), 0);
+    return { revenue, orders, paidOrders, avg: paidOrders ? revenue / paidOrders : 0, prev: p.prev, ts: p.timeseries };
+  }, [pl]);
+
+  // Sparkline points (per bucket) for a range — group sums across restaurants.
+  const sparkOf = useCallback((range: Range, kind: "revenue" | "orders") => {
+    const k = kpiOf(range);
+    if (!k) return undefined;
+    const by = new Map<string, number>();
+    for (const t of k.ts) {
+      const key = istKey(new Date(t.bucket), range);
+      by.set(key, (by.get(key) || 0) + (kind === "revenue" ? t.revenue : t.orders));
+    }
+    const exp = expectedBuckets(range);
+    const pts = exp.length ? exp.map((e) => by.get(e.key) ?? 0) : Array.from(by.values());
+    return pts.length >= 2 ? pts : undefined;
+  }, [kpiOf]);
+
+  // Trend rows for the main chart (single scope) — carries __orders for the tooltip.
+  const restTrend = useMemo(() => {
+    const p = pl(cr.trend);
+    if (!p || p.scope !== "restaurant") return [];
+    const by = new Map<string, { rev: number; ord: number }>();
+    for (const t of p.timeseries) by.set(istKey(new Date(t.bucket), cr.trend), { rev: t.revenue, ord: t.orders });
+    const exp = expectedBuckets(cr.trend);
+    if (!exp.length) return p.timeseries.map((t) => ({ label: tsLabel(t.bucket, cr.trend), Revenue: t.revenue, __orders: t.orders }));
+    return exp.map((e) => ({ label: e.label, Revenue: by.get(e.key)?.rev ?? 0, __orders: by.get(e.key)?.ord ?? 0 }));
+  }, [pl, cr.trend]);
+
+  // Group trend (multi): 2–3 restaurants → per-restaurant stacked rows; 4+ → one
+  // summed line. Both carry __orders so the hover shows orders too (owner ask).
+  const groupTrend = useMemo(() => {
+    const p = pl(cr.trend);
+    if (!p || p.scope !== "group") return { rows: [] as Record<string, unknown>[], lines: [] as { key: string; name: string; color: string }[], stacked: false };
+    const stacked = p.restaurantRevenue.length >= 2 && p.restaurantRevenue.length <= 3;
+    const lines = stacked
+      ? p.restaurantRevenue.map((r) => ({ key: r.id, name: r.name, color: r.accentColor || FALLBACK }))
+      : [{ key: "Revenue", name: "Revenue", color: GREEN }];
+    const by = new Map<string, Record<string, number>>();
+    for (const t of p.timeseries) {
+      const k = istKey(new Date(t.bucket), cr.trend);
+      const row = by.get(k) || {};
+      if (stacked && t.restaurantId) row[t.restaurantId] = (row[t.restaurantId] || 0) + t.revenue;
+      row.Revenue = (row.Revenue || 0) + t.revenue;
+      row.__orders = (row.__orders || 0) + t.orders;
+      by.set(k, row);
+    }
+    const exp = expectedBuckets(cr.trend);
+    const keys = exp.length ? exp : Array.from(by.keys()).sort().map((k) => ({ key: k, label: k }));
+    const rows = keys.map((e) => {
+      const found = by.get(e.key) || {};
+      const row: Record<string, unknown> = { label: e.label, __orders: found.__orders || 0 };
+      for (const l of lines) row[l.key] = found[l.key] || 0;
       return row;
     });
-    return { rows, lines };
-  }, [group, range]);
+    return { rows, lines, stacked };
+  }, [pl, cr.trend]);
 
-  const restTrend = useMemo(() => {
-    const byKey = new Map<string, number>();
-    for (const t of (rest?.timeseries ?? [])) byKey.set(istKey(new Date(t.bucket), range), t.revenue);
-    const expected = expectedBuckets(range);
-    if (!expected.length) return (rest?.timeseries ?? []).map((t) => ({ label: tsLabel(t.bucket, range), Revenue: t.revenue }));
-    return expected.map((e) => ({ label: e.label, Revenue: byKey.get(e.key) ?? 0 }));
-  }, [rest, range]);
+  // ── multi-restaurant table (all multi tiers — owner: design #4) ──
+  const [tq, setTq] = useState("");
+  const [tSort, setTSort] = useState<{ k: "rank" | "name" | "today" | "revenue" | "orders" | "avg" | "openTables"; asc: boolean }>({ k: "revenue", asc: false });
+  const tableRows = useMemo(() => {
+    if (!ov || single) return [];
+    const p = pl(cr.table);
+    const revById = new Map((p?.scope === "group" ? p.restaurantRevenue : []).map((r) => [r.id, r]));
+    // per-restaurant sparkline from the group timeseries of the table's range
+    const sparks = new Map<string, number[]>();
+    if (p?.scope === "group") {
+      const byRest = new Map<string, Map<string, number>>();
+      for (const t of p.timeseries) {
+        if (!t.restaurantId) continue;
+        const m = byRest.get(t.restaurantId) || new Map<string, number>();
+        const k = istKey(new Date(t.bucket), cr.table);
+        m.set(k, (m.get(k) || 0) + t.revenue);
+        byRest.set(t.restaurantId, m);
+      }
+      const exp = expectedBuckets(cr.table);
+      for (const [rid, m] of byRest) sparks.set(rid, exp.length ? exp.map((e) => m.get(e.key) ?? 0) : Array.from(m.values()));
+    }
+    const total = Math.max(1, Array.from(revById.values()).reduce((a, r) => a + r.revenue, 0));
+    const base = ov.restaurants.map((r) => {
+      const g = revById.get(r.id);
+      const revenue = g?.revenue ?? 0, orders = g?.orders ?? 0;
+      return {
+        id: r.id, slug: r.slug, name: r.name, active: r.active, accent: r.accentColor || FALLBACK,
+        revenue, orders, avg: orders ? revenue / orders : 0, share: revenue / total,
+        openTables: r.openTables, today: r.revenueToday, ordersToday: r.ordersToday,
+        revenueAll: r.revenueAll, ordersAll: r.ordersAll, spark: sparks.get(r.id),
+      };
+    });
+    const rank = new Map([...base].sort((a, b) => b.revenue - a.revenue).map((r, i) => [r.id, i + 1]));
+    const q = tq.trim().toLowerCase();
+    const rows = q ? base.filter((r) => r.name.toLowerCase().includes(q) || r.slug.toLowerCase().includes(q)) : base;
+    const dir = tSort.asc ? 1 : -1;
+    rows.sort((a, b) => {
+      if (tSort.k === "name") return a.name.localeCompare(b.name) * dir;
+      if (tSort.k === "rank") return ((rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0)) * dir;
+      const key = tSort.k === "today" ? "today" : tSort.k;
+      return ((a[key as "revenue"] as number) - (b[key as "revenue"] as number)) * dir;
+    });
+    return rows.map((r) => ({ ...r, rank: rank.get(r.id)! }));
+  }, [ov, single, pl, cr.table, tq, tSort]);
+  const th = (k: typeof tSort.k, label: string, left?: boolean) => (
+    <th className={left ? "l" : undefined} onClick={() => setTSort((s) => ({ k, asc: s.k === k ? !s.asc : false }))}
+      role="columnheader" aria-sort={tSort.k === k ? (tSort.asc ? "ascending" : "descending") : "none"}
+      style={{ cursor: "pointer" }}>
+      {label} {tSort.k === k && <i className={`fas fa-caret-${tSort.asc ? "up" : "down"}`} aria-hidden="true" />}
+    </th>
+  );
 
-  // ── plain-language insights, derived from data already on screen (no extra fetch) ──
+  // Best / needs-attention callouts (multi) — momentum = 2nd half vs 1st half of the
+  // trend range's own series (accurate, zero extra fetches).
+  const callouts = useMemo(() => {
+    const p = pl(cr.trend);
+    if (!p || p.scope !== "group" || p.restaurantRevenue.length < 2) return null;
+    const total = p.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
+    const best = p.restaurantRevenue[0];
+    const halves = new Map<string, { a: number; b: number }>();
+    const buckets = Array.from(new Set(p.timeseries.map((t) => t.bucket))).sort();
+    const mid = Math.floor(buckets.length / 2);
+    const rankIdx = new Map(buckets.map((b, i) => [b, i]));
+    for (const t of p.timeseries) {
+      if (!t.restaurantId) continue;
+      const h = halves.get(t.restaurantId) || { a: 0, b: 0 };
+      if ((rankIdx.get(t.bucket) ?? 0) < mid) h.a += t.revenue; else h.b += t.revenue;
+      halves.set(t.restaurantId, h);
+    }
+    let watch: { name: string; pct: number } | null = null;
+    for (const r of p.restaurantRevenue) {
+      const h = halves.get(r.id);
+      if (!h || h.a <= 0) continue;
+      const pct = ((h.b - h.a) / h.a) * 100;
+      if (pct < -5 && (!watch || pct < watch.pct)) watch = { name: r.name, pct };
+    }
+    return { best: best ? { name: best.name, revenue: best.revenue, share: total ? best.revenue / total : 0 } : null, watch };
+  }, [pl, cr.trend]);
+
+  // ── plain-language insights (derived from data already on screen) ──
   const insights = useMemo(() => {
     const out: { icon: string; text: string }[] = [];
-    const rl = RANGE_LABEL[range];
-    if (rest) {
-      const k = rest.kpis;
-      if (rest.prev && rest.prev.revenue > 0 && k.revenue > 0) {
-        const pct = Math.round(((k.revenue - rest.prev.revenue) / rest.prev.revenue) * 100);
-        if (pct >= 300) out.push({ icon: "fa-arrow-trend-up", text: `Revenue is ${Math.round(k.revenue / rest.prev.revenue)}× the period before` });
-        else if (Math.abs(pct) >= 3) out.push({ icon: pct > 0 ? "fa-arrow-trend-up" : "fa-arrow-trend-down", text: `Revenue is ${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% ${PREV_LABEL[range]}` });
+    const rl = RANGE_LABEL[cr.trend];
+    const p = pl(cr.trend);
+    const money = moneyOf(cr.cancel);
+    if (p?.scope === "restaurant") {
+      const k = p.kpis;
+      if (p.prev && p.prev.revenue > 0 && k.revenue > 0) {
+        const pct = Math.round(((k.revenue - p.prev.revenue) / p.prev.revenue) * 100);
+        if (pct >= 300) out.push({ icon: "fa-arrow-trend-up", text: `Revenue is ${Math.round(k.revenue / p.prev.revenue)}× the period before` });
+        else if (Math.abs(pct) >= 3) out.push({ icon: pct > 0 ? "fa-arrow-trend-up" : "fa-arrow-trend-down", text: `Revenue is ${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% ${PREV_LABEL[cr.trend]}` });
       }
-      const busiest = [...rest.hourly].sort((a, b) => b.orders - a.orders)[0];
+      const busiest = [...p.hourly].sort((a, b) => b.orders - a.orders)[0];
       if (busiest?.orders) out.push({ icon: "fa-clock", text: `Busiest at ${busiest.hour}:00 — ${busiest.orders} order${busiest.orders === 1 ? "" : "s"}` });
-      const total = rest.dishes.reduce((a, d) => a + d.revenue, 0);
-      if (rest.dishes[0] && total > 0) out.push({ icon: "fa-utensils", text: `${rest.dishes[0].title} makes ${Math.round((rest.dishes[0].revenue / total) * 100)}% of dish revenue` });
-      if (money && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to ${money.cancelledOrders} cancelled order${money.cancelledOrders === 1 ? "" : "s"} ${rl}` });
-      // Only call out a payment method the staff actually recorded — "Not recorded
-      // is 100% of payments" is true but useless.
-      const payRows = (rest.paymentMethods ?? []).map((p) => ({ ...p, method: canonPayMethod(p.method) }));
-      const pay = payRows.filter((p) => p.method !== "Not recorded").sort((a, b) => b.revenue - a.revenue)[0];
-      const payTotal = payRows.reduce((a, p) => a + p.revenue, 0);
+      const total = p.dishes.reduce((a, d) => a + d.revenue, 0);
+      if (p.dishes[0] && total > 0) out.push({ icon: "fa-utensils", text: `${p.dishes[0].title} makes ${Math.round((p.dishes[0].revenue / total) * 100)}% of dish revenue` });
+      if (money && money !== "err" && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to ${money.cancelledOrders} cancelled order${money.cancelledOrders === 1 ? "" : "s"} ${RANGE_LABEL[cr.cancel]}` });
+      const payRows = (p.paymentMethods ?? []).map((x) => ({ ...x, method: canonPayMethod(x.method) }));
+      const pay = payRows.filter((x) => x.method !== "Not recorded").sort((a, b) => b.revenue - a.revenue)[0];
+      const payTotal = payRows.reduce((a, x) => a + x.revenue, 0);
       if (pay && payTotal > 0 && pay.revenue / payTotal >= 0.15)
         out.push({ icon: "fa-wallet", text: `${pay.method} is ${Math.round((pay.revenue / payTotal) * 100)}% of payments` });
-    } else if (group) {
-      const total = group.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
-      if (group.prev && group.prev.revenue > 0 && total > 0) {
-        const pct = Math.round(((total - group.prev.revenue) / group.prev.revenue) * 100);
-        if (pct >= 300) out.push({ icon: "fa-arrow-trend-up", text: `Group revenue is ${Math.round(total / group.prev.revenue)}× the period before` });
-        else if (Math.abs(pct) >= 3) out.push({ icon: pct > 0 ? "fa-arrow-trend-up" : "fa-arrow-trend-down", text: `Group revenue is ${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% ${PREV_LABEL[range]}` });
+    } else if (p?.scope === "group") {
+      const total = p.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
+      if (p.prev && p.prev.revenue > 0 && total > 0) {
+        const pct = Math.round(((total - p.prev.revenue) / p.prev.revenue) * 100);
+        if (pct >= 300) out.push({ icon: "fa-arrow-trend-up", text: `Group revenue is ${Math.round(total / p.prev.revenue)}× the period before` });
+        else if (Math.abs(pct) >= 3) out.push({ icon: pct > 0 ? "fa-arrow-trend-up" : "fa-arrow-trend-down", text: `Group revenue is ${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% ${PREV_LABEL[cr.trend]}` });
       }
-      const top = group.restaurantRevenue[0];
-      if (top && total > 0 && group.restaurantRevenue.length > 1)
+      const top = p.restaurantRevenue[0];
+      if (top && total > 0 && p.restaurantRevenue.length > 1)
         out.push({ icon: "fa-trophy", text: `${top.name} leads with ${Math.round((top.revenue / total) * 100)}% of revenue ${rl}` });
-      if (money && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to cancellations ${rl}` });
-      if (money && money.discount > 0 && total > 0) out.push({ icon: "fa-tag", text: `${inr(money.discount)} given as discounts` });
+      if (money && money !== "err" && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to cancellations ${RANGE_LABEL[cr.cancel]}` });
+      if (money && money !== "err" && money.discount > 0 && total > 0) out.push({ icon: "fa-tag", text: `${inr(money.discount)} given as discounts` });
     }
     return out.slice(0, 4);
-  }, [rest, group, money, range]);
+  }, [pl, cr.trend, cr.cancel, moneyCache, scopeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dishView = useMemo(() => {
     if (view.level !== "dish") return null;
-    // Distinguish "still loading" from "loaded, but this dish had no sales in this range".
-    // Before, both returned null and the view hung on a permanent false "Loading dish…" when
-    // you switched to a range where the dish didn't sell (audit 2026-07-09). Also treat a
-    // stale `rest` from a different restaurant as still-loading (kills the switch flash).
-    if (!rest || rest.restaurant.id !== view.rid) return "loading" as const;
-    const total = rest.dishes.reduce((a, d) => a + d.revenue, 0) || 1;
-    const idx = rest.dishes.findIndex((d) => d.title === view.dish);
-    const d = rest.dishes[idx];
-    return d ? { d, rank: idx + 1, share: Math.round((d.revenue / total) * 100), of: rest.dishes.length } : ("missing" as const);
-  }, [view, rest]);
+    const p = pl(cr.dishes);
+    if (!p || p.scope !== "restaurant" || p.restaurant.id !== view.rid) return "loading" as const;
+    const total = p.dishes.reduce((a, d) => a + d.revenue, 0) || 1;
+    const idx = p.dishes.findIndex((d) => d.title === view.dish);
+    const d = p.dishes[idx];
+    return d ? { d, rank: idx + 1, share: Math.round((d.revenue / total) * 100), of: p.dishes.length, dishes: p.dishes } : ("missing" as const);
+  }, [view, pl, cr.dishes]);
 
-  const groupTotals = useMemo(() => {
-    if (!group) return null;
-    return {
-      revenue: group.restaurantRevenue.reduce((a, r) => a + r.revenue, 0),
-      // `orders` counts ALL non-cancelled orders (incl. open/unpaid); `paidOrders` comes from
-      // the payment breakdown (paid-only), so the tile can say "N paid · rest still open" like
-      // the single-restaurant view — otherwise Revenue (paid-only) ÷ Orders looked wrong on the
-      // group home with open tables and no explanation (audit 2026-07-07).
-      orders: group.restaurantRevenue.reduce((a, r) => a + r.orders, 0),
-      paidOrders: group.paymentMethods.reduce((a, p) => a + (p.orders || 0), 0),
-    };
-  }, [group]);
+  // ── drawer (multi): row click → summary from data ALREADY loaded (zero fetches) ──
+  const [drawerRid, setDrawerRid] = useState<string | null>(null);
+  useBackClose("owner-rest-drawer", !!drawerRid, () => setDrawerRid(null));
+  const drawer = useMemo(() => {
+    if (!drawerRid || !ov) return null;
+    const r = ov.restaurants.find((x) => x.id === drawerRid);
+    if (!r) return null;
+    const row = tableRows.find((x) => x.id === drawerRid);
+    return { r, row };
+  }, [drawerRid, ov, tableRows]);
 
-  // HQ (10+) table rows: overview (live today/tables) merged with the range revenue,
-  // filtered by the search box, sorted by the active column. Rank is ALWAYS by range
-  // revenue so "#3" keeps meaning "3rd best earner" whatever the sort.
-  const hqRows = useMemo(() => {
-    if (!hq || !ov) return [];
-    const revById = new Map((group?.restaurantRevenue ?? []).map((r) => [r.id, r]));
-    const base = ov.restaurants.map((r) => ({
-      id: r.id, slug: r.slug, name: r.name, active: r.active, accent: r.accentColor || FALLBACK,
-      revenue: revById.get(r.id)?.revenue ?? 0, orders: revById.get(r.id)?.orders ?? 0,
-      openTables: r.openTables, revenueToday: r.revenueToday,
-    }));
-    const rank = new Map([...base].sort((a, b) => b.revenue - a.revenue).map((r, i) => [r.id, i + 1]));
-    const q = hqQuery.trim().toLowerCase();
-    const rows = q ? base.filter((r) => r.name.toLowerCase().includes(q) || r.slug.toLowerCase().includes(q)) : base;
-    rows.sort((a, b) => (hqSort === "name" ? a.name.localeCompare(b.name) : (b[hqSort] as number) - (a[hqSort] as number)));
-    return rows.map((r) => ({ ...r, rank: rank.get(r.id)! }));
-  }, [hq, ov, group, hqQuery, hqSort]);
-  const hqMaxRev = Math.max(1, ...hqRows.map((r) => r.revenue));
+  // ── Report export tables for the current view ──
+  const exportTables = useMemo((): ExportTable[] => {
+    const out: ExportTable[] = [];
+    const p = pl(cr.trend);
+    if (!single && view.level === "home") {
+      out.push({
+        title: `Restaurants · ${RANGE_LABEL[cr.table]}`,
+        head: ["#", "Restaurant", "Revenue", "Orders", "Avg check", "Today", "Open tables", "Status"],
+        rows: tableRows.map((r) => [r.rank, r.name, Math.round(r.revenue), r.orders, Math.round(r.avg), Math.round(r.today), r.openTables, r.active ? "Active" : "Off"]),
+      });
+    }
+    if (p) {
+      const rows = (p.scope === "restaurant" ? restTrend : groupTrend.rows).map((r) => [String(r.label), Math.round(Number(r.Revenue) || 0), Number(r.__orders) || 0]);
+      out.push({ title: `Revenue over time · ${RANGE_LABEL[cr.trend]}`, head: ["Bucket", "Revenue", "Orders"], rows });
+    }
+    if (p?.scope === "restaurant") {
+      out.push({ title: `Dishes · ${RANGE_LABEL[cr.dishes]}`, head: ["Dish", "Qty", "Revenue"], rows: (pl(cr.dishes) as RestA | undefined)?.dishes?.map((d) => [d.title, d.qty, Math.round(d.revenue)]) ?? [] });
+      out.push({ title: `Payments · ${RANGE_LABEL[cr.pay]}`, head: ["Method", "Bills", "Revenue"], rows: ((pl(cr.pay) as RestA | undefined)?.paymentMethods ?? []).map((m) => [canonPayMethod(m.method), m.orders, Math.round(m.revenue)]) });
+    }
+    return out;
+  }, [pl, cr, single, view.level, tableRows, restTrend, groupTrend]);
+  const exportName = `aevidine-dashboard-${new Date().toISOString().slice(0, 10)}`;
 
-  const two = !!group && group.restaurantRevenue.length === 2;
+  const goHome = () => setView({ level: "home" });
+  const openFull = (rid: string) => { setDrawerRid(null); setView({ level: "restaurant", rid }); };
+
+  // Today-so-far numbers (from the overview — no extra call).
+  const todayRow = activeRid ? ov?.restaurants.find((r) => r.id === activeRid) : null;
+  const todayRev = activeRid ? (todayRow?.revenueToday ?? 0) : (ov?.totals.revenueToday ?? 0);
+  const todayOrd = activeRid ? (todayRow?.ordersToday ?? 0) : (ov?.totals.ordersToday ?? 0);
+
+  const kRev = kpiOf(cr.rev), kOrd = kpiOf(cr.ord), kAvg = kpiOf(cr.avg);
+  const money = moneyOf(cr.cancel);
+  const trendPayload = pl(cr.trend);
+  const records = activeRid ? recs[activeRid] : null;
+
+  const kpiRow = (
+    <div className="adm-stats ow2-stats">
+      <Kpi id="rev" k="Revenue" v={kRev?.revenue ?? 0} money loading={!kRev}
+        range={cr.rev} onRange={setCardRange("rev")}
+        delta={kRev?.prev ? { now: kRev.revenue, prev: kRev.prev.revenue } : undefined}
+        prevTitle={PREV_LABEL[cr.rev]} sub={PREV_LABEL[cr.rev] || "whole history"} spark={sparkOf(cr.rev, "revenue")} />
+      <Kpi id="ord" k="Orders" v={kOrd?.orders ?? 0} loading={!kOrd}
+        range={cr.ord} onRange={setCardRange("ord")}
+        sub={kOrd && kOrd.paidOrders !== kOrd.orders ? `${kOrd.paidOrders} paid · rest still open` : PREV_LABEL[cr.ord] || "whole history"}
+        delta={kOrd?.prev ? { now: kOrd.orders, prev: kOrd.prev.orders } : undefined}
+        prevTitle={PREV_LABEL[cr.ord]} spark={sparkOf(cr.ord, "orders")} />
+      <Kpi id="avg" k="Avg order" v={kAvg?.avg ?? 0} money loading={!kAvg}
+        range={cr.avg} onRange={setCardRange("avg")} sub="per paid order" />
+      <Kpi k="Today so far" v={todayRev} money loading={!ov} pill="● live"
+        sub={`${todayOrd} order${todayOrd === 1 ? "" : "s"} today`} />
+      <Kpi id="cancel" k="Lost to cancellations" v={money === "err" ? "—" : ((money as MoneyTotals | undefined)?.cancelledValue ?? 0)} money
+        loading={!money} range={cr.cancel} onRange={setCardRange("cancel")}
+        sub={money === "err" ? "couldn't total for this range" : ((money as MoneyTotals | undefined)?.cancelledOrders ? `${(money as MoneyTotals).cancelledOrders} order${(money as MoneyTotals).cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
+    </div>
+  );
 
   return (
     <>
-      {/* Breadcrumb + range */}
-      <div className="own-bar">
-        <div className="own-crumb">
-          <button className={view.level === "home" ? "cur" : "lnk"} onClick={goHome}>
-            {single ? (ov?.restaurants[0]?.name || "Dashboard") : "All restaurants"}
-          </button>
-          {!single && view.level !== "home" && rest && (<>
-            <span className="sep">›</span>
-            <button className={view.level === "restaurant" ? "cur" : "lnk"} onClick={() => setView({ level: "restaurant", rid: (view as { rid: string }).rid })}>{rest.restaurant.name}</button>
-          </>)}
-          {view.level === "dish" && (<><span className="sep">›</span><span className="cur">{view.dish}</span></>)}
-        </div>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
-          <RangeSlider items={RANGES} value={range} onChange={setRange} caption={rangeSpanText(range)} />
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, marginTop: 2 }}>
-            <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now — recomputes the live numbers (normal views show a stored snapshot to stay instant)">
+      {/* Toolbar — Report ▾ + Refresh (the global range tabs are GONE by design) */}
+      <div className="ow2-bar">
+        {!single && view.level !== "home" ? (
+          <button className="ow2-back" onClick={goHome}><i className="fas fa-arrow-left" aria-hidden="true" /> All restaurants</button>
+        ) : <span className="ow2-title">{single ? "Dashboard" : `Your ${restCount || "…"} restaurant${restCount === 1 ? "" : "s"}`}</span>}
+        <div className="ow2-tools">
+          <ReportMenu tables={exportTables} filename={exportName} />
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+            <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now — recomputes the live numbers">
               <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
             </button>
             {updatedAt && !refreshing && <span style={{ fontSize: 10.5, color: "var(--muted)" }}>updated {timeAgo(updatedAt)}</span>}
@@ -493,146 +747,115 @@ export default function OwnerDashboard() {
         </div>
       )}
 
-      {/* ═══════ HOME · MULTI (2 and 3+) ═══════ */}
+      {/* ═══════ HOME · MULTI ═══════ */}
       {view.level === "home" && !single && (
         <>
-          <div className="adm-stats">
-            <Kpi k={`Revenue (${RANGE_LABEL[range]})`} v={groupTotals?.revenue ?? 0} money loading={!group}
-              delta={group?.prev ? { now: groupTotals?.revenue ?? 0, prev: group.prev.revenue } : undefined}
-              prevTitle={PREV_LABEL[range]} />
-            <Kpi k="Orders" v={groupTotals?.orders ?? 0} loading={!group}
-              sub={groupTotals && groupTotals.paidOrders !== groupTotals.orders ? `${groupTotals.paidOrders} paid · rest still open` : undefined}
-              delta={group?.prev ? { now: groupTotals?.orders ?? 0, prev: group.prev.orders } : undefined}
-              prevTitle={PREV_LABEL[range]} />
-            <Kpi k="Open tables now" v={ov?.totals.openTables ?? 0} />
-            <Kpi k="Lost to cancellations" v={moneyErr ? "—" : (money?.cancelledValue ?? 0)} money loading={!money && !moneyErr}
-              sub={moneyErr ? "couldn't total for this range" : (money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
-          </div>
+          {kpiRow}
 
-          {hq ? (
-            /* ── 10+ restaurants → HQ mode: one sortable, searchable table ── */
-            <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
-              <div className="hq-bar">
-                <span className="hq-search">
-                  <i className="fas fa-magnifying-glass" aria-hidden="true" />
-                  <input value={hqQuery} onChange={(e) => setHqQuery(e.target.value)} placeholder={`Search ${restCount} restaurants…`} aria-label="Search restaurants" />
-                  {hqQuery && <button className="hq-x" onClick={() => setHqQuery("")} aria-label="Clear search">×</button>}
-                </span>
-                <span className="hq-sorts" role="tablist" aria-label="Sort by">
-                  {([["revenue", `Revenue (${RANGE_LABEL[range]})`], ["orders", "Orders"], ["openTables", "Open tables"], ["name", "A–Z"]] as const).map(([k, lb]) => (
-                    <button key={k} role="tab" aria-selected={hqSort === k} className={hqSort === k ? "on" : ""} onClick={() => setHqSort(k)}>{lb}</button>
-                  ))}
-                </span>
-              </div>
-              <div className="hq-scroll">
-                <table className="hq-table">
-                  <thead><tr>
-                    <th className="rk">#</th><th style={{ textAlign: "left" }}>Restaurant</th>
-                    <th>Revenue ({RANGE_LABEL[range]})</th><th>Orders</th><th>Today</th><th>Open tables</th><th>Status</th><th aria-hidden="true" />
-                  </tr></thead>
-                  <tbody>
-                    {hqRows.length === 0 && (
-                      <tr><td colSpan={8} className="hq-empty">{ov ? "No restaurant matches that search." : "Loading…"}</td></tr>
-                    )}
-                    {hqRows.map((r) => (
-                      <tr key={r.id} className="hq-row" onClick={() => setView({ level: "restaurant", rid: r.id })}
-                        tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") setView({ level: "restaurant", rid: r.id }); }}>
-                        <td className="rk">{r.rank}</td>
-                        <td style={{ textAlign: "left" }}>
-                          <span className="hq-nm"><span className="sw" style={{ background: r.accent }} aria-hidden="true" />{r.name}</span>
-                        </td>
-                        <td>
-                          <b><AnimatedNumber value={r.revenue} money /></b>
-                          <span className="hq-meter" aria-hidden="true"><span style={{ width: `${Math.round((r.revenue / hqMaxRev) * 100)}%`, background: r.accent }} /></span>
-                        </td>
-                        <td className="mut"><AnimatedNumber value={r.orders} /></td>
-                        <td className="mut"><AnimatedNumber value={r.revenueToday} money /></td>
-                        <td className="mut"><AnimatedNumber value={r.openTables} /></td>
-                        <td><span className={`own-pill ${r.active ? "on" : "off"}`}>{r.active ? "Active" : "Off"}</span></td>
-                        <td className="go"><i className="fas fa-chevron-right" aria-hidden="true" /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : (<>
-          {two ? (
-            /* ── exactly TWO restaurants → head-to-head ── */
-            <div className="own-charts">
-              <div className="adm-card">
-                <div className="own-ctitle">Head to head <span>· {RANGE_LABEL[range]}</span></div>
-                <div className="own-h2h">
-                  {group!.restaurantRevenue.map((r) => {
-                    const o = ov?.restaurants.find((x) => x.id === r.id);
-                    const max = Math.max(1, ...group!.restaurantRevenue.map((x) => x.revenue));
-                    return (
-                      <button key={r.id} className="own-h2h-col" style={{ ["--rcol" as string]: r.accentColor || FALLBACK }} onClick={() => setView({ level: "restaurant", rid: r.id })}>
-                        <div className="nm">{r.name}</div>
-                        <div className="rev"><AnimatedNumber value={r.revenue} money /></div>
-                        <div className="meter"><span style={{ width: `${(r.revenue / max) * 100}%` }} /></div>
-                        <div className="meta"><AnimatedNumber value={r.orders} /> orders · {o?.openTables ?? 0} open tables</div>
-                      </button>
-                    );
-                  })}
+          {/* Best / needs-attention callouts (surprise add — from data already loaded) */}
+          {callouts && (callouts.best || callouts.watch) && (
+            <div className="ow2-callouts">
+              {callouts.best && (
+                <div className="ow2-co good">
+                  <span className="ic">🏆</span>
+                  <span><small>Top performer · {RANGE_LABEL[cr.trend]}</small><b>{callouts.best.name}</b>
+                    <i>{inr(callouts.best.revenue)} · {Math.round(callouts.best.share * 100)}% of revenue</i></span>
                 </div>
-                <div className="own-hint">Tip: tap a side to open that restaurant</div>
-              </div>
-              <div className="adm-card">
-                <div className="own-ctitle">Revenue over time <span>· {range === "today" || range === "yesterday" ? "by hour" : "by day"}</span></div>
-                <AreaTrend data={trendData.rows} lines={trendData.lines} />
-              </div>
-            </div>
-          ) : (
-            /* ── 3+ restaurants → leaderboard + multi-line trend ── */
-            <div className="own-charts">
-              <div className="adm-card">
-                <div className="own-ctitle">Who earns more <span>· tap a bar to open</span></div>
-                <LeaderBar data={(group?.restaurantRevenue ?? []).map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: r.accentColor || FALLBACK }))}
-                  onSelect={(id) => setView({ level: "restaurant", rid: id })} />
-              </div>
-              <div className="adm-card">
-                <div className="own-ctitle">Revenue over time <span>· {range === "today" || range === "yesterday" ? "by hour" : "by day"}</span></div>
-                <AreaTrend data={trendData.rows} lines={trendData.lines} />
-              </div>
+              )}
+              {callouts.watch && (
+                <div className="ow2-co warn">
+                  <span className="ic">⚠️</span>
+                  <span><small>Needs attention</small><b>{callouts.watch.name}</b>
+                    <i>trending {Math.round(callouts.watch.pct)}% inside this period</i></span>
+                </div>
+              )}
             </div>
           )}
 
-          <h2 className="own-h2">Restaurants</h2>
-          <div className="own-grid">
-            {!ov && <div className="adm-empty" style={{ gridColumn: "1 / -1" }}>Loading…</div>}
-            {ov?.restaurants.map((r) => (
-              <button key={r.id} className="adm-card own-card" style={{ ["--rcol" as string]: r.accentColor }} onClick={() => setView({ level: "restaurant", rid: r.id })}>
-                <span className="own-accent" aria-hidden="true" />
-                <div className="own-head">
-                  <div style={{ minWidth: 0, textAlign: "left" }}>
-                    <div className="own-name" title={r.name}>{r.name}</div>
-                    <div className="adm-muted mono" style={{ fontSize: 11 }}>{r.slug}</div>
-                  </div>
-                  <span className={`own-pill ${r.active ? "on" : "off"}`}>{r.active ? "Active" : "Off"}</span>
-                </div>
-                <div className="own-today">
-                  <div className="own-cell"><div className="k">Orders today</div><div className="v"><AnimatedNumber value={r.ordersToday} /></div></div>
-                  <div className="own-cell"><div className="k">Revenue today</div><div className="v"><AnimatedNumber value={r.revenueToday} money /></div></div>
-                  <div className="own-cell"><div className="k">Open tables</div><div className="v"><AnimatedNumber value={r.openTables} /></div></div>
-                </div>
-                <div className="own-foot">
-                  <span><i className="fas fa-receipt" aria-hidden="true" /> <AnimatedNumber value={r.ordersAll} /> all-time</span>
-                  <span><i className="fas fa-indian-rupee-sign" aria-hidden="true" /> <AnimatedNumber value={r.revenueAll} money /> all-time</span>
-                  <span className="own-open">Open <i className="fas fa-arrow-right" aria-hidden="true" /></span>
-                </div>
-              </button>
-            ))}
+          {/* Group revenue — 2–3 restaurants: Samsung-style stacked daily bars ·
+              4+: one summed line. Tooltip carries orders. */}
+          <div className="adm-card" style={{ marginBottom: 12 }}>
+            <div className="ow2-ct">
+              <span>Revenue over time <span className="mut">· {cr.trend === "today" || cr.trend === "yesterday" ? "by hour" : "by day"}{groupTrend.stacked ? " · each bar split by restaurant" : ""}</span></span>
+              <RangeDrop id="trend" value={cr.trend} onChange={setCardRange("trend")} />
+            </div>
+            {!trendPayload ? <div className="adm-empty">Loading…</div>
+              : groupTrend.stacked
+                ? <StackedDailyBars data={groupTrend.rows} lines={groupTrend.lines} />
+                : <AreaTrend data={groupTrend.rows} lines={groupTrend.lines} />}
           </div>
-          </>)}
+
+          {/* THE table (design #4) — every multi tier. Click a row → side drawer. */}
+          <div className="adm-card" style={{ padding: 0, overflow: "hidden", marginBottom: 12 }}>
+            <div className="hq-bar">
+              <span className="hq-search">
+                <i className="fas fa-magnifying-glass" aria-hidden="true" />
+                <input value={tq} onChange={(e) => setTq(e.target.value)} placeholder={`Search ${restCount} restaurants…`} aria-label="Search restaurants" />
+                {tq && <button className="hq-x" onClick={() => setTq("")} aria-label="Clear search">×</button>}
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>
+                Revenue window <RangeDrop id="table" value={cr.table} onChange={setCardRange("table")} compactBtn />
+              </span>
+            </div>
+            <div className="hq-scroll">
+              <table className="hq-table ow2-table">
+                <thead><tr>
+                  {th("rank", "#", true)}
+                  {th("name", "Restaurant", true)}
+                  {th("today", "Today")}
+                  {th("revenue", `Revenue (${RANGE_LABEL[cr.table]})`)}
+                  {th("orders", "Orders")}
+                  {th("avg", "Avg check")}
+                  <th className="hide-m">Trend</th>
+                  <th className="hide-m">Share</th>
+                  {th("openTables", "Open")}
+                  <th aria-hidden="true" />
+                </tr></thead>
+                <tbody>
+                  {tableRows.length === 0 && (
+                    <tr><td colSpan={10} className="hq-empty">{ov ? "No restaurant matches that search." : "Loading…"}</td></tr>
+                  )}
+                  {tableRows.map((r) => (
+                    <tr key={r.id} className="hq-row" onClick={() => setDrawerRid(r.id)}
+                      tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") setDrawerRid(r.id); }}>
+                      <td className="rk l">{r.rank}</td>
+                      <td className="l"><span className="hq-nm"><span className="sw" style={{ background: r.accent }} aria-hidden="true" />{r.name}</span></td>
+                      <td className="mut"><AnimatedNumber value={r.today} money /></td>
+                      <td><b><AnimatedNumber value={r.revenue} money /></b></td>
+                      <td className="mut"><AnimatedNumber value={r.orders} /></td>
+                      <td className="mut"><AnimatedNumber value={r.avg} money /></td>
+                      <td className="hide-m">{r.spark && r.spark.length >= 2 ? <Spark points={r.spark} color={r.accent} width={84} height={22} /> : <span className="mut">—</span>}</td>
+                      <td className="hide-m"><span className="hq-meter" aria-hidden="true"><span style={{ width: `${Math.round(r.share * 100)}%`, background: r.accent }} /></span><span style={{ fontSize: 11 }}>{Math.round(r.share * 100)}%</span></td>
+                      <td className="mut"><AnimatedNumber value={r.openTables} /></td>
+                      <td className="go"><i className="fas fa-chevron-right" aria-hidden="true" /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Heatmap + payments, side by side (group scope) */}
+          <div className="ow2-two">
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour</span></span><RangeDrop id="heat" value={cr.heat} onChange={setCardRange("heat")} /></div>
+              {(pl(cr.heat) as GroupA | undefined)?.heatmap
+                ? <Heatmap data={(pl(cr.heat) as GroupA).heatmap!} accent={GREEN} />
+                : <div className="adm-empty">Loading…</div>}
+            </div>
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid</span></span><RangeDrop id="pay" value={cr.pay} onChange={setCardRange("pay")} /></div>
+              {(pl(cr.pay) as GroupA | undefined)?.paymentMethods
+                ? <PaymentDonut data={(pl(cr.pay) as GroupA).paymentMethods} />
+                : <div className="adm-empty">Loading…</div>}
+            </div>
+          </div>
         </>
       )}
 
-      {/* ═══════ SINGLE-OWNER HERO — identity + one-tap jumps (2026-07-06 polish):
-          with one restaurant there's no portfolio to browse, so the dashboard opens
-          with WHO you are and the three places you actually go next. ═══════ */}
+      {/* ═══════ SINGLE-OWNER HERO — identity + one-tap jumps ═══════ */}
       {view.level === "home" && single && ov && (
-        <div className="own-hero" style={{ ["--rcol" as string]: ov.restaurants[0].accentColor || FALLBACK }}>
+        <div className="own-hero" style={{ ["--rcol" as string]: GREEN }}>
           <div className="own-hero-id">
             <div className="own-hero-name">{ov.restaurants[0].name}</div>
             <div className="own-hero-sub">
@@ -641,8 +864,6 @@ export default function OwnerDashboard() {
               <span className="live"><i className="fas fa-chair" aria-hidden="true" /> {ov.restaurants[0].openTables} table{ov.restaurants[0].openTables === 1 ? "" : "s"} open now</span>
             </div>
           </div>
-          {/* The ladder (mig 133): a section the admin removed loses its hero shortcut
-              too, not just its nav link — absent map = everything on (older server). */}
           <div className="own-hero-links">
             {ov.entitlements?.reports !== false && <Link href={withPin("/owner/reports")} className="own-hero-link"><i className="fas fa-file-invoice" aria-hidden="true" /> Reports</Link>}
             {ov.entitlements?.staff !== false && <Link href={withPin("/owner/staff")} className="own-hero-link"><i className="fas fa-users-gear" aria-hidden="true" /> Staff &amp; powers</Link>}
@@ -653,9 +874,117 @@ export default function OwnerDashboard() {
 
       {/* ═══════ RESTAURANT (drill-down, or HOME when there's only one) ═══════ */}
       {((view.level === "home" && single) || view.level === "restaurant") && activeRid && (
-        <RestaurantView rest={rest && rest.restaurant.id === activeRid ? rest : null} money={money} moneyErr={moneyErr} range={range} restTrend={restTrend}
-          dishSort={dishSort} setDishSort={setDishSort}
-          onDish={(title) => setView({ level: "dish", rid: activeRid, dish: title })} />
+        <>
+          {kpiRow}
+          <div className="adm-card" style={{ marginBottom: 12 }}>
+            <div className="ow2-ct">
+              <span>Revenue over time <span className="mut">· {cr.trend === "today" || cr.trend === "yesterday" ? "by hour" : "by day"}</span></span>
+              <RangeDrop id="trend" value={cr.trend} onChange={setCardRange("trend")} />
+            </div>
+            {!trendPayload || trendPayload.scope !== "restaurant" ? <div className="adm-empty">Loading…</div>
+              : restTrend.length >= 9
+                ? <AreaTrend data={restTrend} lines={[{ key: "Revenue", name: "Revenue", color: GREEN }]} />
+                : <TimeBar data={restTrend.map((r) => ({ label: String(r.label), revenue: Number(r.Revenue) || 0, __orders: Number(r.__orders) || 0 })) as { label: string; revenue: number }[]} color={GREEN} />}
+          </div>
+
+          <div className="ow2-two">
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Busy hours <span className="mut">· orders by hour</span></span><RangeDrop id="hours" value={cr.hours} onChange={setCardRange("hours")} /></div>
+              {(pl(cr.hours) as RestA | undefined)?.hourly
+                ? <HourlyBar data={(pl(cr.hours) as RestA).hourly} color={GREEN} />
+                : <div className="adm-empty">Loading…</div>}
+            </div>
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Revenue by category</span><RangeDrop id="cats" value={cr.cats} onChange={setCardRange("cats")} /></div>
+              {(pl(cr.cats) as RestA | undefined)?.categories
+                ? <CategoryDonut data={(pl(cr.cats) as RestA).categories} />
+                : <div className="adm-empty">Loading…</div>}
+            </div>
+          </div>
+
+          <div className="ow2-two" style={{ marginTop: 12 }}>
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· orders by day × hour</span></span><RangeDrop id="heat" value={cr.heat} onChange={setCardRange("heat")} /></div>
+              {(pl(cr.heat) as RestA | undefined)?.heatmap
+                ? <Heatmap data={(pl(cr.heat) as RestA).heatmap!} accent={GREEN} />
+                : <div className="adm-empty">Loading…</div>}
+            </div>
+            <div className="adm-card">
+              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid</span></span><RangeDrop id="pay" value={cr.pay} onChange={setCardRange("pay")} /></div>
+              {(pl(cr.pay) as RestA | undefined)?.paymentMethods && ((pl(cr.pay) as RestA).paymentMethods.reduce((a, m) => a + m.revenue, 0) > 0)
+                ? <PaymentDonut data={(pl(cr.pay) as RestA).paymentMethods} />
+                : (pl(cr.pay) ? <div className="adm-empty">No recorded payments in this range.</div> : <div className="adm-empty">Loading…</div>)}
+            </div>
+          </div>
+
+          {/* Records strip — the numbers worth bragging about */}
+          {records && (records.bestDay || records.starDish) && (
+            <div className="adm-card" style={{ marginTop: 12 }}>
+              <div className="ow2-ct"><span>Your records <span className="mut">· the numbers worth bragging about</span></span></div>
+              <div className="rv-recs">
+                {records.bestDay && (
+                  <div className="rv-rec"><span className="e">🏆</span><span><small>BEST DAY EVER</small><b><AnimatedNumber value={records.bestDay.revenue} money /></b>
+                    <i>{new Date(records.bestDay.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: IST })} — beat it!</i></span></div>
+                )}
+                {records.starDish && (
+                  <div className="rv-rec"><span className="e">👑</span><span><small>STAR DISH · 30 DAYS</small><b>{records.starDish.title}</b>
+                    <i>{records.starDish.qty} plates</i></span></div>
+                )}
+                {records.fastHour && (
+                  <div className="rv-rec"><span className="e">⚡</span><span><small>BUSIEST HOUR EVER</small><b><AnimatedNumber value={records.fastHour.orders} /> orders</b>
+                    <i>{istWall(records.fastHour.at, { day: "numeric", month: "short", hour: "numeric", hour12: true })}</i></span></div>
+                )}
+                {records.bigBill && (
+                  <div className="rv-rec"><span className="e">💎</span><span><small>BIGGEST BILL</small><b><AnimatedNumber value={records.bigBill.revenue} money /></b>
+                    <i>{records.bigBill.table ? `table ${records.bigBill.table}` : "one sitting"}</i></span></div>
+                )}
+                {(records.regulars ?? 0) > 0 && (
+                  <div className="rv-rec"><span className="e">🔁</span><span><small>REGULARS · 30 DAYS</small><b><AnimatedNumber value={records.regulars ?? 0} /> returning guests</b>
+                    <i>same name, 2+ visits</i></span></div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="ow2-two" style={{ marginTop: 12 }}>
+            {/* Every dish — tap one for detail */}
+            <div className="adm-card">
+              <div className="ow2-ct">
+                <span>Every dish <span className="mut">· tap one for detail</span></span>
+                <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                  <span className="rv-sort">
+                    <button className={dishSort === "revenue" ? "on" : ""} onClick={() => setDishSort("revenue")}>By revenue</button>
+                    <button className={dishSort === "qty" ? "on" : ""} onClick={() => setDishSort("qty")}>By qty</button>
+                  </span>
+                  <RangeDrop id="dishes" value={cr.dishes} onChange={setCardRange("dishes")} compactBtn />
+                </span>
+              </div>
+              <DishList payload={pl(cr.dishes) as RestA | undefined} sort={dishSort}
+                onDish={(t) => setView({ level: "dish", rid: activeRid, dish: t })} />
+            </div>
+            {/* Recent activity — the owner's mini log (surprise add) */}
+            <div className="adm-card">
+              <div className="ow2-ct">
+                <span>Recent activity <span className="mut">· who did what</span></span>
+                {ov?.entitlements?.activity !== false && <Link href={withPin("/owner/activity")} className="ow2-seeall">See all <i className="fas fa-arrow-right" aria-hidden="true" /></Link>}
+              </div>
+              {!acts ? <div className="adm-empty">Loading…</div>
+                : acts.length === 0 ? <div className="adm-empty">Nothing yet.</div>
+                : (
+                  <div className="ow2-acts">
+                    {acts.map((a) => (
+                      <div key={a.id} className="ow2-act">
+                        <span className={`pn pn-${a.panel}`}>{a.panel}</span>
+                        <span className="tx">{a.action}{a.table_number ? ` · table ${a.table_number}` : ""}</span>
+                        <span className="who">{a.actor || "—"}</span>
+                        <span className="when">{timeAgo(a.created_at)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          </div>
+        </>
       )}
 
       {/* ═══════ DISH ═══════ */}
@@ -664,15 +993,15 @@ export default function OwnerDashboard() {
           {dishView === "loading" || dishView === null ? <div className="adm-empty">Loading dish…</div>
           : dishView === "missing" ? (
             <div className="adm-empty">
-              No sales for <b>{view.dish}</b> in {RANGES.find((r) => r.k === range)?.label?.toLowerCase()}.{" "}
+              No sales for <b>{view.dish}</b> in {RANGE_LABEL[cr.dishes]}.{" "}
               <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setView({ level: "restaurant", rid: view.rid })}>
                 <i className="fas fa-arrow-left" aria-hidden="true" /> Back to restaurant
               </button>
             </div>
           ) : (<>
-            <div className="own-dish-h" style={{ ["--rcol" as string]: rest?.restaurant.accentColor || FALLBACK }}>
+            <div className="own-dish-h" style={{ ["--rcol" as string]: GREEN }}>
               <div className="own-dish-name">{dishView.d.title}</div>
-              <div className="adm-muted">at {rest?.restaurant.name} · {RANGES.find((r) => r.k === range)?.label}</div>
+              <div className="adm-muted">{RANGE_LABEL[cr.dishes]} · <RangeDrop id="dishes-d" value={cr.dishes} onChange={setCardRange("dishes")} compactBtn /></div>
             </div>
             <div className="adm-stats" style={{ marginTop: 14 }}>
               <div className="adm-stat"><div className="k">Revenue</div><div className="v"><AnimatedNumber value={dishView.d.revenue} money /></div></div>
@@ -680,52 +1009,101 @@ export default function OwnerDashboard() {
               <div className="adm-stat"><div className="k">Share of revenue</div><div className="v">{dishView.share}%</div></div>
               <div className="adm-stat"><div className="k">Rank by revenue</div><div className="v">#{dishView.rank}<span style={{ fontSize: 13, color: "var(--muted)" }}> / {dishView.of}</span></div></div>
             </div>
-            <div className="own-ctitle" style={{ marginTop: 18 }}>How it compares <span>· revenue vs other dishes</span></div>
-            <LeaderBar data={(rest?.dishes ?? []).slice(0, 12).map((d) => ({ id: d.title, name: d.title, revenue: d.revenue, orders: d.qty, accentColor: d.title === dishView.d.title ? (rest?.restaurant.accentColor || FALLBACK) : "rgba(128,128,128,.35)" }))}
+            <div className="ow2-ct" style={{ marginTop: 18 }}><span>How it compares <span className="mut">· revenue vs other dishes</span></span></div>
+            <LeaderBar data={dishView.dishes.slice(0, 12).map((d) => ({ id: d.title, name: d.title, revenue: d.revenue, orders: d.qty, accentColor: d.title === dishView.d.title ? GREEN : "rgba(128,128,128,.35)" }))}
               onSelect={(title) => setView({ level: "dish", rid: (view as { rid: string }).rid, dish: title })} />
           </>)}
         </div>
       )}
 
+      {/* ═══════ DRAWER — phase 2 of the 3-phase drill (multi only) ═══════ */}
+      {drawer && (
+        <div className="ow2-drawer-wrap" role="dialog" aria-label={`${drawer.r.name} summary`}>
+          <div className="ow2-drawer-back" onClick={() => setDrawerRid(null)} aria-hidden="true" />
+          <aside className="ow2-drawer">
+            <header>
+              <span className="hq-nm" style={{ fontSize: 15 }}><span className="sw" style={{ background: drawer.row?.accent || GREEN }} aria-hidden="true" />{drawer.r.name}</span>
+              <button className="x" onClick={() => setDrawerRid(null)} aria-label="Close">✕</button>
+            </header>
+            <div className="bd">
+              <div className="dstats">
+                <div><small>Today</small><b><AnimatedNumber value={drawer.r.revenueToday} money /></b><i>{drawer.r.ordersToday} orders</i></div>
+                <div><small>Revenue · {RANGE_LABEL[cr.table]}</small><b><AnimatedNumber value={drawer.row?.revenue ?? 0} money /></b><i>{drawer.row?.orders ?? 0} orders</i></div>
+                <div><small>Avg check</small><b><AnimatedNumber value={drawer.row?.avg ?? 0} money /></b><i>per order</i></div>
+                <div><small>Open tables</small><b><AnimatedNumber value={drawer.r.openTables} /></b><i>right now</i></div>
+              </div>
+              {drawer.row?.spark && drawer.row.spark.length >= 2 && (
+                <div className="dspark"><small>Trend · {RANGE_LABEL[cr.table]}</small><Spark points={drawer.row.spark} color={drawer.row.accent} width={300} height={54} /></div>
+              )}
+              <div className="dall">
+                <span><i className="fas fa-receipt" aria-hidden="true" /> {drawer.r.ordersAll.toLocaleString("en-IN")} orders all-time</span>
+                <span><i className="fas fa-indian-rupee-sign" aria-hidden="true" /> {inr(drawer.r.revenueAll)} all-time</span>
+                <span className={`own-pill ${drawer.r.active ? "on" : "off"}`}>{drawer.r.active ? "Active" : "Off"}</span>
+              </div>
+            </div>
+            <footer>
+              <button className="full" onClick={() => openFull(drawer.r.id)}>
+                View in full detail <i className="fas fa-arrow-right" aria-hidden="true" />
+              </button>
+            </footer>
+          </aside>
+        </div>
+      )}
+
       <style jsx>{`
-        .own-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-        .own-crumb { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 800; min-width: 0; }
-        .own-crumb button { background: none; border: none; font: inherit; padding: 0; }
-        .own-crumb .lnk { color: var(--muted); cursor: pointer; }
-        .own-crumb .lnk:hover { color: var(--accent); text-decoration: underline; }
-        .own-crumb .cur { color: var(--text, inherit); cursor: default; }
-        .own-crumb .sep { color: var(--muted); font-weight: 400; }
-        .own-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
-        .own-ctitle { font-size: 13px; font-weight: 800; margin-bottom: 10px; }
-        .own-ctitle span { color: var(--muted); font-weight: 500; }
-        .own-hint { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
-        .own-h2 { font-size: 12px; font-weight: 800; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
-        .own-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
-        .own-card { position: relative; overflow: hidden; padding-left: 22px; text-align: left; cursor: pointer; transition: border-color .15s; width: 100%; font: inherit; color: inherit; }
-        .own-card:hover { border-color: var(--rcol, var(--accent)); }
-        .own-accent { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--rcol, var(--accent)); }
-        .own-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
-        .own-name { font-size: 15px; font-weight: 800; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .own-pill { font-size: 10px; font-weight: 800; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; flex-shrink: 0; }
-        .own-pill.on { background: color-mix(in srgb, var(--adm-ok) 18%, transparent); color: var(--adm-ok); }
-        .own-pill.off { background: rgba(120,120,120,.18); color: var(--muted); }
-        .own-today { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
-        .own-cell .k { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-        .own-cell .v { font-size: 18px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
-        .own-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-top: 10px; border-top: var(--border); font-size: 12px; color: var(--muted); }
-        .own-foot i { opacity: .7; margin-right: 4px; }
-        .own-open { margin-left: auto; color: var(--rcol, var(--accent)); font-weight: 700; }
-        .own-h2h { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .own-h2h-col { border: var(--border); border-radius: 10px; padding: 12px; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; transition: border-color .15s; }
-        .own-h2h-col:hover { border-color: var(--rcol); }
-        .own-h2h-col .nm { font-weight: 800; font-size: 13.5px; color: var(--rcol); }
-        .own-h2h-col .rev { font-size: 22px; font-weight: 800; margin: 4px 0 6px; font-variant-numeric: tabular-nums; }
-        .own-h2h-col .meter { height: 7px; border-radius: 4px; background: rgba(128,128,128,.14); overflow: hidden; }
-        .own-h2h-col .meter span { display: block; height: 100%; border-radius: 4px; background: var(--rcol); }
-        .own-h2h-col .meta { font-size: 11.5px; color: var(--muted); margin-top: 7px; }
+        .ow2-bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+        .ow2-title { font-size: 17px; font-weight: 800; }
+        .ow2-back { display: inline-flex; align-items: center; gap: 8px; background: none; border: var(--border); border-radius: 9px; padding: 7px 13px; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
+        .ow2-back:hover { color: var(--accent); border-color: var(--accent); }
+        .ow2-tools { display: flex; gap: 10px; align-items: flex-start; }
+        .ow2-stats { margin-bottom: 12px; }
+        :global(.ow2-stats) { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+        .ow2-ct { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 800; margin-bottom: 10px; flex-wrap: wrap; }
+        .ow2-ct .mut { color: var(--muted); font-weight: 500; }
+        .ow2-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .ow2-callouts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+        .ow2-co { display: flex; align-items: center; gap: 12px; border: var(--border); border-radius: 12px; padding: 12px 15px; }
+        .ow2-co.good { border-left: 3px solid ${GREEN}; }
+        .ow2-co.warn { border-left: 3px solid #d97706; }
+        .ow2-co .ic { font-size: 20px; }
+        .ow2-co small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+        .ow2-co b { display: block; font-size: 14.5px; line-height: 1.3; }
+        .ow2-co i { display: block; font-style: normal; font-size: 11.5px; color: var(--muted); }
+        /* table */
+        .hq-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border-bottom: var(--border); }
+        .hq-search { flex: 1 1 220px; display: flex; align-items: center; gap: 9px; border: var(--border); background: var(--bg); border-radius: 9px; padding: 7px 12px; color: var(--muted); }
+        .hq-search input { flex: 1; min-width: 0; background: none; border: none; outline: none; font: inherit; font-size: 13px; color: var(--text); }
+        .hq-search i { font-size: 12px; }
+        .hq-x { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; padding: 0 2px; line-height: 1; }
+        .hq-scroll { overflow: auto; max-height: 64vh; }
+        .hq-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .hq-table th { position: sticky; top: 0; background: var(--card); z-index: 1; text-align: right; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; padding: 9px 12px; border-bottom: var(--border); white-space: nowrap; user-select: none; }
+        .hq-table th:hover { color: var(--accent); }
+        .hq-table th.l, .hq-table td.l { text-align: left; }
+        .hq-table td { padding: 9px 12px; border-bottom: var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .hq-table .rk { width: 30px; color: var(--muted); font-weight: 800; font-size: 11.5px; }
+        .hq-row { cursor: pointer; }
+        .hq-row:hover td, .hq-row:focus-visible td { background: var(--muted2); }
+        .hq-nm { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .hq-nm .sw { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
+        .hq-meter { display: inline-block; vertical-align: middle; width: 52px; height: 7px; border-radius: 4px; background: rgba(128,128,128,.14); overflow: hidden; margin-right: 8px; }
+        .hq-meter span { display: block; height: 100%; border-radius: 4px; }
+        .hq-table .mut { color: var(--muted); }
+        .hq-table .go i { color: var(--muted); font-size: 11px; }
+        .hq-empty { text-align: center !important; color: var(--muted); padding: 26px 12px !important; }
+        /* dish view bits reused */
         .own-dish-h { border-left: 4px solid var(--rcol); padding-left: 12px; }
         .own-dish-name { font-size: 22px; font-weight: 800; }
-        /* ── single-owner hero ── */
+        .rv-sort { display: inline-flex; gap: 2px; }
+        .rv-sort button { background: none; border: var(--border); padding: 4px 10px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
+        .rv-sort button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .rv-recs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+        .rv-rec { flex: 1 1 190px; min-width: 170px; display: flex; gap: 11px; align-items: center; border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 11px 14px; }
+        .rv-rec .e { font-size: 20px; }
+        .rv-rec small { display: block; font-size: 9.5px; color: var(--muted); font-weight: 800; letter-spacing: 0.5px; }
+        .rv-rec b { display: block; font-size: 14px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+        .rv-rec i { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); }
+        /* hero */
         .own-hero { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border: var(--border); border-left: 4px solid var(--rcol); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; background: linear-gradient(90deg, color-mix(in srgb, var(--rcol) 9%, transparent), transparent 55%); }
         .own-hero-id { min-width: 0; flex: 1; }
         .own-hero-name { font-size: 20px; font-weight: 800; line-height: 1.2; }
@@ -736,174 +1114,73 @@ export default function OwnerDashboard() {
         :global(.own-hero-link) { display: inline-flex; align-items: center; gap: 8px; border: var(--border); background: var(--card); border-radius: 9px; padding: 8px 13px; font-size: 12.5px; font-weight: 700; color: var(--text) !important; text-decoration: none; transition: border-color .15s; }
         :global(.own-hero-link:hover) { border-color: var(--rcol); }
         :global(.own-hero-link i) { color: var(--rcol); font-size: 12px; }
-        /* ── HQ mode (10+ restaurants) ── */
-        .hq-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border-bottom: var(--border); }
-        .hq-search { flex: 1 1 220px; display: flex; align-items: center; gap: 9px; border: var(--border); background: var(--bg); border-radius: 9px; padding: 7px 12px; color: var(--muted); }
-        .hq-search input { flex: 1; min-width: 0; background: none; border: none; outline: none; font: inherit; font-size: 13px; color: var(--text); }
-        .hq-search i { font-size: 12px; }
-        .hq-x { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; padding: 0 2px; line-height: 1; }
-        .hq-sorts { display: inline-flex; background: var(--bg); border: var(--border); border-radius: 9px; padding: 3px; gap: 2px; flex-wrap: wrap; }
-        .hq-sorts button { background: none; border: none; padding: 5px 11px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; white-space: nowrap; }
-        .hq-sorts button.on { background: var(--accent); color: #fff; }
-        .hq-scroll { overflow: auto; max-height: 64vh; }
-        .hq-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .hq-table th { position: sticky; top: 0; background: var(--card); z-index: 1; text-align: right; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; padding: 9px 12px; border-bottom: var(--border); white-space: nowrap; }
-        .hq-table td { padding: 9px 12px; border-bottom: var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-        .hq-table .rk { width: 30px; text-align: left; color: var(--muted); font-weight: 800; font-size: 11.5px; }
-        .hq-row { cursor: pointer; }
-        .hq-row:hover td, .hq-row:focus-visible td { background: var(--muted2); }
-        .hq-nm { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .hq-nm .sw { width: 8px; height: 8px; border-radius: 999px; flex-shrink: 0; }
-        .hq-meter { display: inline-block; vertical-align: middle; width: 64px; height: 7px; border-radius: 4px; background: rgba(128,128,128,.14); overflow: hidden; margin-left: 10px; }
-        .hq-meter span { display: block; height: 100%; border-radius: 4px; }
-        .hq-table .mut { color: var(--muted); }
-        .hq-table .go i { color: var(--muted); font-size: 11px; }
-        .hq-empty { text-align: center !important; color: var(--muted); padding: 26px 12px !important; }
-        @media (max-width: 760px) { .own-charts { grid-template-columns: 1fr; } .own-h2h { grid-template-columns: 1fr; } .hq-meter { display: none; } .hq-table .mut { display: none; } .hq-table th:nth-child(4), .hq-table th:nth-child(5), .hq-table th:nth-child(6) { display: none; } .own-hero-links { width: 100%; } :global(.own-hero-link) { flex: 1; justify-content: center; } }
+        .own-pill { font-size: 10px; font-weight: 800; padding: 3px 9px; border-radius: 999px; text-transform: uppercase; letter-spacing: .03em; flex-shrink: 0; }
+        .own-pill.on { background: color-mix(in srgb, var(--adm-ok) 18%, transparent); color: var(--adm-ok); }
+        .own-pill.off { background: rgba(120,120,120,.18); color: var(--muted); }
+        /* recent activity */
+        :global(.ow2-seeall) { font-size: 11.5px; font-weight: 700; color: var(--accent) !important; text-decoration: none; }
+        :global(.ow2-seeall i) { font-size: 10px; margin-left: 4px; }
+        .ow2-acts { display: flex; flex-direction: column; gap: 2px; }
+        .ow2-act { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; padding: 8px 6px; border-radius: 8px; font-size: 12.5px; }
+        .ow2-act:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+        .ow2-act .pn { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 999px; background: rgba(128,128,128,.14); color: var(--muted); }
+        .ow2-act .tx { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ow2-act .who { color: var(--muted); font-size: 11.5px; }
+        .ow2-act .when { color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+        /* drawer */
+        .ow2-drawer-wrap { position: fixed; inset: 0; z-index: 90; }
+        .ow2-drawer-back { position: absolute; inset: 0; background: rgba(5,8,14,.55); backdrop-filter: blur(2px); animation: ow2fade .2s ease-out; }
+        .ow2-drawer { position: absolute; top: 0; right: 0; height: 100%; width: min(400px, 94vw); background: var(--card); border-left: var(--border); box-shadow: -18px 0 50px rgba(0,0,0,.4); display: flex; flex-direction: column; animation: ow2slide .24s cubic-bezier(.4,0,.2,1); }
+        @keyframes ow2slide { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @keyframes ow2fade { from { opacity: 0; } to { opacity: 1; } }
+        .ow2-drawer header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 18px; border-bottom: var(--border); }
+        .ow2-drawer .x { background: var(--bg); border: var(--border); color: var(--text); width: 32px; height: 32px; border-radius: 9px; font-size: 13px; cursor: pointer; }
+        .ow2-drawer .bd { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+        .dstats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .dstats > div { border: var(--border); border-radius: 11px; padding: 11px 13px; }
+        .dstats small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+        .dstats b { display: block; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+        .dstats i { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); }
+        .dspark { border: var(--border); border-radius: 11px; padding: 11px 13px; }
+        .dspark small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+        .dall { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; font-size: 12px; color: var(--muted); }
+        .dall i { opacity: .7; margin-right: 4px; }
+        .ow2-drawer footer { padding: 14px 18px; border-top: var(--border); }
+        .ow2-drawer .full { width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; background: var(--accent); color: #06251a; border: none; border-radius: 11px; padding: 12px; font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer; }
+        .ow2-drawer .full:hover { filter: brightness(1.08); }
+        @media (max-width: 1080px) { :global(.ow2-stats) { grid-template-columns: repeat(3, 1fr) !important; } }
+        @media (max-width: 760px) {
+          :global(.ow2-stats) { grid-template-columns: repeat(2, 1fr) !important; }
+          .ow2-two, .ow2-callouts { grid-template-columns: 1fr; }
+          .hq-table .hide-m { display: none; }
+          .hq-table th:nth-child(3), .hq-table td:nth-child(3), .hq-table th:nth-child(6), .hq-table td:nth-child(6) { display: none; }
+          .ow2-act .who { display: none; }
+        }
       `}</style>
     </>
   );
 }
 
-// ── Restaurant detail (also the HOME layout when the owner has one restaurant) ──
-function RestaurantView({ rest, money, moneyErr, range, restTrend, dishSort, setDishSort, onDish }: {
-  rest: RestA | null; money: MoneyTotals | null; moneyErr: boolean; range: Range; restTrend: Record<string, unknown>[];
-  dishSort: "revenue" | "qty"; setDishSort: (s: "revenue" | "qty") => void; onDish: (t: string) => void;
-}) {
-  if (!rest) return <div className="adm-empty">Loading restaurant…</div>;
-  const accent = rest.restaurant.accentColor || FALLBACK;
-  const dishes = [...rest.dishes].sort((a, b) => (dishSort === "revenue" ? b.revenue - a.revenue : b.qty - a.qty));
+// ── Every-dish list (kept from the old view, range now per-card) ──────────────
+function DishList({ payload, sort, onDish }: { payload?: RestA; sort: "revenue" | "qty"; onDish: (t: string) => void }) {
+  if (!payload) return <div className="adm-empty">Loading…</div>;
+  const dishes = [...payload.dishes].sort((a, b) => (sort === "revenue" ? b.revenue - a.revenue : b.qty - a.qty));
   const maxRev = Math.max(1, ...dishes.map((d) => d.revenue));
-  const k = rest.kpis;
-  const payTotal = (rest.paymentMethods ?? []).reduce((a, p) => a + p.revenue, 0);
-  // These two cards are independent: the same-hour comparison needs comparison windows,
-  // but the 14-day payment trend always has data. They used to share ONE render guard,
-  // so on the All-time view (no sameHour) the payment trend silently vanished too — now
-  // each has its own guard (fixed 2026-07-06).
-  const showSameHour = (rest.sameHour ?? []).length >= 2 && (rest.sameHour ?? []).some((w) => w.revenue > 0);
-  const showPayTrend = (rest.payTrend ?? []).length > 0;
   return (
-    <>
-      <div className="adm-stats">
-        <Kpi k="Revenue" v={k.revenue} money
-          delta={rest.prev ? { now: k.revenue, prev: rest.prev.revenue } : undefined}
-          prevTitle={PREV_LABEL[range]} />
-        <Kpi k="Orders" v={k.orders}
-          sub={k.paidOrders != null && k.paidOrders !== k.orders ? `${k.paidOrders} paid · rest still open` : undefined}
-          delta={rest.prev ? { now: k.orders, prev: rest.prev.orders } : undefined} prevTitle={PREV_LABEL[range]} />
-        <Kpi k="Avg order" v={k.avgOrder} money sub="per paid order" />
-        <Kpi k="Open tables now" v={k.openTables} />
-        <Kpi k="Lost to cancellations" v={moneyErr ? "—" : (money?.cancelledValue ?? 0)} money loading={!money && !moneyErr}
-          sub={moneyErr ? "couldn't total for this range" : (money?.cancelledOrders ? `${money.cancelledOrders} order${money.cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
-      </div>
-      <div className="rv-charts">
-        <div className="adm-card" style={{ gridColumn: "1 / -1" }}>
-          <div className="rv-ct">Revenue over time <span>· {range === "today" || range === "yesterday" ? "by hour" : "by day"}</span></div>
-          {restTrend.length >= 9
-            ? <AreaTrend data={restTrend} lines={[{ key: "Revenue", name: "Revenue", color: accent }]} />
-            : <TimeBar data={restTrend.map((r) => ({ label: String(r.label), revenue: Number(r.Revenue) || 0 }))} color={accent} />}
-        </div>
-        <div className="adm-card"><div className="rv-ct">Busy hours <span>· orders by hour</span></div><HourlyBar data={rest.hourly} color={accent} /></div>
-        <div className="adm-card"><div className="rv-ct">Revenue by category</div><CategoryDonut data={rest.categories} /></div>
-      </div>
-
-      {/* "Is today actually good?" — every window cut at the SAME elapsed time
-          (today-till-5pm vs last-week-till-5pm), so the comparison never lies. The
-          14-day payment trend rides alongside it but has its OWN guard so it survives
-          ranges (e.g. All-time) where the same-hour comparison has nothing to show. */}
-      {(showSameHour || showPayTrend) && (
-        <div className="rv-charts" style={{ marginTop: 12, gridTemplateColumns: showSameHour && showPayTrend ? undefined : "1fr" }}>
-          {showSameHour && (
-            <div className="adm-card">
-              <div className="rv-ct">Is {range === "today" ? "today" : "this period"} actually good? <span>· all cut at the same time of day</span></div>
-              <SameHourBar accent={accent} data={(rest.sameHour ?? []).map((w, i) => ({
-                label: SAMEHOUR_LABEL[range]?.[i] ?? new Date(w.start).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST }),
-                revenue: w.revenue,
-              }))} />
-            </div>
-          )}
-          {showPayTrend && (
-            <div className="adm-card">
-              <div className="rv-ct">How money arrives <span>· last 14 days by payment method</span></div>
-              <PayTrendStack data={rest.payTrend ?? []} />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Payment split — how the money actually arrives */}
-      {payTotal > 0 && (
-        <div className="adm-card" style={{ marginTop: 12 }}>
-          <div className="rv-ct">Payment methods <span>· how customers paid</span></div>
-          <PaymentDonut data={rest.paymentMethods ?? []} />
-        </div>
-      )}
-
-      {/* Records strip — the numbers worth bragging about (all-time + 30d) */}
-      {rest.records && (rest.records.bestDay || rest.records.starDish) && (
-        <div className="adm-card" style={{ marginTop: 12 }}>
-          <div className="rv-ct">Your records <span>· the numbers worth bragging about</span></div>
-          <div className="rv-recs">
-            {rest.records.bestDay && (
-              <div className="rv-rec"><span className="e">🏆</span><span><small>BEST DAY EVER</small><b><AnimatedNumber value={rest.records.bestDay.revenue} money /></b>
-                <i>{new Date(rest.records.bestDay.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: IST })} — beat it!</i></span></div>
-            )}
-            {rest.records.starDish && (
-              <div className="rv-rec"><span className="e">👑</span><span><small>STAR DISH · 30 DAYS</small><b>{rest.records.starDish.title}</b>
-                <i>{rest.records.starDish.qty} plates</i></span></div>
-            )}
-            {rest.records.fastHour && (
-              <div className="rv-rec"><span className="e">⚡</span><span><small>BUSIEST HOUR EVER</small><b><AnimatedNumber value={rest.records.fastHour.orders} /> orders</b>
-                <i>{istWall(rest.records.fastHour.at, { day: "numeric", month: "short", hour: "numeric", hour12: true })}</i></span></div>
-            )}
-            {rest.records.bigBill && (
-              <div className="rv-rec"><span className="e">💎</span><span><small>BIGGEST BILL</small><b><AnimatedNumber value={rest.records.bigBill.revenue} money /></b>
-                <i>{rest.records.bigBill.table ? `table ${rest.records.bigBill.table}` : "one sitting"}</i></span></div>
-            )}
-            {(rest.records.regulars ?? 0) > 0 && (
-              <div className="rv-rec"><span className="e">🔁</span><span><small>REGULARS · 30 DAYS</small><b><AnimatedNumber value={rest.records.regulars ?? 0} /> returning guests</b>
-                <i>same name, 2+ visits</i></span></div>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div className="adm-card" style={{ marginTop: 12 }}>
-        <div className="rv-ct" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>Every dish <span style={{ color: "var(--muted)", fontWeight: 500 }}>· tap one for detail</span></span>
-          <span className="rv-sort">
-            <button className={dishSort === "revenue" ? "on" : ""} onClick={() => setDishSort("revenue")}>By revenue</button>
-            <button className={dishSort === "qty" ? "on" : ""} onClick={() => setDishSort("qty")}>By qty</button>
-          </span>
-        </div>
-        <div className="rv-dishes">
-          {dishes.length === 0 && <div className="adm-empty">No dish sales in this range.</div>}
-          {dishes.map((d) => (
-            <button key={d.title} className="rv-dish" onClick={() => onDish(d.title)}>
-              <span className="rv-dn">{d.title}</span>
-              <span className="rv-bar"><span style={{ width: `${(d.revenue / maxRev) * 100}%`, background: accent }} /></span>
-              <span className="rv-q">{d.qty} sold</span>
-              <span className="rv-r">{inr(d.revenue)}</span>
-              <i className="fas fa-chevron-right" aria-hidden="true" />
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className="rv-dishes">
+      {dishes.length === 0 && <div className="adm-empty">No dish sales in this range.</div>}
+      {dishes.map((d) => (
+        <button key={d.title} className="rv-dish" onClick={() => onDish(d.title)}>
+          <span className="rv-dn">{d.title}</span>
+          <span className="rv-bar"><span style={{ width: `${(d.revenue / maxRev) * 100}%`, background: GREEN }} /></span>
+          <span className="rv-q">{d.qty} sold</span>
+          <span className="rv-r">{inr(d.revenue)}</span>
+          <i className="fas fa-chevron-right" aria-hidden="true" />
+        </button>
+      ))}
       <style jsx>{`
-        .rv-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .rv-ct { font-size: 13px; font-weight: 800; margin-bottom: 10px; }
-        .rv-ct span { color: var(--muted); font-weight: 500; }
-        .rv-sort { display: inline-flex; gap: 2px; }
-        .rv-sort button { background: none; border: var(--border); padding: 4px 10px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
-        .rv-sort button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-        .rv-recs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
-        .rv-rec { flex: 1 1 190px; min-width: 170px; display: flex; gap: 11px; align-items: center; border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 11px 14px; }
-        .rv-rec .e { font-size: 20px; }
-        .rv-rec small { display: block; font-size: 9.5px; color: var(--muted); font-weight: 800; letter-spacing: 0.5px; }
-        .rv-rec b { display: block; font-size: 14px; line-height: 1.3; font-variant-numeric: tabular-nums; }
-        .rv-rec i { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); }
-        .rv-dishes { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
-        .rv-dish { display: grid; grid-template-columns: minmax(120px, 1.4fr) 2fr auto auto auto; align-items: center; gap: 12px; padding: 9px 8px; border: none; border-radius: 8px; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; }
+        .rv-dishes { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; max-height: 420px; overflow-y: auto; }
+        .rv-dish { display: grid; grid-template-columns: minmax(110px, 1.4fr) 1.6fr auto auto auto; align-items: center; gap: 12px; padding: 9px 8px; border: none; border-radius: 8px; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; }
         .rv-dish:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
         .rv-dn { font-weight: 700; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .rv-bar { height: 8px; border-radius: 4px; background: rgba(128,128,128,.14); overflow: hidden; }
@@ -911,8 +1188,8 @@ function RestaurantView({ rest, money, moneyErr, range, restTrend, dishSort, set
         .rv-q { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
         .rv-r { font-weight: 800; font-variant-numeric: tabular-nums; min-width: 70px; text-align: right; }
         .rv-dish i { color: var(--muted); font-size: 11px; }
-        @media (max-width: 760px) { .rv-charts { grid-template-columns: 1fr; } .rv-dish { grid-template-columns: 1fr auto auto; } .rv-bar { display: none; } }
+        @media (max-width: 760px) { .rv-dish { grid-template-columns: 1fr auto auto; } .rv-bar { display: none; } }
       `}</style>
-    </>
+    </div>
   );
 }

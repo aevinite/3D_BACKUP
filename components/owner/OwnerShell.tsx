@@ -127,6 +127,17 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   useBackClose("owner-nav", navOpen, () => setNavOpen(false));
   useEffect(() => { setNavOpen(false); }, [path]);
 
+  // Merged breadcrumb tail (owner 2026-07-26): the dashboard broadcasts the drilled
+  // restaurant/dish names and they render HERE, in the one top strip — Owner ›
+  // Dashboard › My Little French House — instead of a second heading row on the page.
+  const [crumbTail, setCrumbTail] = useState<string[]>([]);
+  useEffect(() => {
+    const onCrumb = (e: Event) => setCrumbTail(((e as CustomEvent).detail?.tail as string[]) ?? []);
+    window.addEventListener("lfh:owner-crumb", onCrumb);
+    return () => window.removeEventListener("lfh:owner-crumb", onCrumb);
+  }, []);
+  useEffect(() => { if (path !== "/owner") setCrumbTail([]); }, [path]);
+
   // Top-strip restaurant switcher dropdown (multi-restaurant owners only). Hardware
   // BACK closes it (project rule: every overlay registers); a route change closes it too.
   const [restOpen, setRestOpen] = useState(false);
@@ -363,11 +374,28 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                 <span className="lbl">{adminViewing ? shownName : "Owner overview"}</span>
               </span>
             )}
-            {/* Owner-panel path (orientation inside /owner) — NOT the admin act-as bar. */}
+            {/* Owner-panel path (orientation inside /owner) — NOT the admin act-as bar.
+                On the dashboard a drilled restaurant/dish appends as the tail (merged
+                breadcrumb, owner 2026-07-26); "Dashboard" then becomes the way back. */}
             <nav className="owx-path" aria-label="Owner panel path">
               <Link href={withRid("/owner")} className="cr root">Owner</Link>
               <i className="fas fa-chevron-right sep root" aria-hidden="true" />
-              <span className="cr cur" aria-current="page">{ownerSectionLabel(path)}</span>
+              {crumbTail.length > 0 ? (
+                <>
+                  <button type="button" className="cr root" style={{ background: "none", border: "none", padding: 0, font: "inherit", cursor: "pointer" }}
+                    onClick={() => window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid: null } }))}>
+                    {ownerSectionLabel(path)}
+                  </button>
+                  {crumbTail.map((t, i) => (
+                    <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: "inherit" }}>
+                      <i className="fas fa-chevron-right sep root" aria-hidden="true" />
+                      <span className="cr cur" aria-current={i === crumbTail.length - 1 ? "page" : undefined}>{t}</span>
+                    </span>
+                  ))}
+                </>
+              ) : (
+                <span className="cr cur" aria-current="page">{ownerSectionLabel(path)}</span>
+              )}
             </nav>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>

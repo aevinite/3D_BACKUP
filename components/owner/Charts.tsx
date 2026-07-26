@@ -87,6 +87,9 @@ function TipBox({ children }: { children: React.ReactNode }) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function MoneyTip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
+  // Rows may carry a hidden `__orders` count (owner 2026-07-26: "the graph should also
+  // show the number of orders when you hover") — shown as one extra plain line.
+  const orders = payload[0]?.payload?.__orders;
   return (
     <TipBox>
       {label != null && <div style={{ color: "var(--muted)", marginBottom: 4 }}>{label}</div>}
@@ -96,6 +99,9 @@ function MoneyTip({ active, payload, label }: any) {
           <b>{p.name}</b>: {inr(p.value)}
         </div>
       ))}
+      {orders != null && Number(orders) > 0 && (
+        <div style={{ color: "var(--muted)", marginTop: 4 }}>{Number(orders).toLocaleString("en-IN")} order{Number(orders) === 1 ? "" : "s"}</div>
+      )}
     </TipBox>
   );
 }
@@ -496,4 +502,83 @@ export function ToggleChart({ data, color, money = true, height = 240, name, tit
 export const RevenueBar = LeaderBar;
 export function TrendLine({ data, lines }: { data: Record<string, unknown>[]; lines: { key: string; name: string; color: string }[]; money?: boolean }) {
   return <AreaTrend data={data} lines={lines} height={230} />;
+}
+
+// ── Heatmap — day-of-week × hour busy grid (owner merge redesign, 2026-07-26) ──
+// Pure divs (no Recharts): 7 rows (Sun..Sat, postgres dow order) × 24 cells, colour
+// intensity = orders share of the busiest cell. Hover shows the exact count.
+const DOW_LB = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const hr12 = (h: number) => `${h % 12 || 12}${h < 12 ? "am" : "pm"}`;
+export function Heatmap({ data, accent }: { data: { dow: number; hr: number; orders: number }[]; accent: string }) {
+  if (!data.length || !data.some((d) => d.orders > 0)) return <Empty />;
+  const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+  for (const d of data) if (d.dow >= 0 && d.dow < 7 && d.hr >= 0 && d.hr < 24) grid[d.dow][d.hr] = d.orders;
+  const max = Math.max(1, ...grid.flat());
+  const marks = [0, 4, 8, 12, 16, 20, 23];
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "34px repeat(24, 1fr)", gap: 3, minWidth: 430 }}>
+        <div />
+        {Array.from({ length: 24 }, (_, h) => (
+          <div key={h} style={{ fontSize: 9, color: "var(--muted)", textAlign: "center", whiteSpace: "nowrap" }}>{marks.includes(h) ? hr12(h) : ""}</div>
+        ))}
+        {grid.map((row, d) => (
+          <FragmentRow key={d} label={DOW_LB[d]} row={row} max={max} accent={accent} />
+        ))}
+      </div>
+    </div>
+  );
+}
+function FragmentRow({ label, row, max, accent }: { label: string; row: number[]; max: number; accent: string }) {
+  return (
+    <>
+      <div style={{ fontSize: 10.5, color: "var(--muted)", display: "flex", alignItems: "center" }}>{label}</div>
+      {row.map((v, h) => (
+        <div key={h} title={`${label} ${hr12(h)} · ${v.toLocaleString("en-IN")} order${v === 1 ? "" : "s"}`}
+          style={{
+            aspectRatio: "1", borderRadius: 3, minWidth: 12,
+            background: v > 0 ? `color-mix(in srgb, ${accent} ${Math.max(8, Math.round((v / max) * 100))}%, transparent)` : "rgba(128,128,128,.08)",
+          }} />
+      ))}
+    </>
+  );
+}
+
+// ── StackedDailyBars — 2–3 restaurants: each day = ONE bar split by restaurant ──
+// (owner 2026-07-26, Samsung-screen-time style). Hover = per-restaurant dot + name
+// + ₹ (MoneyTip already renders exactly that); the restaurant legend sits top-right.
+export function StackedDailyBars({ data, lines, height = 260 }: {
+  data: Record<string, unknown>[];
+  lines: { key: string; name: string; color: string }[];
+  height?: number;
+}) {
+  if (!data.length || !lines.length) return <Empty />;
+  const totals = data.map((row) => lines.reduce((a, l) => a + (Number(row[l.key]) || 0), 0));
+  if (populated(totals) < MIN_POINTS) return <NotEnough height={height} value={populated(totals) === 1 ? inr(soleValue(totals)) : undefined} />;
+  const max = Math.max(1, ...totals);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "flex-end", flexWrap: "wrap", gap: "4px 14px", marginBottom: 8 }} role="list">
+        {lines.map((l) => (
+          <span key={l.key} role="listitem" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--muted)", fontWeight: 600 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 3, background: l.color, display: "inline-block" }} aria-hidden="true" />{l.name}
+          </span>
+        ))}
+      </div>
+      <ScrollX count={data.length} height={height}>
+        <ResponsiveContainer>
+          <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
+            <CartesianGrid stroke={GRID} vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={16} />
+            <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
+            <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
+            {lines.map((l, i) => (
+              <Bar key={l.key} dataKey={l.key} name={l.name} stackId="day" fill={l.color}
+                radius={i === lines.length - 1 ? [5, 5, 0, 0] : [0, 0, 0, 0]} maxBarSize={42} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </ScrollX>
+    </div>
+  );
 }

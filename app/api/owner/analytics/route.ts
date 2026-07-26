@@ -106,18 +106,25 @@ export async function GET(req: NextRequest) {
       // (?refresh=1) forces a live recompute. Keyed by the already-authorized scope.
       const gIds = scope.all ? [] : scope.ids;
       const groupPayload = await cachedOwnerPayload({
-        key: `analytics:v1:group:${scopeKeyOf(null, scope.all, gIds)}:${range}:c${compare ? 1 : 0}`,
+        // v2: payload gained `heatmap` (mig 197) — the version bump invalidates every
+        // v1 snapshot, otherwise the cache would serve heatmap-less JSON verbatim until
+        // its fingerprint happened to change (found in the 2026-07-26 tier verify).
+        key: `analytics:v2:group:${scopeKeyOf(null, scope.all, gIds)}:${range}:c${compare ? 1 : 0}`,
         force: sp.get("refresh") === "1",
         fingerprint: () => ordersFingerprint(scope.all ? null : gIds, from, to),
         compute: async () => {
       const allow = scope.all ? null : new Set(scope.ids);
       const pIds = scope.all ? null : scope.ids; // DB-side scope (mig 138) — no whole-platform scan
-      const [rev, ts] = await Promise.all([
+      const [rev, ts, heat] = await Promise.all([
         sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to, p_ids: pIds }),
         sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket, p_ids: pIds }),
+        // Busy heatmap (mig 197): one ≤7×24 pre-summed grid across the caller's own
+        // restaurants — p_ids pushes the scope into the DB, same rule as the calls above.
+        sb.rpc("lfh_owner_heatmap", { p_restaurant_id: null, p_from: from, p_to: to, p_ids: pIds }),
       ]);
       if (rev.error) throw rev.error;
       if (ts.error) throw ts.error;
+      if (heat.error) throw heat.error;
       // An owner only ever sees their OWN restaurants; admin sees all. These RPCs
       // return one row per restaurant, so we filter the tiny pre-summed rows here.
       const restaurantRevenue = (rev.data ?? [])
@@ -151,7 +158,10 @@ export async function GET(req: NextRequest) {
       }
       const paymentMethods = Array.from(pmByMethod.values()).sort((a, b) => b.revenue - a.revenue);
       const prev = prevWin ? await windowTotals(pIds, prevWin.from, prevWin.to) : null;
-      return { scope: "group", range, restaurantRevenue, timeseries, paymentMethods, prev };
+      const heatmap = ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({
+        dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue),
+      }));
+      return { scope: "group", range, restaurantRevenue, timeseries, paymentMethods, heatmap, prev };
         },
       });
       return NextResponse.json(groupPayload);
@@ -175,12 +185,13 @@ export async function GET(req: NextRequest) {
       new Date(fromMs).toISOString(),
       ...stepsBack.map((d) => new Date(fromMs - d * DAY).toISOString()),
     ];
-    const [meta, ts, dishes, cats, hourly, openT, pm, sameHour, payTrend, records] = await Promise.all([
+    const [meta, ts, dishes, cats, hourly, heat, openT, pm, sameHour, payTrend, records] = await Promise.all([
       sb.from("restaurants").select("id, slug, name, accent_color, hero_title").eq("id", rid).maybeSingle(),
       sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: bucket }),
       sb.rpc("lfh_owner_dish_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_hourly", { p_restaurant_id: rid, p_from: from, p_to: to }),
+      sb.rpc("lfh_owner_heatmap", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open"),
       sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sameHourStarts.length
@@ -193,7 +204,7 @@ export async function GET(req: NextRequest) {
     ]);
     if (meta.error) throw meta.error;
     if (!meta.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
-    for (const e of [ts, dishes, cats, hourly, pm, sameHour, payTrend, records]) if (e.error) throw e.error;
+    for (const e of [ts, dishes, cats, hourly, heat, pm, sameHour, payTrend, records]) if (e.error) throw e.error;
 
     const dishRows = (dishes.data ?? []).map((r: Record<string, unknown>) => ({
       title: r.title, qty: Number(r.qty) || 0, revenue: num(r.revenue),
@@ -221,6 +232,7 @@ export async function GET(req: NextRequest) {
       dishes: dishRows,
       categories: (cats.data ?? []).map((r: Record<string, unknown>) => ({ category: r.category, qty: Number(r.qty) || 0, revenue: num(r.revenue) })),
       hourly: (hourly.data ?? []).map((r: Record<string, unknown>) => ({ hour: Number(r.hour) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
+      heatmap: ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({ dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
       paymentMethods: (pm.data ?? []).map((r: Record<string, unknown>) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 })),
       // sameHour rows come back newest-first (window_start DESC) = the order we sent.
       sameHour: ((sameHour.data ?? []) as Record<string, unknown>[]).map((r) => ({
