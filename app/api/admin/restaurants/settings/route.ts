@@ -1,0 +1,211 @@
+// Admin per-restaurant operational settings (owner 2026-07-26): the restaurant-detail
+// "Settings" tab reads & writes billing, dining-session and table settings here, plus
+// the permanent per-table QR codes (mig 210). The form fields are same-to-same with the
+// manager panel's Settings sections; the manager copies get removed once the owner
+// approves this tab live — until then both panels write the same settings columns.
+//
+// Sanitize rules mirror the manager save path (app/api/editor settings POST) so the two
+// panels can never write different shapes into the same columns. Admin-gated (middleware
+// protects /api/admin/*), service role, every read/write scoped by restaurant_id.
+import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "crypto";
+import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { cleanClonedSettings } from "@/lib/settingsClone";
+import { logAction } from "@/lib/oplog";
+
+export const dynamic = "force-dynamic";
+
+const isUuid = (v: unknown): v is string =>
+  typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
+// Explicit column list — this route never reads or writes anything outside it.
+const SETTINGS_COLS = [
+  "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone", "gstin",
+  "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
+  "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
+  "table_count", "table_seats", "table_names", "auto_table_action",
+] as const;
+const SELECT = SETTINGS_COLS.join(", ");
+
+type Patch = Record<string, unknown>;
+
+// Whitelist sanitizer: only known keys survive, each cleaned the same way the manager
+// save path cleans it. Returns the cleaned patch (empty object = nothing to save).
+function sanitize(body: Patch): Patch {
+  const out: Patch = {};
+  const str = (k: string, max: number, blankNull = true) => {
+    if (!(k in body)) return;
+    const v = String(body[k] ?? "").trim().slice(0, max);
+    out[k] = v || (blankNull ? null : "");
+  };
+  str("restaurant_name", 80);
+  str("restaurant_address", 200);
+  str("restaurant_phone", 30);
+  str("gstin", 20);
+  str("invoice_prefix", 12);
+  str("bill_footer", 200);
+  str("tax_label", 20);
+  if ("tax_components" in body) {
+    const raw = Array.isArray(body.tax_components) ? body.tax_components : [];
+    out.tax_components = raw
+      .map((c) => ({
+        label: String((c as Patch)?.label || "").trim().slice(0, 24),
+        rate: Math.round((Number((c as Patch)?.rate) || 0) * 100) / 100,
+      }))
+      .filter((c) => c.label && c.rate > 0 && c.rate <= 100)
+      .slice(0, 6);
+  }
+  if ("tax_rate" in body) {
+    const v = parseFloat(String(body.tax_rate));
+    out.tax_rate = Number.isFinite(v) && v >= 0 && v <= 1 ? v : null;
+  }
+  for (const k of ["sessions_enabled", "require_location", "require_otp"]) {
+    if (k in body) out[k] = body[k] === true || body[k] === "true";
+  }
+  for (const k of ["geo_lat", "geo_lng"]) {
+    if (k in body) { const v = parseFloat(String(body[k])); out[k] = Number.isFinite(v) ? v : null; }
+  }
+  if ("geo_radius_m" in body) {
+    const n = Math.round(Number(body.geo_radius_m));
+    out.geo_radius_m = Number.isFinite(n) ? Math.min(Math.max(n, 20), 5000) : 250;
+  }
+  if ("table_count" in body) {
+    const n = Math.round(Number(body.table_count));
+    out.table_count = Number.isFinite(n) ? Math.min(Math.max(n, 1), 500) : 12;
+  }
+  if ("table_seats" in body) {
+    const raw = body.table_seats;
+    const clean: Record<string, number> = {};
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      for (const [k, v] of Object.entries(raw)) {
+        const tn = parseInt(k, 10);
+        const n = Math.round(Number(v));
+        if (Number.isFinite(tn) && tn >= 1 && Number.isFinite(n)) clean[String(tn)] = Math.min(Math.max(n, 1), 30);
+      }
+    }
+    out.table_seats = clean;
+  }
+  if ("table_names" in body) {
+    const raw = body.table_names;
+    const clean: Record<string, string> = {};
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      for (const [k, v] of Object.entries(raw)) {
+        const tn = parseInt(k, 10);
+        const name = String(v ?? "").trim().slice(0, 24);
+        if (Number.isFinite(tn) && tn >= 1 && name) clean[String(tn)] = name;
+      }
+    }
+    out.table_names = clean;
+  }
+  if ("auto_table_action" in body) {
+    const v = String(body.auto_table_action || "off");
+    out.auto_table_action = ["off", "close", "restart"].includes(v) ? v : "off";
+  }
+  return out;
+}
+
+// ── permanent per-table QR codes (mig 210) ─────────────────────────────────
+// Unambiguous alphabet (no 0/O/1/I/L). 8 chars ≈ 1.1 × 10¹² combinations — a typed
+// or guessed variation lands on "invalid code", never on a neighbouring table.
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const newCode = () => Array.from(randomBytes(8)).map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join("");
+
+// Make sure tables 1..count each have a code; returns { "<table>": "<code>" }.
+async function ensureCodes(rid: string, count: number): Promise<Record<string, string> | { error: string }> {
+  const cur = await sb.from("table_qr_codes").select("table_number, code").eq("restaurant_id", rid).limit(500);
+  if (cur.error) return { error: cur.error.message };
+  const map: Record<string, string> = {};
+  for (const r of cur.data || []) map[String(r.table_number)] = r.code;
+  const missing: { restaurant_id: string; table_number: number; code: string }[] = [];
+  for (let t = 1; t <= count; t++) if (!map[String(t)]) missing.push({ restaurant_id: rid, table_number: t, code: newCode() });
+  if (missing.length) {
+    // Global-unique code column: on the (astronomically rare) collision, re-mint and retry.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const ins = await sb.from("table_qr_codes").insert(missing);
+      if (!ins.error) break;
+      if (!/duplicate|unique/i.test(ins.error.message)) return { error: ins.error.message };
+      for (const m of missing) m.code = newCode();
+      if (attempt === 2) return { error: "couldn't mint unique codes — try again" };
+    }
+    for (const m of missing) map[String(m.table_number)] = m.code;
+  }
+  const scoped: Record<string, string> = {};
+  for (let t = 1; t <= count; t++) if (map[String(t)]) scoped[String(t)] = map[String(t)];
+  return scoped;
+}
+
+export async function GET(req: NextRequest) {
+  if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const rid = req.nextUrl.searchParams.get("restaurant_id") || "";
+  if (!isUuid(rid)) return NextResponse.json({ error: "missing or invalid restaurant_id" }, { status: 400 });
+  const [row, rest] = await Promise.all([
+    sb.from("settings").select(SELECT).eq("restaurant_id", rid).maybeSingle(),
+    sb.from("restaurants").select("slug, name").eq("id", rid).maybeSingle(),
+  ]);
+  if (row.error) return NextResponse.json({ error: row.error.message }, { status: 500 });
+  if (rest.error) return NextResponse.json({ error: rest.error.message }, { status: 500 });
+  if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
+  const settings = (row.data as unknown as Patch) || {};
+  const count = Math.min(Math.max(Math.round(Number(settings.table_count)) || 12, 1), 500);
+  const codes = await ensureCodes(rid, count);
+  if ("error" in codes) return NextResponse.json({ error: codes.error }, { status: 500 });
+  return NextResponse.json({ settings, slug: rest.data.slug, codes });
+}
+
+export async function POST(req: NextRequest) {
+  if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const body = (await req.json().catch(() => ({}))) as Patch;
+  const rid = body?.restaurant_id;
+  if (!isUuid(rid)) return NextResponse.json({ error: "missing or invalid restaurant_id" }, { status: 400 });
+
+  // ↻ New code for ONE table — the old printed QR stops working immediately.
+  if (body.action === "regen_code") {
+    const table = Math.round(Number(body.table));
+    if (!Number.isFinite(table) || table < 1 || table > 500)
+      return NextResponse.json({ error: "invalid table" }, { status: 400 });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const up = await sb.from("table_qr_codes")
+        .upsert({ restaurant_id: rid, table_number: table, code: newCode() }, { onConflict: "restaurant_id,table_number" })
+        .select("code").maybeSingle();
+      if (!up.error) {
+        await logAction("admin", "table_qr_regen", { detail: `table ${table} got a new QR code`, restaurant_id: rid });
+        return NextResponse.json({ table, code: up.data?.code });
+      }
+      if (!/duplicate|unique/i.test(up.error.message))
+        return NextResponse.json({ error: up.error.message }, { status: 500 });
+    }
+    return NextResponse.json({ error: "couldn't mint a unique code — try again" }, { status: 500 });
+  }
+
+  // Settings save — whitelist-sanitized patch of changed fields only.
+  const patch = sanitize(body);
+  if (!Object.keys(patch).length) return NextResponse.json({ error: "nothing to save" }, { status: 400 });
+  const rest = await sb.from("restaurants").select("id, slug").eq("id", rid).maybeSingle();
+  if (rest.error) return NextResponse.json({ error: rest.error.message }, { status: 500 });
+  if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
+
+  const cur = await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle();
+  if (cur.error) return NextResponse.json({ error: cur.error.message }, { status: 500 });
+
+  let saved;
+  if (cur.data) {
+    saved = await sb.from("settings").update(patch).eq("restaurant_id", rid).select(SELECT).maybeSingle();
+  } else {
+    // No settings row yet → clone #1 as a template so every NOT NULL column is satisfied
+    // (same pattern as the quick-features route), then apply the patch on top.
+    const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
+    const base = cleanClonedSettings(template.data);
+    saved = await sb.from("settings")
+      .upsert({ ...base, id: rest.data.slug, restaurant_id: rid, ...patch }, { onConflict: "restaurant_id" })
+      .select(SELECT).maybeSingle();
+  }
+  if (saved.error) return NextResponse.json({ error: saved.error.message }, { status: 500 });
+  await logAction("admin", "restaurant_settings", {
+    detail: `updated ${Object.keys(patch).join(", ")}`.slice(0, 180), restaurant_id: rid,
+  });
+  return NextResponse.json({ settings: saved.data });
+}
