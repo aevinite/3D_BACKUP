@@ -19,6 +19,7 @@ import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { effectiveTaxRate } from "@/lib/tax";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +84,9 @@ function pinActorFrom(g: PinGate): PinActor | null {
 // is re-read from the DB on every request by userFromCookie, so revoking someone's
 // access takes effect on their very next tap (no re-login needed). Admin bypasses via
 // managerPinGate as before.
-const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders", "tablet_parcel"] as const;
+// TABLET_PERM_KEYS is DERIVED from lib/accessModel.ts (2026-07-26, imported above) —
+// one source of truth with the admin access panel, so a new waiter cap added there is
+// honoured here automatically.
 const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
 // The KOT ▾ menu's module rung (canonical ladder, mig 177): admin's allowed switch
 // AND, when transferred, the owner's toggle. One tiny single-row select on a rare

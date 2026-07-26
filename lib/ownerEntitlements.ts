@@ -8,6 +8,7 @@
 // Clients learn their entitlements through their panel's whoami/API responses; they
 // never read this table directly.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { MANAGER_POWER_FLAGS } from "@/lib/accessModel";
 
 // Owner-panel SECTIONS the admin can switch off (nav + API both honour these).
 // "ratings" (mig 138) gates the guest star-ratings view/management the owner + manager
@@ -43,7 +44,12 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 //                     tri-state) — the same two-rail shape as discount/mark_paid, NOT a
 //                     module. The tablet cap defaults 'on' (mig 178) because taking
 //                     orders is the tablet's existing core function.
-export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops", "take_orders", "parcel"] as const;
+//
+// DERIVED since 2026-07-26: the list now comes from lib/accessModel.ts (the access
+// panel's single source of truth), so a power added there wires itself here — the old
+// hand-typed copy had drifted (view_logs existed in the panel + enforcement but not
+// here, so the owner could never grant/revoke it). Re-exported for existing importers.
+export { MANAGER_POWER_FLAGS };
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
 // The authoritative "is this feature available for this restaurant AT ALL?" check

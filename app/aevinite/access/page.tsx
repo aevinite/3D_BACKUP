@@ -102,7 +102,7 @@ const ROLE_COLOR: Record<string, string> = { owner: "#b491f0", manager: "#d4a574
 const roleTint = (c: string) => `color-mix(in srgb, ${c} 16%, transparent)`;
 const ROLE_RELEVANCE: Record<string, string[]> = {
   manager: ["edit_menu", "give_discounts", "void_bills", "mark_paid", "print_invoice", "khata", "take_orders", "parcel", "table_ops", "table_tags", "banquet", "view_dashboard", "view_ratings", "view_logs", "manage_staff", "edit_settings"],
-  tablet: ["give_discounts", "mark_paid", "print_invoice", "khata", "take_orders", "parcel", "table_ops", "table_tags", "void_bills"],
+  tablet: ["give_discounts", "mark_paid", "print_invoice", "khata", "take_orders", "parcel", "table_ops", "table_tags", "banquet", "void_bills"],
   kitchen: ["edit_menu", "view_logs"],
   owner: PERMISSIONS.filter((p) => p.kind === "ladder").map((p) => p.id),
 };
@@ -483,6 +483,25 @@ export default function Access2Page() {
                 {p.ownerOnly && <p className="acc2-hint"><Icon n="crown" /> Owner-only — this is an owner-panel page; the toggle above turns it on or off.</p>}
                 {p.fixedTop && <p className="acc2-hint"><Icon n="info" /> Owner &amp; manager always have this — choose whether waiters get it below.</p>}
 
+                {/* The owner rung means TWO different things — where the owner USES this, and
+                    that they can HAND IT DOWN. Stated as plain facts, never as controls, so
+                    "has it" and "can give it" stop reading as one idea (owner ask 2026-07-26).
+                    ownerUse comes from lib/accessModel — enforcement is untouched. */}
+                <div className="acc2-ownerfact" role="note">
+                  <div className="of-row"><Icon n="crown" s={13} />
+                    <span><b>Owner has it</b> — {p.ownerUse === "panel"
+                      ? "a page in their own owner panel."
+                      : "no owner-panel page for this; the owner uses it by opening the manager panel."}</span></div>
+                  <div className="of-row"><Icon n="key" s={13} />
+                    <span><b>Owner can give it</b> — {p.ownerOnly
+                      ? "never handed down; this one stays owner-only."
+                      : p.fixedTop
+                        ? "managers always have this one — the only choice is waiters, below."
+                        : lvl >= 2
+                          ? "currently given to managers (owner's Staff & powers page)."
+                          : "not given to managers yet — the owner flips it on their Staff & powers page."}</span></div>
+                </div>
+
                 {p.sub && (
                   <>
                     {/* ONE "…can" tab per tier this capability reaches: Owner, +Manager, +Tablet(Waiter).
@@ -804,6 +823,13 @@ function Style() {
   .acc2-reach .rs.cur { color:#fff; background:var(--accent); }
   .acc2-reach .rs .rc { display:grid; place-items:center; width:15px; height:15px; border-radius:999px; background:rgba(255,255,255,.28); }
   .acc2-reach .rs.cur .rc { color:#fff; }
+  /* Owner two-fact strip — information, never a control: no hover, no pointer, quiet
+     card tone; wraps naturally at phone width. Icons take the accent, the bold lead
+     stays on --text for contrast, body copy on --muted. */
+  .acc2-ownerfact { display:flex; flex-direction:column; gap:7px; margin-top:14px; padding:11px 13px; border-radius:11px; background:var(--card); border:var(--border); }
+  .acc2-ownerfact .of-row { display:flex; gap:9px; align-items:flex-start; font-size:12.5px; color:var(--muted); line-height:1.5; }
+  .acc2-ownerfact .of-row svg { color:var(--accent); flex:none; margin-top:2.5px; }
+  .acc2-ownerfact .of-row b { color:var(--text); font-weight:700; }
   .acc2-sides { display:flex; gap:4px; background:var(--card); border:var(--border); border-radius:11px; padding:4px; margin:14px 0 12px; }
   .acc2-sides .sd { flex:1; display:flex; align-items:center; justify-content:center; gap:7px; min-height:40px; border-radius:8px; border:none; background:transparent; color:var(--muted); font-weight:700; font-size:13px; cursor:pointer; }
   .acc2-sides .sd.on { background:var(--muted2); color:var(--text); }

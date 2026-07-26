@@ -23,6 +23,7 @@ import { logAction } from "@/lib/oplog";
 import { mergeOwnerEntitlements, MANAGER_POWER_FLAGS, powerEntitled } from "@/lib/ownerEntitlements";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
+import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 
 // GAP-B (owner ceiling): a tablet cap gated by an admin module may only be granted to a
 // waiter if that module is EFFECTIVE for the restaurant. The money caps (discount/mark_paid/
@@ -267,7 +268,7 @@ export async function PATCH(req: NextRequest) {
     //   • MANAGER powers (the bare flag, e.g. give_discounts) — per-person override for a
     //     MANAGER, two-state on|off; enforced by managerCan (Option B, 2026-07-24). A key
     //     the enforcer doesn't read would be a dead grant, so both lists are the enforced set.
-    const TABLET_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders", "tablet_parcel"];
+    const TABLET_KEYS = TABLET_PERM_KEYS; // derived from lib/accessModel (2026-07-26) — lockstep with tabletPerm by construction
     const POWER_KEYS = MANAGER_POWER_FLAGS as readonly string[];
     const patch = body?.permissions;
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing permissions object.");

@@ -27,7 +27,8 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
-import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -93,6 +94,13 @@ async function canViewLogs(g: { user: StaffUser | null }, rid: string): Promise<
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
   if (r?.owner_entitlements?.power_view_logs === false) return false;   // admin removed the whole power
+  // Per-person override (mig 115) — same precedence as managerCan: the individual's
+  // setting wins over the restaurant-wide grant but never over the admin cap above (it
+  // was accepted by set_permissions but never read here — a stored-but-dead key, fixed
+  // 2026-07-26).
+  const ov = u.permissions?.view_logs;
+  if (ov === "on" || ov === "pin") return true;
+  if (ov === "off") return false;
   if (r?.manager_permissions?.view_logs === false) return false;        // owner pulled it back from managers
   return true;
 }
@@ -305,31 +313,25 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const myOv = (g.user && g.user.role !== "owner") ? (g.user.permissions || {}) : {};
       for (const flag of MANAGER_POWER_FLAGS) {
         const entitled = ents[powerEntitlementKey(flag)] !== false;
-        let granted = perms[flag] === true;
+        // absentOn flags (view_logs) keep the power unless someone EXPLICITLY switched it
+        // off — matching canViewLogs, so the X-ray never hides a log the server allows.
+        let granted = ABSENT_ON_POWERS.has(flag) ? perms[flag] !== false : perms[flag] === true;
         const ov = myOv[flag];
         if (ov === "on" || ov === "pin") granted = true;
         else if (ov === "off") granted = false;
         effectivePowers[flag] = entitled && granted;
         offByAdmin[flag] = !entitled;
       }
-      // Feature ladder (mig 166): table_tags/khata render nothing anywhere in the
-      // panel unless the FEATURE itself is on for this restaurant — the power flags
-      // above are the owner→manager rung, this is the admin(/owner) application rung.
-      const lad = await tableTagsLadder(rid);
-      if (!lad.effective) { effectivePowers.table_tags = false; effectivePowers.khata = false; }
-      const bq = await banquetLadder(rid);
-      if (!bq.effective) effectivePowers.banquet = false;
-      // KOT ▾ menu (mig 177): same canonical module rule — module off = power dead.
-      const tOps = await tableOpsLadder(rid);
-      if (!tOps.effective) effectivePowers.table_ops = false;
-      // Order-taking (mig 179): same canonical module rule — the ＋Take order button dies
-      // when the admin switches the module off for this restaurant.
-      const tOrd = await takeOrdersLadder(rid);
-      if (!tOrd.effective) effectivePowers.take_orders = false;
-      // Parcel / takeaway module (mig 197): same rule — the 🥡 New Parcel button dies when
-      // the admin hasn't switched the module on for this restaurant.
-      const parc = await parcelLadder(rid);
-      if (!parc.effective) effectivePowers.parcel = false;
+      // Feature-module rung (canonical ladder): a capability whose MODULE is off for this
+      // restaurant renders nothing anywhere in the panel — the power flags above are the
+      // owner→manager rung, this is the admin(/owner) application rung. ONE settings select
+      // covers every module (accessModel MODULE_DEFS), and a module added there wires itself
+      // here — this used to be five hand-written selects of the same row.
+      const ladders = await allModuleLadders(rid);
+      for (const mp of PERMISSIONS) {
+        if (!mp.module || !mp.power) continue;
+        if (!ladders[moduleKey(mp)]?.effective) effectivePowers[mp.power] = false;
+      }
       // Finer edit-menu sub-limits (owner 2026-07-24): mirror menuSubAllowed's resolution so
       // the panel can HIDE a create/delete button a restricted MANAGER isn't allowed, instead
       // of showing-then-refusing it. Same rule as the server: admin/owner get full menu editing
@@ -353,7 +355,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // Delete-a-bill sub-permission (default OFF) — lets the panel show the "🗑 Delete bill"
         // button only when the owner ticked it (admin/owner always true). (owner, 2026-07-24)
         canDeleteBill: await canDeleteBill(g, rid),
-        features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective, table_ops: tOps.effective, take_orders: tOrd.effective, parcel: parc.effective },
+        // One entry per module-backed capability (same keys as before: table_tags, khata,
+        // banquet, table_ops, take_orders, parcel) — derived, so new modules appear here.
+        features: Object.fromEntries(PERMISSIONS.filter((mp) => mp.module).map((mp) => [mp.id, !!ladders[moduleKey(mp)]?.effective])),
       });
     }
 

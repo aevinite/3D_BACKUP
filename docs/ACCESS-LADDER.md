@@ -6,6 +6,26 @@ off makes everything below it disappear from the UI AND get refused by the serve
 (hiding a button is never the only guard). The ladder IS the user-access system —
 it lives in three screens:
 
+## The ladder is a DELEGATION chain, not a usage chain (owner clarification, 2026-07-26)
+
+A rung being ON means **"this role may PASS the capability down — and use it, if their
+panel has a button for it."** Two different facts hide inside every owner rung:
+
+1. **USE** — does this role's own panel surface the feature? The owner uses
+   dashboard/staff/khata-book/menu in the OWNER panel (`ownerUse: "panel"` in
+   `lib/accessModel.ts`), but floor features (parcel, take-orders, discounts, KOT ops…)
+   have **no owner-panel page** — the owner uses those by opening the MANAGER panel,
+   whose higher-view + `managerCan()` owner-bypass grants every power automatically
+   (`ownerUse: "manager"`).
+2. **GRANT** — may this role hand it to the rung below? The grant ceiling always comes
+   from the rung ABOVE (admin `_allowed`/`power_<flag>` caps the owner; the owner's
+   grant caps the manager), **never from what the role personally uses** — that's why
+   an owner who never takes a parcel still grants parcel to managers.
+
+The access panel states both facts on every ladder card (the "Owner has it / Owner can
+give it" strip, driven by `ownerUse`). When adding a feature, set `ownerUse` honestly —
+it is display truth only; enforcement is unchanged.
+
 | Screen | Who uses it | What it controls |
 |---|---|---|
 | `/aevinite` → **Access** | Admin | Every rung: panels, owner sections, the Modules ladder card (feature on/off + "owner controls"), manager powers (exists + granted), tablet tri-states, per-person overrides |
@@ -66,12 +86,21 @@ end-to-end (`take_orders`, mig 179, is the latest worked example: `takeOrdersLad
 the six touchpoints below). Everyday operational actions (accept/serve/open-close/attend)
 stay on the per-restaurant PANEL switch — see the carve-out in the defaults rule.
 
-The six touchpoints to wire for a new laddered feature (grep any of these to copy):
-`lib/tableTags.ts` (a `moduleLadder` alias) · migration (`_allowed`/`_owner_control`/
-`_enabled` + `lib/settingsClone.ts`) · editor `whoami` (`effectivePowers`+`features`) &
-its action gate · tablet route (GET overlay forces the cap off when the module's off +
-the POST gate) · admin `/aevinite/access` (`LADDER_MODULES` + the access route's
-`FEATURE_SWITCHES`/select) · owner `/api/owner/settings` (`MODULE_DEFS`).
+**Wiring is CONSOLIDATED since 2026-07-26 — most lists DERIVE from `lib/accessModel.ts`.**
+A new laddered feature now needs only THREE hand-written touchpoints:
+1. **One entry in `lib/accessModel.ts` `PERMISSIONS`** (module cols + `power` + `tablet`
+   + `ownerUse`, and `moduleLabel` if several capabilities share one module). From this
+   single entry the following wire themselves: the admin access panel + access2 route,
+   the owner grant API (`MANAGER_POWER_FLAGS`), the owner Staff & powers page (add nice
+   copy to its `PERM_COPY`), the owner Settings module toggle (`MODULE_DEFS`), the
+   editor `whoami` (`allModuleLadders` + derived `features`/module-forced powers), the
+   tablet + owner-staff per-person key whitelists (`TABLET_PERM_KEYS`), and the
+   settingsClone drift-guard (warns if a ladder column has no clone default).
+2. **The migration** adding `_allowed`/`_owner_control`/`_enabled` (+ the tablet
+   tri-state column) **+ explicit defaults in `lib/settingsClone.ts`**.
+3. **The feature's own server gates + panel UI** (a `moduleLadder` alias in
+   `lib/tableTags.ts` for its action gates, the tablet GET overlay if the cap must
+   force-off with the module, and the buttons themselves).
 
 ## The defaults rule (apply to EVERY new feature, everywhere)
 
@@ -99,8 +128,8 @@ the POST gate) · admin `/aevinite/access` (`LADDER_MODULES` + the access route'
 | Panels (manager/kitchen/tablet/owner) | admin only (access = the panel itself) | Access → Panels |
 | Guest menu features (11 switches) | admin only (guests aren't staff) | Access → Guest menu features |
 | Owner-panel sections (6) | admin → owner | Access → Owner panel sections |
-| Manager powers: manage_staff · edit_menu · give_discounts · view_dashboard · void_bills · edit_settings · view_ratings · table_tags · khata · banquet · table_ops · take_orders | admin "exists" + owner "granted" | Access → Manager powers / Owner → Staff & powers |
-| Tablet caps: discount · mark_paid · invoice · banquet · table_tags · khata · table_ops · take_orders | manager tri-state + per-user | Access → Tablet / Manager → Settings → Access |
+| Manager powers (DERIVED from accessModel since 2026-07-26): manage_staff · edit_menu · give_discounts · view_dashboard · void_bills · edit_settings · view_ratings · view_logs (absent-ON — an unset grant means ON, matching canViewLogs) · table_tags · khata · banquet · table_ops · take_orders · parcel | admin "exists" + owner "granted" | Access → Manager powers / Owner → Staff & powers |
+| Tablet caps (DERIVED): discount · mark_paid · invoice · banquet (rung surfaced in the admin panel 2026-07-26 — it was server-enforced but invisible there) · table_tags · khata · table_ops · take_orders · parcel | manager tri-state + per-user | Access → Tablet / Manager → Settings → Access |
 | Module: table types + khata (mig 166) | FULL ladder (reference implementation) | Access → Modules |
 | Module: banquet (migs 130 + 167) | FULL ladder | Access → Modules |
 | Module: Table & KOT operations — the KOT ▾ menu: change table, merge tables, move a KOT/dish, split bill, reprint (migs 172-177) | FULL ladder; when off, the classic ⇄ Shift renders instead | Access → Modules |
