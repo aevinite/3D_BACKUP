@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { splitBrandSegments, stripBrandMarkers } from "@/lib/brandText";
 import { openRestaurantPanel } from "@/components/admin/shared";
 import RestaurantReport from "@/components/admin/RestaurantReport";
+import RestaurantSettings from "@/components/admin/RestaurantSettings";
 import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
 import { useBackClose } from "@/lib/backStack";
 import { useToast } from "@/components/admin/toast";
@@ -912,6 +913,10 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // A tiny toast so a failed toggle tells the admin instead of silently snapping back
   // (or, worse, getting stuck showing the wrong ON/OFF state). Mirrors the Access page.
   const [toast, setToast] = useState<string | null>(null);
+  // Overview vs ⚙ Settings tab (owner 2026-07-26): information & actions stay on
+  // Overview; everything configurable (features, review, branding, billing, KOT,
+  // sessions, tables & QR) lives together under Settings.
+  const [tab, setTab] = useState<"overview" | "settings">("overview");
   // Stable (useCallback) so the loaders below can list it as a dep without refetching every render.
   const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); }, []);
 
@@ -947,8 +952,16 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       u.searchParams.delete("section");
       window.history.replaceState(history.state, "", u.pathname + u.search);
     } catch {}
-    const el = document.getElementById(`det-${section}`);
-    if (el) requestAnimationFrame(() => el.scrollIntoView({ block: "start", behavior: "smooth" }));
+    // Sections that moved into the ⚙ Settings tab: switch the tab first, then scroll
+    // once that tab's cards have rendered (one tick later).
+    const inSettings = ["review", "main-features", "branding", "billing", "kitchen", "sessions", "tables"].includes(section);
+    if (inSettings) setTab("settings");
+    const scroll = () => {
+      const el = document.getElementById(`det-${section}`);
+      if (el) el.scrollIntoView({ block: "start", behavior: "smooth" });
+    };
+    if (inSettings) setTimeout(scroll, 120);
+    else requestAnimationFrame(scroll);
   }, []);
 
   // These loaders now announce a failure (flash) instead of silently swallowing it — a failed
@@ -1074,37 +1087,73 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         </div>
       </div>
 
-      <RestaurantTickets restaurantId={restaurant.id} />
-
-      <div id="det-status"><StatusCard restaurant={restaurant} /></div>
-
-      <div id="det-owner"><OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} /></div>
-
-      <div id="det-branding"><BrandingCard restaurant={restaurant} /></div>
-
-      <div id="det-enter"><EnterCard restaurant={restaurant} panels={panels} /></div>
-
-      {/* Google review + Main features sit together near the bottom (owner 2026-07-26): the
-          green mode/toggle cards share one visual language, just above the Access link. */}
-      <div id="det-review"><GoogleReviewCard restaurant={restaurant} /></div>
-
-      <div id="det-main-features"><QuickFeaturesCard restaurant={restaurant} /></div>
-
-      {/* Panels, guest features, auto-print/banquet allow, manager powers, tablet caps and
-          per-person overrides ALL live in the ONE Access & permissions panel now (owner
-          2026-07-24: "merge the two systems"). A single link = single source of truth, and no
-          stale duplicate toggles (the duplicates are what left scroll-spy showing after we removed it). */}
-      <div id="det-access-link" className="adm-card" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <div style={{ fontWeight: 800, fontSize: 15 }}>Panels, features &amp; permissions</div>
-          <p className="hint" style={{ margin: "3px 0 0" }}>Which staff apps this restaurant has · its guest-menu features · special features (banquet, auto-print…) · manager powers · tablet capabilities · per-person overrides — all in one place.</p>
-        </div>
-        <a className="adm-btn primary" href={`/aevinite/access?rid=${restaurant.id}&from=rest`}>
-          <i className="fas fa-user-shield" style={{ marginRight: 7 }} aria-hidden="true" />Open Access &amp; permissions
-        </a>
+      {/* Overview vs ⚙ Settings (owner 2026-07-26): "normal information" stays on Overview;
+          everything changeable — features, Google review, branding, billing, KOT printing,
+          dining sessions, tables & QR — lives together under Settings. */}
+      <div className="adm-dettabs" role="tablist" aria-label="Restaurant detail tabs">
+        <button role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "on" : ""} onClick={() => setTab("overview")}>
+          <i className="fas fa-gauge" aria-hidden="true" style={{ marginRight: 7 }} />Overview
+        </button>
+        <button role="tab" aria-selected={tab === "settings"} className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>
+          <i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 7 }} />Settings
+        </button>
       </div>
 
-      <DangerCard restaurant={restaurant} onDeleted={onBack} onChanged={onChanged} />
+      {tab === "overview" ? (
+        <>
+          <RestaurantTickets restaurantId={restaurant.id} />
+
+          <div id="det-status"><StatusCard restaurant={restaurant} /></div>
+
+          <div id="det-owner"><OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} /></div>
+
+          <div id="det-enter"><EnterCard restaurant={restaurant} panels={panels} /></div>
+
+          {/* Panels, guest features, manager powers, tablet caps and per-person overrides ALL
+              live in the ONE Access & permissions panel (owner 2026-07-24: "merge the two
+              systems"). A single link = single source of truth, no stale duplicate toggles. */}
+          <div id="det-access-link" className="adm-card" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <div style={{ fontWeight: 800, fontSize: 15 }}>Panels, features &amp; permissions</div>
+              <p className="hint" style={{ margin: "3px 0 0" }}>Which staff apps this restaurant has · its guest-menu features · special features (banquet, auto-print…) · manager powers · tablet capabilities · per-person overrides — all in one place.</p>
+            </div>
+            <a className="adm-btn primary" href={`/aevinite/access?rid=${restaurant.id}&from=rest`}>
+              <i className="fas fa-user-shield" style={{ marginRight: 7 }} aria-hidden="true" />Open Access &amp; permissions
+            </a>
+          </div>
+
+          <DangerCard restaurant={restaurant} onDeleted={onBack} onChanged={onChanged} />
+        </>
+      ) : (
+        <>
+          {/* Quick jump chips — scrollable on phones, so any section is one tap away. */}
+          <div className="adm-setchips" aria-label="Jump to a settings section">
+            {([
+              ["det-main-features", "fa-toggle-on", "Features"],
+              ["det-review", "fa-star", "Google review"],
+              ["det-branding", "fa-palette", "Branding"],
+              ["det-billing", "fa-file-invoice", "Billing"],
+              ["det-kitchen", "fa-print", "KOT printing"],
+              ["det-sessions", "fa-qrcode", "Sessions"],
+              ["det-tables", "fa-chair", "Tables & QR"],
+            ] as const).map(([id, icon, label]) => (
+              <button key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" })}>
+                <i className={`fas ${icon}`} aria-hidden="true" />{label}
+              </button>
+            ))}
+          </div>
+
+          <div id="det-main-features"><QuickFeaturesCard restaurant={restaurant} /></div>
+
+          <div id="det-review"><GoogleReviewCard restaurant={restaurant} /></div>
+
+          <div id="det-branding"><BrandingCard restaurant={restaurant} /></div>
+
+          {/* Billing · KOT printing · Dining sessions · Tables & QR — the four sections moved
+              from the manager panel (same fields, admin skin). */}
+          <RestaurantSettings restaurant={{ id: restaurant.id, slug: restaurant.slug, name: restaurant.name }} />
+        </>
+      )}
     </>
   );
 }

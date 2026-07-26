@@ -406,3 +406,17 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
   DB recompute 17 = board API 17 = rendered tickets 17; kitchen order confirmed on its
   table in the tablet; 0 console errors. Owner invokes: `/bug-test manager` (etc.),
   one target per session, up to ~7 parallel sessions.
+
+## 2026-07-26 — Admin restaurant detail: Overview/Settings tabs + settings moved from manager
+- [x] Restaurant detail split into **Overview** (tickets, status, owner, open-as, access link,
+  danger zone) + **⚙ Settings** tab (Features, Google review, Branding, Billing, KOT printing,
+  Dining sessions, Tables & QR) with sticky jump chips + floating save bar. (PR: admin-restaurant-settings)
+- [x] Billing / KOT / Dining-session / Tables sections rebuilt in admin, field-for-field the
+  same as the manager panel (owner-approved mock), writing the same settings columns.
+- [x] Permanent per-table QR codes (mig 210): private random code per table, guest link `/q/<code>`,
+  ⬇ QR download + print sheet + ↻ regenerate; wrong/retired codes show a friendly dead page,
+  never another table. `/q` pages pin the tab's tenant (scoped storage fix).
+- [ ] **AWAITING OWNER APPROVAL of the admin tab live** → then remove from the manager panel:
+  Billing section, Kitchen (KOT) section, "Number of tables" card, "Guest QR links" card
+  (manager keeps: table name+seats, auto close/restart) + drop the Kitchen group from admin Access.
+- [ ] After removal: verify owner /owner/menu embed exposes no Billing/Kitchen settings.

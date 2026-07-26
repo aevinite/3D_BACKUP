@@ -62,7 +62,7 @@ const DIETS = [
 const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
 
 // This is the menu page, shown at "/menu". It's the main browsing screen.
-export default function MenuView({ restaurantId, restaurantSlug, restaurantName, logoText, heroTitle, tagline, accentColor, theme, logoUrl }: { restaurantId: string; restaurantSlug?: string; restaurantName?: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string; theme?: Record<string, unknown>; logoUrl?: string }) {
+export default function MenuView({ restaurantId, restaurantSlug, restaurantName, logoText, heroTitle, tagline, accentColor, theme, logoUrl, qrTable }: { restaurantId: string; restaurantSlug?: string; restaurantName?: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string; theme?: Record<string, unknown>; logoUrl?: string; qrTable?: string }) {
   // Restaurant #1 keeps its exact current chrome (localized hero, hardcoded
   // wordmark, theme accent); other restaurants get their own brand.
   const isDefault = restaurantId === DEFAULT_RESTAURANT_ID;
@@ -115,10 +115,15 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // at the end means "only on first load").
   useEffect(() => {
     try {
-      // Read the bits after "?" in the web address.
-      const params = new URLSearchParams(window.location.search);
-      // Accept either ?table=5 or ?t=5.
-      const raw = params.get("table") || params.get("t");
+      // A /q/<code> page already resolved the table SERVER-SIDE from the private
+      // code (mig 210) — use that and skip the URL entirely (there's no ?table= to
+      // read, and none for a guest to edit).
+      const raw = qrTable || (() => {
+        // Read the bits after "?" in the web address.
+        const params = new URLSearchParams(window.location.search);
+        // Accept either ?table=5 or ?t=5.
+        return params.get("table") || params.get("t");
+      })();
       // Keep only the digits (strip anything that isn't a number).
       const digits = (raw || "").replace(/\D/g, "");
       if (digits) {
@@ -126,7 +131,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         window.dispatchEvent(new Event("lfh:table-scanned"));   // tell the app
       }
     } catch {}  // if anything goes wrong, just carry on without a table number
-  }, []);
+  }, [qrTable]);
 
   // Category bar — ONLY the real food categories (Chef's Special + Favorites
   // moved into the filter row as tag/heart filters; they're no longer tabs).
