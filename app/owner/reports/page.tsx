@@ -394,6 +394,11 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   // day/month → hourly/daily), so a single-bar period fills out. KPI cards + the
   // GST-style tables keep using the daily `mrows`/`bucket` untouched.
   const chartBucket = data.drillBucket || bucket;
+  // The "best/worst" panels + "busiest …" labels describe the CHART series, which may
+  // be auto-drilled (a single day → hourly). Label them by the CHART's grain, not the
+  // un-drilled window — otherwise a single day's hourly chart reads "Best DAY: 1 pm"
+  // instead of "Best HOUR: 1 pm" (owner round-6, phase-4 review).
+  const chartUnit: "month" | "hour" | "day" = chartBucket === "month" ? "month" : chartBucket === "hour" ? "hour" : "day";
   const drillRows = (data.drillRows as MoneyRow[] | undefined) ?? [];
   const chartRows = drillRows.length ? drillRows : mrows;
   const cser = (pick: (r: MoneyRow) => number) => chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), value: pick(r) }));
@@ -474,7 +479,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
             <BestWorst
               series={series.map((s) => ({ label: s.label, value: s.revenue }))}
               money noun="income"
-              unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+              unit={chartUnit}
             />
             <Panel title="Revenue through the period" pad={false}>
               <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={220} /></div>
@@ -504,7 +509,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           <BestWorst
             series={series.map((s) => ({ label: s.label, value: s.revenue }))}
             money noun="revenue"
-            unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+            unit={chartUnit}
           />
         )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
@@ -533,8 +538,8 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           <BestWorst
             series={avgSeries.map((s) => ({ label: s.label, value: s.revenue }))}
             money noun="basket size"
-            title={`Fullest & thinnest ${bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}`}
-            unit={bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day"}
+            title={`Fullest & thinnest ${chartUnit}`}
+            unit={chartUnit}
           />
         )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} showAvg />
@@ -549,7 +554,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
     const placed = t.orders + t.cancelledOrders;
     const paidPct = placed ? (t.paidOrders / placed) * 100 : 0;
     const openOrders = Math.max(0, t.orders - t.paidOrders);   // placed, not cancelled, not yet paid
-    const unitWord = bucket === "month" ? "month" : bucket === "hour" ? "hour" : "day";
+    const unitWord = chartUnit;
     return (
       <>
         <div className="rs-kpis">
