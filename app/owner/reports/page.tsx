@@ -22,14 +22,21 @@ import {
 import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
 import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
 
-type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy";
+type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy" | "all" | "custom";
 const RANGES: { k: Range; label: string }[] = [
   { k: "today", label: "Today" }, { k: "yesterday", label: "Yesterday" },
   { k: "7d", label: "7 days" }, { k: "30d", label: "30 days" },
   { k: "month", label: "This month" }, { k: "lastmonth", label: "Last month" },
   { k: "12m", label: "12 months" }, { k: "fy", label: "FY (Apr–Mar)" },
+  { k: "all", label: "All time" }, { k: "custom", label: "Custom…" },
 ];
 const rangeLabel = (r: Range) => RANGES.find((x) => x.k === r)?.label ?? r;
+// A "Day summary" is inherently ONE day — it must NOT carry a 7d/30d toggle (owner
+// round-6). These report kinds get a single-DATE control instead of the range seg;
+// under the hood a chosen day is fetched as range=custom with from=to=that day.
+const DAY_KINDS = new Set<DataKind>(["daysummary"]);
+const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+const yesterdayIso = () => new Date(Date.now() + 5.5 * 3600_000 - 86_400_000).toISOString().slice(0, 10);
 
 type Rest = { id: string; name: string; accent: string };
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
@@ -124,6 +131,9 @@ export default function OwnerReports() {
     if (open) setSel(open as RKey);
   }, []);
   const [range, setRange] = useState<Range>("30d");
+  const [day, setDay] = useState<string>(istToday());          // Day summary's single date
+  const [cFrom, setCFrom] = useState<string>(istToday());       // Custom range from…
+  const [cTo, setCTo] = useState<string>(istToday());           // …to
   const [store, setStore] = useState<Record<string, Entry>>({});
 
   // Admin act-as scope pin (mirrors app/owner/page.tsx): rides on every call so a second
@@ -152,16 +162,27 @@ export default function OwnerReports() {
     }).catch(() => setReady(true));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cacheKey = (kind: DataKind, r: string, rg: Range) => `${kind}|${r}|${rg}`;
+  // The effective backend window for the ACTIVE report: a day-kind report is always a
+  // single day (range=custom, from=to=day); a report on the "Custom…" range uses the
+  // date pickers; everything else is the plain named range.
+  const effFor = (kind: DataKind, rg: Range): { range: Range; from?: string; to?: string } =>
+    DAY_KINDS.has(kind) ? { range: "custom", from: day, to: day }
+    : rg === "custom" ? { range: "custom", from: cFrom, to: cTo }
+    : { range: rg };
+  const cacheKey = (kind: DataKind, r: string, rg: Range) => {
+    const e = effFor(kind, rg);
+    return `${kind}|${r}|${e.range}${e.from ? `|${e.from}|${e.to}` : ""}`;
+  };
   // A key is fetched at most once (period/rid/kind combos are stable) — dedup via a ref so
   // React StrictMode's double-invoke can't double-fetch, and no stale `store` closure.
   const started = useRef<Set<string>>(new Set());
-  const ensure = useCallback((kind: DataKind, r: string, rg: Range) => {
-    const ck = `${kind}|${r}|${rg}`;
+  const ensure = useCallback((kind: DataKind, r: string, rg: Range, eff: { range: Range; from?: string; to?: string }) => {
+    const ck = `${kind}|${r}|${eff.range}${eff.from ? `|${eff.from}|${eff.to}` : ""}`;
     if (started.current.has(ck)) return;
     started.current.add(ck);
     setStore((s) => ({ ...s, [ck]: { loading: true } }));
-    const q = new URLSearchParams({ type: apiType(kind), range: rg });
+    const q = new URLSearchParams({ type: apiType(kind), range: eff.range });
+    if (eff.from) { q.set("from", eff.from); q.set("to", eff.to as string); }
     if (r) q.set("rid", r);
     if (scopePin) q.set("scope", scopePin);
     fetch(`/api/owner/reports?${q}`, { cache: "no-store" })
@@ -177,7 +198,17 @@ export default function OwnerReports() {
   }, [scopePin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeKind: DataKind = sel ? REPORTS[sel].kind : "money";
-  useEffect(() => { if (ready) ensure(activeKind, rid, range); }, [ready, activeKind, rid, range, ensure]);
+  const isDayKind = DAY_KINDS.has(activeKind);
+  const fdate = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const effLabel = isDayKind ? fdate(day) : range === "custom" ? `${fdate(cFrom)} – ${fdate(cTo)}` : rangeLabel(range);
+  const isCustom = !isDayKind && range === "custom";
+  const customOk = !isCustom || (cFrom <= cTo && !!cFrom && !!cTo);
+  useEffect(() => {
+    if (!ready) return;
+    if (isCustom && !customOk) return;                      // wait for a valid custom range
+    ensure(activeKind, rid, range, effFor(activeKind, range));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, activeKind, rid, range, day, cFrom, cTo, ensure]);
 
   const entry = store[cacheKey(activeKind, rid, range)];
   const data = entry?.data;
@@ -191,7 +222,8 @@ export default function OwnerReports() {
     if (!sel || !data) return;
     const meta = REPORTS[sel];
     const stamp = new Date().toISOString().slice(0, 10);
-    const name = `${meta.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${range}-${stamp}.csv`;
+    const win = isDayKind ? day : range === "custom" ? `${cFrom}_${cTo}` : range;
+    const name = `${meta.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${win}-${stamp}.csv`;
     const m = (data.rows ?? []) as MoneyRow[];
     const t = data.totals;
     if (meta.kind === "money" || meta.kind === "daysummary") {
@@ -238,11 +270,27 @@ export default function OwnerReports() {
             {rests.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         )}
-        <div className="rs-seg" role="tablist" aria-label="Period">
-          {RANGES.map((r) => (
-            <button key={r.k} role="tab" aria-selected={range === r.k} className={range === r.k ? "on" : ""} onClick={() => setRange(r.k)}>{r.label}</button>
-          ))}
-        </div>
+        {/* Day summary is ONE day → a date control, never a 7d/30d toggle (owner round-6). */}
+        {isDayKind ? (
+          <div className="rs-seg" role="group" aria-label="Day">
+            <button aria-pressed={day === istToday()} className={day === istToday() ? "on" : ""} onClick={() => setDay(istToday())}>Today</button>
+            <button aria-pressed={day === yesterdayIso()} className={day === yesterdayIso() ? "on" : ""} onClick={() => setDay(yesterdayIso())}>Yesterday</button>
+            <input type="date" className="rs-date" value={day} max={istToday()} onChange={(e) => setDay(e.target.value)} aria-label="Pick a date" />
+          </div>
+        ) : (
+          <div className="rs-seg" role="tablist" aria-label="Period">
+            {RANGES.map((r) => (
+              <button key={r.k} role="tab" aria-selected={range === r.k} className={range === r.k ? "on" : ""} onClick={() => setRange(r.k)}>{r.label}</button>
+            ))}
+          </div>
+        )}
+        {isCustom && (
+          <div className="rs-custom">
+            <input type="date" className="rs-date" value={cFrom} max={cTo} onChange={(e) => setCFrom(e.target.value)} aria-label="From date" />
+            <i className="fas fa-arrow-right" aria-hidden />
+            <input type="date" className="rs-date" value={cTo} min={cFrom} max={istToday()} onChange={(e) => setCTo(e.target.value)} aria-label="To date" />
+          </div>
+        )}
         {sel && (
           <div className="rs-actions">
             <button className="rs-btn" onClick={exportCsv} disabled={!data} title="Download this report as a CSV (Excel/Sheets)">
@@ -256,10 +304,10 @@ export default function OwnerReports() {
       </div>
 
       {!sel ? (
-        <Hub range={range} money={store[cacheKey("money", rid, range)]} restName={restName} accent={accent} onOpen={setSel} />
+        <Hub range={range} money={entry} restName={restName} accent={accent} onOpen={setSel} />
       ) : (
         <ReportView sel={sel} data={data} loading={entry?.loading} error={entry?.error}
-          range={range} accent={accent} restName={restName} singleRest={singleRest}
+          range={range} rangeText={effLabel} accent={accent} restName={restName} singleRest={singleRest}
           onOpenReport={(k) => setSel(k)} />
       )}
     </div>
@@ -328,19 +376,19 @@ function Hub({ range, money, restName, accent, onOpen }: {
 }
 
 // ── The report view (title + loading/error, delegates body) ───────────────────
-function ReportView({ sel, data, loading, error, range, accent, restName, singleRest, onOpenReport }: {
+function ReportView({ sel, data, loading, error, range, rangeText, accent, restName, singleRest, onOpenReport }: {
   sel: RKey; data?: Payload; loading?: boolean; error?: string;
-  range: Range; accent: string; restName: string; singleRest: boolean;
+  range: Range; rangeText: string; accent: string; restName: string; singleRest: boolean;
   onOpenReport: (k: RKey) => void;
 }) {
   const meta = REPORTS[sel];
   const tone = meta.tone || "accent";
   return (
     <div className={`rs-report tone-${tone}`} id="rs-print">
-      <PrintHead restName={restName} title={meta.label} period={rangeLabel(range)} />
+      <PrintHead restName={restName} title={meta.label} period={rangeText} />
       <div className="rs-rtitle">
         <span className="cic"><i className={`fas ${meta.icon}`} aria-hidden /></span>
-        <div><h2>{meta.label}</h2><div className="scope">{restName} · {rangeLabel(range)}</div></div>
+        <div><h2>{meta.label}</h2><div className="scope">{restName} · {rangeText}</div></div>
       </div>
       {error ? (
         <Panel><div className="rs-empty"><i className="fas fa-triangle-exclamation" aria-hidden />{error}</div></Panel>
