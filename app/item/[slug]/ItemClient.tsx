@@ -701,7 +701,11 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           <span className="detail-price" id="detail-price">{currency ? formatPrice(item.price, currency) : `$${item.price}`}</span>
         </div>
 
-        {/* The nutrition stats row: calories, protein, carbs, sugar. */}
+        {/* The nutrition stats row: calories, protein, carbs, sugar. Only shown when the
+            dish actually HAS nutrition data — restaurants that don't fill it in were
+            getting four empty labelled boxes that read as a broken page (sweep MENU1). */}
+        {[item.nutrition?.calories, item.nutrition?.protein, item.nutrition?.carbs, item.nutrition?.sugar]
+          .some((v) => v != null && String(v).trim() !== "" && String(v).trim() !== "—") && (
         <div className="stats-row" id="stats-row">
           <div className="stat-box">
             <div className="stat-num">{item.nutrition.calories}</div>
@@ -720,8 +724,13 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
             <div className="stat-label">{t.sugar}</div>
           </div>
         </div>
+        )}
 
-        {/* The "About this dish" section. */}
+        {/* The "About this dish" section — only when there's a description to show, so a
+            restaurant with no description doesn't render an empty labelled card (MENU1).
+            (Ingredients/allergens live inside and are only reachable via this section's
+            Read-more, so hiding it when empty loses nothing.) */}
+        {!!(item.longDescription && item.longDescription.trim()) && (<>
         <div className="section-label">{t.aboutDish}</div>
         <div className="desc-box">
           {/* The description. The "expanded" class shows the full text. */}
@@ -777,6 +786,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
             </>
           )}
         </div>
+        </>)}
 
         {/* The action buttons: Add to Cart, plus View in 3D (or a disabled
             placeholder when this dish has no 3D model). */}
