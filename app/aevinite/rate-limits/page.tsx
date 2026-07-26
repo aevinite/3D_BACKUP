@@ -11,6 +11,7 @@ import { timeAgo } from "@/components/admin/shared";
 
 type Rule = { id: string; key: string; label: string; max_count: number; window_seconds: number; enabled: boolean; updated_at: string };
 type Hit = { id: string; restaurant_id: string; restaurant_name: string | null; key: string; subject: string; subject_label: string | null; hit_count: number; max_count: number; window_seconds: number; last_at: string };
+type Blocked = { key: string; ip: string; note: string | null; since: string };
 
 const uuid = () => (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now()) + Math.random();
 
@@ -25,16 +26,18 @@ export default function AdminRateLimits() {
   const toast = useToast();
   const [rules, setRules] = useState<Rule[]>([]);
   const [hits, setHits] = useState<Hit[]>([]);
+  const [blocked, setBlocked] = useState<Blocked[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<Record<string, { max_count: number; window_seconds: number }>>({});
   const [busy, setBusy] = useState<string>("");
 
   const load = useCallback(async () => {
     setLoading(true);
-    const r = await adminFetch<{ rules: Rule[]; events: Hit[] }>("/api/admin/rate-limits");
+    const r = await adminFetch<{ rules: Rule[]; events: Hit[]; blocked: Blocked[] }>("/api/admin/rate-limits");
     if (r.ok) {
       setRules(r.data.rules || []);
       setHits(r.data.events || []);
+      setBlocked(r.data.blocked || []);
       const d: Record<string, { max_count: number; window_seconds: number }> = {};
       for (const x of r.data.rules || []) d[x.id] = { max_count: x.max_count, window_seconds: x.window_seconds };
       setDraft(d);
@@ -69,6 +72,22 @@ export default function AdminRateLimits() {
       body: JSON.stringify({ action: "dismiss", event_id: h.id }),
     });
     if (!res.ok) { toast(res.error || "Couldn't dismiss.", "err"); load(); }
+  };
+  const blockHit = async (h: Hit) => {
+    const res = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "block", event_id: h.id }),
+    });
+    if (res.ok) { setHits((prev) => prev.filter((x) => x.id !== h.id)); toast("Blocked from the admin panel."); load(); }
+    else toast(res.error || "Couldn't block.", "err");
+  };
+  const unblock = async (b: Blocked) => {
+    setBlocked((prev) => prev.filter((x) => x.key !== b.key));
+    const res = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "unblock", key: b.key }),
+    });
+    if (res.ok) toast("Unblocked."); else { toast(res.error || "Couldn't unblock.", "err"); load(); }
   };
   const fixHit = async (h: Hit) => {
     const res = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
@@ -112,12 +131,20 @@ export default function AdminRateLimits() {
                 </div>
                 <div className="adm-muted" style={{ fontSize: 12.5 }}>Who: <b style={{ color: "var(--text)" }}>{h.subject_label || h.subject}</b></div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9 }}>
-                  <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => allowHit(h)} title="This was a real customer — reset their counter so they get through now">
-                    <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Allow (reset)
-                  </button>
-                  <a className="adm-btn" style={{ fontSize: 12 }} href={`#rule-${h.key}`} title="Jump to this limit's setting to raise or lower it">
-                    <i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Change limit
-                  </a>
+                  {h.key === "admin_login" ? (
+                    <button className="adm-btn danger" style={{ fontSize: 12 }} onClick={() => blockHit(h)} title="Bar this device/IP from reaching the admin panel">
+                      <i className="fas fa-ban" aria-hidden="true" style={{ marginRight: 6 }} />Block this device
+                    </button>
+                  ) : (
+                    <>
+                      <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => allowHit(h)} title="This was a real customer — reset their counter so they get through now">
+                        <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Allow (reset)
+                      </button>
+                      <a className="adm-btn" style={{ fontSize: 12 }} href={`#rule-${h.key}`} title="Jump to this limit's setting to raise or lower it">
+                        <i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Change limit
+                      </a>
+                    </>
+                  )}
                   <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => fixHit(h)} title="Hand it to Claude to investigate">
                     <i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 6 }} />Fix
                   </button>
@@ -127,6 +154,30 @@ export default function AdminRateLimits() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Blocked devices (barred from the admin panel) */}
+      {blocked.length > 0 && (
+        <>
+          <div className="rl-sec">
+            <i className="fas fa-ban" aria-hidden="true" style={{ color: "var(--adm-danger)" }} />
+            <h2>Blocked from the admin panel</h2>
+            <span className="rl-chip danger">{blocked.length}</span>
+          </div>
+          <div className="adm-card" style={{ marginBottom: 12 }}>
+            {blocked.map((b) => (
+              <div key={b.key} className="rl-rule">
+                <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                  <b style={{ fontSize: 13.5 }}>{b.note || b.ip}</b>
+                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{b.ip}</div>
+                </div>
+                <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => unblock(b)} title="Let this device reach the admin panel again">
+                  <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Unblock
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Rules — the limits themselves */}

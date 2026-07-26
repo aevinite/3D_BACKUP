@@ -254,6 +254,15 @@ export default function AdminRepair() {
     });
     if (r.ok) toast("Sent to Claude for the 2:30 AM robot."); else toast(r.error || "Couldn't send.", "err");
   };
+  // Block the device/IP behind an admin-login alert from reaching the admin panel (owner 2026-07-26).
+  const rlBlock = async (h: RlHit) => {
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "block", event_id: h.id }),
+    });
+    if (r.ok) { setRlHits((prev) => prev.filter((x) => x.id !== h.id)); toast("Blocked — that device can no longer reach the admin panel."); }
+    else toast(r.error || "Couldn't block that.", "err");
+  };
 
   // Resolve / reopen a complaint (admin is in scope for every restaurant). Optimistic flip.
   const setTicketStatus = async (id: string, status: "resolved" | "open") => {
@@ -419,12 +428,21 @@ export default function AdminRepair() {
                 </div>
                 <div className="adm-muted" style={{ fontSize: 12.5 }}>Who: <b style={{ color: "var(--text)" }}>{h.subject_label || h.subject}</b></div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>
-                  <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => rlAllow(h)} title="Real customer — reset their counter so they get through now">
-                    <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Allow
-                  </button>
-                  <Link className="adm-btn" style={{ fontSize: 12 }} href={`/aevinite/rate-limits#rule-${h.key}`} title="Change this limit">
-                    <i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Change rate limit
-                  </Link>
+                  {h.key === "admin_login" ? (
+                    // Admin-login alert: the headline action is to BLOCK that device from the panel.
+                    <button className="adm-btn danger" style={{ fontSize: 12 }} onClick={() => rlBlock(h)} title="Bar this device/IP from reaching the admin panel">
+                      <i className="fas fa-ban" aria-hidden="true" style={{ marginRight: 6 }} />Block this device
+                    </button>
+                  ) : (
+                    <>
+                      <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => rlAllow(h)} title="Real customer — reset their counter so they get through now">
+                        <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Allow
+                      </button>
+                      <Link className="adm-btn" style={{ fontSize: 12 }} href={`/aevinite/rate-limits#rule-${h.key}`} title="Change this limit">
+                        <i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Change rate limit
+                      </Link>
+                    </>
+                  )}
                   <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => rlFix(h)} title="Hand it to Claude to investigate">
                     <i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 6 }} />Fix
                   </button>
