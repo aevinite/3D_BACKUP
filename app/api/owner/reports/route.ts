@@ -19,7 +19,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct } from "@/lib/tax";
-import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint } from "@/lib/ownerCache";
+import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 
 export const dynamic = "force-dynamic";
 
@@ -174,11 +174,17 @@ export async function GET(req: NextRequest) {
   const cacheKey = `reports:v1:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : range}`;
   const force = sp.get("refresh") === "1";
   const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
+  // Money reports at month bucket read the monthly rollup (mig 201), so their cheap
+  // change-detector (mig 202) is valid — it derives the same signal from rollup + the
+  // current-month tail (~35ms) instead of a ~9.5s full scan. Dishes/categories/hourly scan
+  // live orders, so they keep the full fingerprint (must still catch edits to old orders).
+  const moneyType = type === "sales" || type === "tax" || type === "discounts" || type === "cancellations" || type === "daysummary";
+  const useMonthFp = bucket === "month" && moneyType;
 
   try {
     const payload = await cachedOwnerPayload({
       key: cacheKey, force,
-      fingerprint: () => ordersFingerprint(fpIds, from, to),
+      fingerprint: () => (useMonthFp ? reportMonthFingerprint(fpIds, from, to) : ordersFingerprint(fpIds, from, to)),
       compute: async () => {
     // ── money reports: one bucketed summary drives sales/tax/discounts/cancellations ──
     // The "daysummary" report reads the SAME money payload and additionally bundles the

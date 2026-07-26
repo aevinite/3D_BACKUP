@@ -114,3 +114,14 @@ export async function ordersFingerprint(ids: string[] | null, from: string, to: 
   if (error) return null;
   return typeof data === "string" ? data : null;
 }
+
+// Cheaper change-detector for WIDE, MONTH-bucket MONEY reports (mig 202). Derives the same
+// "<count>:<max-activity>" string from the monthly rollup + current-month tail (~35ms) rather
+// than scanning all ~398k orders (~9.5s). ONLY valid where the report reads that rollup
+// (month bucket + a money report); dishes/categories/hourly still use ordersFingerprint so an
+// edit to an OLD order is still detected. Same null-on-error contract (treat as changed).
+export async function reportMonthFingerprint(ids: string[] | null, from: string, to: string): Promise<string | null> {
+  const { data, error } = await sb.rpc("lfh_owner_report_month_fingerprint", { p_ids: ids, p_from: from, p_to: to });
+  if (error) return null;
+  return typeof data === "string" ? data : null;
+}
