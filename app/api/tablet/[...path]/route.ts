@@ -481,8 +481,19 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_place_order", {
         p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
         p_restaurant_id: rid,
+        // Pass the "send anyway" flag through: the RPC now runs the double-tap guard
+        // ATOMICALLY under a per-table lock (mig 202), which is what actually catches two
+        // truly-simultaneous identical sends (the pre-check above races). confirmDuplicate
+        // bypasses both layers for a deliberate re-send.
+        p_confirm_duplicate: body?.confirmDuplicate === true,
       });
       if (error) throw new Error(error.message);
+      // The RPC's atomic guard fired (a concurrent identical order beat this one): surface it
+      // as the SAME overridable warning shape the client already handles (send anyway → retry
+      // with confirmDuplicate:true), instead of returning it as a success.
+      if (data && (data as { duplicateWarning?: boolean }).duplicateWarning === true) {
+        return NextResponse.json({ error: (data as { error?: string }).error || "This looks identical to an order you just sent.", duplicateWarning: true }, { status: 409 });
+      }
       // A WAITER placed this on the tablet, so it's already confirmed — skip the
       // kitchen "accept" step and push it straight onto the pass as "preparing"
       // (same effect as orders/:id/accept). Guest/head orders still arrive as
