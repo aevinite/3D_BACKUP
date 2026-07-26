@@ -391,3 +391,5 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
 - [x] **Fix 2 — manager Log tab hides when `view_logs` revoked.** Added `{tab:"log", flag:"view_logs"}` to editor `XRAY_TABS`; view_logs is absent-means-ON so non-breaking. Verified: manager sees it by default, hidden when off, admin act-as sees it tinted (usable).
 - [x] **Fix 3 — phone header squeeze.** `@media(max-width:560px)` stacks the ladder-card header (title full-width, tag/toggle/chevron in a row below) + per-person cap rows. Verified at 360px: no horizontal scroll, title uses 89% of card width.
 - [ ] Independent work-checker PASS, then merge + live-verify.
+
+- [x] **Round 2 — manager Settings→Access missing parcel cap.** Added `tablet_parcel` to `ACCESS_CAPS` + its module-gate in `accessCapsFor()` (public/panels/editor/app.js). A manager can now set the waiter parcel cap + per-waiter parcel overrides from their own panel (was server-enforced + in admin/owner screens but absent here). Verified live: accessCapsFor() includes tablet_parcel when the module is on; Access section renders the row.
