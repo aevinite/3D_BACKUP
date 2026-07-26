@@ -13,10 +13,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, adminPassword } from "@/lib/staffAuth";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { throttleStatus, throttleFail, throttleReset, clientIp } from "@/lib/loginThrottle";
-import { rateAllowed } from "@/lib/rateLimit";
+import { recordAlert } from "@/lib/rateLimit";
 
-const ADMIN_MAX_FAILS = 10;             // wrong tries from one IP before a lockout
+const ADMIN_MAX_FAILS = 10;             // wrong tries from one IP before a temporary lockout
 const ADMIN_LOCK_MS = 5 * 60 * 1000;    // lockout length (5 minutes)
+const ADMIN_ALERT_AT = 3;               // after N wrong tries → notify the admin (never locks them)
 const MAX_PASSWORD_LEN = 200;           // reject oversize input outright
 
 export async function POST(req: NextRequest) {
@@ -46,18 +47,17 @@ export async function POST(req: NextRequest) {
     return bad({ locked: true });
   }
 
-  // Configurable admin-login limit (mig 205) — ships DISABLED so the owner is never locked out
-  // of the god-panel; a no-op unless the admin deliberately turns 'admin_login' on. Separate from
-  // the IP lockout above, which stays as the always-on backstop.
-  if (!(await rateAllowed("admin_login", `admin:${ip}`, { label: `admin password from ${ip}` }))) {
-    await logAction("admin", "rate_limited", { device_id: dev, detail: `admin login rate limit reached from ${ip}` });
-    return bad({ locked: true });
-  }
-
   const expected = adminPassword();
   if (!expected || password.length > MAX_PASSWORD_LEN || password !== expected) {
     const t = await throttleFail(throttleKey, ADMIN_MAX_FAILS, ADMIN_LOCK_MS);
     await logAction("admin", "login_failed", { device_id: dev, detail: `wrong admin password from ${ip}` });
+    // After N wrong tries from this device → raise a WARN-ONLY alert (mig 208) so the admin gets a
+    // notification + a Problems entry with a "Block this device" action. This NEVER locks the owner
+    // out — it only tells them someone is guessing. The 5-min IP lockout above stays as the backstop.
+    if (t.failCount >= ADMIN_ALERT_AT) {
+      const label = `Admin panel · ${ip}${dev ? ` · device ${dev.slice(0, 10)}` : ""}`;
+      await recordAlert("admin_login", ip, label, t.failCount);
+    }
     // Just locked by THIS miss → tell them it's locked; otherwise surface attempts left.
     return bad(t.locked ? { locked: true } : { attemptsLeft: t.attemptsLeft });
   }

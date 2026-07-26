@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
+import { throttleBlock, throttleUnblock, listBlocked, clientIp } from "@/lib/loginThrottle";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,10 @@ export async function GET(req: NextRequest) {
     for (const r of rs.data ?? []) names[r.id] = r.name;
   }
   const events = (ev.data ?? []).map((e) => ({ ...e, restaurant_name: names[e.restaurant_id] || null }));
-  return NextResponse.json({ rules: rules.data ?? [], events });
+  // Devices/IPs deliberately blocked from the admin panel (admin: keys, far-future lock).
+  const blockedRaw = await listBlocked("admin:");
+  const blocked = blockedRaw.map((b) => ({ key: b.key, ip: b.key.replace(/^admin:/, ""), note: b.note, since: b.locked_until }));
+  return NextResponse.json({ rules: rules.data ?? [], events, blocked });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -69,8 +73,31 @@ export async function POST(req: NextRequest) {
   let b: Record<string, unknown> = {};
   try { b = await req.json(); } catch { /* empty */ }
   const action = String(b.action || "");
+
+  // Unblock takes a login_throttle key, not an event id.
+  if (action === "unblock") {
+    const key = String(b.key || "");
+    if (!/^admin:/.test(key)) return err("invalid key");
+    await throttleUnblock(key);
+    await logAction("admin", "admin_unblock", { level: "info", detail: `admin-panel block lifted · ${key}` });
+    return NextResponse.json({ ok: true });
+  }
+
   const eventId = String(b.event_id || "");
   if (!UUID.test(eventId)) return err("invalid event_id");
+
+  // Block the device/IP behind an admin-login alert from reaching the admin panel.
+  if (action === "block") {
+    const e = (await sb.from("rate_limit_events").select("id, key, subject, subject_label").eq("id", eventId).maybeSingle()).data as { key: string; subject: string; subject_label: string | null } | null;
+    if (!e) return err("that alert no longer exists", 404);
+    if (e.key !== "admin_login") return err("blocking only applies to admin-login alerts");
+    // Safeguard: never let the admin block their OWN current IP (would lock themselves out).
+    if (e.subject && e.subject === clientIp(req)) return err("That's your own device — you can't block yourself.");
+    await throttleBlock(`admin:${e.subject}`, e.subject_label || `admin panel · ${e.subject}`);
+    await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId);
+    await logAction("admin", "admin_block", { level: "info", detail: `admin-panel access blocked for ${e.subject_label || e.subject}` });
+    return NextResponse.json({ ok: true });
+  }
 
   if (action === "allow") {
     // Reset that subject's counter now (unblock them) + mark the event handled.

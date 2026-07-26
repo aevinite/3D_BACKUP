@@ -37,3 +37,12 @@ export async function rateAllowed(
 export function subjectFor(name: string): string {
   return (name || "").trim().toLowerCase().slice(0, 120);
 }
+
+// Record a WARN-ONLY security event (no counter, no block) — used by the admin-login "N wrong
+// tries" alert so the admin gets a notification + Problems entry without ever being locked out.
+// Surfaces in the bell + Problems (both already read rate_limit_events). Best-effort.
+export async function recordAlert(key: string, subject: string, label: string, hitCount: number): Promise<void> {
+  try {
+    await supabaseAdmin.rpc("lfh_rate_alert", { p_key: key, p_subject: subject.slice(0, 200), p_label: label.slice(0, 200), p_hit: hitCount });
+  } catch { /* best-effort — never break login */ }
+}
