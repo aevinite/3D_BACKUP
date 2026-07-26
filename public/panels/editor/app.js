@@ -1162,7 +1162,7 @@ function userSettingCardHtml() {
     ? state.staffTeam.map((u) => `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 10px;border-radius:9px;background:var(--panel-2)${u.active ? "" : ";opacity:.6"}">
         <div style="display:flex;align-items:center;gap:9px;min-width:0">
-          <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:3px 8px;border-radius:999px;background:color-mix(in srgb, var(--gold) 18%, transparent);color:var(--gold-strong)">${esc(u.role)}</span>
+          <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:3px 8px;border-radius:999px;background:color-mix(in srgb, var(--text) 8%, transparent);color:var(--text)">${esc(u.role)}</span>
           <span style="font-weight:700;font-size:13.5px">${esc(u.name || u.username)}</span>
           ${u.active ? "" : `<span style="font-size:10.5px;color:var(--red);font-weight:700">disabled</span>`}
         </div>
@@ -1367,10 +1367,10 @@ function accessUsersCardHtml(s) {
     ? waiters.map((u) => `
       <div style="padding:10px 12px;border-radius:9px;background:var(--panel-2)${u.active ? "" : ";opacity:.6"}">
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
-          <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:3px 8px;border-radius:999px;background:color-mix(in srgb, var(--gold) 18%, transparent);color:var(--gold-strong)">${esc(u.role)}</span>
+          <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;padding:3px 8px;border-radius:999px;background:color-mix(in srgb, var(--text) 8%, transparent);color:var(--text)">${esc(u.role)}</span>
           <span style="font-weight:700;font-size:13.5px">${esc(u.name || u.username)}</span>
           ${u.active ? "" : `<span style="font-size:10.5px;color:var(--red);font-weight:700">disabled</span>`}
-          ${Object.keys(u.permissions || {}).length ? `<span style="font-size:10.5px;color:var(--gold-strong);font-weight:700" title="This person has their own settings">· custom</span>` : ""}
+          ${Object.keys(u.permissions || {}).length ? `<span style="font-size:10.5px;color:var(--text);font-weight:700" title="This person has their own settings">· custom</span>` : ""}
         </div>
         <div class="grid cols-3" style="gap:8px">${accessCapsFor().map((c) => selFor(u, c)).join("")}</div>
       </div>`).join("")
