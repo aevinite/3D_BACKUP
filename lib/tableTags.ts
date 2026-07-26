@@ -62,3 +62,9 @@ export const tableOpsLadder = (rid: string) =>
 // feature defaults to current behaviour, per docs/ACCESS-LADDER.md).
 export const takeOrdersLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "take_orders_allowed", control: "take_orders_owner_control", enabled: "take_orders_enabled" });
+
+// Parcel / takeaway quick-order — the 🥡 New Parcel button (manager + tablet), which
+// writes a takeaway order into the Platform system. A brand-new module (mig 197): every
+// rung starts OFF (unlike take_orders), so no restaurant gets it until the admin grants it.
+export const parcelLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "parcel_allowed", control: "parcel_owner_control", enabled: "parcel_enabled" });

@@ -2236,3 +2236,25 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
   box-shadow: var(--shadow-md); opacity: 0; pointer-events: none; transform: translateY(3px);
   transition: opacity .12s ease-out, transform .12s ease-out; }
 .lfh-tip.on { opacity: 1; transform: none; }
+
+/* ── Parcel / takeaway quick-order (2026-07-25) ─────────────────────────────── */
+/* Customer name/phone row in the parcel modal head (parcel mode only). */
+.to-cust { display: flex; gap: 8px; margin-top: 10px; }
+.to-cust input { flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--line);
+  color: var(--text); border-radius: 9px; padding: 9px 11px; font-size: 13px; font-weight: 500; }
+.to-cust input:focus { outline: none; border-color: var(--gold); }
+.to-cust .to-cust-phone { max-width: 44%; }
+/* Two pay buttons in the parcel footer (Pay now / Pay on pickup). */
+.to-pay { display: flex; gap: 8px; flex: 1; }
+.to-pay .btn { flex: 1; justify-content: center; white-space: nowrap; }
+/* Paid / unpaid pills + Collect button on the Platform board (takeaway only). */
+.plat-paid, .plat-unpaid { font-size: 10px; font-weight: 800; letter-spacing: .04em;
+  padding: 1px 7px; border-radius: 999px; }
+.plat-paid { background: color-mix(in srgb, var(--green) 20%, transparent); color: var(--green); }
+.plat-unpaid { background: color-mix(in srgb, var(--red) 16%, transparent); color: var(--red); }
+.plat-collect { font-size: 12.5px; }
+/* Phone: keep the New Parcel button BESIDE the "Table view · live" title (owner 2026-07-25). */
+@media (max-width: 640px) {
+  .ed-head:has(.ed-parcel-btn) { flex-wrap: nowrap; }
+  .ed-head .ed-parcel-btn { flex: none; white-space: nowrap; padding: 9px 12px; }
+}

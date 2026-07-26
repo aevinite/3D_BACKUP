@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
 // table_ops = the KOT ▾ menu (merge tables, move a KOT/item, split bill); its admin
 // rung is the table_ops_depth knob — mergeOwnerEntitlements derives power_table_ops
 // from it, so the existing entitlement guard below applies unchanged.
-const FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops", "take_orders"] as const;
+const FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops", "take_orders", "parcel"] as const;
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 

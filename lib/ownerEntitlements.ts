@@ -43,7 +43,7 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 //                     tri-state) — the same two-rail shape as discount/mark_paid, NOT a
 //                     module. The tablet cap defaults 'on' (mig 178) because taking
 //                     orders is the tablet's existing core function.
-export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops", "take_orders"] as const;
+export const MANAGER_POWER_FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops", "take_orders", "parcel"] as const;
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
 // The authoritative "is this feature available for this restaurant AT ALL?" check

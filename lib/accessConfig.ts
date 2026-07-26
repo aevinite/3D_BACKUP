@@ -11,6 +11,7 @@
 export const TABLET_CAPS = [
   "tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet",
   "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders",
+  "tablet_parcel",
 ] as const;
 
 // Feature-ladder switches on settings (mig 166): the feature's admin "allowed" switch +
@@ -20,6 +21,7 @@ export const FEATURE_SWITCHES = [
   "banquet_allowed", "banquet_owner_control",
   "table_ops_allowed", "table_ops_owner_control",
   "take_orders_allowed", "take_orders_owner_control",
+  "parcel_allowed", "parcel_owner_control",
 ] as const;
 
 // The owner's grant baseline for the manager powers (restaurants.manager_permissions).
@@ -32,14 +34,14 @@ export const FEATURE_SWITCHES = [
 export const MP_DEFAULT: Record<string, boolean> = {
   manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true,
   void_bills: false, edit_settings: false, view_ratings: false, table_tags: false,
-  khata: false, banquet: false, table_ops: false, take_orders: false,
+  khata: false, banquet: false, table_ops: false, take_orders: false, parcel: false,
 };
 
 // New-restaurant DEFAULT tablet caps (mirrors lib/settingsClone.ts). take_orders 'on'.
 export const TABLET_CAP_DEFAULTS: Record<string, "off" | "on" | "pin"> = {
   tablet_discount: "off", tablet_mark_paid: "off", tablet_invoice: "off",
   tablet_banquet: "off", tablet_table_tags: "off", tablet_khata: "off",
-  tablet_table_ops: "off", tablet_take_orders: "on",
+  tablet_table_ops: "off", tablet_take_orders: "on", tablet_parcel: "off",
 };
 
 export const isTri = (v: unknown): v is "off" | "on" | "pin" =>

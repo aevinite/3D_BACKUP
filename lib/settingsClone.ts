@@ -91,6 +91,13 @@ export function cleanClonedSettings(
   base.take_orders_allowed = true;
   base.take_orders_owner_control = false;
   base.take_orders_enabled = true;
+  // Parcel / takeaway module (mig 197): a brand-new premium module — starts fully OFF for a
+  // new restaurant (admin must switch it on), owner-transfer off, owner toggle neutral-ON,
+  // tablet cap off. (Same fresh-start rule as table_tags/banquet, NOT the take_orders exception.)
+  base.parcel_allowed = false;
+  base.parcel_owner_control = false;
+  base.parcel_enabled = true;
+  base.tablet_parcel = "off";
   // The auto-print-KOT capability itself (not just its entitlement) must also start OFF, so a
   // later entitlement grant doesn't immediately auto-print KOTs without the owner choosing to. (mig 107.)
   base.auto_print_kot = false;

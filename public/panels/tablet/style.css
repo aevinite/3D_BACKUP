@@ -713,3 +713,9 @@ html[data-theme="light"] .tile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb,
   background: color-mix(in srgb, var(--tagc) 26%, transparent); color: color-mix(in srgb, var(--tagc) 65%, #fff);
   border: 1px solid color-mix(in srgb, var(--tagc) 55%, transparent); }
 .tile.t-tag > * { position: relative; z-index: 1; }
+
+/* ── Parcel / takeaway (2026-07-26) — customer fields + two pay buttons in the cart ── */
+.cart .pcust { display: flex; gap: 8px; margin: 4px 0 10px; }
+.cart .pcust .note { margin: 0; flex: 1; min-width: 0; }
+.parcel-pay { display: flex; gap: 8px; margin-top: 8px; }
+.parcel-pay .btn { flex: 1; }

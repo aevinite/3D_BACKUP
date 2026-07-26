@@ -23,6 +23,7 @@ const WAITER_CAPS: [string, string, string | null][] = [
   ["tablet_discount", "Give discount", null],
   ["tablet_invoice", "Generate invoice", null],
   ["tablet_take_orders", "Take orders", "take_orders"],
+  ["tablet_parcel", "Parcel / takeaway", "parcel"],
   ["tablet_table_ops", "Table & KOT ops", "table_ops"],
   ["tablet_table_tags", "Mark table types", "table_tags"],
   ["tablet_khata", "Khata (pay later)", "table_tags"],
@@ -47,6 +48,7 @@ const PERMS: [string, string, string][] = [
   ["banquet", "Banquet billing", "Create fixed-plate banquet bills"],
   ["table_ops", "Table & KOT operations", "Merge tables, move KOTs/items, split bills"],
   ["take_orders", "Take orders", "Start a new dine-in order at a table, like the waiter tablet"],
+  ["parcel", "Parcel / takeaway", "Punch in a quick takeaway (parcel) order from the floor — shows in the Platform board"],
 ];
 const ROLES = ["manager", "kitchen", "tablet"];
 

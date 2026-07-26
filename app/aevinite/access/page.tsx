@@ -101,8 +101,8 @@ const ROLE_LABEL: Record<string, string> = { owner: "Owner", manager: "Manager",
 const ROLE_COLOR: Record<string, string> = { owner: "#b491f0", manager: "#d4a574", tablet: "#60a5fa", kitchen: "#7ec88a" };
 const roleTint = (c: string) => `color-mix(in srgb, ${c} 16%, transparent)`;
 const ROLE_RELEVANCE: Record<string, string[]> = {
-  manager: ["edit_menu", "give_discounts", "void_bills", "mark_paid", "print_invoice", "khata", "take_orders", "table_ops", "table_tags", "banquet", "view_dashboard", "view_ratings", "view_logs", "manage_staff", "edit_settings"],
-  tablet: ["give_discounts", "mark_paid", "print_invoice", "khata", "take_orders", "table_ops", "table_tags", "void_bills"],
+  manager: ["edit_menu", "give_discounts", "void_bills", "mark_paid", "print_invoice", "khata", "take_orders", "parcel", "table_ops", "table_tags", "banquet", "view_dashboard", "view_ratings", "view_logs", "manage_staff", "edit_settings"],
+  tablet: ["give_discounts", "mark_paid", "print_invoice", "khata", "take_orders", "parcel", "table_ops", "table_tags", "void_bills"],
   kitchen: ["edit_menu", "view_logs"],
   owner: PERMISSIONS.filter((p) => p.kind === "ladder").map((p) => p.id),
 };
