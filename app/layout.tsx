@@ -45,8 +45,13 @@ export const viewport: Viewport = {
 // it deliberately does NOT follow the phone's system dark setting, so the menu
 // always opens light for new visitors (owner, 2026-06-17). Falls back to light on error.
 // (Leave the text inside the backticks exactly as-is — it's a script string.)
+// It ALSO marks the staff/owner/admin panels (which are ALWAYS a dark console skin, never
+// the cream guest theme) with data-staffdark, so a render-blocking CSS rule paints the whole
+// document dark from the very first frame. Without it a new laptop (no saved theme) briefly
+// flashed the cream guest background before the dark owner shell mounted — the "white wide
+// screen" the owner reported (2026-07-26). Uses the raw pathname (available pre-hydration).
 const themeBootScript = `
-(function(){try{var saved=localStorage.getItem('lfh_theme');document.documentElement.setAttribute('data-theme',saved==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}try{var lang=localStorage.getItem('lfh_language')||'en';document.documentElement.setAttribute('lang',lang);}catch(e){}})();
+(function(){try{var saved=localStorage.getItem('lfh_theme');document.documentElement.setAttribute('data-theme',saved==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}try{var lang=localStorage.getItem('lfh_language')||'en';document.documentElement.setAttribute('lang',lang);}catch(e){}try{if(/^\\/(owner|admin|aevinite|manager|kitchen|tablet|login|staff-login)(\\/|$|\\?)/.test(location.pathname)){document.documentElement.setAttribute('data-staffdark','1');}}catch(e){}})();
 `.trim();
 
 // The main layout function. "children" is whatever page is currently showing —
