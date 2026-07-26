@@ -3,6 +3,7 @@
 // role). Posts to /api/panel-login; on success redirects to the user's own panel.
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { clearOwnerSnaps } from "@/lib/ownerSnap";
 
 // Must match the server's ROLE_HOME map (lib/panelGate.ts).
 const ROLE_HOME: Record<string, string> = { owner: "/owner", manager: "/manager", kitchen: "/kitchen", tablet: "/tablet" };
@@ -36,6 +37,9 @@ export default function LoginForm({
         setBusy(false);
         return;
       }
+      // A new sign-in starts with a clean slate of device snapshots, so the previous
+      // account's instant-paint numbers can never show inside this tab.
+      clearOwnerSnaps();
       // From the scoped door, land on the scoped panel URL so the address bar
       // keeps saying which restaurant this is.
       const base = ROLE_HOME[data.role];

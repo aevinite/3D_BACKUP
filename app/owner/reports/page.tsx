@@ -23,6 +23,7 @@ import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
 import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
 import { ReportMenu } from "@/components/owner/OwnerReportButton";
 import { gatherOwnerReport } from "@/lib/ownerReportGather";
+import { readSnap, writeSnap } from "@/lib/ownerSnap";
 import { SectionExport } from "@/components/owner/reports/sectionExport";
 
 type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy" | "all" | "custom";
@@ -150,6 +151,26 @@ export default function OwnerReports() {
   // already sees the pinned rid.
   useEffect(() => { if (scopePin) setRid(scopePin); }, [scopePin]);
 
+  // ── Instant-paint (owner 2026-07-26): last-seen report payloads from THIS tab paint at
+  // ~0ms with the usual count-up/chart animations, then the normal fetch revalidates and
+  // swaps in anything newer. Only settled `data` entries are persisted (never loading/error
+  // states), and `started` is untouched, so every hydrated entry still refetches. Cleared
+  // on login (lib/ownerSnap.ts).
+  const snapKey = `reports${scopePin ? `:${scopePin}` : ""}`;
+  useEffect(() => {
+    const s = readSnap<{ rid?: string; entries?: Record<string, Entry> }>(snapKey);
+    if (!s) return;
+    if (s.entries) setStore((cur) => ({ ...s.entries, ...cur }));
+    // The store keys embed the selected restaurant id, which normally only lands after the
+    // overview fetch — restore it too so the very first frame looks up the right key. The
+    // overview fetch then re-syncs it (same value for a single-restaurant owner).
+    if (s.rid && !scopePin) setRid((cur) => cur || s.rid!);
+  }, [snapKey, scopePin]);
+  useEffect(() => {
+    const settled = Object.fromEntries(Object.entries(store).filter(([, e]) => e.data));
+    if (Object.keys(settled).length) writeSnap(snapKey, { rid, entries: settled });
+  }, [snapKey, store, rid]);
+
   useEffect(() => {
     fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then((r) => r.json()).then((o) => {
       // Overview returns camelCase (accentColor) — reading accent_color left every chart
@@ -183,7 +204,9 @@ export default function OwnerReports() {
     const ck = `${kind}|${r}|${eff.range}${eff.from ? `|${eff.from}|${eff.to}` : ""}`;
     if (started.current.has(ck)) return;
     started.current.add(ck);
-    setStore((s) => ({ ...s, [ck]: { loading: true } }));
+    // Instant-paint: if a hydrated snapshot already fills this key, keep showing it while
+    // the fetch revalidates silently (SWR) — only a truly empty key shows the skeleton.
+    setStore((s) => (s[ck]?.data ? s : { ...s, [ck]: { loading: true } }));
     const q = new URLSearchParams({ type: apiType(kind), range: eff.range });
     if (eff.from) { q.set("from", eff.from); q.set("to", eff.to as string); }
     if (r) q.set("rid", r);
@@ -196,7 +219,9 @@ export default function OwnerReports() {
       })
       .catch((e) => {
         started.current.delete(ck);                       // allow a later retry
-        setStore((s) => ({ ...s, [ck]: { error: e instanceof Error ? e.message : String(e) } }));
+        // A failed SILENT revalidate must never blank numbers already on screen (offline
+        // reload on a hydrated snapshot) — keep the shown data; only an empty key errors.
+        setStore((s) => (s[ck]?.data ? s : { ...s, [ck]: { error: e instanceof Error ? e.message : String(e) } }));
       });
   }, [scopePin]); // eslint-disable-line react-hooks/exhaustive-deps
 

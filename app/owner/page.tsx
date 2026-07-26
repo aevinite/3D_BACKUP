@@ -30,6 +30,7 @@ import { businessDayStartIso } from "@/lib/businessDay";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { reportRealtime } from "@/lib/connectionStatus";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
+import { readSnap, writeSnap } from "@/lib/ownerSnap";
 import { useBackClose } from "@/lib/backStack";
 import { buildReportHtml, buildReportTables, type ReportData, type ExportTable } from "@/components/owner/ownerReportDoc";
 import { gatherOwnerReport } from "@/lib/ownerReportGather";
@@ -286,8 +287,33 @@ export default function OwnerDashboard() {
   const activeRid = view.level === "home" ? homeRid : (view as { rid: string }).rid;
   const restCount = ov?.restaurants.length ?? 0;
   const scopeKey = activeRid ?? "group";
-  const pl = useCallback((range: string): Payload | undefined => cache[`${scopeKey}|${range}`], [cache, scopeKey]);
-  const moneyOf = (range: Range): MoneyTotals | "err" | undefined => moneyCache[`${scopeKey}|${range}`];
+
+  // ── Instant-paint (owner 2026-07-26): last-seen payloads from THIS tab paint at ~0ms ──
+  // `snap` is a render-only FALLBACK layer — never written into `cache`/`moneyCache`, so
+  // the loaders' "fetch if missing" guards still fire and every hydrated number silently
+  // revalidates. The entrance animations (count-up, chart draw-in) run on the hydrated
+  // data exactly as they do on fetched data. Cleared on login (lib/ownerSnap.ts).
+  const snapKey = `dash${scopePin ? `:${scopePin}` : ""}`;
+  const [snap, setSnap] = useState<{ ov?: Overview; cache?: Record<string, Payload>; money?: Record<string, MoneyTotals | "err">; updatedAt?: string } | null>(null);
+  useEffect(() => {
+    const s = readSnap<{ ov?: Overview; cache?: Record<string, Payload>; money?: Record<string, MoneyTotals | "err">; updatedAt?: string }>(snapKey);
+    if (!s) return;
+    setSnap(s);
+    // ov/updatedAt have no fetch-skip guards, so hydrating the state directly is safe —
+    // loadOverview() always runs on mount and overwrites with the live answer.
+    if (s.ov) setOv((cur) => cur ?? s.ov!);
+    if (s.updatedAt) setUpdatedAt((cur) => cur ?? s.updatedAt!);
+  }, [snapKey]);
+  // Persist the freshest state for the next open of this tab (best-effort, tiny JSON).
+  useEffect(() => {
+    if (!ov || !Object.keys(cache).length) return;
+    writeSnap(snapKey, { ov, cache, money: moneyCache, updatedAt: updatedAt ?? undefined });
+  }, [snapKey, ov, cache, moneyCache, updatedAt]);
+
+  const pl = useCallback((range: string): Payload | undefined =>
+    cache[`${scopeKey}|${range}`] ?? snap?.cache?.[`${scopeKey}|${range}`], [cache, snap, scopeKey]);
+  const moneyOf = (range: Range): MoneyTotals | "err" | undefined =>
+    moneyCache[`${scopeKey}|${range}`] ?? snap?.money?.[`${scopeKey}|${range}`];
 
   // Refresh-proof drill (owner round-5: "if you refresh it, it comes backwards").
   // The panel runs under the back-stack history manager, which OWNS pushState/popstate
