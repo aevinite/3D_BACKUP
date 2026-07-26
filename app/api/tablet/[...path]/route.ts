@@ -18,7 +18,8 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { effectiveTaxRate } from "@/lib/tax";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +84,9 @@ function pinActorFrom(g: PinGate): PinActor | null {
 // is re-read from the DB on every request by userFromCookie, so revoking someone's
 // access takes effect on their very next tap (no re-login needed). Admin bypasses via
 // managerPinGate as before.
-const TABLET_PERM_KEYS = ["tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet", "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders"] as const;
+// TABLET_PERM_KEYS is DERIVED from lib/accessModel.ts (2026-07-26, imported above) —
+// one source of truth with the admin access panel, so a new waiter cap added there is
+// honoured here automatically.
 const isPermMode = (v: unknown): v is "on" | "pin" | "off" => v === "on" || v === "pin" || v === "off";
 // The KOT ▾ menu's module rung (canonical ladder, mig 177): admin's allowed switch
 // AND, when transferred, the owner's toggle. One tiny single-row select on a rare
@@ -99,6 +102,10 @@ const tableOpsEffectiveFromRow = (s: Record<string, unknown> | null) =>
 // _allowed side is backfilled true, so ordering stays on unless the admin turns it off.
 const takeOrdersEffectiveFromRow = (s: Record<string, unknown> | null) =>
   !!s && s.take_orders_allowed === true && (s.take_orders_owner_control !== true || s.take_orders_enabled !== false);
+// Parcel / takeaway module rung (mig 197), from an already-fetched settings row. Brand-new
+// module → _allowed defaults FALSE, so the 🥡 Parcel button stays hidden until the admin grants it.
+const parcelEffectiveFromRow = (s: Record<string, unknown> | null) =>
+  !!s && s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   // Admin super-user (no staff cookie — the gate already vetted the admin token):
   // never blocked by a waiter tri-state. This is what makes the X-ray's tinted
@@ -251,6 +258,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         setOut.table_ops_tablet_allowed = tOpsOk;
         // Order-taking module off → the tablet's ＋Take order button hides (tri-state 'off').
         if (!takeOrdersEffectiveFromRow(setOut)) setOut.tablet_take_orders = "off";
+        // Parcel module off → the tablet's 🥡 Parcel button hides (tri-state 'off').
+        if (!parcelEffectiveFromRow(setOut)) setOut.tablet_parcel = "off";
       }
       const body: Record<string, unknown> = {
         ...summary,
@@ -342,6 +351,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (!tOpsOkSt) setSt.tablet_table_ops = "off";
         setSt.table_ops_tablet_allowed = tOpsOkSt; // synthetic flag, see /summary
         if (!takeOrdersEffectiveFromRow(setSt)) setSt.tablet_take_orders = "off";
+        if (!parcelEffectiveFromRow(setSt)) setSt.tablet_parcel = "off";
       }
       return ok({
         // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
@@ -488,6 +498,50 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       await log("order_place", { table_number: t, device_id: dev });
       return ok(data);
+    }
+
+    // parcel — a waiter-placed TAKEAWAY order (no table) → the Platform system, exactly like
+    // the manager's /parcel (mig 197). Its own module + tablet cap; titles/prices resolved
+    // server-side; total = item subtotal (matches every other platform order).
+    if (a === "parcel" && path.length === 1) {
+      if (actor && !(await parcelLadder(rid)).effective) return err("Parcel / takeaway isn't enabled for this restaurant.", 403);
+      { const g2 = recordPin(await tabletPerm("tablet_parcel", req, body, rid, actor)); if (!g2.allow) return g2.resp; }
+      const { items, customer, phone, note, allergies, paid, method } = body || {};
+      if (!Array.isArray(items) || !items.length) return err("items required");
+      const ids = [...new Set(items.map((i: any) => String(i?.id || "")).filter(Boolean))];
+      const menu = (must(await sb.from("menu_items").select("id,title,price").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown }[];
+      const byId = new Map(menu.map((d) => [String(d.id), d]));
+      const picked: { title: string; qty: number; price: number; note?: string }[] = [];
+      let total = 0;
+      for (const it of items) {
+        const d = byId.get(String(it?.id || ""));
+        if (!d) continue;
+        const qty = Math.max(1, Math.min(99, Number(it?.qty) || 1));
+        const price = Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
+        const line: { title: string; qty: number; price: number; note?: string } = { title: d.title, qty, price };
+        const ln = String(it?.note || "").trim().slice(0, 200);
+        if (ln) line.note = ln;
+        picked.push(line);
+        total += price * qty;
+      }
+      if (!picked.length) return err("no valid dishes", 400);
+      total = Math.round(total * 100) / 100;
+      const cust = String(customer || "").trim().slice(0, 120) || "Parcel";
+      const ext = `PARCEL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const ins = await sb.rpc("lfh_platform_insert", {
+        p_source: "takeaway", p_external_id: ext, p_customer: cust,
+        p_phone: String(phone || "").trim().slice(0, 40) || null,
+        p_items: picked, p_total: total, p_restaurant_id: rid,
+      });
+      if (ins.error) throw new Error(ins.error.message);
+      const row = Array.isArray(ins.data) ? ins.data[0] : ins.data;
+      const wholeNote = String(note || "").trim().slice(0, 300);
+      const alg = Array.isArray(allergies) ? allergies.map((x: unknown) => String(x)).slice(0, 20) : [];
+      const patch: Record<string, unknown> = { payload: { channel: "parcel", note: wholeNote || null, allergies: alg } };
+      if (paid === true) { patch.paid = true; patch.paid_at = new Date().toISOString(); patch.payment_method = String(method || "cash").slice(0, 20); }
+      if (row?.id) { const up = await sb.from("aggregator_orders").update(patch).eq("id", row.id).eq("restaurant_id", rid); if (up.error) throw new Error(up.error.message); }
+      await log("parcel_place", { device_id: dev });
+      return ok({ ...row, paid: paid === true });
     }
 
     // banquet/place — generate a banquet bill (mig 130). Priced server-side from

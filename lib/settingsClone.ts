@@ -11,6 +11,8 @@
 // new restaurant's guests are never geofenced to #1's address); table_count → a modest 10.
 // Callers still override id / restaurant_id / the specific flag they're toggling.
 
+import { MODULE_DEFS, TABLET_PERM_KEYS } from "@/lib/accessModel";
+
 // Columns that must NEVER be inherited from the template restaurant. (Only REAL, nullable
 // settings columns — verified against the live schema.)
 // NULLABLE tenant-specific columns — cleared to null so the new restaurant starts blank
@@ -91,6 +93,13 @@ export function cleanClonedSettings(
   base.take_orders_allowed = true;
   base.take_orders_owner_control = false;
   base.take_orders_enabled = true;
+  // Parcel / takeaway module (migs 197-198): ON for the MANAGER by default (owner 2026-07-26 —
+  // common counter task; admin can still switch it off per restaurant), OWNER-transfer off,
+  // owner toggle neutral-ON, and the TABLET cap OFF (waiters don't get takeaway by default).
+  base.parcel_allowed = true;
+  base.parcel_owner_control = false;
+  base.parcel_enabled = true;
+  base.tablet_parcel = "off";
   // The auto-print-KOT capability itself (not just its entitlement) must also start OFF, so a
   // later entitlement grant doesn't immediately auto-print KOTs without the owner choosing to. (mig 107.)
   base.auto_print_kot = false;
@@ -107,5 +116,13 @@ export function cleanClonedSettings(
   // Google-review MODE (mig 187): a new restaurant starts with the Google invite OFF — guests
   // see only the normal in-menu reviews until the admin picks a Google mode. (owner 2026-07-24)
   base.google_review_mode = "off";
+  // Drift guard (2026-07-26): every ladder column the access model knows must have an
+  // EXPLICIT default above — a missing one means a new restaurant silently inherits the
+  // template restaurant's switch (the "#1 leaks onto restaurant #2" class). Warn loudly
+  // in the server log; deliberately no throw (creating a restaurant must never fail
+  // over a missing default — the warn is the tripwire).
+  for (const col of [...MODULE_DEFS.flatMap((m) => [m.allowed, m.control, m.enabled]), ...TABLET_PERM_KEYS]) {
+    if (!(col in base)) console.warn(`[settingsClone] no explicit default for ladder column "${col}" — new restaurants will inherit the template's value; add one above.`);
+  }
   return base;
 }

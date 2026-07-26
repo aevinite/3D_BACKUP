@@ -811,7 +811,7 @@ function renderPanel() {
     p.classList.remove("om-open");
     const off = omBackOff; omBackOff = null; if (off) off();
   }
-  if (!state.table) { p.innerHTML = `<div class="empty">Tap a table to see it — or to take an order for it.</div>`; return; }
+  if (!state.table && !state.parcel) { p.innerHTML = `<div class="empty">Tap a table to see it — or to take an order for it.</div>`; return; }
   if (state.ordering) { renderOrderMode(); return; }
   const t = state.table, s = sessionOf(t), a = tableAgg(t);
 
@@ -2571,13 +2571,22 @@ function orderCartHtml() {
       <span class="cprice">${inr(l.price * l.qty)}</span>
     </div>`).join("");
   const total = state.cart.reduce((s, l) => s + l.price * l.qty, 0);
+  const parcel = !!state.parcel;
+  const custHtml = parcel
+    ? `<div class="pcust"><input type="text" id="pcustName" class="note" placeholder="Customer name (optional)" value="${esc(state.pcust || "")}"><input type="text" id="pcustPhone" class="note" inputmode="tel" placeholder="Phone (optional)" value="${esc(state.pphone || "")}"></div>`
+    : "";
+  const foot = parcel
+    ? `<div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
+       <div class="parcel-pay"><button class="btn green big parcel-send" data-pay="now" ${state.cart.length ? "" : "disabled"}>Pay now &amp; print</button><button class="btn primary big parcel-send" data-pay="later" ${state.cart.length ? "" : "disabled"}>Pay on pickup</button></div>`
+    : `<div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
+       <div class="muted small">Final bill (incl. tax) is computed by the system when you send it.</div>
+       <button class="btn primary big" id="sendOrder" ${state.cart.length ? "" : "disabled"}>SEND TO KITCHEN</button>`;
   return `<div class="cart">
-      <h3>This order</h3>
+      <h3>${parcel ? "This parcel" : "This order"}</h3>
+      ${custHtml}
       <div class="cart-lines">${lines || `<div class="muted">Tap dishes to add them.</div>`}</div>
       <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Avoid in ALL dishes — e.g. nuts, dairy" value="${esc(state.allergies || "")}">
-      <div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
-      <div class="muted small">Final bill (incl. tax) is computed by the system when you send it.</div>
-      <button class="btn primary big" id="sendOrder" ${state.cart.length ? "" : "disabled"}>SEND TO KITCHEN</button>
+      ${foot}
     </div>`;
 }
 // Re-render ONLY the cart pane (its own scroll region) — the dish browser is untouched,
@@ -2605,6 +2614,10 @@ function updateOrderCart() {
   // notes go through the ✎ Edit modal instead.
   const al = c.querySelector("#orderAllergy"); if (al) al.oninput = (e) => (state.allergies = e.target.value);
   const send = c.querySelector("#sendOrder"); if (send) send.onclick = sendOrder;
+  // Parcel mode: two pay buttons + the optional customer fields.
+  c.querySelectorAll(".parcel-send").forEach((b) => (b.onclick = () => sendParcel(b.dataset.pay === "now")));
+  const pn = c.querySelector("#pcustName"); if (pn) pn.oninput = (e) => (state.pcust = e.target.value);
+  const pp = c.querySelector("#pcustPhone"); if (pp) pp.oninput = (e) => (state.pphone = e.target.value);
 }
 // Leave order mode by ANY exit (← back, ✓ Done, hardware back) — one place drops the
 // takeover class + the back-stack layer so none of them can leak.
@@ -2614,6 +2627,7 @@ function exitOrderMode() {
   if (voBackOff) { voBackOff(); voBackOff = null; }   // drop the view-order back step if it's up
   state.ordering = false; state.addToOrderId = null; state._omTop = 0; state.viewOrder = false;
   state.cart = []; state.allergies = "";   // abandoning an order clears its cart + allergy list (no leak to the next table)
+  state.parcel = false; state.pcust = ""; state.pphone = "";   // and any in-progress parcel
   renderPanel();
 }
 // Back / ← Menu from the view-order screen → the dish LIST (one step), not out of the order.
@@ -2621,6 +2635,43 @@ function closeViewOrder() {
   if (voBackOff) { voBackOff(); voBackOff = null; }
   state.viewOrder = false;
   renderOrderMode();
+}
+
+// ── Parcel / takeaway (no table) ─────────────────────────────────────────────
+// Same dish picker as ＋Take order, but no table + pay-now / pay-on-pickup → a takeaway
+// order in the Platform system (server /parcel). Reached from the ☰ drawer (#dwParcel),
+// gated by the parcel module + tablet_parcel cap.
+function openParcelMode() {
+  state.parcel = true; state.ordering = true; state.viewOrder = false;
+  state.table = null; state.addToOrderId = null;
+  state.cart = []; state.allergies = ""; state.pcust = ""; state.pphone = "";
+  state.cat = ""; state.dishSearch = ""; state._omTop = 0; state._addedThisVisit = 0;
+  renderPanel();
+}
+let sendingParcel = false;
+async function sendParcel(payNow) {
+  if (sendingParcel) return;
+  if (!state.cart.length) { toast("Add at least one dish first", false); return; }
+  if (!(await confirmDialog(payNow ? "Take payment now and send this parcel to the kitchen?" : "Send this parcel to the kitchen (pay on pickup)?"))) return;
+  sendingParcel = true;
+  document.querySelectorAll(".parcel-send").forEach((b) => (b.disabled = true));
+  try {
+    const splitCsv = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
+    const items = state.cart.map((l) => {
+      const optTxt = (l.options && l.options.length) ? l.options.map((o) => o.label).join(", ") : "";
+      const noteFull = [optTxt, l.allergy ? `⚠ ${l.allergy}` : "", (l.note || "").trim()].filter(Boolean).join(" · ");
+      return { id: l.id, qty: l.qty, note: noteFull || undefined };
+    });
+    const r = await api("POST", "/parcel", { items, allergies: splitCsv(state.allergies), note: null, customer: state.pcust || null, phone: state.pphone || null, paid: payNow, method: payNow ? "cash" : null });
+    if (r && r.queued) toast("Saved — the parcel will send when you're back online.", true);
+    else toast(r && r.kot_no != null ? `Parcel sent! #${r.kot_no}${payNow ? " · paid" : " · pay on pickup"}` : "Parcel sent", true);
+    state.parcel = false; state.ordering = false; state.cart = []; state.allergies = ""; state.pcust = ""; state.pphone = "";
+    renderPanel();
+    await load();
+  } catch (e) {
+    document.querySelectorAll(".parcel-send").forEach((b) => (b.disabled = false));
+    toast("Couldn't send: " + ((e && e.message) || e), false);
+  } finally { sendingParcel = false; }
 }
 
 // The phone VIEW-ORDER screen (owner 2026-07-05): a separate screen (like the guest
@@ -2638,7 +2689,7 @@ function renderViewOrder() {
     <div class="om lite vieworder">
       <div class="om-head">
         <button class="btn small" id="voBack">← Menu</button>
-        <h2>Your order · ${esc(tableLabel(state.table))}</h2>
+        <h2>${state.parcel ? "🥡 New Parcel" : `Your order · ${esc(tableLabel(state.table))}`}</h2>
       </div>
       <div class="om-voscroll">
         <aside class="om-cart" id="omCart"></aside>
@@ -2670,7 +2721,7 @@ function renderOrderMode() {
   p.innerHTML = `
     <div class="om lite">
       <div class="om-head">
-        <h2>${addMode ? "Add · " : ""}${esc(tableLabel(state.table))}</h2>
+        <h2>${state.parcel ? "🥡 New Parcel" : `${addMode ? "Add · " : ""}${esc(tableLabel(state.table))}`}</h2>
         <input type="search" id="dishSearch" class="order-search om-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">
         <button class="btn small ${addMode ? "primary" : ""}" id="omExit">${addMode ? `✓ Done${state._addedThisVisit ? ` (${state._addedThisVisit} added)` : ""}` : "← back"}</button>
       </div>
@@ -3224,6 +3275,10 @@ window.addEventListener("online", () => load().catch(() => {}));
     // Banquet module (mig 130): shown only when the admin entitlement AND the
     // waiter's tablet_banquet capability allow it (openDrawer re-checks each open).
     '<button class="dw-btn" id="dwBanquet" type="button" hidden style="margin-top:auto;margin-bottom:10px">🎪 Banquet billing</button>' +
+    // 🥡 Parcel / takeaway module (mig 197): its OWN drawer entry (owner 2026-07-26 — the
+    // tablet reaches parcel from the ☰ menu, not a top-bar button). Same ladder + x-ray rule
+    // as banquet; opens the exact same order picker in parcel mode.
+    '<button class="dw-btn" id="dwParcel" type="button" hidden style="margin-top:auto;margin-bottom:10px">🥡 New parcel / takeaway</button>' +
     '<a class="dw-btn danger" id="dwLogout" href="/api/panel-logout" style="margin-top:0">Log out</a>';
   document.body.appendChild(backdrop); document.body.appendChild(drawer);
 
@@ -3243,6 +3298,15 @@ window.addEventListener("online", () => load().catch(() => {}));
       bqBtn.hidden = tHigher() ? false : offForWaiters;
       bqBtn.classList.toggle("xray-off", tHigher() && offForWaiters);
     }
+    // 🥡 Parcel drawer entry — same ladder + admin x-ray rule as banquet above.
+    const pcBtn = drawer.querySelector("#dwParcel");
+    if (pcBtn) {
+      const sset = state.data.settings || {};
+      const pAllowed = sset.parcel_allowed === true && (sset.parcel_owner_control !== true || sset.parcel_enabled !== false);
+      const pOff = !pAllowed || tperm("tablet_parcel") === "off";
+      pcBtn.hidden = tHigher() ? false : pOff;
+      pcBtn.classList.toggle("xray-off", tHigher() && pOff);
+    }
     loadProfile();
     if (window.LFH_BACK && !drawerOff) drawerOff = LFH_BACK.layer("tablet-drawer", closeDrawer);
   };
@@ -3255,6 +3319,8 @@ window.addEventListener("online", () => load().catch(() => {}));
   drawer.querySelector("#dwTheme").onclick = () => document.getElementById("themeToggle")?.click();
   const bqDrawerBtn = drawer.querySelector("#dwBanquet");
   if (bqDrawerBtn) bqDrawerBtn.onclick = () => { closeDrawer(); openBanquet(); };
+  const pcDrawerBtn = drawer.querySelector("#dwParcel");
+  if (pcDrawerBtn) pcDrawerBtn.onclick = () => { closeDrawer(); openParcelMode(); };
   const ham = document.getElementById("hamburger"); if (ham) ham.onclick = openDrawer;
   // 🚩 Report an issue (subject + optional photo + live voice note) — shared widget.
   { const rib = document.getElementById("reportIssueBtn"); if (rib) rib.onclick = () => { if (window.LFH_ISSUE) LFH_ISSUE.open({ api, rid: PANEL_RID, notify: (m) => toast(m, true) }); }; }

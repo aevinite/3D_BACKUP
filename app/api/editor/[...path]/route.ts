@@ -27,7 +27,8 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
-import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -93,6 +94,13 @@ async function canViewLogs(g: { user: StaffUser | null }, rid: string): Promise<
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
   if (r?.owner_entitlements?.power_view_logs === false) return false;   // admin removed the whole power
+  // Per-person override (mig 115) — same precedence as managerCan: the individual's
+  // setting wins over the restaurant-wide grant but never over the admin cap above (it
+  // was accepted by set_permissions but never read here — a stored-but-dead key, fixed
+  // 2026-07-26).
+  const ov = u.permissions?.view_logs;
+  if (ov === "on" || ov === "pin") return true;
+  if (ov === "off") return false;
   if (r?.manager_permissions?.view_logs === false) return false;        // owner pulled it back from managers
   return true;
 }
@@ -305,27 +313,25 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const myOv = (g.user && g.user.role !== "owner") ? (g.user.permissions || {}) : {};
       for (const flag of MANAGER_POWER_FLAGS) {
         const entitled = ents[powerEntitlementKey(flag)] !== false;
-        let granted = perms[flag] === true;
+        // absentOn flags (view_logs) keep the power unless someone EXPLICITLY switched it
+        // off — matching canViewLogs, so the X-ray never hides a log the server allows.
+        let granted = ABSENT_ON_POWERS.has(flag) ? perms[flag] !== false : perms[flag] === true;
         const ov = myOv[flag];
         if (ov === "on" || ov === "pin") granted = true;
         else if (ov === "off") granted = false;
         effectivePowers[flag] = entitled && granted;
         offByAdmin[flag] = !entitled;
       }
-      // Feature ladder (mig 166): table_tags/khata render nothing anywhere in the
-      // panel unless the FEATURE itself is on for this restaurant — the power flags
-      // above are the owner→manager rung, this is the admin(/owner) application rung.
-      const lad = await tableTagsLadder(rid);
-      if (!lad.effective) { effectivePowers.table_tags = false; effectivePowers.khata = false; }
-      const bq = await banquetLadder(rid);
-      if (!bq.effective) effectivePowers.banquet = false;
-      // KOT ▾ menu (mig 177): same canonical module rule — module off = power dead.
-      const tOps = await tableOpsLadder(rid);
-      if (!tOps.effective) effectivePowers.table_ops = false;
-      // Order-taking (mig 179): same canonical module rule — the ＋Take order button dies
-      // when the admin switches the module off for this restaurant.
-      const tOrd = await takeOrdersLadder(rid);
-      if (!tOrd.effective) effectivePowers.take_orders = false;
+      // Feature-module rung (canonical ladder): a capability whose MODULE is off for this
+      // restaurant renders nothing anywhere in the panel — the power flags above are the
+      // owner→manager rung, this is the admin(/owner) application rung. ONE settings select
+      // covers every module (accessModel MODULE_DEFS), and a module added there wires itself
+      // here — this used to be five hand-written selects of the same row.
+      const ladders = await allModuleLadders(rid);
+      for (const mp of PERMISSIONS) {
+        if (!mp.module || !mp.power) continue;
+        if (!ladders[moduleKey(mp)]?.effective) effectivePowers[mp.power] = false;
+      }
       // Finer edit-menu sub-limits (owner 2026-07-24): mirror menuSubAllowed's resolution so
       // the panel can HIDE a create/delete button a restricted MANAGER isn't allowed, instead
       // of showing-then-refusing it. Same rule as the server: admin/owner get full menu editing
@@ -349,7 +355,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // Delete-a-bill sub-permission (default OFF) — lets the panel show the "🗑 Delete bill"
         // button only when the owner ticked it (admin/owner always true). (owner, 2026-07-24)
         canDeleteBill: await canDeleteBill(g, rid),
-        features: { table_tags: lad.effective, khata: lad.effective, banquet: bq.effective, table_ops: tOps.effective, take_orders: tOrd.effective },
+        // One entry per module-backed capability (same keys as before: table_tags, khata,
+        // banquet, table_ops, take_orders, parcel) — derived, so new modules appear here.
+        features: Object.fromEntries(PERMISSIONS.filter((mp) => mp.module).map((mp) => [mp.id, !!ladders[moduleKey(mp)]?.effective])),
       });
     }
 
@@ -582,7 +590,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // these 8, and select("*") pulled the heavy `payload` (full webhook body) + growing
         // `status_history` on every 60s/2s poll for nothing (egress). updated_at is only used
         // in the server-side filter below, so it doesn't need selecting.
-        sb.from("aggregator_orders").select("id,source,items,total,status,kot_no,created_at,customer_name").eq("restaurant_id", rid)
+        sb.from("aggregator_orders").select("id,source,items,total,status,kot_no,created_at,customer_name,paid").eq("restaurant_id", rid)
           .or(`status.eq.new,status.eq.accepted,status.eq.preparing,status.eq.ready,and(status.eq.handed_over,updated_at.gte.${handoverCutoff})`)
           .order("created_at", { ascending: false }).limit(200),
         sb.from("settings").select("kitchen_can_accept_platform, platform_in_bills").eq("restaurant_id", rid).maybeSingle(),
@@ -1207,6 +1215,59 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(data);
     }
 
+    // ── Parcel (a staff-placed TAKEAWAY order) ────────────────────────────────
+    // A "New Parcel" IS a manually-created takeaway order in the Platform system
+    // (aggregator_orders, source='takeaway') — so it lands in the Platform board,
+    // the kitchen, and the Takeaway totals with zero extra plumbing (owner 2026-07-25:
+    // "show as takeaway order we already made in Swiggy/Zomato"). Reuses the take_orders
+    // ladder (same as dine-in ordering) until a dedicated admin toggle is added.
+    // Titles/prices are resolved SERVER-SIDE (never trust the client cart); total is the
+    // item subtotal, matching how every other platform order stores `total`.
+    if (a === "parcel" && path.length === 1) {
+      if (!(await parcelLadder(rid)).effective) return err("Parcel / takeaway isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "parcel"))) return permDenied("take parcel / takeaway orders");
+      const { items, customer, phone, note, allergies, paid, method } = body || {};
+      if (!Array.isArray(items) || !items.length) return err("items required");
+      // The client sends only {id, qty, note}; resolve title+price from OUR menu (rid-scoped).
+      const ids = [...new Set(items.map((i: any) => String(i?.id || "")).filter(Boolean))];
+      const menu = (must(await sb.from("menu_items").select("id,title,price").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown }[];
+      const byId = new Map(menu.map((d) => [String(d.id), d]));
+      const picked: { title: string; qty: number; price: number; note?: string }[] = [];
+      let total = 0;
+      for (const it of items) {
+        const d = byId.get(String(it?.id || ""));
+        if (!d) continue;
+        const qty = Math.max(1, Math.min(99, Number(it?.qty) || 1));
+        const price = Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
+        const line: { title: string; qty: number; price: number; note?: string } = { title: d.title, qty, price };
+        const ln = String(it?.note || "").trim().slice(0, 200);
+        if (ln) line.note = ln;
+        picked.push(line);
+        total += price * qty;
+      }
+      if (!picked.length) return err("no valid dishes", 400);
+      total = Math.round(total * 100) / 100;
+      const cust = String(customer || "").trim().slice(0, 120) || "Parcel";
+      const ext = `PARCEL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const ins = await sb.rpc("lfh_platform_insert", {
+        p_source: "takeaway", p_external_id: ext, p_customer: cust,
+        p_phone: String(phone || "").trim().slice(0, 40) || null,
+        p_items: picked, p_total: total, p_restaurant_id: rid,
+      });
+      if (ins.error) throw new Error(ins.error.message);
+      const row = Array.isArray(ins.data) ? ins.data[0] : ins.data;
+      // Post-insert: keep the whole-order kitchen note + allergies + a 'parcel' channel
+      // marker in payload, and — when paid at the counter — stamp the paid columns. ONE
+      // scoped UPDATE (service-role bypasses RLS, so id + restaurant_id is the fence).
+      const wholeNote = String(note || "").trim().slice(0, 300);
+      const alg = Array.isArray(allergies) ? allergies.map((x: unknown) => String(x)).slice(0, 20) : [];
+      const patch: Record<string, unknown> = { payload: { channel: "parcel", note: wholeNote || null, allergies: alg } };
+      if (paid === true) { patch.paid = true; patch.paid_at = new Date().toISOString(); patch.payment_method = String(method || "cash").slice(0, 20); }
+      if (row?.id) { const up = await sb.from("aggregator_orders").update(patch).eq("id", row.id).eq("restaurant_id", rid); if (up.error) throw new Error(up.error.message); }
+      await log("manager", "parcel_place", { restaurant_id: rid, detail: `${paid === true ? "paid" : "unpaid"} · ₹${total}`, device_id: dev });
+      return ok({ ...row, paid: paid === true });
+    }
+
     // ── Handle a guest rating (mig 140) — mark handled / add an internal note ──
     // Gated by the view_ratings power; the feedback row must belong to THIS restaurant.
     if (a === "ratings" && b === "ack") {
@@ -1276,6 +1337,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       void notifyAggregator(row?.source, row?.external_id, status); // best-effort push back to the platform (dormant w/o keys)
       await log("manager", "platform_status", { restaurant_id: rid, detail: status, device_id: dev });
       return ok(row);
+    }
+
+    // platform/:id/pay — collect a "pay on pickup" parcel (or any unpaid takeaway) at handover.
+    // Scoped ownership check first (the set is service-role, so this eq() pair is the fence).
+    if (a === "platform" && c === "pay") {
+      const owns = must(await sb.from("aggregator_orders").select("id,total").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { total?: number } | null;
+      if (!owns) return err("That order isn't for this restaurant.", 404);
+      const method = String((body && body.method) || "cash").slice(0, 20);
+      const up = await sb.from("aggregator_orders").update({ paid: true, paid_at: new Date().toISOString(), payment_method: method }).eq("id", b).eq("restaurant_id", rid);
+      if (up.error) throw new Error(up.error.message);
+      await log("manager", "parcel_collect", { restaurant_id: rid, detail: `₹${owns.total ?? 0} · ${method}`, device_id: dev });
+      return ok({ ok: true, id: b, paid: true });
     }
 
     // platform/toggles — flip "kitchen can accept" / "show in bills"

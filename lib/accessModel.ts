@@ -44,6 +44,15 @@ export type Perm = {
   ownerOnly?: boolean;         // owner-panel-only section (issues/customers): reach is just Off/Owner
   sub?: SubOpt[];              // granular options → access_config[id].{owner_opts,manager_opts}
   limit?: { label: string; unit: string; options: number[] }; // per-side cap → access_config[id].limit
+  // ── the owner rung says TWO different things (owner clarification, 2026-07-26) ──
+  ownerUse?: "panel" | "manager"; // WHERE the owner personally uses a ladder capability: a page in
+                                  // their own owner panel, or through the manager panel's higher-view
+                                  // (floor/bill work like parcel). Display truth only — enforcement
+                                  // is unchanged (managerCan already passes owners on every power).
+  moduleLabel?: string;        // owner-facing label for the MODULE toggle when several capabilities
+                               // share one module (khata + table types share the table_tags_* columns)
+  absentOn?: boolean;          // this power's manager grant reads an ABSENT key as ON (legacy
+                               // non-breaking flags — view_logs); every other power reads absent as OFF
 };
 
 export const GROUPS: { id: string; name: string; blurb: string; icon: string }[] = [
@@ -84,7 +93,7 @@ export const PERMISSIONS: Perm[] = [
   // (sticky category bar / scrollspy removed — always on, no toggle. search removed.)
 
   // ───────────────────────────── THE MENU (ladder) ─────────────────────────
-  { id: "edit_menu", group: "menu", kind: "ladder", power: "edit_menu", name: "Edit the menu",
+  { id: "edit_menu", group: "menu", kind: "ladder", power: "edit_menu", ownerUse: "panel", name: "Edit the menu",
     what: "The Dishes and Categories screens. Tick exactly which parts each role gets.",
     sub: [
       { id: "add_dish", name: "Add a new dish", what: "The + Add dish button." },
@@ -98,35 +107,36 @@ export const PERMISSIONS: Perm[] = [
     ] },
 
   // ─────────────────────────── BILLS & MONEY (ladder) ──────────────────────
-  { id: "give_discounts", group: "money", kind: "ladder", power: "give_discounts", tablet: "tablet_discount", waiter: true, name: "Give a discount",
+  { id: "give_discounts", group: "money", kind: "ladder", power: "give_discounts", tablet: "tablet_discount", waiter: true, ownerUse: "manager", name: "Give a discount",
     what: "Taking money off a bill. The cap is the most this role may take off in one go.",
     limit: { label: "Most they can take off", unit: "%", options: [5, 10, 20, 50, 100] },
     sub: [
       { id: "whole_bill", name: "Discount the whole bill", what: "A percentage or amount off the whole bill." },
       { id: "on_the_house", name: "Settle on the house", what: "Closes a bill at zero — the highest-risk one." },
     ] },
-  { id: "void_bills", group: "money", kind: "ladder", power: "void_bills", tabletNew: true, tabletDefault: "pin", waiter: true, name: "Void, delete or close a bill",
+  { id: "void_bills", group: "money", kind: "ladder", power: "void_bills", tabletNew: true, tabletDefault: "pin", waiter: true, ownerUse: "manager", name: "Void, delete or close a bill",
     what: "Cancelling a bill after it's generated. Every use is logged with the typed reason.",
     sub: [
       { id: "void_bill", name: "Void a bill", what: "Cancels a generated bill but KEEPS it in the records marked voided (nothing collected)." },
       { id: "delete_bill", name: "Delete a bill", what: "Removes the bill entirely — cannot be undone, leaves no record." },
       { id: "close_unpaid", name: "Close a table unpaid", what: "Frees the table, money marked never collected (walk-out / write-off)." },
     ] },
-  { id: "mark_paid", group: "money", kind: "ladder", tablet: "tablet_mark_paid", waiter: true, fixedTop: true, name: "Mark a bill paid (& undo)",
+  { id: "mark_paid", group: "money", kind: "ladder", tablet: "tablet_mark_paid", waiter: true, fixedTop: true, ownerUse: "manager", name: "Mark a bill paid (& undo)",
     what: "The button that closes a table as paid — and the matching Undo that reopens a just-paid bill (they deliberately share ONE permission, so undoing is never easier than paying). Owner & manager always have it (it's core to running the floor); the toggle is whether WAITERS get it — the classic “trust one waiter, not another” cap.",
     sub: [
       { id: "pay_cash", name: "Cash", what: "Settle as cash." },
       { id: "pay_card", name: "Card / UPI", what: "Settle as card/UPI." },
       { id: "pay_split", name: "Split across methods", what: "Part cash, part card." },
     ] },
-  { id: "print_invoice", group: "money", kind: "ladder", tablet: "tablet_invoice", waiter: true, fixedTop: true, name: "Generate & print the invoice",
+  { id: "print_invoice", group: "money", kind: "ladder", tablet: "tablet_invoice", waiter: true, fixedTop: true, ownerUse: "manager", name: "Generate & print the invoice",
     what: "Producing the tax invoice — carries a legal number that can't be reused. Owner & manager always have it; the toggle is whether waiters may issue invoices.",
     sub: [
       { id: "inv_generate", name: "Generate the invoice", what: "Assigns the next invoice number." },
       { id: "inv_reprint", name: "Reprint an invoice", what: "Prints a copy of an already-issued invoice." },
     ] },
-  { id: "khata", group: "money", kind: "ladder", power: "khata", tablet: "tablet_khata", waiter: true,
-    module: { allowed: "table_tags_allowed", control: "table_tags_owner_control", enabled: "table_tags_enabled" }, name: "Khata — put it on their tab",
+  { id: "khata", group: "money", kind: "ladder", power: "khata", tablet: "tablet_khata", waiter: true, ownerUse: "panel",
+    module: { allowed: "table_tags_allowed", control: "table_tags_owner_control", enabled: "table_tags_enabled" },
+    moduleLabel: "Table types (VIP / Family / Guest) + pay later", name: "Khata — put it on their tab",
     what: "Parking a bill against a named regular to collect later, and the book that tracks who owes what.",
     sub: [
       { id: "khata_add", name: "Park a bill on a person", what: "Moves the amount to that person's tab." },
@@ -135,10 +145,13 @@ export const PERMISSIONS: Perm[] = [
     ] },
 
   // ─────────────────────────── TABLES & FLOOR (ladder) ─────────────────────
-  { id: "take_orders", group: "floor", kind: "ladder", power: "take_orders", tablet: "tablet_take_orders", waiter: true,
+  { id: "take_orders", group: "floor", kind: "ladder", power: "take_orders", tablet: "tablet_take_orders", waiter: true, ownerUse: "manager",
     module: { allowed: "take_orders_allowed", control: "take_orders_owner_control", enabled: "take_orders_enabled" }, name: "Take a new order",
     what: "Punching in a dine-in order. Waiters do this by default; you can hand it to the manager too, or pull it back." },
-  { id: "table_ops", group: "floor", kind: "ladder", power: "table_ops", tablet: "tablet_table_ops", waiter: true,
+  { id: "parcel", group: "floor", kind: "ladder", power: "parcel", tablet: "tablet_parcel", waiter: true, ownerUse: "manager",
+    module: { allowed: "parcel_allowed", control: "parcel_owner_control", enabled: "parcel_enabled" }, name: "Parcel / takeaway orders",
+    what: "The 🥡 New Parcel button — punch in a quick takeaway order from the floor (no table). It shows in the Platform board as a Takeaway, next to Zomato/Swiggy." },
+  { id: "table_ops", group: "floor", kind: "ladder", power: "table_ops", tablet: "tablet_table_ops", waiter: true, ownerUse: "manager",
     module: { allowed: "table_ops_allowed", control: "table_ops_owner_control", enabled: "table_ops_enabled" }, name: "Table & ticket operations",
     what: "The KOT ▾ menu: moving parties/tickets after an order has gone to the kitchen.",
     sub: [
@@ -149,8 +162,9 @@ export const PERMISSIONS: Perm[] = [
       { id: "split_bill", name: "Split the bill", what: "Breaks one bill into several." },
       { id: "reprint_kot", name: "Reprint a kitchen ticket", what: "Prints the ticket again for the kitchen." },
     ] },
-  { id: "table_tags", group: "floor", kind: "ladder", power: "table_tags", tablet: "tablet_table_tags", waiter: true,
-    module: { allowed: "table_tags_allowed", control: "table_tags_owner_control", enabled: "table_tags_enabled" }, name: "Table types (VIP / Family / Guest)",
+  { id: "table_tags", group: "floor", kind: "ladder", power: "table_tags", tablet: "tablet_table_tags", waiter: true, ownerUse: "manager",
+    module: { allowed: "table_tags_allowed", control: "table_tags_owner_control", enabled: "table_tags_enabled" },
+    moduleLabel: "Table types (VIP / Family / Guest) + pay later", name: "Table types (VIP / Family / Guest)",
     what: "Marking a table so the floor shows who's sitting there.",
     sub: [{ id: "tag_set", name: "Mark / remove a table's type", what: "Puts or clears the VIP / Family / Owner's-guest ribbon on a table." }] },
 
@@ -159,7 +173,11 @@ export const PERMISSIONS: Perm[] = [
     what: "Tickets print themselves as orders come in. A main hardware setting — only the admin turns it on/off; it is not delegated." },
 
   // ───────────────────────────── BANQUET (ladder) ──────────────────────────
-  { id: "banquet", group: "banquet", kind: "ladder", power: "banquet",
+  // banquet carries the tablet rung too — the waiter cap (settings.tablet_banquet) has been
+  // server-enforced since mig 130 (tabletPerm) and the manager panel already sets it; without
+  // `tablet`/`waiter` here the admin panel could neither see nor set a rung that genuinely
+  // works — a working-but-invisible switch (fixed 2026-07-26).
+  { id: "banquet", group: "banquet", kind: "ladder", power: "banquet", tablet: "tablet_banquet", waiter: true, ownerUse: "manager",
     module: { allowed: "banquet_allowed", control: "banquet_owner_control", enabled: "banquet_enabled" }, name: "Banquet & events",
     what: "Per-plate event billing that runs without a table. A special feature the admin allows first.",
     sub: [
@@ -169,7 +187,7 @@ export const PERMISSIONS: Perm[] = [
     ] },
 
   // ─────────────────────────── REPORTS & INSIGHTS (ladder) ─────────────────
-  { id: "view_dashboard", group: "reports", kind: "ladder", power: "view_dashboard", section: "reports", name: "Dashboard & reports",
+  { id: "view_dashboard", group: "reports", kind: "ladder", power: "view_dashboard", section: "reports", ownerUse: "panel", name: "Dashboard & reports",
     what: "The numbers screen. Tick which reports each role may open.",
     sub: [
       { id: "rep_sales", name: "Sales summary", what: "Revenue, covers, average bill." },
@@ -179,7 +197,7 @@ export const PERMISSIONS: Perm[] = [
       { id: "rep_tax", name: "Tax report", what: "CGST / SGST breakdown." },
       { id: "rep_zclose", name: "Day close (Z report)", what: "The end-of-day cash-up." },
     ] },
-  { id: "view_ratings", group: "reports", kind: "ladder", power: "view_ratings", section: "ratings", name: "Guest ratings & feedback",
+  { id: "view_ratings", group: "reports", kind: "ladder", power: "view_ratings", section: "ratings", ownerUse: "panel", name: "Guest ratings & feedback",
     what: "Reading what guests said and handling complaints.",
     sub: [
       { id: "rat_view", name: "Read ratings", what: "See the star ratings and comments." },
@@ -187,20 +205,22 @@ export const PERMISSIONS: Perm[] = [
       { id: "rat_delete", name: "Delete a rating", what: "Removing a rating — owner-level by default." },
     ] },
   // (Download & export removed — the app has no export feature yet; it returns here when that's built. See access-panel-build memory, Part I.)
-  { id: "view_logs", group: "reports", kind: "ladder", power: "view_logs", name: "Activity log",
+  // view_logs is the one ABSENT-ON power: canViewLogs (editor API) deliberately keeps the log
+  // for a manager unless someone EXPLICITLY switched it off (non-breaking rollout, 2026-07-24).
+  { id: "view_logs", group: "reports", kind: "ladder", power: "view_logs", absentOn: true, ownerUse: "panel", name: "Activity log",
     what: "The record of who did what. Choose which logs each role may read. (Admin-action logs are never delegated.)",
     sub: [
       { id: "log_orders", name: "Order changes", what: "Dishes added, removed, moved." },
       { id: "log_bills", name: "Bill actions", what: "Discounts, voids, refunds — with the typed reason." },
       { id: "log_staff", name: "Staff actions", what: "Logins, shift changes, power grants." },
     ] },
-  { id: "handle_issues", group: "reports", kind: "ladder", section: "issues", ownerOnly: true, name: "Issues & tickets",
+  { id: "handle_issues", group: "reports", kind: "ladder", section: "issues", ownerOnly: true, ownerUse: "panel", name: "Issues & tickets",
     what: "The Issues page — staff-raised tickets with photo/voice notes. An owner-panel page; not delegated to a waiter." },
-  { id: "view_customers", group: "reports", kind: "ladder", section: "customers", ownerOnly: true, name: "Customers list",
+  { id: "view_customers", group: "reports", kind: "ladder", section: "customers", ownerOnly: true, ownerUse: "panel", name: "Customers list",
     what: "The guest list built from past orders. An owner-panel page." },
 
   // ─────────────────────────── STAFF & SETTINGS (ladder) ───────────────────
-  { id: "manage_staff", group: "staff", kind: "ladder", power: "manage_staff", section: "staff", name: "Manage staff",
+  { id: "manage_staff", group: "staff", kind: "ladder", power: "manage_staff", section: "staff", ownerUse: "panel", name: "Manage staff",
     what: "Adding people, changing roles, resetting PINs.",
     sub: [
       { id: "st_add", name: "Add a person", what: "Creating a new staff login." },
@@ -209,7 +229,7 @@ export const PERMISSIONS: Perm[] = [
       { id: "st_pin", name: "Reset a PIN", what: "Issuing a new PIN when locked out." },
       { id: "st_grant", name: "Grant powers to others", what: "Handing capabilities onward — and ONLY powers this person already holds. Owner-level by default." },
     ] },
-  { id: "edit_settings", group: "staff", kind: "ladder", power: "edit_settings", section: "settings", name: "Restaurant settings",
+  { id: "edit_settings", group: "staff", kind: "ladder", power: "edit_settings", section: "settings", ownerUse: "panel", name: "Restaurant settings",
     what: "The restaurant's own configuration screens.",
     sub: [
       { id: "set_brand", name: "Branding & appearance", what: "Logo, colours, splash." },
@@ -237,6 +257,24 @@ export const maxReach = (p: Perm) => (p.ownerOnly ? 1 : p.waiter ? 3 : 2);
 // Manager powers that DON'T exist in the legacy flag list yet — the read/write
 // route stores them, but their server enforcement is a later reviewed step.
 export const NEW_POWER_FLAGS = PERMISSIONS.filter((p) => p.isNew && p.power).map((p) => p.power!) as string[];
+
+// ── DERIVED WIRING LISTS (2026-07-26) — the routes import THESE instead of keeping
+// hand-typed copies, so adding a feature above wires the whole ladder in one place.
+// (Before this, four separate files each carried their own list and drifted: the owner
+// settings route was missing parcel, the grant routes were missing view_logs.)
+// Every manager-power flag — the owner→manager rung the owner may grant/revoke.
+export const MANAGER_POWER_FLAGS: readonly string[] = PERMISSIONS.filter((p) => p.power && !p.isNew).map((p) => p.power!);
+// Powers whose grant reads an ABSENT manager_permissions key as ON (see `absentOn`).
+export const ABSENT_ON_POWERS: ReadonlySet<string> = new Set(PERMISSIONS.filter((p) => p.power && p.absentOn).map((p) => p.power!));
+// Every real tablet tri-state settings column (the waiter rung).
+export const TABLET_PERM_KEYS: readonly string[] = PERMISSIONS.filter((p) => p.tablet && !p.tabletNew).map((p) => p.tablet!);
+// One entry per MODULE (capabilities sharing columns — khata + table types — dedupe).
+export type ModuleDef = { key: string; label: string; allowed: string; control: string; enabled: string };
+export const MODULE_DEFS: ModuleDef[] = PERMISSIONS.reduce<ModuleDef[]>((acc, p) => {
+  if (p.module && !acc.some((m) => m.allowed === p.module!.allowed))
+    acc.push({ key: p.module.allowed.replace("_allowed", ""), label: p.moduleLabel || p.name, ...p.module });
+  return acc;
+}, []);
 
 // ── the live server state the panel reads (mirrors the extended access route) ─
 export type AccessState = {
@@ -282,7 +320,9 @@ export function reachLevel(p: Perm, s: AccessState): number {
   if (!allowed(p, s)) return 0;
   let lvl = 1;                                        // admin-allowed ⇒ owner has it
   if (p.fixedTop) lvl = 2;                             // mark_paid / invoice: owner+manager always
-  else if (p.power && s.manager[p.power]) lvl = 2;     // owner granted the manager
+  // absentOn (view_logs): an ABSENT grant means ON — display must match what canViewLogs
+  // enforces, or the panel shows "Owner only" while managers genuinely have the log.
+  else if (p.power && (p.absentOn ? s.manager[p.power] !== false : !!s.manager[p.power])) lvl = 2;
   if (lvl >= 2 && p.waiter && tabletValue(p, s) !== "off") lvl = 3;
   return lvl;
 }

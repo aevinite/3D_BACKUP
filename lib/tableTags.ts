@@ -5,6 +5,7 @@
 // SERVER-ONLY (imports supabaseAdmin) — panels learn the effective state through
 // their API responses; the server routes re-check every write regardless of UI.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { MODULE_DEFS } from "@/lib/accessModel";
 
 export const TABLE_TAGS = ["vip", "family", "guest"] as const;
 export type TableTag = (typeof TABLE_TAGS)[number];
@@ -44,6 +45,24 @@ export async function moduleLadder(
   return { allowed, ownerControl, enabled, effective: allowed && (!ownerControl || enabled) };
 }
 
+// EVERY module's ladder in ONE settings select (keyed by module name — "table_tags",
+// "banquet", …, from lib/accessModel MODULE_DEFS). Use this on paths that need several
+// modules at once (the editor whoami used to fire five separate selects for the same
+// row); a new module added to accessModel appears here with no code change.
+export async function allModuleLadders(rid: string): Promise<Record<string, TableTagsLadder>> {
+  const cols = MODULE_DEFS.flatMap((m) => [m.allowed, m.control, m.enabled]);
+  const s = (await sb.from("settings").select(cols.join(", ")).eq("restaurant_id", rid).maybeSingle())
+    .data as Record<string, boolean> | null;
+  const out: Record<string, TableTagsLadder> = {};
+  for (const m of MODULE_DEFS) {
+    const allowed = s?.[m.allowed] === true;
+    const ownerControl = s?.[m.control] === true;
+    const enabled = s?.[m.enabled] !== false;
+    out[m.key] = { allowed, ownerControl, enabled, effective: allowed && (!ownerControl || enabled) };
+  }
+  return out;
+}
+
 export const tableTagsLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "table_tags_allowed", control: "table_tags_owner_control", enabled: "table_tags_enabled" });
 
@@ -62,3 +81,9 @@ export const tableOpsLadder = (rid: string) =>
 // feature defaults to current behaviour, per docs/ACCESS-LADDER.md).
 export const takeOrdersLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "take_orders_allowed", control: "take_orders_owner_control", enabled: "take_orders_enabled" });
+
+// Parcel / takeaway quick-order — the 🥡 New Parcel button (manager + tablet), which
+// writes a takeaway order into the Platform system. A brand-new module (mig 197): every
+// rung starts OFF (unlike take_orders), so no restaurant gets it until the admin grants it.
+export const parcelLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "parcel_allowed", control: "parcel_owner_control", enabled: "parcel_enabled" });

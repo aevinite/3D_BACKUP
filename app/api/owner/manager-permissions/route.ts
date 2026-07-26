@@ -13,17 +13,15 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
 import { mergeOwnerEntitlements, powerEntitlementKey } from "@/lib/ownerEntitlements";
+import { MANAGER_POWER_FLAGS as FLAGS } from "@/lib/accessModel";
 
 export const dynamic = "force-dynamic";
 
-// The full set of manager-capability flags the owner can grant. `edit_settings` is
-// enforced by the editor route (managerCan(…, "edit_settings")) but had no toggle here,
-// so it was permanently off — added so the owner can actually grant it. New powers just
-// append to this whitelist (the owner page maps over it — no fixed count anywhere).
-// table_ops = the KOT ▾ menu (merge tables, move a KOT/item, split bill); its admin
-// rung is the table_ops_depth knob — mergeOwnerEntitlements derives power_table_ops
-// from it, so the existing entitlement guard below applies unchanged.
-const FLAGS = ["manage_staff", "edit_menu", "give_discounts", "view_dashboard", "void_bills", "edit_settings", "view_ratings", "table_tags", "khata", "banquet", "table_ops", "take_orders"] as const;
+// The full set of manager-capability flags the owner can grant — DERIVED from
+// lib/accessModel.ts (2026-07-26, imported above as FLAGS) so it can never drift from
+// the admin panel again (the old hand-typed copy was missing view_logs: the admin
+// could set it and the server enforced it, but the owner had no way to grant or pull
+// it back).
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 
