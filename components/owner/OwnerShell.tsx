@@ -43,7 +43,7 @@ const GROUPS: NavGroup[] = [
       // restaurant (ent key injected by the layout), NOT a separate admin section toggle — so
       // it appears only for restaurants that actually have pay-later on (no dead section).
       { href: "/owner/khata", label: "Pay Later", icon: "fa-book", ent: "khata_book" },
-      { href: "/owner/issues", label: "Feedback & issues", icon: "fa-triangle-exclamation", ent: "issues" },
+      { href: "/owner/issues", label: "Feedback & complaints", icon: "fa-triangle-exclamation", ent: "issues" },
     ],
   },
   {

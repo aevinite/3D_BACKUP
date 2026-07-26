@@ -33,6 +33,11 @@ export async function GET(req: NextRequest) {
   let q = sb.from("staff_actions").select(COLS).order("created_at", { ascending: false }).limit(limit);
   // Owner never sees the admin's own actions or the direct-database-edit footprints.
   q = q.not("panel", "in", "(admin,db)");
+  // …nor raw app/system FAULTS (level='error'). Those are technical support signals for the
+  // admin side, not the owner — the owner's "problems" surface is Complaints (the issues
+  // table), not the error log (owner 2026-07-26). Keep every non-error row, including rows
+  // whose level is NULL (an OR so a plain `neq` doesn't silently drop the NULLs).
+  q = q.or("level.is.null,level.neq.error");
   // Optional ?rid= — narrow to ONE selected restaurant (the top-strip restaurant pick / an
   // admin act-as one restaurant), mirroring how /api/owner/reports scopes. Only honoured when
   // that id is already in the caller's scope (an admin's scope is every restaurant), so it can
@@ -47,7 +52,8 @@ export async function GET(req: NextRequest) {
     if (!scope.ids.length) return NextResponse.json({ actions: [] });
     q = q.in("restaurant_id", scope.ids);
   }
-  if (level === "error" || level === "warn" || level === "info") q = q.eq("level", level);
+  // Only the owner-visible severities are selectable (never "error" — excluded above).
+  if (level === "warn" || level === "info") q = q.eq("level", level);
   if (qText) {
     const safe = qText.replace(/[%,()]/g, " ");
     q = q.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`);
