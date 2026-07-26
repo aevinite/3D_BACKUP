@@ -437,16 +437,16 @@ function DeleteForeverModal({ owner, busy, onConfirm, onClose }: { owner: Owner;
   const match = v === owner.username.toLowerCase();
   const hint = !v
     ? { c: "var(--muted)", i: "fa-keyboard", t: "Waiting for the username…" }
-    : match ? { c: TONE.ok.c, i: "fa-circle-check", t: "Matches — delete is armed." }
+    : match ? { c: TONE.ok.c, i: "fa-circle-check", t: "Matches — ready to move to the bin." }
       : { c: "#fbbf24", i: "fa-circle-exclamation", t: "Doesn’t match yet." };
   return (
-    <ModalShell id="admin-owner-delete" onClose={onClose} width={460} label={`Delete ${owner.name} forever`}>
-      <ModalHead tone="danger" icon="fa-triangle-exclamation" title={`Delete ${owner.name} forever?`} sub="This cannot be undone." subColor="#fca5a5" />
+    <ModalShell id="admin-owner-delete" onClose={onClose} width={460} label={`Move ${owner.name} to the recycle bin`}>
+      <ModalHead tone="danger" icon="fa-trash-can" title={`Move ${owner.name} to the recycle bin?`} sub="Restorable for 90 days — nothing is erased yet." subColor="#fca5a5" />
       <div style={{ padding: "14px 20px 4px", display: "grid", gap: 12 }}>
         <FactList danger facts={[
-          { i: "fa-store", c: "#fbbf24", t: <>Their restaurants fall back to a <b>co-owner</b>, or to <b>&ldquo;no owner&rdquo;</b></> },
-          { i: "fa-right-from-bracket", c: "#f87171", t: <>Signed out everywhere and the login is <b>removed</b></> },
-          { i: "fa-clipboard-list", c: "#34d399", t: <>The <b>activity log is kept</b> for your records</> },
+          { i: "fa-box-archive", c: "#fbbf24", t: <>They leave the Owners list and go to the <b>Recycle bin</b></> },
+          { i: "fa-store", c: "#34d399", t: <>Their restaurants <b>stay linked</b> and come back if you restore</> },
+          { i: "fa-clock-rotate-left", c: "#34d399", t: <><b>Restorable for 90 days</b>; only after that can they be permanently removed</> },
         ]} />
         <div style={{ fontSize: 12.5, color: "var(--muted)" }}>Type <b style={{ color: "var(--text)" }}>{owner.username}</b> to confirm:</div>
         <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={owner.username} autoComplete="off" spellCheck={false} aria-label="Type the username to confirm deletion"
@@ -456,7 +456,7 @@ function DeleteForeverModal({ owner, busy, onConfirm, onClose }: { owner: Owner;
       </div>
       <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", padding: "16px 20px 20px" }}>
         <button style={ghostBtn} onClick={onClose}>Cancel</button>
-        <button style={{ ...ctaBtn("danger"), opacity: match && !busy ? 1 : 0.4, cursor: match && !busy ? "pointer" : "not-allowed" }} disabled={!match || busy} onClick={onConfirm}><i className="fas fa-trash-can" aria-hidden="true" />Delete forever</button>
+        <button style={{ ...ctaBtn("danger"), opacity: match && !busy ? 1 : 0.4, cursor: match && !busy ? "pointer" : "not-allowed" }} disabled={!match || busy} onClick={onConfirm}><i className="fas fa-trash-can" aria-hidden="true" />Move to recycle bin</button>
       </div>
     </ModalShell>
   );
@@ -591,7 +591,8 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
     onYes: () => run(async () => { await patch({ owner_id: owner.id, action: "detach", restaurant_id: r.id }); }),
   });
 
-  // Permanent delete — the modal's type-to-confirm gate already guards it, so this just runs it.
+  // Delete → moves the owner to the RECYCLE BIN (the server soft-deletes now, mig
+  // 208). The modal's type-to-confirm gate already guards it, so this just runs it.
   async function doDelete() {
     setShowDelete(false);
     setMErr(""); setBusy(true);
@@ -742,14 +743,14 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
           <div style={{ fontSize: 13, fontWeight: 700, color: "#fca5a5", marginBottom: 6 }}>Danger zone</div>
           {owner.active ? (
             <div style={{ fontSize: 12, color: "var(--muted)" }}>
-              To delete this owner forever, <b>suspend them first</b> (the reversible step). Once deleted there is NO restore.
+              To delete this owner, <b>suspend them first</b> (the reversible step). Deleting then moves them to the <b>Recycle bin</b> — restorable for 90 days.
             </div>
           ) : (
             <>
               <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 10 }}>
-                This owner is suspended. Deleting is <b>permanent</b> — no restore. Their restaurants fall to a co-owner or become &ldquo;no owner&rdquo;; the activity log is kept.
+                This owner is suspended. Deleting moves them to the <b>Recycle bin</b>, where they can be <b>restored for 90 days</b>; nothing is erased yet and their restaurants stay linked. Only after 90 days can they be permanently removed.
               </div>
-              <button style={btn("#991b1b")} disabled={busy} onClick={() => setShowDelete(true)}><i className="fas fa-trash-can" style={{ marginRight: 6, fontSize: 11 }} aria-hidden="true" />Delete forever</button>
+              <button style={btn("#991b1b")} disabled={busy} onClick={() => setShowDelete(true)}><i className="fas fa-trash-can" style={{ marginRight: 6, fontSize: 11 }} aria-hidden="true" />Move to recycle bin</button>
             </>
           )}
         </div>
