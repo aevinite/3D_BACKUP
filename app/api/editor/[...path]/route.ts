@@ -27,7 +27,7 @@ import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
-import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 
 export const dynamic = "force-dynamic"; // always live, never cached
@@ -82,6 +82,17 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   return !!r?.manager_permissions?.[flag];
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
+
+// A row on the Platform board is gated by different rungs depending on what it is: a staff
+// PARCEL (source 'parcel') rides the parcel module + power; a delivery order (zomato/swiggy/
+// website=takeaway) rides the platform module + power. Admin/owner pass via managerCan's
+// higher-view bypass; for a real manager the module must ALSO be effective (mig 209).
+async function platformOrParcelCan(g: { user: StaffUser | null }, rid: string, source?: string): Promise<boolean> {
+  const isParcel = source === "parcel";
+  const flag = isParcel ? "parcel" : "platform";
+  if (g.user) { const ladder = await (isParcel ? parcelLadder : platformLadder)(rid); if (!ladder.effective) return false; }
+  return managerCan(g, rid, flag);
+}
 
 // Activity-log visibility (owner 2026-07-24, access panel "Activity log" power). Deliberately
 // NON-BREAKING: a manager keeps the log UNLESS the admin or owner has EXPLICITLY switched
@@ -581,21 +592,38 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // Platform (Zomato/Swiggy/takeaway) orders + the two operator toggles. Read
     // from the separate aggregator_orders table — dine-in `orders` is untouched.
     if (p === "platform") {
+      // The Platform board is a ladder MODULE (mig 209). It shows delivery-app orders
+      // (Zomato/Swiggy/website) when the platform module is effective AND that channel is on,
+      // plus staff PARCELS (own source, own `parcel` module). Refuse only when BOTH are off.
+      const [plat, parc] = await Promise.all([platformLadder(rid), parcelLadder(rid)]);
+      if (!plat.effective && !parc.effective) return err("The Platform board isn't enabled for this restaurant.", 403);
+      // Which delivery channels are live for this restaurant (settings.platform_channels).
+      // website is stored under source 'takeaway' (the existing plumbing) but labelled "Website".
+      const settingsRow = must(await sb.from("settings")
+        .select("kitchen_can_accept_platform, platform_in_bills, platform_channels").eq("restaurant_id", rid).maybeSingle()) as
+        { kitchen_can_accept_platform?: boolean; platform_in_bills?: boolean; platform_channels?: Record<string, { on?: boolean }> } | null;
+      const chan = settingsRow?.platform_channels || {};
+      const chOn = (k: string) => chan?.[k]?.on === true;
+      // Build the set of sources this board may show: enabled delivery channels ∪ parcels.
+      const sources: string[] = [];
+      if (plat.effective) { if (chOn("zomato")) sources.push("zomato"); if (chOn("swiggy")) sources.push("swiggy"); if (chOn("website")) sources.push("takeaway"); }
+      if (parc.effective) sources.push("parcel");
+      const channels = { zomato: plat.effective && chOn("zomato"), swiggy: plat.effective && chOn("swiggy"), website: plat.effective && chOn("website") };
+      // Nothing to show (module on but every channel off, parcel off) → empty board, no query.
+      if (!sources.length) return ok({ orders: [], toggles: { ...(settingsRow || {}) }, channels, platform_on: plat.effective, parcel_on: parc.effective });
       // Active orders (any age) + just-handed-over ones (last 6 min): a handed-over
       // ticket lingers ~6 min in the board's "Handed over" column for a final glance,
       // then drops off the live board. Cancelled never show. (owner, 2026-06-21)
       const handoverCutoff = new Date(Date.now() - 6 * 60 * 1000).toISOString();
-      const [rows, settings] = await Promise.all([
-        // Explicit column list (NOT select("*")) on this POLLED path — the board only renders
-        // these 8, and select("*") pulled the heavy `payload` (full webhook body) + growing
-        // `status_history` on every 60s/2s poll for nothing (egress). updated_at is only used
-        // in the server-side filter below, so it doesn't need selecting.
-        sb.from("aggregator_orders").select("id,source,items,total,status,kot_no,created_at,customer_name,paid").eq("restaurant_id", rid)
-          .or(`status.eq.new,status.eq.accepted,status.eq.preparing,status.eq.ready,and(status.eq.handed_over,updated_at.gte.${handoverCutoff})`)
-          .order("created_at", { ascending: false }).limit(200),
-        sb.from("settings").select("kitchen_can_accept_platform, platform_in_bills").eq("restaurant_id", rid).maybeSingle(),
-      ]);
-      return ok({ orders: must(rows) || [], toggles: must(settings) || {} });
+      // Explicit column list (NOT select("*")) on this POLLED path — the board only renders
+      // these, and select("*") pulled the heavy `payload` (full webhook body) + growing
+      // `status_history` on every 60s/2s poll for nothing (egress). updated_at is only used
+      // in the server-side filter below, so it doesn't need selecting. Scoped to the live sources.
+      const rows = sb.from("aggregator_orders").select("id,source,items,total,status,kot_no,created_at,customer_name,paid").eq("restaurant_id", rid)
+        .in("source", sources)
+        .or(`status.eq.new,status.eq.accepted,status.eq.preparing,status.eq.ready,and(status.eq.handed_over,updated_at.gte.${handoverCutoff})`)
+        .order("created_at", { ascending: false }).limit(200);
+      return ok({ orders: must(await rows) || [], toggles: { kitchen_can_accept_platform: settingsRow?.kitchen_can_accept_platform, platform_in_bills: settingsRow?.platform_in_bills }, channels, platform_on: plat.effective, parcel_on: parc.effective });
     }
 
     // Day-close "Z report": the business-day totals, computed SERVER-SIDE from the DB
@@ -797,7 +825,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const elapsedMs = now.getTime() - since.getTime();
       const [dishesQ, setQ, platRangeQ] = await Promise.all([
         sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
-        sb.from("settings").select("tax_rate,tax_components").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select("tax_rate,tax_components,platform_allowed,platform_owner_control,platform_enabled,parcel_allowed,parcel_owner_control,parcel_enabled,platform_channels").eq("restaurant_id", rid).maybeSingle(),
         sb.from("aggregator_orders").select("source,total,status,created_at").eq("restaurant_id", rid).gte("created_at", since.toISOString()).limit(5000),
       ]);
       // Page through EVERY order in the window. A single .limit(50000) is silently capped by
@@ -839,7 +867,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Same effective rate + discount-before-tax rule as billMath/Z-report (lib/tax.ts),
       // so the dashboard revenue agrees with the Bills tab and the printed bills. Was
       // summing the STORED order total (taxed at a flat 5% on the pre-discount subtotal).
-      const rate = effectiveTaxRate(must(setQ) || {});
+      const setRow = (must(setQ) || {}) as Record<string, any>;
+      const rate = effectiveTaxRate(setRow);
+      // Which platform surfaces are live (mig 209) — so the dashboard hides dead channels for a
+      // restaurant that isn't on the delivery apps. moduleLadder formula, computed from the
+      // columns already fetched above (no extra query).
+      const platOnDash = setRow.platform_allowed === true && (setRow.platform_owner_control !== true || setRow.platform_enabled !== false);
+      const parcelOnDash = setRow.parcel_allowed === true && (setRow.parcel_owner_control !== true || setRow.parcel_enabled !== false);
+      const dashChan = (setRow.platform_channels || {}) as Record<string, { on?: boolean }>;
+      const channelsOn = { zomato: platOnDash && dashChan.zomato?.on === true, swiggy: platOnDash && dashChan.swiggy?.on === true, website: platOnDash && dashChan.website?.on === true, parcel: parcelOnDash };
       const catOf: Record<string, string> = Object.fromEntries(dishes.map((d: { id: string; category?: string }) => [d.id, d.category || "other"]));
       const hours = Array(24).fill(0);
       const topD: Record<string, number> = {}, cats: Record<string, number> = {}, seriesMap: Record<string, number> = {};
@@ -971,7 +1007,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // three platform channels from the one scoped aggregator query above.
       const platRows = (must(platRangeQ) || []) as { source: string; total: number; status: string }[];
       const channels: Record<string, { rev: number; count: number }> = {
-        dinein: { rev: 0, count: 0 }, zomato: { rev: 0, count: 0 }, swiggy: { rev: 0, count: 0 }, takeaway: { rev: 0, count: 0 },
+        dinein: { rev: 0, count: 0 }, zomato: { rev: 0, count: 0 }, swiggy: { rev: 0, count: 0 }, takeaway: { rev: 0, count: 0 }, parcel: { rev: 0, count: 0 },
       };
       for (const pr of platRows) {
         if (pr.status === "cancelled" || pr.status === "rejected") continue;
@@ -1015,7 +1051,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         dineIn: ((must(openSessQ) || []) as unknown[]).length,
         zomato: platActive.filter((r) => r.source === "zomato").length,
         swiggy: platActive.filter((r) => r.source === "swiggy").length,
-        takeaway: platActive.filter((r) => r.source === "takeaway").length,
+        takeaway: platActive.filter((r) => r.source === "takeaway").length,   // website channel
+        parcel: platActive.filter((r) => r.source === "parcel").length,       // staff parcels
       };
       const platformToday = { count: platToday.length, revenue: r2(platToday.reduce((sum, r) => sum + (Number(r.total) || 0), 0)) };
       // Dine-in channel = the collected dine-in figures computed above.
@@ -1038,7 +1075,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // [method, revenue, billCount] triples, biggest first (bill count shipped 2026-07-05
         // for the donut legend — same rows, no extra read; old clients ignore the 3rd slot).
         paymentMethods: Object.entries(paymentMethods).map(([method, v]) => [method, r2(v.rev), v.bills]).sort((a, b) => (b[1] as number) - (a[1] as number)),
-        live, platformToday,
+        live, platformToday, channelsOn,
         // Crazy-dashboard fields (2026-07-05). prev is cut at the same elapsed time as
         // the current period, so deltas stay honest mid-day/mid-month.
         prev: { revenue: r2(prevRevenue), orders: prevOrders, cancelled: prevCancelled, series: prevSeries.map(r2) },
@@ -1218,12 +1255,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(data);
     }
 
-    // ── Parcel (a staff-placed TAKEAWAY order) ────────────────────────────────
-    // A "New Parcel" IS a manually-created takeaway order in the Platform system
-    // (aggregator_orders, source='takeaway') — so it lands in the Platform board,
-    // the kitchen, and the Takeaway totals with zero extra plumbing (owner 2026-07-25:
-    // "show as takeaway order we already made in Swiggy/Zomato"). Reuses the take_orders
-    // ladder (same as dine-in ordering) until a dedicated admin toggle is added.
+    // ── Parcel (a staff-placed counter PARCEL) ────────────────────────────────
+    // A "New Parcel" is a manually-created order in the Platform system with its OWN
+    // source 'parcel' (mig 209) — so it lands on the Platform board / kitchen labelled
+    // "Parcel" (never confused with the website "Takeaway" channel). Gated by the parcel
+    // module + power (its own ladder), separate from the platform delivery module.
     // Titles/prices are resolved SERVER-SIDE (never trust the client cart); total is the
     // item subtotal, matching how every other platform order stores `total`.
     if (a === "parcel" && path.length === 1) {
@@ -1253,7 +1289,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const cust = String(customer || "").trim().slice(0, 120) || "Parcel";
       const ext = `PARCEL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const ins = await sb.rpc("lfh_platform_insert", {
-        p_source: "takeaway", p_external_id: ext, p_customer: cust,
+        p_source: "parcel", p_external_id: ext, p_customer: cust,
         p_phone: String(phone || "").trim().slice(0, 40) || null,
         p_items: picked, p_total: total, p_restaurant_id: rid,
       });
@@ -1295,12 +1331,27 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
 
-    // ── Platform (Zomato/Swiggy/takeaway) orders ──────────────────────────────
-    // platform/test — drop a random test order in (stands in for the real
-    // aggregator webhook until API keys exist). Same insert path the webhook will use.
+    // ── Platform (Zomato/Swiggy/website) orders ───────────────────────────────
+    // platform/test — the "Simulate order" control: drop a realistic demo order in on a chosen
+    // channel (stands in for the real aggregator webhook until API keys exist). Same insert path
+    // the webhook will use. Gated by the platform module + channel + the manager `platform` power
+    // (admin/owner pass via managerCan's higher-view bypass). Marked payload.demo so a later real
+    // integration can tell demo orders apart.
     if (a === "platform" && b === "test") {
-      const SRC = ["zomato", "swiggy", "takeaway"];
-      const src = SRC[Math.floor(Math.random() * SRC.length)];
+      if (g.user && !(await platformLadder(rid)).effective) return err("The Platform board isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "platform"))) return permDenied("use the Platform board");
+      // Only simulate on a channel that's actually turned on for this restaurant.
+      const chRow = must(await sb.from("settings").select("platform_channels").eq("restaurant_id", rid).maybeSingle()) as { platform_channels?: Record<string, { on?: boolean }> } | null;
+      const chan = chRow?.platform_channels || {};
+      const CH2SRC: Record<string, string> = { zomato: "zomato", swiggy: "swiggy", website: "takeaway" };
+      const onChannels = Object.keys(CH2SRC).filter((k) => chan?.[k]?.on === true);
+      const reqCh = String((body && body.channel) || "").toLowerCase();
+      // A named channel that's OFF is refused (don't silently simulate a different one); no name
+      // = pick any live channel (the UI only ever offers channels that are on).
+      if (reqCh && !onChannels.includes(reqCh)) return err("That channel is turned off for this restaurant.", 400);
+      const channel = reqCh || onChannels[Math.floor(Math.random() * onChannels.length)];
+      if (!channel) return err("No delivery channel is turned on for this restaurant.", 400);
+      const src = CH2SRC[channel];
       const dishes = must(await sb.from("menu_items").select("title, price").eq("restaurant_id", rid).limit(50)) || [];
       const pick: { title: string; qty: number; price: number }[] = [];
       let total = 0;
@@ -1313,16 +1364,21 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         total += price * qty;
       }
       const NAMES = ["Aarav S.", "Meera K.", "Priya R.", "Rohan B.", "Sana M.", "Kunal D.", "Diya P.", "Vikram J."];
-      const cust = src === "takeaway" ? `Walk-in · ${NAMES[Math.floor(Math.random() * NAMES.length)].split(" ")[0]}` : NAMES[Math.floor(Math.random() * NAMES.length)];
-      const ext = `${src.toUpperCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const cust = NAMES[Math.floor(Math.random() * NAMES.length)];
+      const ext = `${channel.toUpperCase()}-DEMO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const { data, error } = await sb.rpc("lfh_platform_insert", {
         p_source: src, p_external_id: ext, p_customer: cust,
         p_phone: `+9190${Math.floor(10000000 + Math.random() * 89999999)}`,
         p_items: pick, p_total: total, p_restaurant_id: rid,
       });
       if (error) throw new Error(error.message);
-      await log("manager", "platform_test_order", { restaurant_id: rid, detail: `${src} test order`, device_id: dev });
-      return ok(Array.isArray(data) ? data[0] : data);
+      const testRow = Array.isArray(data) ? data[0] : data;
+      // Mark the row as a demo/representation order + remember which channel it came in on
+      // (website vs the takeaway source), so the board labels it and a later real integration
+      // can distinguish it. One scoped update (id + restaurant_id is the fence).
+      if (testRow?.id) await sb.from("aggregator_orders").update({ payload: { demo: true, channel } }).eq("id", testRow.id).eq("restaurant_id", rid);
+      await log("manager", "platform_test_order", { restaurant_id: rid, detail: `${channel} demo order`, device_id: dev });
+      return ok(testRow);
     }
 
     // platform/:id/status — advance a platform order (accept/preparing/ready/handed_over/cancelled)
@@ -1332,8 +1388,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!ALLOWED.includes(status)) return err("invalid status");
       // lfh_platform_set_status updates by id with NO tenant scope (mig 071); confirm this
       // platform order is THIS restaurant's before advancing it (service-role bypasses RLS).
-      const owns = must(await sb.from("aggregator_orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const owns = must(await sb.from("aggregator_orders").select("id,source").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { source?: string } | null;
       if (!owns) return err("That platform order isn't for this restaurant.", 404);
+      // A parcel is gated by the parcel module/power; a delivery order by the platform one.
+      if (!(await platformOrParcelCan(g, rid, owns.source))) return permDenied("manage this order");
       const { data, error } = await sb.rpc("lfh_platform_set_status", { p_id: b, p_status: status, p_by: "manager" });
       if (error) throw new Error(error.message);
       const row = Array.isArray(data) ? data[0] : data;
@@ -1345,8 +1403,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // platform/:id/pay — collect a "pay on pickup" parcel (or any unpaid takeaway) at handover.
     // Scoped ownership check first (the set is service-role, so this eq() pair is the fence).
     if (a === "platform" && c === "pay") {
-      const owns = must(await sb.from("aggregator_orders").select("id,total").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { total?: number } | null;
+      const owns = must(await sb.from("aggregator_orders").select("id,total,source").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { total?: number; source?: string } | null;
       if (!owns) return err("That order isn't for this restaurant.", 404);
+      if (!(await platformOrParcelCan(g, rid, owns.source))) return permDenied("collect this order");
       const method = String((body && body.method) || "cash").slice(0, 20);
       const up = await sb.from("aggregator_orders").update({ paid: true, paid_at: new Date().toISOString(), payment_method: method }).eq("id", b).eq("restaurant_id", rid);
       if (up.error) throw new Error(up.error.message);

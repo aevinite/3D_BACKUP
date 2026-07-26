@@ -263,10 +263,10 @@ const NR_PANELS = [
 ] as const;
 const SYS_PANELS: Record<string, boolean> = { manager: true, kitchen: true, tablet: true, owner: false };
 const NR_OWNER_SECTIONS = [["menu", "Menu"], ["reports", "Reports"], ["staff", "Staff & powers"], ["issues", "Feedback & issues"], ["ratings", "Ratings"], ["customers", "Customers"], ["settings", "Settings"]] as const;
-const NR_MGR_POWERS = [["manage_staff", "Manage staff"], ["edit_menu", "Edit menu"], ["give_discounts", "Give discounts"], ["view_dashboard", "View dashboard"], ["void_bills", "Void / delete bills"], ["edit_settings", "Edit settings"], ["view_ratings", "View ratings"], ["table_tags", "Table types"], ["khata", "Pay Later (khata)"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT ops"], ["take_orders", "Take orders"], ["parcel", "Parcel / takeaway"]] as const;
-const NR_MODULES = [["table_tags", "Table types + Pay Later"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT operations"], ["take_orders", "Take orders (manager)"], ["parcel", "Parcel / takeaway"]] as const;
+const NR_MGR_POWERS = [["manage_staff", "Manage staff"], ["edit_menu", "Edit menu"], ["give_discounts", "Give discounts"], ["view_dashboard", "View dashboard"], ["void_bills", "Void / delete bills"], ["edit_settings", "Edit settings"], ["view_ratings", "View ratings"], ["table_tags", "Table types"], ["khata", "Pay Later (khata)"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT ops"], ["take_orders", "Take orders"], ["parcel", "Parcel / takeaway"], ["platform", "Platform board"]] as const;
+const NR_MODULES = [["table_tags", "Table types + Pay Later"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT operations"], ["take_orders", "Take orders (manager)"], ["parcel", "Parcel / takeaway"], ["platform", "Platform (Zomato / Swiggy)"]] as const;
 const NR_TABLET_CAPS = [["tablet_discount", "Discounts"], ["tablet_mark_paid", "Mark paid"], ["tablet_invoice", "Invoice"], ["tablet_banquet", "Banquet"], ["tablet_table_tags", "Table types"], ["tablet_khata", "Pay Later"], ["tablet_table_ops", "Table & KOT ops"], ["tablet_take_orders", "Take orders"], ["tablet_parcel", "Parcel"]] as const;
-const NR_MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: false, table_ops: false, take_orders: false, parcel: true };
+const NR_MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: false, table_ops: false, take_orders: false, parcel: true, platform: true };
 const NR_TABLET_DEFAULT: Record<string, "off" | "on" | "pin"> = { tablet_discount: "off", tablet_mark_paid: "off", tablet_invoice: "off", tablet_banquet: "off", tablet_table_tags: "off", tablet_khata: "off", tablet_table_ops: "off", tablet_take_orders: "on", tablet_parcel: "off" };
 // The SYSTEM defaults for a brand-new restaurant (matches lib/settingsClone + MP_DEFAULT +
 // owner absent=ON). All owner sections + power switches on; modules off; grants = MP_DEFAULT.
@@ -760,10 +760,69 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
 // writes the SAME settings columns the Access screen reads — so the two are always in sync
 // (single source of truth; no duplicated value). Fine-tune the full ladder in Access below.
 const QUICK_FEATURES = [
-  { key: "banquet", label: "Banquet billing" },
-  { key: "auto_print_kot", label: "Auto-print KOT" },
+  { key: "platform", label: "Platform board (Zomato / Swiggy)", hint: "The 🛵 online-delivery board in the manager panel. Turn it off for restaurants that aren't on the delivery apps. Choose which channels are live below." },
+  { key: "banquet", label: "Banquet billing", hint: "Per-plate event billing that runs without a table." },
+  { key: "auto_print_kot", label: "Auto-print KOT", hint: "Kitchen tickets print themselves as orders come in." },
 ] as const;
 type QuickKey = (typeof QUICK_FEATURES)[number]["key"];
+
+// The delivery channels a restaurant can turn on inside the Platform board (mig 209). Website =
+// the restaurant's own site (stored under the 'takeaway' source; labelled Website to keep it
+// distinct from a staff Parcel). Each carries an optional API key (stored server-side only).
+const PLATFORM_CHANNELS: [string, string][] = [["zomato", "Zomato"], ["swiggy", "Swiggy"], ["website", "Website (own site)"]];
+
+// The channel sub-panel shown UNDER the Platform toggle when it's on. On/off + API key per
+// channel. Keys are write-only from the UI's side: the server returns hasKey, never the value,
+// and a channel with no key still works as a live demo (the manager's "Simulate order").
+function PlatformChannels({ restaurant }: { restaurant: Restaurant }) {
+  const [ch, setCh] = useState<Record<string, { on: boolean; hasKey: boolean }> | null>(null);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const [loadErr, setLoadErr] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(() => {
+    setLoadErr(false);
+    fetch(`/api/admin/restaurants/platform-channels?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => { if (j.error || !j.channels) { setLoadErr(true); return; } setCh(j.channels); })
+      .catch(() => setLoadErr(true));
+  }, [restaurant.id]);
+  useEffect(() => { load(); }, [load]);
+  const post = async (channel: string, patch: { on?: boolean; key?: string }) => {
+    if (pending.has(channel)) return;
+    setErr(null); setPending((s) => new Set(s).add(channel));
+    try {
+      const r = await fetch("/api/admin/restaurants/platform-channels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, channel, ...patch }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
+      setCh(d.channels);
+      if (typeof patch.key === "string") setDraft((s) => ({ ...s, [channel]: "" })); // clear the input after saving a key
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setPending((s) => { const n = new Set(s); n.delete(channel); return n; }); }
+  };
+  return (
+    <div style={{ margin: "6px 0 2px 26px", display: "grid", gap: 6 }}>
+      {loadErr && <div style={{ color: "var(--adm-danger)", fontSize: 12 }}>Couldn&rsquo;t load channels. <button className="adm-btn" style={{ marginLeft: 6, padding: "2px 8px" }} onClick={load}>Retry</button></div>}
+      {ch && PLATFORM_CHANNELS.map(([key, label]) => {
+        const c = ch[key] || { on: false, hasKey: false };
+        const busy = pending.has(key);
+        return (
+          <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "7px 10px", borderRadius: 9, border: "1px solid var(--adm-border, rgba(128,128,128,0.25))", background: c.on ? "color-mix(in srgb, var(--adm-ok) 6%, transparent)" : "transparent" }}>
+            <button type="button" className={`adm-toggle ${c.on ? "on" : "off"}`} disabled={busy} onClick={() => post(key, { on: !c.on })} style={{ minWidth: 128 }} title={c.on ? "On — tap to turn off" : "Off — tap to turn on"}>
+              <span>{label}</span><span className="pill">{c.on ? "ON" : "OFF"}</span>
+            </button>
+            <input className="adm-input" type="password" autoComplete="off" style={{ flex: 1, minWidth: 170, opacity: c.on ? 1 : 0.5 }} disabled={!c.on || busy}
+              placeholder={c.hasKey ? "•••••••• saved — type to replace" : "API key — blank = demo mode"}
+              value={draft[key] || ""} maxLength={500} onChange={(e) => setDraft((s) => ({ ...s, [key]: e.target.value }))} />
+            <button className="adm-btn" disabled={!c.on || busy || !((draft[key] || "").trim())} onClick={() => post(key, { key: draft[key] || "" })}>Save key</button>
+            {c.hasKey && <button className="adm-btn" disabled={busy} onClick={() => post(key, { key: "" })} title="Remove the saved key (back to demo mode)">Clear</button>}
+            <span className="adm-muted" style={{ fontSize: 11.5, width: "100%" }}>{c.hasKey ? "Live key set." : "Demo mode — the manager can simulate orders on this channel."}</span>
+          </div>
+        );
+      })}
+      {err && <div style={{ color: "var(--adm-danger)", fontSize: 12 }}>{err}</div>}
+    </div>
+  );
+}
 function QuickFeaturesCard({ restaurant }: { restaurant: Restaurant }) {
   const [state, setState] = useState<Record<QuickKey, boolean> | null>(null);
   const [loadErr, setLoadErr] = useState(false);
@@ -775,7 +834,7 @@ function QuickFeaturesCard({ restaurant }: { restaurant: Restaurant }) {
       .then((r) => r.json())
       .then((j) => {
         if (j.error || typeof j.banquet === "undefined") { setLoadErr(true); return; }
-        setState({ banquet: !!j.banquet, auto_print_kot: !!j.auto_print_kot });
+        setState({ platform: !!j.platform, banquet: !!j.banquet, auto_print_kot: !!j.auto_print_kot });
       })
       .catch(() => setLoadErr(true));
   }, [restaurant.id]);
@@ -789,7 +848,7 @@ function QuickFeaturesCard({ restaurant }: { restaurant: Restaurant }) {
     try {
       const r = await fetch("/api/admin/restaurants/quick-features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, feature: key, on: next }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      setState({ banquet: !!d.banquet, auto_print_kot: !!d.auto_print_kot }); // trust the server's effective read
+      setState({ platform: !!d.platform, banquet: !!d.banquet, auto_print_kot: !!d.auto_print_kot }); // trust the server's effective read
     } catch (e) {
       setState((s) => (s ? { ...s, [key]: !next } : s)); // revert
       setErr(e instanceof Error ? e.message : String(e));
@@ -803,14 +862,28 @@ function QuickFeaturesCard({ restaurant }: { restaurant: Restaurant }) {
       <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Quick on/off for this restaurant&apos;s main operational features. Same switches as <b>Access &amp; permissions</b> below — changing one changes the other. Fine-tune who can use them (owner / manager / tablet) in Access.</p>
       {state === null && !loadErr
         ? <div className="adm-empty">Loading…</div>
-        : <div className="adm-togglegrid">
+        : <div style={{ display: "grid", gap: 6 }}>
+            {/* Green-box rows — same visual language as the Google-review mode cards above:
+                selected/on = 2px green border + faint green fill + ✓, off = muted outline + ○,
+                with a right-aligned ON/OFF chip. Platform reveals its channel sub-panel when on. */}
             {QUICK_FEATURES.map((f) => {
               const on = !!state?.[f.key];
+              const busy = !state || pending.has(f.key);
               return (
-                <button key={f.key} type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={!state || pending.has(f.key)} onClick={() => toggle(f.key)}
-                  title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
-                  <span>{f.label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
-                </button>
+                <div key={f.key}>
+                  <button type="button" className="adm-card" disabled={busy} onClick={() => toggle(f.key)}
+                    title={on ? "On — tap to turn off" : "Off — tap to turn on"}
+                    style={{ width: "100%", display: "flex", alignItems: "flex-start", gap: 10, textAlign: "left", padding: "10px 12px", cursor: busy ? "default" : "pointer",
+                      border: on ? "2px solid var(--adm-ok)" : "1px solid var(--adm-border, rgba(128,128,128,0.3))",
+                      background: on ? "color-mix(in srgb, var(--adm-ok) 8%, transparent)" : "transparent" }}>
+                    <span aria-hidden="true" style={{ marginTop: 1, fontWeight: 800, color: on ? "var(--adm-ok)" : "var(--muted)" }}>{on ? "✓" : "○"}</span>
+                    <span style={{ flex: 1 }}><span style={{ fontWeight: 700 }}>{f.label}</span><span className="adm-muted" style={{ display: "block", fontSize: 12 }}>{f.hint}</span></span>
+                    <span className="adm-chip" style={on
+                      ? { background: "color-mix(in srgb, var(--adm-ok) 20%, transparent)", color: "var(--adm-ok)" }
+                      : { background: "var(--muted2)", color: "var(--muted)" }}>{on ? "ON" : "OFF"}</span>
+                  </button>
+                  {f.key === "platform" && on && <PlatformChannels restaurant={restaurant} />}
+                </div>
               );
             })}
           </div>}
@@ -1005,13 +1078,15 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
       <div id="det-status"><StatusCard restaurant={restaurant} /></div>
 
-      <div id="det-review"><GoogleReviewCard restaurant={restaurant} /></div>
-
       <div id="det-owner"><OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} /></div>
 
       <div id="det-branding"><BrandingCard restaurant={restaurant} /></div>
 
       <div id="det-enter"><EnterCard restaurant={restaurant} panels={panels} /></div>
+
+      {/* Google review + Main features sit together near the bottom (owner 2026-07-26): the
+          green mode/toggle cards share one visual language, just above the Access link. */}
+      <div id="det-review"><GoogleReviewCard restaurant={restaurant} /></div>
 
       <div id="det-main-features"><QuickFeaturesCard restaurant={restaurant} /></div>
 

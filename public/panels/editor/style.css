@@ -1926,6 +1926,11 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 /* ── Platform tab (Zomato / Swiggy / takeaway board) ─────────────────────── */
 .plat-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .plat-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Simulate-order menu (demo mode) — a small dropdown of the live delivery channels. */
+.plat-sim { position: relative; }
+.plat-sim-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; display: flex; flex-direction: column; gap: 4px; padding: 6px; min-width: 140px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,.18)); }
+.plat-sim-menu[hidden] { display: none; }
+.plat-sim-menu .btn { justify-content: flex-start; width: 100%; }
 .plat-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; }
 .plat-toggle input { width: 15px; height: 15px; accent-color: var(--gold); }
 .btn.ghost { background: transparent; }
@@ -1939,10 +1944,11 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .plat-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 13px; padding: 12px 13px; box-shadow: var(--shadow-sm); }
 .plat-card.z { border-left-color: #e23744; }
 .plat-card.s { border-left-color: #fc8019; }
-.plat-card.t { border-left-color: #6f9a6a; }
+.plat-card.t { border-left-color: #0ea5e9; }   /* Website (own site) */
+.plat-card.p { border-left-color: #6b7280; }   /* Parcel (counter) */
 .plat-ch { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .plat-badge { font-size: 11px; font-weight: 800; color: #fff; padding: 3px 9px; border-radius: 7px; letter-spacing: .03em; }
-.plat-badge.z { background: #e23744; } .plat-badge.s { background: #fc8019; } .plat-badge.t { background: #6f9a6a; } .plat-badge.o { background: var(--muted); }
+.plat-badge.z { background: #e23744; } .plat-badge.s { background: #fc8019; } .plat-badge.t { background: #0ea5e9; } .plat-badge.p { background: #6b7280; } .plat-badge.o { background: var(--muted); }
 .plat-kot { font-weight: 800; font-size: 14px; }
 .plat-age { margin-left: auto; font-size: 12px; color: var(--muted); font-weight: 600; }
 .plat-cust { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
@@ -1978,7 +1984,8 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .tbox.dine .tbox-ico { background: var(--gold); color: #2a1d0c; } .tbox.dine .tbox-bar { background: var(--gold); }
 .tbox.z .tbox-ico { background: #e23744; } .tbox.z .tbox-bar { background: #e23744; }
 .tbox.s .tbox-ico { background: #fc8019; } .tbox.s .tbox-bar { background: #fc8019; }
-.tbox.t .tbox-ico { background: #6f9a6a; } .tbox.t .tbox-bar { background: #6f9a6a; }
+.tbox.t .tbox-ico { background: #0ea5e9; } .tbox.t .tbox-bar { background: #0ea5e9; }
+.tbox.p .tbox-ico { background: #6b7280; } .tbox.p .tbox-bar { background: #6b7280; }
 .tbox.tot .tbox-ico { background: #3a2d1a; color: var(--gold); } .tbox.tot .tbox-bar { background: var(--gold); }
 .tbox.tot .tbox-n { color: var(--gold); }
 @media (max-width: 760px) { .dash-layout { grid-template-columns: 1fr; } .dash-nav { flex-direction: row; flex-wrap: wrap; } }

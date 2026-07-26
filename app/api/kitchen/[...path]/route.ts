@@ -10,6 +10,7 @@ import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { notifyAggregator } from "@/lib/aggregators";
+import { platformLadder, parcelLadder } from "@/lib/tableTags";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
 
@@ -73,7 +74,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Orders + dishes from the shared "live board" helper — today's tickets PLUS
       // any still-open session's, so a dish left cooking on an overnight table keeps
       // showing here (and matches the manager). Was a day-clipped fetch before.
-      const [live, dishes, platform, settings, restaurant] = await Promise.all([
+      const [live, dishes, platform, settings, restaurant, platL, parcL] = await Promise.all([
         liveOrdersAndItems(rid, undefined, true), // activeOnly: received/preparing only (board never shows served)
         sb.from("menu_items").select("id,title,category,tags").eq("restaurant_id", rid).order("category").limit(2000),
         // active platform (Zomato/Swiggy/takeaway) tickets — separate table, so dine-in is untouched.
@@ -82,14 +83,26 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // two big JSON columns — so we drop ONLY those and keep every small column (verified unused
         // in the route + kitchen/app.js, so the board looks identical). (owner 2026-06-29)
         sb.from("aggregator_orders").select("id, source, external_id, status, order_id, created_at, customer_name, customer_phone, items, total, kot_no, accepted_at, accepted_by, updated_at, restaurant_id").eq("restaurant_id", rid).in("status", ["new", "accepted", "preparing", "ready"]).order("created_at").limit(500),
-        sb.from("settings").select("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select("kitchen_can_accept_platform, auto_print_kot, auto_print_kot_allowed, platform_channels").eq("restaurant_id", rid).maybeSingle(),
         // THIS restaurant's identity, so the kitchen header shows which restaurant the
         // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
+        platformLadder(rid),
+        parcelLadder(rid),
       ]);
+      // Only surface tickets whose feature is live (mig 209): delivery channels (zomato/swiggy/
+      // website=takeaway) when the platform module is effective AND that channel is on; parcels
+      // when the parcel module is effective. Belt-and-braces — if the admin switches a channel
+      // off while tickets are still cooking, they drop off the kitchen board too.
+      const kChan = ((must(settings) || {}) as { platform_channels?: Record<string, { on?: boolean }> }).platform_channels || {};
+      const kOn = (k: string) => kChan?.[k]?.on === true;
+      const kSources = new Set<string>();
+      if (platL.effective) { if (kOn("zomato")) kSources.add("zomato"); if (kOn("swiggy")) kSources.add("swiggy"); if (kOn("website")) kSources.add("takeaway"); }
+      if (parcL.effective) kSources.add("parcel");
+      const platformRows = ((must(platform) || []) as { source?: string }[]).filter((r) => kSources.has(String(r.source)));
       return ok({
         orders: live.orders, items: live.items, dishes: must(dishes),
-        platform: must(platform) || [],
+        platform: platformRows,
         platformAccept: !!(must(settings) || {}).kitchen_can_accept_platform,
         // Auto-print KOT is ON only when the ADMIN allowed it AND the owner toggled it on
         // (mig 107). The kitchen panel prints a ticket for each brand-new order when true.
