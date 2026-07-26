@@ -148,7 +148,7 @@ export function AreaTrend({ data, lines, height = 260 }: {
             <defs>
               {lines.map((l) => (
                 <linearGradient key={l.key} id={`own-g-${cssId(l.key)}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={l.color} stopOpacity={0.28} />
+                  <stop offset="0%" stopColor={l.color} stopOpacity={0.36} />
                   <stop offset="100%" stopColor={l.color} stopOpacity={0.02} />
                 </linearGradient>
               ))}
@@ -156,10 +156,12 @@ export function AreaTrend({ data, lines, height = 260 }: {
             <CartesianGrid stroke={GRID} vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} minTickGap={24} />
             <YAxis domain={fitDomain(values)} tick={{ fontSize: 11, fill: AXIS }} tickFormatter={compact} width={48} allowDecimals={false} />
-            <Tooltip content={<MoneyTip />} />
+            {/* Crosshair + ringed active dot = the "pretty" hover from the design demos
+                the owner asked to match (2026-07-26). */}
+            <Tooltip content={<MoneyTip />} cursor={{ stroke: "var(--muted)", strokeDasharray: "3 3", strokeOpacity: 0.5 }} />
             {lines.map((l) => (
               <Area key={l.key} type="monotone" dataKey={l.key} name={l.name} stroke={l.color}
-                strokeWidth={2.25} dot={false} activeDot={{ r: 4 }}
+                strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: "var(--card)" }}
                 fill={single ? `url(#own-g-${cssId(l.key)})` : "transparent"} />
             ))}
           </AreaChart>
@@ -406,6 +408,32 @@ export function PayTrendStack({ data }: { data: { day: string; method: string; r
 }
 
 // ── Spark — tiny inline sparkline for KPI tiles (pure SVG, no axes) ─────────
+// ── SparkArea — full-width gradient mini-trend for KPI cards (D1 look, 2026-07-26).
+// preserveAspectRatio="none" lets it stretch across the whole card bottom.
+export function SparkArea({ points, color, height = 34 }: { points: number[]; color: string; height?: number }) {
+  if (points.length < 2) return null;
+  const w = 300;
+  const max = Math.max(...points, 1), min = Math.min(...points, 0);
+  const span = max - min || 1;
+  const step = w / (points.length - 1);
+  const X = (i: number) => (i * step).toFixed(1);
+  const Y = (v: number) => (height - 3 - ((v - min) / span) * (height - 6)).toFixed(1);
+  const line = points.map((v, i) => `${i === 0 ? "M" : "L"}${X(i)},${Y(v)}`).join(" ");
+  const gid = "spa" + Math.random().toString(36).slice(2, 7);
+  return (
+    <svg width="100%" height={height} viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" aria-hidden="true" style={{ display: "block" }}>
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity={0.3} />
+          <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+        </linearGradient>
+      </defs>
+      <path d={`${line} L${w},${height} L0,${height} Z`} fill={`url(#${gid})`} />
+      <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.85" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
 export function Spark({ points, color, width = 72, height = 26 }: { points: number[]; color: string; width?: number; height?: number }) {
   if (points.length < 2) return null;
   const [lo, hi] = fitDomain(points);

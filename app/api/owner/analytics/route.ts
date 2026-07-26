@@ -106,10 +106,10 @@ export async function GET(req: NextRequest) {
       // (?refresh=1) forces a live recompute. Keyed by the already-authorized scope.
       const gIds = scope.all ? [] : scope.ids;
       const groupPayload = await cachedOwnerPayload({
-        // v2: payload gained `heatmap` (mig 197) — the version bump invalidates every
-        // v1 snapshot, otherwise the cache would serve heatmap-less JSON verbatim until
-        // its fingerprint happened to change (found in the 2026-07-26 tier verify).
-        key: `analytics:v2:group:${scopeKeyOf(null, scope.all, gIds)}:${range}:c${compare ? 1 : 0}`,
+        // v2: payload gained `heatmap` (mig 197); v3: gained `categories` — each shape
+        // change bumps the version so stale snapshots can't serve field-less JSON
+        // verbatim until their fingerprint happens to change (found 2026-07-26).
+        key: `analytics:v3:group:${scopeKeyOf(null, scope.all, gIds)}:${range}:c${compare ? 1 : 0}`,
         force: sp.get("refresh") === "1",
         fingerprint: () => ordersFingerprint(scope.all ? null : gIds, from, to),
         compute: async () => {
@@ -157,11 +157,32 @@ export async function GET(req: NextRequest) {
         }
       }
       const paymentMethods = Array.from(pmByMethod.values()).sort((a, b) => b.revenue - a.revenue);
+      // Category split across the group (round-2: the owner wants "Revenue by category"
+      // on the multi home too). lfh_owner_category_breakdown is per-restaurant, so —
+      // exactly like the payment breakdown above — a scoped owner sums their own
+      // restaurants (one tiny pre-summed call each) and we merge by category name.
+      // scope.all (admin) merges across every restaurant id from the revenue rows.
+      const catIds: string[] = scope.all
+        ? (rev.data ?? []).map((r: Record<string, unknown>) => r.restaurant_id as string)
+        : scope.ids;
+      const catByName = new Map<string, { category: string; qty: number; revenue: number }>();
+      const catRes = await Promise.all(catIds.map((id) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      for (const r of catRes) {
+        if (r.error) throw r.error;
+        for (const row of (r.data ?? []) as Record<string, unknown>[]) {
+          const c = String(row.category ?? "Other");
+          const cur = catByName.get(c) || { category: c, qty: 0, revenue: 0 };
+          cur.qty += Number(row.qty) || 0;
+          cur.revenue = num(cur.revenue + (Number(row.revenue) || 0));
+          catByName.set(c, cur);
+        }
+      }
+      const categories = Array.from(catByName.values()).sort((a, b) => b.revenue - a.revenue);
       const prev = prevWin ? await windowTotals(pIds, prevWin.from, prevWin.to) : null;
       const heatmap = ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({
         dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue),
       }));
-      return { scope: "group", range, restaurantRevenue, timeseries, paymentMethods, heatmap, prev };
+      return { scope: "group", range, restaurantRevenue, timeseries, paymentMethods, categories, heatmap, prev };
         },
       });
       return NextResponse.json(groupPayload);
