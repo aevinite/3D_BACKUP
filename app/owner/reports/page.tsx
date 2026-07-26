@@ -21,6 +21,8 @@ import {
 } from "@/components/owner/reports/kit";
 import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
 import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
+import { ReportMenu } from "@/components/owner/OwnerReportButton";
+import { gatherOwnerReport } from "@/lib/ownerReportGather";
 
 type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy" | "all" | "custom";
 const RANGES: { k: Range; label: string }[] = [
@@ -291,7 +293,7 @@ export default function OwnerReports() {
             <input type="date" className="rs-date" value={cTo} min={cFrom} max={istToday()} onChange={(e) => setCTo(e.target.value)} aria-label="To date" />
           </div>
         )}
-        {sel && (
+        {sel ? (
           <div className="rs-actions">
             <button className="rs-btn" onClick={exportCsv} disabled={!data} title="Download this report as a CSV (Excel/Sheets)">
               <i className="fas fa-download" aria-hidden /> CSV
@@ -299,6 +301,14 @@ export default function OwnerReports() {
             <button className="rs-btn" onClick={() => window.print()} disabled={!data} title="Print or save as PDF">
               <i className="fas fa-print" aria-hidden /> Print
             </button>
+          </div>
+        ) : (
+          /* On the hub: the SAME ask-first compiled statement as the dashboard's Report
+             button (owner round-6: "the main section will have the same report as the
+             dashboard"). Generates billing + GST + settlement + per-restaurant sections. */
+          <div className="rs-actions">
+            <ReportMenu filename={`aevidine-report-${new Date().toISOString().slice(0, 10)}`}
+              gather={(qs, label) => gatherOwnerReport({ restaurants: rests, activeRid: rid || null, scopePin, asSuffix: asSuffix(), periodQs: qs, periodLabel: label })} />
           </div>
         )}
       </div>
