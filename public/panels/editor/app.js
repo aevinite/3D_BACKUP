@@ -455,6 +455,92 @@ function renderCatFilter() {
   }));
 }
 
+// ── Search suggestions dropdown (2026-07-26) ──────────────────────────────────
+// Mirrors the guest menu's search: as you type, a small dropdown of the top matching
+// rows appears under the search box. Click one (or ↑/↓ + Enter) to open it in the
+// editor. Name-starts-with ranks first, then any substring match (name/slug/id/
+// category/tags); capped at 8. The left-hand list still filters underneath, unchanged.
+// Only the record tabs (Dishes / Categories / Tags) have a searchable list, so it stays
+// closed everywhere else. Works identically in the manager panel and the owner embed
+// (same file, theme-var styling).
+const SUGGEST_TABS = ["items", "categories", "filters"];
+let _suggestMatches = []; // the rows currently shown (index-aligned with the DOM rows)
+let _suggestIdx = -1;     // keyboard-highlighted row (-1 = none)
+function suggestMatches(q) {
+  const f = fold(q);
+  if (!f) return [];
+  return records()
+    .map((r) => {
+      const label = recLabel(r);
+      const hay = fold([label, r.slug, r.id, r.category, Array.isArray(r.tags) ? r.tags.join(" ") : ""].filter(Boolean).join(" "));
+      if (!hay.includes(f)) return null;
+      return { r, label, starts: fold(label).startsWith(f) ? 0 : 1 };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.starts - b.starts || a.label.localeCompare(b.label))
+    .slice(0, 8);
+}
+function closeSuggest() {
+  const box = document.getElementById("searchSuggest");
+  if (box) { box.hidden = true; box.innerHTML = ""; }
+  _suggestMatches = [];
+  _suggestIdx = -1;
+}
+// openSuggestion: guard unsaved edits, then open the chosen row in the editor.
+async function openSuggestion(m) {
+  if (!m) return;
+  if (!(await confirmDiscardIfDirty())) return;
+  closeSuggest();
+  selectRecord(m.r);
+  renderList(); // move the row highlight in the list to match
+}
+function renderSearchSuggest() {
+  const box = document.getElementById("searchSuggest");
+  if (!box) return;
+  const q = (state.search || "").trim();
+  // No dropdown on non-record tabs, in multi-select mode, or with an empty box.
+  if (!q || !SUGGEST_TABS.includes(state.tab) || state.bulkMode) { closeSuggest(); return; }
+  _suggestMatches = suggestMatches(q);
+  if (!_suggestMatches.length) {
+    box.hidden = false;
+    box.innerHTML = `<div class="ss-empty">No matches for “${esc(q)}”.</div>`;
+    _suggestIdx = -1;
+    return;
+  }
+  if (_suggestIdx >= _suggestMatches.length) _suggestIdx = -1;
+  box.hidden = false;
+  box.innerHTML = _suggestMatches.map((m, i) => {
+    const r = m.r;
+    let thumb;
+    if (state.tab === "items") {
+      thumb = r.image
+        ? `<span class="ss-thumb" style="background-image:url('${esc(r.image)}')"></span>`
+        : `<span class="ss-thumb"><i class="fas fa-utensils"></i></span>`;
+    } else if (state.tab === "categories") {
+      thumb = `<span class="ss-thumb" style="color:${esc(r.color || "#d4a574")}"><i class="fas ${esc(r.icon || "fa-tag")}"></i></span>`;
+    } else {
+      thumb = `<span class="ss-thumb">${esc(r.icon || "🏷️")}</span>`;
+    }
+    const no = state.tab === "items" && r.dish_no != null ? `<span class="ss-no">#${esc(String(r.dish_no))}</span>` : "";
+    return `<div class="ss-row ${i === _suggestIdx ? "active" : ""}" role="option" data-idx="${i}">${thumb}<span class="ss-label">${esc(m.label)}</span>${no}</div>`;
+  }).join("");
+  // mousedown (not click) fires BEFORE the input's blur, so the pick lands before the
+  // dropdown closes; preventDefault keeps focus off the row.
+  box.querySelectorAll(".ss-row").forEach((row) => {
+    row.onmousedown = (e) => { e.preventDefault(); openSuggestion(_suggestMatches[+row.dataset.idx]); };
+  });
+}
+// paintSuggestActive: restyle the keyboard-highlighted row + keep it in view.
+function paintSuggestActive() {
+  const box = document.getElementById("searchSuggest");
+  if (!box) return;
+  box.querySelectorAll(".ss-row").forEach((row, i) => {
+    const on = i === _suggestIdx;
+    row.classList.toggle("active", on);
+    if (on) row.scrollIntoView({ block: "nearest" });
+  });
+}
+
 function renderList() {
   const ul = $("#list");
   ul.innerHTML = ""; // wipe the old list before drawing the new one
@@ -8259,6 +8345,7 @@ function setTab(tab) {
   if (tab !== "items") { state.bulkMode = false; state.bulkSel.clear(); }
   syncBulkBtn();
   $("#search").style.display = noList ? "none" : "";
+  closeSuggest(); // the open suggestions belong to the tab we're leaving
   // Tables tab: drop the whole left sidebar (it only held a dead "Floor map" label).
   // The floor already has its own left tiles + right detail, so it takes the full
   // width — the .no-sidebar class collapses the grid's first column to nothing.
@@ -8753,8 +8840,23 @@ window.addEventListener("beforeunload", (e) => { if (editorDirty()) { e.preventD
     rz.addEventListener("pointerup", up);
   });
 })();
-// Typing in the search box filters the left-hand list live.
-$("#search").oninput = (e) => { state.search = e.target.value; renderList(); };
+// Typing in the search box filters the left-hand list live AND shows a suggestions
+// dropdown of the top matches (click / ↑↓ + Enter to open one in the editor).
+(() => {
+  const box = $("#search");
+  box.oninput = (e) => { state.search = e.target.value; renderList(); renderSearchSuggest(); };
+  box.addEventListener("focus", () => { if ((state.search || "").trim()) renderSearchSuggest(); });
+  // A short delay lets a suggestion's mousedown land before we close (belt-and-braces).
+  box.addEventListener("blur", () => setTimeout(closeSuggest, 120));
+  box.addEventListener("keydown", (e) => {
+    const dd = document.getElementById("searchSuggest");
+    if (!dd || dd.hidden || !_suggestMatches.length) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); _suggestIdx = Math.min(_suggestMatches.length - 1, _suggestIdx + 1); paintSuggestActive(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); _suggestIdx = Math.max(0, _suggestIdx - 1); paintSuggestActive(); }
+    else if (e.key === "Enter") { e.preventDefault(); openSuggestion(_suggestMatches[_suggestIdx] || _suggestMatches[0]); }
+    else if (e.key === "Escape") { closeSuggest(); }
+  });
+})();
 // Ctrl+S (or Cmd+S on Mac) saves the current record instead of saving the web page.
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {

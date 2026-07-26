@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=20260726nits" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=20260726srch" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js"></script>
 </head>
@@ -68,6 +68,9 @@
         <!-- Dishes tab only: enter multi-select to mark many dishes sold-out/available or delete. -->
         <button id="bulkBtn" class="btn" type="button" hidden title="Select several dishes at once">☑︎ Select</button>
         <button id="newBtn" class="btn primary">+ New</button>
+        <!-- Live suggestions dropdown: top matches as you type; click to open in the
+             editor. Built by renderSearchSuggest() in app.js. -->
+        <div id="searchSuggest" class="search-suggest" role="listbox" hidden></div>
       </div>
       <!-- Category filter chips (Dishes tab only): tap a category to see just its
            dishes. Built by renderCatFilter() in app.js; hidden on other tabs. -->
@@ -104,6 +107,6 @@
   <script src="/panels/undobar.js?v=3"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=20260726nits2"></script>
+  <script src="/panels/editor/app.js?v=20260726srch2"></script>
 </body>
 </html>
