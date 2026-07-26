@@ -10,6 +10,7 @@
 // reuses this same API (they can't change the power toggles — those stay owner-only).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { asSuffix } from "@/lib/ownerPin";
+import { MANAGER_POWER_FLAGS, ABSENT_ON_POWERS, PERM_BY_ID } from "@/lib/accessModel";
 
 type Perms = Record<string, boolean>;
 type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms; modules?: Record<string, boolean> };
@@ -31,25 +32,30 @@ const WAITER_CAPS: [string, string, string | null][] = [
 ];
 const OVR_MODES: [string, string][] = [["default", "Default"], ["on", "On"], ["pin", "PIN"], ["off", "Off"]];
 
-// [flag, label, hint]. Rendered by mapping — add a new power here (and to the API
-// FLAGS whitelist) and it just appears; nothing is hardcoded to a fixed count.
-const PERMS: [string, string, string][] = [
-  ["manage_staff", "Manage staff", "Add / remove team members"],
-  ["edit_menu", "Edit menu", "Change dishes, prices, categories"],
-  ["give_discounts", "Give discounts", "Apply a discount to a bill"],
-  ["view_dashboard", "View dashboard", "See sales numbers & charts"],
-  ["void_bills", "Void bills", "Cancel / void an invoiced bill"],
-  ["edit_settings", "Change settings", "Edit restaurant settings & preferences"],
-  ["view_ratings", "Guest ratings", "See & handle guest star-ratings"],
-  // Table types + khata module (mig 166) — only shown when the admin entitles the
-  // power (power_<flag>), same as every row here (the `exists` check below).
-  ["table_tags", "Mark table types", "Mark tables VIP / Family / Owner's guest + settle on the house"],
-  ["khata", "Pay later (khata)", "Park bills on a person & collect later"],
-  ["banquet", "Banquet billing", "Create fixed-plate banquet bills"],
-  ["table_ops", "Table & KOT operations", "Merge tables, move KOTs/items, split bills"],
-  ["take_orders", "Take orders", "Start a new dine-in order at a table, like the waiter tablet"],
-  ["parcel", "Parcel / takeaway", "Punch in a quick takeaway (parcel) order from the floor — shows in the Platform board"],
-];
+// Owner-page copy per power flag (shorter, owner-voiced). The FLAG LIST itself is
+// DERIVED from lib/accessModel.ts (2026-07-26) so this page can never miss a power the
+// admin panel + server know about (the old hand-typed list was missing view_logs); a
+// flag without copy here still renders, using the access model's own name/description.
+const PERM_COPY: Record<string, [string, string]> = {
+  manage_staff: ["Manage staff", "Add / remove team members"],
+  edit_menu: ["Edit menu", "Change dishes, prices, categories"],
+  give_discounts: ["Give discounts", "Apply a discount to a bill"],
+  view_dashboard: ["View dashboard", "See sales numbers & charts"],
+  void_bills: ["Void bills", "Cancel / void an invoiced bill"],
+  edit_settings: ["Change settings", "Edit restaurant settings & preferences"],
+  view_ratings: ["Guest ratings", "See & handle guest star-ratings"],
+  view_logs: ["Activity log", "See the restaurant's activity record — who did what"],
+  table_tags: ["Mark table types", "Mark tables VIP / Family / Owner's guest + settle on the house"],
+  khata: ["Pay later (khata)", "Park bills on a person & collect later"],
+  banquet: ["Banquet billing", "Create fixed-plate banquet bills"],
+  table_ops: ["Table & KOT operations", "Merge tables, move KOTs/items, split bills"],
+  take_orders: ["Take orders", "Start a new dine-in order at a table, like the waiter tablet"],
+  parcel: ["Parcel / takeaway", "Punch in a quick takeaway (parcel) order from the floor — shows in the Platform board"],
+};
+const PERMS: [string, string, string][] = MANAGER_POWER_FLAGS.map((f) => {
+  const p = PERM_BY_ID[f];
+  return [f, PERM_COPY[f]?.[0] || p?.name || f, PERM_COPY[f]?.[1] || p?.what || ""];
+});
 const ROLES = ["manager", "kitchen", "tablet"];
 
 export default function OwnerStaffPage() {
@@ -269,7 +275,9 @@ export default function OwnerStaffPage() {
                 // and clicking it jumps to the admin Access hub instead of toggling.
                 const exists = r.ownerEntitlements?.[`power_${key}`] !== false;
                 if (!exists && actor !== "admin") return null;
-                const on = !!r.managerPermissions?.[key];
+                // absentOn flags (view_logs): an ABSENT grant means ON — the toggle must show
+                // what the server enforces, never "off" while managers genuinely have it.
+                const on = ABSENT_ON_POWERS.has(key) ? r.managerPermissions?.[key] !== false : !!r.managerPermissions?.[key];
                 if (!exists) {
                   return (
                     <button key={key} type="button" className="ost-perm xray-off" data-perm-key={key}
