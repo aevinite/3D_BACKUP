@@ -109,8 +109,18 @@ export function sectionHtml(c: SectionCtx): string {
 </body></html>`;
 }
 
+// Open the print document for a section — exported so the page can print AFTER its
+// ask-the-date dialog (owner 2026-07-26: print asks/confirms the date first).
+export function printSection(ctx: SectionCtx) {
+  const w = window.open("", "_blank");
+  if (!w) return;
+  w.document.write(sectionHtml(ctx));
+  w.document.close();
+}
+
 // ── the Print / CSV / Excel dropdown for a section ────────────────────────────
-export function SectionExport({ ctx, filename }: { ctx: SectionCtx; filename: string }) {
+// `onPrintClick` (optional) replaces the immediate print with the page's ask-first flow.
+export function SectionExport({ ctx, filename, onPrintClick }: { ctx: SectionCtx; filename: string; onPrintClick?: () => void }) {
   const [open, setOpen] = useState(false);
   const ready = (ctx.data.rows?.length ?? 0) >= 0 && !!ctx.data;
   useBackClose("owner-section-export", open, () => setOpen(false));
@@ -123,7 +133,7 @@ export function SectionExport({ ctx, filename }: { ctx: SectionCtx; filename: st
   const csvEsc = (v: string | number) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const doCsv = () => { const t = sectionTables(ctx); dl(new Blob(["﻿" + t.map((x) => [x.title, x.head.map(csvEsc).join(","), ...x.rows.map((r) => r.map(csvEsc).join(","))].join("\n")).join("\n\n")], { type: "text/csv;charset=utf-8" }), `${filename}.csv`); };
   const doXls = () => { const t = sectionTables(ctx); const html = `<html><head><meta charset="utf-8"></head><body>` + t.map((x) => `<h3>${x.title}</h3><table border="1"><tr>${x.head.map((h) => `<th>${h}</th>`).join("")}</tr>${x.rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</table>`).join("<br/>") + `</body></html>`; dl(new Blob([html], { type: "application/vnd.ms-excel" }), `${filename}.xls`); };
-  const doPrint = () => { const w = window.open("", "_blank"); if (!w) return; w.document.write(sectionHtml(ctx)); w.document.close(); };
+  const doPrint = () => (onPrintClick ? onPrintClick() : printSection(ctx));
   return (
     <span className="rs-exp" style={{ position: "relative", display: "inline-flex" }}>
       <button className="rs-btn" onClick={() => setOpen((o) => !o)} disabled={!ready} aria-haspopup="menu" aria-expanded={open}>
