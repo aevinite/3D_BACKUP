@@ -1,5 +1,13 @@
 # Customer CRM — capture number at bill time, recognize repeat customers (2026-07-26)
 
+> **STATUS 2026-07-27 — BUILT + FULLY VERIFIED on dev (branch `feat/customer-crm`, mig 211 applied to dev DB).**
+> In-browser drive: 15/15 checks passed (pay-sheet capture + repeat chip + name prefill,
+> visit 3→4 on settle, undo 4→3, guest "Welcome back" toast by device at 360px with NO
+> phone shown, owner Visits/consent✓/regular/Erase at desktop + 390px, burger-barn
+> tenant scoping: capture works there, #1's customer unknown there, #1 owner can't see
+> barn's customer). Remaining: PR → backup-1 deploy + live verify → AV live on explicit yes.
+> v1 exclusions unchanged (split-settle dedicated screen, khata, parcel don't capture).
+
 **Owner request (voice, cleaned up):** staff (tablet/manager) take the customer's
 name + mobile number while settling the bill — *only if the customer wants to give
 it*. From then on we know when they're a repeat customer (visit count), we can greet
