@@ -23,7 +23,7 @@ import Link from "next/link";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import { asSuffix } from "@/lib/ownerPin";
 import {
-  AreaTrend, TimeBar, LeaderBar, CategoryDonut, PaymentDonut, canonPayMethod,
+  AreaTrend, TimeBar, LeaderBar, WhoEarnsMore, CategoryDonut, PaymentDonut, canonPayMethod,
   DeltaChip, Spark, SparkArea, Heatmap, StackedDailyBars, RevMonthCompare,
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
@@ -969,7 +969,8 @@ export default function OwnerDashboard() {
                 <div className="ow2-ct"><span>Who earns more <span className="mut">· tap a bar to open</span></span>
                   <span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
                 {!trendPayload || trendPayload.scope !== "group" ? <div className="adm-empty">Loading…</div>
-                  : <LeaderBar data={trendPayload.restaurantRevenue.map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: r.accentColor || FALLBACK }))}
+                  : <WhoEarnsMore data={trendPayload.restaurantRevenue.map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: r.accentColor || FALLBACK }))}
+                      trendData={groupTrend.rows} trendLines={groupTrend.lines}
                       onSelect={(id) => setDrawerRid(id)} />}
               </div>
               <div className="adm-card">
