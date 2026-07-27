@@ -22,6 +22,7 @@ import { PAYMENT_METHODS } from "@/lib/payments";
 import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { effectiveTaxRate } from "@/lib/tax";
+import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -220,6 +221,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (path.join("/") === "whoami") {
       const actor = g.user ? g.user.role : "admin"; // no staff cookie = admin super-user
       return ok({ actor, higherView: !g.user });
+    }
+
+    // customer-recognize?phone=… — repeat-customer lookup for the payment sheet
+    // (Customer CRM, mig 211). Read-only, scoped by rid via the RPC. Returns
+    // {known,name,visits,blocked}; never lists customers. The number is only
+    // used to greet a returning guest — nothing is stored on a read.
+    if (path.join("/") === "customer-recognize") {
+      const phone = (new URL(req.url).searchParams.get("phone") || "").trim().slice(0, 20);
+      if (!phone) return ok({ known: false });
+      const { data, error } = await sb.rpc("lfh_recognize_customer", { p_phone: phone, p_restaurant_id: rid });
+      if (error) throw new Error(error.message);
+      return ok(data || { known: false });
     }
 
     // ── GET /api/tablet/summary — TIER 1 of the two-tier floor (mig 101) ──────
@@ -1166,6 +1179,28 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true, count: rows.length });
     }
 
+    // tables/:t/customer-capture — save the guest's name+number at bill time, with
+    // consent (Customer CRM, mig 211). DPDP: the RPC stores NOTHING without consent.
+    // Records one visit for this table's session (idempotent), links the guests'
+    // devices, and bumps the returning-customer count. Gated by the restaurant's
+    // "customers" entitlement (default on). Fire-and-forget from the pay sheet — a
+    // failure here NEVER blocks the settle that already happened.
+    if (a === "tables" && c === "customer-capture") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      const ent = await getOwnerEntitlements(rid);
+      if (!ent.customers) return err("The customer directory isn't enabled for this restaurant.", 403);
+      const phone = String(body?.phone || "").slice(0, 20);
+      const name = String(body?.name || "").slice(0, 80);
+      const consent = body?.consent === true;
+      const { data, error } = await sb.rpc("lfh_capture_customer", {
+        p_restaurant_id: rid, p_table: t, p_phone: phone, p_name: name, p_consent: consent,
+      });
+      if (error) return err(error.message, 500);
+      if ((data as { ok?: boolean })?.ok) await log("customer_saved", { table_number: t, device_id: dev });
+      return ok(data || { ok: false });
+    }
+
     // ── Table types (VIP / Family / Owner's Guest) + khata — mig 166 ─────────────
     // tables/:t/tag — the waiter marks/clears a table's special type. Feature-laddered
     // + the manager's tablet_table_tags tri-state (off default | on | pin).
@@ -1312,6 +1347,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // (a refund/correction) — record it for the money-accountability trail either way.
       const reason = String((body && body.reason) || "").trim().slice(0, 120);
       await log("payment_revert", { table_number: t, device_id: dev, detail: reason ? `unpaid: ${reason}` : "undo settle (within grace)" });
+      // Reversing the settle reverses the visit it counted (Customer CRM, mig 211).
+      await sb.rpc("lfh_uncapture_customer", { p_restaurant_id: rid, p_table: t });
       return ok({ ok: true, count: paid.length });
     }
 
