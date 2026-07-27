@@ -269,6 +269,84 @@ function RangeDrop({ id, value, onChange, compactBtn, main }: { id: string; valu
   );
 }
 
+// ── Restaurant selector (owner 2026-07-27): a light dropdown at the top of the
+// dashboard to switch scope — "All restaurants" (group view) or one restaurant
+// (that restaurant's full dashboard). It only DRIVES the existing view model
+// (goHome / viewTo restaurant) — no new fetch: every scope is already cached
+// per `${scopeKey}|${range}`, so switching costs nothing extra. The colour swatch
+// per restaurant matches its portfolioColor(i) in the charts, so a restaurant
+// keeps ONE identity colour across the selector and every graph.
+function RestaurantDrop({ rests, activeRid, onPick }: {
+  rests: { id: string; name: string; accentColor: string; revenueToday: number }[];
+  activeRid: string | null; // null = All restaurants
+  onPick: (rid: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  useBackClose("owner-rest", open, () => setOpen(false));
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest?.("[data-restdrop]")) setOpen(false);
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [open]);
+  const idx = activeRid ? rests.findIndex((r) => r.id === activeRid) : -1;
+  const cur = idx >= 0 ? rests[idx] : null;
+  const money = (n: number) =>
+    n >= 1e7 ? `₹${(n / 1e7).toFixed(1)}Cr` : n >= 1e5 ? `₹${(n / 1e5).toFixed(1)}L`
+    : n >= 1e3 ? `₹${(n / 1e3).toFixed(1)}k` : `₹${Math.round(n)}`;
+  return (
+    <span className="owd" data-restdrop>
+      <button type="button" className="owd-btn" aria-haspopup="listbox" aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}>
+        {cur ? <span className="sw" style={{ background: portfolioColor(idx) }} aria-hidden="true" />
+          : <i className="fas fa-store" aria-hidden="true" />}
+        <span className="lbl">{cur ? cur.name : "All restaurants"}</span>
+        <i className="fas fa-chevron-down" aria-hidden="true" />
+      </button>
+      {open && (
+        <span className="owd-pop" role="listbox" aria-label="Choose restaurant">
+          <button type="button" role="option" aria-selected={!activeRid} className={!activeRid ? "on" : ""}
+            onClick={() => { onPick(null); setOpen(false); }}>
+            <i className="fas fa-store dot" aria-hidden="true" />
+            <span className="nm">All restaurants</span>
+            <small>{rests.length} in total</small>
+          </button>
+          <span className="owd-div" aria-hidden="true" />
+          {rests.map((r, i) => (
+            <button key={r.id} type="button" role="option" aria-selected={activeRid === r.id}
+              className={activeRid === r.id ? "on" : ""}
+              onClick={() => { onPick(r.id); setOpen(false); }}>
+              <span className="sw" style={{ background: portfolioColor(i) }} aria-hidden="true" />
+              <span className="nm">{r.name}</span>
+              <small>{money(r.revenueToday)} today</small>
+            </button>
+          ))}
+        </span>
+      )}
+      <style jsx>{`
+        .owd { position: relative; display: inline-flex; }
+        .owd-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 260px; background: var(--card); border: var(--border); border-radius: 10px; padding: 7px 13px; font: inherit; font-size: 14px; font-weight: 800; color: inherit; cursor: pointer; }
+        .owd-btn:hover { border-color: var(--accent); }
+        .owd-btn .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .owd-btn i.fa-store { font-size: 12px; opacity: .7; }
+        .owd-btn i.fa-chevron-down { font-size: 9px; opacity: .6; margin-left: 2px; }
+        .owd-btn .sw { width: 11px; height: 11px; border-radius: 999px; flex: none; }
+        .owd-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 90; min-width: 250px; max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; background: var(--card); border: var(--border); border-radius: 12px; padding: 5px; box-shadow: 0 16px 40px rgba(0,0,0,.45); }
+        .owd-div { height: 1px; background: var(--border); margin: 4px 6px; opacity: .6; }
+        .owd-pop button { display: flex; align-items: center; gap: 9px; background: none; border: none; border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; font-weight: 700; color: inherit; cursor: pointer; text-align: left; }
+        .owd-pop button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+        .owd-pop button.on { color: var(--accent); }
+        .owd-pop button .sw { width: 11px; height: 11px; border-radius: 999px; flex: none; }
+        .owd-pop button .dot { width: 12px; text-align: center; font-size: 11px; opacity: .7; flex: none; }
+        .owd-pop button .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .owd-pop button small { font-size: 10.5px; color: var(--muted); font-weight: 600; flex: none; }
+      `}</style>
+    </span>
+  );
+}
+
 // ── D1-style KPI card: sparkline inside, delta chip; the whole card is a LINK
 // into the matching report (owner round-3: "the top five box … should take you
 // to the report section").
@@ -1010,8 +1088,14 @@ export default function OwnerDashboard() {
     <>
       {/* Toolbar — Report ▾ + Refresh (the global range tabs are GONE by design) */}
       <div className="ow2-bar">
-        {!single && view.level !== "home" ? (
-          <button className="ow2-back" onClick={goHome}><i className="fas fa-arrow-left" aria-hidden="true" /> All restaurants</button>
+        {ov && !single ? (
+          // Pick scope right here (owner 2026-07-27): "All restaurants" (group) or one
+          // restaurant's full dashboard. Replaces the old static title + back button.
+          <RestaurantDrop
+            rests={ov.restaurants}
+            activeRid={view.level === "home" ? null : (view as { rid: string }).rid}
+            onPick={(rid) => (rid ? viewTo({ level: "restaurant", rid }) : goHome())}
+          />
         ) : <span className="ow2-title">{single ? "Dashboard" : `Your ${restCount || "…"} restaurant${restCount === 1 ? "" : "s"}`}</span>}
         <div className="ow2-tools">
           {/* THE main range — one dropdown for every graph on the page (owner round-2).
