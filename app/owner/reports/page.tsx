@@ -134,17 +134,6 @@ function splitTax(rates: number[], target: number): number[] {
   });
 }
 
-function downloadCsv(filename: string, header: string[], rows: (string | number)[][]) {
-  const esc = (v: string | number) => {
-    let s = String(v);
-    if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = "'" + s;      // neutralise formula injection
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const csv = [header, ...rows].map((r) => r.map(esc).join(",")).join("\n");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
-  a.download = filename; a.click(); URL.revokeObjectURL(a.href);
-}
 
 // Build the Day-summary's extra print/CSV tables (the day's dishes + busy hours) so a
 // printed day sheet carries everything for that day, not just the money lines.
@@ -156,6 +145,9 @@ function dayExtraTables(dishesDay?: Payload, hourlyDay?: Payload): { title: stri
   if (hours.length) out.push({ title: "Busy hours", head: ["Hour", "Orders", "Revenue"], rows: hours.map((h) => [`${h.hour % 12 === 0 ? 12 : h.hour % 12} ${h.hour < 12 ? "AM" : "PM"}`, h.orders, Math.round(h.revenue)]) });
   return out;
 }
+
+// Tab-lifetime memo of the hub's per-restaurant brief per query string (see Hub).
+const briefMemo = new Map<string, { id: string; name: string; accent: string; revenue: number; orders: number }[]>();
 
 // ── Menu-engineering quadrant (client-only view over the dishes payload) ──────
 type MI = { title: string; qty: number; revenue: number };
@@ -219,7 +211,7 @@ export default function OwnerReports() {
     const open = new URLSearchParams(window.location.search).get("open");
     const a = open && openAlias(open);
     if (a) { setSel(a.sel); if (a.sub) setSub(a.sub); if (a.pay) setPayDetail(a.pay); }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Scroll memory (owner 2026-07-26: "when I click back it takes me to the top — it
   // should keep me where I was"). The owner panel scrolls INSIDE `.adm-main`, not the
@@ -278,10 +270,10 @@ export default function OwnerReports() {
     const s = readSnap<{ rid?: string; entries?: Record<string, Entry> }>(snapKey);
     if (!s) return;
     if (s.entries) setStore((cur) => ({ ...s.entries, ...cur }));
-    // The store keys embed the selected restaurant id, which normally only lands after the
-    // overview fetch — restore it too so the very first frame looks up the right key. The
-    // overview fetch then re-syncs it (same value for a single-restaurant owner).
-    if (s.rid && !scopePin) setRid((cur) => cur || s.rid!);
+    // Deliberately NOT restoring the last-picked restaurant: the owner's rule (2026-07-26)
+    // is that Reports always OPENS on "All restaurants" (a multi-restaurant estate) — a
+    // restaurant is a per-visit choice, not a sticky one. (A single-restaurant owner still
+    // gets pinned by the overview effect; admin act-as still pins from ?rid.)
   }, [snapKey, scopePin]);
   useEffect(() => {
     const settled = Object.fromEntries(Object.entries(store).filter(([, e]) => e.data));
@@ -340,7 +332,7 @@ export default function OwnerReports() {
         // reload on a hydrated snapshot) — keep the shown data; only an empty key errors.
         setStore((s) => (s[ck]?.data ? s : { ...s, [ck]: { error: e instanceof Error ? e.message : String(e) } }));
       });
-  }, [scopePin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scopePin]);
 
   // The active body (sub-tab aware) and the payload it reads. The hub reads "money".
   const bodyKey: BodyKey = sel ? bodyKeyFor(sel, sub) : "sales";
@@ -385,15 +377,20 @@ export default function OwnerReports() {
   const exportMeta = { label: sel ? REPORTS[sel].label + (activeSubLabel ? ` · ${activeSubLabel}` : "") : "", kind: BODY_KIND[bodyKey] };
 
   // ── ONE breadcrumb (owner 2026-07-26: "not two different paths — on the top only") ──
-  // Feed the open report (and its sub-tab / open overlay) into the SHELL's single top path
-  // — Owner › Reports › Day summary — and drop the page's own second crumb row. Cleared on
-  // hub and on unmount so the top path always mirrors exactly where you are.
+  // Feed the SCOPE ("All restaurants" or the picked restaurant — owner: "beside Reports it
+  // should be written All restaurants in the path") plus the open report / sub-tab / overlay
+  // into the SHELL's single top path — Owner › Reports › Green Bowl › Sales › Revenue — and
+  // drop the page's own second crumb row. Cleared on unmount so the path always mirrors here.
   const payLabel = payDetail === "discounts" ? "Discounts" : payDetail === "cancellations" ? "Cancellations" : "";
+  const scopeCrumb = rid ? restName : rests.length > 1 ? "All restaurants" : "";
   useEffect(() => {
-    const tail = sel ? [REPORTS[sel].label, ...(activeSubLabel ? [activeSubLabel] : []), ...(payLabel ? [payLabel] : [])] : [];
+    const tail = [
+      ...(scopeCrumb ? [scopeCrumb] : []),
+      ...(sel ? [REPORTS[sel].label, ...(activeSubLabel ? [activeSubLabel] : []), ...(payLabel ? [payLabel] : [])] : []),
+    ];
     window.dispatchEvent(new CustomEvent("lfh:owner-crumb", { detail: { tail } }));
     return () => { window.dispatchEvent(new CustomEvent("lfh:owner-crumb", { detail: { tail: [] } })); };
-  }, [sel, activeSubLabel, payLabel]);
+  }, [sel, activeSubLabel, payLabel, scopeCrumb]);
 
   return (
     <div className="rs-root">
@@ -479,7 +476,7 @@ export default function OwnerReports() {
           briefQs={`type=byrestaurant&range=${range}${range === "custom" ? `&from=${cFrom}&to=${cTo}` : ""}${scp}`} />
       ) : (
         <ReportView sel={sel} bodyKey={bodyKey} data={data} loading={entry?.loading} error={entry?.error}
-          range={range} rangeText={effLabel} accent={accent} restName={restName} singleRest={singleRest}
+          rangeText={effLabel} accent={accent} restName={restName} singleRest={singleRest}
           onOpenReport={openReport} payDetail={payDetail} onPayDetail={setPayDetail}
           moneyData={moneyEntry?.data} dishesDay={dishesDay} hourlyDay={hourlyDay} />
       )}
@@ -495,13 +492,17 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
   // Per-restaurant brief (owner 2026-07-26: "in the all-restaurants view there will be a
   // brief report about all the restaurants"). Fetched only when viewing ALL of a
   // multi-restaurant estate; clicking a card scopes the whole page to that restaurant.
+  // Last result is kept per-query in a module map so returning from a report re-paints the
+  // brief at the SAME height instantly (no fetch gap that would shift the restored scroll),
+  // then the refetch swaps in anything newer.
   const showBrief = !rid && rests.length > 1;
-  const [brief, setBrief] = useState<{ id: string; name: string; accent: string; revenue: number; orders: number }[] | null>(null);
+  const [brief, setBrief] = useState<{ id: string; name: string; accent: string; revenue: number; orders: number }[] | null>(
+    () => (showBrief && briefMemo.get(briefQs)) || null);
   useEffect(() => {
     if (!showBrief) { setBrief(null); return; }
     let live = true;
     fetch(`/api/owner/reports?${briefQs}`, { cache: "no-store" }).then((r) => r.json())
-      .then((d) => { if (live && Array.isArray(d.rows)) setBrief(d.rows); }).catch(() => {});
+      .then((d) => { if (Array.isArray(d.rows)) { briefMemo.set(briefQs, d.rows); if (live) setBrief(d.rows); } }).catch(() => {});
     return () => { live = false; };
   }, [showBrief, briefQs]);
   const briefMax = brief && brief.length ? Math.max(...brief.map((b) => b.revenue), 1) : 1;
@@ -589,9 +590,9 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
 }
 
 // ── The report view (title + loading/error, delegates body) ───────────────────
-function ReportView({ sel, bodyKey, data, loading, error, range, rangeText, accent, restName, singleRest, onOpenReport, payDetail, onPayDetail, moneyData, dishesDay, hourlyDay }: {
+function ReportView({ sel, bodyKey, data, loading, error, rangeText, accent, restName, singleRest, onOpenReport, payDetail, onPayDetail, moneyData, dishesDay, hourlyDay }: {
   sel: RKey; bodyKey: BodyKey; data?: Payload; loading?: boolean; error?: string;
-  range: Range; rangeText: string; accent: string; restName: string; singleRest: boolean;
+  rangeText: string; accent: string; restName: string; singleRest: boolean;
   onOpenReport: OpenReport;
   payDetail: "" | "discounts" | "cancellations"; onPayDetail: (d: "" | "discounts" | "cancellations") => void;
   moneyData?: Payload; dishesDay?: Payload; hourlyDay?: Payload;
@@ -681,8 +682,11 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     const pays = (data.payments || []).map((p) => ({ ...p, method: canonPayMethod(p.method) })).filter((p) => p.revenue > 0);
     const payTotal = pays.reduce((a, p) => a + p.revenue, 0);
     const avg = t.paidOrders ? t.revenue / t.paidOrders : 0;
+    // Split the WHOLE-RUPEE tax (GST returns round to the rupee): equal rates then always
+    // show equal halves (₹81,369.50 each), and the lines sum exactly to the displayed
+    // whole-rupee "GST collected" — no ₹163 parent over ₹81.25+81.25 children (audit 2026-07-27).
     const taxLines = data.tax
-      ? splitTax(data.tax.components.map((c) => c.rate), t.tax).map((amt, i) => ({ label: data.tax!.components[i].label, rate: data.tax!.components[i].rate, amt }))
+      ? splitTax(data.tax.components.map((c) => c.rate), Math.round(t.tax)).map((amt, i) => ({ label: data.tax!.components[i].label, rate: data.tax!.components[i].rate, amt }))
       : [];
     return (
       <>
@@ -950,11 +954,13 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     const comps = data.tax?.components ?? [];
     // Per-period filing view: split each period's tax across the set tax lines, integer-rounded
     // so each row's parts still sum to that row's total tax (matches the printed-bill split).
+    // Whole-rupee per-row tax (GST-return rounding) so each row's parts sum exactly to the
+    // row's displayed total, and two equal rates never differ by a paisa.
     const filingRows = (comps.length ? mrows.filter((r) => r.tax > 0) : []).map((r) => ({
       bucket: r.bucket,
       taxable: r.subtotal - r.discount,
-      tax: r.tax,
-      parts: splitTax(comps.map((c) => c.rate), r.tax),
+      tax: Math.round(r.tax),
+      parts: splitTax(comps.map((c) => c.rate), Math.round(r.tax)),
     }));
     const compTotals = comps.map((_, i) => filingRows.reduce((a, r) => a + r.parts[i], 0));
     const filingTaxable = filingRows.reduce((a, r) => a + r.taxable, 0);
@@ -980,8 +986,8 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
               <table className="rs-table">
                 <thead><tr><th>Tax line</th><th className="num">Rate</th><th className="num">Collected</th></tr></thead>
                 <tbody>
-                  <tr><td><b>Total tax</b></td><td className="num">{data.tax.effectivePct}%</td><td className="num"><b>{inrP(t.tax)}</b></td></tr>
-                  {splitTax(data.tax.components.map((c) => c.rate), t.tax).map((amt, i) => {
+                  <tr><td><b>Total tax</b></td><td className="num">{data.tax.effectivePct}%</td><td className="num"><b>{inr(t.tax)}</b></td></tr>
+                  {splitTax(data.tax.components.map((c) => c.rate), Math.round(t.tax)).map((amt, i) => {
                     const c = data.tax!.components[i];
                     return <tr key={c.label}><td>{c.label}</td><td className="num">{c.rate}%</td><td className="num">{inrP(amt)}</td></tr>;
                   })}
