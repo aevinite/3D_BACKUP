@@ -207,7 +207,7 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
         .lfh-conn-pop {
           position: absolute; top: calc(100% + 8px); right: 0; z-index: 9999;
           width: min(86vw, 288px); display: flex; flex-direction: column; gap: 12px;
-          padding: 14px; background: var(--panel, #10182b); color: var(--text, #e7eefc);
+          padding: 14px; background: var(--panel, var(--card, #10182b)); color: var(--text, #e7eefc);
           border: 1px solid var(--line, rgba(127,127,127,.28)); border-radius: 14px;
           box-shadow: 0 18px 50px rgba(0,0,0,.4);
           font: 500 12.5px/1.35 system-ui, sans-serif;
