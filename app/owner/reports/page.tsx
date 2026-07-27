@@ -192,6 +192,56 @@ function classifyMenu(rows: MI[]) {
   return { dishes };
 }
 
+// ── Period dropdown (owner 2026-07-27: "make it a dropdown like the dashboard,
+// not the whole strip showing"). Same button+popup look as the dashboard's
+// RangeDrop (owr-btn / owr-pop), so the two pages read as one console. Picking
+// "Custom…" still reveals the date pickers next to it.
+function PeriodDrop({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
+  const [open, setOpen] = useState(false);
+  useBackClose("owner-reports-period", open, () => setOpen(false));
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest?.('[data-rng="reports-period"]')) setOpen(false);
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [open]);
+  return (
+    <span className="owr" data-rng="reports-period">
+      <button type="button" className="owr-btn main" aria-haspopup="listbox" aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}>
+        {rangeLabel(value)} <i className="fas fa-chevron-down" aria-hidden="true" />
+      </button>
+      {open && (
+        <span className="owr-pop" role="listbox" aria-label="Period">
+          {RANGES.map((r) => (
+            <button key={r.k} type="button" role="option" aria-selected={r.k === value}
+              className={r.k === value ? "on" : ""}
+              onClick={() => { onChange(r.k); setOpen(false); }}>
+              {r.label}
+            </button>
+          ))}
+        </span>
+      )}
+      <style jsx>{`
+        .owr { position: relative; display: inline-flex; }
+        .owr-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--bg); border: var(--border); border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; white-space: nowrap; }
+        .owr-btn:hover { color: var(--accent); border-color: var(--accent); }
+        .owr-btn i { font-size: 9px; opacity: .7; }
+        .owr-btn.main { background: color-mix(in srgb, #34d399 16%, transparent); border: 1px solid #34d399; color: #059669; font-size: 12.5px; font-weight: 800; padding: 7px 14px; border-radius: 10px; }
+        .owr-btn.main:hover { background: color-mix(in srgb, #34d399 26%, transparent); color: #047857; }
+        :global([data-skin="dark"]) .owr-btn.main { color: #34d399; }
+        :global([data-skin="dark"]) .owr-btn.main:hover { color: #6ee7b7; }
+        .owr-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 90; min-width: 180px; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; background: var(--card); border: var(--border); border-radius: 12px; padding: 5px; box-shadow: 0 16px 40px rgba(0,0,0,.45); }
+        .owr-pop button { display: flex; align-items: center; background: none; border: none; border-radius: 8px; padding: 8px 12px; font: inherit; font-size: 12.5px; font-weight: 700; color: inherit; cursor: pointer; text-align: left; }
+        .owr-pop button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+        .owr-pop button.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+      `}</style>
+    </span>
+  );
+}
+
 const DAYPARTS: { label: string; icon: string; hours: number[] }[] = [
   { label: "Morning",    icon: "fa-mug-hot",   hours: [5, 6, 7, 8, 9, 10, 11] },
   { label: "Afternoon",  icon: "fa-sun",       hours: [12, 13, 14, 15, 16] },
@@ -489,11 +539,7 @@ export default function OwnerReports() {
             <input type="date" className="rs-date" value={day} max={istToday()} onChange={(e) => setDay(e.target.value)} aria-label="Pick a date" />
           </div>
         ) : (
-          <div className="rs-seg" role="tablist" aria-label="Period">
-            {RANGES.map((r) => (
-              <button key={r.k} role="tab" aria-selected={range === r.k} className={range === r.k ? "on" : ""} onClick={() => setRange(r.k)}>{r.label}</button>
-            ))}
-          </div>
+          <PeriodDrop value={range} onChange={setRange} />
         )}
         {isCustom && (
           <div className="rs-custom">
