@@ -273,27 +273,24 @@ export function LeaderBar({ data, onSelect }: { data: RevDatum[]; onSelect?: (id
 // horizontal LeaderBar) · Line (the per-restaurant multi-line trend, reused from
 // AreaTrend). A small segmented toggle at the top-right flips between them. This
 // is the ONLY chart that changed — every other owner card is untouched.
+// Flat gradient column (owner 2026-07-27: "forget 3d" — the drop-shadow + gloss looked
+// blurry on the client site). Crisp rounded column, full colour at the top fading gently
+// toward the base — the exact look from the approved design demo.
 function Column3D(props: {
   x?: number; y?: number; width?: number; height?: number; fill?: string; index?: number;
 }) {
   const { x = 0, y = 0, width = 0, height = 0, fill = "#888", index = 0 } = props;
   if (height <= 0 || width <= 0) return null;
   const gid = `we-col-${index}`;
-  const gloss = Math.min(6, height);
   return (
     <g>
       <defs>
         <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity={0.28} />
-          <stop offset="14%" stopColor={fill} stopOpacity={1} />
-          <stop offset="100%" stopColor={fill} stopOpacity={0.55} />
+          <stop offset="0%" stopColor={fill} stopOpacity={1} />
+          <stop offset="100%" stopColor={fill} stopOpacity={0.45} />
         </linearGradient>
-        <filter id="we-col-shadow" x="-40%" y="-40%" width="180%" height="180%">
-          <feDropShadow dx="0" dy="3" stdDeviation="3" floodColor="#000" floodOpacity={0.45} />
-        </filter>
       </defs>
-      <rect x={x} y={y} width={width} height={height} rx={6} fill={`url(#${gid})`} filter="url(#we-col-shadow)" />
-      <rect x={x + 2} y={y + 2} width={Math.max(0, width - 4)} height={gloss} rx={4} fill="rgba(255,255,255,.32)" />
+      <rect x={x} y={y} width={width} height={height} rx={6} fill={`url(#${gid})`} />
     </g>
   );
 }

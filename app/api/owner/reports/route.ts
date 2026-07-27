@@ -56,6 +56,14 @@ function windowFor(range: string, sp?: URLSearchParams): { from: string; to: str
     const n = range === "7d" ? 7 : 30;
     return { from: new Date(istMidnightToday - (n - 1) * DAY).toISOString(), to, bucket: "day" };
   }
+  // this calendar week: Monday 00:00 IST → now (owner 2026-07-27) — mirrors the
+  // analytics route's "week" so the dashboard KPI tiles and charts share one window.
+  if (range === "week") {
+    const ist = new Date(now + 5.5 * 3600_000);
+    const dow = (ist.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
+    const monday = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() - dow) - 5.5 * 3600_000;
+    return { from: new Date(monday).toISOString(), to, bucket: "day" };
+  }
   // 12m: the 12 whole IST calendar months ending this month (inclusive), aligned to 00:00
   // IST on the 1st — matches the month buckets the client plots (no rolling extra 13th month).
   if (range === "12m") {
@@ -89,7 +97,7 @@ type Row = Record<string, unknown>;
 // "today" for the DATA but was still echoed back verbatim in the response, so the
 // client title (which looks range up in a fixed table) rendered blank (bug L-…).
 // Normalising here means `range` in the payload is ALWAYS a known key.
-const VALID_RANGES = new Set(["today", "yesterday", "7d", "30d", "month", "lastmonth", "12m", "fy", "all", "custom"]);
+const VALID_RANGES = new Set(["today", "yesterday", "week", "7d", "30d", "month", "lastmonth", "12m", "fy", "all", "custom"]);
 
 // Fetch EVERY restaurant id, paging past PostgREST's default row cap. The admin
 // "all restaurants" merge for dishes/categories/hourly must cover the SAME universe

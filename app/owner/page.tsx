@@ -37,18 +37,25 @@ import { gatherOwnerReport } from "@/lib/ownerReportGather";
 import { ReportMenu } from "@/components/owner/OwnerReportButton";
 
 const DAY_MS = 86400000;
-type Range = "today" | "yesterday" | "7d" | "30d" | "all";
+type Range = "today" | "yesterday" | "week" | "7d" | "month" | "30d" | "lastmonth" | "all";
 const RANGES: { k: Range; label: string }[] = [
   { k: "today", label: "Today" }, { k: "yesterday", label: "Yesterday" },
-  { k: "7d", label: "7 days" }, { k: "30d", label: "30 days" }, { k: "all", label: "All time" },
+  { k: "week", label: "This week" }, { k: "7d", label: "Last 7 days" },
+  { k: "month", label: "This month" }, { k: "30d", label: "Last 30 days" },
+  { k: "lastmonth", label: "Last month" }, { k: "all", label: "All time" },
 ];
 const RANGE_LABEL: Record<Range, string> = {
-  today: "today", yesterday: "yesterday", "7d": "last 7 days", "30d": "last 30 days", all: "all time",
+  today: "today", yesterday: "yesterday", week: "this week", "7d": "last 7 days",
+  month: "this month", "30d": "last 30 days", lastmonth: "last month", all: "all time",
 };
 const PREV_LABEL: Record<Range, string> = {
-  today: "vs yesterday (same hours)", yesterday: "vs the day before", "7d": "vs the 7 days before",
-  "30d": "vs the 30 days before", all: "",
+  today: "vs yesterday (same hours)", yesterday: "vs the day before", week: "vs last week",
+  "7d": "vs the 7 days before", month: "vs last month (so far)", "30d": "vs the 30 days before",
+  lastmonth: "vs the month before", all: "",
 };
+// The owner's last-used range survives a refresh (owner 2026-07-27: "whenever I refresh
+// it goes to 30 days again"). One browser-local key; validated against RANGES on read.
+const RANGE_LS_KEY = "lfh-owner-range";
 // Theme accent for every single-scope chart (owner 2026-07-26: "it should be green
 // everywhere" — Burger Barn's charts were rendering in its brown accent).
 const GREEN = "#34d399";
@@ -151,9 +158,33 @@ function rangeSpanText(k: Range): string {
   const f = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
   if (k === "today") return `Today · ${f(now)}`;
   if (k === "yesterday") return `Yesterday · ${f(new Date(now.getTime() - DAY_MS))}`;
+  if (k === "week") {
+    const ist = new Date(now.getTime() + 5.5 * 3600_000);
+    const dow = (ist.getUTCDay() + 6) % 7; // Mon=0
+    return `${f(new Date(now.getTime() - dow * DAY_MS))} – ${f(now)} (this week)`;
+  }
   if (k === "7d") return `${f(new Date(now.getTime() - 6 * DAY_MS))} – ${f(now)} (7 days)`;
+  if (k === "month") return `${now.toLocaleDateString("en-IN", { month: "long", timeZone: IST })} so far`;
   if (k === "30d") return `${f(new Date(now.getTime() - 29 * DAY_MS))} – ${f(now)} (30 days)`;
+  if (k === "lastmonth") {
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    return `All of ${prev.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: IST })}`;
+  }
   return `Everything up to ${f(now)}`;
+}
+// A thrown fetch/PostgREST failure is often a plain object, not an Error — String(e)
+// renders the literal "[object Object]" (the owner saw exactly that in the red banner
+// on the client site, 2026-07-27). Pull the human parts out of whatever shape arrives.
+function errText(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    const s = [o.message, o.error, o.details, o.code].filter((x): x is string => typeof x === "string" && !!x).join(" · ");
+    if (s) return s;
+    try { return JSON.stringify(e).slice(0, 200); } catch { /* fall through */ }
+  }
+  return String(e);
 }
 function timeAgo(iso: string): string {
   const s = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000));
@@ -287,6 +318,18 @@ export default function OwnerDashboard() {
   // The MAIN range (top-right): the one dropdown the whole page follows — KPI boxes
   // and graphs alike (owner round-2: "only the main one"). Default 30 days.
   const [globalRange, setGlobalRange] = useState<Range>("30d");
+  // Restore the last-used range once on mount (owner 2026-07-27: a refresh always
+  // bounced back to 30 days). Post-mount so SSR/hydration still render the default.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(RANGE_LS_KEY) as Range | null;
+      if (saved && saved !== "30d" && RANGES.some((r) => r.k === saved)) setGlobalRange(saved);
+    } catch { /* storage unavailable */ }
+  }, []);
+  const pickRange = useCallback((k: Range) => {
+    setGlobalRange(k);
+    try { localStorage.setItem(RANGE_LS_KEY, k); } catch { /* noop */ }
+  }, []);
   const [ov, setOv] = useState<Overview | null>(null);
   // Payload cache — key `${scopeKey}|${range}`; cards sharing a range share ONE fetch,
   // and a range the owner already looked at repaints instantly (session-cached).
@@ -399,20 +442,22 @@ export default function OwnerDashboard() {
       const recQ = rid && !(rid in ((recsRef.current) || {})) ? "&records=1" : "";
       const refQ = opts?.refresh ? "&refresh=1" : "";
       const a = await fetch(`/api/owner/analytics?${opts?.qs ?? `range=${range}`}${rid ? `&rid=${rid}` : ""}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then((r) => r.json());
-      if (a.error) throw new Error(a.error);
+      if (a.error) throw new Error(errText(a.error));
       setCache((c) => ({ ...c, [key]: a }));
       if (a.cachedAt) setUpdatedAt(a.cachedAt);
       if (rid && a.records) setRecs((m) => ({ ...m, [rid]: a.records }));
       setErr(null);
       reportRealtime("online");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errText(e));
       reportRealtime("weak");
     } finally {
       inflight.current.delete(key);
     }
   }, [scp]);
   const recsRef = useRef(recs); recsRef.current = recs;
+  const cacheRef = useRef(cache); cacheRef.current = cache;
+  const moneyRef = useRef(moneyCache); moneyRef.current = moneyCache;
 
   const fetchMoney = useCallback(async (sk: string, range: Range, opts?: { refresh?: boolean }) => {
     const key = `money:${sk}|${range}`;
@@ -430,6 +475,29 @@ export default function OwnerDashboard() {
       inflight.current.delete(key);
     }
   }, [scp]);
+
+  // PRE-WARM every other range in the background (owner 2026-07-27: "all the calculation
+  // should be going on in the background … all time should also be pre-calculated").
+  // A few seconds after a scope's dashboard has painted, quietly request each remaining
+  // range once, staggered. Server-side, cachedOwnerPayload stores the snapshot, so
+  // switching ranges — or tomorrow's first open — answers from ONE cache-row read.
+  // Ranges already fetched this session are skipped, so warm visits cost ~nothing; and
+  // because it's view-triggered (not a blind cron), idle tenants burn zero compute.
+  const warmedScopes = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!ov) return;
+    const sk = scopeKey;
+    if (warmedScopes.current.has(sk)) return;
+    warmedScopes.current.add(sk);
+    const others = RANGES.map((r) => r.k).filter((k) => k !== globalRange);
+    const timers = others.map((k, i) => setTimeout(() => {
+      if (!cacheRef.current[`${sk}|${k}`]) fetchPayload(sk, k);
+      if (!moneyRef.current[`${sk}|${k}`]) fetchMoney(sk, k);
+    }, 4000 + i * 1500));
+    return () => { timers.forEach(clearTimeout); };
+    // globalRange deliberately NOT a dep: warming runs once per scope per visit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ov, scopeKey, fetchPayload, fetchMoney]);
 
   // Recent activity mini feed (single/drilled view) — 6 rows, scoped, egress-tiny.
   const fetchActs = useCallback(async (rid: string) => {
@@ -451,7 +519,7 @@ export default function OwnerDashboard() {
       setOv(o);
       setErr(null);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errText(e));
       reportRealtime("weak");
     }
   }, [scp]);
@@ -929,7 +997,7 @@ export default function OwnerDashboard() {
           {/* THE main range — one dropdown for every graph on the page (owner round-2).
               Picking it also resets the five KPI boxes; each box can still override. */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
-            <RangeDrop id="global" value={globalRange} onChange={setGlobalRange} main />
+            <RangeDrop id="global" value={globalRange} onChange={pickRange} main />
             <span style={{ fontSize: 10.5, color: "var(--muted)" }}>{rangeSpanText(globalRange)}</span>
           </div>
           <ReportMenu gather={gatherReport} filename={exportName} />
