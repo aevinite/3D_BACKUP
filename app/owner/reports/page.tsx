@@ -29,7 +29,7 @@ import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/r
 import { ReportMenu } from "@/components/owner/OwnerReportButton";
 import { gatherOwnerReport } from "@/lib/ownerReportGather";
 import { readSnap, writeSnap } from "@/lib/ownerSnap";
-import { SectionExport } from "@/components/owner/reports/sectionExport";
+import { SectionExport, printSection } from "@/components/owner/reports/sectionExport";
 
 type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy" | "all" | "custom";
 const RANGES: { k: Range; label: string }[] = [
@@ -46,6 +46,27 @@ const rangeLabel = (r: Range) => RANGES.find((x) => x.k === r)?.label ?? r;
 const DAY_KINDS = new Set<DataKind>(["daysummary"]);
 const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 const yesterdayIso = () => new Date(Date.now() + 5.5 * 3600_000 - 86_400_000).toISOString().slice(0, 10);
+
+// The IST calendar dates a named range covers — used to PREFILL the print ask-dialog's
+// from/to. Mirrors the server's windowFor() at day granularity (to = today for "…to now").
+function rangeDates(r: Range, cFrom: string, cTo: string): { from: string; to: string } {
+  const today = istToday();
+  const ist = new Date(Date.now() + 5.5 * 3600_000);
+  const iso = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
+  const y = ist.getUTCFullYear(), m = ist.getUTCMonth();
+  switch (r) {
+    case "today": return { from: today, to: today };
+    case "yesterday": { const yd = yesterdayIso(); return { from: yd, to: yd }; }
+    case "7d": return { from: new Date(Date.now() + 5.5 * 3600_000 - 6 * 86_400_000).toISOString().slice(0, 10), to: today };
+    case "30d": return { from: new Date(Date.now() + 5.5 * 3600_000 - 29 * 86_400_000).toISOString().slice(0, 10), to: today };
+    case "month": return { from: iso(y, m, 1), to: today };
+    case "lastmonth": return { from: iso(m === 0 ? y - 1 : y, m === 0 ? 11 : m - 1, 1), to: iso(y, m, 0) };
+    case "12m": return { from: iso(y, m - 11, 1), to: today };
+    case "fy": return { from: iso(m >= 3 ? y : y - 1, 3, 1), to: today };
+    case "all": return { from: "2020-01-01", to: today };
+    default: return { from: cFrom, to: cTo };
+  }
+}
 
 // ── Sub-tabs (the merge, owner 2026-07-26) ────────────────────────────────────
 // A "body key" is one of the original report VIEWS. Six catalog reports now compose
@@ -375,6 +396,47 @@ export default function OwnerReports() {
   const activeSubKey = subTabs.length ? (subTabs.find((t) => t.key === sub)?.key ?? subTabs[0].key) : "";
   const activeSubLabel = subTabs.find((t) => t.key === activeSubKey)?.label ?? "";
   const exportMeta = { label: sel ? REPORTS[sel].label + (activeSubLabel ? ` · ${activeSubLabel}` : "") : "", kind: BODY_KIND[bodyKey] };
+  const exportCtx = data ? {
+    meta: exportMeta, data, restName, periodLabel: effLabel, isTax: bodyKey === "tax", bucketLabel,
+    extra: sel === "daysummary" ? dayExtraTables(dishesDay, hourlyDay) : undefined,
+  } : null;
+
+  // ── Print ask-dialog (owner 2026-07-26: "when you click print it should autofill the date
+  // you're on, with Today/Yesterday quick options — and for ranged reports ask from which to
+  // which date"). Confirming with the SAME period prints at once; picking another date/range
+  // first applies it (same controls as on screen), waits for that data, THEN prints.
+  const [printAsk, setPrintAsk] = useState(false);
+  const [pdDay, setPdDay] = useState(day);                 // dialog's day (day-kind reports)
+  const [pdFrom, setPdFrom] = useState("");                // dialog's from/to (ranged reports)
+  const [pdTo, setPdTo] = useState("");
+  const [printWhenReady, setPrintWhenReady] = useState(false);
+  const openPrintAsk = () => {
+    setPdDay(day);
+    const w = rangeDates(range, cFrom, cTo);
+    setPdFrom(w.from); setPdTo(w.to);
+    setPrintAsk(true);
+  };
+  const confirmPrint = () => {
+    setPrintAsk(false);
+    if (isDayKind) {
+      if (pdDay === day) { if (exportCtx) printSection(exportCtx); return; }
+      setDay(pdDay); setPrintWhenReady(true);
+    } else {
+      const cur = rangeDates(range, cFrom, cTo);
+      if (pdFrom === cur.from && pdTo === cur.to) { if (exportCtx) printSection(exportCtx); return; }
+      setRange("custom"); setCFrom(pdFrom); setCTo(pdTo); setPrintWhenReady(true);
+    }
+  };
+  // Print as soon as the newly-picked period's data (and the day sheet's extras) settle.
+  const extrasSettled = sel !== "daysummary" ||
+    ((): boolean => { const d = store[dayKeyFor("dishes")], h = store[dayKeyFor("hourly")]; return !!(d && !d.loading && (d.data || d.error)) && !!(h && !h.loading && (h.data || h.error)); })();
+  useEffect(() => {
+    if (!printWhenReady || !exportCtx || entry?.loading || !extrasSettled) return;
+    setPrintWhenReady(false);
+    printSection(exportCtx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printWhenReady, data, entry?.loading, extrasSettled]);
+  useBackClose("owner-print-ask", printAsk, () => setPrintAsk(false));
 
   // ── ONE breadcrumb (owner 2026-07-26: "not two different paths — on the top only") ──
   // Feed the SCOPE ("All restaurants" or the picked restaurant — owner: "beside Reports it
@@ -444,8 +506,8 @@ export default function OwnerReports() {
           /* Phase 3: professional section-scoped Print / CSV / Excel (was a raw CSV +
              UI print). Builds a clean standalone document for THIS report + period. */
           <div className="rs-actions">
-            {data && <SectionExport filename={`${exportMeta.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${isDayKind ? day : range === "custom" ? `${cFrom}_${cTo}` : range}-${new Date().toISOString().slice(0, 10)}`}
-              ctx={{ meta: exportMeta, data, restName, periodLabel: effLabel, isTax: bodyKey === "tax", bucketLabel, extra: sel === "daysummary" ? dayExtraTables(dishesDay, hourlyDay) : undefined }} />}
+            {exportCtx && <SectionExport filename={`${exportMeta.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${isDayKind ? day : range === "custom" ? `${cFrom}_${cTo}` : range}-${new Date().toISOString().slice(0, 10)}`}
+              ctx={exportCtx} onPrintClick={openPrintAsk} />}
           </div>
         ) : (
           /* On the hub: the SAME ask-first compiled statement as the dashboard's Report
@@ -467,6 +529,42 @@ export default function OwnerReports() {
               <i className={`fas ${t.icon}`} aria-hidden /> {t.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Print ask-dialog: confirm/adjust the period, then it prints (waits for fresh data). */}
+      {printAsk && (
+        <div className="rs-ovl" role="dialog" aria-modal="true" aria-label="Print this report" onClick={(e) => { if (e.target === e.currentTarget) setPrintAsk(false); }}>
+          <div className="rs-ovl-card" style={{ width: "min(440px, 100%)" }}>
+            <header className="rs-ovl-h"><b><i className="fas fa-print" aria-hidden style={{ marginRight: 8, color: "var(--accent)" }} />Print {sel ? REPORTS[sel].label : "report"}</b>
+              <button className="rs-ovl-x" onClick={() => setPrintAsk(false)} aria-label="Close"><i className="fas fa-xmark" aria-hidden /></button>
+            </header>
+            <div className="rs-ovl-b">
+              {isDayKind ? (
+                <>
+                  <p className="rs-note" style={{ margin: "0 0 10px" }}>Which day should the printed sheet cover?</p>
+                  <div className="rs-seg" role="group" aria-label="Print day" style={{ marginBottom: 14 }}>
+                    <button aria-pressed={pdDay === istToday()} className={pdDay === istToday() ? "on" : ""} onClick={() => setPdDay(istToday())}>Today</button>
+                    <button aria-pressed={pdDay === yesterdayIso()} className={pdDay === yesterdayIso() ? "on" : ""} onClick={() => setPdDay(yesterdayIso())}>Yesterday</button>
+                    <input type="date" className="rs-date" value={pdDay} max={istToday()} onChange={(e) => setPdDay(e.target.value)} aria-label="Print date" />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="rs-note" style={{ margin: "0 0 10px" }}>Print the report from which date to which date?</p>
+                  <div className="rs-custom" style={{ marginBottom: 14 }}>
+                    <input type="date" className="rs-date" value={pdFrom} max={pdTo} onChange={(e) => setPdFrom(e.target.value)} aria-label="Print from date" />
+                    <i className="fas fa-arrow-right" aria-hidden />
+                    <input type="date" className="rs-date" value={pdTo} min={pdFrom} max={istToday()} onChange={(e) => setPdTo(e.target.value)} aria-label="Print to date" />
+                  </div>
+                </>
+              )}
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button className="rs-btn" onClick={() => setPrintAsk(false)}>Cancel</button>
+                <button className="rs-btn cta" onClick={confirmPrint}><i className="fas fa-print" aria-hidden /> Print</button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
