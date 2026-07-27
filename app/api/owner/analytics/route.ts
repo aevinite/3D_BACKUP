@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
-import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint } from "@/lib/ownerCache";
+import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +60,14 @@ function windowFor(range: string, sp?: URLSearchParams): { from: string; to: str
     if (range === "month") return { from: new Date(start(y, m)).toISOString(), to, bucket: "day" };
     return { from: new Date(start(y, m - 1)).toISOString(), to: new Date(start(y, m)).toISOString(), bucket: "day" };
   }
+  // this calendar week: Monday 00:00 IST → now, day buckets (owner 2026-07-27:
+  // "make option like … this week"). Mirrors the whole-IST-month logic above.
+  if (range === "week") {
+    const istNow = new Date(now + 5.5 * 3600_000);
+    const dow = (istNow.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
+    const monday = Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate() - dow) - 5.5 * 3600_000;
+    return { from: new Date(monday).toISOString(), to, bucket: "day" };
+  }
   // 7d / 30d: EXACTLY N whole IST calendar days ending today (inclusive), aligned to
   // 00:00 IST. A rolling now−N×24h window instead spilled into a partial (N+1)th IST
   // day whose day-bucket the client's whole-day zero-filled axis drops — so the chart
@@ -78,6 +86,33 @@ function windowFor(range: string, sp?: URLSearchParams): { from: string; to: str
   if (range === "yesterday") return { from: new Date(todayStart - DAY).toISOString(), to: new Date(todayStart).toISOString(), bucket: "hour" };
   // today (default): 05:00 IST business-day start → now.
   return { from: new Date(todayStart).toISOString(), to, bucket: "hour" };
+}
+
+// Change-detector choice. The precise orders fingerprint SCANS its window, which on a
+// wide window ("All time" ≈ 6 years of rows) is a ~10s statement-timeout on a big
+// tenant — the exact "Couldn't load / Loading… forever" the owner hit live 2026-07-27.
+// Past ~35 days we switch to the mig-202 rollup-derived fingerprint (~35ms): it still
+// catches every new/changed recent order; an edit to an ANCIENT order is picked up by
+// the nightly rollup refresh (and the Refresh button always forces a recompute). Same
+// tradeoff the money reports already ship with (reports route, mig 202).
+const WIDE_FP_MS = 35 * DAY;
+const fpFor = (ids: string[] | null, from: string, to: string) =>
+  Date.parse(to) - Date.parse(from) > WIDE_FP_MS
+    ? reportMonthFingerprint(ids, from, to)
+    : ordersFingerprint(ids, from, to);
+
+// A thrown Supabase/PostgREST error is a plain object, not an Error — String(e) on it
+// renders the literal "[object Object]" the owner saw in the red banner. Pull the
+// human parts out instead, whatever shape arrives.
+function errText(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    const s = [o.message, o.details, o.hint, o.code].filter((x): x is string => typeof x === "string" && !!x).join(" · ");
+    if (s) return s;
+    try { return JSON.stringify(e).slice(0, 300); } catch { /* fall through */ }
+  }
+  return String(e);
 }
 
 // The previous EQUAL-LENGTH window, for the KPI ▲/▼ delta chips ("today" compares
@@ -104,6 +139,9 @@ function prevTsWindowFor(range: string, from: string, to: string): { from: strin
   const f = Date.parse(from);
   if (range === "7d") return { from: new Date(f - 7 * DAY).toISOString(), to: from };
   if (range === "30d") return { from: new Date(f - 30 * DAY).toISOString(), to: from };
+  // "week" starts Monday 00:00 IST → previous window is the WHOLE prior week, so the
+  // overlay lines up Mon↔Mon by day-of-week (same idea as month's day-1↔day-1).
+  if (range === "week") return { from: new Date(f - 7 * DAY).toISOString(), to: from };
   // "month" (the locked this-month-vs-last-month chart): previous window is the WHOLE
   // previous calendar month, so the overlay lines up day-1↔day-1 by day-of-month.
   if (range === "month") {
@@ -173,7 +211,7 @@ export async function GET(req: NextRequest) {
         // fingerprint happens to change (found 2026-07-26).
         key: `analytics:v5:group:${scopeKeyOf(null, scope.all, gIds)}:${rangeKey}:c${compare ? 1 : 0}`,
         force: sp.get("refresh") === "1",
-        fingerprint: () => ordersFingerprint(scope.all ? null : gIds, from, to),
+        fingerprint: () => fpFor(scope.all ? null : gIds, from, to),
         compute: async () => {
       const allow = scope.all ? null : new Set(scope.ids);
       const pIds = scope.all ? null : scope.ids; // DB-side scope (mig 138) — no whole-platform scan
@@ -309,7 +347,7 @@ export async function GET(req: NextRequest) {
     const restBase = await cachedOwnerPayload({
       key: `analytics:v5:rest:${rid}:${rangeKey}:c${compare ? 1 : 0}`,
       force: sp.get("refresh") === "1",
-      fingerprint: () => ordersFingerprint([rid], from, to),
+      fingerprint: () => fpFor([rid], from, to),
       compute: async () => {
     const [meta, ts, dishes, cats, hourly, heat, pm, sameHour, payTrend, prevTs] = await Promise.all([
       sb.from("restaurants").select("id, slug, name, accent_color, hero_title").eq("id", rid).maybeSingle(),
@@ -395,6 +433,6 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json({ ...restBase, kpis, records });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    return NextResponse.json({ error: errText(e) }, { status: 500 });
   }
 }
