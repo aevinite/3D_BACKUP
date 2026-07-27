@@ -138,6 +138,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // Clear the short login lockout on the device behind an admin-login alert ("let them try again").
+  // admin-login is warn-only (no blocking counter), but several wrong tries lock that IP out for a
+  // few minutes via login_throttle — this lifts that so a genuine person (e.g. the owner forgot the
+  // password) can retry now. Marks the alert handled.
+  if (action === "clear") {
+    const e = (await sb.from("rate_limit_events").select("id, key, subject, subject_label").eq("id", eventId).maybeSingle()).data as { key: string; subject: string; subject_label: string | null } | null;
+    if (!e) return err("that alert no longer exists", 404);
+    if (e.key !== "admin_login") return err("clearing a lockout only applies to admin-login alerts");
+    if (e.subject) await throttleUnblock(`admin:${e.subject}`);
+    await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId);
+    await logAction("admin", "admin_lockout_clear", { level: "info", detail: `admin-login lockout cleared for ${e.subject_label || e.subject}` });
+    return NextResponse.json({ ok: true });
+  }
+
   if (action === "allow") {
     // Reset that subject's counter now (unblock them) + mark the event handled.
     const r = await sb.rpc("lfh_rate_allow", { p_event_id: eventId, p_actor: "admin" });

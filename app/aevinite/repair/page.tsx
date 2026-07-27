@@ -254,6 +254,16 @@ export default function AdminRepair() {
     });
     if (r.ok) toast("Sent to Claude for the 2:30 AM robot."); else toast(r.error || "Couldn't send.", "err");
   };
+  // Admin-login alert: "let them try again" — clear the short lockout on that device so a genuine
+  // person (e.g. the owner forgot the password) can retry now. Marks the alert handled. (owner 2026-07-27)
+  const rlClear = async (h: RlHit) => {
+    setRlHits((prev) => prev.filter((x) => x.id !== h.id));
+    const r = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "clear", event_id: h.id }),
+    });
+    if (r.ok) toast("Cleared — that device can try the admin password again now."); else { toast(r.error || "Couldn't clear that.", "err"); loadHub(); }
+  };
   // Block the device/IP behind an admin-login alert from reaching the admin panel (owner 2026-07-26).
   const rlBlock = async (h: RlHit) => {
     const r = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
@@ -429,10 +439,15 @@ export default function AdminRepair() {
                 <div className="adm-muted" style={{ fontSize: 12.5 }}>Who: <b style={{ color: "var(--text)" }}>{h.subject_label || h.subject}</b></div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 9, alignItems: "center" }}>
                   {h.key === "admin_login" ? (
-                    // Admin-login alert: the headline action is to BLOCK that device from the panel.
-                    <button className="adm-btn danger" style={{ fontSize: 12 }} onClick={() => rlBlock(h)} title="Bar this device/IP from reaching the admin panel">
-                      <i className="fas fa-ban" aria-hidden="true" style={{ marginRight: 6 }} />Block this device
-                    </button>
+                    // Admin-login alert: let a genuine person retry (clear the short lockout), or BLOCK the device.
+                    <>
+                      <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => rlClear(h)} title="Genuine person — clear the short lockout so they can try the password again now">
+                        <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Let them try again
+                      </button>
+                      <button className="adm-btn danger" style={{ fontSize: 12 }} onClick={() => rlBlock(h)} title="Bar this device/IP from reaching the admin panel">
+                        <i className="fas fa-ban" aria-hidden="true" style={{ marginRight: 6 }} />Block this device
+                      </button>
+                    </>
                   ) : (
                     <>
                       <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => rlAllow(h)} title="Real customer — reset their counter so they get through now">
@@ -441,11 +456,11 @@ export default function AdminRepair() {
                       <Link className="adm-btn" style={{ fontSize: 12 }} href={`/aevinite/rate-limits#rule-${h.key}`} title="Change this limit">
                         <i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Change rate limit
                       </Link>
+                      <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => rlFix(h)} title="Hand it to Claude to investigate">
+                        <i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 6 }} />Fix
+                      </button>
                     </>
                   )}
-                  <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => rlFix(h)} title="Hand it to Claude to investigate">
-                    <i className="fas fa-robot" aria-hidden="true" style={{ marginRight: 6 }} />Fix
-                  </button>
                   <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={() => rlDismiss(h)} title="Clear from the board">Dismiss</button>
                 </div>
               </div>
