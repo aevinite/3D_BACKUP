@@ -287,7 +287,7 @@ function Column3D(props: {
       <defs>
         <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={fill} stopOpacity={1} />
-          <stop offset="100%" stopColor={fill} stopOpacity={0.45} />
+          <stop offset="100%" stopColor={fill} stopOpacity={0.72} />
         </linearGradient>
       </defs>
       <rect x={x} y={y} width={width} height={height} rx={6} fill={`url(#${gid})`} />
