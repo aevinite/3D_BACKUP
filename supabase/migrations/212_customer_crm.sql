@@ -1,5 +1,5 @@
 -- ============================================================================
--- 211_customer_crm.sql — Customer CRM: capture name+number at bill time,
+-- 212_customer_crm.sql — Customer CRM: capture name+number at bill time,
 -- recognize repeat customers, link their device(s), forget devices after 12mo.
 --
 -- DPDP (India) shape baked in: nothing is stored without explicit consent

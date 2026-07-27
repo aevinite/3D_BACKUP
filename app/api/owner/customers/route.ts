@@ -9,7 +9,7 @@ import { ownerScope, type OwnerScope } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
-// visits/consent added by Customer CRM (mig 211): a REAL repeat count + the DPDP
+// visits/consent added by Customer CRM (mig 212): a REAL repeat count + the DPDP
 // opt-in flag. Still money-free (no spend column exists).
 const COLS = "restaurant_id, phone, name, blocked, visits, consent, first_seen_at, last_seen_at";
 const REPEAT_MIN = 2; // visits >= 2 = a returning customer (real count, not a time heuristic)
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
   // can't express, so it stays derived from the shown page and can undercount on very busy
   // restaurants; making it exact needs a small scoped DB function (see OVERNIGHT note).
   // `returning` is now an EXACT scoped head-count (visits >= 2) — the real visit
-  // counter (mig 211) lets us count it in the DB instead of eyeballing timestamps on
+  // counter (mig 212) lets us count it in the DB instead of eyeballing timestamps on
   // the shown page, so it no longer undercounts busy restaurants.
   const head = () => sb.from("customers").select("phone", { count: "exact", head: true }).in("restaurant_id", ids);
   const [cntAll, cntBlocked, cntNew, cntReturning] = await Promise.all([
@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ summary, customers });
 }
 
-// DELETE /api/owner/customers — erase a customer (DPDP right-to-erasure, mig 211).
+// DELETE /api/owner/customers — erase a customer (DPDP right-to-erasure, mig 212).
 // Removes the customers row + their visit ledger + device links, scoped to a
 // restaurant the owner actually owns AND still has the "customers" section for.
 // Admin (top power) is never gated. Body: { restaurant_id, phone }.

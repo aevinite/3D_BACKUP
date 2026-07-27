@@ -224,7 +224,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     // customer-recognize?phone=… — repeat-customer lookup for the payment sheet
-    // (Customer CRM, mig 211). Read-only, scoped by rid via the RPC. Returns
+    // (Customer CRM, mig 212). Read-only, scoped by rid via the RPC. Returns
     // {known,name,visits,blocked}; never lists customers. The number is only
     // used to greet a returning guest — nothing is stored on a read.
     if (path.join("/") === "customer-recognize") {
@@ -1180,7 +1180,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
 
     // tables/:t/customer-capture — save the guest's name+number at bill time, with
-    // consent (Customer CRM, mig 211). DPDP: the RPC stores NOTHING without consent.
+    // consent (Customer CRM, mig 212). DPDP: the RPC stores NOTHING without consent.
     // Records one visit for this table's session (idempotent), links the guests'
     // devices, and bumps the returning-customer count. Gated by the restaurant's
     // "customers" entitlement (default on). Fire-and-forget from the pay sheet — a
@@ -1347,7 +1347,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // (a refund/correction) — record it for the money-accountability trail either way.
       const reason = String((body && body.reason) || "").trim().slice(0, 120);
       await log("payment_revert", { table_number: t, device_id: dev, detail: reason ? `unpaid: ${reason}` : "undo settle (within grace)" });
-      // Reversing the settle reverses the visit it counted (Customer CRM, mig 211).
+      // Reversing the settle reverses the visit it counted (Customer CRM, mig 212).
       await sb.rpc("lfh_uncapture_customer", { p_restaurant_id: rid, p_table: t });
       return ok({ ok: true, count: paid.length });
     }

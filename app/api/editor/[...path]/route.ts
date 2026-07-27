@@ -304,7 +304,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const p = path.join("/");
 
     // customer-recognize?phone=… — repeat-customer lookup for the pay sheet
-    // (Customer CRM, mig 211). Read-only, scoped by rid via the RPC. Never lists.
+    // (Customer CRM, mig 212). Read-only, scoped by rid via the RPC. Never lists.
     if (p === "customer-recognize") {
       const phone = (new URL(req.url).searchParams.get("phone") || "").trim().slice(0, 20);
       if (!phone) return ok({ known: false });
@@ -1191,7 +1191,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     const dev = deviceIdFrom(req); // which device (this editor screen) is acting
 
     // customer-capture — save the guest's name+number at bill time, with consent
-    // (Customer CRM, mig 211). DPDP: the RPC stores NOTHING without consent. Records
+    // (Customer CRM, mig 212). DPDP: the RPC stores NOTHING without consent. Records
     // one visit for the table's session (idempotent), links devices, bumps the
     // returning count. Gated by the "customers" entitlement (default on). Called once
     // after the bill closes; a failure never blocks the settle that already happened.
@@ -2596,7 +2596,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
         const reason = String((body && body.revert_reason) || "").trim();
         if (!reason) return err("Reverting a PAID bill needs a reason (refund/correction).", 409);
         await log("editor", "payment_revert", { restaurant_id: rid, order_id: id, detail: reason, device_id: deviceIdFrom(req) });
-        // Reversing the settle reverses the visit it counted (Customer CRM, mig 211).
+        // Reversing the settle reverses the visit it counted (Customer CRM, mig 212).
         // Idempotent per session, so reverting each order of a multi-order bill is safe.
         if (cur.table_number != null) await sb.rpc("lfh_uncapture_customer", { p_restaurant_id: rid, p_table: String(cur.table_number) });
       }

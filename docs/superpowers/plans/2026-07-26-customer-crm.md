@@ -1,6 +1,6 @@
 # Customer CRM — capture number at bill time, recognize repeat customers (2026-07-26)
 
-> **STATUS 2026-07-27 — BUILT + FULLY VERIFIED on dev (branch `feat/customer-crm`, mig 211 applied to dev DB).**
+> **STATUS 2026-07-27 — BUILT + FULLY VERIFIED on dev (branch `feat/customer-crm`, mig 212 applied to dev DB).**
 > In-browser drive: 15/15 checks passed (pay-sheet capture + repeat chip + name prefill,
 > visit 3→4 on settle, undo 4→3, guest "Welcome back" toast by device at 360px with NO
 > phone shown, owner Visits/consent✓/regular/Erase at desktop + 390px, burger-barn
@@ -66,7 +66,7 @@ months. Owner asked "is this legal?" → yes, see Legality below. Build fully he
 - Migration numbering: 209 (platform) & 210 (QR) taken ⇒ **use 211**. Repo has
   duplicate-number collisions historically — check `ls` again right before writing.
 
-## 2. Schema — migration `211_customer_crm.sql`
+## 2. Schema — migration `212_customer_crm.sql`
 
 All additive (live-site safety rule). One file, sections in order:
 
@@ -182,7 +182,7 @@ All additive (live-site safety rule). One file, sections in order:
 
 ## 6. Verification checklist (dev DB, worktree server on port 4001 — NOT 4000)
 
-1. `node scripts/apply-migration.mjs supabase/migrations/211_customer_crm.sql`
+1. `node scripts/apply-migration.mjs supabase/migrations/212_customer_crm.sql`
    (dev DB `wnsfcizc…` — NEVER seed-supabase.mjs, it reverts editor data).
    Verify RPC grants: anon can call ONLY `lfh_greet_device`.
 2. `npm run lint` / build green in the worktree.
@@ -208,7 +208,7 @@ All additive (live-site safety rule). One file, sections in order:
 1. PR from `feat/customer-crm` → review → **deploy-lock ritual** → merge to
    main → backup-1 (3-d-backup) auto-deploy → verify live (real settle loop).
 2. backup-1 stays ahead; **AV live only after explicit owner yes** (ask with
-   the ask-user-question tool): run mig 211 on AV DB `kclqk…`, scripted code
+   the ask-user-question tool): run mig 212 on AV DB `kclqk…`, scripted code
    copy, verify end-to-end there. backup-2 after.
 3. Memory note + REQUESTS.md tick when verified everywhere.
 

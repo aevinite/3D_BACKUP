@@ -1,4 +1,4 @@
-// CustomerGreeter — the returning-guest "Welcome back" touch (Customer CRM, mig 211).
+// CustomerGreeter — the returning-guest "Welcome back" touch (Customer CRM, mig 212).
 //
 // On the guest menu, once per browser SESSION, we ask the server if THIS device was
 // linked to a consented customer on a past visit (lfh_greet_device). If so, we show a
