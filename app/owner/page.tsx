@@ -107,6 +107,26 @@ const WEEK: Range = "7d";
 // dark green, a third non-brown colour only if needed (owner round-2: "only brown
 // doesn't make sense"). Identity accent colours are for the many-tier only.
 const GREEN_SHADES = ["#34d399", "#0f766e", "#a3e635"];
+// 4+ restaurants: give each one a DISTINCT, SOLID colour (owner 2026-07-27: the charts
+// looked "faded" and same-ish because most restaurants default to the same gold accent —
+// so several bars/lines were the identical washed-out yellow). This vibrant qualitative
+// palette assigns a clearly-different hue per restaurant BY POSITION, so no two adjacent
+// restaurants share a colour and the same restaurant keeps its colour across the
+// "Who earns more" bars AND the "Revenue over time" lines that sit side-by-side.
+const PORTFOLIO_COLORS = [
+  "#34d399", // emerald  (owner brand green first)
+  "#3b82f6", // blue
+  "#f59e0b", // amber
+  "#ec4899", // pink
+  "#8b5cf6", // violet
+  "#14b8a6", // teal
+  "#ef4444", // red
+  "#eab308", // yellow
+  "#f97316", // orange
+  "#06b6d4", // cyan
+];
+/** Stable colour for a restaurant by its position in the portfolio list. */
+const portfolioColor = (i: number) => PORTFOLIO_COLORS[i % PORTFOLIO_COLORS.length];
 
 const IST = "Asia/Kolkata";
 // Some RPCs return a zone-LESS IST wall-clock timestamp — see the note in the old
@@ -611,7 +631,7 @@ export default function OwnerDashboard() {
     const stacked = p.restaurantRevenue.length >= 2 && p.restaurantRevenue.length <= 3;
     const lines = p.restaurantRevenue.map((r, i) => ({
       key: r.id, name: r.name,
-      color: stacked ? GREEN_SHADES[i % GREEN_SHADES.length] : (r.accentColor || FALLBACK),
+      color: stacked ? GREEN_SHADES[i % GREEN_SHADES.length] : portfolioColor(i),
     }));
     const by = new Map<string, Record<string, number>>();
     for (const t of p.timeseries) {
@@ -1037,7 +1057,7 @@ export default function OwnerDashboard() {
                 <div className="ow2-ct"><span>Who earns more <span className="mut">· tap a bar to open</span></span>
                   <span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
                 {!trendPayload || trendPayload.scope !== "group" ? <div className="adm-empty">Loading…</div>
-                  : <WhoEarnsMore data={trendPayload.restaurantRevenue.map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: r.accentColor || FALLBACK }))}
+                  : <WhoEarnsMore data={trendPayload.restaurantRevenue.map((r, i) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: portfolioColor(i) }))}
                       trendData={groupTrend.rows} trendLines={groupTrend.lines}
                       onSelect={(id) => setDrawerRid(id)} />}
               </div>
