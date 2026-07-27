@@ -51,9 +51,29 @@
   // one ticket didn't auto-print (staff can tap 🖨 reprint); it is NOT a crash, so it must not
   // create client_error rows / fake fix requests. The removal-timing cause was fixed in #353;
   // this guard covers the residual late-rejection path.
+  //
+  // Same reasoning for NETWORK-DROP noise: a background fetch whose promise rejects with
+  // "Failed to fetch" (and its per-browser twins below) means the request never reached the
+  // server — a momentary wifi/connection blip on the device, NOT a bug in our code. (A broken
+  // endpoint returns an error *response*, which resolves the fetch; it never says "Failed to
+  // fetch".) The connection light + offline queue already handle these blips visibly, so a
+  // 2-second drop must not raise a red crash row / fake "Fix NOW". Repeated real outages still
+  // surface via the connection badge going red.
+  var NETWORK_NOISE = [
+    "Failed to fetch",                              // Chrome / Edge
+    "NetworkError when attempting to fetch",        // Firefox
+    "Load failed",                                  // Safari (fetch abort/offline)
+    "The network connection was lost",              // iOS / Safari
+    "The Internet connection appears to be offline",// iOS / Safari
+    "network error",                                // generic
+  ];
   function isBenign(message) {
     var m = String(message || "");
-    return m.indexOf("Failed to execute 'print' on 'Window'") >= 0;
+    if (m.indexOf("Failed to execute 'print' on 'Window'") >= 0) return true;
+    for (var i = 0; i < NETWORK_NOISE.length; i++) {
+      if (m.indexOf(NETWORK_NOISE[i]) >= 0) return true;
+    }
+    return false;
   }
   var lastMsg = "", lastAt = 0;
   function reportError(message, where) {
