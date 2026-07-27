@@ -9,8 +9,21 @@ import { useBackClose } from "@/lib/backStack";
 import { canonPayMethod } from "@/components/owner/Charts";
 import type { ExportTable } from "@/components/owner/ownerReportDoc";
 
-const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
+// Paise only when the amount actually has them (the CGST/SGST halves of an odd tax total),
+// so equal rates print as equal halves; whole-rupee amounts stay clean.
+const inr = (n: number) => {
+  const v = Number(n) || 0;
+  const hasPaise = Math.abs(Math.round(v) - v) > 0.005;
+  return "₹" + v.toLocaleString("en-IN", { minimumFractionDigits: hasPaise ? 2 : 0, maximumFractionDigits: 2 });
+};
 const nfmt = (n: number) => Math.round(Number(n) || 0).toLocaleString("en-IN");
+// Proportional-by-rate split, paise, last line absorbs the remainder so parts add to total.
+const splitTax = (rates: number[], target: number): number[] => {
+  const sum = rates.reduce((a, r) => a + r, 0) || 1;
+  const p2 = (v: number) => Math.round(v * 100) / 100;
+  let running = 0;
+  return rates.map((r, i) => { const amt = i === rates.length - 1 ? p2(target - running) : p2(target * (r / sum)); running = p2(running + amt); return amt; });
+};
 const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
@@ -23,6 +36,7 @@ export type SectionCtx = {
   meta: SectionMeta; data: Payload; restName: string; periodLabel: string;
   isTax?: boolean;   // the Tax/GST report → append the CGST/SGST split table
   bucketLabel: (iso: string, bucket: string) => string;
+  extra?: ExportTable[];   // extra tables appended to print/CSV (Day summary: dishes + hours)
 };
 
 // ── build the flat tables (CSV / Excel) for the current section ──────────────
@@ -32,14 +46,17 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
   const title = `${meta.label} — ${c.restName} — ${c.periodLabel}`;
   if (meta.kind === "money" || meta.kind === "daysummary") {
     const m = (data.rows ?? []) as MoneyRow[]; const t = data.totals;
-    const head = ["Period", "Orders", "Paid", "Gross", "Tax", "Discount", "Net", "Cancelled", "Lost value"];
+    const head = ["Period", "Orders", "Paid", "Item sales", "GST", "Discount", "Total collected", "Cancelled", "Lost value"];
     const rows: (string | number)[][] = m.map((r) => [c.bucketLabel(r.bucket, grain), r.orders, r.paidOrders, Math.round(r.subtotal), Math.round(r.tax), Math.round(r.discount), Math.round(r.revenue), r.cancelledOrders, Math.round(r.cancelledValue)]);
     if (t) rows.push(["Total", t.orders, t.paidOrders, Math.round(t.subtotal), Math.round(t.tax), Math.round(t.discount), Math.round(t.revenue), t.cancelledOrders, Math.round(t.cancelledValue)]);
     const out: ExportTable[] = [{ title, head, rows }];
     if (c.isTax && data.tax) {
+      // Whole-rupee target (GST-return rounding): equal rates export equal halves that sum
+      // to the shown total — mirrors the on-screen split exactly.
       out.push({ title: `${meta.label} — tax split`, head: ["Component", "Rate %", "Collected"],
-        rows: [["Total tax", data.tax.effectivePct, Math.round(t?.tax ?? 0)], ...data.tax.components.map((x) => [x.label, x.rate, Math.round(x.amount)] as (string | number)[])] });
+        rows: [["Total tax", data.tax.effectivePct, Math.round(t?.tax ?? 0)], ...splitTax(data.tax.components.map((x) => x.rate), Math.round(t?.tax ?? 0)).map((amt, i) => [data.tax!.components[i].label, data.tax!.components[i].rate, amt] as (string | number)[])] });
     }
+    if (c.extra?.length) out.push(...c.extra);   // Day summary: the day's dishes + busy hours
     return out;
   }
   if (meta.kind === "dishes") return [{ title, head: ["Dish", "Qty sold", "Item sales (list price)"], rows: ((data.rows ?? []) as { title: string; qty: number; revenue: number }[]).map((r) => [r.title, r.qty, Math.round(r.revenue)]) }];
@@ -54,10 +71,21 @@ export function sectionHtml(c: SectionCtx): string {
   const tables = sectionTables(c);
   const gen = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" });
   const isMoney = c.meta.kind === "money" || c.meta.kind === "daysummary";
+  // Format each numeric cell by what its COLUMN HEADER says, not its index — the tables have
+  // different shapes (money table vs the tax-split table vs breakdowns), so an index-based
+  // guess mis-rendered the split's rate/amount. Money headers → ₹ (paise-aware); "Rate" → N%;
+  // everything else numeric → plain count.
+  const fmtCell = (cell: string | number, head: string): string => {
+    if (typeof cell !== "number") return esc(String(cell));
+    const h = head.toLowerCase();
+    if (/rate|%/.test(h)) return `${cell}%`;
+    if (/gross|gst|tax|discount|net|revenue|collected|lost|sales|value/.test(h)) return inr(cell);
+    return nfmt(cell);
+  };
   const tableHtml = (t: ExportTable) => `
     <h3>${esc(t.title.split(" — ")[1] ? t.title.split(" — ").slice(1).join(" · ") : t.title)}</h3>
     <table><thead><tr>${t.head.map((h, i) => `<th${i > 0 ? ' class="r"' : ""}>${esc(h)}</th>`).join("")}</tr></thead>
-    <tbody>${t.rows.map((r, ri) => `<tr${ri === t.rows.length - 1 && isMoney && String(r[0]).startsWith("Total") ? ' class="tot"' : ""}>${r.map((cell, i) => `<td${i > 0 ? ' class="r"' : ""}>${typeof cell === "number" && i > 0 ? (isMoney && ![1, 2].includes(i) ? inr(cell) : nfmt(cell)) : esc(String(cell))}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    <tbody>${t.rows.map((r, ri) => `<tr${ri === t.rows.length - 1 && isMoney && String(r[0]).startsWith("Total") ? ' class="tot"' : ""}>${r.map((cell, i) => `<td${i > 0 ? ' class="r"' : ""}>${i === 0 ? esc(String(cell)) : fmtCell(cell, String(t.head[i] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   return `<!doctype html><html><head><meta charset="utf-8"/><title>${esc(c.meta.label)} · ${esc(c.restName)} · ${esc(c.periodLabel)}</title>
 <style>
   *{box-sizing:border-box} body{font-family:-apple-system,"Segoe UI",Inter,Roboto,sans-serif;color:#10231c;margin:0;padding:34px 40px 50px;font-size:12.5px;line-height:1.5}
@@ -76,13 +104,23 @@ export function sectionHtml(c: SectionCtx): string {
   <div class="mast"><span class="brand">Aevidine · Restaurant OS</span><span class="gen">Generated ${esc(gen)}</span></div>
   <h1>${esc(c.meta.label)}</h1><div class="scope">${esc(c.restName)} · ${esc(c.periodLabel)}</div>
   ${tables.map(tableHtml).join("")}
-  <div class="note">Net revenue counts paid, non-cancelled orders and is net of discounts. Generated automatically by the Aevidine owner console.</div>
+  <div class="note">Item sales are menu prices before discount. Total collected is every rupee guests paid (GST included) on paid, non-cancelled orders; your earnings are the item sales minus discount, before GST. Generated automatically by the Aevidine owner console.</div>
 <script>window.addEventListener("load",function(){setTimeout(function(){window.print()},300)});</script>
 </body></html>`;
 }
 
+// Open the print document for a section — exported so the page can print AFTER its
+// ask-the-date dialog (owner 2026-07-26: print asks/confirms the date first).
+export function printSection(ctx: SectionCtx) {
+  const w = window.open("", "_blank");
+  if (!w) return;
+  w.document.write(sectionHtml(ctx));
+  w.document.close();
+}
+
 // ── the Print / CSV / Excel dropdown for a section ────────────────────────────
-export function SectionExport({ ctx, filename }: { ctx: SectionCtx; filename: string }) {
+// `onPrintClick` (optional) replaces the immediate print with the page's ask-first flow.
+export function SectionExport({ ctx, filename, onPrintClick }: { ctx: SectionCtx; filename: string; onPrintClick?: () => void }) {
   const [open, setOpen] = useState(false);
   const ready = (ctx.data.rows?.length ?? 0) >= 0 && !!ctx.data;
   useBackClose("owner-section-export", open, () => setOpen(false));
@@ -95,7 +133,7 @@ export function SectionExport({ ctx, filename }: { ctx: SectionCtx; filename: st
   const csvEsc = (v: string | number) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const doCsv = () => { const t = sectionTables(ctx); dl(new Blob(["﻿" + t.map((x) => [x.title, x.head.map(csvEsc).join(","), ...x.rows.map((r) => r.map(csvEsc).join(","))].join("\n")).join("\n\n")], { type: "text/csv;charset=utf-8" }), `${filename}.csv`); };
   const doXls = () => { const t = sectionTables(ctx); const html = `<html><head><meta charset="utf-8"></head><body>` + t.map((x) => `<h3>${x.title}</h3><table border="1"><tr>${x.head.map((h) => `<th>${h}</th>`).join("")}</tr>${x.rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</table>`).join("<br/>") + `</body></html>`; dl(new Blob([html], { type: "application/vnd.ms-excel" }), `${filename}.xls`); };
-  const doPrint = () => { const w = window.open("", "_blank"); if (!w) return; w.document.write(sectionHtml(ctx)); w.document.close(); };
+  const doPrint = () => (onPrintClick ? onPrintClick() : printSection(ctx));
   return (
     <span className="rs-exp" style={{ position: "relative", display: "inline-flex" }}>
       <button className="rs-btn" onClick={() => setOpen((o) => !o)} disabled={!ready} aria-haspopup="menu" aria-expanded={open}>

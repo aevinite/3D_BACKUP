@@ -14,7 +14,7 @@
 // theme green — the honest fit for a toggleable ranking.
 import { useState } from "react";
 import { inr } from "@/components/admin/shared";
-import { nfmt, scrollToId, type RKey } from "@/components/owner/reports/kit";
+import { nfmt, scrollToId } from "@/components/owner/reports/kit";
 import { CategoryDonut } from "@/components/owner/Charts";
 import { Panel, Stat } from "@/components/owner/reports/kit";
 import { SearchTable, type Col } from "@/components/owner/reports/SearchTable";
@@ -74,7 +74,7 @@ function RankStyles() {
 }
 
 // ── ITEM SALES ────────────────────────────────────────────────────────────────
-export function DishesReport({ rows, onOpenReport }: { rows: DishRow[]; onOpenReport?: (k: RKey) => void }) {
+export function DishesReport({ rows, onOpenReport }: { rows: DishRow[]; onOpenReport?: (k: string) => void }) {
   const [metric, setMetric] = useState<"revenue" | "qty">("revenue");
   const totalRev = rows.reduce((a, d) => a + d.revenue, 0);
   const totalQty = rows.reduce((a, d) => a + d.qty, 0);
@@ -155,7 +155,7 @@ export function DishesReport({ rows, onOpenReport }: { rows: DishRow[]; onOpenRe
 }
 
 // ── CATEGORY MIX ────────────────────────────────────────────────────────────────
-export function CategoriesReport({ rows, onOpenReport }: { rows: CatRow[]; onOpenReport?: (k: RKey) => void }) {
+export function CategoriesReport({ rows, onOpenReport }: { rows: CatRow[]; onOpenReport?: (k: string) => void }) {
   const byRev = [...rows].sort((a, b) => b.revenue - a.revenue);
   const totalRev = rows.reduce((a, c) => a + c.revenue, 0);
   const totalQty = rows.reduce((a, c) => a + c.qty, 0);
@@ -236,7 +236,7 @@ function classifyMenu(rows: MI[]) {
 }
 type MenuDish = ReturnType<typeof classifyMenu>["dishes"][number];
 
-export function MenuReport({ rows, onOpenReport }: { rows: MI[]; onOpenReport?: (k: RKey) => void }) {
+export function MenuReport({ rows, onOpenReport }: { rows: MI[]; onOpenReport?: (k: string) => void }) {
   const { dishes, totalQty, totalRev } = classifyMenu(rows);
   const byRev = [...dishes].sort((a, b) => b.revenue - a.revenue);
   const count = (k: Klass) => dishes.filter((d) => d.klass === k).length;

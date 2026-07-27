@@ -18,17 +18,18 @@ import { Spark } from "@/components/owner/Charts";
 import { AnimatedStatValue } from "@/components/owner/AnimatedNumber";
 
 // ── The report catalog ─────────────────────────────────────────────────────
-export type RKey =
-  | "daysummary" | "sales" | "avgbill" | "volume" | "weekday"
-  | "payments" | "discounts" | "cancellations"
-  | "tax"
-  | "dishes" | "categories" | "menu"
-  | "hourly" | "daypart";
+// SIX full reports (owner 2026-07-26: "there are too many sub-reports which are not needed").
+// Each merged report bundles what used to be separate cards, as sub-tabs / KPI drill-boxes
+// inside ONE report, so the owner never hops sub-report → sub-report:
+//   • sales   = revenue trend + average bill + order volume
+//   • payments= settlement + discounts + cancellations (the last two open as detail overlays)
+//   • items   = item sales + category mix + menu engineering (sub-tabs)
+//   • timing  = busy hours + day parts + day of the week (sub-tabs)
+export type RKey = "daysummary" | "sales" | "payments" | "tax" | "items" | "timing";
 
-// Which server payload a report reads. Several reports are different VIEWS over the
-// same bucketed money payload (one RPC round-trip) — sales/avgbill/volume/weekday/
-// discounts/cancellations/tax all render from "money"; daypart re-slices "hourly";
-// menu re-slices "dishes". So a dozen reports cost only a handful of query shapes.
+// Which server payload a report reads. Merged reports may pull a SECOND payload on demand
+// (items also fetches categories; timing also fetches the money series for day-of-week) —
+// the page requests that extra shape when the report opens.
 export type DataKind = "money" | "daysummary" | "payments" | "dishes" | "categories" | "hourly";
 export type Tone = "accent" | "good" | "warn" | "bad" | "info";
 
@@ -38,28 +39,19 @@ export type ReportMeta = {
 export type ReportCat = { key: string; label: string; icon: string; keys: RKey[] };
 
 export const REPORTS: Record<RKey, ReportMeta> = {
-  daysummary:    { key: "daysummary",    label: "Day summary",       icon: "fa-file-invoice-dollar", kind: "daysummary", tone: "accent", blurb: "The whole day on one sheet — money in, how it was paid, tax, and what you kept." },
-  sales:         { key: "sales",         label: "Sales trend",       icon: "fa-chart-line",          kind: "money",      tone: "accent", blurb: "Revenue over time — subtotal, tax, discounts and net kept." },
-  avgbill:       { key: "avgbill",       label: "Average bill",      icon: "fa-receipt",             kind: "money",      tone: "info",   blurb: "Average spend per paid bill, and which way it's trending." },
-  volume:        { key: "volume",        label: "Order volume",      icon: "fa-list-check",          kind: "money",      tone: "info",   blurb: "How many orders came in — paid vs cancelled — over the period." },
-  weekday:       { key: "weekday",       label: "Day of week",       icon: "fa-calendar-week",       kind: "money",      tone: "info",   blurb: "Which weekdays actually carry the business." },
-  payments:      { key: "payments",      label: "Payment settlement",icon: "fa-wallet",              kind: "payments",   tone: "accent", blurb: "How the money truly arrived — UPI, cash, card, other." },
-  discounts:     { key: "discounts",     label: "Discounts given",   icon: "fa-tag",                 kind: "money",      tone: "warn",   blurb: "What was given away, on which days." },
-  cancellations: { key: "cancellations", label: "Cancellations",     icon: "fa-ban",                 kind: "money",      tone: "bad",    blurb: "Voided orders and the value lost with them." },
-  tax:           { key: "tax",           label: "Tax / GST",         icon: "fa-landmark",            kind: "money",      tone: "accent", blurb: "Tax collected with the CGST/SGST split — ready for filing." },
-  dishes:        { key: "dishes",        label: "Item sales",        icon: "fa-utensils",            kind: "dishes",     tone: "accent", blurb: "Every dish: how many sold and what it earned." },
-  categories:    { key: "categories",    label: "Category mix",      icon: "fa-layer-group",         kind: "categories", tone: "accent", blurb: "Which sections of the menu carry the money." },
-  menu:          { key: "menu",          label: "Menu engineering",  icon: "fa-lightbulb",           kind: "dishes",     tone: "info",   blurb: "Stars, workhorses, puzzles, dogs — what to push, price, fix or drop." },
-  hourly:        { key: "hourly",        label: "Busy hours",        icon: "fa-clock",               kind: "hourly",     tone: "accent", blurb: "When the money comes in, hour by hour." },
-  daypart:       { key: "daypart",       label: "Day parts",         icon: "fa-sun",                 kind: "hourly",     tone: "info",   blurb: "Morning, afternoon, evening and late-night at a glance." },
+  daysummary: { key: "daysummary", label: "Day summary",   icon: "fa-file-invoice-dollar", kind: "daysummary", tone: "accent", blurb: "The whole day on one sheet — money in, how it was paid, the tax, plus the day's dishes and busy hours." },
+  sales:      { key: "sales",      label: "Sales",         icon: "fa-chart-line",          kind: "money",      tone: "accent", blurb: "Money over time — total collected, net sales, average bill and how many orders came in." },
+  payments:   { key: "payments",   label: "Payments",      icon: "fa-wallet",              kind: "payments",   tone: "accent", blurb: "How the money arrived — UPI, cash, card — with discounts given and value lost to cancellations." },
+  tax:        { key: "tax",        label: "Tax / GST",     icon: "fa-landmark",            kind: "money",      tone: "accent", blurb: "GST collected with the CGST/SGST split — ready for filing." },
+  items:      { key: "items",      label: "Items & menu",  icon: "fa-utensils",            kind: "dishes",     tone: "accent", blurb: "Every dish and category: what sells, what earns, and what to push, price, fix or drop." },
+  timing:     { key: "timing",     label: "Busy times",    icon: "fa-clock",               kind: "hourly",     tone: "accent", blurb: "When the business comes in — by hour, by part of the day, and by day of the week." },
 };
 
 export const CATEGORIES: ReportCat[] = [
-  { key: "overview", label: "Overview",             icon: "fa-gauge-high",  keys: ["daysummary", "sales", "avgbill", "volume"] },
-  { key: "money",    label: "Money & settlement",   icon: "fa-sack-dollar", keys: ["payments", "discounts", "cancellations"] },
-  { key: "tax",      label: "Tax & compliance",     icon: "fa-landmark",    keys: ["tax"] },
-  { key: "menu",     label: "Menu & items",         icon: "fa-utensils",    keys: ["dishes", "categories", "menu"] },
-  { key: "ops",      label: "Operations & timing",  icon: "fa-clock",       keys: ["hourly", "daypart", "weekday"] },
+  { key: "overview", label: "Overview",            icon: "fa-gauge-high",  keys: ["daysummary", "sales"] },
+  { key: "money",    label: "Money & tax",         icon: "fa-sack-dollar", keys: ["payments", "tax"] },
+  { key: "menu",     label: "Menu & items",        icon: "fa-utensils",    keys: ["items"] },
+  { key: "ops",      label: "Operations & timing", icon: "fa-clock",       keys: ["timing"] },
 ];
 
 // ── Shared formatting ───────────────────────────────────────────────────────
@@ -199,6 +191,10 @@ export function ReportsStyles() {
       .rs-crumb { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); font-weight: 600; }
       .rs-crumb button { background: none; border: none; color: var(--muted); font: inherit; font-weight: 600; padding: 0; cursor: pointer; }
       .rs-crumb button:hover { color: var(--accent); }
+      .rs-back { display: inline-flex; align-items: center; gap: 7px; background: none; border: none; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 700; padding: 4px 0; cursor: pointer; transition: color .14s ease; }
+      .rs-back:hover { color: var(--accent); }
+      .rs-back i { font-size: 11px; }
+      @media print { .rs-back { display: none !important; } }
       .rs-h1 { font-size: 22px; font-weight: 800; margin: 2px 0 0; letter-spacing: -0.02em; }
       .rs-sub { font-size: 12.5px; color: var(--muted); margin: 4px 0 0; }
       .rs-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 16px 0 18px; }
@@ -262,6 +258,40 @@ export function ReportsStyles() {
       .rs-card .ct p { font-size: 11.5px; color: var(--muted); margin: 3px 0 0; line-height: 1.4; }
       .rs-card .go { position: absolute; top: 15px; right: 14px; color: var(--muted); font-size: 11px; opacity: 0; transform: translateX(-3px); transition: opacity .16s ease, transform .16s ease; }
       .rs-card:hover .go { opacity: 1; transform: translateX(0); color: var(--tone-c); }
+
+      /* ── Sub-tabs (the merge: one report, several views) ────────────────── */
+      .rs-subtabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 16px; border-bottom: 1px solid var(--border-c); padding-bottom: 2px; }
+      .rs-subtab { border: none; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 700; padding: 9px 14px; border-radius: 8px 8px 0 0; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; position: relative; transition: color .15s ease, background .15s ease; }
+      .rs-subtab i { font-size: 12px; opacity: .85; }
+      .rs-subtab:hover { color: var(--text); background: var(--muted2); }
+      .rs-subtab.on { color: var(--accent); }
+      .rs-subtab.on::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -3px; height: 2.5px; border-radius: 2px; background: var(--accent); }
+      @media print { .rs-subtabs { display: none !important; } }
+
+      /* ── Detail overlay (discount/cancellation drill from Payments) ──────── */
+      .rs-ovl { position: fixed; inset: 0; z-index: 120; background: color-mix(in srgb, #000 55%, transparent); backdrop-filter: blur(3px); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; animation: rs-fade .18s ease; }
+      .rs-ovl-card { width: min(920px, 100%); background: var(--card); border: 1px solid var(--border-c); border-radius: 16px; box-shadow: 0 30px 80px -20px rgba(0,0,0,.6); overflow: hidden; margin: auto 0; }
+      .rs-ovl-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 15px 18px; border-bottom: 1px solid var(--border-c); position: sticky; top: 0; background: var(--card); }
+      .rs-ovl-h b { font-size: 15px; font-weight: 800; letter-spacing: -0.01em; }
+      .rs-ovl-x { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border-c); background: var(--muted2); color: var(--text); cursor: pointer; font-size: 14px; }
+      .rs-ovl-x:hover { background: var(--card); }
+      .rs-ovl-b { padding: 18px; }
+      @media (prefers-reduced-motion: reduce) { .rs-ovl { animation: none; } }
+      /* Ctrl+P with the overlay open must print the REPORT, not a black wash + card. */
+      @media print { .rs-ovl { display: none !important; } }
+
+      /* ── Per-restaurant brief (all-restaurants hub) ─────────────────────── */
+      .rs-brief { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 4px 0 8px; }
+      .rs-brief-card { text-align: left; border: 1px solid var(--border-c); border-radius: 12px; background: var(--card); padding: 13px 15px; cursor: pointer; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
+      .rs-brief-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 45%, var(--border-c)); box-shadow: 0 10px 24px -14px color-mix(in srgb, var(--accent) 50%, transparent); }
+      .rs-brief-top { display: flex; align-items: center; gap: 8px; }
+      .rs-brief-top .sw { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+      .rs-brief-top .nm { font-size: 13px; font-weight: 700; letter-spacing: -0.01em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .rs-brief-top .rk { margin-left: auto; font-size: 10.5px; font-weight: 800; color: var(--muted); }
+      .rs-brief-v { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; margin: 8px 0 2px; }
+      .rs-brief-sub { font-size: 11px; color: var(--muted); }
+      .rs-brief-bar { height: 5px; border-radius: 999px; background: var(--muted2); overflow: hidden; margin-top: 9px; }
+      .rs-brief-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
 
       /* ── Report view: title, KPI band, panels ──────────────────────────── */
       .rs-report { animation: rs-fade .22s ease; }

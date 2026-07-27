@@ -59,6 +59,16 @@ export const ACT_LABEL: Record<string, string> = {
 
 export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
 
+// Paise-precise money — for lines that must ADD UP exactly (e.g. the CGST/SGST halves of
+// an odd total tax: ₹162,739 → ₹81,369.50 + ₹81,369.50, not ₹81,370 + ₹81,369 which reads
+// as "why are two equal 2.5% rates different?"). Shows decimals only when there ARE paise,
+// so whole-rupee amounts still read cleanly (owner 2026-07-26).
+export const inrP = (n: number) => {
+  const v = Number(n) || 0;
+  const hasPaise = Math.abs(Math.round(v) - v) > 0.005;
+  return "₹" + v.toLocaleString("en-US", { minimumFractionDigits: hasPaise ? 2 : 0, maximumFractionDigits: 2 });
+};
+
 // isManagerPinRow — a TABLET row's `actor` normally names the manager whose PIN authorised
 // the action (the tablet has no per-person login). BUT a person's OWN identity actions —
 // signing in/out, setting up their profile, changing their password/PIN — also stamp `actor`

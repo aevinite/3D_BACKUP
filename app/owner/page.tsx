@@ -18,7 +18,7 @@
 //     slides a summary drawer from the right with "View in full detail" → the
 //     restaurant's own dashboard (the owner's 3-phase drill).
 //   · Report ▾ (top right): Print / CSV / Excel of what's currently on screen.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
 import { asSuffix } from "@/lib/ownerPin";
@@ -265,6 +265,25 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
 
 export default function OwnerDashboard() {
   const [view, setView] = useState<View>({ level: "home" });
+  // ── Scroll memory on the drill (owner 2026-07-26: "for the other pages also — back should
+  // keep me where I was"). Drilling DEEPER (home→restaurant→dish) opens at the top; going
+  // BACK restores the exact scroll of the level you left. Same pattern as /owner/reports;
+  // the owner panel scrolls inside .adm-main, not the window.
+  const levelDepth = (v: View) => (v.level === "home" ? 0 : v.level === "restaurant" ? 1 : 2);
+  const drillScroll = useRef<[number, number, number]>([0, 0, 0]);
+  const prevView = useRef<View>(view);
+  const viewTo = (v: View) => {
+    const el = typeof document === "undefined" ? null : document.querySelector<HTMLElement>(".adm-main");
+    if (el) drillScroll.current[levelDepth(prevView.current)] = el.scrollTop;
+    setView(v);
+  };
+  useLayoutEffect(() => {
+    const el = document.querySelector<HTMLElement>(".adm-main");
+    const from = levelDepth(prevView.current), to = levelDepth(view);
+    prevView.current = view;
+    if (!el || from === to) return;
+    el.scrollTop = to > from ? 0 : drillScroll.current[to];   // deeper → top; back → restore
+  }, [view]);
   // The MAIN range (top-right): the one dropdown the whole page follows — KPI boxes
   // and graphs alike (owner round-2: "only the main one"). Default 30 days.
   const [globalRange, setGlobalRange] = useState<Range>("30d");
@@ -340,7 +359,7 @@ export default function OwnerDashboard() {
     drillRestored.current = true;
     const onOpen = (e: Event) => {
       const rid = (e as CustomEvent).detail?.rid as string | null | undefined;
-      setView(rid ? { level: "restaurant", rid } : { level: "home" });
+      viewTo(rid ? { level: "restaurant", rid } : { level: "home" });
     };
     window.addEventListener("lfh:owner-open-restaurant", onOpen);
     return () => window.removeEventListener("lfh:owner-open-restaurant", onOpen);
@@ -806,8 +825,8 @@ export default function OwnerDashboard() {
   // KPI boxes deep-link into the matching report (round-3).
   const reportHref = (t: string) => (scopePin ? `/owner/reports?rid=${scopePin}${asSuffix()}&open=${t}` : `/owner/reports?open=${t}`);
 
-  const goHome = () => setView({ level: "home" });
-  const openFull = (rid: string) => { setDrawerRid(null); setView({ level: "restaurant", rid }); };
+  const goHome = () => viewTo({ level: "home" });
+  const openFull = (rid: string) => { setDrawerRid(null); viewTo({ level: "restaurant", rid }); };
 
   // Today-so-far numbers (from the overview — no extra call).
   const todayRow = activeRid ? ov?.restaurants.find((r) => r.id === activeRid) : null;
@@ -1152,7 +1171,7 @@ export default function OwnerDashboard() {
                 </span>
               </div>
               <DishList payload={pl(globalRange) as RestA | undefined} sort={dishSort}
-                onDish={(t) => setView({ level: "dish", rid: activeRid, dish: t })} />
+                onDish={(t) => viewTo({ level: "dish", rid: activeRid, dish: t })} />
             </div>
             {/* Recent activity — the owner's mini log (surprise add) */}
             <div className="adm-card">
@@ -1188,7 +1207,7 @@ export default function OwnerDashboard() {
           : dishView === "missing" ? (
             <div className="adm-empty">
               No sales for <b>{view.dish}</b> in {RANGE_LABEL[globalRange]}.{" "}
-              <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setView({ level: "restaurant", rid: view.rid })}>
+              <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => viewTo({ level: "restaurant", rid: view.rid })}>
                 <i className="fas fa-arrow-left" aria-hidden="true" /> Back to restaurant
               </button>
             </div>
@@ -1205,7 +1224,7 @@ export default function OwnerDashboard() {
             </div>
             <div className="ow2-ct" style={{ marginTop: 18 }}><span>How it compares <span className="mut">· revenue vs other dishes</span></span></div>
             <LeaderBar data={dishView.dishes.slice(0, 12).map((d) => ({ id: d.title, name: d.title, revenue: d.revenue, orders: d.qty, accentColor: d.title === dishView.d.title ? GREEN : "rgba(128,128,128,.35)" }))}
-              onSelect={(title) => setView({ level: "dish", rid: (view as { rid: string }).rid, dish: title })} />
+              onSelect={(title) => viewTo({ level: "dish", rid: (view as { rid: string }).rid, dish: title })} />
           </>)}
         </div>
       )}

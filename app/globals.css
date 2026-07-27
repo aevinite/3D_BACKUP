@@ -64,6 +64,12 @@ button.favorite-btn:focus-visible {
   outline-offset: 2px;
 }
 html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
+/* Staff/owner/admin panels are ALWAYS the dark console skin. The boot script tags the
+   document data-staffdark on those routes so this render-blocking rule paints it dark on
+   the FIRST frame — no cream-guest-background flash before the dark shell mounts (the
+   "white wide screen" the owner saw on a fresh laptop, 2026-07-26). Wins over the light
+   rule above (later + more specific), regardless of the saved data-theme. */
+html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !important; }
 #app { display: flex; flex-direction: column; flex: 1; width: 100%; height: 100%; overflow: hidden; min-height: 0; max-width: 100vw; }
 .page { display: none; height: 100%; width: 100%; flex-direction: column; }
 .page.active { display: flex; }
