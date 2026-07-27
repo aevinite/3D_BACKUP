@@ -14,7 +14,7 @@ import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
 import Dropdown from "@/components/admin/Dropdown";
 import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
-import { openRestaurantPanel, PANEL_COLOR, ACT_LABEL, timeAgo, type Action } from "@/components/admin/shared";
+import { openRestaurantPanel, PANEL_COLOR, ACT_LABEL, timeAgo, useActiveAutoRefresh, type Action } from "@/components/admin/shared";
 
 type Restaurant = { id: string; name: string };
 type Session = { id: string; table_number: string; status: string; bill_no: number | null; invoice_no: number | null; invoice_voided: boolean };
@@ -41,6 +41,16 @@ const TICKET_FILTERS = [
 ];
 
 const uuid = () => (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now()) + Math.random();
+
+// Auto-fix (owner 2026-07-27): when ON, a new app ERROR is handed to Claude ("Fix now")
+// the moment it appears — no click — and clears itself once the fix lands (the mig 183
+// trigger auto-resolves the error, so it drops off the board and we toast "auto-fixed").
+// Scope is ERRORS ONLY: staff-raised complaints and rate-limit hits are deliberately NOT
+// auto-actioned (they need a human's judgement). The setting + the "already handled" keys
+// persist in localStorage so it survives a refresh and never double-sends the same problem.
+const AUTOFIX_ON_LS = "lfh_repair_autofix";        // "1" = on
+const AUTOFIX_SENT_LS = "lfh_repair_autofix_sent"; // { [errKey]: sentAtMs }
+const AUTOFIX_SENT_TTL = 24 * 3600 * 1000;         // errors list is last-24h, so forget older keys
 
 const TOOLS: { op: Op; label: string; icon: string; desc: string; danger?: boolean }[] = [
   { op: "unstick_table", label: "Unstick a table", icon: "fa-wand-magic-sparkles", desc: "Force-close a jammed open/pending table so it's usable again." },
@@ -92,6 +102,12 @@ export default function AdminRepair() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [confirmResolve, setConfirmResolve] = useState<string>(""); // group key mid-confirm ("are you sure?")
   const [resolving, setResolving] = useState<Set<string>>(new Set());
+
+  // Auto-fix — the toggle + its book-keeping (see the AUTOFIX_* notes near the top).
+  const [autoFix, setAutoFix] = useState(false);
+  const autoSentRef = useRef<Record<string, number>>({}); // errKey → sentAtMs (persisted, dedupes sends)
+  const trackedRef = useRef<Map<string, string>>(new Map()); // errKey → title, for the "solved" toast
+  const autoBusyRef = useRef(false); // guards the send loop against re-entrancy
 
   // "Describe a problem" box + the queue + Claude session history.
   const [note, setNote] = useState("");
@@ -160,6 +176,93 @@ export default function AdminRepair() {
   useEffect(() => { loadHub(); }, [loadHub]);
 
   const refreshAll = () => { setRefreshing(true); Promise.all([loadHub(), load()]).finally(() => setTimeout(() => setRefreshing(false), 500)); };
+
+  // ── Auto-fix plumbing ──────────────────────────────────────────────────────
+  const persistAutoSent = () => { try { localStorage.setItem(AUTOFIX_SENT_LS, JSON.stringify(autoSentRef.current)); } catch { /* private mode */ } };
+
+  // Hydrate the toggle + the "already sent" keys on mount, pruning anything older than 24h.
+  useEffect(() => {
+    try {
+      setAutoFix(localStorage.getItem(AUTOFIX_ON_LS) === "1");
+      const raw = localStorage.getItem(AUTOFIX_SENT_LS);
+      if (raw) {
+        const obj = JSON.parse(raw) as Record<string, number>;
+        const cutoff = Date.now() - AUTOFIX_SENT_TTL;
+        const pruned: Record<string, number> = {};
+        for (const [k, v] of Object.entries(obj)) if (typeof v === "number" && v > cutoff) pruned[k] = v;
+        autoSentRef.current = pruned;
+        setSent(new Set(Object.keys(pruned))); // reflect "Sent to Claude" in the tiles
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const toggleAutoFix = (on: boolean) => {
+    setAutoFix(on);
+    try { localStorage.setItem(AUTOFIX_ON_LS, on ? "1" : "0"); } catch { /* ignore */ }
+    toast(on ? "Auto-fix on — new problems go to Claude the moment they appear." : "Auto-fix off.");
+  };
+
+  // Cheap poll used ONLY while auto-fix is on: just the error list (not the whole hub), and
+  // only while the tab is visible & in use — so it stays egress-light. Off = zero fetches.
+  const loadErrors = useCallback(async () => {
+    const e = await adminFetch<{ actions: Action[] }>("/api/admin/oplog?level=error&limit=50&unresolved=1");
+    if (e.ok) setErrors(e.data.actions || []);
+  }, []);
+  useActiveAutoRefresh(() => { if (autoFix) loadErrors(); }, 60000);
+
+  // Fire "Fix now" (instant) for a batch of fresh problems, once each. Marks them handled
+  // BEFORE awaiting so a re-render can't double-send; un-marks any that failed so the next
+  // tick retries. One loadHub at the end refreshes the "Waiting for Claude" queue.
+  const autoFixSend = useCallback(async (gs: ErrGroup[]) => {
+    if (autoBusyRef.current || gs.length === 0) return;
+    autoBusyRef.current = true;
+    const now = Date.now();
+    for (const g of gs) { autoSentRef.current[g.key] = now; trackedRef.current.set(g.key, ACT_LABEL[g.sample.action] || g.sample.action); }
+    persistAutoSent();
+    setSent((prev) => { const n = new Set(prev); gs.forEach((g) => n.add(g.key)); return n; });
+    let okCount = 0;
+    await Promise.all(gs.map(async (g) => {
+      const r = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
+        body: JSON.stringify({ action_id: g.sample.id, restaurant_id: g.sample.restaurant_id || null, mode: "instant" }),
+      });
+      if (r.ok) okCount++;
+      else { // failed → free it so we retry next tick
+        delete autoSentRef.current[g.key]; trackedRef.current.delete(g.key);
+        setSent((prev) => { const n = new Set(prev); n.delete(g.key); return n; });
+      }
+    }));
+    persistAutoSent();
+    autoBusyRef.current = false;
+    if (okCount) toast(`Auto-fix: sent ${okCount} problem${okCount === 1 ? "" : "s"} to Claude.`);
+    loadHub();
+  }, [loadHub, toast]);
+
+  // The watcher: on every error-list change (initial load, 60s poll, or a manual refresh),
+  // (1) tell the owner about anything auto-sent that's now GONE (Claude landed the fix and the
+  // mig-183 trigger cleared it), then (2) hand any brand-new problems to Claude.
+  useEffect(() => {
+    if (!autoFix || errLoading || autoBusyRef.current) return;
+    const gs = groupErrors(errors);
+    const present = new Set(gs.map((g) => g.key));
+    // seed tracking for problems we sent in a PREVIOUS session that are still on the board,
+    // so we can still congratulate when they clear.
+    for (const g of gs) if ((g.key in autoSentRef.current) && !trackedRef.current.has(g.key)) trackedRef.current.set(g.key, ACT_LABEL[g.sample.action] || g.sample.action);
+    // solved → toast + free the key (a later recurrence can be re-sent)
+    let solved = 0;
+    for (const [key, title] of Array.from(trackedRef.current.entries())) {
+      if (!present.has(key)) {
+        solved++; trackedRef.current.delete(key); delete autoSentRef.current[key];
+        if (solved <= 3) toast(`✓ Auto-fixed & cleared: ${title}`);
+      }
+    }
+    if (solved) { persistAutoSent(); if (solved > 3) toast(`✓ Auto-fixed & cleared ${solved} problems.`); }
+    // new problems (not already handled by auto OR a manual send) → send
+    const toSend = gs.filter((g) => !(g.key in autoSentRef.current) && !sent.has(g.key));
+    if (toSend.length) autoFixSend(toSend);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFix, errors, errLoading]);
 
   // Two Claudes (owner 2026-07-22): 'instant' pops a terminal on the Mac now; 'overnight' waits
   // for the 02:30 robot. Used by both the describe box and the per-error buttons.
@@ -329,7 +432,23 @@ export default function AdminRepair() {
         <h2>Problems right now</h2>
         {groups.length ? <span className="rp-chip danger">{groups.length}</span> : null}
         <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>all restaurants · last 24h</span>
+        {/* Auto-fix toggle — hands each new error to Claude on its own and clears it once fixed. */}
+        <label className="rp-auto" style={{ marginLeft: "auto" }} title="When on, a new error is sent to Claude the moment it appears and clears itself once the fix lands — no clicking. Staff complaints are left for you.">
+          <i className={`fas fa-wand-magic-sparkles${autoFix ? " rp-auto-live" : ""}`} aria-hidden="true" />
+          <span className="rp-auto-txt">Auto-fix</span>
+          <button type="button" role="switch" aria-checked={autoFix} aria-label="Auto-fix problems"
+            className={`rp-switch${autoFix ? " on" : ""}`} onClick={() => toggleAutoFix(!autoFix)}>
+            <span className="rp-knob" />
+          </button>
+        </label>
       </div>
+
+      {autoFix ? (
+        <div className="rp-autobar">
+          <i className="fas fa-robot" aria-hidden="true" />
+          <span>Auto-fix is on — new errors go straight to Claude and clear themselves once fixed. Staff complaints &amp; rate-limit hits are left for you to decide.</span>
+        </div>
+      ) : null}
 
       {errLoading ? (
         <div className="adm-empty">Checking for problems…</div>
@@ -708,6 +827,16 @@ export default function AdminRepair() {
         .rp-link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;padding:0 2px}
         .rp-x{margin-left:auto;background:none;border:none;color:var(--muted);opacity:.5;cursor:pointer;font-size:13px;padding:2px 6px;border-radius:6px}
         .rp-x:hover{opacity:1;background:color-mix(in srgb,var(--text) 8%,transparent)}
+        .rp-auto{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);cursor:pointer;user-select:none}
+        .rp-auto .rp-auto-txt{font-weight:600}
+        .rp-auto-live{color:var(--adm-accent,#e8a13c);animation:rpPulse 1.6s ease-in-out infinite}
+        @keyframes rpPulse{0%,100%{opacity:1}50%{opacity:.45}}
+        .rp-switch{position:relative;width:40px;height:23px;border-radius:999px;border:1px solid color-mix(in srgb,var(--text) 18%,transparent);background:color-mix(in srgb,var(--text) 8%,transparent);cursor:pointer;padding:0;transition:background .16s,border-color .16s;flex:0 0 auto}
+        .rp-switch .rp-knob{position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:999px;background:var(--text);opacity:.7;transition:transform .16s,opacity .16s}
+        .rp-switch.on{background:color-mix(in srgb,var(--adm-accent,#e8a13c) 55%,transparent);border-color:color-mix(in srgb,var(--adm-accent,#e8a13c) 70%,transparent)}
+        .rp-switch.on .rp-knob{transform:translateX(17px);background:#fff;opacity:1}
+        .rp-autobar{display:flex;align-items:center;gap:10px;padding:10px 14px;margin:0 0 12px;border-radius:12px;font-size:12.5px;line-height:1.45;border:1px solid color-mix(in srgb,var(--adm-accent,#e8a13c) 40%,transparent);background:color-mix(in srgb,var(--adm-accent,#e8a13c) 10%,var(--card));color:var(--text)}
+        .rp-autobar i{color:var(--adm-accent,#e8a13c)}
       `}</style>
     </>
   );
