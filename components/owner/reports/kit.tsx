@@ -277,6 +277,8 @@ export function ReportsStyles() {
       .rs-ovl-x:hover { background: var(--card); }
       .rs-ovl-b { padding: 18px; }
       @media (prefers-reduced-motion: reduce) { .rs-ovl { animation: none; } }
+      /* Ctrl+P with the overlay open must print the REPORT, not a black wash + card. */
+      @media print { .rs-ovl { display: none !important; } }
 
       /* ── Per-restaurant brief (all-restaurants hub) ─────────────────────── */
       .rs-brief { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 4px 0 8px; }

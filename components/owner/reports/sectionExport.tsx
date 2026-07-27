@@ -51,8 +51,10 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
     if (t) rows.push(["Total", t.orders, t.paidOrders, Math.round(t.subtotal), Math.round(t.tax), Math.round(t.discount), Math.round(t.revenue), t.cancelledOrders, Math.round(t.cancelledValue)]);
     const out: ExportTable[] = [{ title, head, rows }];
     if (c.isTax && data.tax) {
+      // Whole-rupee target (GST-return rounding): equal rates export equal halves that sum
+      // to the shown total — mirrors the on-screen split exactly.
       out.push({ title: `${meta.label} — tax split`, head: ["Component", "Rate %", "Collected"],
-        rows: [["Total tax", data.tax.effectivePct, t?.tax ?? 0], ...splitTax(data.tax.components.map((x) => x.rate), t?.tax ?? 0).map((amt, i) => [data.tax!.components[i].label, data.tax!.components[i].rate, amt] as (string | number)[])] });
+        rows: [["Total tax", data.tax.effectivePct, Math.round(t?.tax ?? 0)], ...splitTax(data.tax.components.map((x) => x.rate), Math.round(t?.tax ?? 0)).map((amt, i) => [data.tax!.components[i].label, data.tax!.components[i].rate, amt] as (string | number)[])] });
     }
     if (c.extra?.length) out.push(...c.extra);   // Day summary: the day's dishes + busy hours
     return out;
@@ -77,7 +79,7 @@ export function sectionHtml(c: SectionCtx): string {
     if (typeof cell !== "number") return esc(String(cell));
     const h = head.toLowerCase();
     if (/rate|%/.test(h)) return `${cell}%`;
-    if (/gross|tax|discount|net|revenue|collected|lost|sales|value/.test(h)) return inr(cell);
+    if (/gross|gst|tax|discount|net|revenue|collected|lost|sales|value/.test(h)) return inr(cell);
     return nfmt(cell);
   };
   const tableHtml = (t: ExportTable) => `

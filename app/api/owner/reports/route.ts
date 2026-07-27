@@ -171,7 +171,11 @@ export async function GET(req: NextRequest) {
   // ?refresh=1 (the Refresh button) forces a live recompute + re-store. Keyed by the already-
   // authorized scope, so isolation is unchanged. `cachedAt`/`cached` ride along for the UI.
   const scopeIds = scope.all ? [] : scope.ids;
-  const cacheKey = `reports:v1:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : range}`;
+  // The key embeds the RESOLVED window start (not just "30d"): a sliding range crosses into a
+  // new IST day, the key changes, and the new window computes cold. Without this, the first
+  // open of a new day served YESTERDAY'S 30-day window from the stale-while-revalidate row —
+  // numbers that no longer match a recount (caught in the 2026-07-27 audit). v2 orphans v1 rows.
+  const cacheKey = `reports:v2:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : `${range}:${from.slice(0, 10)}`}`;
   const force = sp.get("refresh") === "1";
   const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
   // Money reports at month bucket read the monthly rollup (mig 201), so their cheap
