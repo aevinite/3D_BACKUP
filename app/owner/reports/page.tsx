@@ -314,6 +314,20 @@ export default function OwnerReports() {
     window.addEventListener("lfh:owner-open-restaurant", onHome);
     return () => window.removeEventListener("lfh:owner-open-restaurant", onHome);
   }, [backToHub]);
+  // The shell's restaurant switchers (top-strip "Owner overview ▾" dropdown + the sidebar
+  // "My restaurants" list) re-scope the reports IN PLACE here instead of jumping to the
+  // dashboard (owner 2026-07-27: "toggle on top to all restaurants" must work on Reports).
+  // rid=null → "" = all restaurants; a real id pins to that one. Closing any open report
+  // back to the hub shows the new scope's overview (and the by-restaurant brief for "all").
+  useEffect(() => {
+    const onScope = (e: Event) => {
+      const rid = (e as CustomEvent<{ rid: string | null }>).detail?.rid ?? null;
+      setRid(rid ?? "");
+      backToHub();
+    };
+    window.addEventListener("lfh:owner-scope", onScope);
+    return () => window.removeEventListener("lfh:owner-scope", onScope);
+  }, [backToHub]);
   const [range, setRange] = useState<Range>("30d");
   const [day, setDay] = useState<string>(istToday());          // Day summary's single date
   const [cFrom, setCFrom] = useState<string>(istToday());       // Custom range from…

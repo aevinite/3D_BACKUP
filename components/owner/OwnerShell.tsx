@@ -203,6 +203,13 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
     if (path === "/owner") {
       setNavOpen(false); // no navigation happens on the home page → close explicitly
       window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid } }));
+    } else if (path === "/owner/reports") {
+      // On Reports the switcher re-scopes the reports IN PLACE (owner 2026-07-27:
+      // "toggle on top to all restaurants" must work here without bouncing back to the
+      // dashboard). The reports page listens for lfh:owner-scope and sets its rid — same
+      // event-driven, no-new-fetch idea the dashboard uses for its own switcher.
+      setNavOpen(false);
+      window.dispatchEvent(new CustomEvent("lfh:owner-scope", { detail: { rid } }));
     } else {
       // navigating → the path-effect closes the drawer after the route commits
       const q = [rid ? `focus=${rid}` : "", ridPin ? `rid=${ridPin}${asSuffix()}` : ""].filter(Boolean).join("&");
