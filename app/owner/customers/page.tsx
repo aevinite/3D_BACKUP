@@ -11,7 +11,7 @@ import { asSuffix } from "@/lib/ownerPin";
 const IST = "Asia/Kolkata";
 type Customer = {
   restaurant_id: string; restaurantName: string; phone: string; name: string | null;
-  blocked: boolean; first_seen_at: string; last_seen_at: string; returning: boolean;
+  blocked: boolean; visits: number; consent: boolean; first_seen_at: string; last_seen_at: string; returning: boolean;
 };
 type Summary = { total: number; returning: number; newThisMonth: number; blocked: number; shown: number };
 
@@ -58,6 +58,27 @@ export default function OwnerCustomers() {
     return () => { stop(); document.removeEventListener("visibilitychange", onVis); };
   }, [load]);
 
+  // DPDP right-to-erasure: permanently remove a customer's record + visit history +
+  // device links. Native confirm keeps it simple (no overlay to register with the
+  // back-button manager). Scoped + entitlement-checked again server-side.
+  const [erasing, setErasing] = useState<string | null>(null);
+  const erase = useCallback(async (c: Customer) => {
+    const label = c.name || c.phone || "this customer";
+    if (!window.confirm(`Erase ${label}?\n\nThis permanently deletes their name, number, visit history and any linked devices. This can't be undone.`)) return;
+    const key = `${c.restaurant_id}:${c.phone}`;
+    setErasing(key);
+    try {
+      const r = await fetch(`/api/owner/customers${asSuffix() ? `?${asSuffix().replace(/^&/, "")}` : ""}`, {
+        method: "DELETE", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurant_id: c.restaurant_id, phone: c.phone }),
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || "Couldn't erase.");
+      setCustomers((prev) => (prev || []).filter((x) => !(x.restaurant_id === c.restaurant_id && x.phone === c.phone)));
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setErasing(null); }
+  }, []);
+
   const rows = customers || [];
 
   return (
@@ -102,17 +123,23 @@ export default function OwnerCustomers() {
                     <tr style={{ textAlign: "left", fontSize: 12, color: "var(--muted)" }}>
                       <th style={{ padding: "8px 10px" }}>Name</th>
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>Phone</th>
+                      <th style={{ padding: "8px 10px", textAlign: "center" }}>Visits</th>
                       <th style={{ padding: "8px 10px" }}>Restaurant</th>
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>First visit</th>
                       <th style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>Last visit</th>
+                      <th style={{ padding: "8px 10px" }}></th>
                       <th style={{ padding: "8px 10px" }}></th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((c) => (
                       <tr key={`${c.restaurant_id}:${c.phone}`} style={{ borderTop: "1px solid var(--border,#e5e7eb)", opacity: c.blocked ? 0.65 : 1 }}>
-                        <td style={{ padding: "9px 10px", fontWeight: 700 }}>{c.name || <span className="adm-muted">Guest</span>}</td>
+                        <td style={{ padding: "9px 10px", fontWeight: 700 }}>
+                          {c.name || <span className="adm-muted">Guest</span>}
+                          {c.consent && <i className="fas fa-circle-check" title="Consented to be saved" aria-label="consented" style={{ marginLeft: 6, fontSize: 11, color: "var(--adm-ok,#16a34a)" }} />}
+                        </td>
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontFamily: "ui-monospace, monospace", fontSize: 12.5 }}>{c.phone || "—"}</td>
+                        <td style={{ padding: "9px 10px", textAlign: "center", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{c.visits ?? 0}</td>
                         <td style={{ padding: "9px 10px" }}><span className="adm-chip">{c.restaurantName}</span></td>
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontSize: 12.5 }}>{fmt(c.first_seen_at)}</td>
                         <td style={{ padding: "9px 10px", whiteSpace: "nowrap", fontSize: 12.5 }}>{fmt(c.last_seen_at)}</td>
@@ -120,6 +147,13 @@ export default function OwnerCustomers() {
                           {c.blocked ? <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-danger,#e5484d) 16%, transparent)", color: "var(--adm-danger,#e5484d)" }}>blocked</span>
                             : c.returning ? <span className="adm-chip" style={{ background: "color-mix(in srgb, var(--adm-ok,#16a34a) 16%, transparent)", color: "var(--adm-ok,#16a34a)" }}>regular</span>
                             : <span className="adm-chip">new</span>}
+                        </td>
+                        <td style={{ padding: "9px 10px", whiteSpace: "nowrap" }}>
+                          <button className="adm-btn" title="Erase this customer (permanent)" aria-label={`Erase ${c.name || c.phone}`}
+                            disabled={erasing === `${c.restaurant_id}:${c.phone}`} onClick={() => erase(c)}
+                            style={{ padding: "4px 8px", fontSize: 12, color: "var(--adm-danger,#e5484d)" }}>
+                            {erasing === `${c.restaurant_id}:${c.phone}` ? "…" : <><i className="fas fa-trash-can" aria-hidden="true" /> Erase</>}
+                          </button>
                         </td>
                       </tr>
                     ))}

@@ -1858,6 +1858,18 @@ function openPaymentMethodModal(due, label, opts = {}) {
           <input type="text" class="pay-other-input" maxlength="60" placeholder="e.g. wallet, bank transfer" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;margin-bottom:10px">
           <button type="button" class="btn primary pay-other-confirm" style="width:100%">Confirm</button>
         </div>
+        ${opts.crm === false ? "" : `
+        <div class="pay-cust" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
+          <div style="font-size:13px;font-weight:700;margin:0 0 3px">📱 Save customer <span style="color:var(--muted);font-weight:400">— optional, only if they agree</span></div>
+          <div style="font-size:11.5px;color:var(--muted);margin:0 0 8px">Lets you spot regulars and greet them by name next time.</div>
+          <input type="tel" inputmode="numeric" class="pay-cust-phone" maxlength="20" placeholder="Mobile number" style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;margin-bottom:8px">
+          <input type="text" class="pay-cust-name" maxlength="80" placeholder="Name (optional)" style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;margin-bottom:8px">
+          <div class="pay-cust-chip" style="display:none;font-size:12.5px;font-weight:700;color:#16a34a;margin:0 0 8px"></div>
+          <label style="display:flex;align-items:flex-start;gap:9px;font-size:12.5px;color:var(--text);cursor:pointer">
+            <input type="checkbox" class="pay-cust-consent" style="margin-top:2px;width:16px;height:16px;flex:none">
+            <span>Customer agrees to save their name &amp; number to recognise their next visits. They can ask to remove it anytime.</span>
+          </label>
+        </div>`}
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid var(--line)"><button class="btn pay-cancel-btn">Cancel</button></div>
     </div>`;
@@ -1865,7 +1877,16 @@ function openPaymentMethodModal(due, label, opts = {}) {
     let resolved = false;
     let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-pay", () => cancel()) : null;
     const close = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); payModalOpen = false; };
-    const finish = (method, note) => { resolved = true; close(); resolve({ method, note }); };
+    // Read the optional customer fields at finish time (DPDP: only sent if consented).
+    const readCust = () => {
+      const pe = ov.querySelector(".pay-cust-phone");
+      if (!pe) return null;
+      const ne = ov.querySelector(".pay-cust-name"), ce = ov.querySelector(".pay-cust-consent");
+      const phone = (pe.value || "").trim();
+      if (!phone || !(ce && ce.checked)) return null;
+      return { phone, name: (ne?.value || "").trim(), consent: true };
+    };
+    const finish = (method, note) => { resolved = true; const cust = readCust(); close(); resolve({ method, note, cust }); };
     const cancel = () => { close(); if (!resolved) resolve(null); };
     ov.querySelector(".pay-close").onclick = cancel;
     ov.querySelector(".pay-cancel-btn").onclick = cancel;
@@ -1886,6 +1907,31 @@ function openPaymentMethodModal(due, label, opts = {}) {
     const confirmOther = () => finish("Other", otherInput.value.trim());
     ov.querySelector(".pay-other-confirm").onclick = confirmOther;
     otherInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); confirmOther(); } };
+
+    // Repeat-customer recognition: as the waiter types a known number, show a chip and
+    // pre-fill the name. Read-only lookup (stores nothing); debounced to one call.
+    const phoneEl = ov.querySelector(".pay-cust-phone");
+    if (phoneEl) {
+      const nameEl = ov.querySelector(".pay-cust-name");
+      const chipEl = ov.querySelector(".pay-cust-chip");
+      let recTimer = null;
+      phoneEl.addEventListener("input", () => {
+        if (recTimer) clearTimeout(recTimer);
+        const digits = (phoneEl.value || "").replace(/[^0-9]/g, "");
+        if (digits.length < 7) { chipEl.style.display = "none"; return; }
+        recTimer = setTimeout(async () => {
+          try {
+            const r = await api("GET", `/customer-recognize?phone=${encodeURIComponent(digits)}`);
+            if (r && r.known) {
+              const v = Number(r.visits) || 0;
+              chipEl.textContent = `✨ Repeat customer${v ? ` · ${v + 1}${v + 1 === 2 ? "nd" : v + 1 === 3 ? "rd" : "th"} visit` : ""}${r.name ? ` · ${r.name}` : ""}`;
+              chipEl.style.display = "";
+              if (r.name && !nameEl.value.trim()) nameEl.value = r.name;
+            } else { chipEl.style.display = "none"; }
+          } catch { chipEl.style.display = "none"; }
+        }, 400);
+      });
+    }
   });
 }
 // payBillWithMethod: the ONE shared "close this bill" flow for the tablet — opens the
@@ -1910,6 +1956,17 @@ async function payBillWithMethod(t, a) {
   }
   if (picked.special === "khata") { await tabletKhataFlow(t, a.due); return; }
   payBill(t, picked.method, picked.note);
+  if (picked.cust) captureCustomer(t, picked.cust);
+}
+
+// Save the guest's consented name+number after the bill is settled (Customer CRM).
+// Fire-and-forget: it never blocks or reverses the payment that already went through.
+// The server stores nothing without consent and records one visit per session.
+async function captureCustomer(t, cust) {
+  try {
+    const r = await api("POST", `/tables/${t}/customer-capture`, { phone: cust.phone, name: cust.name, consent: cust.consent === true });
+    if (r && r.ok) toast(`📇 Saved ${cust.name ? cust.name : "customer"}${r.visits ? ` · ${r.visits} visit${r.visits === 1 ? "" : "s"}` : ""}`);
+  } catch { /* best-effort; the bill is already paid */ }
 }
 
 // tabletKhataFlow(t, due): "Collect later" — pick (or add) the person, then park the

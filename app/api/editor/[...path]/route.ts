@@ -26,7 +26,7 @@ import { softDeleteOrders } from "@/lib/softDelete";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { MANAGER_POWER_FLAGS, powerEntitlementKey } from "@/lib/ownerEntitlements";
+import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 
@@ -302,6 +302,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   try {
     const { path = [] } = await ctx.params;
     const p = path.join("/");
+
+    // customer-recognize?phone=… — repeat-customer lookup for the pay sheet
+    // (Customer CRM, mig 212). Read-only, scoped by rid via the RPC. Never lists.
+    if (p === "customer-recognize") {
+      const phone = (new URL(req.url).searchParams.get("phone") || "").trim().slice(0, 20);
+      if (!phone) return ok({ known: false });
+      const { data, error } = await sb.rpc("lfh_recognize_customer", { p_phone: phone, p_restaurant_id: rid });
+      if (error) throw new Error(error.message);
+      return ok(data || { known: false });
+    }
 
     // whoami — boot signal for the panel's hierarchy X-ray (2026-07-05). Tells the
     // client WHO is viewing (admin super-user / owner / manager) and this restaurant's
@@ -1179,6 +1189,27 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (emptyIdSegment(b) || emptyIdSegment(c)) return err("Missing id — please refresh and try again.");
     const body = await readBody(req);
     const dev = deviceIdFrom(req); // which device (this editor screen) is acting
+
+    // customer-capture — save the guest's name+number at bill time, with consent
+    // (Customer CRM, mig 212). DPDP: the RPC stores NOTHING without consent. Records
+    // one visit for the table's session (idempotent), links devices, bumps the
+    // returning count. Gated by the "customers" entitlement (default on). Called once
+    // after the bill closes; a failure never blocks the settle that already happened.
+    if (a === "customer-capture") {
+      const t = String(body?.table || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      const ent = await getOwnerEntitlements(rid);
+      if (!ent.customers) return err("The customer directory isn't enabled for this restaurant.", 403);
+      const { data, error } = await sb.rpc("lfh_capture_customer", {
+        p_restaurant_id: rid, p_table: t,
+        p_phone: String(body?.phone || "").slice(0, 20),
+        p_name: String(body?.name || "").slice(0, 80),
+        p_consent: body?.consent === true,
+      });
+      if (error) return err(error.message, 500);
+      if ((data as { ok?: boolean })?.ok) await log("editor", "customer_saved", { restaurant_id: rid, table_number: t, device_id: dev });
+      return ok(data || { ok: false });
+    }
 
     // ── Raise an issue / complaint ────────────────────────────────────────────
     // A manager (or any staff) flags an operational problem for THIS restaurant; the
@@ -2539,7 +2570,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       }
       if (body.archived !== undefined) patch.archived = body.archived === true;
       if (!Object.keys(patch).length) return err("nothing to update");
-      const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at").eq("id", id).eq("restaurant_id", rid).single());
+      const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at,table_number").eq("id", id).eq("restaurant_id", rid).single());
       if (patch.status === "cancelled" && cur.payment_status === "paid")
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
       if (patch.payment_status === "paid" && cur.status === "cancelled")
@@ -2565,6 +2596,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
         const reason = String((body && body.revert_reason) || "").trim();
         if (!reason) return err("Reverting a PAID bill needs a reason (refund/correction).", 409);
         await log("editor", "payment_revert", { restaurant_id: rid, order_id: id, detail: reason, device_id: deviceIdFrom(req) });
+        // Reversing the settle reverses the visit it counted (Customer CRM, mig 212).
+        // Idempotent per session, so reverting each order of a multi-order bill is safe.
+        if (cur.table_number != null) await sb.rpc("lfh_uncapture_customer", { p_restaurant_id: rid, p_table: String(cur.table_number) });
       }
       if (patch.archived === false && cur.archived === true) {
         if (tooOld(cur.archived_at)) return err("This bill was freed more than 30 minutes ago and can no longer be restored.", 409);

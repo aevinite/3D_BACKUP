@@ -144,6 +144,11 @@ async function rpc(fn: string, args: Record<string, unknown>): Promise<RpcResult
 // Look up a returning customer by phone number.
 export const recognizeCustomer = (phone: string, restaurantId: string = DEFAULT_RESTAURANT_ID) =>
   rpc("lfh_recognize_customer", { p_phone: phone, p_restaurant_id: restaurantId });
+// Greet a returning guest BY DEVICE (Customer CRM, mig 212) — recognises this phone/
+// browser from a past consented visit so the menu can say "Welcome back, {name}".
+// Returns { known, name, visits } and NEVER the phone number. Anon-callable RPC.
+export const greetDevice = (restaurantId: string = DEFAULT_RESTAURANT_ID) =>
+  rpc("lfh_greet_device", { p_restaurant_id: restaurantId, p_device_id: getGuestDeviceId() });
 // Pre-check: is this table already held by someone? Drives the head-vs-guest UI
 // branch before we ask the guest for anything.
 export const tableStatus = (table: string, restaurantId: string = DEFAULT_RESTAURANT_ID) =>
