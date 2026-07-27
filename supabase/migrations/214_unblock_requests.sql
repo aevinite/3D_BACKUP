@@ -1,8 +1,8 @@
--- 213 — unblock_requests: a blocked device's polite "please let me back in" queue.
+-- 214 — unblock_requests: a blocked device's polite "please let me back in" queue.
 --
--- ⚠ MIGRATION NUMBER: next free after 212 (customer_crm). If a parallel branch already took
---   213, renumber to the next free slot — this is a standalone additive CREATE TABLE, correct at
---   ANY number.
+-- ⚠ MIGRATION NUMBER: 213 was taken by a parallel branch (fix_owner_fn_drift), so this moved to
+--   214. It's a standalone additive CREATE TABLE, correct at ANY number; renumber again if 214
+--   collides too.
 --
 -- WHY: when the admin deliberately blocks a device/IP from the admin panel (a far-future lock in
 -- login_throttle, see lib/loginThrottle.ts), that device now sees a "You're blocked" page instead

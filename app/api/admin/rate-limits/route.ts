@@ -5,7 +5,7 @@
 //     "allow"|"dismiss" { event_id }              → reset a subject's counter / clear a hit
 //     "block" { event_id }                        → bar an admin-login device from the panel
 //     "unblock" { key }                           → lift a block by throttle key
-//     "approve_request"|"deny_request" { request_id } → act on an unblock request (mig 213)
+//     "approve_request"|"deny_request" { request_id } → act on an unblock request (mig 214)
 // Admin-gated (same cookie as every other /api/admin/* route).
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
   const blockedRaw = await listBlocked("admin:");
   const blocked = blockedRaw.map((b) => ({ key: b.key, ip: b.key.replace(/^admin:/, ""), note: b.note, since: b.locked_until }));
 
-  // Open "please unblock me" requests from blocked devices (mig 213). Shown at the bottom of the
+  // Open "please unblock me" requests from blocked devices (mig 214). Shown at the bottom of the
   // page, just above the block list. Silent by design — never in the bell / phone alerts.
   const reqRows = await sb.from("unblock_requests")
     .select("id, key, ip, device_id, message, created_at")
