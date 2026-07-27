@@ -12,7 +12,7 @@ import { useState, Fragment, type CSSProperties } from "react";
 import { useBackClose } from "@/lib/backStack";
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, ComposedChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+  XAxis, YAxis, Tooltip, CartesianGrid, Legend, LabelList,
 } from "recharts";
 
 const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
@@ -264,6 +264,90 @@ export function LeaderBar({ data, onSelect }: { data: RevDatum[]; onSelect?: (id
         </BarChart>
       </ResponsiveContainer>
      </div>
+    </div>
+  );
+}
+
+// ── WhoEarnsMore — the "Who earns more" card body (owner 2026-07-27) ─────────
+// Same ranking data, three ways: 3-D Columns (default) · Bars (the ranked
+// horizontal LeaderBar) · Line (the per-restaurant multi-line trend, reused from
+// AreaTrend). A small segmented toggle at the top-right flips between them. This
+// is the ONLY chart that changed — every other owner card is untouched.
+function Column3D(props: {
+  x?: number; y?: number; width?: number; height?: number; fill?: string; index?: number;
+}) {
+  const { x = 0, y = 0, width = 0, height = 0, fill = "#888", index = 0 } = props;
+  if (height <= 0 || width <= 0) return null;
+  const gid = `we-col-${index}`;
+  const gloss = Math.min(6, height);
+  return (
+    <g>
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity={0.28} />
+          <stop offset="14%" stopColor={fill} stopOpacity={1} />
+          <stop offset="100%" stopColor={fill} stopOpacity={0.55} />
+        </linearGradient>
+        <filter id="we-col-shadow" x="-40%" y="-40%" width="180%" height="180%">
+          <feDropShadow dx="0" dy="3" stdDeviation="3" floodColor="#000" floodOpacity={0.45} />
+        </filter>
+      </defs>
+      <rect x={x} y={y} width={width} height={height} rx={6} fill={`url(#${gid})`} filter="url(#we-col-shadow)" />
+      <rect x={x + 2} y={y + 2} width={Math.max(0, width - 4)} height={gloss} rx={4} fill="rgba(255,255,255,.32)" />
+    </g>
+  );
+}
+
+function ColumnsChart({ data, onSelect }: { data: RevDatum[]; onSelect?: (id: string) => void }) {
+  const max = Math.max(1, ...data.map((d) => d.revenue));
+  return (
+    <div style={{ width: "100%", height: 300 }}>
+      <ResponsiveContainer>
+        <BarChart data={data} margin={{ left: 0, right: 8, top: 24, bottom: 6 }}>
+          <CartesianGrid vertical={false} stroke={GRID} />
+          <XAxis dataKey="name" tick={{ fontSize: 11, fill: AXIS }} interval={0} angle={-28} textAnchor="end" height={74} />
+          <YAxis domain={[0, max]} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} width={46} allowDecimals={false} />
+          <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
+          <Bar dataKey="revenue" name="Revenue" shape={<Column3D />} maxBarSize={72} isAnimationActive={false}
+            cursor={onSelect ? "pointer" : undefined}
+            onClick={(d: { id?: string }) => d?.id && onSelect?.(d.id)}>
+            <LabelList dataKey="revenue" position="top" formatter={((value: unknown) => compact(Number(value))) as never} style={{ fill: "var(--ink)", fontSize: 11, fontWeight: 700 }} />
+            {data.map((d) => <Cell key={d.id} fill={d.accentColor} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export function WhoEarnsMore({ data, trendData, trendLines, onSelect }: {
+  data: RevDatum[];
+  trendData?: Record<string, unknown>[];
+  trendLines?: { key: string; name: string; color: string }[];
+  onSelect?: (id: string) => void;
+}) {
+  const [view, setView] = useState<"columns" | "bars" | "line">("columns");
+  if (!data.length) return <Empty />;
+  const sorted = [...data].sort((a, b) => b.revenue - a.revenue);
+  const canLine = !!(trendData && trendData.length && trendLines && trendLines.length);
+  const opts: [typeof view, string][] = [["columns", "Columns"], ["bars", "Bars"]];
+  if (canLine) opts.push(["line", "Line"]);
+  const v = view === "line" && !canLine ? "columns" : view;
+  return (
+    <div>
+      <div style={{ display: "inline-flex", gap: 2, padding: 3, marginLeft: "auto", marginBottom: 8,
+        background: "rgba(128,128,128,.14)", borderRadius: 9, float: "right" }}>
+        {opts.map(([o, label]) => (
+          <button key={o} type="button" onClick={() => setView(o)} aria-pressed={v === o}
+            style={{ border: 0, cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 6,
+              background: v === o ? "#e6b93f" : "transparent", color: v === o ? "#1a1205" : "var(--muted)" }}>{label}</button>
+        ))}
+      </div>
+      <div style={{ clear: "both" }}>
+        {v === "line" ? <AreaTrend data={trendData!} lines={trendLines!} height={248} />
+          : v === "bars" ? <LeaderBar data={sorted} onSelect={onSelect} />
+          : <ColumnsChart data={sorted} onSelect={onSelect} />}
+      </div>
     </div>
   );
 }
