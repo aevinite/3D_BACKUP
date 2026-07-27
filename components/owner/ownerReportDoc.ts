@@ -194,18 +194,22 @@ function groupSlowDishes(rests: ReportRestaurant[], cap = 10): { restaurant: str
   const rows = rests.flatMap((r) => slowDishes(r.dishes, 4).map((x) => ({ restaurant: r.name, ...x })));
   return rows.sort((a, b) => a.qty - b.qty || a.revenue - b.revenue).slice(0, cap);
 }
-// Best & weakest day across the whole scope (day-grain windows of a week or more).
-function dayExtremes(rests: ReportRestaurant[]): { best: DailyRow; worst: DailyRow } | null {
+// All restaurants' day rows merged into one row per calendar day (day-grain only).
+function mergedDaily(rests: ReportRestaurant[]): DailyRow[] {
   const byIso = new Map<string, DailyRow>();
   for (const r of rests) {
-    if (r.dailyGrain !== "day") return null;
+    if (r.dailyGrain !== "day") return [];
     for (const d of r.daily) {
       const c = byIso.get(d.iso);
       if (c) { c.orders += d.orders; c.gross += d.gross; c.discount += d.discount; c.tax += d.tax; c.net += d.net; }
       else byIso.set(d.iso, { ...d });
     }
   }
-  const days = Array.from(byIso.values()).filter((d) => d.orders > 0);
+  return Array.from(byIso.values()).sort((a, b) => a.iso.localeCompare(b.iso));
+}
+// Best & weakest day across the whole scope (day-grain windows of a week or more).
+function dayExtremes(rests: ReportRestaurant[]): { best: DailyRow; worst: DailyRow } | null {
+  const days = mergedDaily(rests).filter((d) => d.orders > 0);
   if (days.length < 7) return null;
   let best = days[0], worst = days[0];
   for (const d of days) { if (d.net > best.net) best = d; if (d.net < worst.net) worst = d; }
@@ -352,9 +356,16 @@ export function buildReportHtml(d: ReportData): string {
 }
 
 // ── the same compiled sections as flat tables (CSV / Excel) ───────────────────
+// Layout the owner asked for (2026-07-27): the averages/summary block sits on TOP,
+// then the fully detailed day-wise sheet for the whole scope, then the sections.
+const dayHead = ["Period", "Orders", "Gross", "Discount", "GST", "Collected", "In hand"];
+const dayRow = (x: DailyRow): (string | number)[] =>
+  [x.label, x.orders, Math.round(x.gross), Math.round(x.discount), Math.round(x.tax), Math.round(x.net), Math.round(x.gross - x.discount)];
 export function buildReportTables(d: ReportData): ExportTable[] {
   const g = d.group;
   const out: ExportTable[] = [];
+  const gDaily = mergedDaily(d.restaurants);
+  const activeDays = gDaily.filter((x) => x.orders > 0).length;
   out.push({
     title: `Aevidine business performance report — ${d.scopeName} — ${d.periodLabel} — generated ${d.generatedAt}`,
     head: ["Metric", "Value"],
@@ -362,9 +373,22 @@ export function buildReportTables(d: ReportData): ExportTable[] {
       ["Net revenue (paid, net of discounts)", Math.round(g.revenue)],
       ["Orders", g.orders], ["Paid orders", g.paidOrders],
       ["Average bill", Math.round(g.avg)],
+      ...(activeDays > 1 ? [
+        ["Active days in the period", activeDays],
+        ["Average collected per active day", Math.round(g.revenue / activeDays)],
+        ["Average orders per active day", Math.round(g.orders / activeDays)],
+      ] as (string | number)[][] : []),
       ...billingRows(g.billing).map(([l, v]) => [l, v] as (string | number)[]),
     ],
   });
+  // multi-restaurant only — a single restaurant's own day table below already covers it
+  if (d.restaurants.length > 1 && gDaily.length > 1) {
+    out.push({
+      title: `${d.scopeName} — day-by-day (detailed, whole scope)`,
+      head: dayHead,
+      rows: gDaily.map(dayRow),
+    });
+  }
   if (g.payments.length) {
     out.push({ title: "Settlement — all", head: ["Method", "Bills", "Amount"], rows: g.payments.map((p) => [p.method, p.orders, Math.round(p.revenue)]) });
   }
@@ -414,7 +438,7 @@ export function buildReportTables(d: ReportData): ExportTable[] {
     }
     if (r.daily.length > 1) {
       // CSV carries the COMPLETE series (the print sheet caps very long windows)
-      out.push({ title: `${r.name} — day-by-day breakdown`, head: ["Period", "Orders", "Gross", "Discount", "GST", "Net"], rows: r.daily.map((x) => [x.label, x.orders, Math.round(x.gross), Math.round(x.discount), Math.round(x.tax), Math.round(x.net)]) });
+      out.push({ title: `${r.name} — day-by-day breakdown`, head: dayHead, rows: r.daily.map(dayRow) });
     }
   }
   return out;
