@@ -2517,13 +2517,34 @@ function openPaymentMethodModal(due, label, opts = {}) {
           <input type="text" class="dish-edit-custominput" id="payOtherInput" maxlength="60" placeholder="e.g. wallet, bank transfer">
           <button type="button" class="btn primary pay-other-confirm">Confirm</button>
         </div>
+        ${opts.crm === false ? "" : `
+        <div class="pay-cust" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)">
+          <label class="dish-edit-lbl">📱 Save customer <span class="muted small">— optional, only if they agree</span></label>
+          <div class="muted small" style="margin:-2px 0 6px">Lets you spot regulars and greet them by name next time.</div>
+          <input type="tel" inputmode="numeric" class="dish-edit-custominput pay-cust-phone" maxlength="20" placeholder="Mobile number" style="margin-bottom:6px">
+          <input type="text" class="dish-edit-custominput pay-cust-name" maxlength="80" placeholder="Name (optional)" style="margin-bottom:6px">
+          <div class="pay-cust-chip" style="display:none;font-size:12.5px;font-weight:700;color:#16a34a;margin:0 0 6px"></div>
+          <label style="display:flex;align-items:flex-start;gap:9px;font-size:12.5px;cursor:pointer">
+            <input type="checkbox" class="pay-cust-consent" style="margin-top:2px;width:16px;height:16px;flex:none">
+            <span>Customer agrees to save their name &amp; number to recognise their next visits. They can ask to remove it anytime.</span>
+          </label>
+        </div>`}
       </div>
       <div class="dish-edit-foot"><button type="button" class="btn dish-edit-cancel">Cancel</button></div>
     </div></div>`);
     document.body.appendChild(wrap);
     let resolved = false;
     const close = () => wrap.remove();
-    const finish = (method, note) => { resolved = true; close(); resolve({ method, note, tip }); };
+    // Read the optional customer fields at finish time (DPDP: only sent if consented).
+    const readCust = () => {
+      const pe = wrap.querySelector(".pay-cust-phone");
+      if (!pe) return null;
+      const ne = wrap.querySelector(".pay-cust-name"), ce = wrap.querySelector(".pay-cust-consent");
+      const phone = (pe.value || "").trim();
+      if (!phone || !(ce && ce.checked)) return null;
+      return { phone, name: (ne?.value || "").trim(), consent: true };
+    };
+    const finish = (method, note) => { resolved = true; const cust = readCust(); close(); resolve({ method, note, tip, cust }); };
     const cancel = () => { close(); if (!resolved) resolve(null); };
     // Hardware BACK must cancel THIS sheet via cancel() (resolves the awaited promise as null),
     // not the adapter's bare remove() — else payOrdersWithMethod awaits forever and the bill is
@@ -2555,6 +2576,30 @@ function openPaymentMethodModal(due, label, opts = {}) {
     const confirmOther = () => finish("Other", otherInput.value.trim());
     wrap.querySelector(".pay-other-confirm").onclick = confirmOther;
     otherInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); confirmOther(); } };
+
+    // Repeat-customer recognition: known number → chip + pre-fill name. Read-only, debounced.
+    const phoneEl = wrap.querySelector(".pay-cust-phone");
+    if (phoneEl) {
+      const nameEl = wrap.querySelector(".pay-cust-name");
+      const chipEl = wrap.querySelector(".pay-cust-chip");
+      let recTimer = null;
+      phoneEl.addEventListener("input", () => {
+        if (recTimer) clearTimeout(recTimer);
+        const digits = (phoneEl.value || "").replace(/[^0-9]/g, "");
+        if (digits.length < 7) { chipEl.style.display = "none"; return; }
+        recTimer = setTimeout(async () => {
+          try {
+            const r = await api("GET", `/customer-recognize?phone=${encodeURIComponent(digits)}`);
+            if (r && r.known) {
+              const v = Number(r.visits) || 0;
+              chipEl.textContent = `✨ Repeat customer${v ? ` · visit #${v + 1}` : ""}${r.name ? ` · ${r.name}` : ""}`;
+              chipEl.style.display = "";
+              if (r.name && !nameEl.value.trim()) nameEl.value = r.name;
+            } else { chipEl.style.display = "none"; }
+          } catch { chipEl.style.display = "none"; }
+        }, 400);
+      });
+    }
   });
 }
 
@@ -2598,6 +2643,15 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
   // written to an unpaid order and the Z-report (which sums tips over PAID orders only) dropped it.
   // Best-effort — a tip failing to save must not undo a completed payment.
   if (paidIds.length && Number(picked.tip) > 0) { try { await api("POST", "/orders/" + paidIds[0] + "/tip", { amount: Number(picked.tip) }); } catch { /* tip is non-critical */ } }
+  // Save the guest's consented name+number after the bill settles (Customer CRM). The
+  // server stores nothing without consent + records one visit per session; fire-and-forget
+  // so it never undoes a completed payment. Table comes from the orders we just settled.
+  if (paidIds.length && picked.cust) {
+    try {
+      const t = payable[0] && payable[0].table_number;
+      if (t != null) { const rc = await api("POST", "/customer-capture", { table: String(t), phone: picked.cust.phone, name: picked.cust.name, consent: picked.cust.consent === true }); if (rc && rc.ok) toast(`📇 Saved ${picked.cust.name || "customer"}`, "ok"); }
+    } catch { /* best-effort; bill already paid */ }
+  }
   // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
   if (okCount && !failCount) {
     const msg = skipped ? `Paid via ${picked.method} — ${skipped} new order still to accept` : `Marked paid via ${picked.method}`;
