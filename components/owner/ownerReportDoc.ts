@@ -56,17 +56,32 @@ const nfmt = (n: number) => Math.round(n).toLocaleString("en-IN");
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) + "%" : "—");
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-// The PetPooja-style "Billing Details" block: gross → discounts → each tax line →
-// total GST → net amount, plus what was lost to cancellations.
+// The money-flow calculation (owner, 2026-07-27): show the WHOLE journey from gross
+// sales to money in hand as one visible calculation — every cut named, every subtotal
+// computed in front of the reader. "=" rows are emphasised by billingTableHtml.
+export function moneyInHand(b: BillingDetails): number | null {
+  return b.gross != null && b.discount != null ? b.gross - b.discount : null;
+}
 function billingRows(b: BillingDetails): [string, string][] {
   const rows: [string, string][] = [];
-  if (b.gross != null) rows.push(["Gross sales (before tax)", inr(b.gross)]);
-  if (b.discount != null) rows.push(["Discounts given", "− " + inr(b.discount)]);
-  for (const c of b.taxComponents) rows.push([`${c.label} collected`, inr(c.amount)]);
-  if (b.taxTotal != null) rows.push(["Total GST collected", inr(b.taxTotal)]);
-  rows.push(["Net amount (kept)", inr(b.net)]);
-  if (b.gross != null && b.gross > 0 && b.discount != null) rows.push(["Discount rate", pct(b.discount, b.gross)]);
-  if (b.cancelledValue != null) rows.push(["Cancelled orders", `${nfmt(b.cancelledOrders || 0)} · ${inr(b.cancelledValue)} lost`]);
+  if (b.gross != null && b.discount != null && b.taxTotal != null) {
+    rows.push(["Gross sales — everything billed, before tax", inr(b.gross)]);
+    rows.push(["Less : discounts given to guests", "− " + inr(b.discount)]);
+    rows.push(["= Taxable amount (gross − discounts)", inr(b.gross - b.discount)]);
+    for (const c of b.taxComponents) rows.push([`Add : ${c.label} collected`, "+ " + inr(c.amount)]);
+    rows.push([b.taxComponents.length ? "Add : total GST collected" : "Add : GST collected", "+ " + inr(b.taxTotal)]);
+    // computed (not b.net): group-level `net` is summed from a different, created_at-attributed
+    // source, so khata orders paid across the period edge could make the printed equation
+    // visibly not add up. The calculation must stay self-consistent on paper.
+    rows.push(["= Total collected from guests", inr(b.gross - b.discount + b.taxTotal)]);
+    rows.push(["Less : GST set aside for the government", "− " + inr(b.taxTotal)]);
+    rows.push(["= MONEY IN HAND — what you keep", inr(b.gross - b.discount)]);
+    if (b.gross > 0) rows.push(["Discount rate", pct(b.discount, b.gross)]);
+  } else {
+    // no sales-report data for this scope — show what we do know, no fake maths
+    rows.push(["Net amount (kept)", inr(b.net)]);
+  }
+  if (b.cancelledValue != null) rows.push(["Cancelled orders — never entered the numbers above", `${nfmt(b.cancelledOrders || 0)} · ${inr(b.cancelledValue)} lost`]);
   return rows;
 }
 // "vs the previous equal period" — the one line every owner asks first.
@@ -77,8 +92,11 @@ function prevLine(cur: number, prev: number | null): string {
   return `${arrow} ${p > 0 ? "+" : ""}${p}% vs previous period`;
 }
 function billingTableHtml(b: BillingDetails): string {
-  return `<table class="kvt"><tbody>${billingRows(b).map(([l, v]) =>
-    `<tr><td>${esc(l)}</td><td class="r"><b>${esc(v)}</b></td></tr>`).join("")}</tbody></table>`;
+  return `<table class="kvt"><tbody>${billingRows(b).map(([l, v]) => {
+    const em = l.startsWith("=");                      // computed subtotal rows
+    const grand = l.startsWith("= MONEY IN HAND");     // the number the owner reads first
+    return `<tr${grand ? ' class="grand"' : em ? ' class="em"' : ""}><td>${esc(l)}</td><td class="r"><b>${esc(v)}</b></td></tr>`;
+  }).join("")}</tbody></table>`;
 }
 function settlementHtml(pays: ReportPayments[]): string {
   if (!pays.length) return "";
@@ -162,6 +180,37 @@ function medians(dishes: { qty: number; revenue: number }[]): { qtyMed: number; 
   const med = (a: number[]) => { const x = [...a].sort((p, q) => p - q); const m = x.length >> 1; return x.length ? (x.length % 2 ? x[m] : (x[m - 1] + x[m]) / 2) : 0; };
   return { qtyMed: med(dishes.map((d) => d.qty)), priceMed: med(dishes.map((d) => (d.qty ? d.revenue / d.qty : 0))) };
 }
+// Slow movers — the menu-engineering "Dogs" quadrant. Research (Lightspeed/meez/R365):
+// the worst sellers matter MORE than the top ones because they demand a decision —
+// re-price, rework, or drop. Only meaningful when the menu is big enough that the
+// bottom isn't just the same handful as the top.
+function slowDishes(dishes: { title: string; qty: number; revenue: number }[], n = 5): { title: string; qty: number; revenue: number }[] {
+  const sold = dishes.filter((x) => x.qty > 0);
+  if (sold.length < 8) return [];
+  return [...sold].sort((a, b) => a.qty - b.qty || a.revenue - b.revenue).slice(0, n);
+}
+// Group view: each restaurant's slowest dishes tagged with WHO serves them, weakest first.
+function groupSlowDishes(rests: ReportRestaurant[], cap = 10): { restaurant: string; title: string; qty: number; revenue: number }[] {
+  const rows = rests.flatMap((r) => slowDishes(r.dishes, 4).map((x) => ({ restaurant: r.name, ...x })));
+  return rows.sort((a, b) => a.qty - b.qty || a.revenue - b.revenue).slice(0, cap);
+}
+// Best & weakest day across the whole scope (day-grain windows of a week or more).
+function dayExtremes(rests: ReportRestaurant[]): { best: DailyRow; worst: DailyRow } | null {
+  const byIso = new Map<string, DailyRow>();
+  for (const r of rests) {
+    if (r.dailyGrain !== "day") return null;
+    for (const d of r.daily) {
+      const c = byIso.get(d.iso);
+      if (c) { c.orders += d.orders; c.gross += d.gross; c.discount += d.discount; c.tax += d.tax; c.net += d.net; }
+      else byIso.set(d.iso, { ...d });
+    }
+  }
+  const days = Array.from(byIso.values()).filter((d) => d.orders > 0);
+  if (days.length < 7) return null;
+  let best = days[0], worst = days[0];
+  for (const d of days) { if (d.net > best.net) best = d; if (d.net < worst.net) worst = d; }
+  return { best, worst };
+}
 function categoriesHtml(cats: { category: string; qty: number; revenue: number }[]): string {
   if (!cats.length) return "";
   const total = cats.reduce((a, c) => a + c.revenue, 0);
@@ -176,19 +225,24 @@ export function buildReportHtml(d: ReportData): string {
   const kv = (label: string, value: string, hint?: string) =>
     `<div class="kv"><div class="kv-l">${label}</div><div class="kv-v">${value}</div>${hint ? `<div class="kv-h">${hint}</div>` : ""}</div>`;
 
+  const inHand = moneyInHand(g.billing);
+  const extremes = dayExtremes(d.restaurants);
   const summary = `
     <section>
       <h2>Executive summary</h2>
       <div class="kvgrid">
         ${kv("Net revenue", inr(g.revenue), prevLine(g.revenue, g.prevRevenue) || "paid, net of discounts")}
+        ${inHand != null ? kv("Money in hand", inr(inHand), "after GST set aside") : ""}
         ${kv("Orders", nfmt(g.orders), `${nfmt(g.paidOrders)} paid`)}
         ${kv("Average bill", inr(g.avg), "per paid order")}
         ${g.billing.taxTotal != null ? kv("Total GST", inr(g.billing.taxTotal), g.billing.taxComponents.map((c) => c.label).join(" + ") || "collected") : ""}
         ${g.billing.discount != null ? kv("Discounts", inr(g.billing.discount)) : ""}
         ${g.billing.cancelledValue != null ? kv("Lost to cancellations", inr(g.billing.cancelledValue), `${nfmt(g.billing.cancelledOrders || 0)} orders`) : ""}
+        ${extremes ? kv("Best day", inr(extremes.best.net), extremes.best.label) : ""}
+        ${extremes ? kv("Weakest day", inr(extremes.worst.net), extremes.worst.label) : ""}
       </div>
       <div class="two">
-        <div><h3>Billing &amp; tax details</h3>${billingTableHtml(g.billing)}</div>
+        <div><h3>Money flow — from sale to in-hand</h3>${billingTableHtml(g.billing)}</div>
         <div><h3>Settlement — how the money arrived</h3>${settlementHtml(g.payments)}</div>
       </div>
       ${g.khata && g.khata.outstanding > 0 ? `
@@ -209,17 +263,30 @@ export function buildReportHtml(d: ReportData): string {
       </tbody></table>
     </section>` : "";
 
+  // Slow movers across the group — worst sellers matter more than top sellers
+  // because each one is a decision waiting: re-price, rework, or drop.
+  const gSlow = multi ? groupSlowDishes(d.restaurants) : [];
+  const slowSection = gSlow.length ? `
+    <section>
+      <h2>Slow movers — dishes that need a decision</h2>
+      <table><thead><tr><th>#</th><th>Dish</th><th>Restaurant</th><th class="r">Sold</th><th class="r">Revenue</th></tr></thead><tbody>
+        ${gSlow.map((x, i) => `<tr><td>${i + 1}</td><td>${esc(x.title)}</td><td>${esc(x.restaurant)}</td><td class="r">${nfmt(x.qty)}</td><td class="r">${inr(x.revenue)}</td></tr>`).join("")}
+      </tbody></table>
+      <p class="mut" style="font-size:9.5px">The least-ordered dishes of the period, weakest first. Each one costs prep time, inventory and menu space — re-price it, rework it, promote it, or drop it.</p>
+    </section>` : "";
+
   const sections = d.restaurants.map((r, i) => `
     <section class="rest ${multi ? "brk" : ""}">
       <h2>${multi ? `${i + 1}. ` : ""}${esc(r.name)}</h2>
       <div class="kvgrid">
         ${kv("Net revenue", inr(r.revenue), prevLine(r.revenue, r.prevRevenue) || (multi ? `${Math.round(r.share * 100)}% of the group` : "paid, net of discounts"))}
+        ${moneyInHand(r.billing) != null ? kv("Money in hand", inr(moneyInHand(r.billing)!), "after GST set aside") : ""}
         ${kv("Orders", nfmt(r.orders), `${nfmt(r.paidOrders)} paid`)}
         ${kv("Average bill", inr(r.avg), "per paid order")}
         ${r.busiestHour ? kv("Busiest hour", r.busiestHour, "most orders") : ""}
       </div>
       <div class="two">
-        <div><h3>Billing &amp; tax details</h3>${billingTableHtml(r.billing)}</div>
+        <div><h3>Money flow — from sale to in-hand</h3>${billingTableHtml(r.billing)}</div>
         <div><h3>Settlement</h3>${settlementHtml(r.payments)}</div>
       </div>
       ${categoriesHtml(r.categories)}
@@ -231,6 +298,12 @@ export function buildReportHtml(d: ReportData): string {
         ${r.dishes.slice(0, 12).map((x, j) => `<tr><td>${j + 1}</td><td>${esc(x.title)}</td><td class="r">${nfmt(x.qty)}</td><td class="r">${inr(x.revenue)}</td><td class="r">${pct(x.revenue, r.dishes.reduce((a, y) => a + y.revenue, 0))}</td><td>${dishTag(x, qtyMed, priceMed)}</td></tr>`).join("")}
       </tbody></table>
       <p class="mut" style="font-size:9.5px">Verdict: ⭐ Star = sells a lot at a good price · Crowd favourite = sells a lot, cheap · Hidden gem = pricey but under-ordered (promote it) · Rethink = neither (re-price, rework or drop).</p>`; })() : `<p class="mut">No dish sales in this period.</p>`}
+      ${(() => { const slow = slowDishes(r.dishes); return slow.length ? `
+      <h3>Slow movers — needs a decision</h3>
+      <table><thead><tr><th>#</th><th>Dish</th><th class="r">Sold</th><th class="r">Revenue</th></tr></thead><tbody>
+        ${slow.map((x, j) => `<tr><td>${j + 1}</td><td>${esc(x.title)}</td><td class="r">${nfmt(x.qty)}</td><td class="r">${inr(x.revenue)}</td></tr>`).join("")}
+      </tbody></table>
+      <p class="mut" style="font-size:9.5px">The least-ordered dishes here this period — re-price, rework, promote, or drop.</p>` : ""; })()}
       ${dailyHtml(r.daily)}
     </section>`).join("");
 
@@ -258,6 +331,8 @@ export function buildReportHtml(d: ReportData): string {
   tr:nth-child(even) td { background: #f6faf9; }
   tr.tot td { border-top: 1.5px solid #0f766e; background: #eef7f4; }
   .kvt td:first-child { color: #4b615a; }
+  .kvt tr.em td { border-top: 1.5px solid #0f766e; background: #f6faf9; }
+  .kvt tr.grand td { border-top: 2px solid #0f766e; border-bottom: 2px solid #0f766e; background: #eef7f4; font-size: 13.5px; }
   .r { text-align: right; }
   .mut { color: #6b7f78; }
   .note { margin-top: 26px; font-size: 10px; color: #6b7f78; border-top: 1px solid #d9e5e1; padding-top: 8px; }
@@ -269,8 +344,9 @@ export function buildReportHtml(d: ReportData): string {
   <div class="scope">${esc(d.scopeName)} · ${esc(d.periodLabel)}</div>
   ${summary}
   ${comparison}
+  ${slowSection}
   ${sections}
-  <div class="note">Net revenue counts paid, non-cancelled orders and is net of discounts (discount applied before tax). GST figures come from the restaurant's configured tax lines; a restaurant with no tax configuration shows total tax only. Generated automatically by the Aevidine owner console.</div>
+  <div class="note">Net revenue counts paid, non-cancelled orders and is net of discounts (discount applied before tax). "Money in hand" = total collected minus the GST set aside for the government (equivalently gross sales minus discounts). GST figures come from the restaurant's configured tax lines; a restaurant with no tax configuration shows total tax only. Generated automatically by the Aevidine owner console.</div>
 <script>window.addEventListener("load",function(){setTimeout(function(){window.print()},350)});</script>
 </body></html>`;
 }
@@ -301,6 +377,12 @@ export function buildReportTables(d: ReportData): ExportTable[] {
       head: ["#", "Restaurant", "Net revenue", "Share %", "Orders", "Paid orders", "Avg bill", "Total GST", "Cancelled value"],
       rows: d.restaurants.map((r, i) => [i + 1, r.name, Math.round(r.revenue), Math.round(r.share * 100), r.orders, r.paidOrders, Math.round(r.avg), r.billing.taxTotal != null ? Math.round(r.billing.taxTotal) : "", r.billing.cancelledValue != null ? Math.round(r.billing.cancelledValue) : ""]),
     });
+    const gSlow = groupSlowDishes(d.restaurants);
+    if (gSlow.length) out.push({
+      title: "Slow movers — dishes that need a decision (weakest first)",
+      head: ["#", "Dish", "Restaurant", "Sold", "Revenue"],
+      rows: gSlow.map((x, i) => [i + 1, x.title, x.restaurant, x.qty, Math.round(x.revenue)]),
+    });
   }
   for (const r of d.restaurants) {
     out.push({
@@ -317,6 +399,12 @@ export function buildReportTables(d: ReportData): ExportTable[] {
       head: ["#", "Dish", "Sold", "Revenue", "Verdict"],
       rows: r.dishes.slice(0, 15).map((x, j) => [j + 1, x.title, x.qty, Math.round(x.revenue), dishTag(x, qtyMed, priceMed)]),
     }); }
+    { const slow = slowDishes(r.dishes);
+      if (slow.length) out.push({
+        title: `${r.name} — slow movers (least ordered)`,
+        head: ["#", "Dish", "Sold", "Revenue"],
+        rows: slow.map((x, j) => [j + 1, x.title, x.qty, Math.round(x.revenue)]),
+      }); }
     { const dp = daypartRows(r.hourly);
       if (dp.length > 1) out.push({ title: `${r.name} — dayparts`, head: ["Daypart", "Orders", "Revenue"], rows: dp.map((x) => [x.name, x.orders, Math.round(x.revenue)]) }); }
     { const wd = weekdayRows(r.daily, r.dailyGrain);
