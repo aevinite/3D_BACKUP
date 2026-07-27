@@ -135,7 +135,20 @@ async function rpc(fn: string, args: Record<string, unknown>): Promise<RpcResult
   // Database said no -> report failure with its message.
   if (error) return { ok: false, reason: error.message };
   // Got data -> use it; got nothing -> treat as a failure ("empty").
-  return (data as RpcResult) ?? { ok: false, reason: "empty" };
+  const result = (data as RpcResult) ?? { ok: false, reason: "empty" };
+  // A guest limit tripped entirely inside Postgres (guest_order / waiter_call / join_session) — no
+  // server route sees it, so nudge the owner's phone. The server verifies a REAL open event exists
+  // before pinging, so this beacon can't fabricate an alert. Fire-and-forget; never blocks the guest.
+  if (result.reason === "rate_limited") {
+    try {
+      const rid = typeof args.p_restaurant_id === "string" ? args.p_restaurant_id : undefined;
+      fetch("/api/guest/limit-hit", {
+        method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fn, rid }),
+      }).catch(() => {});
+    } catch { /* best-effort */ }
+  }
+  return result;
 }
 
 // ── RPC wrappers: each one-liner below just calls a specific database function.

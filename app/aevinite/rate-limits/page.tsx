@@ -12,6 +12,7 @@ import { timeAgo } from "@/components/admin/shared";
 type Rule = { id: string; key: string; label: string; max_count: number; window_seconds: number; enabled: boolean; updated_at: string };
 type Hit = { id: string; restaurant_id: string; restaurant_name: string | null; key: string; subject: string; subject_label: string | null; hit_count: number; max_count: number; window_seconds: number; last_at: string };
 type Blocked = { key: string; ip: string; note: string | null; since: string };
+type UnblockReq = { id: string; key: string; ip: string; device_id: string | null; message: string | null; created_at: string; asked_today: number };
 
 const uuid = () => (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now()) + Math.random();
 
@@ -27,17 +28,19 @@ export default function AdminRateLimits() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [hits, setHits] = useState<Hit[]>([]);
   const [blocked, setBlocked] = useState<Blocked[]>([]);
+  const [requests, setRequests] = useState<UnblockReq[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<Record<string, { max_count: number; window_seconds: number }>>({});
   const [busy, setBusy] = useState<string>("");
 
   const load = useCallback(async () => {
     setLoading(true);
-    const r = await adminFetch<{ rules: Rule[]; events: Hit[]; blocked: Blocked[] }>("/api/admin/rate-limits");
+    const r = await adminFetch<{ rules: Rule[]; events: Hit[]; blocked: Blocked[]; requests: UnblockReq[] }>("/api/admin/rate-limits");
     if (r.ok) {
       setRules(r.data.rules || []);
       setHits(r.data.events || []);
       setBlocked(r.data.blocked || []);
+      setRequests(r.data.requests || []);
       const d: Record<string, { max_count: number; window_seconds: number }> = {};
       for (const x of r.data.rules || []) d[x.id] = { max_count: x.max_count, window_seconds: x.window_seconds };
       setDraft(d);
@@ -83,11 +86,31 @@ export default function AdminRateLimits() {
   };
   const unblock = async (b: Blocked) => {
     setBlocked((prev) => prev.filter((x) => x.key !== b.key));
+    setRequests((prev) => prev.filter((x) => x.key !== b.key)); // any request for that device is now moot
     const res = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "unblock", key: b.key }),
     });
     if (res.ok) toast("Unblocked."); else { toast(res.error || "Couldn't unblock.", "err"); load(); }
+  };
+  // Approve an unblock request → lift the block on that device.
+  const approveRequest = async (q: UnblockReq) => {
+    setRequests((prev) => prev.filter((x) => x.id !== q.id));
+    setBlocked((prev) => prev.filter((x) => x.key !== q.key));
+    const res = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "approve_request", request_id: q.id }),
+    });
+    if (res.ok) toast("Unblocked — they can sign in again."); else { toast(res.error || "Couldn't unblock.", "err"); load(); }
+  };
+  // Deny an unblock request → clear it from the list, block stays.
+  const denyRequest = async (q: UnblockReq) => {
+    setRequests((prev) => prev.filter((x) => x.id !== q.id));
+    const res = await adminFetch<{ ok: boolean }>("/api/admin/rate-limits", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "deny_request", request_id: q.id }),
+    });
+    if (res.ok) toast("Request dismissed."); else { toast(res.error || "Couldn't dismiss.", "err"); load(); }
   };
   const fixHit = async (h: Hit) => {
     const res = await adminFetch<{ ok: boolean }>("/api/admin/fix-request", {
@@ -156,30 +179,6 @@ export default function AdminRateLimits() {
         </div>
       )}
 
-      {/* Blocked devices (barred from the admin panel) */}
-      {blocked.length > 0 && (
-        <>
-          <div className="rl-sec">
-            <i className="fas fa-ban" aria-hidden="true" style={{ color: "var(--adm-danger)" }} />
-            <h2>Blocked from the admin panel</h2>
-            <span className="rl-chip danger">{blocked.length}</span>
-          </div>
-          <div className="adm-card" style={{ marginBottom: 12 }}>
-            {blocked.map((b) => (
-              <div key={b.key} className="rl-rule">
-                <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-                  <b style={{ fontSize: 13.5 }}>{b.note || b.ip}</b>
-                  <div className="adm-muted" style={{ fontSize: 11.5 }}>{b.ip}</div>
-                </div>
-                <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => unblock(b)} title="Let this device reach the admin panel again">
-                  <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Unblock
-                </button>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
       {/* Rules — the limits themselves */}
       <div className="rl-sec">
         <i className="fas fa-sliders" aria-hidden="true" style={{ color: "var(--muted)" }} />
@@ -214,6 +213,62 @@ export default function AdminRateLimits() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Unblock requests — blocked devices asking to be let back in (just above the block list) */}
+      <div className="rl-sec">
+        <i className="fas fa-hand" aria-hidden="true" style={{ color: requests.length ? "var(--adm-accent,#e8a13c)" : "var(--muted)" }} />
+        <h2>Unblock requests</h2>
+        {requests.length ? <span className="rl-chip">{requests.length}</span> : null}
+        <span className="adm-muted" style={{ fontSize: 12 }}>blocked devices asking to be let back in</span>
+      </div>
+      {loading ? <div className="adm-empty">Loading…</div> : requests.length === 0 ? (
+        <div className="adm-muted" style={{ fontSize: 12.5, padding: "2px 0 6px" }}>No requests right now.</div>
+      ) : (
+        <div className="adm-card" style={{ marginBottom: 12 }}>
+          {requests.map((q) => (
+            <div key={q.id} className="rl-rule">
+              <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <b style={{ fontSize: 13.5 }}>{q.ip}</b>
+                  {q.asked_today > 1 ? <span className="rl-chip">asked {q.asked_today}× today</span> : null}
+                  <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(q.created_at)}</span>
+                </div>
+                {q.message ? <div className="adm-muted" style={{ fontSize: 12.5, marginTop: 3, color: "var(--text)" }}>“{q.message}”</div> : null}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => approveRequest(q)} title="Lift the block — let this device sign in again">
+                  <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Unblock
+                </button>
+                <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => denyRequest(q)} title="Keep the block; clear this request">Deny</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Blocked devices (barred from the admin panel) — the very bottom of the page */}
+      <div className="rl-sec">
+        <i className="fas fa-ban" aria-hidden="true" style={{ color: blocked.length ? "var(--adm-danger)" : "var(--muted)" }} />
+        <h2>Blocked from the admin panel</h2>
+        {blocked.length ? <span className="rl-chip danger">{blocked.length}</span> : null}
+      </div>
+      {loading ? <div className="adm-empty">Loading…</div> : blocked.length === 0 ? (
+        <div className="adm-muted" style={{ fontSize: 12.5, padding: "2px 0 6px" }}>No devices are blocked.</div>
+      ) : (
+        <div className="adm-card" style={{ marginBottom: 12 }}>
+          {blocked.map((b) => (
+            <div key={b.key} className="rl-rule">
+              <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                <b style={{ fontSize: 13.5 }}>{b.note || b.ip}</b>
+                <div className="adm-muted" style={{ fontSize: 11.5 }}>{b.ip}</div>
+              </div>
+              <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => unblock(b)} title="Let this device reach the admin panel again">
+                <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Unblock
+              </button>
+            </div>
+          ))}
         </div>
       )}
 

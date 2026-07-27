@@ -13,10 +13,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
+import { pingLatestGuestLimit } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
 const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
+
+// A replayed offline order can still trip the guest_order limit inside the RPC. The online path
+// pings via the client beacon, but this server route bypasses it — so ping here too. Best-effort.
+function maybePing(data: unknown, rid: string): void {
+  if (data && typeof data === "object" && (data as { reason?: string }).reason === "rate_limited") {
+    void pingLatestGuestLimit("guest_order", rid);
+  }
+}
 
 type Body = {
   mode?: "session" | "public";
@@ -37,6 +46,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
     if (!b.token) return NextResponse.json({ ok: false, reason: "invalid_token" }, { status: 400 });
     const { data, error } = await sb.rpc("lfh_place_order", { p_token: b.token, p_items: items, p_allergies: allergies });
     if (error) return NextResponse.json({ ok: false, reason: error.message }, { status: 502 });
+    maybePing(data, ""); // session mode: rid unknown → helper scans recent guest_order events
     return NextResponse.json(data ?? { ok: false, reason: "empty" });
   }
 
@@ -48,6 +58,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
     p_restaurant_id: b.restaurantId || DEFAULT_RID,
   });
   if (error) return NextResponse.json({ ok: false, reason: error.message }, { status: 502 });
+  maybePing(data, b.restaurantId || DEFAULT_RID);
   return NextResponse.json(data ?? { ok: false, reason: "empty" });
 }
 

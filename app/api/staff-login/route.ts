@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, adminPassword } from "@/lib/staffAuth";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
-import { throttleStatus, throttleFail, throttleReset, clientIp } from "@/lib/loginThrottle";
+import { throttleStatus, throttleFail, throttleReset, throttleIsBlocked, clientIp } from "@/lib/loginThrottle";
 import { recordAlert } from "@/lib/rateLimit";
 
 const ADMIN_MAX_FAILS = 10;             // wrong tries from one IP before a temporary lockout
@@ -38,13 +38,16 @@ export async function POST(req: NextRequest) {
   const bad = (extra: Record<string, unknown>) =>
     wantsJson
       ? NextResponse.json({ ok: false, ...extra }, { status: 401 })
-      : NextResponse.redirect(new URL(`/staff-login?${extra.locked ? "locked=1" : "bad=1"}&next=${encodeURIComponent(next)}`, req.url), 303);
+      : NextResponse.redirect(new URL(`/staff-login?${extra.blocked ? "blocked=1" : extra.locked ? "locked=1" : "bad=1"}&next=${encodeURIComponent(next)}`, req.url), 303);
 
-  // Locked out? Refuse before even checking the password, and log the attempt.
+  // Locked out? Refuse before even checking the password, and log the attempt. A DELIBERATE admin
+  // block (far-future lock) is distinct from a few-minute wrong-tries lockout: it sends the visitor
+  // to the "You're blocked" page (where they can ask to be unblocked), not the "wait a bit" message.
   const st = await throttleStatus(throttleKey);
   if (st.locked) {
-    await logAction("admin", "login_blocked", { device_id: dev, detail: `admin login blocked — ${ip} is locked out (too many wrong tries)` });
-    return bad({ locked: true });
+    const blocked = await throttleIsBlocked(throttleKey);
+    await logAction("admin", "login_blocked", { device_id: dev, detail: `admin login refused — ${ip} is ${blocked ? "blocked" : "locked out (too many wrong tries)"}` });
+    return bad(blocked ? { blocked: true } : { locked: true });
   }
 
   const expected = adminPassword();
