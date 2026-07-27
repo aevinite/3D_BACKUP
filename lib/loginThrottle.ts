@@ -74,6 +74,19 @@ export async function throttleBlock(key: string, note?: string): Promise<void> {
 export async function throttleUnblock(key: string): Promise<void> {
   await throttleReset(key);
 }
+// Is this key under a DELIBERATE admin block (a far-future lock), as opposed to a normal few-minute
+// lockout? Distinguishes the "You're blocked" page (permanent, can request unblock) from the
+// "wait a few minutes" message. Same >1-year cutoff listBlocked() uses. Fail-open → false.
+export async function throttleIsBlocked(key: string): Promise<boolean> {
+  try {
+    const { data } = await sb.from("login_throttle").select("locked_until").eq("key", key).limit(1);
+    const until = data?.[0]?.locked_until ? new Date(data[0].locked_until).getTime() : 0;
+    return until > Date.now() + 365 * 24 * 60 * 60 * 1000;
+  } catch {
+    return false; // fail-open: never trap a user on the blocked page due to a DB blip
+  }
+}
+
 // Currently-blocked keys (locked_until more than a year out = a deliberate block, not a lockout).
 export async function listBlocked(prefix = "admin:"): Promise<{ key: string; note: string | null; locked_until: string }[]> {
   try {

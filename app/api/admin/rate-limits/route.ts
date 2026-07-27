@@ -1,7 +1,11 @@
 // Admin · Rate Limits — view/edit the configurable limits (mig 205) and act on the hits.
-//   GET   → { rules, events }  (global rules + open "limit reached" events, newest first)
+//   GET   → { rules, events, blocked, requests }  (rules + open hits + blocked devices + unblock requests)
 //   PATCH { id, max_count?, window_seconds?, enabled? } → edit one rule
-//   POST  { action: "allow"|"dismiss", event_id } → Allow (reset that subject's counter) / dismiss
+//   POST  { action, ... }:
+//     "allow"|"dismiss" { event_id }              → reset a subject's counter / clear a hit
+//     "block" { event_id }                        → bar an admin-login device from the panel
+//     "unblock" { key }                           → lift a block by throttle key
+//     "approve_request"|"deny_request" { request_id } → act on an unblock request (mig 214)
 // Admin-gated (same cookie as every other /api/admin/* route).
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
@@ -38,7 +42,20 @@ export async function GET(req: NextRequest) {
   // Devices/IPs deliberately blocked from the admin panel (admin: keys, far-future lock).
   const blockedRaw = await listBlocked("admin:");
   const blocked = blockedRaw.map((b) => ({ key: b.key, ip: b.key.replace(/^admin:/, ""), note: b.note, since: b.locked_until }));
-  return NextResponse.json({ rules: rules.data ?? [], events, blocked });
+
+  // Open "please unblock me" requests from blocked devices (mig 214). Shown at the bottom of the
+  // page, just above the block list. Silent by design — never in the bell / phone alerts.
+  const reqRows = await sb.from("unblock_requests")
+    .select("id, key, ip, device_id, message, created_at")
+    .eq("status", "open").order("created_at", { ascending: false }).limit(50);
+  // "asked N× today" per ip, across the last 24h (open + resolved), so the admin sees repeat askers.
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const counted = await sb.from("unblock_requests").select("ip").gte("created_at", since).limit(1000);
+  const perIp: Record<string, number> = {};
+  for (const r of counted.data ?? []) perIp[r.ip] = (perIp[r.ip] || 0) + 1;
+  const requests = (reqRows.data ?? []).map((r) => ({ ...r, asked_today: perIp[r.ip] || 1 }));
+
+  return NextResponse.json({ rules: rules.data ?? [], events, blocked, requests });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -79,7 +96,29 @@ export async function POST(req: NextRequest) {
     const key = String(b.key || "");
     if (!/^admin:/.test(key)) return err("invalid key");
     await throttleUnblock(key);
+    // Any open unblock requests for this device are now moot → resolve them as approved.
+    await sb.from("unblock_requests").update({ status: "approved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("key", key).eq("status", "open");
     await logAction("admin", "admin_unblock", { level: "info", detail: `admin-panel block lifted · ${key}` });
+    return NextResponse.json({ ok: true });
+  }
+
+  // Approve an unblock request: lift the block on that device AND mark the request(s) handled.
+  if (action === "approve_request") {
+    const id = String(b.request_id || "");
+    if (!UUID.test(id)) return err("invalid request_id");
+    const r = (await sb.from("unblock_requests").select("key").eq("id", id).maybeSingle()).data as { key: string } | null;
+    if (!r) return err("that request no longer exists", 404);
+    await throttleUnblock(r.key);
+    await sb.from("unblock_requests").update({ status: "approved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("key", r.key).eq("status", "open");
+    await logAction("admin", "admin_unblock", { level: "info", detail: `unblock request approved · ${r.key}` });
+    return NextResponse.json({ ok: true });
+  }
+  // Deny an unblock request: leave the block in place, just clear the request from the list.
+  if (action === "deny_request") {
+    const id = String(b.request_id || "");
+    if (!UUID.test(id)) return err("invalid request_id");
+    const r = await sb.from("unblock_requests").update({ status: "denied", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", id).select("id").maybeSingle();
+    if (r.error) return err(r.error.message, 500);
     return NextResponse.json({ ok: true });
   }
 
