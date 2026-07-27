@@ -35,6 +35,7 @@ const SessionStatusWidget = dynamic(() => import("@/components/SessionStatusWidg
 const BackQuitDialog     = dynamic(() => import("@/components/BackQuitDialog"),     { ssr: false });
 const PointerCaptureGuard = dynamic(() => import("@/components/PointerCaptureGuard"), { ssr: false });
 const BanGate            = dynamic(() => import("@/components/BanGate"),            { ssr: false });
+const CustomerGreeter    = dynamic(() => import("@/components/CustomerGreeter"),    { ssr: false });
 
 // Staff routes never get guest chrome. Two shapes must both be caught:
 //  - the flat admin routes (/manager, /kitchen, /tablet, /login, …), and
@@ -70,6 +71,7 @@ export default function GuestChrome() {
       <BackQuitDialog />
       <PointerCaptureGuard />
       <BanGate />
+      <CustomerGreeter />
     </>
   );
 }

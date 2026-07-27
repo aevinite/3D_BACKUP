@@ -9,8 +9,10 @@ import { ownerScope, type OwnerScope } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
-const COLS = "restaurant_id, phone, name, blocked, first_seen_at, last_seen_at";
-const RETURN_GAP_MS = 60_000; // last_seen more than a minute after first_seen = came back
+// visits/consent added by Customer CRM (mig 211): a REAL repeat count + the DPDP
+// opt-in flag. Still money-free (no spend column exists).
+const COLS = "restaurant_id, phone, name, blocked, visits, consent, first_seen_at, last_seen_at";
+const REPEAT_MIN = 2; // visits >= 2 = a returning customer (real count, not a time heuristic)
 
 async function scopedIds(scope: OwnerScope): Promise<string[]> {
   if (!scope.all) return scope.ids;
@@ -38,7 +40,7 @@ export async function GET(req: NextRequest) {
   if (search) q = q.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
   const { data, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const list = (data || []) as Array<{ restaurant_id: string; phone: string; name: string | null; blocked: boolean; first_seen_at: string; last_seen_at: string }>;
+  const list = (data || []) as Array<{ restaurant_id: string; phone: string; name: string | null; blocked: boolean; visits: number; consent: boolean; first_seen_at: string; last_seen_at: string }>;
 
   // Restaurant names (multi-restaurant owner tells brands apart).
   const rids = [...new Set(list.map((c) => c.restaurant_id))];
@@ -50,9 +52,7 @@ export async function GET(req: NextRequest) {
 
   const monthAgo = Date.now() - 30 * 86_400_000;
   const monthAgoIso = new Date(monthAgo).toISOString();
-  const isReturning = (c: { first_seen_at: string; last_seen_at: string }) =>
-    new Date(c.last_seen_at).getTime() - new Date(c.first_seen_at).getTime() > RETURN_GAP_MS;
-  const customers = list.map((c) => ({ ...c, restaurantName: names[c.restaurant_id] || "—", returning: isReturning(c) }));
+  const customers = list.map((c) => ({ ...c, restaurantName: names[c.restaurant_id] || "—", returning: (c.visits || 0) >= REPEAT_MIN }));
 
   // Summary counts are TRUE scoped head-counts, not derived from the 300-row display page —
   // before this, "Blocked"/"New" undercounted for a restaurant with >300 guests (a guest
@@ -62,18 +62,51 @@ export async function GET(req: NextRequest) {
   // per-row comparison of two timestamps (last_seen vs first_seen), which a column filter
   // can't express, so it stays derived from the shown page and can undercount on very busy
   // restaurants; making it exact needs a small scoped DB function (see OVERNIGHT note).
+  // `returning` is now an EXACT scoped head-count (visits >= 2) — the real visit
+  // counter (mig 211) lets us count it in the DB instead of eyeballing timestamps on
+  // the shown page, so it no longer undercounts busy restaurants.
   const head = () => sb.from("customers").select("phone", { count: "exact", head: true }).in("restaurant_id", ids);
-  const [cntAll, cntBlocked, cntNew] = await Promise.all([
+  const [cntAll, cntBlocked, cntNew, cntReturning] = await Promise.all([
     head(),
     head().eq("blocked", true),
     head().gte("first_seen_at", monthAgoIso),
+    head().gte("visits", REPEAT_MIN),
   ]);
   const summary = {
     total: cntAll.count ?? list.length,
-    returning: customers.filter((c) => c.returning).length,
+    returning: cntReturning.count ?? customers.filter((c) => c.returning).length,
     newThisMonth: cntNew.count ?? list.filter((c) => new Date(c.first_seen_at).getTime() >= monthAgo).length,
     blocked: cntBlocked.count ?? list.filter((c) => c.blocked).length,
     shown: list.length,
   };
   return NextResponse.json({ summary, customers });
+}
+
+// DELETE /api/owner/customers — erase a customer (DPDP right-to-erasure, mig 211).
+// Removes the customers row + their visit ledger + device links, scoped to a
+// restaurant the owner actually owns AND still has the "customers" section for.
+// Admin (top power) is never gated. Body: { restaurant_id, phone }.
+export async function DELETE(req: NextRequest) {
+  const scope = await ownerScope(req);
+  if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  let body: { restaurant_id?: string; phone?: string };
+  try { body = await req.json(); } catch { return NextResponse.json({ error: "bad body" }, { status: 400 }); }
+  const restaurantId = String(body?.restaurant_id || "");
+  const phone = String(body?.phone || "");
+  if (!restaurantId || !phone) return NextResponse.json({ error: "restaurant_id and phone required" }, { status: 400 });
+
+  // The restaurant must be in the owner's own, still-entitled set (never trust the
+  // client's restaurant_id beyond that). Admin bypasses the entitlement gate only.
+  const ownIds = await scopedIds(scope);
+  if (!ownIds.includes(restaurantId)) return NextResponse.json({ error: "not your restaurant" }, { status: 403 });
+  if (!scope.all && !scope.admin) {
+    const allowed = await entitledSubset([restaurantId], "customers");
+    if (!allowed.length) return NextResponse.json({ error: "Customers isn't enabled for your restaurant.", disabled: true }, { status: 403 });
+  }
+
+  await sb.from("customer_visits").delete().eq("restaurant_id", restaurantId).eq("phone", phone);
+  await sb.from("customer_devices").delete().eq("restaurant_id", restaurantId).eq("phone", phone);
+  const del = await sb.from("customers").delete().eq("restaurant_id", restaurantId).eq("phone", phone).select("phone");
+  if (del.error) return NextResponse.json({ error: del.error.message }, { status: 500 });
+  return NextResponse.json({ ok: true, erased: (del.data || []).length });
 }
