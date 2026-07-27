@@ -48,40 +48,43 @@ EVERYTHING typed, always, without being told, even mid-task:
 Full background: `.claude/work-checker-lessons.md` → "Safe-audit operating rules". This
 block is the always-loaded reminder so the rule can't be forgotten mid-session.
 
-## 🔒 TWO STACKS — MAIN IS UNTOUCHABLE (owner, 2026-07-22 — ABSOLUTE, EVERY SESSION)
+## 🔒 TWO STACKS — "AV LIVE" IS UNTOUCHABLE (owner, 2026-07-22 — ABSOLUTE, EVERY SESSION)
 
 There are TWO fully separate deployments of this product. Know which one you are
-touching BEFORE every action:
+touching BEFORE every action. The owner's NAME for the live stack is **"AV live"**
+(after its keys file `.env.AV.live`) — when he says "put it on AV live / edit AV live /
+push to AV live" he means the live client stack below, NOT the git branch `main` (the
+branch is just git's word for the code line and exists in BOTH stacks).
 
-| | **MAIN (live clients)** | **DEV/TEST (this folder)** |
+| | **AV LIVE (live clients)** | **DEV/TEST (this folder)** |
 |---|---|---|
 | Folder | `/Users/aevinite/Documents/LIVE_PROJECTS/3D_Menu_Av` | `/Users/aevinite/Documents/Projects/backup_Menu` |
 | Git repo | `aevinitegroup/3D_Menu_Av` | `aevinite/3D_BACKUP` |
-| Vercel | `3d-menu-av` | `3-d-backup` |
+| Vercel | `3d-menu-av` (aevinite.shop) | `3-d-backup` |
 | Supabase | `kclqkmdxnwlhtyrducku` | `wnsfcizclkbobwzcxqsf` (Mumbai) |
-| Keys | `.env.MAIN.local` (in this folder, gitignored) | `.env.local` |
+| Keys | `.env.AV.live` (in this folder, gitignored) | `.env.local` |
 
-- **MAIN is READ-ONLY BY DEFAULT — for every session, every mode.** No DB writes, no
+- **AV LIVE is READ-ONLY BY DEFAULT — for every session, every mode.** No DB writes, no
   migrations, no deploys, no env changes, no pushes to `aevinitegroup/3D_Menu_Av`, no
   edits inside the `LIVE_PROJECTS/3D_Menu_Av` folder. **This rule survives
-  bypass-permissions / auto-accept mode:** before ANY action that changes MAIN, STOP and
-  ask the owner an explicit "Should I do this on MAIN? yes/no" question (use the
+  bypass-permissions / auto-accept mode:** before ANY action that changes AV LIVE, STOP
+  and ask the owner an explicit "Should I do this on AV live? yes/no" question (use the
   ask-user-question tool), naming exactly what will change. One yes = that one action
   only, not a standing license.
-- **Even READING main (data copy, health check) — announce it in chat first.** Reads
+- **Even READING AV live (data copy, health check) — announce it in chat first.** Reads
   are allowed, but say you're doing them.
 - **All building & testing happens HERE, against the dev DB, with dev keys.** Never
-  point a dev server, script, seed, or migration at MAIN's URL/keys "just to check".
+  point a dev server, script, seed, or migration at AV LIVE's URL/keys "just to check".
 - **ONE migrations folder is the single source of truth for BOTH databases**
   (`supabase/migrations/` here). Every schema change: written once here → run on the
-  DEV DB → verified → reaches MAIN only through the release step below. NEVER write a
-  migration only on MAIN, and never let the two schemas fork.
-- **Release to MAIN = a deliberate, asked-first ritual, every time:** (1) build + tests
-  green here, verified on dev; (2) ASK the owner explicitly; (3) on yes: scripted
+  DEV DB → verified → reaches AV LIVE only through the release step below. NEVER write a
+  migration only on AV LIVE, and never let the two schemas fork.
+- **Release to AV LIVE = a deliberate, asked-first ritual, every time:** (1) build +
+  tests green here, verified on dev; (2) ASK the owner explicitly; (3) on yes: scripted
   one-way code copy dev-repo → live-repo (never hand-edit the live repo — that's how
-  drift starts), run pending migrations on MAIN DB, deploy; (4) verify MAIN end-to-end
-  (health + a real order loop) and report honestly, including anything that failed.
-- **Secrets discipline applies doubly to `.env.MAIN.local`:** never print, echo, or
+  drift starts), run pending migrations on the AV LIVE DB, deploy; (4) verify AV LIVE
+  end-to-end (health + a real order loop) and report honestly, including anything failed.
+- **Secrets discipline applies doubly to `.env.AV.live`:** never print, echo, or
   commit any value from it; masked reads only.
 
 ## 💸 BILLING-COMPLIANCE GUARDRAIL — pointer only, load `docs/COMPLIANCE-GUARDRAILS.md` when touching billing (2026-07-25)
@@ -382,12 +385,10 @@ in the middleware matcher before any public hosting. `ADMIN_PASSWORD` is in
 
 ## Routes
 
-- `/` — `app/page.tsx` is now just `redirect("/menu")`. NOT a duplicate anymore;
-  nothing to mirror.
+- `/` — `app/page.tsx` is just `redirect("/menu")`.
 - `/menu` — menu with 3D preload (`app/menu/page.tsx`).
 - `/item/[slug]` — dish detail.
-- `/view/[folder]` — 3D viewer.
-  (The old `/3d/[folder]` stub has been deleted — only these four routes exist.)
+- `/view/[folder]` — 3D viewer. (Only these four routes exist.)
 
 ## Skills and tools to reach for
 
@@ -532,12 +533,8 @@ do it automatically, without being asked. Reuse the existing engine, don't reinv
   "latest-wins" seq guard in each loader is a DIFFERENT mechanism — don't conflate.)
 - **Supabase HEAD lies about Cache-Control.** Use GET with `Range: bytes=0-0`
   for header checks. `scripts/set-glb-cache.mjs` has this bug.
-- **`/` is now just a redirect to `/menu`** (not a duplicate). No mirroring needed.
-- **Light mode works and persists** (`lfh_theme`). The old "Header forces dark /
-  light unreachable" note is stale — the theme toggle is live.
+- **Light mode works and persists** (`lfh_theme`) via the theme toggle.
 - **Don't re-suggest Draco compression.** Already done. See model-pipeline memory.
-- **Editor runs on port 4001** (`editor/server.js` default; `START.BAT` opens
-  4001). The code default and the launch script now agree on 4001.
 - **Service-role Supabase keys must never be committed or echoed.** If the user
   pastes one in chat, warn them loudly and treat it as compromised.
 - **ABSOLUTE RULE — secrets never appear in chat, ever.** This includes the Supabase
@@ -580,6 +577,21 @@ do it automatically, without being asked. Reuse the existing engine, don't reinv
 - If the change touches 3D model loading, `verify-cache.mjs` still passes.
 - If the change touches UI, run the page in Chrome MCP and screenshot or
   describe what's now visible. Don't claim "it works" from source alone.
+
+## 🚦 DEPLOY LOCK — one session deploys at a time (owner, 2026-07-25 — pointer only, load the detail ONLY when deploying)
+
+Many sessions run in this SHARED folder at once and have been OVERWRITING each other's
+small un-shipped edits (name changes etc.). So deploying is now a **locked, one-at-a-time
+ritual**. This block is only the always-loaded reminder — keep it cheap; the full
+step-by-step protocol lives in the **`ship-safety`** skill under "Deploy lock". **Do NOT
+read/expand that protocol every session — invoke the skill ONLY at the moment you are about
+to deploy** (push to `main` / merge an auto-deploying PR / trigger a Vercel build).
+
+- **The moment a deploy is requested → invoke `ship-safety` FIRST**, then follow its Deploy-lock
+  steps: (1) if another session is mid-deploy (`.claude/deploy.lock` is fresh) → **WAIT**, poll,
+  don't deploy in parallel; (2) take the lock; (3) **overwrite check** — `git fetch` + rebase on
+  `origin/main`, stage ONLY the files THIS task changed (never blind `git add -A`, never revert
+  another session's uncommitted small edits); (4) deploy + verify live; (5) **release the lock**.
 
 ## Deployment (ONE target now)
 

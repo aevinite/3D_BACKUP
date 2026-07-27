@@ -420,3 +420,20 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
   Billing section, Kitchen (KOT) section, "Number of tables" card, "Guest QR links" card
   (manager keeps: table name+seats, auto close/restart) + drop the Kitchen group from admin Access.
 - [ ] After removal: verify owner /owner/menu embed exposes no Billing/Kitchen settings.
+
+## 2026-07-27 — Owner report overhaul (compiled statement + exports + picker)
+- [x] Money-flow calculation in the compiled report (print + CSV/Excel): gross − discounts
+  = taxable + CGST/SGST = collected − GST set aside = MONEY IN HAND, subtotals emphasised;
+  collected row computed from the same lines so the equation always adds up (khata edge).
+  Exec summary gains Money-in-hand / Best-day / Weakest-day cards. (PR #508, LIVE)
+- [x] Slow movers (menu-engineering dogs): group table naming the restaurant per dish +
+  per-restaurant bottom-5 table, in print AND CSV/Excel. (PR #508, LIVE)
+- [x] Excel/CSV day-book: averages on top (per-active-day), whole-scope detailed day-by-day
+  table, In-hand column on every day table. (PR #509, LIVE both stacks)
+- [x] Report period chooser: calendar browse — year book → 12 months → day grid, whole-year/
+  whole-month shortcuts, exact-day pick. (PR #509, LIVE both stacks)
+- [x] Ported to AV live (owner: "make it live on both") — commit bfe5e64, deployed via /v13 API,
+  aevinite.shop verified healthy.
+- [ ] 3 print-design variants + interactive year→month→day Time-explorer prototype served on
+  :49826 for the owner to choose from (design decision pending — owner said keep current
+  format, so variants are reference only; Time-explorer = candidate for /owner/reports UI).
