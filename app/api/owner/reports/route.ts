@@ -186,12 +186,20 @@ export async function GET(req: NextRequest) {
   const cacheKey = `reports:v2:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : `${range}:${from.slice(0, 10)}`}`;
   const force = sp.get("refresh") === "1";
   const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
-  // Money reports at month bucket read the monthly rollup (mig 201), so their cheap
-  // change-detector (mig 202) is valid — it derives the same signal from rollup + the
-  // current-month tail (~35ms) instead of a ~9.5s full scan. Dishes/categories/hourly scan
-  // live orders, so they keep the full fingerprint (must still catch edits to old orders).
+  // Change-detector choice. The precise ordersFingerprint SCANS its window — on a WIDE
+  // window that's a 5–8s full-table scan (measured 2026-07-27: fy 7.1s, 12m 8.2s, all 5.5s
+  // over ~398k orders) that the cold/refresh path WAITS on, so a big-tenant owner opening
+  // "12 months" of the dishes/categories/hourly/payments/by-restaurant report saw it hang.
+  // Two cases now use the ~0.3s rollup-derived fingerprint (mig 202) instead:
+  //   • money reports at month bucket (already read the rollup — always valid), and
+  //   • ANY report on a window wider than ~35 days — same tradeoff the dashboard ships
+  //     (analytics fpFor): it still flags every new/recent-edited order; a change to an
+  //     ANCIENT order that shifts neither count nor max-activity is caught by the nightly
+  //     rollup refresh (and Refresh always forces a live recompute). Narrow windows keep
+  //     the precise scan (it's sub-second there and catches old-order edits immediately).
   const moneyType = type === "sales" || type === "tax" || type === "discounts" || type === "cancellations" || type === "daysummary";
-  const useMonthFp = bucket === "month" && moneyType;
+  const wideWindow = Date.parse(to) - Date.parse(from) > 35 * DAY;
+  const useMonthFp = wideWindow || (bucket === "month" && moneyType);
 
   try {
     const payload = await cachedOwnerPayload({
