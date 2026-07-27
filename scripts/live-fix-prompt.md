@@ -57,7 +57,7 @@ is ambiguous instead of guessing.
 ## Hard rules
 
 - You were started with permission prompts off — that is trust, not freedom: stay inside this
-  project + its worktrees, never touch `~/Documents/Brain`, never print secrets, never run
+  project + its worktrees, never touch `~/Brain`, never print secrets, never run
   destructive git commands (no force-push, no reset --hard on shared branches).
 - If production is broken RIGHT NOW (restaurant in service), the FIRST move is the cheapest
   stabiliser (feature toggle off / maintenance mode / a Repair-Kit data fix you walk the owner

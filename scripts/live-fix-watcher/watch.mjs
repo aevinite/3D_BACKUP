@@ -98,10 +98,16 @@ if (!DRY) {
 // The rulebook is referenced by its INSTALLED absolute path (copied by install.sh), not a
 // repo-relative one — the shared project folder can be on any branch at any time, and an old
 // branch may not carry the file.
+//
+// HUMAN-FIRST WORDING (owner 2026-07-27): the owner SEES this opening prompt in the terminal,
+// so it must read like a note a person would write — problem first, plain words, and the
+// machine ids tucked at the bottom clearly marked as bookkeeping, never leading the message.
 const prompt =
-  `A LIVE fix request just arrived from the admin panel (fix_requests id ${reqRow.id}${runId ? `, your agent_runs history id is ${runId}` : ""}). ` +
-  `Summary: '${summary}'` + (note ? ` — owner's note: '${note}'` : "") +
-  `. Read ${join(BASE, "live-fix-prompt.md")} FIRST and follow it exactly — the owner is watching this terminal and can answer questions.`;
+  `Hi — the owner just pressed "Fix NOW" in the admin panel, so this window opened to sort out ONE problem:\n\n` +
+  `  Problem: "${summary}"\n` +
+  (note ? `  Owner's note: "${note}"\n` : "") +
+  `\nFirst read ${join(BASE, "live-fix-prompt.md")} and follow it exactly. The owner is watching this terminal and can answer questions — talk to them in plain, beginner-friendly language, and START by telling them in one simple sentence what you understand the problem to be.\n\n` +
+  `(Bookkeeping, for your database updates only — don't lead with these when talking to the owner: fix request id ${reqRow.id}${runId ? `, history row id ${runId}` : ""}.)`;
 
 const jobsDir = join(BASE, "jobs");
 mkdirSync(jobsDir, { recursive: true });
