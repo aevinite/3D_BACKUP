@@ -136,7 +136,10 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
     window.addEventListener("lfh:owner-crumb", onCrumb);
     return () => window.removeEventListener("lfh:owner-crumb", onCrumb);
   }, []);
-  useEffect(() => { if (path !== "/owner") setCrumbTail([]); }, [path]);
+  // NB: no path-based clear here — each broadcasting page (dashboard, reports) emits an empty
+  // tail on unmount, so the tail always reflects the CURRENT page. A path-based clear here ran
+  // AFTER the incoming page's mount broadcast (parent effects fire after child effects) and
+  // wiped it — the reports sub-report crumb vanished. Page-owned lifecycle avoids that race.
 
   // Top-strip restaurant switcher dropdown (multi-restaurant owners only). Hardware
   // BACK closes it (project rule: every overlay registers); a route change closes it too.

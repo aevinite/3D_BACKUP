@@ -47,6 +47,53 @@ const DAY_KINDS = new Set<DataKind>(["daysummary"]);
 const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 const yesterdayIso = () => new Date(Date.now() + 5.5 * 3600_000 - 86_400_000).toISOString().slice(0, 10);
 
+// ── Sub-tabs (the merge, owner 2026-07-26) ────────────────────────────────────
+// A "body key" is one of the original report VIEWS. Six catalog reports now compose
+// several of these as sub-tabs inside one report, so the owner never sub-report-hops.
+// The active sub-tab also picks the data payload to fetch — each view keeps reading the
+// exact same (already-verified) numbers it did as a standalone report.
+type BodyKey =
+  | "daysummary" | "sales" | "avgbill" | "volume" | "weekday"
+  | "payments" | "discounts" | "cancellations" | "tax"
+  | "dishes" | "categories" | "menu" | "hourly" | "daypart";
+const BODY_KIND: Record<BodyKey, DataKind> = {
+  daysummary: "daysummary",
+  sales: "money", avgbill: "money", volume: "money", weekday: "money",
+  discounts: "money", cancellations: "money", tax: "money",
+  payments: "payments",
+  dishes: "dishes", menu: "dishes", categories: "categories",
+  hourly: "hourly", daypart: "hourly",
+};
+type OpenOpts = { sub?: string; pay?: "discounts" | "cancellations" };
+type OpenReport = (k: RKey, opts?: OpenOpts) => void;
+type SubTab = { key: string; label: string; icon: string; body: BodyKey };
+const SUBTABS: Record<RKey, SubTab[]> = {
+  daysummary: [],
+  sales: [
+    { key: "revenue", label: "Revenue", icon: "fa-chart-line", body: "sales" },
+    { key: "avgbill", label: "Average bill", icon: "fa-receipt", body: "avgbill" },
+    { key: "volume", label: "Order volume", icon: "fa-list-check", body: "volume" },
+  ],
+  payments: [],   // discounts + cancellations open as detail overlays, not tabs
+  tax: [],
+  items: [
+    { key: "items", label: "Items", icon: "fa-utensils", body: "dishes" },
+    { key: "categories", label: "Categories", icon: "fa-layer-group", body: "categories" },
+    { key: "menu", label: "Menu engineering", icon: "fa-lightbulb", body: "menu" },
+  ],
+  timing: [
+    { key: "hours", label: "By hour", icon: "fa-clock", body: "hourly" },
+    { key: "dayparts", label: "Day parts", icon: "fa-sun", body: "daypart" },
+    { key: "weekday", label: "Day of week", icon: "fa-calendar-week", body: "weekday" },
+  ],
+};
+// The body shown for a report + its active sub-tab (first tab default; no tabs = the report key itself).
+const bodyKeyFor = (sel: RKey, subKey: string): BodyKey => {
+  const tabs = SUBTABS[sel];
+  if (!tabs.length) return sel as BodyKey;
+  return (tabs.find((t) => t.key === subKey) ?? tabs[0]).body;
+};
+
 type Rest = { id: string; name: string; accent: string };
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
 type Totals = Omit<MoneyRow, "bucket">;
@@ -99,6 +146,17 @@ function downloadCsv(filename: string, header: string[], rows: (string | number)
   a.download = filename; a.click(); URL.revokeObjectURL(a.href);
 }
 
+// Build the Day-summary's extra print/CSV tables (the day's dishes + busy hours) so a
+// printed day sheet carries everything for that day, not just the money lines.
+function dayExtraTables(dishesDay?: Payload, hourlyDay?: Payload): { title: string; head: string[]; rows: (string | number)[][] }[] {
+  const out: { title: string; head: string[]; rows: (string | number)[][] }[] = [];
+  const dishes = ((dishesDay?.rows ?? []) as DishRow[]).filter((d) => d.qty > 0).sort((a, b) => b.revenue - a.revenue);
+  if (dishes.length) out.push({ title: "Items sold", head: ["Dish", "Qty", "Sales"], rows: dishes.map((d) => [d.title, d.qty, Math.round(d.revenue)]) });
+  const hours = ((hourlyDay?.rows ?? []) as HourRow[]).filter((h) => h.orders > 0).sort((a, b) => a.hour - b.hour);
+  if (hours.length) out.push({ title: "Busy hours", head: ["Hour", "Orders", "Revenue"], rows: hours.map((h) => [`${h.hour % 12 === 0 ? 12 : h.hour % 12} ${h.hour < 12 ? "AM" : "PM"}`, h.orders, Math.round(h.revenue)]) });
+  return out;
+}
+
 // ── Menu-engineering quadrant (client-only view over the dishes payload) ──────
 type MI = { title: string; qty: number; revenue: number };
 type Klass = "star" | "workhorse" | "puzzle" | "dog";
@@ -137,13 +195,31 @@ export default function OwnerReports() {
   // fires against the wrong scope in the meantime. "" = all restaurants.
   const [rid, setRid] = useState<string>("");
   const [sel, setSel] = useState<RKey | "">("");         // "" = hub
-  // Deep link from the dashboard's KPI boxes (owner round-3: "the top five box …
-  // should take you to the report section"): /owner/reports?open=<type> lands on
-  // that report directly instead of the hub.
+  const [sub, setSub] = useState<string>("");            // active sub-tab key ("" = first)
+  // A KPI drill-box inside Payments opens the discount / cancellation detail as an OVERLAY
+  // (owner 2026-07-26: "make a whole popup … you don't have to make a whole sub-report").
+  const [payDetail, setPayDetail] = useState<"" | "discounts" | "cancellations">("");
+  // Deep link from the dashboard's KPI boxes (owner round-3: "the top five box … should take
+  // you to the report section"): /owner/reports?open=<type>. `type` may be a NEW report key or
+  // an OLD sub-report name — map old names onto the report + sub-tab (or payment overlay) that
+  // now contains them, so existing dashboard links keep landing on the right thing.
+  const openAlias = (raw: string): { sel: RKey; sub?: string; pay?: "discounts" | "cancellations" } | null => {
+    const k = raw as BodyKey | RKey;
+    const map: Record<string, { sel: RKey; sub?: string; pay?: "discounts" | "cancellations" }> = {
+      daysummary: { sel: "daysummary" }, sales: { sel: "sales" }, tax: { sel: "tax" }, payments: { sel: "payments" },
+      items: { sel: "items" }, timing: { sel: "timing" },
+      avgbill: { sel: "sales", sub: "avgbill" }, volume: { sel: "sales", sub: "volume" },
+      weekday: { sel: "timing", sub: "weekday" }, hourly: { sel: "timing", sub: "hours" }, daypart: { sel: "timing", sub: "dayparts" },
+      dishes: { sel: "items", sub: "items" }, categories: { sel: "items", sub: "categories" }, menu: { sel: "items", sub: "menu" },
+      discounts: { sel: "payments", pay: "discounts" }, cancellations: { sel: "payments", pay: "cancellations" },
+    };
+    return map[k] ?? null;
+  };
   useEffect(() => {
     const open = new URLSearchParams(window.location.search).get("open");
-    if (open) setSel(open as RKey);
-  }, []);
+    const a = open && openAlias(open);
+    if (a) { setSel(a.sel); if (a.sub) setSub(a.sub); if (a.pay) setPayDetail(a.pay); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Scroll memory (owner 2026-07-26: "when I click back it takes me to the top — it
   // should keep me where I was"). The owner panel scrolls INSIDE `.adm-main`, not the
@@ -151,10 +227,12 @@ export default function OwnerReports() {
   // the report; going back to the hub restores exactly where the owner was browsing.
   const scroller = () => (typeof document === "undefined" ? null : document.querySelector<HTMLElement>(".adm-main"));
   const hubScroll = useRef(0);
-  const openReport = useCallback((k: RKey) => {
+  const openReport = useCallback((k: RKey, opts?: OpenOpts) => {
     setSel((cur) => { if (cur === "") { const el = scroller(); if (el) hubScroll.current = el.scrollTop; } return k; });
+    setSub(opts?.sub ?? "");                 // land on a named sub-tab, else the report's first
+    setPayDetail(opts?.pay ?? "");           // optionally pop a Payments detail overlay
   }, []);
-  const backToHub = useCallback(() => setSel(""), []);
+  const backToHub = useCallback(() => { setSel(""); setSub(""); setPayDetail(""); }, []);
   // Restore the right scroll position AFTER the view swaps, before the browser paints.
   useIso(() => {
     const el = scroller();
@@ -165,6 +243,14 @@ export default function OwnerReports() {
   // The mobile/desktop BACK button (and browser back) closes the open report back to the
   // hub instead of leaving the panel — same back-layer contract every owner overlay uses.
   useBackClose("owner-report-view", !!sel, backToHub);
+  // The ONE top-strip breadcrumb's "Reports" segment (rendered by OwnerShell from the
+  // section label) dispatches this when clicked. On the reports route it can only come from
+  // that segment, so treat it as "back to the hub" — a single path, no second crumb row.
+  useEffect(() => {
+    const onHome = () => backToHub();
+    window.addEventListener("lfh:owner-open-restaurant", onHome);
+    return () => window.removeEventListener("lfh:owner-open-restaurant", onHome);
+  }, [backToHub]);
   const [range, setRange] = useState<Range>("30d");
   const [day, setDay] = useState<string>(istToday());          // Day summary's single date
   const [cFrom, setCFrom] = useState<string>(istToday());       // Custom range from…
@@ -256,26 +342,58 @@ export default function OwnerReports() {
       });
   }, [scopePin]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const activeKind: DataKind = sel ? REPORTS[sel].kind : "money";
+  // The active body (sub-tab aware) and the payload it reads. The hub reads "money".
+  const bodyKey: BodyKey = sel ? bodyKeyFor(sel, sub) : "sales";
+  const activeKind: DataKind = sel ? BODY_KIND[bodyKey] : "money";
   const isDayKind = DAY_KINDS.has(activeKind);
   const fdate = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   const effLabel = isDayKind ? fdate(day) : range === "custom" ? `${fdate(cFrom)} – ${fdate(cTo)}` : rangeLabel(range);
   const isCustom = !isDayKind && range === "custom";
   const customOk = !isCustom || (cFrom <= cTo && !!cFrom && !!cTo);
+  // Payments folds in discounts + cancellations (they read the "money" payload) as detail
+  // overlays, so fetch that alongside the settlement payload when Payments is open.
+  const needMoneyToo = sel === "payments";
+  // Day summary also bundles that day's DISHES + BUSY HOURS (owner 2026-07-26: "in the daily
+  // report there is no dish info — it should be added … all the report for that day"). Both
+  // are fetched scoped to the SINGLE chosen day.
+  const dayEff = { range: "custom" as Range, from: day, to: day };
+  const dayKeyFor = (kind: DataKind) => `${kind}|${rid}|custom|${day}|${day}`;
   useEffect(() => {
     if (!ready) return;
     if (isCustom && !customOk) return;                      // wait for a valid custom range
     ensure(activeKind, rid, range, effFor(activeKind, range));
+    if (needMoneyToo) ensure("money", rid, range, effFor("money", range));
+    if (sel === "daysummary") { ensure("dishes", rid, "custom", dayEff); ensure("hourly", rid, "custom", dayEff); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, activeKind, rid, range, day, cFrom, cTo, ensure]);
+  }, [ready, activeKind, rid, range, day, cFrom, cTo, ensure, needMoneyToo, sel]);
 
   const entry = store[cacheKey(activeKind, rid, range)];
   const data = entry?.data;
+  const moneyEntry = store[cacheKey("money", rid, range)];
+  const dishesDay = store[dayKeyFor("dishes")]?.data;
+  const hourlyDay = store[dayKeyFor("hourly")]?.data;
   const restName = rid ? (rests.find((r) => r.id === rid)?.name ?? "This restaurant") : "All restaurants";
   // Charts follow the owner-panel THEME (green), not each restaurant's brand colour —
   // a brown/orange/red chart inside the green owner console read as a bug (owner 2026-07-25).
   const accent = "var(--accent)";
   const singleRest = !!rid;
+
+  // Sub-tabs for the current report + the export meta for whatever sub-view is showing.
+  const subTabs = sel ? SUBTABS[sel] : [];
+  const activeSubKey = subTabs.length ? (subTabs.find((t) => t.key === sub)?.key ?? subTabs[0].key) : "";
+  const activeSubLabel = subTabs.find((t) => t.key === activeSubKey)?.label ?? "";
+  const exportMeta = { label: sel ? REPORTS[sel].label + (activeSubLabel ? ` · ${activeSubLabel}` : "") : "", kind: BODY_KIND[bodyKey] };
+
+  // ── ONE breadcrumb (owner 2026-07-26: "not two different paths — on the top only") ──
+  // Feed the open report (and its sub-tab / open overlay) into the SHELL's single top path
+  // — Owner › Reports › Day summary — and drop the page's own second crumb row. Cleared on
+  // hub and on unmount so the top path always mirrors exactly where you are.
+  const payLabel = payDetail === "discounts" ? "Discounts" : payDetail === "cancellations" ? "Cancellations" : "";
+  useEffect(() => {
+    const tail = sel ? [REPORTS[sel].label, ...(activeSubLabel ? [activeSubLabel] : []), ...(payLabel ? [payLabel] : [])] : [];
+    window.dispatchEvent(new CustomEvent("lfh:owner-crumb", { detail: { tail } }));
+    return () => { window.dispatchEvent(new CustomEvent("lfh:owner-crumb", { detail: { tail: [] } })); };
+  }, [sel, activeSubLabel, payLabel]);
 
   return (
     <div className="rs-root">
@@ -283,14 +401,17 @@ export default function OwnerReports() {
 
       <div className="rs-head">
         <div>
-          {sel && (
-            <div className="rs-crumb">
-              <button onClick={backToHub}><i className="fas fa-arrow-left" aria-hidden /> Reports</button>
-              <span>/</span><span style={{ color: "var(--text)" }}>{REPORTS[sel].label}</span>
-            </div>
+          {/* The path lives ONCE in the shell's top strip (Owner › Reports › …) — no second
+              crumb row here (owner 2026-07-26). A report just shows a back link; its title is
+              the rs-rtitle below. The hub shows the section heading. */}
+          {sel ? (
+            <button className="rs-back" onClick={backToHub}><i className="fas fa-arrow-left" aria-hidden /> All reports</button>
+          ) : (
+            <>
+              <h1 className="rs-h1">Reports</h1>
+              <p className="rs-sub">Every report you need, on demand — pick one, choose a period, then print or download it.</p>
+            </>
           )}
-          {!sel && <h1 className="rs-h1">Reports</h1>}
-          {!sel && <p className="rs-sub">Every report you need, on demand — pick one, choose a period, then print or download it.</p>}
         </div>
       </div>
 
@@ -326,8 +447,8 @@ export default function OwnerReports() {
           /* Phase 3: professional section-scoped Print / CSV / Excel (was a raw CSV +
              UI print). Builds a clean standalone document for THIS report + period. */
           <div className="rs-actions">
-            {data && <SectionExport filename={`${REPORTS[sel].label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${isDayKind ? day : range === "custom" ? `${cFrom}_${cTo}` : range}-${new Date().toISOString().slice(0, 10)}`}
-              ctx={{ meta: REPORTS[sel], data, restName, periodLabel: effLabel, isTax: sel === "tax", bucketLabel }} />}
+            {data && <SectionExport filename={`${exportMeta.label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${isDayKind ? day : range === "custom" ? `${cFrom}_${cTo}` : range}-${new Date().toISOString().slice(0, 10)}`}
+              ctx={{ meta: exportMeta, data, restName, periodLabel: effLabel, isTax: bodyKey === "tax", bucketLabel, extra: sel === "daysummary" ? dayExtraTables(dishesDay, hourlyDay) : undefined }} />}
           </div>
         ) : (
           /* On the hub: the SAME ask-first compiled statement as the dashboard's Report
@@ -340,21 +461,51 @@ export default function OwnerReports() {
         )}
       </div>
 
+      {/* Sub-tab strip — the merge (owner 2026-07-26): one report, several views, no hop. */}
+      {sel && subTabs.length > 0 && (
+        <div className="rs-subtabs" role="tablist" aria-label={`${REPORTS[sel].label} views`}>
+          {subTabs.map((t) => (
+            <button key={t.key} role="tab" aria-selected={t.key === activeSubKey}
+              className={"rs-subtab" + (t.key === activeSubKey ? " on" : "")} onClick={() => setSub(t.key)}>
+              <i className={`fas ${t.icon}`} aria-hidden /> {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {!sel ? (
-        <Hub range={range} money={entry} restName={restName} accent={accent} onOpen={openReport} />
+        <Hub range={range} money={entry} restName={restName} accent={accent} onOpen={openReport}
+          rests={rests} rid={rid} onPickRest={setRid}
+          briefQs={`type=byrestaurant&range=${range}${range === "custom" ? `&from=${cFrom}&to=${cTo}` : ""}${scp}`} />
       ) : (
-        <ReportView sel={sel} data={data} loading={entry?.loading} error={entry?.error}
+        <ReportView sel={sel} bodyKey={bodyKey} data={data} loading={entry?.loading} error={entry?.error}
           range={range} rangeText={effLabel} accent={accent} restName={restName} singleRest={singleRest}
-          onOpenReport={openReport} />
+          onOpenReport={openReport} payDetail={payDetail} onPayDetail={setPayDetail}
+          moneyData={moneyEntry?.data} dishesDay={dishesDay} hourlyDay={hourlyDay} />
       )}
     </div>
   );
 }
 
-// ── The hub: hero snapshot + categorised report cards ─────────────────────────
-function Hub({ range, money, restName, accent, onOpen }: {
+// ── The hub: hero snapshot + per-restaurant brief + categorised report cards ──
+function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, briefQs }: {
   range: Range; money?: Entry; restName: string; accent: string; onOpen: (k: RKey) => void;
+  rests: Rest[]; rid: string; onPickRest: (id: string) => void; briefQs: string;
 }) {
+  // Per-restaurant brief (owner 2026-07-26: "in the all-restaurants view there will be a
+  // brief report about all the restaurants"). Fetched only when viewing ALL of a
+  // multi-restaurant estate; clicking a card scopes the whole page to that restaurant.
+  const showBrief = !rid && rests.length > 1;
+  const [brief, setBrief] = useState<{ id: string; name: string; accent: string; revenue: number; orders: number }[] | null>(null);
+  useEffect(() => {
+    if (!showBrief) { setBrief(null); return; }
+    let live = true;
+    fetch(`/api/owner/reports?${briefQs}`, { cache: "no-store" }).then((r) => r.json())
+      .then((d) => { if (live && Array.isArray(d.rows)) setBrief(d.rows); }).catch(() => {});
+    return () => { live = false; };
+  }, [showBrief, briefQs]);
+  const briefMax = brief && brief.length ? Math.max(...brief.map((b) => b.revenue), 1) : 1;
+
   const t = money?.data?.totals;
   const rows = (money?.data?.rows ?? []) as MoneyRow[];
   const bucket = money?.data?.bucket || "day";
@@ -389,6 +540,30 @@ function Hub({ range, money, restName, accent, onOpen }: {
         </div>
       </div>
 
+      {showBrief && brief && brief.length > 0 && (
+        <div>
+          <div className="rs-catrow">
+            <span className="ic"><i className="fas fa-trophy" aria-hidden /></span>
+            <b>By restaurant</b><span className="n">{brief.length}</span>
+          </div>
+          <p className="rs-sub" style={{ margin: "0 2px 12px" }}>Total collected per restaurant this period — tap one to see just its reports.</p>
+          <div className="rs-brief">
+            {brief.map((b, i) => (
+              <button key={b.id} className="rs-brief-card" onClick={() => onPickRest(b.id)} title={`See ${b.name}'s reports`}>
+                <div className="rs-brief-top">
+                  <span className="sw" style={{ background: b.accent || "var(--accent)" }} aria-hidden />
+                  <span className="nm">{b.name}</span>
+                  <span className="rk">#{i + 1}</span>
+                </div>
+                <div className="rs-brief-v">{inr(b.revenue)}</div>
+                <div className="rs-brief-sub">{nfmt(b.orders)} order{b.orders === 1 ? "" : "s"}</div>
+                <div className="rs-brief-bar"><span style={{ width: `${Math.max(3, (b.revenue / briefMax) * 100)}%` }} /></div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {CATEGORIES.map((cat) => (
         <div key={cat.key}>
           <div className="rs-catrow">
@@ -414,10 +589,12 @@ function Hub({ range, money, restName, accent, onOpen }: {
 }
 
 // ── The report view (title + loading/error, delegates body) ───────────────────
-function ReportView({ sel, data, loading, error, range, rangeText, accent, restName, singleRest, onOpenReport }: {
-  sel: RKey; data?: Payload; loading?: boolean; error?: string;
+function ReportView({ sel, bodyKey, data, loading, error, range, rangeText, accent, restName, singleRest, onOpenReport, payDetail, onPayDetail, moneyData, dishesDay, hourlyDay }: {
+  sel: RKey; bodyKey: BodyKey; data?: Payload; loading?: boolean; error?: string;
   range: Range; rangeText: string; accent: string; restName: string; singleRest: boolean;
-  onOpenReport: (k: RKey) => void;
+  onOpenReport: OpenReport;
+  payDetail: "" | "discounts" | "cancellations"; onPayDetail: (d: "" | "discounts" | "cancellations") => void;
+  moneyData?: Payload; dishesDay?: Payload; hourlyDay?: Payload;
 }) {
   const meta = REPORTS[sel];
   const tone = meta.tone || "accent";
@@ -433,8 +610,40 @@ function ReportView({ sel, data, loading, error, range, rangeText, accent, restN
       ) : loading || !data ? (
         <div className="rs-kpis">{[0, 1, 2, 3].map((i) => <div key={i} className="rs-stat tone-accent" style={{ opacity: .5 }}><div className="rs-stat-k">Loading…</div><div className="rs-stat-v">—</div></div>)}</div>
       ) : (
-        <ReportBody sel={sel} data={data} accent={accent} singleRest={singleRest} onOpenReport={onOpenReport} />
+        <ReportBody bk={bodyKey} data={data} accent={accent} singleRest={singleRest} onOpenReport={onOpenReport}
+          onPayDetail={onPayDetail} dishesDay={dishesDay} hourlyDay={hourlyDay} />
       )}
+      {/* Discount / cancellation DETAIL overlay opened from a Payments KPI box (owner: a
+          popup, not a whole extra sub-report). Reads the money payload. */}
+      {sel === "payments" && payDetail && (
+        <ReportOverlay title={payDetail === "discounts" ? "Discounts given" : "Cancellations"} onClose={() => onPayDetail("")}>
+          {moneyData
+            ? <ReportBody bk={payDetail} data={moneyData} accent={accent} singleRest={singleRest} onOpenReport={onOpenReport} onPayDetail={onPayDetail} />
+            : <div className="rs-kpis">{[0, 1, 2].map((i) => <div key={i} className="rs-stat tone-accent" style={{ opacity: .5 }}><div className="rs-stat-k">Loading…</div><div className="rs-stat-v">—</div></div>)}</div>}
+        </ReportOverlay>
+      )}
+    </div>
+  );
+}
+
+// A full-page detail overlay (owner 2026-07-26: "make a whole popup … you don't have to make
+// a whole sub-report"). Registered as a back layer so hardware/browser Back closes it first.
+function ReportOverlay({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  useBackClose("owner-report-detail", true, onClose);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="rs-ovl" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="rs-ovl-card">
+        <header className="rs-ovl-h">
+          <b>{title}</b>
+          <button className="rs-ovl-x" onClick={onClose} aria-label="Close"><i className="fas fa-xmark" aria-hidden /></button>
+        </header>
+        <div className="rs-ovl-b">{children}</div>
+      </div>
     </div>
   );
 }
@@ -443,7 +652,7 @@ function EmptyCard({ text }: { text: string }) {
   return <Panel><div className="rs-empty"><i className="fas fa-inbox" aria-hidden />{text}</div></Panel>;
 }
 
-function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey; data: Payload; accent: string; singleRest: boolean; onOpenReport: (k: RKey) => void }) {
+function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, dishesDay, hourlyDay }: { bk: BodyKey; data: Payload; accent: string; singleRest: boolean; onOpenReport: OpenReport; onPayDetail?: (d: "" | "discounts" | "cancellations") => void; dishesDay?: Payload; hourlyDay?: Payload }) {
   const bucket = data.bucket || "day";
   const t = data.totals;
   const mrows = (data.rows ?? []) as MoneyRow[];
@@ -467,7 +676,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   const series = chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), revenue: r.revenue }));
 
   // ── DAY SUMMARY ──
-  if (sel === "daysummary") {
+  if (bk === "daysummary") {
     if (!t) return <EmptyCard text="Nothing in this period yet." />;
     const pays = (data.payments || []).map((p) => ({ ...p, method: canonPayMethod(p.method) })).filter((p) => p.revenue > 0);
     const payTotal = pays.reduce((a, p) => a + p.revenue, 0);
@@ -483,7 +692,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} sub={`${nfmt(t.orders)} orders total`} />
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avg)} />
           <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
-          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={`${inr(t.cancelledValue)} lost`} onClick={() => onOpenReport("cancellations")} title="Open the Cancellations report" />
+          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={`${inr(t.cancelledValue)} lost`} onClick={() => onOpenReport("payments", { pay: "cancellations" })} title="Open the Cancellations report" />
         </div>
 
         <div className="rs-daysheet">
@@ -539,6 +748,9 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           </Panel>
         </div>
 
+        {/* The day's DISHES + BUSY HOURS, right on the day sheet (owner 2026-07-26). */}
+        <DayExtras dishesDay={dishesDay} hourlyDay={hourlyDay} accent={accent} />
+
         {series.length > 1 && (
           <>
             <BestWorst
@@ -546,7 +758,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
               money noun="income"
               unit={chartUnit}
             />
-            <Panel title="Revenue through the period" pad={false}>
+            <Panel title="Revenue through the day" pad={false}>
               <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={220} /></div>
             </Panel>
           </>
@@ -556,7 +768,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   }
 
   // ── SALES TREND ──
-  if (sel === "sales") {
+  if (bk === "sales") {
     if (!t) return <EmptyCard text="No sales in this period yet." />;
     return (
       <>
@@ -565,7 +777,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
           <Stat label="Net sales" tone="good" icon="fa-sack-dollar" value={inr(t.subtotal - t.discount)} sub="your earnings, before GST" />
           <Stat label="Item sales" tone="info" icon="fa-cart-shopping" value={inr(t.subtotal)} sub="menu prices, before discount" />
           <Stat label="GST collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} sub="held for the government" onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
-          <Stat label="Discounts" tone="warn" icon="fa-tag" value={inr(t.discount)} onClick={() => onOpenReport("discounts")} title="Open the Discounts report" />
+          <Stat label="Discounts" tone="warn" icon="fa-tag" value={inr(t.discount)} onClick={() => onOpenReport("payments", { pay: "discounts" })} title="Open the Discounts report" />
         </div>
         <Panel title="Revenue over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={240} /></div>
@@ -583,7 +795,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   }
 
   // ── AVERAGE BILL ──
-  if (sel === "avgbill") {
+  if (bk === "avgbill") {
     if (!t) return <EmptyCard text="No paid bills in this period yet." />;
     const avgSeries = chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), revenue: r.paidOrders ? Math.round(r.revenue / r.paidOrders) : 0 }));
     const avg = t.paidOrders ? t.revenue / t.paidOrders : 0;
@@ -592,7 +804,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
       <>
         <div className="rs-kpis">
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" big value={inr(avg)} sub="revenue ÷ paid bills" spark={avgSeries.map((s) => s.revenue)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
-          <Stat label="Paid bills" tone="accent" icon="fa-receipt" value={nfmt(t.paidOrders)} onClick={() => onOpenReport("volume")} title="Open the Order volume report" />
+          <Stat label="Paid bills" tone="accent" icon="fa-receipt" value={nfmt(t.paidOrders)} onClick={() => onOpenReport("sales", { sub: "volume" })} title="Open the Order volume report" />
           <Stat label="Highest bucket" tone="good" icon="fa-arrow-up" value={inr(withData.length ? Math.max(...withData) : 0)} />
           <Stat label="Lowest bucket" tone="warn" icon="fa-arrow-down" value={inr(withData.length ? Math.min(...withData) : 0)} />
         </div>
@@ -613,7 +825,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   }
 
   // ── ORDER VOLUME ──
-  if (sel === "volume") {
+  if (bk === "volume") {
     if (!t) return <EmptyCard text="No orders in this period yet." />;
     const vol = chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), value: r.orders }));
     const placed = t.orders + t.cancelledOrders;
@@ -625,7 +837,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
         <div className="rs-kpis">
           <Stat label="Orders placed" tone="info" icon="fa-list-check" big value={nfmt(placed)} sub={`${nfmt(t.paidOrders)} paid · ${nfmt(t.cancelledOrders)} cancelled`} spark={vol.map((v) => v.value)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
           <Stat label="Paid bills" tone="good" icon="fa-circle-check" value={nfmt(t.paidOrders)} sub={`${paidPct.toFixed(0)}% of placed`} />
-          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={placed ? `${((t.cancelledOrders / placed) * 100).toFixed(1)}% of placed` : ""} onClick={() => onOpenReport("cancellations")} title="Open the Cancellations report" />
+          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={placed ? `${((t.cancelledOrders / placed) * 100).toFixed(1)}% of placed` : ""} onClick={() => onOpenReport("payments", { pay: "cancellations" })} title="Open the Cancellations report" />
           <Stat label={`Busiest ${unitWord}`} tone="accent" icon="fa-fire" value={nfmt(vol.length ? Math.max(...vol.map((v) => v.value)) : 0)} sub={`orders in one ${unitWord}`} />
         </div>
         <SplitBar
@@ -648,7 +860,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   }
 
   // ── DAY OF WEEK ──
-  if (sel === "weekday") {
+  if (bk === "weekday") {
     if (bucket !== "day") return <EmptyCard text="Pick a daily period (7 days, 30 days, this or last month) to see the day-of-week breakdown." />;
     const NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const by = new Map<string, { rev: number; orders: number; days: number }>();
@@ -728,7 +940,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   }
 
   // ── TAX / GST ──
-  if (sel === "tax") {
+  if (bk === "tax") {
     if (!t) return <EmptyCard text="No taxable sales in this period yet." />;
     const taxable = t.subtotal - t.discount;                       // the value tax is charged on
     const actualPct = taxable ? (t.tax / taxable) * 100 : 0;       // rate the numbers actually realised
@@ -813,7 +1025,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   }
 
   // ── DISCOUNTS GIVEN ──
-  if (sel === "discounts") {
+  if (bk === "discounts") {
     if (!t) return <EmptyCard text="No sales in this period yet." />;
     const discRows = mrows.filter((r) => r.discount > 0);
     const effPct = t.subtotal ? (t.discount / t.subtotal) * 100 : 0;
@@ -864,7 +1076,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   }
 
   // ── CANCELLATIONS ──
-  if (sel === "cancellations") {
+  if (bk === "cancellations") {
     if (!t) return <EmptyCard text="No orders in this period yet." />;
     const cxRows = mrows.filter((r) => r.cancelledOrders > 0);
     const placed = t.orders + t.cancelledOrders;
@@ -914,7 +1126,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   }
 
   // ── PAYMENT SETTLEMENT ──
-  if (sel === "payments") {
+  if (bk === "payments") {
     const raw = (data.rows ?? []) as PayRow[];
     if (!raw.length) return <EmptyCard text="No payments recorded in this period." />;
     // Merge by canonical method (mirrors PaymentDonut) so the table and the donut agree.
@@ -935,10 +1147,12 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
       <>
         <div className="rs-kpis">
           <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(total)} sub={`${nfmt(bills)} bills settled`} />
-          <Stat label="Bills settled" tone="info" icon="fa-receipt" value={nfmt(bills)} />
-          <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avgBill)} />
           <Stat label="Top method" tone="good" icon="fa-wallet" value={canonPayMethod(top?.method)} sub={`${Math.round(topShare)}% of money · ${nfmt(top?.orders || 0)} bills`} onClick={() => scrollToId("rs-pay-method")} title="Jump to the per-method table" />
-          <Stat label="Methods used" tone="info" icon="fa-layer-group" value={nfmt(pays.length)} onClick={() => scrollToId("rs-pay-method")} title="Jump to the per-method table" />
+          <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avgBill)} />
+          {/* Discounts + cancellations fold in here as drill-boxes → open a detail overlay
+              (owner 2026-07-26: a box on top that opens the full detail, not a sub-report). */}
+          <Stat label="Discounts given" tone="warn" icon="fa-tag" value="View" sub="what was given away" onClick={onPayDetail ? () => onPayDetail("discounts") : undefined} title="Open the discounts detail" />
+          <Stat label="Cancellations" tone="bad" icon="fa-ban" value="View" sub="value lost to voids" onClick={onPayDetail ? () => onPayDetail("cancellations") : undefined} title="Open the cancellations detail" />
         </div>
         <div className="rs-grid two">
           <Panel id="rs-pay-method" title="Per method" hint="bills, money and average" pad={false}>
@@ -977,29 +1191,26 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
     );
   }
 
-  // ── ITEM SALES ──
-  if (sel === "dishes") {
+  // ── ITEMS & MENU (sub-tabs of one report) ── the cross-drills switch sub-tab, not report.
+  const itemsSub = (k: string) => { if (k === "menu") onOpenReport("items", { sub: "menu" }); else if (k === "categories") onOpenReport("items", { sub: "categories" }); else onOpenReport("items", { sub: "items" }); };
+  if (bk === "dishes") {
     const dishes = (data.rows ?? []) as DishRow[];
     if (!dishes.length) return <EmptyCard text="No dish sales in this period." />;
-    return <DishesReport rows={dishes} onOpenReport={onOpenReport} />;
+    return <DishesReport rows={dishes} onOpenReport={itemsSub} />;
   }
-
-  // ── CATEGORY MIX ──
-  if (sel === "categories") {
+  if (bk === "categories") {
     const cats = (data.rows ?? []) as CatRow[];
     if (!cats.length) return <EmptyCard text="No category sales in this period." />;
-    return <CategoriesReport rows={cats} onOpenReport={onOpenReport} />;
+    return <CategoriesReport rows={cats} onOpenReport={itemsSub} />;
   }
-
-  // ── MENU ENGINEERING ──
-  if (sel === "menu") {
+  if (bk === "menu") {
     const mrowsMenu = (data.rows ?? []) as MI[];
     if (!classifyMenu(mrowsMenu).dishes.length) return <EmptyCard text="No dish sales in this period." />;
-    return <MenuReport rows={mrowsMenu} onOpenReport={onOpenReport} />;
+    return <MenuReport rows={mrowsMenu} onOpenReport={itemsSub} />;
   }
 
   // ── BUSY HOURS ──
-  if (sel === "hourly") {
+  if (bk === "hourly") {
     const hrs = (data.rows ?? []) as HourRow[];
     if (!hrs.length) return <EmptyCard text="No orders in this period yet." />;
     // 12-hour clock label ("2 PM") — friendlier than "14:00" on a customer-facing report.
@@ -1068,7 +1279,7 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   }
 
   // ── DAY PARTS ──
-  if (sel === "daypart") {
+  if (bk === "daypart") {
     const hrs = (data.rows ?? []) as HourRow[];
     if (!hrs.length) return <EmptyCard text="No orders in this period yet." />;
     const byHour = new Map(hrs.map((h) => [h.hour, h]));
@@ -1134,6 +1345,40 @@ function ReportBody({ sel, data, accent, singleRest, onOpenReport }: { sel: RKey
   }
 
   return <EmptyCard text="Report not available." />;
+}
+
+// ── The day's dishes + busy hours, shown inside the Day summary ───────────────
+// Reuses the same dish/hourly payloads the standalone reports use, scoped to the one day.
+function DayExtras({ dishesDay, hourlyDay, accent }: { dishesDay?: Payload; hourlyDay?: Payload; accent: string }) {
+  const dishes = ((dishesDay?.rows ?? []) as DishRow[]).filter((d) => d.qty > 0);
+  const hours = ((hourlyDay?.rows ?? []) as HourRow[]).filter((h) => h.orders > 0);
+  if (!dishes.length && !hours.length) return null;
+  const topDishes = [...dishes].sort((a, b) => b.revenue - a.revenue).slice(0, 8);
+  const dishTotal = dishes.reduce((a, d) => a + d.revenue, 0);
+  const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`;
+  const hourSeries = Array.from({ length: 24 }, (_, h) => ({ label: hourLabel(h), value: hours.find((x) => x.hour === h)?.revenue || 0 }));
+  const peak = hours.length ? [...hours].sort((a, b) => b.revenue - a.revenue)[0] : null;
+  return (
+    <div className="rs-grid two" style={{ marginTop: 14 }}>
+      {topDishes.length > 0 && (
+        <Panel title="Top items" hint={`${nfmt(dishes.length)} sold`} pad={false}>
+          <div className="rs-tablewrap">
+            <table className="rs-table">
+              <thead><tr><th>Dish</th><th className="num">Qty</th><th className="num">Sales</th><th className="num">% of items</th></tr></thead>
+              <tbody>{topDishes.map((d) => (
+                <tr key={d.title}><td>{d.title}</td><td className="num">{nfmt(d.qty)}</td><td className="num"><b>{inr(d.revenue)}</b></td><td className="num">{dishTotal ? ((d.revenue / dishTotal) * 100).toFixed(1) : "0.0"}%</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+      {hours.length > 0 && (
+        <Panel title="Busy hours" hint={peak ? `peak ${hourLabel(peak.hour)}` : undefined} pad={false}>
+          <div style={{ padding: 12 }}><ToggleChart data={hourSeries} color={accent} money height={200} title="When the money came in" /></div>
+        </Panel>
+      )}
+    </div>
+  );
 }
 
 // ── Shared money table (sales / avgbill / volume / tax) ───────────────────────

@@ -165,7 +165,7 @@ export async function GET(req: NextRequest) {
   // The restaurants this call may touch (for the merged all-restaurants shapes).
   const ridList: (string | null)[] = rid ? [rid] : scope.all ? [null] : scope.ids;
 
-  const KNOWN = new Set(["sales", "tax", "discounts", "cancellations", "daysummary", "dishes", "categories", "hourly", "payments"]);
+  const KNOWN = new Set(["sales", "tax", "discounts", "cancellations", "daysummary", "dishes", "categories", "hourly", "payments", "byrestaurant"]);
   if (!KNOWN.has(type)) return NextResponse.json({ error: "unknown report type" }, { status: 400 });
   // Compute-on-view snapshot cache (mig 196): a normal open serves the stored JSON instantly;
   // ?refresh=1 (the Refresh button) forces a live recompute + re-store. Keyed by the already-
@@ -344,6 +344,19 @@ export async function GET(req: NextRequest) {
       const rows: Row[] = mergeBy(rowsets, keyCol, numeric)
         .map((r) => ({ ...r, revenue: num(r.revenue) }));
       rows.sort((a, b) => (type === "hourly" ? Number(a.hour) - Number(b.hour) : Number(b.revenue) - Number(a.revenue)));
+      return { type, range, rows };
+    }
+
+    // ── per-restaurant brief (all-restaurants hub leaderboard) ──
+    // One grouped call returns each in-scope restaurant's revenue + orders for the window.
+    if (type === "byrestaurant") {
+      const pIds = scope.all ? null : scope.ids;
+      const res = await sb.rpc("lfh_owner_restaurant_revenue", { p_from: from, p_to: to, p_ids: pIds });
+      if (res.error) throw res.error;
+      const rows = ((res.data ?? []) as Row[]).map((r) => ({
+        id: r.restaurant_id, name: r.name, accent: r.accent_color || "",
+        revenue: num(r.revenue), orders: Number(r.orders) || 0,
+      })).sort((a, b) => b.revenue - a.revenue);
       return { type, range, rows };
     }
 

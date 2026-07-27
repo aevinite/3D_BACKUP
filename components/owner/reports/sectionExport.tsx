@@ -36,6 +36,7 @@ export type SectionCtx = {
   meta: SectionMeta; data: Payload; restName: string; periodLabel: string;
   isTax?: boolean;   // the Tax/GST report → append the CGST/SGST split table
   bucketLabel: (iso: string, bucket: string) => string;
+  extra?: ExportTable[];   // extra tables appended to print/CSV (Day summary: dishes + hours)
 };
 
 // ── build the flat tables (CSV / Excel) for the current section ──────────────
@@ -53,6 +54,7 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
       out.push({ title: `${meta.label} — tax split`, head: ["Component", "Rate %", "Collected"],
         rows: [["Total tax", data.tax.effectivePct, t?.tax ?? 0], ...splitTax(data.tax.components.map((x) => x.rate), t?.tax ?? 0).map((amt, i) => [data.tax!.components[i].label, data.tax!.components[i].rate, amt] as (string | number)[])] });
     }
+    if (c.extra?.length) out.push(...c.extra);   // Day summary: the day's dishes + busy hours
     return out;
   }
   if (meta.kind === "dishes") return [{ title, head: ["Dish", "Qty sold", "Item sales (list price)"], rows: ((data.rows ?? []) as { title: string; qty: number; revenue: number }[]).map((r) => [r.title, r.qty, Math.round(r.revenue)]) }];
