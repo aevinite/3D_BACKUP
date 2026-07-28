@@ -779,7 +779,7 @@ function blank(tab) {
     return {
       id: "", slug: "", title: "", price: "", image: "",
       category: (state.data.categories[0] || {}).slug || "",
-      veg: false, is4d: false, model_folder: "",
+      veg: false, is4d: false, open_price: false, model_folder: "",
       model_small_url: "", model_optimized_url: "",
       description: "", long_description: "", rating: "", time: "", search_alias: "",
       nutrition: { calories: "", protein: "", carbs: "", sugar: "" },
@@ -965,6 +965,8 @@ function formItems(it) {
         ? "🚫 Not available right now — tap to make available"
         : "✅ Available — tap to mark not available"}
     </button>
+    <div style="margin-top:14px">${toggle("💰 Open price — staff type the price at order time", "open_price", it.open_price)}</div>
+    <span class="hint">For as-per-MRP / market-price items (a soft-drink can, mineral water…). When on, the tablet shows “Set price” and the waiter enters the amount each time — the Price field above is ignored, and the dish is hidden from the guest menu.</span>
   </div>
 
   <div class="card"><h3>Image</h3>
