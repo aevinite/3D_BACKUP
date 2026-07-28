@@ -9325,7 +9325,12 @@ const XRAY_CONTROLS = [
   { selector: '.list-item[data-settings-section="sessions"]', flag: "admin_only_setting", label: "Dining sessions" },
   { selector: '[data-mgr-hide="table_count"]', flag: "admin_only_setting", label: "Number of tables" },
 ];
-let XRAY_WHO = null;
+// `var`, not `let`: this is read by render/permission helpers defined FAR earlier
+// in the file (canDeleteBill, hierarchy checks, the Tables tab render…). With `let`
+// a render that fires during boot — before this line executes — hit the temporal
+// dead zone and threw "Cannot access 'XRAY_WHO' before initialization", breaking the
+// Tables tab. `var` hoists, so an early read safely sees undefined instead.
+var XRAY_WHO = null;
 
 // Where "change this" points: the admin jumps to the Access hub deep-linked to the EXACT
 // control (?focus=<flag> — the Access page scrolls to it and flashes it, owner 2026-07-28);
