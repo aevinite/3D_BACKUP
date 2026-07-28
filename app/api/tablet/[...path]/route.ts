@@ -259,7 +259,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // slim (nomenu) load it's never issued at all.
       const dishesP = nomenu
         ? null
-        : sb.from("menu_items").select("id,title,price,category,tags,veg,options").eq("restaurant_id", rid).order("category");
+        : sb.from("menu_items").select("id,title,price,category,tags,veg,options,open_price").eq("restaurant_id", rid).order("category");
       const [settings, categories, restaurant] = await Promise.all([
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
@@ -543,7 +543,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { items, customer, phone, note, allergies, paid, method } = body || {};
       if (!Array.isArray(items) || !items.length) return err("items required");
       const ids = [...new Set(items.map((i: any) => String(i?.id || "")).filter(Boolean))];
-      const menu = (must(await sb.from("menu_items").select("id,title,price").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown }[];
+      const menu = (must(await sb.from("menu_items").select("id,title,price,open_price").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown; open_price?: boolean }[];
       const byId = new Map(menu.map((d) => [String(d.id), d]));
       const picked: { title: string; qty: number; price: number; note?: string }[] = [];
       let total = 0;
@@ -551,7 +551,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const d = byId.get(String(it?.id || ""));
         if (!d) continue;
         const qty = Math.max(1, Math.min(99, Number(it?.qty) || 1));
-        const price = Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
+        // Open-price dish: staff typed the price at order time — honour it (clamped), don't
+        // read the (empty) DB price. A missing/zero price on an open-price line is refused.
+        let price: number;
+        if (d.open_price) {
+          price = Math.max(0, Math.min(100000, Number(String(it?.price ?? "").replace(/[^0-9.]/g, "")) || 0));
+          if (price <= 0) return err(`Enter a price for "${d.title}".`, 400);
+          price = Math.round(price * 100) / 100;
+        } else {
+          price = Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
+        }
         const line: { title: string; qty: number; price: number; note?: string } = { title: d.title, qty, price };
         const ln = String(it?.note || "").trim().slice(0, 200);
         if (ln) line.note = ln;
@@ -1036,6 +1045,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const line = {
         id: dishId,
         qty: Math.max(1, Math.round(Number(body?.qty) || 1)),
+        // Staff-typed price for open-price dishes; the RPC's pricer honours it only when the
+        // dish is flagged open_price, and clamps it — normal dishes stay DB-priced.
+        price: body?.price != null ? String(body.price) : undefined,
         options: Array.isArray(body?.options) ? body.options : undefined,
         removed: Array.isArray(body?.removed) ? body.removed : undefined,
         note: body?.note ? String(body.note) : undefined,
