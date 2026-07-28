@@ -11,6 +11,11 @@
 //         the dashboard red button, and the red styling in Logs)
 //   3. one 'error_resolved' diary line, so the activity log shows who cleared it
 //
+// Step 2 is belt-and-braces: mig 183's trigger already clears the group when status flips (present
+// on BOTH databases, checked 2026-07-28). Doing it explicitly still earns its keep — it reports the
+// exact count back to the terminal, writes the diary line the trigger doesn't, and still clears the
+// board for a ticket that was already marked fixed (the trigger only fires on a status CHANGE).
+//
 // Usage:
 //   node scripts/resolve-fix-request.mjs --id <fix-request-uuid> [--pr <url>] [--stack dev|av]
 //                                        [--status fixed|dismissed] [--actor "Claude live fix"] [--dry]

@@ -9,7 +9,9 @@ is ambiguous instead of guessing.
 **FINISH THE WHOLE JOB IN THIS SESSION (owner 2026-07-28 — the point of "Fix NOW").** One press
 of that button must end with: the problem fixed, the fix LIVE on the site, and the ticket +
 its red tile cleared on the website — done BY YOU, not left for the owner. Do not stop at "PR
-opened, please merge". The only pauses allowed are the three named in step 5.
+opened, please merge". The only pauses allowed are the ones named in step 5: a risky change
+(money/tax, a database migration, login/permission), shipping to AV live, or genuine doubt about
+what to touch. Everything else you decide and ship.
 
 ## Do this, in order
 
