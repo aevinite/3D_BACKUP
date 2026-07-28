@@ -83,6 +83,27 @@ export async function logError(
 ): Promise<void> {
   const msg = err instanceof Error ? err.message : String(err ?? "unknown error");
   const detail = `${fields.detail ? fields.detail + " — " : ""}${msg}`.slice(0, 500);
+
+  // Has this exact KIND of problem already been dealt with? (error_signatures, mig 218.)
+  //   • marked "not a problem" → the row is still written for the audit trail, but pre-resolved so
+  //     it never alarms again (owner: an unnecessary error "should not pop up only").
+  //   • fixed, and this is a NEW occurrence → the fix did not hold. It stays LOUD; we only count it
+  //     so Repair can label it "came back after the fix". Fixed has to mean gone, not hidden.
+  // Fail-open in every direction: any trouble reading the memory and we alarm exactly as before.
+  const seenAt = new Date().toISOString();
+  let mute = false;
+  let memId: string | null = null;
+  try {
+    const { lookupErrorMemory } = await import("@/lib/errorMemory");
+    const mem = await lookupErrorMemory({ panel, action, detail, restaurantId: fields.restaurant_id ?? null });
+    if (mem) {
+      memId = mem.id;
+      mute = mem.state === "ignored";
+    }
+  } catch {
+    /* no memory available → behave like before this feature existed */
+  }
+
   try {
     await sb.from("staff_actions").insert({
       // panel is a free-text column; 'db'/'guest' are valid tags for non-staff origins.
@@ -95,13 +116,20 @@ export async function logError(
       actor: fields.actor ?? null,
       actor_id: fields.actor_id ?? null,
       level: "error",
+      // Pre-resolved ONLY for an owner-muted signature: keeps it out of "Problems right now", the
+      // dashboard's red count and the Fix-NOW queue, while the Logs page still shows the row.
+      ...(mute ? { resolved_at: seenAt } : {}),
       ...(fields.restaurant_id !== undefined ? { restaurant_id: fields.restaurant_id } : {}),
     });
   } catch {
     /* never let error-logging break the request */
   }
+  if (memId) { try { const { noteRecurrence } = await import("@/lib/errorMemory"); await noteRecurrence(memId, seenAt); } catch { /* counter only */ } }
+
   // Best-effort outbound alert (grouped, non-blocking). Wrapped so a missing/errored alert
-  // layer can't affect the request.
+  // layer can't affect the request. A muted signature sends no alert either — that is the
+  // whole point of muting it.
+  if (mute) return;
   try {
     const { sendOwnerAlert } = await import("@/lib/alerts");
     await sendOwnerAlert(`⚠️ ${panel}/${action}: ${msg.slice(0, 120)}`, `${panel}:${action}`);

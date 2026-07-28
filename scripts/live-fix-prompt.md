@@ -20,6 +20,16 @@ what to touch. Everything else you decide and ship.
    rows to `.claude/audits/repair-input-<today>.md`. Read it. Your request id is in your opening
    prompt. (The shared folder may sit on an old branch missing that script — if so, run it
    straight from main: `git fetch origin && git show origin/main:scripts/fetch-fix-requests.mjs > /tmp/ffr.mjs && node /tmp/ffr.mjs`.)
+1½. **CHECK IT ISN'T ALREADY FIXED — before you build anything (2026-07-28, learned the hard way).**
+   Several sessions run at once, and the session that CAUSED your error rows (a rush/soak test) is
+   the most likely one to be fixing them right now. Two cheap checks:
+   - the input file's **"Problems already dealt with"** section (`error_signatures`, mig 218) — if
+     your problem is listed as `fixed` with a date AFTER the error rows, the answer already exists:
+     report that and stop, don't rebuild it;
+   - `git fetch origin` then READ the suspect file on main (`git show origin/main:<file>`) and scan
+     `git log origin/main` — a commit subject is not proof, the code is.
+   Re-run the `git fetch` check again immediately BEFORE you ask to merge. On 2026-07-28 skipping
+   this cost ~40 minutes and produced a duplicate PR (#522 vs #527).
 2. **Restate the problem to the owner in one plain sentence** so they can correct you before you
    spend time on the wrong thing. Their note may be voice-transcribed — read past typos.
 3. **Investigate honestly.** Reproduce from the context rows + code reading. If you cannot
