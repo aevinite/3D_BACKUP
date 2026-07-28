@@ -5611,7 +5611,7 @@ function floorHtml() {
   if (state.selectedTable != null) {
     const t = state.selectedTable;
     const parts = tablePanelParts(t);
-    const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
+    const { headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
     // Pop this table out into the FLOATING layer (owner request, 2026-07-02 — "movable",
     // "many popups at the same time"). Docking back happens from the floating card's own
     // "⇱ Dock" button (bindFloor), not here — this button only ever pops OUT.
@@ -5622,7 +5622,7 @@ function floorHtml() {
           <div class="tp-detail-top"><h3>${esc(tableLabel(t))}</h3>${headPill}${parts.kotHeadBtn || ""}${floatBtn}<button class="tp-detail-close" id="tpDetailClose" aria-label="Back to floor controls" title="Back to floor controls">✕</button></div>
           ${headMeta}
         </div>
-        <div class="tp-detail-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div>
+        <div class="tp-detail-body">${requestsSec}${sessionSec}${ordersSec}${callsSec}${billSec}</div>
         <div class="tp-detail-foot">${foot}</div>
       </div>`;
   } else {
@@ -5636,7 +5636,7 @@ function floorHtml() {
   // pinned ones (dragged) keep the exact x/y/w they were dropped at.
   const floatingLayerHtml = state.floatingTables.map((f) => {
     const parts = tablePanelParts(f.table);
-    const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
+    const { headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
     const dockBtn = isPhoneLayout() ? "" : `<button class="tp-detail-float" data-float-dock="${esc(f.table)}" title="Dock back to the side panel">⇱ Dock</button>`; // no side panel on a phone → nothing to dock into
     // A PINNED card keeps its dragged/resized geometry (x/y/w/h); a free one gets only its
     // auto-arrange width here and its left/top/width from layoutFloatingRow after render.
@@ -5648,7 +5648,7 @@ function floorHtml() {
           <div class="tp-detail-top"><h3>${esc(tableLabel(f.table))}</h3>${headPill}${parts.kotHeadBtn || ""}${dockBtn}<button class="tp-detail-close" data-float-close="${esc(f.table)}" aria-label="Close" title="Close">✕</button></div>
           ${headMeta}
         </div>
-        <div class="tp-detail-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div>
+        <div class="tp-detail-body">${requestsSec}${sessionSec}${ordersSec}${callsSec}${billSec}</div>
         <div class="tp-detail-foot">${foot}</div>
       </div>
       <div class="tp-resize-handle" data-float-resize="${esc(f.table)}" title="Drag to resize"></div>
@@ -5662,13 +5662,12 @@ function floorHtml() {
   // On a PHONE the floor is ALWAYS popup-mode (there's no room for the side panel — owner,
   // 2026-07-03: "on phone, click table = only popup"); the desktop rule is unchanged.
   if (isPhoneLayout() || state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null)) {
-    // The bulk Open-all / Close-all live in the side panel — which is hidden while
-    // collapsed. Without this, "Open all" vanished when the floor was collapsed (owner
-    // 2026-06-27: "open all tables button not working"). Surface them in a small bar on
-    // the collapsed floor so they're always reachable. Same ids → bindFloor wires them;
-    // the side panel's copies never co-exist (the panel isn't rendered when collapsed).
-    const cb = sessionsOn ? `<div class="floor-collapsed-bar"><button class="btn small" id="floorOpenAll" title="Open all tables">⬆ Open all</button><button class="btn small danger" id="floorCloseAll" title="Close all tables">⬇ Close all</button></div>` : "";
-    return `<div class="floor-wrap floor-collapsed">${main}${cb}<button class="floor-side-toggle is-collapsed" id="floorSideToggle" title="Show floor controls" aria-label="Show floor controls">‹</button></div>${floatingLayerHtml}`;
+    // NO floating Open-all/Close-all bar here any more (owner, 2026-07-28): it hovered
+    // over the header and overlapped the New Parcel button. These rarely-used bulk
+    // actions live ONLY in the side panel's "Whole floor" card now — expanding the
+    // panel (the ‹ chevron) is one click away, and a whole-floor action is deliberate
+    // enough to deserve that click.
+    return `<div class="floor-wrap floor-collapsed">${main}<button class="floor-side-toggle is-collapsed" id="floorSideToggle" title="Show floor controls" aria-label="Show floor controls">‹</button></div>${floatingLayerHtml}`;
   }
   const collapseBtn = state.selectedTable == null
     ? `<button class="floor-side-toggle" id="floorSideToggle" title="Hide this panel" aria-label="Hide this panel">›</button>` : "";
@@ -6383,6 +6382,23 @@ function tablePanelParts(t) {
   const sess = openSessionForTable(t);
   const calls = callsForTable(t);
 
+  // ── PENDING REQUESTS for THIS table (a guest tapped "open this table" / "join" /
+  // asked for a waiter on their phone). These used to live ONLY in the floor's side
+  // "Requests" card + the tile's 📨 badge — the table DETAIL (docked, floating popup
+  // AND the legacy modal) never showed them, so staff opening a "Wants in" table saw
+  // just "This table isn't open yet" with no way to accept the person (owner,
+  // 2026-07-28). Built from the ALWAYS-fresh summary (not the per-table slice) so the
+  // card shows even while the slice is still streaming in; an "open" request hides
+  // once the table is actually open (same rule as reqsForTable). The buttons reuse
+  // data-req-approve/deny → resolveRequest and are wired by bindTablePanel, which all
+  // three detail hosts share.
+  const tReqs = (state.summary.requests || []).filter((r) => String(r.table_number) === String(t) && !(r.type === "open" && (sess || summaryTableOpen(t))));
+  const REQ_WORDS = { open: "is asking to open this table", join: "is asking to join this table", access: "asked for a waiter" };
+  const reqOkLabel = (r) => (r.type === "open" ? "✓ Open for them" : r.type === "access" ? "✓ Attend" : "✓ Let them in");
+  const requestsSec = tReqs.length ? `<div class="sx-sec tp-req-sec"><div class="sx-sec-h">📨 Someone's waiting <span class="sub">· ${tReqs.length}</span></div>${tReqs.map((r) =>
+    `<div class="sx-req"><div class="sx-req-info"><b>${esc(r.name || r.phone || "A guest")}</b> ${esc(REQ_WORDS[r.type] || "sent a request")}<small>${esc(timeAgo(r.created_at))}</small></div><div class="sx-req-actions"><button class="btn small" data-req-deny="${esc(r.id)}" title="Dismiss this request">✕</button><button class="btn small primary" data-req-approve="${esc(r.id)}">${reqOkLabel(r)}</button></div></div>`
+  ).join("")}</div>` : "";
+
   // ── INSTANT RENDER (stale-while-revalidate): before this table's full slice has loaded,
   // render the head + a light "loading details…" body from the ALWAYS-fresh summary tile
   // (guests/dishes/due/status — everything but the individual dish rows), so the popup
@@ -6448,7 +6464,7 @@ function tablePanelParts(t) {
     const loadRow = `<div class="sx-loading"><span class="sx-load-dot"></span> Loading details…</div>`;
     const sessionSec = sessionsOn ? `<div class="sx-sec"><div class="sx-sec-h">Guests <span class="sub">· ${guestsN}</span></div>${loadRow}</div>` : "";
     const ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${dishN}</span></div>${loadRow}</div>`;
-    return { sess: null, os: [], canFree: false, headPill, headMeta, sessionSec, ordersSec, callsSec: "", billSec: "", foot: "" };
+    return { sess: null, os: [], canFree: false, headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec: "", billSec: "", foot: "" };
   }
 
   let sessionSec = "";
@@ -6595,7 +6611,7 @@ function tablePanelParts(t) {
   const takeOrderBtn = `<button class="btn primary tp-take-order" data-take-order="${esc(t)}">＋ Take order</button>`;
   const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${kotOn ? "" : splitBtn}<span class="tp-foot-spacer"></span>${tagBtn}${shiftFallbackBtn}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
 
-  return { sess, os, canFree, headPill, headMeta, kotHeadBtn, sessionSec, ordersSec, callsSec, billSec, foot };
+  return { sess, os, canFree, headPill, headMeta, kotHeadBtn, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot };
 }
 
 // Compact dish-picker modal for ADDING a dish to an already-placed order (staff
@@ -7709,6 +7725,12 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   root.querySelectorAll("[data-mem-kick]").forEach((b) => (b.onclick = () => kickMember(b.dataset.memKick)));
   root.querySelectorAll("[data-mem-head]").forEach((b) => (b.onclick = () => makeHead(b.dataset.memHead)));
   root.querySelectorAll("[data-mem-ban]").forEach((b) => (b.onclick = () => banMember(b.dataset.memBan, b.dataset.banPhone)));
+  // Pending open/join/access requests now show INSIDE the detail (tp-req-sec) — approve/
+  // deny here, same resolveRequest the floor's Requests card uses. Must be wired HERE
+  // (not only the delegated #editor handler): the delegated handler deliberately skips
+  // clicks inside [data-table-detail], and the legacy modal lives on document.body.
+  root.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => resolveRequest(b.dataset.reqApprove, "approved")));
+  root.querySelectorAll("[data-req-deny]").forEach((b) => (b.onclick = () => resolveRequest(b.dataset.reqDeny, "denied")));
   const rst = root.querySelector("[data-tp-restart]"); if (rst) rst.onclick = () => restartTable(rst.dataset.tpRestart);
   root.querySelectorAll("[data-item-next]").forEach((b) => (b.onclick = () => itemStatus(b.dataset.itemNext, b.dataset.itemStatus)));
   root.querySelectorAll("[data-legacy-order]").forEach((b) => (b.onclick = () => legacyItemStatus(b.dataset.legacyOrder, b.dataset.legacyIdx, b.dataset.legacyStatus)));
@@ -7733,8 +7755,8 @@ function renderTablePanel() {
   document.querySelector(".tbl-modal-overlay")?.remove();
   const t = state.openSess;
   const parts = tablePanelParts(t);
-  const { headPill, headMeta, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
-  const wrap = el(`<div class="sx-modal-overlay tbl-modal-overlay"><div class="tbl-modal sx-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(tableLabel(t))}</h3>${headPill}${parts.kotHeadBtn || ""}<button class="tbl-modal-close" aria-label="Close">✕</button></div>${headMeta}</div><div class="tbl-modal-body">${sessionSec}${ordersSec}${callsSec}${billSec}</div><div class="tbl-modal-foot">${foot}</div></div></div>`);
+  const { headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
+  const wrap = el(`<div class="sx-modal-overlay tbl-modal-overlay"><div class="tbl-modal sx-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(tableLabel(t))}</h3>${headPill}${parts.kotHeadBtn || ""}<button class="tbl-modal-close" aria-label="Close">✕</button></div>${headMeta}</div><div class="tbl-modal-body">${requestsSec}${sessionSec}${ordersSec}${callsSec}${billSec}</div><div class="tbl-modal-foot">${foot}</div></div></div>`);
   document.body.appendChild(wrap);
   const newModal = wrap.querySelector(".tbl-modal"); if (newModal) newModal.scrollTop = savedScroll;
   wrap.querySelector(".tbl-modal-close").onclick = closeTablePanel;

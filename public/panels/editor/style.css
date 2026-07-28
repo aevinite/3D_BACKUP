@@ -842,6 +842,16 @@ body {
 .sx-sec { border-top: 1px solid var(--line); padding-top: 12px; }
 .sx-sec:first-child { border-top: none; padding-top: 0; }
 .sx-sec-h { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 14px; margin-bottom: 8px; }
+/* "Someone's waiting" card INSIDE the table detail (docked / floating / modal) — the
+   pending open/join/access requests for THIS table, with accept/deny right there.
+   Amber = the same "Wants in" colour the floor tile pulses in (#e7b75a), so the card
+   reads as the reason the tile was shouting. Sits FIRST in the detail body. (Placed
+   AFTER the .sx-sec/.sx-sec:first-child rules on purpose — same-or-later specificity
+   is what lets its border/padding win.) */
+.sx-sec.tp-req-sec, .sx-sec.tp-req-sec:first-child { background: rgba(231,183,90,0.10); border: 1px solid rgba(231,183,90,0.45); border-radius: 12px; padding: 10px 12px; }
+.sx-sec.tp-req-sec .sx-sec-h { color: #e7b75a; } /* bright amber on the dark theme */
+html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* darker amber for contrast on the cream theme */
+.sx-sec.tp-req-sec .sx-req { border-top-color: rgba(231,183,90,0.30); }
 .sx-auto { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .sx-mem, .sx-item, .sx-call { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; }
 /* per-dish line price, pushed to the right just before the Serve button */
@@ -953,10 +963,11 @@ body {
   box-shadow: 0 3px 12px rgba(0,0,0,.20);
 }
 @media (prefers-reduced-motion: reduce) { .floor-side-toggle { transition: none; } .floor-side-toggle:hover { transform: none; } }
-/* Bulk Open-all/Close-all on the COLLAPSED floor (they normally live in the side panel,
-   which is hidden when collapsed) — sit at the top-right, left of the re-open chevron. */
-.floor-collapsed-bar { position: absolute; top: 12px; right: 48px; display: flex; gap: 8px; z-index: 6; }
-@media (max-width: 1040px) { .floor-collapsed-bar { position: static; right: auto; margin: 8px 0 0; } }
+/* (The floating Open-all/Close-all bar on the collapsed floor was removed 2026-07-28 —
+   it overlapped the New Parcel button. The bulk actions live only in the side panel's
+   "Whole floor" card now.) The header keeps clearance for the absolute ‹ chevron so it
+   never sits on the New Parcel button either. */
+.floor-collapsed .floor-main > .ed-head { padding-right: 68px; }
 
 /* Master-detail: the table detail shown IN the right side panel (replacing the
    floor controls when a tile is selected). It reuses all the .sx-* / .tp-order /

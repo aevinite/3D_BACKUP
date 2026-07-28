@@ -437,3 +437,11 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
 - [ ] 3 print-design variants + interactive year→month→day Time-explorer prototype served on
   :49826 for the owner to choose from (design decision pending — owner said keep current
   format, so variants are reference only; Time-explorer = candidate for /owner/reports UI).
+
+## 2026-07-28 — Manager Tables: requests must show IN the table detail + floating bar removal
+- [ ] Table detail (docked side view, floating popup AND legacy modal) shows a "📨 Someone's
+  waiting" card with the pending open/join/access request(s) for THAT table + accept/deny
+  buttons — before, a "Wants in" table's detail just said "This table isn't open yet" with
+  no way to accept the guest.
+- [ ] Floating "⬆ Open all / ⬇ Close all" bar on the collapsed floor REMOVED (it overlapped
+  the New Parcel button); the bulk actions stay in the side panel's "Whole floor" card only.
