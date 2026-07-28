@@ -9326,10 +9326,11 @@ const XRAY_CONTROLS = [
   { selector: '[data-mgr-hide="table_count"]', flag: "admin_only_setting", label: "Number of tables" },
 ];
 // `var`, not `let`: this is read by render/permission helpers defined FAR earlier
-// in the file (canDeleteBill, hierarchy checks, the Tables tab render…). With `let`
-// a render that fires during boot — before this line executes — hit the temporal
-// dead zone and threw "Cannot access 'XRAY_WHO' before initialization", breaking the
-// Tables tab. `var` hoists, so an early read safely sees undefined instead.
+// in the file (canDeleteBill, platformHtml, the Bills sub-nav…). With `let`, boot's
+// setTab(state.tab) → renderEditor() runs BEFORE this line and hit the temporal dead
+// zone, throwing "Cannot access 'XRAY_WHO' before initialization" — which killed the
+// **Bills (orders) and Platform tabs** (verified against a control; Tables was fine).
+// `var` hoists, so an early read safely sees undefined instead.
 var XRAY_WHO = null;
 
 // Where "change this" points: the admin jumps to the Access hub deep-linked to the EXACT
