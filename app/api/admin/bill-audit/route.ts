@@ -21,10 +21,13 @@ const BILL_ACTIONS = ["order_delete", "orders_delete", "bill_restore", "payment_
   // a table (which cancels its unpaid orders). Shown so the "what happened" category is visible
   // here too, not just in the per-restaurant log (owner, 2026-07-24).
   "invoice_void", "table_restart", "table_close",
+  // Cancelling ONE bill (and undoing that) — newly logged 2026-07-28. Cancelling takes a bill
+  // out of the takings, so it belongs in the tamper log; order_cancel is RISK, the undo is not.
+  "order_cancel", "order_uncancel",
   // Admin Repair Kit actions that touch bills/orders (mig 159 tooling) — surfaced here so the
   // tamper log shows emergency surgery too.
   "repair_void_bill", "repair_delete_order", "repair_refire_order", "repair_edit_time"];
-const RISK = new Set(["order_delete", "payment_revert", "close_unpaid", "invoice_void",
+const RISK = new Set(["order_delete", "payment_revert", "close_unpaid", "invoice_void", "order_cancel",
   "repair_delete_order", "repair_void_bill", "repair_edit_time"]); // removals / voids / edits = the tamper-risk signals
 
 export async function GET(req: NextRequest) {
