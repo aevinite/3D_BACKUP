@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
+import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { notifyAggregator } from "@/lib/aggregators";
@@ -54,8 +55,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // 2026-07-06). The kitchen has no permission-gated actions (yet), so this only
     // drives the "Admin view" marker; add capability maps here when kitchen gets any.
     if (path.join("/") === "whoami") {
-      const actor = g.user ? g.user.role : "admin"; // no staff cookie = admin super-user
-      return ok({ actor, higherView: !g.user }); // admin-only, like the tablet's
+      // ACTUAL-VIEW mode (owner, 2026-07-28): ?view=real on an admin-view tab is answered
+      // as the real kitchen screen; simulated keeps the client's ribbon (the way back).
+      const simulate = !g.user && new URL(req.url).searchParams.get("view") === "real";
+      const actor = g.user ? g.user.role : simulate ? "kitchen" : "admin"; // no staff cookie = admin super-user
+      return ok({ actor, higherView: !g.user && !simulate, simulated: simulate }); // admin-only, like the tablet's
     }
 
     if (path.join("/") === "board") {
@@ -132,6 +136,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (emptyIdSegment(b) || emptyIdSegment(c)) return err("Missing id — please refresh and try again.");
     const body = await readBody(req);
     const dev = deviceIdFrom(req); // which device (kitchen screen) is acting
+    // Admin panel-view actions (no staff cookie) get the actor_id='admin:view' marker so the
+    // ADMIN's log surfaces can attribute them; staff/owner reads mask it (owner 2026-07-28).
+    const adminMark = g.user ? {} : { actor_id: ADMIN_VIEW_ACTOR_ID };
     // A staff-blocked device can't do anything from the kitchen screen.
     if (await deviceBlocked(dev)) return err("This device has been blocked by staff.", 403);
 
@@ -163,7 +170,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // BOTH the .select() on the update and the full-row re-read (server↔DB egress saver).
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "preparing" }).eq("order_id", b).eq("restaurant_id", rid).eq("status", "received");
-      await logAction("kitchen", "order_accept", { order_id: b, device_id: dev, restaurant_id: rid });
+      await logAction("kitchen", "order_accept", { ...adminMark, order_id: b, device_id: dev, restaurant_id: rid });
       return ok({ ok: true });
     }
 
@@ -177,7 +184,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // return=minimal: client discards the body and re-fetches the board → skip the full-row re-read.
       must(await sb.from("orders").update({ items, status: "preparing" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "ready" }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
-      await logAction("kitchen", "order_ready", { order_id: b, device_id: dev, restaurant_id: rid });
+      await logAction("kitchen", "order_ready", { ...adminMark, order_id: b, device_id: dev, restaurant_id: rid });
       return ok({ ok: true });
     }
 
@@ -233,7 +240,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       const row = Array.isArray(data) ? data[0] : data;
       void notifyAggregator(row?.source, row?.external_id, status); // best-effort push back to the platform (dormant w/o keys)
-      await logAction("kitchen", "platform_status", { detail: status, device_id: dev, restaurant_id: rid });
+      await logAction("kitchen", "platform_status", { ...adminMark, detail: status, device_id: dev, restaurant_id: rid });
       return ok(row);
     }
 
@@ -245,7 +252,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const tags = Array.isArray(cur.tags) ? cur.tags.filter((t: string) => t !== "sold-out") : [];
       if (value) tags.push("sold-out");
       const row = must(await sb.from("menu_items").update({ tags }).eq("id", b).eq("restaurant_id", rid).select());
-      await logAction("kitchen", value ? "sold_out_on" : "sold_out_off", { detail: b, device_id: dev, restaurant_id: rid });
+      await logAction("kitchen", value ? "sold_out_on" : "sold_out_off", { ...adminMark, detail: b, device_id: dev, restaurant_id: rid });
       return ok(row[0] || null);
     }
 

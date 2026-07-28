@@ -78,11 +78,16 @@ function ownerSectionLabel(path: string): string {
   return best?.label ?? "Dashboard";
 }
 
-export default function OwnerShell({ children, adminViewing, restaurantName, initialSkin, entitlements }: {
+export default function OwnerShell({ children, adminViewing, restaurantName, initialSkin, entitlements, dualAdmin }: {
   children: React.ReactNode; adminViewing?: boolean; restaurantName?: string; initialSkin?: "light" | "dark";
   // Owner-panel section entitlements (mig 133), resolved server-side by the layout.
   // Absent map (never happens in practice) = everything on.
   entitlements?: Record<string, boolean>;
+  // DUAL-COOKIE case (owner, 2026-07-28): a real owner is signed in AND the admin's
+  // act-as is live in the same browser. The layout can't read searchParams, so it can't
+  // tell an admin-opened tab from the owner's own — it passes BOTH payloads and this
+  // client picks per tab below (?rid= pin → admin view; no pin → the owner's own view).
+  dualAdmin?: { adminEntitlements: Record<string, boolean>; restaurantName: string };
 }) {
   const path = usePathname();
   const router = useRouter();
@@ -90,9 +95,6 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   // Hardware BACK closes the zones popout instead of leaving the page (project rule:
   // every popup registers). Self-noops while closed.
   useBackClose("owner-xray-zones", zonesOpen, () => setZonesOpen(false));
-  const sectionOn = (it: NavItem) => !it.ent || !entitlements || entitlements[it.ent] !== false;
-  // What the admin sees tinted (the X-ray zones): sections off for the real owner.
-  const offSections = GROUPS.flatMap((g) => g.items).filter((it) => it.ent && !sectionOn(it));
   // Admin scope pin (bug C1, 2026-07-05): when the admin drills into ONE restaurant
   // the URL carries ?rid=<id>. Carry it across EVERY sidebar link so navigating
   // dashboard→reports→staff keeps this tab pinned to that restaurant instead of
@@ -104,8 +106,36 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   // it in useEffect keeps SSR and first paint identical; the pin lands on the next render, before
   // any nav click. A real owner has no ?rid, so this stays null throughout.
   const [ridPin, setRidPin] = useState<string | null>(null);
-  useEffect(() => { setRidPin(new URLSearchParams(window.location.search).get("rid")); }, []);
-  const withRid = (href: string) => (ridPin ? `${href}${href.includes("?") ? "&" : "?"}rid=${ridPin}${asSuffix()}` : href);
+  // ACTUAL-VIEW toggle (owner, 2026-07-28): ?view=real on an admin-view tab renders the
+  // cockpit exactly as the REAL owner sees it (removed sections hidden, not tinted); only
+  // the slim admin bar stays as the way back. Read post-mount like ridPin (hydration-safe).
+  const [viewReal, setViewReal] = useState(false);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    setRidPin(q.get("rid"));
+    setViewReal(q.get("view") === "real");
+  }, []);
+  // DUAL-COOKIE per-tab resolution (owner, 2026-07-28): a ?rid-pinned tab is the ADMIN's
+  // view (only the console's act-as/go flow appends the pin — panel APIs enforce the same
+  // rule server-side in lib/ownerScope); an unpinned tab is the real owner's own cockpit.
+  // Resolved post-mount like ridPin, so SSR and first paint stay identical — the brief
+  // owner-styled first frame only ever happens on the admin's own machine.
+  if (dualAdmin && ridPin) {
+    adminViewing = true;
+    entitlements = dualAdmin.adminEntitlements;
+    restaurantName = dualAdmin.restaurantName;
+  }
+  const simulated = !!(adminViewing && viewReal);
+  // Flip THIS TAB between the full admin view and the actual owner view — pure URL state.
+  const setSimulate = (on: boolean) => {
+    const u = new URL(window.location.href);
+    if (on) u.searchParams.set("view", "real"); else u.searchParams.delete("view");
+    window.location.href = u.toString();
+  };
+  const sectionOn = (it: NavItem) => !it.ent || !entitlements || entitlements[it.ent] !== false;
+  // What the admin sees tinted (the X-ray zones): sections off for the real owner.
+  const offSections = GROUPS.flatMap((g) => g.items).filter((it) => it.ent && !sectionOn(it));
+  const withRid = (href: string) => (ridPin ? `${href}${href.includes("?") ? "&" : "?"}rid=${ridPin}${asSuffix()}${viewReal ? "&view=real" : ""}` : href);
   // Skin: the server passes the cookie value as `initialSkin` so SSR already emits the
   // RIGHT data-skin — no dark→light flash on load for owners who chose light (fixed
   // 2026-07-06). Falls back to dark on a first-ever visit (no cookie yet).
@@ -260,14 +290,15 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
               <div className="owx-group-lbl">{g.label}</div>
               {g.items.map((it) => {
                 const on = sectionOn(it);
-                // Hidden below, tinted above: a section the admin removed disappears
-                // for the real owner, but the admin act-as sees it amber-tinted (X-ray).
-                if (!on && !adminViewing) return null;
+                // Hidden below, tinted above: a section the admin removed disappears for
+                // the real owner, but the admin act-as sees it grey-tinted (X-ray). The
+                // ACTUAL-VIEW mode renders like the real owner: hidden, not tinted.
+                if (!on && (!adminViewing || simulated)) return null;
                 return (
                   <Link key={it.href} href={withRid(it.href)} className={`owx-navlink${isActive(it) ? " active" : ""}${on ? "" : " xray-off"}`}
                     onClick={() => { if (isActive(it)) setNavOpen(false); }} /* different page → the path-effect closes AFTER the route commits (closing here races the back-stack rewind and can bounce the nav) */
                     aria-current={isActive(it) ? "page" : undefined}
-                    title={on ? undefined : `${it.label} is off for this owner — you can still open it (admin view)`}>
+                    title={on ? undefined : `Not available — ${it.label} isn't enabled for this owner (turned off by the admin). You can still open it from this view.`}>
                     <i className={`fas ${it.icon}`} aria-hidden="true" />
                     {it.label}
                     {it.soon && <span className="navsoon">Soon</span>}
@@ -315,8 +346,15 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
               <i className="fas fa-chevron-right sep" aria-hidden="true" />
               <span className="cur">Owner panel</span>
             </nav>
-            <span className="adm-adminbar-tag"><i className="fas fa-user-shield" aria-hidden="true" /> Admin view</span>
-            {/* X-ray zone counter: which sections the real owner can't see. */}
+            <span className="adm-adminbar-tag"><i className="fas fa-user-shield" aria-hidden="true" /> Admin view{simulated ? " · as real owner" : ""}</span>
+            {/* X-ray zone counter: which sections the real owner can't see. In the
+                ACTUAL-VIEW mode it's replaced by the way back to the full admin view. */}
+            {simulated ? (
+              <button className="adm-btn xray-zbtn" onClick={() => setSimulate(false)}
+                title="Back to the full admin view (everything visible)">
+                <i className="fas fa-user-shield" style={{ marginRight: 6 }} aria-hidden="true" /> See full admin view
+              </button>
+            ) : (
             <span style={{ position: "relative" }}>
               <button className="adm-btn xray-zbtn" onClick={() => setZonesOpen((o) => !o)}
                 title="Sections hidden from the real owner">
@@ -329,15 +367,24 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                   {offSections.map((it) => (
                     <button key={it.href} className="zrow" onClick={() => {
                       setZonesOpen(false);
-                      // Jump straight to the admin setting that controls this section.
-                      router.push(`/aevinite/access${ridPin ? `?rid=${ridPin}&` : "?"}focus=owner-panel`);
+                      // Jump straight to the EXACT admin control for this section — the
+                      // Access page scrolls to it and flashes it (owner 2026-07-28).
+                      router.push(`/aevinite/access${ridPin ? `?rid=${ridPin}&` : "?"}focus=${encodeURIComponent(it.ent!)}`);
                     }}>
                       <span className="dot" aria-hidden="true" />{it.label}<small>change in Access</small>
                     </button>
                   ))}
+                  {/* Bottom row (owner 2026-07-28): flip THIS TAB to the ACTUAL owner panel —
+                      exactly what the real owner sees, with their real access. */}
+                  <div className="zsep" aria-hidden="true" />
+                  <button className="zrow zsim" onClick={() => { setZonesOpen(false); setSimulate(true); }}
+                    title="Reload this tab showing exactly what the real owner sees — same limited access, fully working">
+                    <span className="dot" style={{ background: "#6b7280" }} aria-hidden="true" />👁 See the actual owner panel
+                  </button>
                 </div>
               )}
             </span>
+            )}
             <button className="adm-btn" onClick={exitAdminView} title="Stop viewing this owner panel">
               <i className="fas fa-arrow-rotate-left" style={{ marginRight: 6 }} aria-hidden="true" /> Exit view
             </button>
@@ -430,9 +477,11 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
 
       {/* Hierarchy X-ray styles (same amber language as the manager panel's ribbon). */}
       <style jsx global>{`
-        .adm.owx .owx-navlink.xray-off { color: #d97706 !important; opacity: .72; }
+        /* GREYED OUT (off-for-owner) — neutral mid-grey, clearly dimmer than enabled links,
+           never near-black; stays clickable for the admin (owner 2026-07-28: grey, not golden). */
+        .adm.owx .owx-navlink.xray-off { color: #8b919c !important; opacity: .55; filter: grayscale(1); }
         .adm.owx .owx-navlink.xray-off::after { content: ""; width: 6px; height: 6px; border-radius: 50%;
-          background: #d97706; margin-left: 6px; display: inline-block; vertical-align: middle; }
+          background: #9aa0a6; margin-left: 6px; display: inline-block; vertical-align: middle; }
         .adm.owx .xray-zbtn { color: #b45309; border-color: color-mix(in srgb, #d97706 45%, transparent); }
         .adm.owx .xray-zpop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; min-width: 250px;
           background: var(--adm-card, #fff); border: 1px solid var(--adm-line, #ddd); border-radius: 12px; padding: 6px;
@@ -443,6 +492,9 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
         .adm.owx .xray-zpop .zrow:hover { background: color-mix(in srgb, #d97706 12%, transparent); }
         .adm.owx .xray-zpop .zrow .dot { width: 7px; height: 7px; border-radius: 50%; background: #d97706; flex-shrink: 0; }
         .adm.owx .xray-zpop .zrow small { color: var(--adm-muted,#888); margin-left: auto; }
+        .adm.owx .xray-zpop .zsep { height: 1px; margin: 6px 4px; background: var(--adm-line, #ddd); }
+        .adm.owx .xray-zpop .zrow.zsim { font-weight: 700; }
+        .adm.owx .xray-zpop .zrow.zsim:hover { background: color-mix(in srgb, #6b7280 14%, transparent); }
       `}</style>
     </div>
   );

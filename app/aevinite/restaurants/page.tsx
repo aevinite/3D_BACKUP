@@ -99,7 +99,9 @@ export default function AdminRestaurants() {
   }, []);
   useEffect(() => {
     if (!focusSlug || !list) return;
-    const hit = list.find((r) => r.slug === focusSlug);
+    // Matched by slug (the original contract) OR id — the panels' "zones off" dropdown
+    // only knows its ?rid pin (a uuid), not the slug (owner 2026-07-28).
+    const hit = list.find((r) => r.slug === focusSlug || r.id === focusSlug);
     if (hit) { setSelected(hit); setFocusSlug(null); return; } // consume it — Back shows the plain list
     const el = document.getElementById(`rest-row-${focusSlug}`);
     if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -919,6 +921,12 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // Overview; everything configurable (features, review, branding, billing, KOT,
   // sessions, tables & QR) lives together under Settings.
   const [tab, setTab] = useState<"overview" | "settings">("overview");
+  // ?tab=settings deep-link (owner 2026-07-28): the panels' "zones off" dropdown sends the
+  // admin here for admin-only settings (billing/KOT/sessions/table count). Post-mount, not
+  // in the initializer, so SSR and first paint stay identical (no hydration mismatch).
+  useEffect(() => {
+    try { if (new URLSearchParams(window.location.search).get("tab") === "settings") setTab("settings"); } catch {}
+  }, []);
   // Stable (useCallback) so the loaders below can list it as a dep without refetching every render.
   const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); }, []);
 

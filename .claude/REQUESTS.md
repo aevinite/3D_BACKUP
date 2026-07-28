@@ -445,3 +445,16 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
   no way to accept the guest. (PR #511)
 - [x] Floating "⬆ Open all / ⬇ Close all" bar on the collapsed floor REMOVED (it overlapped
   the New Parcel button); the bulk actions stay in the side panel's "Whole floor" card only. (PR #511)
+
+## 2026-07-28 — Admin panel-view isolation + "actual panel" toggle + feature-jump polish
+- [ ] Per-tab session separation: a panel tab opened FROM admin (?rid pin) stays the ADMIN's
+  view even when a real staff/owner login exists in another tab of the same browser — and the
+  real logins stay untouched (requireRole/panelAdminRid/ownerScope + owner layout dual-cookie).
+- [ ] "Zones off for staff" dropdown: every non-granted feature listed; "⚙ change" lands on the
+  EXACT control on /aevinite/access (scroll + ~1.5s flash), admin-only settings land on the
+  restaurant's ⚙ Settings tab.
+- [ ] "See the actual panel" toggle (bottom of the zones dropdown; kitchen: in the ribbon) —
+  ?view=real per tab, default OFF; whoami answers as the real role; fully working.
+- [ ] Not-available controls grey (neutral, not golden) + hover "Not available…" tooltip.
+- [ ] Admin panel-view actions logged with actor_id='admin:view' — visible only to the admin
+  (owner/manager log reads mask it; admin surfaces show an 🛡 Admin pill).

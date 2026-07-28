@@ -25,12 +25,23 @@ import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 export type OwnerScope = { all: true; admin?: true } | { all: false; ids: string[]; ownerId: string; admin?: true };
 
 export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
-  // A logged-in OWNER wins over a stray admin cookie in the same browser. This
-  // matches app/owner/layout.tsx (which renders the OWNER shell when the owner
-  // cookie is valid) — before, layout picked owner chrome while this scoped to
-  // the admin's act-as restaurant: owner header, someone else's numbers
-  // (surfaced 2026-07-04 verifying the redesign on a shared browser profile).
-  const owner = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  // PER-TAB ADMIN PIN (owner, 2026-07-28): ?scope=/?rid=/?as= are appended only by the
+  // admin console's act-as flow and echoed by that tab on every call. Such a pin WITH a
+  // valid admin cookie marks the request as an ADMIN-VIEW tab — it stays the admin's
+  // view even when a real owner is signed in elsewhere in the same browser (tabs share
+  // one cookie jar; the owner-first order below used to let an owner login in another
+  // tab take over an admin-opened cockpit). Without the admin cookie the params are
+  // ignored, so nothing changes for real owners.
+  const pinSp = req.nextUrl?.searchParams;
+  const adminPinned =
+    !!(pinSp?.get("scope") || pinSp?.get("rid") || pinSp?.get("as")) &&
+    (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value));
+  // A logged-in OWNER wins over a stray admin cookie in the same browser (unless the
+  // per-tab admin pin above claimed this request). This matches app/owner/layout.tsx
+  // (which renders the OWNER shell when the owner cookie is valid) — before, layout
+  // picked owner chrome while this scoped to the admin's act-as restaurant: owner
+  // header, someone else's numbers (surfaced 2026-07-04 on a shared browser profile).
+  const owner = adminPinned ? null : await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   if (owner && owner.role === "owner") {
     // Multi-owner: resolve every restaurant this owner is a member of (restaurant_owners,
     // mig 097) — but ONLY the ones that are LIVE and still have the owner panel switched on.

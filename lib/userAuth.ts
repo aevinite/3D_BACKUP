@@ -252,9 +252,20 @@ export function roleSatisfies(have: Role, need: Role): boolean {
 // who explicitly signed in must always act as THAT person; the admin fallback is
 // only for admin-only sessions (its ?rid / act-as flow is unchanged).
 export async function requireRole(
-  req: { cookies: { get(name: string): { value: string } | undefined } },
+  req: { cookies: { get(name: string): { value: string } | undefined }; nextUrl?: { searchParams?: URLSearchParams } },
   role: Role,
 ): Promise<{ ok: true; user: StaffUser | null } | { ok: false; transient?: boolean }> {
+  // PER-TAB ADMIN PIN — checked even before the staff cookie (owner, 2026-07-28). A
+  // request carrying ?rid= is one only an ADMIN-VIEW tab produces: the console's
+  // act-as/go flow appends it, panelAdminRid strips it for real staff, and the panel
+  // echoes it on every API call. Tabs share one cookie jar, so the staff-first order
+  // below used to let a staff login in ANOTHER tab take over an admin-opened panel
+  // mid-session. A pinned request with a valid admin cookie therefore stays the
+  // admin's, regardless of who else is signed in; without the admin cookie the pin
+  // is ignored and nothing changes for real staff.
+  if (req.nextUrl?.searchParams?.get("rid") && (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value))) {
+    return { ok: true, user: null }; // admin super — scope comes from the same ?rid via panelRestaurantId
+  }
   let u: StaffUser | null;
   try {
     u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);

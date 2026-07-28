@@ -330,7 +330,18 @@ function openIssueModal() {
 // browser-wide and used to shift this tab's data — owner bug, 2026-07-03). Empty
 // for real staff logins; the server ignores it for them anyway.
 const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
-const ridQ = (path) => PANEL_RID ? path + (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID) : path;
+// ACTUAL-VIEW toggle (owner, 2026-07-28): ?view=real on an admin-view tab asks the server
+// to answer whoami exactly as the REAL manager gets it (real limited access), so the admin
+// can see the panel as their staff do. Per-tab like ?rid, echoed on every call; ignored
+// server-side for real staff and for non-admin sessions.
+const PANEL_VIEW_REAL = PANEL_RID && new URLSearchParams(location.search).get("view") === "real";
+const ridQ = (path) => {
+  if (!PANEL_RID) return path;
+  const sep = () => (path.includes("?") ? "&" : "?");
+  path += sep() + "rid=" + encodeURIComponent(PANEL_RID);
+  if (PANEL_VIEW_REAL) path += "&view=real";
+  return path;
+};
 
 // The restaurant THIS panel is currently showing: the admin "view as" URL pin if
 // present, else the restaurant the board loaded (state.data.restaurant.id) once
@@ -8149,7 +8160,7 @@ function oplogHtml() {
     return `<div class="oprow oprow-click${blockedDev[r.device_id] ? " op-blocked" : ""}" data-op-detail="${esc(r.id)}">
       <div class="opcell">${device}</div>
       <div class="opcell"><span class="op-panel op-${esc(r.panel)}">${esc(PANEL_LABEL[r.panel] || r.panel)}</span></div>
-      <div class="opcell"><b>${esc(ACT[r.action] || r.action)}</b>${pinPill(r)}</div>
+      <div class="opcell"><b>${esc(ACT[r.action] || r.action)}</b>${pinPill(r)}${r.actor_id === "00000000-0000-0000-0000-0000000000ad" ? ` <span class="op-pinpill" title="You did this from an admin panel view — staff and owner logs show it as a plain panel action">🛡 Admin</span>` : ""}</div>
       <div class="opcell lg-muted">${where}</div>
       <div class="opcell"><small>${esc(whenLabel(r.created_at))}</small></div>
       <div class="opcell opacts">${act}</div>
@@ -8207,7 +8218,7 @@ function showOpDetail(id) {
     { section: "Who" },
     isPin
       ? { label: "Panel", value: "Waiter tablet" }
-      : { label: "Done by", value: r.actor || (r.panel === "db" ? "Direct database edit" : "Panel action (no staff login yet)") },
+      : { label: "Done by", value: r.actor_id === "00000000-0000-0000-0000-0000000000ad" ? "🛡 Admin (via panel view — invisible to staff & owner logs)" : (r.actor || (r.panel === "db" ? "Direct database edit" : "Panel action (no staff login yet)")) },
     { label: "Panel", value: isPin ? "" : (PANEL_LABEL[r.panel] || r.panel) },
     { label: "Device", value: r.device_id ? "#" + r.device_id : "" },
   ];
@@ -9316,30 +9327,34 @@ const XRAY_CONTROLS = [
 ];
 let XRAY_WHO = null;
 
-// Where "change this" points: the admin jumps to the Access hub (deep-linked to the
-// manager-powers card, pinned to this tab's restaurant); an owner jumps to their own
-// Staff & powers page focused on the exact toggle (Phase 5 deep-link).
+// Where "change this" points: the admin jumps to the Access hub deep-linked to the EXACT
+// control (?focus=<flag> — the Access page scrolls to it and flashes it, owner 2026-07-28);
+// an owner jumps to their own Staff & powers page focused on the exact toggle. Admin-only
+// settings (billing/KOT/sessions/table count) have no Access-page card — their home is the
+// restaurant detail's ⚙ Settings tab on /aevinite/restaurants.
 function xraySettingUrl(flag) {
-  return XRAY_WHO && XRAY_WHO.actor === "admin"
-    ? `/aevinite/access${PANEL_RID ? `?rid=${encodeURIComponent(PANEL_RID)}&` : "?"}focus=manager-powers`
-    : `/owner/staff?focus=${encodeURIComponent(flag)}`;
+  if (XRAY_WHO && XRAY_WHO.actor === "admin") {
+    if (flag === "admin_only_setting")
+      return `/aevinite/restaurants?focus=${encodeURIComponent(PANEL_RID)}&tab=settings`;
+    return `/aevinite/access${PANEL_RID ? `?rid=${encodeURIComponent(PANEL_RID)}&` : "?"}focus=${encodeURIComponent(flag)}`;
+  }
+  return `/owner/staff?focus=${encodeURIComponent(flag)}`;
 }
 
 (function injectXrayStyles() {
   const css = `
-  /* Tinted (off-for-staff) — colour cue only; stays fully clickable for the higher role.
-     Generic since Phase 2: applies to tabs AND in-tab controls/list rows alike. */
-  .xray-off { position: relative; color: var(--gold-strong, #b8860b) !important; opacity: .72; }
+  /* GREYED OUT (off-for-staff) — a neutral mid-grey cue, clearly dimmer than enabled
+     controls but never near-black; stays fully clickable for the higher role (owner
+     2026-07-28: "grey, not golden"). Generic since Phase 2: tabs AND in-tab controls. */
+  .xray-off { position: relative; color: #8b919c !important; opacity: .55; filter: grayscale(1); }
   .xray-off::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-    background: #d97706; margin-left: 6px; vertical-align: middle; }
-  /* A FILLED button (primary/gold or pay/green) is ADMIN-USABLE when tinted, so it must
-     look ENABLED and READABLE — not washed out. The base .72 opacity + gold-on-gold text
-     made "+ Take order" look broken (owner 2026-07-24). Keep the full fill + dark label
-     at full opacity; mark "off for staff" with ONE subtle, intentional cue: a soft inset
-     ring + the amber dot after the label. Clean, not broken-looking. */
+    background: #9aa0a6; margin-left: 6px; vertical-align: middle; }
+  /* A FILLED button (primary/gold or pay/green) greys out the same way — grayscale drains
+     the fill so it reads "not available here" at a glance, while staying clickable and
+     readable for the admin/owner looking in. */
   .btn.primary.xray-off, .tp-take-order.xray-off, .btn.pay.xray-off, .btn.green.xray-off {
-    color: #2a1d0c !important; opacity: 1 !important;
-    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, #7a4d12 60%, transparent); }
+    opacity: .6 !important; filter: grayscale(1);
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, #6b7280 55%, transparent); }
   .xray-pulse { animation: xrayPulse 1.1s ease-out 2; border-radius: 8px; }
   @keyframes xrayPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217,119,6,0); } 50% { box-shadow: 0 0 0 4px rgba(217,119,6,.55); } }
   /* Faded admin ribbon across the very top — flows above the sticky topbar. */
@@ -9367,7 +9382,10 @@ function xraySettingUrl(flag) {
   #xrayZones .zrow .dot { width: 7px; height: 7px; border-radius: 50%; background: #d97706; flex-shrink: 0; }
   #xrayZones .zrow small { color: var(--muted,#888); margin-left: auto; }
   #xrayZones .zrow small.zgo { margin-left: 8px; color: #b45309; font-weight: 700; }
-  #xrayZones .zrow small.zgo:hover { text-decoration: underline; }`;
+  #xrayZones .zrow small.zgo:hover { text-decoration: underline; }
+  #xrayZones .zsep { height: 1px; margin: 6px 4px; background: var(--line, #ddd); }
+  #xrayZones .zrow.zsim { font-weight: 700; }
+  #xrayZones .zrow.zsim:hover { background: color-mix(in srgb, #6b7280 14%, transparent); }`;
   const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
 })();
 
@@ -9532,7 +9550,7 @@ function applyHierarchyView() {
     if (!higher) { xraySetHidden(btn, true); xraySetTint(btn, false); continue; }  // real manager → hide entirely
     // higher role → TINT (colour only), still fully usable. Record it as a zone.
     xraySetHidden(btn, false);
-    xraySetTint(btn, true, `${entry.label} is off for staff — you can still use it (admin view)`);
+    xraySetTint(btn, true, `Not available — ${entry.label} isn't enabled for this restaurant's staff (turned off by the ${xrayOffBy(entry.flag)}). You can still use it from this view.`);
     zones.push({ ...entry, el: btn });
   }
   // A real manager must never be LEFT ON a tab that just got hidden (e.g. the default
@@ -9555,7 +9573,7 @@ function applyHierarchyView() {
       if (granted) { xraySetHidden(el, false); xraySetTint(el, false); return; }
       if (!higher) { xraySetHidden(el, true); xraySetTint(el, false); return; }
       xraySetHidden(el, false);
-      xraySetTint(el, true, `${entry.label}: off for staff (by the ${xrayOffBy(entry.flag)}) — you can still use it`);
+      xraySetTint(el, true, `Not available — ${entry.label} isn't enabled for this restaurant's staff (turned off by the ${xrayOffBy(entry.flag)}). You can still use it from this view.`);
       if (!counted) { zones.push({ ...entry, el }); counted = true; } // one zone per control type
     });
   }
@@ -9609,18 +9627,30 @@ new MutationObserver(() => {
   requestAnimationFrame(() => { xrayPassQueued = false; applyHierarchyView(); });
 }).observe(document.body, { childList: true, subtree: true });
 
+// Flip this admin-view TAB between the full admin view and the "actual panel" view
+// (?view=real — the server then answers whoami exactly as the real manager gets it).
+// Pure URL state: reloading this iframe with/without the param is the whole toggle.
+function xraySetViewReal(on) {
+  const u = new URL(location.href);
+  if (on) u.searchParams.set("view", "real"); else u.searchParams.delete("view");
+  location.replace(u.toString());
+}
+
 function renderXrayRibbon(higher, zones) {
   let rb = document.getElementById("xrayRibbon");
   const zp = document.getElementById("xrayZones");
-  if (!higher) { if (rb) rb.remove(); if (zp) zp.remove(); syncRibbonHeight(); return; }
+  // The ACTUAL-VIEW mode (?view=real) renders like a real manager (higher=false), but the
+  // admin still needs the ribbon — it's the only way back to the full admin view.
+  const sim = !!(XRAY_WHO && XRAY_WHO.simulated);
+  if (!higher && !sim) { if (rb) rb.remove(); if (zp) zp.remove(); syncRibbonHeight(); return; }
   if (!rb) { rb = document.createElement("div"); rb.id = "xrayRibbon"; document.body.insertBefore(rb, document.body.firstChild); }
-  const who = XRAY_WHO.actor === "admin" ? "Admin" : "Owner";
+  const who = sim || XRAY_WHO.actor === "admin" ? "Admin" : "Owner";
   const restEl = document.getElementById("brandRest");
   const restName = restEl ? restEl.textContent.replace(/^·\s*/, "") : "";
   const n = zones.length;
   // Skip identical rebuilds: the MutationObserver re-runs applyHierarchyView on every
   // repaint, and rewriting our own innerHTML would itself be a mutation → a loop.
-  const sig = `${who}|${restName}|${zones.map((z) => z.label).join(",")}`;
+  const sig = `${who}|${sim ? "sim" : "full"}|${restName}|${zones.map((z) => z.label).join(",")}`;
   if (rb.dataset.sig === sig) return;
   rb.dataset.sig = sig;
   // The ADMIN came here from the console → show the PATH (Restaurants › name ›
@@ -9633,11 +9663,15 @@ function renderXrayRibbon(higher, zones) {
       `<i class="fas fa-chevron-right rb-sep"></i><span>Manager panel</span></nav>`
     : (restName ? `<span class="rb-rest">${esc(restName)}</span>` : "");
   rb.innerHTML =
-    `<span class="rb-tag"><i class="fas fa-user-shield"></i> ${who} view</span>` +
+    `<span class="rb-tag"><i class="fas fa-user-shield"></i> ${who} view${sim ? " · as real manager" : ""}</span>` +
     crumbs +
     `<span class="rb-spacer"></span>` +
-    `<button id="xrayZonesBtn">${n} zone${n === 1 ? "" : "s"} off for staff <i class="fas fa-chevron-down" style="font-size:9px"></i></button>` +
+    (sim
+      ? `<button id="xrayFullBtn" title="Back to the full admin view (everything visible)"><i class="fas fa-user-shield"></i> See full admin view</button>`
+      : `<button id="xrayZonesBtn">${n} zone${n === 1 ? "" : "s"} off for staff <i class="fas fa-chevron-down" style="font-size:9px"></i></button>`) +
     `<button class="rb-exit" id="xrayExit"><i class="fas fa-arrow-rotate-left"></i> Exit view</button>`;
+  const xrayFullBtn = document.getElementById("xrayFullBtn");
+  if (xrayFullBtn) xrayFullBtn.onclick = () => xraySetViewReal(false);
   const xrayHome = document.getElementById("xrayHome");
   if (xrayHome) xrayHome.onclick = () => {
     try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
@@ -9646,7 +9680,8 @@ function renderXrayRibbon(higher, zones) {
     try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
     try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
   };
-  document.getElementById("xrayZonesBtn").onclick = () => toggleXrayZones(zones);
+  const zbtn = document.getElementById("xrayZonesBtn"); // absent in the actual-view mode
+  if (zbtn) zbtn.onclick = () => toggleXrayZones(zones);
   syncRibbonHeight();
 }
 
@@ -9663,10 +9698,20 @@ function toggleXrayZones(zones) {
   let zp = document.getElementById("xrayZones");
   if (zp) { (zp._xrayClose || (() => zp.remove()))(); return; }
   zp = document.createElement("div"); zp.id = "xrayZones";
+  // Bottom row (owner 2026-07-28): flip THIS TAB to the ACTUAL panel — exactly what the
+  // real manager sees, with their real limited access. Admin-view tabs only (the pin is
+  // what carries ?view=real); an owner looking into their own manager panel has no
+  // simulate mode, they ARE the reference view the toggle imitates one rung down.
+  const simRow = (XRAY_WHO && XRAY_WHO.actor === "admin" && PANEL_RID)
+    ? `<div class="zsep"></div><button class="zrow zsim" id="xraySimRow" title="Reload this tab showing exactly what the real manager sees — same limited access, fully working">` +
+      `<span class="dot" style="background:#6b7280"></span>👁 See the actual manager panel</button>`
+    : "";
   zp.innerHTML = `<div class="zh">Off for staff on this page</div>` + (zones.length
     ? zones.map((z, i) => `<button class="zrow" data-zi="${i}"><span class="dot"></span>${z.label} <small>by ${xrayOffBy(z.flag)}</small><small class="zgo" data-zgo="${i}" title="Open the setting that controls this">⚙ change</small></button>`).join("")
-    : `<div class="zrow" style="cursor:default">Nothing is off here.</div>`);
+    : `<div class="zrow" style="cursor:default">Nothing is off here.</div>`) + simRow;
   document.getElementById("xrayRibbon").appendChild(zp);
+  const simBtn = zp.querySelector("#xraySimRow");
+  if (simBtn) simBtn.onclick = () => xraySetViewReal(true);
   // Hardware BACK closes the popout (not the site) — the panels' backstack manager.
   const backOff = window.LFH_BACK ? LFH_BACK.layer("xray-zones", () => zp.remove()) : null;
   const closeZp = () => { zp.remove(); if (backOff) backOff(); };
