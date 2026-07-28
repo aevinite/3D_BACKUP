@@ -106,6 +106,7 @@ const prompt =
   `Hi — the owner just pressed "Fix NOW" in the admin panel, so this window opened to sort out ONE problem:\n\n` +
   `  Problem: "${summary}"\n` +
   (note ? `  Owner's note: "${note}"\n` : "") +
+  `\nYour job is the WHOLE loop (owner 2026-07-28): fix it, put it LIVE, then clear the ticket + its red tile on the website yourself with node scripts/resolve-fix-request.mjs --id <request id> --pr <pr url>. Don't hand a PR back to the owner.\n` +
   `\nFirst read ${join(BASE, "live-fix-prompt.md")} and follow it exactly. The owner is watching this terminal and can answer questions — talk to them in plain, beginner-friendly language, and START by telling them in one simple sentence what you understand the problem to be.\n\n` +
   `(Bookkeeping, for your database updates only — don't lead with these when talking to the owner: fix request id ${reqRow.id}${runId ? `, history row id ${runId}` : ""}.)`;
 

@@ -174,7 +174,9 @@ export default function AdminRepair() {
     setSending(false);
     if (r.ok) {
       setNote("");
-      toast(mode === "instant" ? "Sent — a Claude window opens on the Mac within a minute." : "Queued — the night robot takes it at 2:30 AM.");
+      // Instant wording promises the whole loop (owner 2026-07-28): the popped session fixes it,
+      // ships it live and clears the ticket itself — see scripts/live-fix-prompt.md steps 5-6.
+      toast(mode === "instant" ? "Sent — a Claude window opens on the Mac within a minute, fixes it, puts it live, then clears this itself." : "Queued — the night robot takes it at 2:30 AM.");
       loadHub();
     } else toast(r.error || "Couldn't send that.", "err");
   };
@@ -187,7 +189,7 @@ export default function AdminRepair() {
       headers: { "Content-Type": "application/json", "X-LFH-Action-Id": uuid() },
       body: JSON.stringify({ action_id: g.sample.id, restaurant_id: g.sample.restaurant_id || null, mode }),
     });
-    if (r.ok) { toast(mode === "instant" ? "Sent to Claude — window opens on the Mac shortly." : "Queued for the 2:30 AM robot."); loadHub(); }
+    if (r.ok) { toast(mode === "instant" ? "Sent to Claude — it fixes this, puts it live, and clears this tile itself." : "Queued for the 2:30 AM robot."); loadHub(); }
     else { toast(r.error || "Couldn't send that.", "err"); setSent((prev) => { const n = new Set(prev); n.delete(g.key); return n; }); }
   };
 
