@@ -480,3 +480,24 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
 - [x] Repair queue cleared afterwards: 5 open fix_requests closed (pointing at PR #521) and all
   unresolved error rows marked resolved. Dev AND AV live both show 0 open items. AV live needed no
   change — its queue was already empty (read-only check only, no writes).
+
+## 2026-07-28 — "Fix NOW" must finish the whole loop itself (owner: "that same session should also make it live and click on resolve on website itself")
+
+- [x] **A popped Fix-NOW session now ships the fix live and clears the ticket itself.** It used to
+  stop at "PR opened, please merge" and leave the ticket + the red problem tile for the owner to
+  clear by hand. `scripts/live-fix-prompt.md` (the rulebook the terminal reads) gained a
+  finish-the-whole-job header, a new step 5 "make it LIVE yourself" (verify → PR → merge → deploy
+  → check the deployed URL, following the deploy-lock ritual) and step 6 "press Resolve for the
+  owner". Ordinary fixes ship with no question; the owner kept ONE plain yes/no for money/tax
+  maths, database migrations, login/permission changes, genuine doubt — and shipping to AV live
+  (backup deploys first, then ask, then the two-stacks release ritual).
+- [x] **New `scripts/resolve-fix-request.mjs`** = the terminal equivalent of the panel's Resolve
+  button: marks the `fix_requests` row fixed (+ PR link) and stamps `resolved_at` on the whole
+  error group, so "Problems right now", the dashboard red button and the red rows in Logs all
+  clear. `--stack dev|av`, `--dry`, `--status dismissed`; finds the keys from the main checkout so
+  it works from a worktree. Verified on the dev DB with a throwaway probe ticket + 2 duplicate
+  error rows (both stamped, one diary line written, test rows then deleted).
+- [x] Both Mac watchers updated (`~/.claude/fix-request-watcher/` and `…-avlive/`): their opening
+  prompt now states the whole loop, and the AV-live one says to ask once and then ship to AV live
+  itself. The Fix-NOW toast in admin → Repair now promises the same. Verified LIVE on 3-d-backup
+  (new wording present in the deployed bundle, old wording gone). (PR #523)
