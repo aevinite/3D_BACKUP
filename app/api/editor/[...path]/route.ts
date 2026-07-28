@@ -2334,6 +2334,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // is the OWNER's toggle (owner panel) — a manager must not flip rungs above them. (mig 166)
         delete (body as Record<string, unknown>).table_tags_owner_control;
         delete (body as Record<string, unknown>).table_tags_enabled;
+        // Admin/owner-only settings (owner 2026-07-28): a REAL MANAGER may edit only per-table
+        // NAME + seats + auto-close from this panel — never the billing identity, KOT printing,
+        // the dining-session system, or the table COUNT. Those live in the admin panel
+        // (components/admin/RestaurantSettings.tsx). The manager UI hides them (XRAY_CONTROLS in
+        // public/panels/editor/app.js); this is the matching SERVER guard so the limit holds even
+        // if the hidden control is forced. Admin (no staff cookie) and owner (role "owner") keep
+        // full access — only a real manager's patch is stripped.
+        if (g.user && g.user.role !== "owner") {
+          const MANAGER_BLOCKED_SETTINGS = [
+            "table_count",
+            "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone",
+            "gstin", "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
+            "auto_print_kot",
+            "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
+          ];
+          for (const k of MANAGER_BLOCKED_SETTINGS) delete (body as Record<string, unknown>)[k];
+        }
         // settings is one row per restaurant (UNIQUE restaurant_id); matched by
         // restaurant_id at the upsert below — don't force the legacy id='site'
         // (that only ever matches restaurant #1's row).
