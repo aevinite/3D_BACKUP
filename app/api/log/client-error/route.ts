@@ -66,27 +66,10 @@ export async function POST(req: NextRequest) {
     const message = String(body.message || "client error").slice(0, 300);
     const where = String(body.where || "").slice(0, 120);
     const detail = (where ? `${message} @ ${where}` : message).slice(0, 500);
-
-    // Same "already dealt with?" check the server-side logError does (error_signatures, mig 218) —
-    // a screen crash the owner marked "not a problem" is recorded but never alarms again, while a
-    // crash that returns AFTER its fix stays loud (the fix didn't hold). Fail-open.
-    const seenAt = new Date().toISOString();
-    let mem: { id: string; state: "fixed" | "ignored" } | null = null;
-    try {
-      const { lookupErrorMemory } = await import("@/lib/errorMemory");
-      mem = await lookupErrorMemory({ panel, action: "client_error", detail, restaurantId: rid });
-    } catch { /* no memory → alarm as before */ }
-    const mute = mem?.state === "ignored";
-
     await sb.from("staff_actions").insert({
       panel, action: "client_error", detail, device_id: device, level: "error",
-      ...(mute ? { resolved_at: seenAt } : {}),
       ...(rid !== null ? { restaurant_id: rid } : { restaurant_id: null }),
     });
-    if (mem) {
-      try { const { noteRecurrence } = await import("@/lib/errorMemory"); await noteRecurrence(mem.id, seenAt); } catch { /* counter only */ }
-    }
-    if (mute) return NextResponse.json({ ok: true, muted: true });
 
     // Best-effort grouped alert (15-min dedupe lives in sendOwnerAlert). Wrapped in after() so
     // the serverless platform keeps the function alive until the push completes AFTER the
