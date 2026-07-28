@@ -6,7 +6,7 @@
   <title>Waiter tablet</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=20260726unserve">
+  <link rel="stylesheet" href="style.css?v=20260728tabletham">
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js"></script>
 </head>
@@ -74,7 +74,7 @@
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=1"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=6"></script>
+  <script src="/panels/connbadge.js?v=7"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
@@ -84,6 +84,6 @@
   <script src="/panels/undobar.js?v=3"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
   <script src="/panels/fitnums.js?v=1" data-fit=".ordtotal,.ctotal"></script>
-  <script src="app.js?v=20260728openprice"></script>
+  <script src="app.js?v=20260728brandmark"></script>
 </body>
 </html>
