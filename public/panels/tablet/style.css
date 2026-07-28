@@ -446,7 +446,11 @@ html[data-theme="light"] .t-done .tlabel{ color:#15803d; }
    panel becomes a FULL-SCREEN overlay with a top-right ✕ close. Desktop/tablet
    layout (side-by-side floor + panel) is unchanged above 760px.
    ════════════════════════════════════════════════════════════════════════════ */
-.hamburger { display: none; }
+/* The ☰ opens the ONLY entry to Banquet / New Parcel / Log out. It must be
+   reachable on the tablet's real target device (iPad, ≥760px) too — hiding it
+   above 760px left a waiter unable to log out or start a takeaway on an iPad.
+   So show it at ALL widths (the phone @media below restyles the top bar). */
+.hamburger { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 12px; font-size: 19px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 #tabletClose { display: none; }
 
 /* Slide-in settings/profile drawer (built in app.js) */

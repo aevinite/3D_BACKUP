@@ -44,6 +44,7 @@ export interface MenuItem {
   allergens: string[];
   searchAlias: string; // hidden synonyms for search (e.g. "caesar, healthy")
   options: OptionGroup[]; // per-dish customization (size, milk, extras…)
+  openPrice: boolean; // price is entered by staff at order time (as-per-MRP / market price)
 }
 
 // A customization group the owner defines and the guest picks from.
@@ -120,6 +121,7 @@ function mapRow(row: any, agg?: RatingAgg): MenuItem {
     // Only keep `options` if it really is a list; otherwise use an empty list
     // so code that loops over options never breaks.
     options: Array.isArray(row.options) ? row.options : [],
+    openPrice: !!row.open_price,
   };
 }
 
@@ -238,7 +240,7 @@ export async function getOrderStatus(
 // them off the grid read (and its realtime refetch) cuts egress on the hot path;
 // mapRow fills any omitted field with a safe default, so nothing breaks.
 export const CARD_COLUMNS =
-  "id, slug, title, price, image, category, veg, is4d, model_folder, model_small_url, model_optimized_url, description, tags, allergens, search_alias, options, sort_order, restaurant_id";
+  "id, slug, title, price, image, category, veg, is4d, model_folder, model_small_url, model_optimized_url, description, tags, allergens, search_alias, options, open_price, sort_order, restaurant_id";
 
 export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID, columns: string = "*"): Promise<MenuItem[]> {
   // Fetch the dishes AND the real-review aggregates at the same time (parallel
@@ -257,7 +259,10 @@ export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID,
   const aggBySlug = new Map<string, RatingAgg>(((ratings.data as RatingAgg[] | null) ?? []).map((r) => [r.item_slug, r]));
   // Cast: a dynamic column string makes supabase-js widen the row type; mapRow reads
   // fields defensively (every one has a default), so treating rows as any is safe here.
-  return ((items.data ?? []) as any[]).map((row) => mapRow(row, aggBySlug.get(row.slug)));
+  // Hide open-price dishes from the guest menu: their price is set by staff at order time,
+  // so a self-ordering guest has no price to pay (the server would reject a ₹0 line anyway).
+  // Waiter/manager panels read their own API and DO show these.
+  return ((items.data ?? []) as any[]).map((row) => mapRow(row, aggBySlug.get(row.slug))).filter((it) => !it.openPrice);
 }
 
 // A single item by slug, or null if it doesn't exist.

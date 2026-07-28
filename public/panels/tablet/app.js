@@ -209,6 +209,48 @@ const reasonPrompt = (message, placeholder) => new Promise((resolve) => {
   ov.onclick = (e) => { if (e.target === ov) done(null); };
 });
 
+// Ask the waiter for a price at order time — used for "open price" dishes (as-per-MRP /
+// market-price items like a soft-drink can or mineral water). Resolves a positive number
+// (rupees), or null if cancelled. The server re-validates + clamps; this is just the entry.
+const pricePrompt = (title, current) => new Promise((resolve) => {
+  const ov = document.createElement("div");
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  const box = document.createElement("div");
+  Object.assign(box.style, { width: "min(92vw,340px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
+  box.innerHTML = `
+    <div style="font-size:16px;font-weight:800;margin:0 0 6px">💰 Enter price</div>
+    <div style="font-size:13px;color:var(--muted);margin:0 0 12px">Price for <b>${esc(title || "this item")}</b> (per item)</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:20px;font-weight:800;color:var(--muted)">₹</span>
+      <input class="pr-in" type="text" inputmode="decimal" maxlength="8" placeholder="0" autocomplete="off"
+        value="${current != null && current > 0 ? esc(String(current)) : ""}"
+        style="flex:1;min-width:0;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:20px;font-weight:800;outline:none" />
+    </div>
+    <div class="pr-err" style="font-size:12px;color:#fca5a5;min-height:16px;margin:6px 2px 0"></div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button class="pr-cancel" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--panel-2);color:var(--text);cursor:pointer">Cancel</button>
+      <button class="pr-ok" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--gold);color:#14110d;cursor:pointer">Add</button>
+    </div>`;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  const input = box.querySelector(".pr-in");
+  const err = box.querySelector(".pr-err");
+  setTimeout(() => { input.focus(); input.select(); }, 50);
+  let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-price", () => done(null)) : null;
+  const done = (val) => { if (backOff) { backOff(); backOff = null; } ov.remove(); resolve(val); };
+  // Keep only digits + one dot as the waiter types.
+  input.oninput = () => { input.value = input.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"); };
+  box.querySelector(".pr-cancel").onclick = () => done(null);
+  box.querySelector(".pr-ok").onclick = () => {
+    const v = Number(input.value);
+    if (!v || v <= 0) { err.textContent = "Enter a price greater than 0."; return; }
+    if (v > 100000) { err.textContent = "That price looks too high."; return; }
+    done(Math.round(v * 100) / 100);
+  };
+  input.onkeydown = (e) => { if (e.key === "Enter") box.querySelector(".pr-ok").click(); else if (e.key === "Escape") done(null); };
+  ov.onclick = (e) => { if (e.target === ov) done(null); };
+});
+
 // Run an action that MAY need a manager PIN: try it plainly first (so it stays
 // frictionless when no PIN is configured yet, or for the admin super-user); if the
 // server answers "manager PIN required", prompt once and retry with it. Reloads on
@@ -2360,7 +2402,7 @@ function dishBtnHtml(d) {
     ${out ? "" : `<span class="dedit" data-dishedit="${esc(d.id)}" role="button" aria-label="Quantity / allergy" title="Set quantity or allergy">✎</span>`}
     <span class="dname">${esc(d.title)}</span>
     <span class="drow">
-      <span class="dprice">${out ? "SOLD OUT" : inr(dishPrice(d))}</span>
+      <span class="dprice">${out ? "SOLD OUT" : (d.open_price ? "Set price" : inr(dishPrice(d)))}</span>
       <span class="dbadge">${out ? "" : dishBadgeInner(d.id, inCartQty)}</span>
     </span>
   </button>`;
@@ -2498,7 +2540,7 @@ function bindDishButtons() {
     const d = state.data.dishes.find((x) => x.id === el.dataset.dishedit);
     if (d) renderDishOptions(d, null);
   }));
-  document.querySelectorAll("[data-dish]").forEach((b) => (b.onclick = (e) => {
+  document.querySelectorAll("[data-dish]").forEach((b) => (b.onclick = async (e) => {
     if (e.target.closest && e.target.closest("[data-dishedit]")) return; // ✎ handled above
     const d = state.data.dishes.find((x) => x.id === b.dataset.dish);
     if (!d) { toast("That dish just changed — refreshing the menu", false); renderOrderMode(); return; }
@@ -2507,6 +2549,17 @@ function bindDishButtons() {
     // adds. (owner 2026-07-08)
     if (e.target.closest && e.target.closest("[data-dishminus]")) {
       removeOneDish(d.id);
+      updateDishBadges(); updateOrderCart(); updateViewPill();
+      return;
+    }
+    // OPEN-PRICE dish (as-per-MRP / market price): ask the waiter for the price first, then
+    // carry it on the line. Each tap is its own line (prices can differ between two cans), and
+    // the flag makes the server trust this typed price for this dish only.
+    if (d.open_price) {
+      const p = await pricePrompt(d.title);
+      if (p == null) return;                     // cancelled — add nothing
+      if (state.addToOrderId) { addDishToOrder(state.addToOrderId, { dishId: d.id, qty: 1, price: p }); return; }
+      state.cart.push({ id: d.id, title: d.title, price: p, qty: 1, open_price: true });
       updateDishBadges(); updateOrderCart(); updateViewPill();
       return;
     }
@@ -2666,10 +2719,18 @@ function updateOrderCart() {
     if (state.cart[i].qty <= 0) state.cart.splice(i, 1);
     updateOrderCart(); updateDishBadges();
   }));
-  c.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => {
+  c.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = async () => {
     const l = state.cart[+b.dataset.edit];
     const d = l && state.data.dishes.find((x) => x.id === l.id);
-    if (d) renderDishOptions(d, +b.dataset.edit);
+    if (!d) return;
+    // Open-price line: ✎ re-asks the price (there are no size/extras to pick), instead of the
+    // options popup — which would have no groups and reset this line's price to 0.
+    if (l.open_price || d.open_price) {
+      const p = await pricePrompt(d.title, l.price);
+      if (p != null) { l.price = p; updateOrderCart(); updateViewPill(); }
+      return;
+    }
+    renderDishOptions(d, +b.dataset.edit);
   }));
   // ONE box, ALLERGY-only (owner, 2026-07-06). Its text is the whole-order avoid list
   // applied to every dish ("no X" on each line + "⚠ AVOID" on the KOT) — so it must NOT
@@ -2724,7 +2785,7 @@ async function sendParcel(payNow) {
     const items = state.cart.map((l) => {
       const optTxt = (l.options && l.options.length) ? l.options.map((o) => o.label).join(", ") : "";
       const noteFull = [optTxt, l.allergy ? `⚠ ${l.allergy}` : "", (l.note || "").trim()].filter(Boolean).join(" · ");
-      return { id: l.id, qty: l.qty, note: noteFull || undefined };
+      return { id: l.id, qty: l.qty, price: l.open_price ? l.price : undefined, note: noteFull || undefined };
     });
     const r = await api("POST", "/parcel", { items, allergies: splitCsv(state.allergies), note: null, customer: state.pcust || null, phone: state.pphone || null, paid: payNow, method: payNow ? "cash" : null });
     if (r && r.queued) toast("Saved — the parcel will send when you're back online.", true);
@@ -2853,6 +2914,9 @@ async function sendOrder() {
         const note = [l.note, typed].filter(Boolean).join(" · ");
         return {
           id: l.id, qty: l.qty,
+          // Open-price lines carry the staff-typed price; the server honours it only for a
+          // dish flagged open_price (every normal line is still priced from the DB).
+          price: l.open_price ? l.price : undefined,
           options: l.options ? l.options.map((o) => ({ group: o.group, label: o.label })) : undefined,
           note: note || undefined,
         };
