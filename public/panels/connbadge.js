@@ -271,6 +271,18 @@
     pop.addEventListener("click", function (e) { e.stopPropagation(); });
     badge.appendChild(pop);
     renderPop(computeView());
+    // Keep the popover on-screen. It's anchored right:0 to the badge, so when the
+    // badge sits near the LEFT edge (e.g. the kitchen top bar) the ~288px panel
+    // overflowed the left screen edge on phones and clipped its own text. A CSS
+    // position:fixed clamp is defeated by transformed ancestors, so measure the
+    // rendered rect and nudge it back inside the viewport with a transform.
+    requestAnimationFrame(function () {
+      if (!pop) return;
+      var r = pop.getBoundingClientRect(), pad = 8, shift = 0;
+      if (r.left < pad) shift = pad - r.left;
+      else if (r.right > window.innerWidth - pad) shift = (window.innerWidth - pad) - r.right;
+      if (shift) pop.style.transform = "translateX(" + Math.round(shift) + "px)";
+    });
     badge.setAttribute("aria-expanded", "true");
     // click-away
     onDocClick = function () { closePop(); };
