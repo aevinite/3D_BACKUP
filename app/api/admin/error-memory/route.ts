@@ -1,8 +1,7 @@
-// GET/DELETE /api/admin/error-memory — the list of problems already dealt with (mig 218).
+// GET/DELETE /api/admin/error-memory — problems recorded as FIXED (migs 218/219).
 //
-// The Repair page uses this for two things:
-//   1) a "Dealt with" panel the owner can review and undo ("Show this again"), so muting is never
-//      a one-way door;
+// This list hides nothing. The Repair page uses it for two read-only things:
+//   1) an "Already fixed" reference list (with the link to each fix) that can be forgotten again;
 //   2) labelling a live problem tile "came back after the fix on <date>" — a problem recorded as
 //      fixed that is happening again means the fix did NOT hold, and that has to be visible.
 //
@@ -24,7 +23,7 @@ export async function GET(req: NextRequest) {
   if (rid && !UUID.test(rid)) return err("invalid restaurant_id");
 
   let q = sb.from("error_signatures")
-    .select("id, restaurant_id, panel, action, sig, state, fixed_at, fixed_by, pr_url, note, recurrences, last_seen_at")
+    .select("id, restaurant_id, panel, action, sig, fixed_at, fixed_by, pr_url, note")
     .order("fixed_at", { ascending: false }).limit(100);
   // A NULL-restaurant signature covers every restaurant, so it belongs in a scoped view too.
   if (rid) q = q.or(`restaurant_id.eq.${rid},restaurant_id.is.null`);
@@ -43,18 +42,18 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// DELETE ?id=… — forget one memory ("Show this again"). The error alarms normally from now on.
+// DELETE ?id=… — forget one record ("Forget this"), so Fix-now treats the problem as new again.
 export async function DELETE(req: NextRequest) {
   if (!(await admin(req))) return err("unauthorized", 401);
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!UUID.test(id)) return err("invalid id");
-  const r = await sb.from("error_signatures").delete().eq("id", id).select("panel, action, sig, state, restaurant_id").maybeSingle();
+  const r = await sb.from("error_signatures").delete().eq("id", id).select("panel, action, sig, restaurant_id").maybeSingle();
   if (r.error) return err(r.error.message, 500);
   if (!r.data) return err("that entry is already gone", 404);
   const gone = r.data as { panel: string; action: string; sig: string; restaurant_id: string | null };
   await logAction("admin", "error_memory_cleared", {
     restaurant_id: gone.restaurant_id ?? undefined, level: "info",
-    detail: `Show again: ${gone.panel}/${gone.action} — ${gone.sig.slice(0, 90)}`,
+    detail: `Forgot fix record: ${gone.panel}/${gone.action} — ${gone.sig.slice(0, 90)}`,
   });
   return NextResponse.json({ ok: true });
 }

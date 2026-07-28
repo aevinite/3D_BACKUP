@@ -1,80 +1,66 @@
-// errorMemory — reads/writes the "already dealt with" memory (error_signatures, mig 218).
+// errorMemory — a plain record of problems that were FIXED (error_signatures, migs 218 + 219).
 //
-// The rules, in the owner's words (2026-07-28): "once you fix that error, that should not pop up
-// again — the same one", and an unnecessary error "should not pop up only". So:
+// IT NEVER HIDES ANYTHING. That is the whole point (owner 2026-07-28: "don't do anything that's
+// gonna break or hide something from me"). Nothing here is consulted when an error is logged, so
+// every error is still written and still alarms exactly as it did before this table existed. Its
+// ONE job: when someone presses "Fix now" on an occurrence that happened BEFORE its fix, answer
+// "that's already fixed on <date>, here's the PR" instead of opening a second Claude session to
+// redo work that's already done. The red tile stays on the board either way.
 //
-//   • state 'fixed'   → occurrences from BEFORE the fix are silent (already answered). An
-//                       occurrence AFTER the fix is a REGRESSION: it stays loud, because fixed
-//                       has to mean gone. We count it so the Repair page can say "came back".
-//   • state 'ignored' → the owner said this isn't a real problem: always silent, still logged.
-//
-// Every function here is FAIL-OPEN: if the memory table can't be read we behave exactly like
-// before it existed (the error alarms). Losing an alarm is worse than showing a duplicate.
+// Every function is fail-open: if the table can't be read we behave as if there were no record.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { errorSig } from "@/lib/errorSignature";
 
 export type ErrorMemory = {
   id: string;
-  state: "fixed" | "ignored";
   fixed_at: string;
   fixed_by: string | null;
   pr_url: string | null;
   note: string | null;
-  recurrences: number;
 };
 
 type Key = { panel: string; action: string; detail: string | null | undefined; restaurantId?: string | null };
 
 /**
- * The memory for this problem, or null when we've never dealt with it. A signature saved with NO
- * restaurant (a platform-wide bug) covers every restaurant; a restaurant-scoped one wins when both
- * exist, so one tenant's "not a problem" can never mute another tenant's real alarm.
+ * The fix recorded for this problem, or null if none. A record saved with NO restaurant (a
+ * platform-wide bug) covers every restaurant; a restaurant-scoped one wins when both exist.
  */
 export async function lookupErrorMemory(key: Key): Promise<ErrorMemory | null> {
   const sig = errorSig(key.detail);
   if (!sig) return null;
   try {
     const r = await sb.from("error_signatures")
-      .select("id, restaurant_id, state, fixed_at, fixed_by, pr_url, note, recurrences")
+      .select("id, restaurant_id, fixed_at, fixed_by, pr_url, note")
       .eq("panel", key.panel).eq("action", key.action).eq("sig", sig)
       .limit(5);
     if (r.error || !r.data?.length) return null;
     const rows = r.data as (ErrorMemory & { restaurant_id: string | null })[];
     const scoped = key.restaurantId ? rows.find((x) => x.restaurant_id === key.restaurantId) : null;
-    const global = rows.find((x) => x.restaurant_id === null);
-    return scoped || global || null;
+    return scoped || rows.find((x) => x.restaurant_id === null) || null;
   } catch {
-    return null; // fail open — alarm as normal
-  }
-}
-
-/** Was this occurrence AFTER the fix? (i.e. the fix did not hold). */
-export function isRegression(mem: ErrorMemory | null, occurredAt: string | Date = new Date()): boolean {
-  if (!mem || mem.state !== "fixed") return false;
-  return new Date(occurredAt).getTime() > new Date(mem.fixed_at).getTime();
-}
-
-/** Bump the seen-counter so the Repair page can show "×N since the fix". Best-effort. */
-export async function noteRecurrence(memId: string, seenAt: string = new Date().toISOString()): Promise<void> {
-  try {
-    await sb.rpc("lfh_bump_error_signature", { p_id: memId, p_seen: seenAt });
-  } catch {
-    /* counter only — never let it affect the request */
+    return null;
   }
 }
 
 /**
- * Remember that a problem was handled. Called when the owner resolves an error group, marks it
- * "not a problem", or a Claude fix request is closed as fixed. Re-recording an existing signature
- * refreshes fixed_at and ZEROES the recurrence count — a new fix deserves a clean slate, otherwise
- * an old failed attempt's counter would make the new fix look broken from day one.
+ * Did this occurrence happen AFTER the recorded fix? Then the fix didn't hold — it is a fresh
+ * problem, it alarms normally, and a new Fix-now request is allowed (carrying the failed attempt
+ * so nobody rebuilds it blind).
+ */
+export function isRegression(mem: ErrorMemory | null, occurredAt: string | Date = new Date()): boolean {
+  if (!mem) return false;
+  return new Date(occurredAt).getTime() > new Date(mem.fixed_at).getTime();
+}
+
+/**
+ * Record that a problem was fixed. Called when a Claude ticket is closed as fixed, or the owner
+ * marks a problem handled. Re-recording refreshes the date and keeps the newest PR link.
  */
 export async function rememberErrorHandled(args: {
   panel: string;
   action: string;
   detail: string | null | undefined;
   restaurantId?: string | null;
-  state: "fixed" | "ignored";
   by: "owner" | "claude";
   prUrl?: string | null;
   note?: string | null;
@@ -87,7 +73,6 @@ export async function rememberErrorHandled(args: {
       p_panel: args.panel,
       p_action: args.action,
       p_sig: sig,
-      p_state: args.state,
       p_by: args.by,
       p_pr_url: args.prUrl ?? null,
       p_note: args.note ? String(args.note).slice(0, 300) : null,
@@ -98,7 +83,7 @@ export async function rememberErrorHandled(args: {
   }
 }
 
-/** Forget a signature — the Repair page's "show this again". Returns how many memories went. */
+/** Forget a record, so Fix-now treats the problem as brand new again. */
 export async function forgetErrorSignature(args: {
   panel: string;
   action: string;
@@ -109,7 +94,6 @@ export async function forgetErrorSignature(args: {
   if (!sig) return 0;
   let q = sb.from("error_signatures").delete()
     .eq("panel", args.panel).eq("action", args.action).eq("sig", sig);
-  // Only drop the memory that actually covers this row: the restaurant's own, or the global one.
   q = args.restaurantId
     ? q.or(`restaurant_id.eq.${args.restaurantId},restaurant_id.is.null`)
     : q.is("restaurant_id", null);

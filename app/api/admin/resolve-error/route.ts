@@ -26,12 +26,10 @@ export async function POST(req: NextRequest) {
   const actionId = typeof body.action_id === "string" && UUID.test(body.action_id) ? body.action_id : null;
   if (!actionId) return NextResponse.json({ error: "invalid action_id" }, { status: 400 });
   const reopen = body.reopen === true; // Logs-page "Reopen" — undo a resolve for the whole group.
-  // mode (mig 218) — what to REMEMBER about this kind of error, not just these rows:
-  //   'fixed'   (default) → it was a real problem and it's dealt with; old occurrences never alarm
-  //                         again, but if it happens again after now it comes back loud.
-  //   'ignored'           → "this isn't a real problem, never show it again" (still logged).
-  // Reopening forgets the memory entirely, so the problem alarms normally from then on.
-  const mode = body.mode === "ignored" ? "ignored" : "fixed";
+  // NOTE (mig 219): there is deliberately NO "mute" mode. Resolving clears today's rows and records
+  // that the problem was handled (so Fix-now on an older occurrence says "already fixed" instead of
+  // opening a duplicate Claude session) — it can never silence a FUTURE error. If this problem
+  // happens again it lands on the board as loudly as any other. Reopening forgets the record.
 
   // Look up the row the owner tapped so we can resolve its whole repeat-group.
   const row = (await sb.from("staff_actions")
@@ -54,8 +52,8 @@ export async function POST(req: NextRequest) {
 
   const count = r.data?.length ?? 0;
 
-  // Remember (or forget) the PROBLEM, not just these rows — mig 218. This is what stops the same
-  // error re-alarming and re-opening a Claude ticket after it's been dealt with.
+  // Record (or forget) that this problem was handled — migs 218/219. This ONLY stops a duplicate
+  // Claude ticket for occurrences from before now; it never hides a new error.
   let remembered = false;
   let forgotten = 0;
   try {
@@ -63,19 +61,19 @@ export async function POST(req: NextRequest) {
     if (reopen) {
       forgotten = await forgetErrorSignature(key);
     } else {
-      remembered = (await rememberErrorHandled({ ...key, state: mode, by: "owner" })).ok;
+      remembered = (await rememberErrorHandled({ ...key, by: "owner" })).ok;
     }
   } catch { /* the row-level resolve already succeeded — memory is best-effort */ }
 
   await logAction("admin", reopen ? "error_reopened" : "error_resolved", {
     restaurant_id: row.restaurant_id ?? undefined,
     level: "info",
-    detail: `${reopen ? "Reopened" : mode === "ignored" ? "Marked not-a-problem" : "Resolved"}: ${(row.detail || row.action).slice(0, 100)}${count > 1 ? ` (×${count})` : ""}`,
+    detail: `${reopen ? "Reopened" : "Resolved"}: ${(row.detail || row.action).slice(0, 100)}${count > 1 ? ` (×${count})` : ""}`,
   });
   return NextResponse.json({
     ok: true,
     resolved: reopen ? 0 : count,
     reopened: reopen ? count : 0,
-    remembered, forgotten, mode: reopen ? "reopened" : mode,
+    remembered, forgotten,
   });
 }

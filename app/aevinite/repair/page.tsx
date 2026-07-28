@@ -79,11 +79,11 @@ function groupErrors(rows: Action[]): ErrGroup[] {
   return Array.from(map.values()).sort((x, y) => y.latest.localeCompare(x.latest));
 }
 
-// A problem we've already dealt with (error_signatures, mig 218).
+// A problem recorded as fixed (error_signatures, migs 218/219). This record NEVER hides an error —
+// it only lets the page say "already fixed" and stops Fix-now opening a duplicate Claude session.
 type ErrMemory = {
   id: string; restaurant_id: string | null; restaurant: string; panel: string; action: string;
-  sig: string; state: "fixed" | "ignored"; fixed_at: string; fixed_by: string | null;
-  pr_url: string | null; note: string | null; recurrences: number; last_seen_at: string | null;
+  sig: string; fixed_at: string; fixed_by: string | null; pr_url: string | null; note: string | null;
 };
 // The memory covering a live problem tile, if any: same panel + action + signature, and either the
 // same restaurant or a platform-wide (null) entry.
@@ -109,7 +109,7 @@ export default function AdminRepair() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [confirmResolve, setConfirmResolve] = useState<string>(""); // group key mid-confirm ("are you sure?")
   const [resolving, setResolving] = useState<Set<string>>(new Set());
-  // Problems already dealt with (mig 218) + whether the review panel is open.
+  // Problems recorded as fixed (migs 218/219) + whether the reference list is open.
   const [memories, setMemories] = useState<ErrMemory[]>([]);
   const [showMemories, setShowMemories] = useState(false);
 
@@ -168,8 +168,8 @@ export default function AdminRepair() {
       adminFetch<{ issues: Issue[] }>("/api/owner/issues?scope=all"),
       adminFetch<AttData>("/api/admin/attention"),
       adminFetch<{ events: RlHit[] }>("/api/admin/rate-limits"),
-      // Problems already dealt with (mig 218) — drives the "came back after the fix" label and the
-      // "Dealt with" panel where muting can be undone.
+      // Problems recorded as fixed (migs 218/219) — drives the "came back after the fix" label and
+      // the read-only "Already fixed" reference list. Nothing here hides an error.
       adminFetch<{ memories: ErrMemory[] }>("/api/admin/error-memory"),
     ]);
     if (e.ok) setErrors(e.data.actions || []);
@@ -221,33 +221,31 @@ export default function AdminRepair() {
   // with an are-you-sure step). Persists via /api/admin/resolve-error (mig 181 resolved_at) for
   // the WHOLE ×N group, so it drops off the board here AND clears the dashboard red count — and
   // stays gone after a refresh (unlike the old local-only hide). Optimistic; reverts on failure.
-  // mode 'fixed' = "I've handled this"; mode 'ignored' = "this isn't a real problem, never show it
-  // again". Both remember the PROBLEM (mig 218), not just today's rows, so the same error can't
-  // re-alarm or open a second Claude ticket. The difference: a 'fixed' problem that happens AGAIN
-  // comes back loud (the fix didn't hold); an 'ignored' one stays quiet until the owner un-mutes it.
-  const resolveError = async (g: ErrGroup, mode: "fixed" | "ignored" = "fixed") => {
+  // Clears today's rows for the whole ×N group AND records that this problem was handled (migs
+  // 218/219) — which only prevents a DUPLICATE Claude ticket for older occurrences. It never
+  // silences a future error: if this happens again it lands on the board like any other problem.
+  const resolveError = async (g: ErrGroup) => {
     setConfirmResolve("");
     setResolving((prev) => new Set(prev).add(g.key));
     setErrors((prev) => prev.filter((a) => errorGroupKey(a) !== g.key));
     const r = await adminFetch<{ ok: boolean }>("/api/admin/resolve-error", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action_id: g.sample.id, mode }),
+      body: JSON.stringify({ action_id: g.sample.id }),
     });
     setResolving((prev) => { const n = new Set(prev); n.delete(g.key); return n; });
     if (r.ok) {
-      toast(mode === "ignored"
-        ? "Marked as not a problem — this won't show again (undo it under \"Dealt with\")."
-        : g.count > 1 ? `Resolved · cleared ${g.count} reports` : "Resolved");
-      loadHub(); // pull the new memory so the Dealt-with panel and its count are honest
+      toast(g.count > 1 ? `Resolved · cleared ${g.count} reports` : "Resolved");
+      loadHub(); // pull the new record so the "already fixed" list stays honest
     } else { toast(r.error || "Couldn't resolve that.", "err"); loadHub(); }
   };
 
-  // "Show this again" — forget a memory, so that problem alarms normally from now on.
+  // Forget a record, so Fix-now treats that problem as brand new again. (It was never hiding
+  // anything — the record only answers "already fixed" when you press Fix-now on an old report.)
   const forgetMemory = async (m: ErrMemory) => {
     setMemories((prev) => prev.filter((x) => x.id !== m.id));
     const r = await adminFetch<{ ok: boolean }>(`/api/admin/error-memory?id=${m.id}`, { method: "DELETE" });
-    if (r.ok) toast("That problem will show up again if it happens.");
+    if (r.ok) toast("Forgotten — Fix now will treat that problem as new again.");
     else { toast(r.error || "Couldn't undo that.", "err"); loadHub(); }
   };
 
@@ -396,10 +394,10 @@ export default function AdminRepair() {
             const jl = jumpLabel(a);
             const isOpen = expanded.has(g.key);
             const wasSent = sent.has(g.key);
-            // Was this problem already "fixed" once? Then it is BACK — the fix didn't hold, and
-            // that deserves the loudest label on the tile (mig 218).
+            // Was this problem fixed once before? Then it is BACK — the fix didn't hold, which
+            // deserves the loudest label on the tile (migs 218/219).
             const mem = memoryFor(g, memories);
-            const cameBack = mem?.state === "fixed" && new Date(g.latest) > new Date(mem.fixed_at);
+            const cameBack = !!mem && new Date(g.latest) > new Date(mem.fixed_at);
             return (
               <div key={g.key} className="rp-err">
                 <span className="rp-err-bar" style={{ background: cameBack ? "var(--adm-danger)" : color }} />
@@ -448,13 +446,10 @@ export default function AdminRepair() {
                     {/* Resolve — the owner clears it himself (persists; whole ×N group). Two-step
                         are-you-sure so a mis-tap can't wipe a real problem off the board. */}
                     {confirmResolve === g.key ? (
-                      <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, flexWrap: "wrap" }}>
-                        <span className="adm-muted">Which is it?</span>
-                        <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => resolveError(g, "fixed")} title="It was a real problem and it's handled. If it ever happens again it comes straight back to this board.">
-                          <i className="fas fa-check" aria-hidden="true" style={{ marginRight: 5 }} />It&apos;s handled
-                        </button>
-                        <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => resolveError(g, "ignored")} title="Not a real problem — never show me this one again (you can undo it under 'Dealt with')">
-                          <i className="fas fa-bell-slash" aria-hidden="true" style={{ marginRight: 5, opacity: 0.85 }} />Not a problem
+                      <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                        <span className="adm-muted">Mark resolved?</span>
+                        <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => resolveError(g)} title="I've handled this — clear it from the board. If it ever happens again it comes straight back.">
+                          <i className="fas fa-check" aria-hidden="true" style={{ marginRight: 5 }} />Yes, resolve
                         </button>
                         <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setConfirmResolve("")}>Cancel</button>
                       </span>
@@ -471,37 +466,30 @@ export default function AdminRepair() {
         </div>
       )}
 
-      {/* ── Dealt with (mig 218) ────────────────────────────────────────────
-          The memory of problems that are handled or muted. It exists so muting is never a
-          one-way door: everything here can be brought back with one tap, and anything that
-          has happened again since its fix says so in red. */}
+      {/* ── Already fixed (migs 218/219) ────────────────────────────────────
+          A plain record of problems that have been fixed, with the link to the fix. It hides
+          NOTHING: if any of these happens again it appears in "Problems right now" above like
+          any other error. Its only effect is that pressing Fix now on an OLD report of one
+          answers "already fixed on <date>" instead of sending Claude to redo the work. */}
       {memories.length ? (
         <div style={{ marginBottom: 14 }}>
           <button className="rp-link" onClick={() => setShowMemories((v) => !v)} style={{ fontSize: 12.5 }}>
             <i className={`fas fa-chevron-${showMemories ? "down" : "right"}`} aria-hidden="true" style={{ marginRight: 6, fontSize: 10 }} />
-            Dealt with ({memories.length}) — problems that won&apos;t alarm again
-            {memories.some((m) => m.state === "fixed" && m.recurrences > 0)
-              ? <span className="rp-chip danger" style={{ marginLeft: 8 }}>{memories.filter((m) => m.state === "fixed" && m.recurrences > 0).length} came back</span>
-              : null}
+            Already fixed ({memories.length}) — for reference; nothing here is hidden from the board
           </button>
           {showMemories ? (
             <div style={{ marginTop: 8 }}>
               {memories.map((m) => (
-                <div key={m.id} className="rp-err" style={{ opacity: m.recurrences > 0 && m.state === "fixed" ? 1 : 0.85 }}>
-                  <span className="rp-err-bar" style={{ background: m.state === "ignored" ? "var(--muted)" : m.recurrences > 0 ? "var(--adm-danger)" : "var(--adm-ok, #4caf82)" }} />
+                <div key={m.id} className="rp-err" style={{ opacity: 0.85 }}>
+                  <span className="rp-err-bar" style={{ background: "var(--adm-ok, #4caf82)" }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
                       <b style={{ fontSize: 13 }}>{ACT_LABEL[m.action] || m.action}</b>
                       <span className="rp-panel">{PANEL_NAME[m.panel] || m.panel}</span>
                       <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{m.restaurant}</span>
-                      <span className={`rp-chip${m.state === "ignored" ? "" : " ok"}`}>
-                        {m.state === "ignored" ? "not a problem" : "fixed"}
-                      </span>
-                      {m.state === "fixed" && m.recurrences > 0 ? (
-                        <span className="rp-chip danger">happened {m.recurrences}× since</span>
-                      ) : null}
+                      <span className="rp-chip ok">fixed</span>
                       <span className="adm-muted" style={{ fontSize: 11.5 }}>
-                        {m.state === "ignored" ? "muted" : "fixed"} {timeAgo(m.fixed_at)}{m.fixed_by ? ` by ${m.fixed_by === "claude" ? "Claude" : "you"}` : ""}
+                        fixed {timeAgo(m.fixed_at)}{m.fixed_by ? ` by ${m.fixed_by === "claude" ? "Claude" : "you"}` : ""}
                       </span>
                     </div>
                     <div className="rp-detail" style={{ maxHeight: 34 }}>{m.sig}</div>
@@ -509,8 +497,8 @@ export default function AdminRepair() {
                       {m.pr_url ? (
                         <a className="rp-link" href={m.pr_url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>see the fix</a>
                       ) : null}
-                      <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={() => forgetMemory(m)} title="Stop remembering this — it will show as a problem again if it happens">
-                        <i className="fas fa-bell" aria-hidden="true" style={{ marginRight: 6, opacity: 0.85 }} />Show this again
+                      <button className="adm-btn" style={{ fontSize: 12, marginLeft: "auto" }} onClick={() => forgetMemory(m)} title="Forget this record — Fix now will treat that problem as brand new again">
+                        <i className="fas fa-eraser" aria-hidden="true" style={{ marginRight: 6, opacity: 0.85 }} />Forget this
                       </button>
                     </div>
                   </div>
