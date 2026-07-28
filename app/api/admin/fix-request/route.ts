@@ -14,6 +14,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction, redactMoney } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
+import { lookupErrorMemory, isRegression, rememberErrorHandled } from "@/lib/errorMemory";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,9 @@ async function postHandler(req: NextRequest) {
   // its queued/fixed request across a refresh (kills the "keeps re-offering Fix now" bug). Same
   // formula as groupErrors() in app/aevinite/repair/page.tsx — keep the two in lock-step.
   let errKey: string | null = null;
+  // Set when this problem was fixed before and has come back — attached to the context so the
+  // agent sees the failed attempt instead of rebuilding it from scratch.
+  let regression: { fixedAt: string; prUrl: string | null; fixedBy: string | null; seenSince: number } | null = null;
 
   if (actionId) {
     // Find the error row, then grab the window of rows around it for the same restaurant.
@@ -60,6 +64,27 @@ async function postHandler(req: NextRequest) {
     rid = rid || row.restaurant_id;
     source = "error_row";
     summary = (redactMoney(row.detail) as string) || row.action;
+
+    // ── Already dealt with? (error_signatures, mig 218) ──────────────────────────────────────
+    // This is the guard that stops the same problem being handed to Claude twice. On 2026-07-28
+    // a 414 ticket popped a live session that spent ~40 minutes rebuilding a fix ANOTHER session
+    // had already shipped. So: an error that happened BEFORE its fix has already been answered —
+    // refuse, and tell the owner where the answer is. An error that happened AFTER its fix is a
+    // different story: the fix didn't hold, so the request goes through, clearly labelled, with
+    // the previous attempt attached so nobody rebuilds it blind.
+    const mem = await lookupErrorMemory({ panel: row.panel, action: row.action, detail: row.detail, restaurantId: row.restaurant_id });
+    if (mem) {
+      const when = new Date(mem.fixed_at).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+      if (mem.state === "ignored") {
+        return err(`You marked this as "not a real problem" on ${when}. Tap "Show this again" on it first if you want Claude to look into it.`, 409);
+      }
+      if (!isRegression(mem, row.created_at)) {
+        return err(`This was already fixed on ${when}${mem.pr_url ? ` — ${mem.pr_url}` : ""}. This entry is from before that fix, so there's nothing new to do.`, 409);
+      }
+      // Regression: keep it loud and give the agent the history.
+      regression = { fixedAt: mem.fixed_at, prUrl: mem.pr_url, fixedBy: mem.fixed_by, seenSince: mem.recurrences };
+      summary = `CAME BACK after the fix on ${when} — ${summary}`.slice(0, 300);
+    }
 
     // ±window: the 20 rows just BEFORE this error for the same restaurant (what led up to it).
     let ctxQ = sb.from("staff_actions")
@@ -74,6 +99,12 @@ async function postHandler(req: NextRequest) {
     // If the owner ALSO typed a hint ("Fix now with a note"), surface it up top so the agent reads
     // it — the note column alone isn't in the bundled input file. redactMoney to match the rest.
     if (note) (context as Record<string, unknown>).owner_note = redactMoney(note);
+    // The earlier fix that failed — so the agent starts from "why didn't that hold?", not from zero.
+    if (regression) (context as Record<string, unknown>).previous_fix = {
+      fixed_at: regression.fixedAt, pr_url: regression.prUrl, fixed_by: regression.fixedBy,
+      times_seen_since: regression.seenSince,
+      note: "This problem was recorded as FIXED before and has happened again — the earlier fix did not hold. Check that PR first; do not rebuild it blind.",
+    };
     errKey = `${row.panel}|${row.restaurant_id || ""}|${row.action}|${(redactMoney(row.detail) as string || "").slice(0, 90)}`;
   }
 
@@ -112,7 +143,32 @@ export async function PATCH(req: NextRequest) {
   if (!["open", "fixed", "dismissed"].includes(status)) return err("invalid status");
   const patch: Record<string, unknown> = { status };
   if (status !== "open") patch.resolved_at = new Date().toISOString();
-  const r = await sb.from("fix_requests").update(patch).eq("id", id).select("id").maybeSingle();
+  if (typeof body.pr_url === "string" && /^https?:\/\//.test(body.pr_url)) patch.pr_url = body.pr_url.slice(0, 300);
+  const r = await sb.from("fix_requests")
+    .update(patch).eq("id", id)
+    .select("id, action_id, restaurant_id, pr_url, summary").maybeSingle();
   if (r.error) return err(r.error.message, 500);
+
+  // Closing a ticket TEACHES the memory (mig 218), so the same problem can never be handed to
+  // Claude twice: 'fixed' → this kind of error is answered; 'dismissed' → the owner decided it
+  // isn't a real problem. Only possible when the ticket came from a real error row (we need its
+  // message to build the signature). Best-effort: the ticket close itself must not fail on this.
+  const closed = r.data as { action_id?: string | null; restaurant_id?: string | null; pr_url?: string | null } | null;
+  if (closed?.action_id && status !== "open") {
+    try {
+      const src = (await sb.from("staff_actions").select("panel, action, detail, restaurant_id")
+        .eq("id", closed.action_id).maybeSingle()).data as
+        { panel: string; action: string; detail: string | null; restaurant_id: string | null } | null;
+      if (src) {
+        await rememberErrorHandled({
+          panel: src.panel, action: src.action, detail: src.detail,
+          restaurantId: src.restaurant_id,
+          state: status === "fixed" ? "fixed" : "ignored",
+          by: "claude",
+          prUrl: closed.pr_url ?? null,
+        });
+      }
+    } catch { /* memory is an optimisation, not a requirement */ }
+  }
   return NextResponse.json({ ok: true });
 }
