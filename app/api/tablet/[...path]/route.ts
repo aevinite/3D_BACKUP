@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
+import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
@@ -219,8 +220,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // higherView is ADMIN-ONLY on purpose: tabletPerm's bypass is admin-only, so an
     // owner/manager tint would promise a button that 403s on tap (work-checker).
     if (path.join("/") === "whoami") {
-      const actor = g.user ? g.user.role : "admin"; // no staff cookie = admin super-user
-      return ok({ actor, higherView: !g.user });
+      // ACTUAL-VIEW mode (owner, 2026-07-28): an admin-view tab with ?view=real is answered
+      // as the REAL waiter tablet (no tinted extras); simulated keeps the client's ribbon.
+      const simulate = !g.user && new URL(req.url).searchParams.get("view") === "real";
+      const actor = g.user ? g.user.role : simulate ? "tablet" : "admin"; // no staff cookie = admin super-user
+      return ok({ actor, higherView: !g.user && !simulate, simulated: simulate });
     }
 
     // customer-recognize?phone=… — repeat-customer lookup for the payment sheet
@@ -409,8 +413,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   // not by parsing free text. Stays null for 'on'-mode or admin-bypass actions (no PIN).
   let pinAuth: { actor: string; actor_id: string | null } | null = null;
   const recordPin = <T extends PinGate>(g: T): T => { const p = pinActorFrom(g); if (p) pinAuth = { actor: p.actor, actor_id: p.actor_id }; return g; };
+  // Admin panel-view actions (no staff cookie, no PIN) get the actor_id='admin:view' marker
+  // so the ADMIN's log surfaces can attribute them; staff/owner reads mask it (2026-07-28).
   const log = (action: string, fields: Record<string, unknown> = {}) =>
-    logAction(tabletPanel, action, { ...(pinAuth ?? {}), ...fields, restaurant_id: rid });
+    logAction(tabletPanel, action, { ...(!actor && !pinAuth ? { actor_id: ADMIN_VIEW_ACTOR_ID } : {}), ...(pinAuth ?? {}), ...fields, restaurant_id: rid });
   try {
     const { path = [] } = await ctx.params;
     const [a, b, c] = path;

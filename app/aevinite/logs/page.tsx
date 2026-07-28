@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ACT_LABEL, PANEL_COLOR, timeAgo, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
+import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
@@ -297,6 +298,9 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
               {isTabletPin
                 ? <span className="adm-chip" title={pinShared ? "PIN shared by these managers — any could have entered it" : "Unlocked by this manager's PIN"}
                     style={{ marginLeft: 6, fontWeight: 700, background: pinShared ? "color-mix(in srgb, var(--adm-warn) 20%, transparent)" : "color-mix(in srgb, #d4af37 20%, transparent)", color: pinShared ? "var(--adm-warn)" : "#d4af37" }}>🔑 {a.actor}</span>
+                : a.actor_id === ADMIN_VIEW_ACTOR_ID
+                ? <span className="adm-chip" title="You did this from an admin panel view — staff and owner logs show it as a plain panel action"
+                    style={{ marginLeft: 6, fontWeight: 700, background: "color-mix(in srgb, #6b7280 20%, transparent)", color: "var(--adm-muted, #8b919c)" }}><i className="fas fa-user-shield" aria-hidden="true" style={{ marginRight: 4 }} />Admin</span>
                 : a.actor ? <span className="adm-muted"> · {a.actor}</span> : ""}
               {a.table_number && (isTabletPin || !a.actor) ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
               {det ? <span className="adm-muted"> · {det.length > 60 ? det.slice(0, 60) + "…" : det}</span> : null}

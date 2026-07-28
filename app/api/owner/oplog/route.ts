@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, inScope } from "@/lib/ownerScope";
+import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 
 export const dynamic = "force-dynamic";
 
@@ -72,5 +73,9 @@ export async function GET(req: NextRequest) {
     for (const x of rest.data ?? []) nameById.set(x.id, x.name);
   }
   const actions = rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? nameById.get(a.restaurant_id) ?? null : null }));
+  // Actions the ADMIN performed from a panel view carry actor_id='admin:view' (2026-07-28).
+  // Only the admin may see that marker — a REAL owner gets the row as a plain, neutral
+  // panel action (the admin stays invisible, per the standing rule).
+  if (!scope.admin) for (const a of actions) if (a.actor_id === ADMIN_VIEW_ACTOR_ID) a.actor_id = null;
   return NextResponse.json({ actions });
 }

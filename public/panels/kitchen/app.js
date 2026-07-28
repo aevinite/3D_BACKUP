@@ -28,7 +28,15 @@ let view = localStorage.getItem("kds_view") === "wall" ? "wall" : "columns";
 // another restaurant's panel (the act-as cookie is browser-wide — owner bug, 2026-07-03).
 // Empty for real staff logins; the server ignores it for them.
 const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
-const ridQ = (path) => PANEL_RID ? path + (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID) : path;
+// ACTUAL-VIEW toggle (owner, 2026-07-28): ?view=real on an admin-view tab makes whoami
+// answer as the real kitchen screen. Per-tab like ?rid, echoed on every call.
+const PANEL_VIEW_REAL = PANEL_RID && new URLSearchParams(location.search).get("view") === "real";
+const ridQ = (path) => {
+  if (!PANEL_RID) return path;
+  path += (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID);
+  if (PANEL_VIEW_REAL) path += "&view=real";
+  return path;
+};
 const api = async (method, path, body) => {
   // Writes go through the offline outbox (sent now if online, else saved + replayed
   // on reconnect, at-most-once). GETs stay a plain fetch. Same contract as before.
@@ -1049,10 +1057,18 @@ if (window.LFH_RT) {
     background: transparent; color: var(--muted, #9fb0cc); font-weight: 700; padding: 4px 12px; }`;
   const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
 
+  // Flip this admin-view TAB between the full admin view and the "actual kitchen" view
+  // (?view=real). Pure URL state — reloading with/without the param is the whole toggle.
+  const setViewReal = (on) => {
+    const u = new URL(location.href);
+    if (on) u.searchParams.set("view", "real"); else u.searchParams.delete("view");
+    location.replace(u.toString());
+  };
   api("GET", "/whoami").then((w) => {
-    if (!w || !w.higherView) return;
+    const sim = !!(w && w.simulated); // ACTUAL-VIEW mode: real kitchen render, slim ribbon back
+    if (!w || (!w.higherView && !sim)) return;
     const rb = document.createElement("div"); rb.id = "xrayRibbon";
-    const who = w.actor === "admin" ? "Admin" : w.actor.charAt(0).toUpperCase() + w.actor.slice(1);
+    const who = sim || w.actor === "admin" ? "Admin" : w.actor.charAt(0).toUpperCase() + w.actor.slice(1);
     // ADMIN came from the console → show the PATH (Restaurants › name › Kitchen
     // panel), the owner panel's breadcrumb language (owner, 2026-07-06). Any other
     // higher role keeps the plain name — no console to crumb back to.
@@ -1061,12 +1077,22 @@ if (window.LFH_RT) {
         `<span class="rb-sep">›</span><span id="xrayRest"></span>` +
         `<span class="rb-sep">›</span><span>Kitchen panel</span></nav>`
       : `<span class="rb-rest" id="xrayRest"></span>`;
+    // The kitchen has no gated controls, so the "actual view" only drops the admin extras;
+    // the toggle still exists on every panel (owner 2026-07-28: one per panel, default off).
+    const simBtn = sim
+      ? `<button id="xraySimBtn" title="Back to the full admin view">See full admin view</button>`
+      : (who === "Admin" && PANEL_RID
+        ? `<button id="xraySimBtn" title="Reload this tab showing exactly what the real kitchen screen sees">👁 See actual panel</button>`
+        : "");
     rb.innerHTML =
-      `<span class="rb-tag">${who} view</span>` +
+      `<span class="rb-tag">${who} view${sim ? " · as real kitchen" : ""}</span>` +
       body +
       `<span class="rb-spacer"></span>` +
+      simBtn +
       `<button id="xrayExit">Exit view</button>`;
     document.body.insertBefore(rb, document.body.firstChild);
+    const simB = document.getElementById("xraySimBtn");
+    if (simB) simB.onclick = () => setViewReal(!sim);
     const home = document.getElementById("xrayHome");
     if (home) home.onclick = () => {
       try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }

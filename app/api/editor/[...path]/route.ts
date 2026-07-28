@@ -13,6 +13,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { menuTag } from "@/lib/menuDataServer";
 import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
+import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
@@ -319,7 +320,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // but show it GREYED to a higher role (admin/owner) looking in. Read-only; the
     // server still enforces every capability (managerCan) regardless of what the UI shows.
     if (p === "whoami") {
-      const actor = g.user ? g.user.role : "admin"; // no staff user cookie = admin super-user
+      // ACTUAL-VIEW mode (owner, 2026-07-28): an admin-view tab may ask ?view=real —
+      // answer exactly as the REAL manager would be answered (restaurant-wide grants, no
+      // higher-view tinting), plus simulated:true so the client keeps its ribbon (the way
+      // back to the full admin view). Read-only; every write gate still sees the admin.
+      const simulate = !g.user && new URL(req.url).searchParams.get("view") === "real";
+      const actor = g.user ? g.user.role : simulate ? "manager" : "admin"; // no staff user cookie = admin super-user
       const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle()).data as
         { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean>; access_config?: { edit_menu?: { manager_opts?: Record<string, boolean> } } } | null;
       // The ladder, resolved per power (mig 133): effective = admin entitles it AND the
@@ -359,7 +365,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // (all true); a manager is limited only when the owner configured manager_opts, and then
       // only an EXPLICIT true allows it (an absent/unconfigured key stays ALLOWED = default).
       const MENU_SUB_KEYS = ["add_dish", "edit_dish", "edit_price", "delete_dish", "mark_86", "manage_categories", "manage_filters", "edit_3d"];
-      const mo = (g.user && g.user.role === "manager") ? r?.access_config?.edit_menu?.manager_opts : null;
+      const mo = ((g.user && g.user.role === "manager") || simulate) ? r?.access_config?.edit_menu?.manager_opts : null;
       const menuRestricted = !!(mo && typeof mo === "object");
       const menuSub: Record<string, boolean> = {};
       for (const k of MENU_SUB_KEYS) menuSub[k] = menuRestricted ? mo![k] === true : true;
@@ -368,14 +374,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         role: actor,
         // A higher role is "viewing" a lower panel when it's the admin super-user or an
         // owner opening the manager panel — those see greyed (not hidden) disabled items.
+        // (In the simulate mode actor is already "manager", so this resolves false.)
         higherView: actor === "admin" || actor === "owner",
+        simulated: simulate,
         managerPermissions: perms,
         effectivePowers,
         offByAdmin,
         menuSub,
         // Delete-a-bill sub-permission (default OFF) — lets the panel show the "🗑 Delete bill"
-        // button only when the owner ticked it (admin/owner always true). (owner, 2026-07-24)
-        canDeleteBill: await canDeleteBill(g, rid),
+        // button only when the owner ticked it (admin/owner always true; the simulate mode
+        // resolves it like a real manager: only when the owner explicitly ticked it).
+        canDeleteBill: simulate
+          ? ((r?.access_config as { void_bills?: { manager_opts?: Record<string, boolean> } } | null)?.void_bills?.manager_opts?.delete_bill === true)
+          : await canDeleteBill(g, rid),
         // One entry per module-backed capability (same keys as before: table_tags, khata,
         // banquet, table_ops, take_orders, parcel) — derived, so new modules appear here.
         features: Object.fromEntries(PERMISSIONS.filter((mp) => mp.module).map((mp) => [mp.id, !!ladders[moduleKey(mp)]?.effective])),
@@ -1131,7 +1142,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // ADMIN's actions (panel='admin') AND the OWNER's actions (panel='owner' —
       // staff changes, permission grants…) are both hidden here; they show only in
       // their own panels' logs.
-      return ok(must(await sb.from("staff_actions").select("*").eq("restaurant_id", rid).not("panel", "in", "(admin,owner,db)").order("created_at", { ascending: false }).limit(200)));
+      const rows = (must(await sb.from("staff_actions").select("*").eq("restaurant_id", rid).not("panel", "in", "(admin,owner,db)").order("created_at", { ascending: false }).limit(200)) || []) as { actor_id?: string | null }[];
+      // Actions the ADMIN performed from a panel view carry actor_id='admin:view' (owner,
+      // 2026-07-28). Only the admin's own view may see that marker — for staff/owner
+      // viewers the row must stay a plain, neutral panel row (the admin stays invisible).
+      if (g.user) for (const row of rows) if (row.actor_id === ADMIN_VIEW_ACTOR_ID) row.actor_id = null;
+      return ok(rows);
     }
 
     if (p === "staff-risk") {
@@ -1178,7 +1194,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   // admin super-user has no per-user cookie). Before this, `actor` was never filled, so
   // the Operation-log "By" column and the Staff-watch tool saw only an anonymous row.
   const actorName = g.user?.name || g.user?.username || null;
-  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(a[2] || {}) });
+  // Admin panel-view actions (no staff cookie) get the actor_id='admin:view' marker so the
+  // ADMIN's log surfaces can attribute them; staff/owner log reads mask it (owner 2026-07-28).
+  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? {} : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
   try {
@@ -2556,7 +2574,9 @@ export const PATCH = withIdempotency(patchImpl, "editor");
 async function patchImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const actorName = g.user?.name || g.user?.username || null;
-  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(a[2] || {}) });
+  // Admin panel-view actions (no staff cookie) get the actor_id='admin:view' marker so the
+  // ADMIN's log surfaces can attribute them; staff/owner log reads mask it (owner 2026-07-28).
+  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? {} : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
   try {
@@ -2658,7 +2678,9 @@ export const DELETE = withIdempotency(deleteImpl, "editor");
 async function deleteImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const actorName = g.user?.name || g.user?.username || null;
-  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(a[2] || {}) });
+  // Admin panel-view actions (no staff cookie) get the actor_id='admin:view' marker so the
+  // ADMIN's log surfaces can attribute them; staff/owner log reads mask it (owner 2026-07-28).
+  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? {} : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
   try {

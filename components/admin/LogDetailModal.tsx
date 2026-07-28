@@ -17,6 +17,7 @@
 // there because every log row carries them.
 import { useEffect, useRef } from "react";
 import { useBackClose } from "@/lib/backStack";
+import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { ACT_LABEL, PANEL_COLOR, formatActionDetail, fullWhen, timeAgo, isManagerPinRow, type Action } from "@/components/admin/shared";
 
 // One "label : value" line. Renders nothing when the value is empty, so no blank rows.
@@ -111,6 +112,8 @@ export function LogDetailModal({ row, onClose, showRestaurant = true }: { row: A
           <Section title="Who">
             {isPin
               ? <Field label="Panel">Waiter tablet</Field>
+              : row.actor_id === ADMIN_VIEW_ACTOR_ID
+              ? <Field label="Done by"><span style={{ fontWeight: 700 }}>🛡 Admin (via panel view — staff &amp; owner logs see a plain panel action)</span></Field>
               : <Field label="Done by">{row.actor || <span style={{ color: "var(--muted, #93a1b0)" }}>{panel === "db" ? "Direct database edit (no staff login)" : "Panel action (no staff login yet)"}</span>}</Field>}
             <Field label="Device">{row.device_id ? "📱 #" + row.device_id : null}</Field>
             {showRestaurant && <Field label="Restaurant">{row.restaurant_name || null}</Field>}

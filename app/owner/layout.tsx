@@ -63,7 +63,19 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
     // Pay Later nav shows if the module is on for ANY owned restaurant (per-restaurant data
     // is filtered by the API). Injected as a synthetic section key the nav gate reads.
     ents.khata_book = (await Promise.all(ownedIds.map((id) => tableTagsLadder(id)))).some((l) => l.effective);
-    return <OwnerShell initialSkin={initialSkin} entitlements={ents}><AutoFitNumbers />{children}</OwnerShell>;
+    // DUAL-COOKIE case (owner, 2026-07-28): a real owner login AND a live admin act-as in
+    // the same browser. This layout can't read searchParams, so it can't tell an
+    // admin-opened tab (?rid= pin) from the owner's own — pass BOTH payloads and let
+    // OwnerShell pick per tab. Costs one extra entitlement read, only on such sessions
+    // (in practice just the admin's own machine while testing).
+    let dualAdmin: { adminEntitlements: Record<string, boolean>; restaurantName: string } | undefined;
+    if (acting && actingValid) {
+      const r = (await sb.from("restaurants").select("name").eq("id", acting).limit(1)).data?.[0];
+      const adminEnts = await getOwnerEntitlements(acting);
+      adminEnts.khata_book = (await tableTagsLadder(acting)).effective;
+      dualAdmin = { adminEntitlements: adminEnts, restaurantName: r?.name || "this restaurant" };
+    }
+    return <OwnerShell initialSkin={initialSkin} entitlements={ents} dualAdmin={dualAdmin}><AutoFitNumbers />{children}</OwnerShell>;
   }
 
   // 2) ADMIN viewing a specific restaurant (act-as) → top-power, invisible view.

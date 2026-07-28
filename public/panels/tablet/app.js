@@ -86,7 +86,15 @@ const state = {
 // another restaurant's panel (the act-as cookie is browser-wide — owner bug, 2026-07-03).
 // Empty for real staff logins; the server ignores it for them.
 const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
-const ridQ = (path) => PANEL_RID ? path + (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID) : path;
+// ACTUAL-VIEW toggle (owner, 2026-07-28): ?view=real on an admin-view tab makes whoami answer
+// as the REAL waiter tablet (no tinted extras). Per-tab like ?rid, echoed on every call.
+const PANEL_VIEW_REAL = PANEL_RID && new URLSearchParams(location.search).get("view") === "real";
+const ridQ = (path) => {
+  if (!PANEL_RID) return path;
+  path += (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID);
+  if (PANEL_VIEW_REAL) path += "&view=real";
+  return path;
+};
 const api = async (method, path, body) => {
   // Writes go through the offline outbox: sent now if online, else saved on this
   // device and replayed on reconnect (at-most-once via X-LFH-Action-Id). GETs stay
@@ -466,8 +474,17 @@ const tperm = (k) => ((state.data.settings || {})[k] || "off");
 // templates; txray() adds the tint class when it's off-for-waiters.
 let TABLET_WHO = null;
 const tHigher = () => !!(TABLET_WHO && TABLET_WHO.higherView);
+// ACTUAL-VIEW mode (?view=real): whoami answered as the real waiter (higherView=false), so
+// tshow/txray naturally hide what waiters don't have; simulated keeps the ribbon rendered.
+const tSim = () => !!(TABLET_WHO && TABLET_WHO.simulated);
 const tshow = (k) => tperm(k) !== "off" || tHigher();
 const txray = (k) => (tperm(k) === "off" && tHigher() ? " xray-off" : "");
+// Hover explanation for any greyed-out (off-for-waiters) control — set lazily so the
+// templates don't need a title on every txray() usage (owner 2026-07-28).
+document.addEventListener("mouseover", (e) => {
+  const el = e.target.closest && e.target.closest(".xray-off");
+  if (el && !el.title) el.title = "Not available — this isn't enabled for this restaurant's waiters. You can still use it from the admin view.";
+});
 
 // ── Special table types (VIP / Family / Owner's Guest) + khata — mig 166 ──────
 // Mirrors the manager panel. The tile look is the APPROVED design
@@ -3234,7 +3251,9 @@ const XRAY_CAPS = [
 ];
 (function injectXrayStyles() {
   const css = `
-  .xray-off { color: #d97706 !important; border-color: color-mix(in srgb, #d97706 45%, transparent) !important; opacity: .78; }
+  /* GREYED OUT (off-for-waiters) — neutral mid-grey, clearly dimmer than enabled controls,
+     never near-black; stays clickable for the admin view (owner 2026-07-28: grey, not golden). */
+  .xray-off { color: #8b919c !important; border-color: color-mix(in srgb, #6b7280 45%, transparent) !important; opacity: .55; filter: grayscale(1); }
   #xrayRibbon { display: flex; align-items: center; gap: 12px; padding: 6px 14px; flex: none;
     background: color-mix(in srgb, #d97706 14%, var(--panel, #101826)); border-bottom: 1px solid color-mix(in srgb, #d97706 40%, transparent);
     font-size: 12px; color: var(--text, #e8eefc); position: relative; z-index: 40; }
@@ -3256,7 +3275,10 @@ const XRAY_CAPS = [
     border: 0; border-radius: 8px; padding: 8px; font: inherit; font-size: 12.5px; color: inherit; cursor: pointer; }
   #xrayZones .zrow:hover { background: color-mix(in srgb, #d97706 14%, transparent); }
   #xrayZones .zrow .dot { width: 7px; height: 7px; border-radius: 50%; background: #d97706; flex-shrink: 0; }
-  #xrayZones .zrow small { color: var(--muted,#9fb0cc); margin-left: auto; }`;
+  #xrayZones .zrow small { color: var(--muted,#9fb0cc); margin-left: auto; }
+  #xrayZones .zsep { height: 1px; margin: 6px 4px; background: var(--line, #26324a); }
+  #xrayZones .zrow.zsim { font-weight: 700; }
+  #xrayZones .zrow.zsim:hover { background: color-mix(in srgb, #6b7280 16%, transparent); }`;
   const s = document.createElement("style"); s.textContent = css; document.head.appendChild(s);
 })();
 
@@ -3266,9 +3288,42 @@ function closeXrayZones() {
   if (zp) zp.remove();
   if (xrayZonesBackOff) { xrayZonesBackOff(); xrayZonesBackOff = null; }
 }
+// Flip this admin-view TAB between the full admin view and the "actual tablet" view
+// (?view=real). Pure URL state — reloading with/without the param is the whole toggle.
+function xraySetViewReal(on) {
+  const u = new URL(location.href);
+  if (on) u.searchParams.set("view", "real"); else u.searchParams.delete("view");
+  location.replace(u.toString());
+}
 function renderXrayRibbon() {
   let rb = document.getElementById("xrayRibbon");
-  if (!tHigher()) { if (rb) rb.remove(); return; }
+  if (!tHigher() && !tSim()) { if (rb) rb.remove(); return; }
+  // ACTUAL-VIEW mode: everything renders as the real waiter tablet; the ribbon stays as
+  // the only admin trace — and the way back to the full admin view.
+  if (tSim()) {
+    const restS = (state.data.restaurant && state.data.restaurant.name) || "";
+    const simSig = `sim|${restS}`;
+    if (rb && rb.dataset.sig === simSig) return;
+    if (!rb) { rb = document.createElement("div"); rb.id = "xrayRibbon"; document.body.insertBefore(rb, document.body.firstChild); }
+    rb.dataset.sig = simSig;
+    rb.innerHTML =
+      `<span class="rb-tag">Admin view · as real tablet</span>` +
+      `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
+      `<span class="rb-sep">›</span><span>${restS ? esc(restS) : "…"}</span>` +
+      `<span class="rb-sep">›</span><span>Tablet panel</span></nav>` +
+      `<span class="rb-spacer"></span>` +
+      `<button id="xrayFullBtn" title="Back to the full admin view (everything visible)">See full admin view</button>` +
+      `<button class="rb-exit" id="xrayExit">Exit view</button>`;
+    document.getElementById("xrayFullBtn").onclick = () => xraySetViewReal(false);
+    document.getElementById("xrayHome").onclick = () => {
+      try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+    };
+    document.getElementById("xrayExit").onclick = async () => {
+      try { await fetch("/api/admin/act-as", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clear: true }) }); } catch {}
+      try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }
+    };
+    return;
+  }
   const zones = XRAY_CAPS.filter((c) => {
     // Module caps only count as "zones" when the module exists for this restaurant at
     // all (banquet full ladder / KOT-menu depth) — otherwise it's not a grantable thing.
@@ -3304,20 +3359,29 @@ function renderXrayRibbon() {
   document.getElementById("xrayZonesBtn").onclick = () => {
     if (document.getElementById("xrayZones")) { closeXrayZones(); return; }
     const zp = document.createElement("div"); zp.id = "xrayZones";
+    // Bottom row (owner 2026-07-28): flip THIS TAB to the ACTUAL waiter tablet — exactly
+    // what a real waiter sees, with their real limited access. Admin-view tabs only.
+    const simRow = PANEL_RID
+      ? `<div class="zsep"></div><button class="zrow zsim" id="xraySimRow" title="Reload this tab showing exactly what a real waiter sees — same limited access, fully working">` +
+        `<span class="dot" style="background:#6b7280"></span>👁 See the actual tablet panel</button>`
+      : "";
     zp.innerHTML = `<div class="zh">Off for waiters here</div>` + (zones.length
       ? zones.map((z) => `<button class="zrow" data-zk="${z.key}"><span class="dot"></span>${z.label}<small>⚙ change in Access</small></button>`).join("")
-      : `<div class="zrow" style="cursor:default">Nothing is off — waiters see everything you see.</div>`);
+      : `<div class="zrow" style="cursor:default">Nothing is off — waiters see everything you see.</div>`) + simRow;
     rb.appendChild(zp);
     // Hardware BACK closes the popout (not the panel) — panels' backstack manager.
     xrayZonesBackOff = window.LFH_BACK ? LFH_BACK.layer("xray-zones", () => { const z = document.getElementById("xrayZones"); if (z) z.remove(); xrayZonesBackOff = null; }) : null;
-    // A zone row jumps to the admin Access hub, pinned to this restaurant's tablet card.
+    // A zone row jumps to the admin Access hub, deep-linked to the EXACT control
+    // (the Access page scrolls to it and flashes it — owner 2026-07-28).
     zp.querySelectorAll(".zrow[data-zk]").forEach((row) => {
       row.onclick = () => {
         closeXrayZones();
-        const url = `/aevinite/access${PANEL_RID ? `?rid=${encodeURIComponent(PANEL_RID)}&` : "?"}focus=tablet`;
+        const url = `/aevinite/access${PANEL_RID ? `?rid=${encodeURIComponent(PANEL_RID)}&` : "?"}focus=${encodeURIComponent(row.dataset.zk)}`;
         try { window.top.location.href = url; } catch { window.location.href = url; }
       };
     });
+    const simBtn = zp.querySelector("#xraySimRow");
+    if (simBtn) simBtn.onclick = () => xraySetViewReal(true);
   };
 }
 document.addEventListener("click", (e) => {
@@ -3327,7 +3391,7 @@ document.addEventListener("click", (e) => {
 // One tiny request, once per page load — no polling.
 api("GET", "/whoami").then((w) => {
   TABLET_WHO = w;
-  if (!tHigher()) return;
+  if (!tHigher() && !tSim()) return;
   renderXrayRibbon();
   lastSig = ""; // force one repaint — buttons may need to appear tinted
   renderFloor(); if (!state.ordering && !state.pickerOpen) renderPanel();   // #U1: don't clobber an open Move picker

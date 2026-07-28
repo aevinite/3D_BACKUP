@@ -128,6 +128,13 @@ const ROLE_RELEVANCE: Record<string, string[]> = {
   owner: PERMISSIONS.filter((p) => p.kind === "ladder").map((p) => p.id),
 };
 
+// Every alias a ?focus deep-link may use for one capability card: its id, the manager
+// power flag, the tablet_* cap key, the owner section key, the guest feature slug, and
+// its sub-option ids (e.g. khata_book). Rendered as data-focus-key + used for the flash.
+function focusKeysOf(p: Perm): string[] {
+  return [p.id, p.power, p.tablet, p.section, p.feature, ...(p.sub || []).map((s) => s.id)].filter(Boolean) as string[];
+}
+
 export default function Access2Page() {
   const [rests, setRests] = useState<Rest[]>([]);
   const [rid, setRid] = useState<string>("");
@@ -151,12 +158,18 @@ export default function Access2Page() {
   const [fromRest, setFromRest] = useState(false);
   const railRef = useRef<HTMLElement | null>(null);
   const spyClick = useRef(0); // suppress the spy briefly after a rail click so it doesn't fight the smooth-scroll
+  const focusRef = useRef(""); // ?focus=<key> deep-link, consumed once when the state has loaded
+  // The key currently being flash-highlighted. STATE, not a manual classList.add: the
+  // section/card components are nested in this component, so any re-render remounts them
+  // and would wipe a manually-added class mid-flash (bit us on the first build).
+  const [flashKey, setFlashKey] = useState("");
 
   useEffect(() => {
     // Read ?rid / ?from off the URL directly (no useSearchParams → no Suspense
     // boundary needed), matching how the restaurants page reads ?focus.
     const q = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
     const urlRid = q.get("rid") || "";
+    focusRef.current = q.get("focus") || "";
     setFromRest(q.get("from") === "rest");
     fetch("/api/admin/restaurants").then((r) => r.json()).then((d) => {
       const list: Rest[] = (Array.isArray(d) ? d : d.restaurants || []).filter((x: Rest) => x.active !== false);
@@ -203,6 +216,41 @@ export default function Access2Page() {
     onScroll();
     return () => { scroller.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); };
   }, [tab, st, rid]);
+
+  // DEEP-LINK (owner, 2026-07-28): ?focus=<key> — sent by the panels' "zones off for
+  // staff" dropdowns ("⚙ change") — lands on the EXACT control, not just the page. A key
+  // may be a permission id, a manager power flag, a tablet_* cap key, an owner section
+  // key, or a guest feature slug; every control card exposes all its aliases via
+  // data-focus-key (space-separated, matched with ~=). Opens the card's group first
+  // (sections start collapsed), then scrolls to it and flashes a ring for ~1.6s — the
+  // same pattern as /owner/staff's ?focus. Consumed once per page load.
+  useEffect(() => {
+    const key = focusRef.current;
+    if (!key || !st || tab !== "general") return;
+    focusRef.current = "";
+    const hit = PERMISSIONS.find((p) =>
+      [p.id, p.power, p.tablet, p.section, p.feature].includes(key) || (p.sub || []).some((s) => s.id === key));
+    if (hit) {
+      setOpen((s) => ({ ...s, [hit.group]: true }));
+      setOpenCards((s) => ({ ...s, [hit.id]: true }));
+      setActiveArea(hit.group);
+    }
+    // Let the just-opened group render before locating the card — retry briefly (the
+    // React commit can land after a fixed delay; a one-shot 150ms lookup flashed the
+    // whole section instead of the card when it lost that race).
+    let tries = 0;
+    const locate = () => {
+      const exact = document.querySelector<HTMLElement>(`[data-focus-key~="${CSS.escape(key)}"]`);
+      if (!exact && tries++ < 12) { setTimeout(locate, 120); return; }
+      const el = exact || document.getElementById("sec-" + (hit?.group || key));
+      if (!el) return;
+      spyClick.current = Date.now() + 1500; // don't let the scroll-spy fight the jump
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setFlashKey(key); // the matching card renders .acc2-flash itself (survives re-renders)
+      setTimeout(() => setFlashKey(""), 2000);
+    };
+    setTimeout(locate, 120);
+  }, [st, tab]);
 
   // Keep the highlighted rail item in view WITHIN the rail (scrolls the rail only, never the page).
   useEffect(() => {
@@ -433,7 +481,7 @@ export default function Access2Page() {
     const on = switchVal(p);
     const blocked = p.requires && !st!.features[p.requires];
     return (
-      <div className="acc2-sw">
+      <div className={`acc2-sw${flashKey && focusKeysOf(p).includes(flashKey) ? " acc2-flash" : ""}`} data-focus-key={focusKeysOf(p).join(" ")}>
         <div className="acc2-sw-b">
           <div className="nm">{p.name}{p.adminOnly && <span className="tag">ADMIN ONLY</span>}<InfoBtn p={p} /></div>
           <div className="ds">{blocked ? `Needs “${PERM_BY_ID[p.requires!].name}” on first.` : p.what}</div>
@@ -459,7 +507,7 @@ export default function Access2Page() {
     const reachTxt = p.fixedTop ? "Owner + Manager" + (lvl >= 3 ? " + Tablet" : "") : REACH_LABEL[lvl];
 
     return (
-      <article className={`acc2-card ${isOpen ? "o" : ""} ${master ? "act" : ""}`}>
+      <article className={`acc2-card ${isOpen ? "o" : ""} ${master ? "act" : ""}${flashKey && focusKeysOf(p).includes(flashKey) ? " acc2-flash" : ""}`} data-focus-key={focusKeysOf(p).join(" ")}>
         <div className="acc2-ph">
           <button className="acc2-ph-b" onClick={() => setOpenCards((s) => ({ ...s, [p.id]: !s[p.id] }))}>
             <div className="nm">{p.name}{p.adminOnly && <span className="tag">ADMIN ONLY</span>}</div>
@@ -776,6 +824,9 @@ function Toggle({ checked, disabled, onChange }: { checked: boolean; disabled?: 
 function Style() {
   return <style jsx global>{`
   .acc2 { max-width: 1180px; }
+  /* ?focus deep-link landing flash (owner 2026-07-28) — same amber ring as /owner/staff. */
+  .acc2-flash { animation: acc2FlashRing 1.6s ease-out 1; border-radius: 12px; }
+  @keyframes acc2FlashRing { 0%, 55% { box-shadow: 0 0 0 4px rgba(217,119,6,.55); } 100% { box-shadow: 0 0 0 4px transparent; } }
   /* People coloured by ROLE (owner 2026-07-25) — matches the Users page; no single gold accent. */
   .acc2 .prole { display:flex; align-items:center; gap:8px; }
   .acc2 .prole .pdot { width:8px; height:8px; border-radius:50%; flex:none; }

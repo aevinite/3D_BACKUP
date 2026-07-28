@@ -60,10 +60,16 @@ const RID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export async function panelAdminRid(role: Role, rid: string | undefined): Promise<string | null> {
   const store = await cookies();
+  // PER-TAB ADMIN PIN first (owner, 2026-07-28): a valid ?rid= + the admin cookie marks
+  // THIS TAB as an admin view even when a real staff login for the same role exists in
+  // the browser. Before, the staff check below answered first, so signing in as staff
+  // in one tab silently turned every admin-opened panel tab into that staff session
+  // (and Visit-panel landed on the staff view instead of the admin one). Only the
+  // console's act-as flow appends ?rid=, and it's ignored without the admin cookie.
+  if (rid && RID_RE.test(rid) && (await tokenIsValid(store.get(AUTH_COOKIE)?.value))) return rid;
   const u = await userFromCookie(store.get(USER_COOKIE)?.value);
   if (u && u.role === role) return null; // real staff login — the layout already vetted them
   if (await tokenIsValid(store.get(AUTH_COOKIE)?.value)) {
-    if (rid && RID_RE.test(rid)) return rid;
     redirect("/aevinite"); // admin, but no (valid) restaurant named for THIS tab
   }
   return null; // not staff, not admin — the layout gate already bounced them to /login
