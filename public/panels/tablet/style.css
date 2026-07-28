@@ -464,6 +464,12 @@ html[data-theme="light"] .t-done .tlabel{ color:#15803d; }
 .tbl-drawer .dw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .tbl-drawer .dw-btn { display: block; width: 100%; box-sizing: border-box; text-align: center; padding: 13px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; margin-top: auto; }
 .tbl-drawer .dw-btn.danger { border-color: #7f1d1d; color: #fca5a5; }
+/* The [hidden] attribute must WIN over this display:block — same rule as
+   .confirm-overlay[hidden] above. app.js correctly sets bqBtn.hidden = true when
+   banquet isn't entitled, but an author `display:block` overrides the UA's
+   [hidden]{display:none}, so the dead "🎪 Banquet billing" button still showed
+   (and only errored "not enabled" when tapped). */
+.tbl-drawer .dw-btn[hidden] { display: none; }
 
 @media (max-width: 760px) {
   .hamburger { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 12px; font-size: 19px; cursor: pointer; -webkit-tap-highlight-color: transparent; }

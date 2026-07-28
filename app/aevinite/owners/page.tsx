@@ -232,7 +232,10 @@ export default function AdminOwners() {
       <style jsx>{`
         .own-page { display: flex; flex-direction: column; overflow-x: hidden; }
         .own-head { flex: none; }
-        .own-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+        /* minmax(0,1fr), not 1fr: a bare 1fr track has an implicit min of min-content,
+           so a wide KPI card pushed the grid past the viewport and the cards ran
+           off-screen with nothing to scroll on a phone. minmax(0,…) lets them shrink. */
+        .own-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
         .own-tools { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
         /* minmax(0,1fr): stop the detail column blowing out past its track when a child
            has wide min-content (e.g. long activity UUIDs) — the clip-on-the-right bug. */
@@ -257,7 +260,7 @@ export default function AdminOwners() {
           .own-pane { flex: 1; min-height: 0; overflow: hidden; }
         }
         @media (max-width: 860px) {
-          .own-kpis { grid-template-columns: repeat(2, 1fr); }
+          .own-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .own-pane { grid-template-columns: 1fr; }
           .own-rail.has-sel { display: none; }
           .own-detail:not(.open) { display: none; }
