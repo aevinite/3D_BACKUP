@@ -14,6 +14,7 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { inChunks, dedupeById } from "@/lib/idChunks";
 
 // We only touch id / created_at / session_id here; the rest of the row passes
 // through untouched, hence the index signature.
@@ -68,6 +69,16 @@ async function pageAll<T>(
   return all;
 }
 
+// The old single-query reads came back already ordered by created_at,id. Now that a couple of
+// them are a union of two/several reads, re-apply that same order in JS so every panel keeps
+// receiving rows oldest-first (the kitchen/tablet render in arrival order).
+function sortRows<T extends { created_at: string; id: string }>(rows: T[]): T[] {
+  return rows.sort((a, b) =>
+    a.created_at === b.created_at
+      ? String(a.id).localeCompare(String(b.id))
+      : String(a.created_at).localeCompare(String(b.created_at)));
+}
+
 export async function liveOrdersAndItems(
   restaurantId: string = DEFAULT_RESTAURANT_ID,
   tableNumbers?: string[],
@@ -84,27 +95,43 @@ export async function liveOrdersAndItems(
   // Scoped to this restaurant so a kitchen/tablet only ever sees its own floor.
   // ONLY pre-rollover sessions matter here: a session OPENED today (created_at >= since)
   // can only contain orders created after it, so those orders already pass the
-  // `created_at >= since` arm of the OR below. Narrowing to the overnight stragglers
-  // keeps this id-list tiny — the stress test showed 300+ open sessions inlining ~11KB
-  // of UUIDs into the PostgREST URL, flirting with URL-length failures.
+  // "today" arm of the union below. Narrowing to the overnight stragglers keeps this
+  // id-list small (it is chunked as well — see the 414 note at the top of idChunks.ts).
   const openRes = await sb.from("sessions").select("id")
     .eq("status", "open").eq("restaurant_id", restaurantId).lt("created_at", since);
   if (openRes.error) throw new Error(openRes.error.message);
   const openIds = (openRes.data ?? []).map((s) => s.id as string);
 
   // Orders: today's, PLUS any belonging to a still-open session (matches the brain).
-  // The optional table filter is AND-ed in BEFORE the today/open-session OR group, so
-  // PostgREST builds  ... AND table_number IN (…) AND (created_at>=since OR session_id IN (…)).
-  // Paged (pageAll) + a stable created_at,id tiebreak so pages never overlap/skip.
-  const orders = await pageAll<Row>((from, to) => {
+  //
+  // Two SEPARATE reads unioned in JS instead of one `or(created_at.gte…,session_id.in.(…))`:
+  // the OR arm inlined every open-session uuid into a single GET query string, which past a
+  // few hundred ids is refused outright as a 414 (see lib/idChunks.ts for the measurement). The
+  // session arm is now chunked, and the two result sets are deduped by order id — the union
+  // is exactly the same set of orders as the old OR produced.
+  const orderQuery = () => {
     let q = sb.from("orders").select(ORDER_COLS).eq("archived", false).is("deleted_at", null).eq("restaurant_id", restaurantId);
     if (activeOnly) q = q.in("status", KITCHEN_ACTIVE_STATUSES); // kitchen board → drop served/cancelled server-side
     if (tableFilter) q = q.in("table_number", tableFilter);
-    q = openIds.length
-      ? q.or(`created_at.gte.${since},session_id.in.(${openIds.join(",")})`)
-      : q.gte("created_at", since);
-    return q.order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to);
-  });
+    return q;
+  };
+  const todaysOrders = await pageAll<Row>((from, to) =>
+    orderQuery().gte("created_at", since)
+      .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to));
+  const openSessionOrders = await inChunks<string, Row>(openIds, (slice) =>
+    pageAll<Row>((from, to) =>
+      orderQuery().in("session_id", slice)
+        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)));
+  const orders = sortRows(dedupeById([...todaysOrders, ...openSessionOrders]));
+
+  // Items scoped to a set of order ids — chunked so a long board can't build an over-long
+  // URL, and paged inside each chunk so no chunk is silently clipped at 1000 rows.
+  const itemsForOrderIds = async (ids: string[]) =>
+    inChunks<string, Row>(ids, (slice) =>
+      pageAll<Row>((from, to) =>
+        sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
+          .in("order_id", slice)
+          .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)));
 
   // TARGETED path: items are simply the items of the orders we fetched — scope by
   // order_id (no today/open OR logic needed; the orders query already settled which
@@ -112,11 +139,7 @@ export async function liveOrdersAndItems(
   if (tableFilter) {
     const orderIds = orders.map((o) => o.id);
     if (!orderIds.length) return { orders, items: [] };
-    const items = await pageAll<Row>((from, to) =>
-      sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
-        .in("order_id", orderIds)
-        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to));
-    return { orders, items };
+    return { orders, items: sortRows(await itemsForOrderIds(orderIds)) };
   }
 
   // ACTIVE-ONLY (kitchen) full board: the caller already dropped served/cancelled orders
@@ -128,25 +151,20 @@ export async function liveOrdersAndItems(
   if (activeOnly) {
     const activeIds = orders.map((o) => o.id);
     if (!activeIds.length) return { orders, items: [] };
-    const items = await pageAll<Row>((from, to) =>
-      sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
-        .in("order_id", activeIds)
-        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to));
-    return { orders, items };
+    return { orders, items: sortRows(await itemsForOrderIds(activeIds)) };
   }
 
   // FULL path: per-dish rows are today's, PLUS the items of the OLD (pre-rollover)
   // open-session orders we just kept — so their dishes' statuses come along too.
-  // Keeping the id-list to just those old orders keeps the query small.
+  // Same two-read union as the orders above (was an `or(…order_id.in.(…))`).
   const sinceMs = new Date(since).getTime();
   const oldOrderIds = orders.filter((o) => new Date(o.created_at).getTime() < sinceMs).map((o) => o.id);
-  const items = await pageAll<Row>((from, to) => {
-    let q = sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId);
-    q = oldOrderIds.length
-      ? q.or(`created_at.gte.${since},order_id.in.(${oldOrderIds.join(",")})`)
-      : q.gte("created_at", since);
-    return q.order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to);
-  });
+  const todaysItems = await pageAll<Row>((from, to) =>
+    sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
+      .gte("created_at", since)
+      .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to));
+  const oldItems = await itemsForOrderIds(oldOrderIds);
+  const items = sortRows(dedupeById([...todaysItems, ...oldItems]));
 
   return { orders, items };
 }
