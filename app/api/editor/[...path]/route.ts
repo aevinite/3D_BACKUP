@@ -2396,6 +2396,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             "gstin", "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
             "auto_print_kot",
             "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
+            // How long the activity log and customer log are KEPT. A manager must never be able
+            // to shorten the record that audits them — dropping this to 1 day makes the nightly
+            // cleanup (mig 053) erase the evidence of a discount/void/delete they made yesterday.
+            // docs/COMPLIANCE-GUARDRAILS.md §3: the audit log has no "off" switch — and a
+            // retention dial the audited party controls is an off switch with extra steps.
+            // Owner + admin keep it (the owner is the one being protected, not policed).
+            "oplog_retention_days", "custlog_retention_days",
           ];
           for (const k of MANAGER_BLOCKED_SETTINGS) delete (body as Record<string, unknown>)[k];
         }
@@ -2684,6 +2691,17 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       if (patch.archived === false) patch.archived_at = null;
       if (patch.status === "cancelled") patch.cancelled_at = new Date().toISOString();
       if (patch.status === "received" && cur.status === "cancelled") patch.cancelled_at = null;
+      // Cancelling takes a bill OUT of revenue, so it is a money-affecting action and must name
+      // a person — it was previously the ONE such action that wrote no log line at all (only the
+      // row's cancelled_at showed it happened, with no actor). Cancel stays UNGATED for managers
+      // on purpose (it's routine floor work; only DELETE needs the power) — this records it, it
+      // does not restrict it. Un-cancelling is logged too, so a cancel/restore pair can't be used
+      // to move a bill in and out of the takings unobserved. (docs/COMPLIANCE-GUARDRAILS.md §3)
+      if (patch.status === "cancelled" && cur.status !== "cancelled") {
+        await log("editor", "order_cancel", { restaurant_id: rid, order_id: id, table_number: cur.table_number ?? null, detail: `cancelled${cur.payment_status === "paid" ? " (was marked paid)" : ""}`, device_id: deviceIdFrom(req) });
+      } else if (patch.status === "received" && cur.status === "cancelled") {
+        await log("editor", "order_uncancel", { restaurant_id: rid, order_id: id, table_number: cur.table_number ?? null, detail: "cancel undone — back on the floor", device_id: deviceIdFrom(req) });
+      }
       // Only session_id is needed (for auto-settle on pay); the client discards the body → no full row.
       const data = must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid).select("session_id"));
       if (patch.payment_status === "paid") await maybeAutoSettle(data[0]?.session_id, { panel: "editor", deviceId: deviceIdFrom(req) }); // paying may complete the table
