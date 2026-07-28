@@ -211,8 +211,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
+  const { path = [] } = await ctx.params;
   try {
-    const { path = [] } = await ctx.params;
 
     // whoami — boot signal for the tablet's hierarchy X-ray (Phase 3, 2026-07-06).
     // Same contract as the manager panel's: WHO is viewing, so the client can HIDE an
@@ -387,7 +388,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
     return err("unknown GET endpoint", 404);
   } catch (e) {
-    logError("tablet", "route_error", e, { restaurant_id: rid });
+    logError("tablet", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/") || "/"}` });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }
@@ -417,8 +418,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   // so the ADMIN's log surfaces can attribute them; staff/owner reads mask it (2026-07-28).
   const log = (action: string, fields: Record<string, unknown> = {}) =>
     logAction(tabletPanel, action, { ...(!actor && !pinAuth ? { actor_id: ADMIN_VIEW_ACTOR_ID } : {}), ...(pinAuth ?? {}), ...fields, restaurant_id: rid });
+  // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
+  const { path = [] } = await ctx.params;
   try {
-    const { path = [] } = await ctx.params;
     const [a, b, c] = path;
     // A missing client id arrives as the literal "undefined"/"null"/"NaN" — reject before it
     // reaches a uuid query and throws the "invalid input syntax for type uuid" route_error.
@@ -1409,7 +1411,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // error from a since-deleted row) — don't leak the internal message to the waiter's toast;
     // log it server-side and return a generic 500. (NB2)
     console.error("[tablet POST]", e instanceof Error ? e.message : e);
-    logError("tablet", "route_error", e, { restaurant_id: rid });
+    logError("tablet", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
     return err("Something went wrong — try again.", 500);
   }
 }
