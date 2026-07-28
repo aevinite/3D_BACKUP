@@ -458,3 +458,25 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
 - [ ] Not-available controls grey (neutral, not golden) + hover "Not available…" tooltip.
 - [ ] Admin panel-view actions logged with actor_id='admin:view' — visible only to the admin
   (owner/manager log reads mask it; admin surfaces show an 🛡 Admin pill).
+
+## 2026-07-28 — "Solve all Fix NOW errors" (admin Repair queue emptied)
+- [x] **Manager `route_error` was undiagnosable.** The Repair page kept offering "Fix NOW" on an
+  error whose entire text was `canceling statement due to statement timeout` — no endpoint, no
+  method, so it could never actually be fixed. Manager, kitchen and tablet route errors now record
+  the method + endpoint next to the message (`GET stats — canceling statement…`); `path` is resolved
+  just outside the `try` so the `catch` can name it. No extra query. Verified live: the diary row
+  read `GET __logprobe — temporary log probe`. (PR #521)
+- [x] **The timeout itself: the manager Dashboard paged serially.** `/api/editor/stats` made up to
+  12 STRICTLY SEQUENTIAL round-trips; on the busiest restaurant a full-year view spent ~5s just
+  queueing, close enough to Postgres' statement timeout that a burst of panel traffic tipped it
+  over. Now fetched in doubling parallel waves (1, 2, 4, 8), stopping as soon as a wave comes back
+  short — at most 4 round-trips, and a restaurant with under a page of orders still issues exactly
+  ONE query as before. Every Dashboard field (revenue, series, top dishes, categories, hours, day
+  parts, payment methods, heatmap, truncated) is IDENTICAL old vs new across today/30d/year;
+  full-year median 4.8s → 1.4s. Verified LIVE on 3-d-backup. (PR #521)
+- [x] **Manager `XRAY_WHO` boot error** (Bills + Platform tabs threw "Cannot access 'XRAY_WHO'
+  before initialization") — already fixed on main by PR #517; re-verified here that all 11 editor
+  tabs boot clean. No further change needed.
+- [x] Repair queue cleared afterwards: 5 open fix_requests closed (pointing at PR #521) and all
+  unresolved error rows marked resolved. Dev AND AV live both show 0 open items. AV live needed no
+  change — its queue was already empty (read-only check only, no writes).
