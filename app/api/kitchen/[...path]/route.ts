@@ -48,8 +48,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
+  const { path = [] } = await ctx.params;
   try {
-    const { path = [] } = await ctx.params;
 
     // whoami — boot signal for the kitchen's hierarchy X-ray ribbon (Phase 4,
     // 2026-07-06). The kitchen has no permission-gated actions (yet), so this only
@@ -116,7 +117,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
     return err("unknown GET endpoint", 404);
   } catch (e) {
-    logError("kitchen", "route_error", e, { restaurant_id: rid });
+    logError("kitchen", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/") || "/"}` });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }
@@ -128,8 +129,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
+  const { path = [] } = await ctx.params;
   try {
-    const { path = [] } = await ctx.params;
     const [a, b, c] = path;
     // A missing client id arrives as literal "undefined"/"null"/"NaN" — reject before it
     // reaches a uuid query and throws the "invalid input syntax for type uuid" route_error.
@@ -258,7 +260,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     return err("unknown POST endpoint", 404);
   } catch (e) {
-    logError("kitchen", "route_error", e, { restaurant_id: rid });
+    logError("kitchen", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }

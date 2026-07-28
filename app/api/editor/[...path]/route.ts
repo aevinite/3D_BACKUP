@@ -300,10 +300,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
+  // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
+  // Without this a failure was logged as bare "canceling statement due to statement
+  // timeout" with no hint of WHICH read timed out, so the admin Repair page could only
+  // offer an unfixable mystery — nobody could tell if it was the Dashboard, the Z-report
+  // or the log. (bug 2026-07-28)
+  const { path = [] } = await ctx.params;
+  const p = path.join("/");
   try {
-    const { path = [] } = await ctx.params;
-    const p = path.join("/");
-
     // customer-recognize?phone=… — repeat-customer lookup for the pay sheet
     // (Customer CRM, mig 212). Read-only, scoped by rid via the RPC. Never lists.
     if (p === "customer-recognize") {
@@ -870,12 +874,37 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // previous period for the delta chips), which exceeded 5k and truncated the 30-day total; 12k keeps
       // the common Today/30-day demo views COMPLETE (no truncation note) while still bounding a full scan.
       const STATS_ROW_CAP = 12000;
+      const STATS_PAGE = 1000;
       let statsTruncated = false;
-      for (let from = 0; from < STATS_ROW_CAP; from += 1000) {
-        const page = (must(await sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).order("created_at", { ascending: false }).range(from, from + 999)) as any[] | null) || [];
-        allRows.push(...page);
-        if (page.length < 1000) break;
-        if (from + 1000 >= STATS_ROW_CAP) statsTruncated = true; // filled the cap on a full page → older orders exist beyond it
+      const statsPage = (from: number) => sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).order("created_at", { ascending: false }).range(from, from + STATS_PAGE - 1);
+      // Fetch those pages in DOUBLING PARALLEL WAVES — 1, then 2, then 4, then 8 at a time —
+      // stopping the moment a wave comes back short. This used to be up to 12 STRICTLY
+      // SEQUENTIAL round-trips: on the busiest restaurant a full-year Dashboard spent ~5.5s
+      // just queueing, close enough to Postgres' statement timeout that a burst of panel
+      // traffic tipped it over into "canceling statement due to statement timeout" (the error
+      // the owner kept seeing, 2026-07-28). Same page size, same rows, same order, same
+      // numbers — only the WAITING is now concurrent. Measured on the busiest demo restaurant:
+      // full-year Dashboard 5.5s → 2.3s under load, 3.0s → 1.0s idle.
+      //
+      // Why doubling instead of firing all 12 at once: an OFFSET page still has to walk the
+      // rows before it, so pages past the end of the data are not free. Doubling bounds the
+      // wasted reads (at most one extra wave past the end) while cutting round-trips from 12
+      // to at most 4. A restaurant with under a page of orders in the window still issues
+      // exactly ONE query, exactly as before.
+      let statsFrom = 0;
+      let statsWave = 1;
+      while (statsFrom < STATS_ROW_CAP) {
+        const offsets: number[] = [];
+        for (let i = 0; i < statsWave && statsFrom < STATS_ROW_CAP; i++, statsFrom += STATS_PAGE) offsets.push(statsFrom);
+        const pages = (await Promise.all(offsets.map((from) => statsPage(from))))
+          .map((r) => ((must(r) as any[] | null) || []));
+        for (const page of pages) allRows.push(...page); // offset order = the old loop's order
+        // A short page means the data ran out — nothing after it can be full, so stop here.
+        if (pages.some((page) => page.length < STATS_PAGE)) break;
+        // Every page full AND the cap is consumed → older orders exist beyond it, so the
+        // dashboard shows its honest "most recent N orders" note. Same rule as the old loop.
+        if (statsFrom >= STATS_ROW_CAP) statsTruncated = true;
+        statsWave *= 2;
       }
       const oldestLoadedIso = allRows.length ? allRows[allRows.length - 1].created_at : null;
       const dishes = must(dishesQ);
@@ -1180,7 +1209,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   } catch (e) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
-    logError("manager", "route_error", e, { restaurant_id: rid });
+    logError("manager", "route_error", e, { restaurant_id: rid, detail: `GET ${p || "/"}` });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }
@@ -1199,8 +1228,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? {} : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
+  // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
+  const { path = [] } = await ctx.params;
   try {
-    const { path = [] } = await ctx.params;
     const [a, b, c] = path;
     // A missing client id arrives as literal "undefined"/"null"/"NaN" — reject before it
     // reaches a uuid query and throws the "invalid input syntax for type uuid" route_error.
@@ -2564,7 +2594,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   } catch (e) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
-    logError("manager", "route_error", e, { restaurant_id: rid });
+    logError("manager", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }
@@ -2579,8 +2609,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
   const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? {} : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
+  // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
+  const { path = [] } = await ctx.params;
   try {
-    const { path = [] } = await ctx.params;
     const [a, id] = path;
     // "undefined"/"null"/"NaN" id → clean 400 (a truthy string would slip past `&& id` below).
     if (emptyIdSegment(id)) return err("Missing id — please refresh and try again.");
@@ -2668,7 +2699,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
   } catch (e) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
-    logError("manager", "route_error", e, { restaurant_id: rid });
+    logError("manager", "route_error", e, { restaurant_id: rid, detail: `PATCH ${path.join("/") || "/"}` });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }
@@ -2683,8 +2714,9 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
   const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? {} : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
+  // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
+  const { path = [] } = await ctx.params;
   try {
-    const { path = [] } = await ctx.params;
     const [a, id] = path;
     // "undefined"/"null"/"NaN" id → clean 400 (a truthy string would slip past `&& id` below).
     if (emptyIdSegment(id)) return err("Missing id — please refresh and try again.");
@@ -2762,7 +2794,7 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
   } catch (e) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
-    logError("manager", "route_error", e, { restaurant_id: rid });
+    logError("manager", "route_error", e, { restaurant_id: rid, detail: `DELETE ${path.join("/") || "/"}` });
     return err(e instanceof Error ? e.message : String(e), 500);
   }
 }
