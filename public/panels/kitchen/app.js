@@ -672,7 +672,9 @@ function restDisplayName(r) {
 }
 function setRestName(r) {
   const el = document.getElementById("restName");
-  if (el) el.textContent = restDisplayName(r);
+  // Strip the *accent* wordmark markers so a literal '*' never shows in the
+  // header (matches lib/brandText stripBrandMarkers; see tablet setRestName).
+  if (el) el.textContent = restDisplayName(r).replace(/\*/g, "");
 }
 
 // loadTables(tables): TARGETED refetch — fetch ONLY the named tables' orders+items
@@ -768,7 +770,7 @@ async function loadTables(tables) {
 // layout (works on an 80mm thermal roll or A4). NO prices — a KOT is for the kitchen, not a bill.
 function printKot(order, itemRows, restaurant) {
   try {
-    const rname = restDisplayName(restaurant) || "Kitchen";
+    const rname = restDisplayName(restaurant).replace(/\*/g, "") || "Kitchen";
     const tnum = order.table_number != null ? order.table_number : "?";
     const kot = order.kot_no != null ? order.kot_no : "—";
     const when = order.created_at ? new Date(order.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";

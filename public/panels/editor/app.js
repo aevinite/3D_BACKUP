@@ -407,7 +407,7 @@ async function loadAll() {
   // Name THIS restaurant in the top bar so staff (and the admin viewing as a tenant)
   // always know which restaurant they're managing. (owner 2026-06-26)
   const rr = data.restaurant || {};
-  const restName = rr.logo_text || (rr.name && rr.name.en) || rr.name_en || (state.data.settings || {}).restaurant_name || "";
+  const restName = (rr.logo_text || (rr.name && rr.name.en) || rr.name_en || (state.data.settings || {}).restaurant_name || "").replace(/\*/g, "");
   const brandEl = document.getElementById("brandRest");
   if (brandEl) brandEl.textContent = restName ? "· " + restName : "";
   syncBanquetTab(); // Banquet tab follows the admin entitlement (mig 130)

@@ -2964,7 +2964,10 @@ function restDisplayName(r) {
 }
 function setRestName(r) {
   const el = document.getElementById("restName");
-  if (el) el.textContent = restDisplayName(r);
+  // Strip the *accent* wordmark markers (lib/brandText stripBrandMarkers) so a
+  // literal '*' never shows in the header — logo_text like "Aangan *Garden*"
+  // marks the accent word for the guest hero; a plain header shows it clean.
+  if (el) el.textContent = restDisplayName(r).replace(/\*/g, "");
 }
 
 // loadTables(tables): TARGETED refetch — fetch ONLY the named tables' slice
