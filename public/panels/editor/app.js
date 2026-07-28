@@ -1392,8 +1392,12 @@ function accessUsersCardHtml(s) {
 function formGeneral(s) {
   const sec = state.settingsSection;
   if (sec === "tables") {
+    // "Number of tables" is ADMIN/OWNER-only (owner 2026-07-28): a real manager may set each
+    // table's NAME + seats + see its QR link, but NOT change how many tables exist. The card
+    // carries data-mgr-hide so XRAY_CONTROLS hides it for the real manager and tints it for a
+    // higher role (admin/owner). The floor count itself lives in the admin RestaurantSettings.
     return `
-  <div class="card"><h3>Tables / seating</h3>
+  <div class="card" data-mgr-hide="table_count"><h3>Tables / seating</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       How many tables the restaurant has. Drives the live floor map in the
       <b>Tables</b> tab — Save, then open Tables.
@@ -9298,6 +9302,15 @@ const XRAY_CONTROLS = [
   { selector: "#sxKot", flag: "table_ops", label: "Table & KOT operations" },
   { selector: '.list-item[data-settings-section="users"]', flag: "manage_staff", label: "User settings" },
   { selector: '.list-item[data-settings-section="access"]', flag: "manage_staff", label: "Access settings" },
+  // ADMIN/OWNER-only settings (owner 2026-07-28): a real manager only handles per-table
+  // name + seats + QR. Billing, KOT printing, dining sessions and the table COUNT are set
+  // from the admin panel (components/admin/RestaurantSettings.tsx). "admin_only_setting" is
+  // never a real manager power, so these HIDE for the manager and stay tinted-but-usable for
+  // a higher role (admin/owner) looking in — same pattern as Users/Access above.
+  { selector: '.list-item[data-settings-section="billing"]', flag: "admin_only_setting", label: "Billing settings" },
+  { selector: '.list-item[data-settings-section="kitchen"]', flag: "admin_only_setting", label: "Kitchen settings" },
+  { selector: '.list-item[data-settings-section="sessions"]', flag: "admin_only_setting", label: "Dining sessions" },
+  { selector: '[data-mgr-hide="table_count"]', flag: "admin_only_setting", label: "Number of tables" },
 ];
 let XRAY_WHO = null;
 
@@ -9543,6 +9556,14 @@ function applyHierarchyView() {
       xraySetTint(el, true, `${entry.label}: off for staff (by the ${xrayOffBy(entry.flag)}) — you can still use it`);
       if (!counted) { zones.push({ ...entry, el }); counted = true; } // one zone per control type
     });
+  }
+  // A real manager who raced the whoami hide and parked on an admin-only settings section
+  // (billing/kitchen/dining sessions) is bounced back to General so they never sit on cards
+  // whose sidebar row is now hidden. One-shot: after the hop the condition self-clears.
+  if (!higher && state.tab === "general" && (state.settingsSection === "billing" || state.settingsSection === "kitchen" || state.settingsSection === "sessions")) {
+    state.settingsSection = "general";
+    renderList();
+    renderEditor();
   }
   // Finer edit-menu sub-limits (owner 2026-07-24): the owner can restrict a MANAGER to only
   // some menu actions. The server (menuSubAllowed) already refuses a disallowed create/delete;
