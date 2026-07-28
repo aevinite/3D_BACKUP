@@ -1267,10 +1267,17 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
         the whole page scrolls (instead of two side-by-side panes).
      3. Multi-column forms / grids collapse to a single column.
    Nothing here changes desktop; it's purely additive for narrow viewports. */
-@media (max-width: 760px) {
-  /* belt-and-braces: never let a stray wide element scroll the whole page sideways */
-  html, body { overflow-x: hidden; }
 
+/* ── NAV: ☰ drawer for PHONES **AND TABLETS** (<= 1279px) ────────────────────
+   The nine tabs (Editor · Bills · Tables · Platform · Banquet · Dashboard ·
+   Ratings · Log · Settings) plus the brand and the connection pill need ~1300px
+   to sit in one row. On an iPad (1194px) the row silently CLIPPED: Ratings was
+   cut mid-word and Log + Settings were unreachable, with no ☰ to fall back on
+   because the drawer only existed under 760px. Aangan's staff work on a tablet,
+   so that made three sections unopenable on their main device (found on AV live
+   2026-07-28). These NAV rules therefore run up to 1279px; the phone LAYOUT
+   rules (single column, swipe list) stay at <= 760px where they belong. */
+@media (max-width: 1279px) {
   /* --- top bar: ONE slim row (☰ + brand + actions); the tabs move into a left
      slide-in drawer opened by the ☰ button (owner request 2026-07-20 — the old
      wrap-to-many-rows tab strip ate a third of the phone screen). --- */
@@ -1340,6 +1347,14 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   @media (prefers-reduced-motion: reduce) {
     .tabs, .nav-scrim, .nav-burger span { transition: none; }
   }
+}
+
+/* ── PHONE-ONLY LAYOUT (<= 760px) ────────────────────────────────────────────
+   One column, the dish list becomes a horizontal swipe strip, forms collapse.
+   A tablet keeps the two-pane layout — it only borrows the ☰ nav drawer above. */
+@media (max-width: 760px) {
+  /* belt-and-braces: never let a stray wide element scroll the whole page sideways */
+  html, body { overflow-x: hidden; }
 
   /* --- main layout: single column, page scrolls instead of fixed panes --- */
   .layout { grid-template-columns: 1fr; height: auto; }

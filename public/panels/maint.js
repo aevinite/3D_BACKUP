@@ -321,10 +321,14 @@
     try { res = await fetch("/api/panel-profile", { cache: "no-store" }); } catch {}
     if (res && res.ok) {
       profile = await res.json();
+      // { staff: false } → admin super-access / signed-out tab: there is no per-user
+      // profile to show, so leave the top bar alone. (The endpoint answers 200 for this
+      // now instead of 401, which used to log a red console error on every panel load.)
+      if (!profile || profile.staff === false || profile.error) { profile = null; return; }
       buildSettingsButton();
       if (profile.needsProfile) openDrawer(); // force first-login capture
     }
-    // 401 → admin super-access (no per-user profile): nothing in the panel top bar.
+    // No staff profile → admin super-access: nothing in the panel top bar.
     // The floating "Menu live/offline" button was removed — the admin manages
     // maintenance from the /aevinite admin panel, and managers from their profile.
   }

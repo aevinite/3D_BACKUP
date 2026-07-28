@@ -68,6 +68,46 @@ async function pageAll<T>(
   return all;
 }
 
+// ── ID lists must NEVER be inlined whole (the blank-kitchen bug) ─────────────
+// PostgREST puts every filter in the URL, so an `in.(…)` list of UUIDs costs ~37 bytes
+// EACH. Past roughly 500-700 ids the request exceeds the edge proxy's URL limit and comes
+// back as `414 Request-URI Too Large`; the route turned that into a 500 and the KITCHEN
+// BOARD WENT COMPLETELY BLANK mid-rush — "New 0 · Cooking 0 · Ready 0" while thousands of
+// tickets were live, with no hint on screen (AV-live rush test 2026-07-28: 4,321 active
+// tickets, every /api/kitchen/board call failed). The sessions id-list was hardened for
+// this in 2026-07-03; the ORDER id-lists were not, which is what actually broke.
+//
+// So: every id list is split into small chunks, each chunk is fetched (and paged) on its
+// own, and the results are merged + dedup'd by id. 150 ids ≈ 5.5KB of URL — a wide margin
+// under the ~18KB that still worked. Chunks run a few at a time so a big backlog stays
+// fast without opening dozens of simultaneous connections (owner's connection budget).
+const ID_CHUNK = 150;
+const CHUNK_CONCURRENCY = 6;
+
+const chunkIds = (ids: string[]): string[][] => {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += ID_CHUNK) out.push(ids.slice(i, i + ID_CHUNK));
+  return out;
+};
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += limit) {
+    out.push(...(await Promise.all(items.slice(i, i + limit).map(fn))));
+  }
+  return out;
+}
+
+// Merge the chunk/pass results back into ONE list that looks exactly like the old single
+// query's output: unique by id, ordered by created_at then id (the stable tiebreak).
+const mergeRows = (groups: Row[][]): Row[] => {
+  const byId = new Map<string, Row>();
+  for (const g of groups) for (const r of g) byId.set(r.id, r);
+  return [...byId.values()].sort((a, b) =>
+    a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1
+      : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+};
+
 export async function liveOrdersAndItems(
   restaurantId: string = DEFAULT_RESTAURANT_ID,
   tableNumbers?: string[],
@@ -93,18 +133,33 @@ export async function liveOrdersAndItems(
   const openIds = (openRes.data ?? []).map((s) => s.id as string);
 
   // Orders: today's, PLUS any belonging to a still-open session (matches the brain).
-  // The optional table filter is AND-ed in BEFORE the today/open-session OR group, so
-  // PostgREST builds  ... AND table_number IN (…) AND (created_at>=since OR session_id IN (…)).
-  // Paged (pageAll) + a stable created_at,id tiebreak so pages never overlap/skip.
-  const orders = await pageAll<Row>((from, to) => {
+  // Two SCOPED passes instead of one query with every session id inlined in the URL:
+  //   (a) everything since the business-day start, and
+  //   (b) the pre-rollover open sessions' orders, in id chunks.
+  // The row SET is identical to the old `created_at>=since OR session_id IN (…)` — pass (b)
+  // adds `created_at < since` only because anything newer is already in pass (a) — and
+  // mergeRows dedups + restores the created_at,id ordering. See the ID_CHUNK note above.
+  const baseOrders = () => {
     let q = sb.from("orders").select(ORDER_COLS).eq("archived", false).is("deleted_at", null).eq("restaurant_id", restaurantId);
     if (activeOnly) q = q.in("status", KITCHEN_ACTIVE_STATUSES); // kitchen board → drop served/cancelled server-side
     if (tableFilter) q = q.in("table_number", tableFilter);
-    q = openIds.length
-      ? q.or(`created_at.gte.${since},session_id.in.(${openIds.join(",")})`)
-      : q.gte("created_at", since);
-    return q.order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to);
-  });
+    return q;
+  };
+  const orderPasses: Row[][] = [
+    await pageAll<Row>((from, to) => baseOrders().gte("created_at", since)
+      .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    ...(await mapLimit(chunkIds(openIds), CHUNK_CONCURRENCY, (ids) =>
+      pageAll<Row>((from, to) => baseOrders().lt("created_at", since).in("session_id", ids)
+        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)))),
+  ];
+  const orders = mergeRows(orderPasses);
+
+  // Every dish row for a set of order ids, chunked so the URL can never overflow.
+  const itemsForOrderIds = async (ids: string[]): Promise<Row[]> =>
+    mergeRows(await mapLimit(chunkIds(ids), CHUNK_CONCURRENCY, (c) =>
+      pageAll<Row>((from, to) => sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
+        .in("order_id", c)
+        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to))));
 
   // TARGETED path: items are simply the items of the orders we fetched — scope by
   // order_id (no today/open OR logic needed; the orders query already settled which
@@ -112,11 +167,7 @@ export async function liveOrdersAndItems(
   if (tableFilter) {
     const orderIds = orders.map((o) => o.id);
     if (!orderIds.length) return { orders, items: [] };
-    const items = await pageAll<Row>((from, to) =>
-      sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
-        .in("order_id", orderIds)
-        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to));
-    return { orders, items };
+    return { orders, items: await itemsForOrderIds(orderIds) };
   }
 
   // ACTIVE-ONLY (kitchen) full board: the caller already dropped served/cancelled orders
@@ -128,11 +179,7 @@ export async function liveOrdersAndItems(
   if (activeOnly) {
     const activeIds = orders.map((o) => o.id);
     if (!activeIds.length) return { orders, items: [] };
-    const items = await pageAll<Row>((from, to) =>
-      sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId)
-        .in("order_id", activeIds)
-        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to));
-    return { orders, items };
+    return { orders, items: await itemsForOrderIds(activeIds) };
   }
 
   // FULL path: per-dish rows are today's, PLUS the items of the OLD (pre-rollover)
@@ -140,13 +187,12 @@ export async function liveOrdersAndItems(
   // Keeping the id-list to just those old orders keeps the query small.
   const sinceMs = new Date(since).getTime();
   const oldOrderIds = orders.filter((o) => new Date(o.created_at).getTime() < sinceMs).map((o) => o.id);
-  const items = await pageAll<Row>((from, to) => {
-    let q = sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId);
-    q = oldOrderIds.length
-      ? q.or(`created_at.gte.${since},order_id.in.(${oldOrderIds.join(",")})`)
-      : q.gte("created_at", since);
-    return q.order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to);
-  });
+  const items = mergeRows([
+    await pageAll<Row>((from, to) =>
+      sb.from("order_items").select(ITEM_COLS).eq("restaurant_id", restaurantId).gte("created_at", since)
+        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to)),
+    oldOrderIds.length ? await itemsForOrderIds(oldOrderIds) : [],
+  ]);
 
   return { orders, items };
 }

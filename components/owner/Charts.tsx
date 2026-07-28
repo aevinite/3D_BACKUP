@@ -128,6 +128,16 @@ export function AreaTrend({ data, lines, height = 260 }: {
   if (!data.length || !lines.length) return <Empty />;
   const values = data.flatMap((row) => lines.map((l) => Number(row[l.key]) || 0));
   const single = lines.length === 1;
+  // Dynamic-chart rule — AreaTrend was the ONE time chart here that skipped the shared
+  // populated()/NotEnough gate, so a brand-new restaurant's "Revenue over time · last 30
+  // days" drew 29 dead-flat days plus one lonely spike (exactly the "reads as broken"
+  // shape the rule forbids — seen on Aangan's live owner dashboard 2026-07-28, and it is
+  // what EVERY new client sees in their first weeks). Now it answers like its siblings:
+  // fewer than 2 buckets with real activity → the NotEnough card, single value kept as
+  // a number. Charts with genuine history are untouched.
+  if (populated(values) < MIN_POINTS) {
+    return <NotEnough height={height} value={populated(values) === 1 ? inr(soleValue(values)) : undefined} />;
+  }
   return (
     <div>
       {/* Legend lives ABOVE the plot as wrapping HTML chips — NOT Recharts' in-canvas legend

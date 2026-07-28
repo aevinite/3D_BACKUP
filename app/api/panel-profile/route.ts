@@ -1,6 +1,13 @@
 // /api/panel-profile — the logged-in staff user's own profile.
 //   GET  → { username, role, name, phone, hasPin, needsProfile, canSelfReset }
-//          (401 if not logged in — e.g. admin super-access has no user profile).
+//          or { staff: false } when there is no staff user — which is a NORMAL state,
+//          not a failure: the admin's super-access view has no per-user profile.
+//          It used to answer 401 there, so EVERY admin panel view logged a red
+//          "Failed to load resource: 401" in the console and fed the error log a
+//          fake problem (seen on all six panels during the AV-live sweep 2026-07-28).
+//          Now it's a plain 200 that says "nobody is signed in"; the `error` key is
+//          kept alongside so existing callers branch exactly as before.
+//          POST still answers 401 — writing a profile genuinely requires a login.
 //   POST → set their own name/phone (first-login capture), set/change PIN, and/or
 //          change their own PASSWORD (only if canSelfReset; requires the current
 //          password and bumps token_version so all sessions must re-login).
@@ -14,7 +21,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
-  if (!u) return NextResponse.json({ error: "not logged in" }, { status: 401 });
+  // No staff cookie = admin super-access (or a signed-out tab). Not an error → 200.
+  // `error` stays in the body so callers that test `j.error` keep skipping the profile UI.
+  if (!u) return NextResponse.json({ staff: false, error: "not logged in" });
   return NextResponse.json({
     username: u.username, role: u.role, name: u.name, phone: u.phone,
     hasPin: !!u.pin_hash,
