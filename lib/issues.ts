@@ -85,13 +85,12 @@ export async function raiseIssue(input: RaiseIssueInput): Promise<void> {
   try {
     const { data: rest } = await sb.from("restaurants").select("name").eq("id", input.rid).maybeSingle();
     await sendOwnerAlert(
-      alertText("🚩 New complaint", [
-        ["Restaurant", rest?.name ?? null],
+      alertText([
         ["About", subject],
         ["From", `${input.raisedBy} (${input.raisedRole})`],
       ], "Open admin → Repair to reply."),
       `complaint:${ins.data?.id ?? Date.now()}`,
-      { title: "New complaint" },
+      { title: rest?.name ? `New complaint: ${rest.name}` : "New complaint", tags: "triangular_flag_on_post" },
     );
   } catch {
     /* alerting is best-effort; the complaint is already saved */

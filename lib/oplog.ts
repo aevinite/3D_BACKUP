@@ -107,13 +107,12 @@ export async function logError(
     // Structured like every other alert (owner 2026-07-29) — headline, then labelled facts.
     // No extra DB read here on purpose: an error can arrive in bursts, so the restaurant NAME is
     // left to the bell / Everything Log rather than paid for on every error.
-    const body = alertText("⚠️ Something went wrong", [
-      ["Panel", panel],
+    const body = alertText([
       ["Action", String(action).replace(/_/g, " ")],
       ["Problem", msg.slice(0, 160)],
       ["Who", fields.actor ?? null],
     ], "Open admin → Logs to see the full detail.");
-    await sendOwnerAlert(body, `${panel}:${action}`, { title: `Problem in ${panel}` });
+    await sendOwnerAlert(body, `${panel}:${action}`, { title: `Something went wrong in ${panel}`, tags: "warning" });
   } catch {
     /* alert layer optional / best-effort */
   }

@@ -53,17 +53,19 @@ async function notifyRateHit(
     const note = key === "admin_login"
       ? "Nobody is locked out — this is just a heads-up."
       : per ? `They can try again after ${per}.` : "They can try again shortly.";
-    const body = alertText(`🚦 Limit reached`, [
-      ["Limit", friendly],
+    // "Limit reached: Staff / owner login" is already the title, so it is NOT repeated here.
+    const body = alertText([
       ["Who", who],
       ["Where", where],
       ["Tries", tries],
       ["Device", extra?.device ? extra.device.slice(0, 10) : null],
     ], note);
-    // The ADMIN-login warning stays audible on purpose — that one is about the owner's own
-    // top-level panel, so he should FEEL it. Every other limit is a quiet, informational ping.
-    const silent = key !== "admin_login";
-    await sendOwnerAlert(body, `ratelimit:${key}:${subject}`, { silent, title: `Limit reached: ${friendly}` });
+    // Alerts are quiet BY DEFAULT now (see lib/alerts.ts). The ONE deliberate exception the owner
+    // chose: wrong tries on his own ADMIN login stay audible, because that's his top-level panel.
+    await sendOwnerAlert(body, `ratelimit:${key}:${subject}`, {
+      ...(key === "admin_login" ? { silent: false } : {}),
+      title: `Limit reached: ${friendly}`,
+    });
   } catch { /* alerts are best-effort */ }
 }
 
