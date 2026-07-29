@@ -103,8 +103,17 @@ export async function logError(
   // Best-effort outbound alert (grouped, non-blocking). Wrapped so a missing/errored alert
   // layer can't affect the request.
   try {
-    const { sendOwnerAlert } = await import("@/lib/alerts");
-    await sendOwnerAlert(`⚠️ ${panel}/${action}: ${msg.slice(0, 120)}`, `${panel}:${action}`);
+    const { sendOwnerAlert, alertText } = await import("@/lib/alerts");
+    // Structured like every other alert (owner 2026-07-29) — headline, then labelled facts.
+    // No extra DB read here on purpose: an error can arrive in bursts, so the restaurant NAME is
+    // left to the bell / Everything Log rather than paid for on every error.
+    const body = alertText("⚠️ Something went wrong", [
+      ["Panel", panel],
+      ["Action", String(action).replace(/_/g, " ")],
+      ["Problem", msg.slice(0, 160)],
+      ["Who", fields.actor ?? null],
+    ], "Open admin → Logs to see the full detail.");
+    await sendOwnerAlert(body, `${panel}:${action}`, { title: `Problem in ${panel}` });
   } catch {
     /* alert layer optional / best-effort */
   }

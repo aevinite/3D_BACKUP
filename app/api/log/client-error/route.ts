@@ -11,7 +11,7 @@
 // just returns ok:true without writing, so a misbehaving client can never error-storm the DB.
 import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { sendOwnerAlert } from "@/lib/alerts";
+import { sendOwnerAlert, alertText } from "@/lib/alerts";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +75,15 @@ export async function POST(req: NextRequest) {
     // the serverless platform keeps the function alive until the push completes AFTER the
     // response is sent — a bare fire-and-forget gets frozen on Vercel and drops the alert
     // (proven flaky in a live test 2026-07-24). The response stays instant; the push runs after.
-    after(sendOwnerAlert(`⚠️ ${panel} screen error: ${message.slice(0, 100)}`, `client:${panel}`).catch(() => {}));
+    after(sendOwnerAlert(
+      alertText("⚠️ A screen showed an error", [
+        ["Panel", panel],
+        ["Problem", message.slice(0, 160)],
+        ["Screen", where || null],
+      ], "Open admin → Logs to see the full detail."),
+      `client:${panel}`,
+      { title: `Screen error in ${panel}` },
+    ).catch(() => {}));
 
     return NextResponse.json({ ok: true });
   } catch {

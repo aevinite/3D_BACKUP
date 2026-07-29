@@ -184,8 +184,11 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
                   <a key={h.id} href="/aevinite/repair#rate-limits" onClick={onClose} className="adm-card" style={{ display: "flex", alignItems: "flex-start", gap: 11, padding: "10px 12px", borderLeft: "3px solid var(--adm-danger, #e5484d)", textDecoration: "none", color: "inherit" }}>
                     <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: "var(--adm-danger, #e5484d)", fontSize: 15, marginTop: 1 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.key.replace(/_/g, " ")} · {h.subject}</div>
-                      <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{h.restaurantName} · {h.hit_count}/{h.max_count} · {new Date(h.last_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+                      {/* Two lines on purpose: the "who" now carries role + person + restaurant
+                          (2026-07-29) and must stay READABLE, not be cut off at one line. */}
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{h.key.replace(/_/g, " ")}</div>
+                      <div style={{ fontSize: 12.5, marginTop: 1, overflowWrap: "anywhere" }}>{h.subject}</div>
+                      <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>{h.restaurantName} · {h.hit_count}/{h.max_count} · {new Date(h.last_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
                     </div>
                   </a>
                 ))}

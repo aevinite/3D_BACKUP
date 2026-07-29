@@ -307,3 +307,72 @@ export async function requireRole(
   if (await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)) return { ok: true, user: null }; // admin super
   return { ok: false };
 }
+
+// ── Who was this login for? (alert wording only) ───────────────────────────────────────────
+// When a login limit is reached the owner gets a phone ping + a bell entry. Those used to say
+// only the typed name ("ravi") — not which RESTAURANT it belongs to, nor whether it's a manager,
+// a kitchen screen, a waiter tablet or an owner (owner 2026-07-29). This builds that one human
+// line. It runs ONLY on the rare wall-hit path, never on a normal login, so the hot login path
+// keeps its deliberate "no DB read before the counter" shape.
+// Reads are scoped + capped + explicit-column (egress rules). Never throws: a blank result just
+// means the alert falls back to the plain typed name.
+const ROLE_WORD: Record<string, string> = {
+  owner: "Owner", manager: "Manager", kitchen: "Kitchen screen", tablet: "Waiter tablet",
+};
+
+export async function describeLoginTarget(username: string, restaurantId?: string | null): Promise<string | null> {
+  try {
+    const uname = normalizeLoginName(username);
+    if (!uname) return null;
+    const { data, error } = await sb.from("staff_users")
+      .select("id, role, name, username, restaurant_id")
+      .eq("username", uname).eq("active", true).limit(5);
+    if (error) return null;
+    const rows = (data || []) as { id: string; role: string; name: string | null; restaurant_id: string | null }[];
+    // A name nobody has is worth SAYING — it means someone is typing a name that doesn't exist
+    // here, which reads very differently from a real waiter fumbling their password.
+    if (!rows.length) return `Unknown name “${uname}” — no active account has that name`;
+
+    // Restaurant names for the rows we're about to describe (one scoped read, ≤5 ids).
+    // Owners are the exception: their row's restaurant_id is the #1 "home" namespace, not what
+    // they own, so an owner's restaurant comes from the ownership join instead.
+    const ids = new Set<string>();
+    for (const r of rows) if (r.role !== "owner" && r.restaurant_id) ids.add(r.restaurant_id);
+    if (restaurantId) ids.add(restaurantId);
+    const ownerRows = rows.filter((r) => r.role === "owner");
+    const ownedByUser: Record<string, string[]> = {};
+    if (ownerRows.length && !restaurantId) {
+      const { data: links } = await sb.from("restaurant_owners")
+        .select("user_id, restaurant_id").in("user_id", ownerRows.map((r) => r.id)).limit(20);
+      for (const l of (links || []) as { user_id: string; restaurant_id: string }[]) {
+        ids.add(l.restaurant_id);
+        (ownedByUser[l.user_id] ||= []).push(l.restaurant_id);
+      }
+    }
+    const nameOf: Record<string, string> = {};
+    if (ids.size) {
+      const { data: rests } = await sb.from("restaurants").select("id, name").in("id", [...ids]).limit(20);
+      for (const r of (rests || []) as { id: string; name: string }[]) nameOf[r.id] = r.name;
+    }
+
+    const describe = (r: typeof rows[number]) => {
+      const role = ROLE_WORD[r.role] || r.role;
+      // Don't repeat the same word twice ("“diagm1” (diagm1)") when the display name IS the login name.
+      const person = r.name && r.name.toLowerCase() !== uname ? `“${r.name}” (${uname})` : `“${uname}”`;
+      let where: string;
+      if (r.role === "owner") {
+        const owned = (restaurantId ? [restaurantId] : ownedByUser[r.id] || []).map((id) => nameOf[id]).filter(Boolean);
+        where = owned.length ? owned.slice(0, 2).join(" + ") + (owned.length > 2 ? ` +${owned.length - 2} more` : "") : "their restaurants";
+      } else {
+        where = (r.restaurant_id && nameOf[r.restaurant_id]) || "unknown restaurant";
+      }
+      return `${role} ${person} at ${where}`;
+    };
+    // The same name can exist at several restaurants (mig 091), and the plain /login door can't
+    // tell them apart — so name the first and say how many others share it.
+    const first = describe(rows[0]);
+    return rows.length > 1 ? `${first} (+${rows.length - 1} more account${rows.length > 2 ? "s" : ""} use this name)` : first;
+  } catch {
+    return null; // wording help only — never let it break a login or an alert
+  }
+}
