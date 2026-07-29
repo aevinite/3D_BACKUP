@@ -633,3 +633,11 @@ assigns sections). Storage is `staff_users.assigned_tables integer[]`, which rid
   floor; section change emits the ops breadcrumb; revoking the power / switching the module off
   is refused server-side and **keeps** saved sections; a non-#1 restaurant is untouched.
   Screenshots checked at desktop and 360px, then deleted. `verify-board-sig.mjs` passes.
+- [x] **Go-live safety (owner: "make sure right now whoever the users are created in the
+  backup, all will have full access").** Migration **223** backfills every existing waiter
+  with EVERY table (only where the list is empty — a deliberate section is never
+  overwritten), and `fullFloorFor()` seeds new waiters the same way from BOTH create paths
+  (owner/manager and admin). So sections are only ever a SUBTRACTION and nobody is ever
+  accidentally locked out. Verified on the backup DB: 13/13 live waiters hold every table
+  (the 14th is on the soft-deleted "ZZ Clone Leak Test", which has no settings row and
+  blocks logins anyway), and a freshly created waiter came out with all 30.
