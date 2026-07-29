@@ -1223,8 +1223,19 @@ function userSettingCardHtml() {
 // the number kept alongside, else the plain "Table t". Display-only; every id/bill
 // still uses the number.
 function tableLabel(t) {
-  const nm = (((state.data.settings || {}).table_names || {})[String(t)] || "").trim();
+  const nm = tableName(t);
   return nm ? `${nm} (T${t})` : `Table ${t}`;
+}
+// tableName(t): JUST the owner's name for table t ("A1", "Patio"), or "" when unnamed.
+function tableName(t) {
+  return (((state.data.settings || {}).table_names || {})[String(t)] || "").trim();
+}
+// tablePrintLabel(t): what goes on PAPER (a KOT). Names win outright here — no "(T1)"
+// tail: the printed ticket has to read exactly like the label on the table, so a waiter
+// carrying it walks to the right place (owner 2026-07-29). Unnamed → "Table 7".
+function tablePrintLabel(t) {
+  if (t == null || t === "") return "Table ?";
+  return tableName(t) || `Table ${t}`;
 }
 
 // tableSeatingCardHtml: the "Table setting" card — how many people can sit at EACH
@@ -4871,7 +4882,7 @@ function previewSampleKOT() {
     <body onload="setTimeout(function(){window.print()},80)">
       <h2>KITCHEN TICKET</h2>
       <div class="r"><span>${esc(rest)}</span><span>#SAMPLE</span></div>
-      <div class="r"><span>Table 5</span><span>${esc(now)}</span></div>
+      <div class="r"><span>${esc(tablePrintLabel(5))}</span><span>${esc(now)}</span></div>
       <hr>
       <div class="r"><b>2×</b><span>Margherita Pizza</span></div>
       <div class="r"><b>1×</b><span>Garlic Bread</span></div>
@@ -7728,7 +7739,7 @@ function printKotTicket(o) {
       @media print{body{margin:0 !important;padding:2mm 5mm 4mm !important}.kl,.meta,.al{break-inside:avoid;page-break-inside:avoid}}
     </style></head><body>
       <div class="h">${esc(rname)}<br>KITCHEN TICKET · REPRINT</div>
-      <div class="meta"><span>KOT #${esc(String(kot))}</span><span>Table ${esc(String(o.table_number ?? "?"))}</span></div>
+      <div class="meta"><span>KOT #${esc(String(kot))}</span><span>${esc(tablePrintLabel(o.table_number))}</span></div>
       <div class="meta"><span>${esc(when)}</span></div>
       ${linesHtml || "<div>(no items)</div>"}
       ${allerg}
@@ -7761,7 +7772,7 @@ function openReprintKotPicker(t) {
     return `<button class="btn" data-reprint="${esc(o.id)}" style="display:flex;justify-content:space-between;width:100%;margin:0 0 8px;padding:11px 14px"><span><b>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</b> · ${nd} dish${nd === 1 ? "" : "es"}</span><span>🖨️</span></button>`;
   }).join("");
   const wrap = el(`<div class="sx-modal-overlay reprint-overlay"><div class="sx-modal" style="max-width:420px">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🖨️ Reprint a KOT — Table ${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🖨️ Reprint a KOT — ${esc(tableLabel(t))}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body" style="padding:10px 14px 14px">${rowsH}</div></div></div>`);
   document.body.appendChild(wrap);
   const closeM = () => wrap.remove();
