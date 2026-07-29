@@ -60,10 +60,11 @@ async function notifyRateHit(
       ["Tries", tries],
       ["Device", extra?.device ? extra.device.slice(0, 10) : null],
     ], note);
-    // Alerts are quiet BY DEFAULT now (see lib/alerts.ts). The ONE deliberate exception the owner
-    // chose: wrong tries on his own ADMIN login stay audible, because that's his top-level panel.
+    // A limit being reached breaks NOTHING — the person just waits — so these are the pings that
+    // arrive silently. The one exception the owner chose: wrong tries on his own ADMIN login stay
+    // audible, because that's his top-level panel. Errors/complaints elsewhere are loud by default.
     await sendOwnerAlert(body, `ratelimit:${key}:${subject}`, {
-      ...(key === "admin_login" ? { silent: false } : {}),
+      silent: key !== "admin_login",
       title: `Limit reached: ${friendly}`,
     });
   } catch { /* alerts are best-effort */ }

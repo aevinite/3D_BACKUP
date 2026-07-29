@@ -46,12 +46,16 @@ async function recentlyAlerted(key: string): Promise<boolean> {
 //              owner's phone on 2026-07-29 — Android's per-channel vibration overrode it.)
 //   • Telegram → disable_notification: true = the message appears in the chat silently.
 // Nothing is ever hidden or dropped — silent means quiet, not invisible.
-// QUIET IS THE DEFAULT (owner 2026-07-29, second pass): error pings were still making his phone
-// sound and vibrate all through service. So EVERY alert now goes out quiet unless a caller
-// deliberately asks to be heard with `silent: false`. Today the ONLY loud one is the wrong-password
-// warning for his own ADMIN login (his choice — that one is about his top-level panel).
-// Trade-off he accepted: a genuine break during service no longer buzzes the phone; it still lands
-// in the notification list, the admin bell and the Everything Log, so nothing is hidden.
+// WHICH ALERTS MAY BUZZ — the owner's final rule (2026-07-29, third pass). LOUD is the default,
+// because a thing that is actually BROKEN on the website must be felt during service:
+//   • LOUD (sound + vibration): something went wrong, a screen error, a new complaint, and the
+//     wrong-password warning for his own ADMIN login.
+//   • SILENT (`silent: true` → arrives in the notification drawer, no sound, no vibration): the
+//     "limit reached" pings — staff/owner login, guest orders, manager PIN, waiter calls, join
+//     table, OTP. Nothing is broken when one of those fires; the person just waits a few minutes.
+// (An earlier pass had made EVERYTHING quiet; he corrected that — errors must buzz.)
+// Silent still means quiet, never hidden: every alert also lands in the notification list, the
+// admin bell and the Everything Log.
 type AlertOpts = { silent?: boolean; title?: string; tags?: string };
 
 // ── ONE shape for every alert (owner 2026-07-29: "structure it, one long plain line is hard to
@@ -86,8 +90,8 @@ function headerSafe(s: string): string {
   return `=?UTF-8?B?${Buffer.from(s, "utf8").toString("base64")}?=`;
 }
 
-// Quiet unless a caller explicitly says `silent: false` (see AlertOpts above).
-const isQuiet = (o?: AlertOpts) => o?.silent !== false;
+// Loud unless the caller explicitly asks for quiet with `silent: true` (see AlertOpts above).
+const isQuiet = (o?: AlertOpts) => o?.silent === true;
 
 async function pushNtfy(text: string, o?: AlertOpts): Promise<void> {
   const topic = process.env.NTFY_TOPIC;
