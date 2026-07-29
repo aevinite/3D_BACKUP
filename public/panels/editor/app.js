@@ -3766,10 +3766,12 @@ function printBill(t, sess, os) {
   // Customer name: orders carry a customer_name (dine-in head / aggregator buyer);
   // use the first order that has one. Blank → the line is hidden, never empty.
   const cust = esc((os.find((o) => (o.customer_name || "").toString().trim()) || {}).customer_name || "");
-  // Table shown as "T5": prefix a plain numeric table with "T". Non-numeric
-  // values (e.g. "Takeaway", "T5") are left exactly as entered.
+  // Table on the printed bill: the restaurant's OWN name for it when it has one ("A1",
+  // "Patio" — mig 131), because the guest and the waiter both know the table by that name
+  // (owner 2026-07-29: "print acc to the table name … on the KOT as well as the bill").
+  // No name → the old "T5". Non-numeric values (e.g. "Takeaway") are left exactly as entered.
   const tnum = (t || "").toString().trim();
-  const tableDisp = /^\d+$/.test(tnum) ? "T" + tnum : esc(tnum || "—");
+  const tableDisp = /^\d+$/.test(tnum) ? esc(tableName(tnum) || "T" + tnum) : esc(tnum || "—");
   const invNo = sess && sess.invoice_no != null ? esc(invFmt(sess.invoice_no, sess.invoice_at)) : "";
   const billNo = sess && sess.bill_no != null ? esc(sess.bill_no) : "";
   const now = new Date();
