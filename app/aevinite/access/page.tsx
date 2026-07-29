@@ -34,6 +34,7 @@ const P: Record<string, string> = {
   fire: "M12 2c1 4 4 5 4 9a4 4 0 01-8 0c0-1.5.5-2.5 1-3M12 22a6 6 0 006-6c0-2-1-4-2-5",
   sparkles: "M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z",
   chart: "M3 3v16.5A1.5 1.5 0 004.5 21H21M7 15l3.5-4 3 2.5L20 7",
+  box: "M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 22V13",
   sidebar: "M3 3h18v18H3zM9 3v18",
 };
 const Icon = ({ n, s = 16 }: { n: string; s?: number }) => (

@@ -17,7 +17,7 @@ import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { getOwnerEntitlements, getOwnerEntitlementsUnion } from "@/lib/ownerEntitlements";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
-import { tableTagsLadder } from "@/lib/tableTags";
+import { tableTagsLadder, inventoryLadder } from "@/lib/tableTags";
 import OwnerShell from "@/components/owner/OwnerShell";
 import OwnerReconnecting from "@/components/owner/OwnerReconnecting";
 import AutoFitNumbers from "@/components/AutoFitNumbers";
@@ -63,6 +63,9 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
     // Pay Later nav shows if the module is on for ANY owned restaurant (per-restaurant data
     // is filtered by the API). Injected as a synthetic section key the nav gate reads.
     ents.khata_book = (await Promise.all(ownedIds.map((id) => tableTagsLadder(id)))).some((l) => l.effective);
+    // Inventory & expenses (mig 221): same synthetic-key pattern — the nav shows the section
+    // if ANY owned restaurant has the module effective (per-restaurant data filtered by the API).
+    ents.inventory = (await Promise.all(ownedIds.map((id) => inventoryLadder(id)))).some((l) => l.effective);
     // DUAL-COOKIE case (owner, 2026-07-28): a real owner login AND a live admin act-as in
     // the same browser. This layout can't read searchParams, so it can't tell an
     // admin-opened tab (?rid= pin) from the owner's own — pass BOTH payloads and let
@@ -73,6 +76,7 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
       const r = (await sb.from("restaurants").select("name").eq("id", acting).limit(1)).data?.[0];
       const adminEnts = await getOwnerEntitlements(acting);
       adminEnts.khata_book = (await tableTagsLadder(acting)).effective;
+      adminEnts.inventory = (await inventoryLadder(acting)).effective;
       dualAdmin = { adminEntitlements: adminEnts, restaurantName: r?.name || "this restaurant" };
     }
     return <OwnerShell initialSkin={initialSkin} entitlements={ents} dualAdmin={dualAdmin}><AutoFitNumbers />{children}</OwnerShell>;
@@ -86,6 +90,7 @@ export default async function OwnerLayout({ children }: { children: React.ReactN
     // Admin act-as: show Pay Later greyed (X-ray) when the module is off for this restaurant,
     // never hidden — same rule as the other sections the admin sees tinted.
     adminEnts.khata_book = (await tableTagsLadder(acting)).effective;
+    adminEnts.inventory = (await inventoryLadder(acting)).effective;
     return (
       <OwnerShell adminViewing restaurantName={r?.name || "this restaurant"} initialSkin={initialSkin} entitlements={adminEnts}>
         <AutoFitNumbers />
