@@ -92,6 +92,10 @@ export default function StaffProfilePage() {
   const [flash, setFlash] = useState<string | null>(null);   // which field just saved
   const [busy, setBusy] = useState(false);
   const [logRows, setLogRows] = useState<LogRow[] | null>(null);
+  // Waiter sections (mig 222): null until we've asked whether this restaurant uses them.
+  const [sections, setSections] = useState<{ moduleOn: boolean; tableCount: number } | null>(null);
+  const [secTables, setSecTables] = useState<number[]>([]);
+  const [secBusy, setSecBusy] = useState(false);
   const [showPay, setShowPay] = useState(false);
 
   // Admin-in-one-restaurant scope pin — same as the roster, so an admin viewing restaurant A
@@ -114,6 +118,48 @@ export default function StaffProfilePage() {
     finally { setLoading(false); }
   }, [id, withScope]);
   useEffect(() => { load(); }, [load]);
+
+  // ── Waiter sections (mig 222) ──────────────────────────────────────────────
+  // Which tables this waiter's tablet shows. Served by the same endpoint the manager
+  // panel's section editor uses, so there is ONE place that decides who may change a
+  // section and one place that sanitises the numbers — this page just draws it.
+  // Loaded only for a waiter, and only once we know which restaurant they belong to.
+  useEffect(() => {
+    if (!staff || staff.role !== "tablet" || !staff.restaurant_id) return;
+    let dead = false;
+    fetch(`/api/editor/table-sections?rid=${encodeURIComponent(staff.restaurant_id)}`, { cache: "no-store" })
+      .then((x) => x.json())
+      .then((j) => {
+        if (dead || j.error) return;
+        setSections({ moduleOn: !!j.moduleOn, tableCount: Number(j.tableCount) || 0 });
+        // This person's own row comes back in the same call — no second request just to
+        // learn the five numbers we're about to draw.
+        const mine = (j.waiters || []).find((w: { id: string }) => w.id === staff.id);
+        setSecTables(((mine?.assigned_tables || []) as unknown[]).map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b));
+      })
+      // A manager/owner without the section power gets a 403 here — that's a normal
+      // "you don't hand out sections" answer, so the card simply stays hidden.
+      .catch(() => {});
+    return () => { dead = true; };
+  }, [staff]);
+
+  async function saveSection(tables: number[]) {
+    if (!staff) return;
+    const before = secTables;
+    setSecTables(tables); setSecBusy(true);
+    try {
+      const r = await fetch(`/api/editor/table-sections?rid=${encodeURIComponent(staff.restaurant_id)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: staff.id, tables }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Save failed (${r.status})`);
+      setSecTables((d.user?.assigned_tables || []).map(Number));
+    } catch (e) {
+      setSecTables(before);                       // never show a section that didn't save
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally { setSecBusy(false); }
+  }
 
   // The activity feed loads only when its tab is opened (it's a separate query).
   useEffect(() => {
@@ -651,6 +697,45 @@ export default function StaffProfilePage() {
               </>
             )}
 
+            {/* Waiter sections (mig 222): which tables this person's tablet shows. Only for
+                waiters, and only when the restaurant actually has sections switched on —
+                otherwise it's a control that changes nothing, which is worse than absent. */}
+            {staff.role === "tablet" && sections?.moduleOn && (
+              <>
+                <p className="sp-sect">Tables this waiter serves <span className="sp-mut">— their tablet shows only these</span></p>
+                {secTables.length === 0 && (
+                  <div className="sp-note" style={{ marginBottom: 10 }}>
+                    <i className="fas fa-triangle-exclamation" />
+                    <div>No tables yet — <b>this waiter&apos;s tablet is empty</b> until you tick some below.</div>
+                  </div>
+                )}
+                <div className="sp-tsec">
+                  {Array.from({ length: sections.tableCount }, (_, k) => k + 1).map((i) => {
+                    const on = secTables.includes(i);
+                    return (
+                      <button key={i} className={on ? "on" : ""} disabled={secBusy}
+                        title={on ? `Tap to take table ${i} away` : `Tap to give table ${i}`}
+                        onClick={() => saveSection(on ? secTables.filter((x) => x !== i) : [...secTables, i].sort((a, b) => a - b))}>
+                        {on ? "✓ " : ""}T{i}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="sp-row" style={{ marginTop: 8 }}>
+                  <span className="sp-mut">{secTables.length} of {sections.tableCount} tables</span>
+                  <span className="sp-rt">
+                    <button className="sp-btn" disabled={secBusy}
+                      onClick={() => saveSection(Array.from({ length: sections.tableCount }, (_, k) => k + 1))}>All</button>
+                    <button className="sp-btn" disabled={secBusy} onClick={() => saveSection([])}>None</button>
+                  </span>
+                </div>
+                <div className="sp-note" style={{ marginTop: 10 }}>
+                  <i className="fas fa-table-cells-large" />
+                  <div>The whole floor at once — including any table <b>nobody</b> is serving — is in the manager panel under <b>Settings → Tables</b>.</div>
+                </div>
+              </>
+            )}
+
             <div className="sp-note" style={{ marginTop: 12 }}>
               <i className="fas fa-users-gear" />
               <div>What <b>all</b> your managers may do — including whether they can see staff pay — lives in
@@ -785,6 +870,12 @@ export default function StaffProfilePage() {
         .sp-seg { display: inline-flex; gap: 2px; background: var(--bg); border: var(--border); border-radius: 9px; padding: 2px; }
         .sp-seg button { min-height: 30px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer; }
         .sp-seg button.on { background: var(--accent); color: #04160f; }
+        /* Waiter sections (mig 222): the table chips. Same visual language as .sp-day —
+           a grid of small toggles — so the page keeps one way of saying "pick some". */
+        .sp-tsec { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; max-height: 210px; overflow-y: auto; padding-right: 4px; }
+        .sp-tsec button { min-height: 38px; border-radius: 9px; border: var(--border); background: var(--bg); color: var(--muted); font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+        .sp-tsec button.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); color: var(--adm-ok); }
+        .sp-tsec button:disabled { opacity: .6; cursor: default; }
         .sp-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
         .sp-kpi { background: color-mix(in srgb, var(--fg, #888) 4%, transparent); border: var(--border); border-radius: 12px; padding: 11px 12px; }
         .sp-kpi .k { font-size: 10.5px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }

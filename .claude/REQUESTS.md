@@ -595,3 +595,41 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
 - [x] **Owner rule added: ASK before sending a test notification to his phone**, so he can be ready
   to look at it. Verification otherwise goes through a local push sink (`NTFY_SERVER` pointed at
   127.0.0.1) which captures the exact title/priority/body without touching his phone.
+
+## 2026-07-29 — Waiter sections: give each tablet its own set of tables (owner: "a particular tablet can access only a particular amount of tables, not others")
+
+Owner's four calls: a waiter with **nothing assigned sees an empty floor**; other tables are
+**hidden**, not greyed; assignments are **sticky** (no daily reset); the **manager gets the
+power ON by default** and the owner can revoke it. A table may be given to two waiters.
+
+Built as the canonical 4-rung module `table_assign` (mig **222**) — admin `_allowed` /
+`_owner_control` → owner `_enabled` → owner→manager grant. **No tablet rung** (a waiter never
+assigns sections). Storage is `staff_users.assigned_tables integer[]`, which rides free on the
+`select("*")` that `userFromCookie` already does on every request — zero extra queries.
+
+- [x] Migration 222 — ladder columns, `assigned_tables`, manager grant backfilled true on all
+  15 restaurants, `rt_emit` trigger on `UPDATE OF assigned_tables` (ops topic, table NULL =
+  full reload). Applied to the DEV DB only. Module ships **OFF** everywhere.
+- [x] `lib/tableAssign.ts` — `waiterTables()` answers **null (unrestricted)** for the admin,
+  for any non-waiter role, and for every restaurant with the module off, so the whole feature
+  is a no-op until someone switches it on.
+- [x] Server enforcement — ONE gate in the tablet POST dispatcher (not 38 branches): it
+  resolves the affected table from order / item / session / call / request / member ids and
+  checks **both ends** of shift / merge / move. Reads narrowed on `/summary` (tiles + calls +
+  requests + joiners + counters) and `/state` (both the targeted slice and the whole floor).
+- [x] Manager/owner/admin editor — "Who serves which table", by-waiter **and** by-table views,
+  a red **"N tables nobody serves"** warning with a one-tap fix, per-waiter picker with
+  All/None/range, Escape + phone-Back close the top layer only.
+- [x] Reachable for a real manager — the Settings tab is gated by the SEPARATE `edit_settings`
+  power, so the same editor also opens from a **👥 Who serves what** button on the live Table
+  view. Caught in live testing; without it a granted manager had no door.
+- [x] Waiter tablet — floor, filter counts and all three destination pickers honour the
+  section; "Your tables · 1–3" strip; a friendly empty state instead of a blank grid.
+- [x] Owner → person → Access — "Tables this waiter serves" chips, module-gated.
+- [x] Verified live on :4010 (worktree): **30 automated checks green** — module off changes
+  nothing; module on + no section = empty floor; a manager can set a section; out-of-range and
+  duplicate numbers are dropped server-side; a table outside the section reads empty and every
+  write on it is refused 403; own tables unaffected; a manager looking in keeps the whole
+  floor; section change emits the ops breadcrumb; revoking the power / switching the module off
+  is refused server-side and **keeps** saved sections; a non-#1 restaurant is untouched.
+  Screenshots checked at desktop and 360px, then deleted. `verify-board-sig.mjs` passes.

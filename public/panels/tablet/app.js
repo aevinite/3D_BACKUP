@@ -452,6 +452,55 @@ function needsAttention(i) {
 }
 
 function tableCount() { return Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12); }
+
+// ── Waiter sections (mig 222) ────────────────────────────────────────────────
+// `my_tables` comes down with the floor summary: an ARRAY = this waiter only serves
+// those tables; NULL/absent = not restricted (the admin, a manager/owner looking in, or
+// the module is off for this restaurant) and the whole floor renders exactly as before.
+//
+// The server already narrows what it SENDS, but the client still has to know the list:
+// renderFloor draws 1…table_count and summaryTile() invents a "free" tile for any number
+// the summary didn't mention — so without this, another waiter's tables would still sit
+// on screen looking empty and tappable.
+function mySection() {
+  const my = (state.summary || {}).my_tables;
+  return Array.isArray(my) ? my.map((n) => String(parseInt(n, 10))) : null;
+}
+const sectioned = () => mySection() !== null;
+function inMySection(i) {
+  const my = mySection();
+  return my === null || my.includes(String(parseInt(i, 10)));
+}
+
+// "1 2 3 4 5 6"  →  "1-6";  "1 2 4 9 10"  →  "1-2, 4, 9-10". A waiter reads their own
+// section at a glance instead of counting a row of twenty chips.
+function rangeText(nums) {
+  const xs = nums.map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  if (!xs.length) return "";
+  const parts = [];
+  let start = xs[0], prev = xs[0];
+  for (let i = 1; i <= xs.length; i++) {
+    const cur = xs[i];
+    if (cur === prev + 1) { prev = cur; continue; }
+    parts.push(start === prev ? String(start) : `${start}–${prev}`);
+    start = cur; prev = cur;
+  }
+  return parts.join(", ");
+}
+
+// The "Your tables" strip above the floor. Hidden entirely (via an inline style, not the
+// `hidden` attribute — an author display rule would beat that) for anyone not restricted.
+function renderMySection() {
+  const el = document.getElementById("mySection");
+  if (!el) return;
+  const my = mySection();
+  // Nothing assigned → stay silent here: the big empty state where the tiles would be
+  // already says it, in more words and more kindly. Two identical warnings stacked on a
+  // 360px phone just eats the screen.
+  if (my === null || !my.length) { el.style.display = "none"; el.innerHTML = ""; return; }
+  el.style.display = "flex";
+  el.innerHTML = `<span class="ms-key">Your tables</span><b>${esc(rangeText(my))}</b><span class="ms-n">${my.length} table${my.length === 1 ? "" : "s"}</span>`;
+}
 // tableLabel(t): the table's display name (mig 131) with the number kept alongside,
 // else "Table t". Display-only — bills/KOTs/ids all keep the number.
 const tname = (t) => (((state.data.settings || {}).table_names || {})[String(t)] || "").trim();
@@ -547,6 +596,10 @@ async function selectTable(t) {
 // detect that flip and full-render instead of redrawing a tile that should vanish. Under the
 // default "all" filter this is always true, so patching collapses to the manager's behaviour.
 function passesFilter(i) {
+  // Waiter sections come FIRST: a table outside this waiter's section is never drawn,
+  // whatever the chip filter says. Putting it in the SHARED predicate means the full
+  // render and the incremental patch path can't disagree about it.
+  if (!inMySection(i)) return false;
   const filt = state.floorFilter || "all";
   if (filt === "needs") return needsAttention(i);
   if (filt === "open") return tileIsOpen(i);
@@ -617,9 +670,14 @@ function tileHtml(i) {
 // stable #counts / #floorNav containers, so rewriting innerHTML never orphans a handler.
 function floorFilterCounts() {
   const n = tableCount();
-  let cNeeds = 0, cOpen = 0, cFree = 0;
-  for (let i = 1; i <= n; i++) { if (needsAttention(i)) cNeeds++; if (tileIsOpen(i)) cOpen++; else cFree++; }
-  return [["all", "All", n], ["needs", "⚠ Needs", cNeeds], ["open", "Active", cOpen], ["free", "Free", cFree]];
+  let cAll = 0, cNeeds = 0, cOpen = 0, cFree = 0;
+  for (let i = 1; i <= n; i++) {
+    if (!inMySection(i)) continue;       // sections: count MY tables, not the restaurant's
+    cAll++;
+    if (needsAttention(i)) cNeeds++;
+    if (tileIsOpen(i)) cOpen++; else cFree++;
+  }
+  return [["all", "All", cAll], ["needs", "⚠ Needs", cNeeds], ["open", "Active", cOpen], ["free", "Free", cFree]];
 }
 function floorCountsHtml() {
   const filt = state.floorFilter || "all";
@@ -640,13 +698,25 @@ function renderFloor() {
   if (countsEl) countsEl.innerHTML = floorCountsHtml();
   const navEl = document.getElementById("floorNav");
   if (navEl) navEl.innerHTML = floorNavHtml();
+  renderMySection();               // sections: "Your tables · 1-6" (no-op when unrestricted)
 
   let html = "";
   for (let i = 1; i <= n; i++) {
     if (!passesFilter(i)) continue;        // SHARED predicate — patch path agrees on visibility
     html += tileHtml(i);                   // SHARED tile builder — single source of truth
   }
-  $("#tiles").innerHTML = html || `<div class="muted" style="padding:14px">No tables here right now.</div>`;
+  // Sections: an empty floor because NOTHING was assigned is a very different thing from
+  // "your filter matched nothing" — say so plainly and point at the person who can fix it,
+  // so a waiter who's handed a tablet at the start of a shift isn't staring at a blank grid
+  // wondering if the app is broken.
+  const emptyMsg = (sectioned() && !mySection().length)
+    ? `<div class="sx-empty" style="padding:26px 16px;text-align:center;line-height:1.6">
+         <div style="font-size:30px;margin-bottom:6px">🪑</div>
+         <div style="font-weight:800;font-size:15px">No tables assigned to you yet</div>
+         <div class="muted" style="font-size:13px;margin-top:4px">Ask your manager to give you a section — your tables will show up here straight away.</div>
+       </div>`
+    : `<div class="muted" style="padding:14px">No tables here right now.</div>`;
+  $("#tiles").innerHTML = html || emptyMsg;
   window.__lfhPerf.fullRenders++;
   window.__lfhPerf.lastMs = performance.now() - _t0;
 }
@@ -682,6 +752,7 @@ function patchTabletTiles(tables) {
   if (countsEl) countsEl.innerHTML = floorCountsHtml();
   const navEl = document.getElementById("floorNav");
   if (navEl) navEl.innerHTML = floorNavHtml();
+  renderMySection();               // sections: "Your tables · 1-6" (no-op when unrestricted)
   window.__lfhPerf.patches++;
   window.__lfhPerf.tilesPatched += patched;
   window.__lfhPerf.lastMs = performance.now() - _t0;
@@ -1626,7 +1697,10 @@ function renderMoveItemTarget(t, itemId) {
 // PIN mode rides the normal actGated round-trip (the server's tabletPerm challenges).
 function renderMergePicker(t, s) {
   const occ = [];
-  for (let i = 1, n = tableCount(); i <= n; i++) { if (String(i) !== String(t) && tileIsOpen(i)) occ.push(i); }
+  // inMySection: a waiter with a section can only merge into a table they also hold — the
+  // server refuses the other direction anyway (both ends of a move are checked), so
+  // offering it would just be a button that fails.
+  for (let i = 1, n = tableCount(); i <= n; i++) { if (String(i) !== String(t) && inMySection(i) && tileIsOpen(i)) occ.push(i); }
   const btns = occ.length
     ? `<div class="kotm-grid">` + occ.map((i) => `<button class="kotm-tile occ" data-mergeto="${i}"><b>T${i}</b><small>${tileState(i).label}</small></button>`).join("") + `</div>`
     : `<div class="muted">No other open tables to merge with.</div>`;
@@ -1648,7 +1722,7 @@ function renderShiftPicker(t, s) {
   const free = [];
   // FREE = not open, read from the summary (tileIsOpen) — works for every tile, not just the
   // selected one whose slice is cached. (Two-tier: the grid no longer holds every table's session.)
-  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !tileIsOpen(i)) free.push(i); }
+  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && inMySection(i) && !tileIsOpen(i)) free.push(i); }
   const btns = free.length
     ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">Table ${i}</button>`).join("")
     : `<div class="muted">No free tables to shift to.</div>`;
@@ -1682,11 +1756,11 @@ function renderMoveOrderTarget(t, orderId) {
   const n = tableCount();
   const tiles = [];
   for (let i = 1; i <= n; i++) {
-    if (String(i) === String(t)) continue;
+    if (String(i) === String(t) || !inMySection(i)) continue;  // sections: only my own tables
     const st = tileState(i);
     tiles.push(`<button class="btn shiftpick" data-moveto="${i}">Table ${i}<br><span class="muted small">${st.label}</span></button>`);
   }
-  const body = `<div class="muted small" style="margin-bottom:10px">Send this order to which table's bill?</div><div class="shiftgrid">${tiles.join("")}</div>`;
+  const body = `<div class="muted small" style="margin-bottom:10px">Send this order to which table's bill?</div><div class="shiftgrid">${tiles.length ? tiles.join("") : `<div class="muted">No other table in your section to move this to.</div>`}</div>`;
   const { dropLayer } = renderPickerShell("Move order →", body, "tablet-move-target", () => renderMoveOrderPicker(t));
   document.querySelectorAll("[data-moveto]").forEach((b) => (b.onclick = () => {
     const to = b.dataset.moveto;
@@ -3179,6 +3253,12 @@ async function loadImpl() {
   // Split the full-summary response into the per-tile summary (+ aggregates) and the agnostic bundle.
   const { settings, dishes, categories, restaurant, ...summaryOnly } = summary || {};
   state.summary = summaryOnly;
+  // Sections (mig 222): if a manager just took this table off the waiter mid-shift, the
+  // open detail is no longer theirs to look at — drop back to the floor rather than leave
+  // a panel on screen whose every button would now be refused by the server.
+  if (state.table != null && !inMySection(state.table)) {
+    state.table = null; state.ordering = false; state.cart = [];
+  }
   const patch = {
     settings: settings ?? null,
     categories: categories || state.data.categories || [],   // categories are always returned; keep last if absent

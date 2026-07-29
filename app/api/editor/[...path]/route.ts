@@ -29,6 +29,7 @@ import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 
 export const dynamic = "force-dynamic"; // always live, never cached
@@ -316,6 +317,34 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_recognize_customer", { p_phone: phone, p_restaurant_id: rid });
       if (error) throw new Error(error.message);
       return ok(data || { known: false });
+    }
+
+    // ── table-sections — who serves which table (waiter sections, mig 222) ────
+    // The roster the section editor needs, and NOTHING else: id, display name, login,
+    // active, assigned_tables. Deliberately not the full staff roster (that's
+    // /api/owner/staff, gated by manage_staff) — a manager who may hand out sections
+    // shouldn't thereby gain phone numbers and per-user permissions. Waiters only:
+    // sections are a tablet concept.
+    //
+    // The ADMIN always gets an answer even when the module is off (x-ray rule: the admin
+    // sees every feature, tinted, and it genuinely works); a real owner/manager needs the
+    // module effective AND — for a manager — the granted power.
+    if (p === "table-sections") {
+      const on = (await tableAssignLadder(rid)).effective;
+      if (g.user && !on) return err("Waiter sections aren't switched on for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "table_assign"))) return permDenied("give waiters their own tables");
+      const [staff, settings] = await Promise.all([
+        sb.from("staff_users").select("id, username, name, role, active, assigned_tables")
+          .eq("restaurant_id", rid).eq("role", "tablet").is("deleted_at", null)
+          .order("name", { ascending: true }).limit(200),
+        sb.from("settings").select("table_count, table_names").eq("restaurant_id", rid).maybeSingle(),
+      ]);
+      return ok({
+        moduleOn: on,
+        waiters: must(staff) || [],
+        tableCount: Number(must(settings)?.table_count) || 12,
+        tableNames: must(settings)?.table_names || {},
+      });
     }
 
     // whoami — boot signal for the panel's hierarchy X-ray (2026-07-05). Tells the
@@ -1252,6 +1281,43 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // one visit for the table's session (idempotent), links devices, bumps the
     // returning count. Gated by the "customers" entitlement (default on). Called once
     // after the bill closes; a failure never blocks the settle that already happened.
+    // ── table-sections — set ONE waiter's tables (waiter sections, mig 222) ────
+    // Body: { user_id, tables: number[] }. The whole set is replaced, so the client can
+    // send the result of a tick/untick without any merge logic. Same ladder as the GET.
+    //
+    // Numbers are sanitised and clamped to 1…table_count here, not trusted from the
+    // client: a stale panel could otherwise write table 40 into a 12-table restaurant and
+    // the waiter would hold a table that doesn't exist. Duplicates collapse, order is
+    // stable, and an empty list is a legitimate "this waiter serves nothing yet".
+    if (a === "table-sections") {
+      if (g.user && !(await tableAssignLadder(rid)).effective)
+        return err("Waiter sections aren't switched on for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "table_assign"))) return permDenied("give waiters their own tables");
+      const uid = String(body?.user_id || "").trim();
+      if (!uid) return err("Which person? — user_id is required.");
+      const cnt = Number((await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle()).data?.table_count) || 12;
+      const seen = new Set<number>();
+      const tables: number[] = [];
+      for (const v of Array.isArray(body?.tables) ? body.tables : []) {
+        const n = parseInt(String(v), 10);
+        if (Number.isFinite(n) && n >= 1 && n <= cnt && !seen.has(n)) { seen.add(n); tables.push(n); }
+      }
+      tables.sort((x, y) => x - y);
+      // Scoped to THIS restaurant and to a waiter: a manager can't reach another
+      // restaurant's staff row, nor give a manager/kitchen login a section.
+      const upd = await sb.from("staff_users").update({ assigned_tables: tables })
+        .eq("id", uid).eq("restaurant_id", rid).eq("role", "tablet")
+        .select("id, username, name, assigned_tables");
+      if (upd.error) return err(upd.error.message, 500);
+      const row = (upd.data || [])[0];
+      if (!row) return err("That waiter is no longer on this restaurant's team.", 404);
+      await log("editor", "table_sections_set", {
+        restaurant_id: rid, device_id: dev,
+        detail: `${row.name || row.username}: ${tables.length ? tables.map((t) => `T${t}`).join(" ") : "no tables"}`,
+      });
+      return ok({ ok: true, user: row });
+    }
+
     if (a === "customer-capture") {
       const t = String(body?.table || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");

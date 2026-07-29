@@ -24,6 +24,7 @@ import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersL
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { effectiveTaxRate } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
+import { waiterTables, allows, normTable, blockedReason } from "@/lib/tableAssign";
 
 export const dynamic = "force-dynamic";
 
@@ -161,6 +162,45 @@ function overlayUserPerms<T extends Record<string, any> | null>(settings: T, use
   return out as T;
 }
 
+// ── Waiter sections (mig 222) — narrowing the floor reads ────────────────────
+// `limit === null` means "not a restricted caller" (admin, manager/owner looking in, or
+// the module is off for this restaurant) and every function below returns untouched —
+// which is why wiring these in changes nothing for anyone not using sections.
+//
+// Rows are filtered by their own `table_number`, so a row whose table the waiter doesn't
+// hold simply never reaches the device. `blocklist` is deliberately LEFT ALONE: it is a
+// restaurant-wide ban list keyed by phone/device with no table at all, and the waiter
+// needs it to see that the guest in front of them is blocked.
+function narrowSummary(summary: Record<string, any>, limit: string[] | null): void {
+  if (limit === null || !summary) return;
+  const keep = (t: unknown) => allows(limit, t);
+  const tiles = summary.tiles && typeof summary.tiles === "object" ? summary.tiles : {};
+  const outTiles: Record<string, unknown> = {};
+  for (const k of Object.keys(tiles)) if (keep(k)) outTiles[k] = tiles[k];
+  summary.tiles = outTiles;
+  for (const key of ["calls", "requests", "joiners"]) {
+    if (Array.isArray(summary[key])) {
+      summary[key] = summary[key].filter((r: { table_number?: unknown }) => keep(r?.table_number));
+    }
+  }
+  // The RPC's last two fields are restaurant-wide (a count over ALL live orders, and the
+  // newest order's table). Left as-is they'd hand a waiter a number and a table pointer
+  // from outside their section. Neither is rendered by the tablet today, so narrowing
+  // them costs nothing and stops them becoming a way back to the whole floor later:
+  // order_count becomes "how many of MY tables are busy", and the pointer only survives
+  // if it points at one of mine.
+  summary.order_count = Object.values(outTiles).filter((t: any) => {
+    const c = t?.counts || {};
+    return (Number(c.nw) || 0) + (Number(c.ck) || 0) + (Number(c.rd) || 0) + (Number(c.sv) || 0) > 0;
+  }).length;
+  if (!keep(summary.latest_order_table)) summary.latest_order_table = null;
+}
+
+// Keep only the rows whose table_number the waiter holds. `members` and `items` carry no
+// table_number — they are narrowed by the session/order ids that survived instead.
+const narrowRows = <T extends { table_number?: unknown }>(rows: T[] | null | undefined, limit: string[] | null): T[] =>
+  limit === null ? (rows || []) : (rows || []).filter((r) => allows(limit, r?.table_number));
+
 const nowIso = () => new Date().toISOString();
 // Mark an order EDITED after placement → bumps orders.edited_at so the "✎ Edited"
 // badge shows on every panel (mirrors the manager). Best-effort; never fails the edit.
@@ -257,6 +297,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl || null });
       if (error) throw new Error(error.message);
       const summary = data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] };
+      // WAITER SECTIONS (mig 222): keep only the tables this waiter was given. `limit` is
+      // null — and this is a total no-op — for the admin, for a manager/owner looking in,
+      // and for every restaurant with the module off. Note the RPC applies `p_table` ONLY
+      // to the tile loop: calls/requests/joiners/order_count are restaurant-wide and ride
+      // along on the targeted response too, so they must be narrowed on BOTH paths.
+      const myTables = await waiterTables(g.user, rid); // resolved ONCE for this request
+      narrowSummary(summary, myTables);
       // Targeted (?table=N): tile only — the panel keeps its cached agnostic bundle.
       if (tbl) return ok(summary);
       // Full floor: attach the small table-agnostic collections in ONE round-trip. The dishes
@@ -286,8 +333,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // Parcel module off → the tablet's 🥡 Parcel button hides (tri-state 'off').
         if (!parcelEffectiveFromRow(setOut)) setOut.tablet_parcel = "off";
       }
+      // WAITER SECTIONS: the client MUST be told the list, not just given fewer tiles.
+      // renderFloor() draws 1…table_count and treats a missing tile as an EMPTY table, so
+      // narrowing the payload alone would leave every other table on screen looking free.
+      // `null` = not restricted (admin / manager looking in / module off) → draw everything.
       const body: Record<string, unknown> = {
         ...summary,
+        my_tables: myTables,
         // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
         settings: setOut, categories: must(categories),
         restaurant: must(restaurant) || null,
@@ -338,7 +390,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // menu event always forces a FULL pass, so they're left OUT of a targeted slice (the panel
       // keeps its cached copies). Members/items are scoped by the table's open-session ids.
       const tbl = new URL(req.url).searchParams.get("table");
+      // WAITER SECTIONS (mig 222). Resolved once for both branches below.
+      const limit = await waiterTables(g.user, rid);
       if (tbl) {
+        // A table outside the waiter's section answers as an EMPTY table rather than an
+        // error. Deliberate: the tablet treats a failed slice fetch as "something's wrong,
+        // reload everything", so a 403 here would spin a reload loop if a stale realtime
+        // breadcrumb ever named someone else's table. Nothing is disclosed either way —
+        // and the WRITE path (below) does refuse outright.
+        if (!allows(limit, tbl)) return ok({ sessions: [], members: [], calls: [], orders: [], items: [], requests: [] });
         const live = await liveOrdersAndItems(rid, [tbl]);
         const sessions = must(await sb.from("sessions").select("*").neq("status", "closed").eq("restaurant_id", rid).eq("table_number", tbl));
         const sids = (sessions || []).map((s: { id: string }) => s.id);
@@ -378,11 +438,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (!takeOrdersEffectiveFromRow(setSt)) setSt.tablet_take_orders = "off";
         if (!parcelEffectiveFromRow(setSt)) setSt.tablet_parcel = "off";
       }
+      // WAITER SECTIONS: narrow the whole-floor board to the waiter's own tables. The
+      // per-table rows filter on their own table_number; members and items have none, so
+      // they follow the session / order ids that survived. (limit === null → untouched.)
+      const stSessions = narrowRows(must(sessions) as { table_number?: unknown; id?: string }[], limit);
+      const stOrders = narrowRows(live.orders as { table_number?: unknown; id?: string }[], limit);
+      const keptSids = new Set(stSessions.map((s) => String(s.id)));
+      const keptOids = new Set(stOrders.map((o) => String(o.id)));
+      const stMembers = limit === null ? must(members)
+        : (must(members) || []).filter((m: { session_id?: string }) => keptSids.has(String(m.session_id)));
+      const stItems = limit === null ? live.items
+        : (live.items || []).filter((i) => keptOids.has(String((i as { order_id?: string }).order_id)));
       return ok({
         // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
-        settings: setSt, sessions: must(sessions), members: must(members),
-        orders: live.orders, items: live.items, calls: must(calls), dishes: must(dishes),
-        categories: must(categories), requests: must(requests),
+        settings: setSt, sessions: stSessions, members: stMembers,
+        orders: stOrders, items: stItems,
+        calls: narrowRows(must(calls) as { table_number?: unknown }[], limit),
+        dishes: must(dishes), categories: must(categories),
+        requests: narrowRows(must(requests) as { table_number?: unknown }[], limit),
         restaurant: must(restaurant) || null,
       });
     }
@@ -436,6 +509,25 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     const dev = deviceIdFrom(req); // which tablet/device is acting
     // A staff-blocked device can't do anything from the tablet.
     if (await deviceBlocked(dev)) return err("This device has been blocked by staff.", 403);
+
+    // ── WAITER SECTIONS (mig 222) — ONE gate for every table-scoped write ──────
+    // Deliberately checked HERE, once, instead of inside each of the ~38 action branches
+    // below. Two reasons: a branch is easy to forget (and a forgotten one is a silent
+    // hole), and a NEW `orders/:id/…` or `tables/:t/…` action added next year is covered
+    // the day it's written without anyone remembering this feature exists.
+    //
+    // blockedReason() resolves the affected table from the same [a, b, c] segments the
+    // dispatcher already has — following order/item/session/call/request/member ids to
+    // their table, and checking BOTH ends of a move (shift / merge / move dish / move
+    // ticket) so a party can't be pushed onto a table the waiter can no longer see. It
+    // returns null immediately for the admin, for a manager/owner looking in, and for
+    // every restaurant with the module off, so this costs one lookup only for a real
+    // waiter at a restaurant that actually uses sections.
+    const sectionLimit = await waiterTables(actor, rid);
+    if (sectionLimit !== null) {
+      const blocked = await blockedReason(sectionLimit, a, b, c, body);
+      if (blocked) return err(blocked, 403);
+    }
 
     // ── Raise an issue / complaint (photo + voice note optional) ────────────────
     // A waiter flags a floor problem for THIS restaurant; owner + admin see it. Media

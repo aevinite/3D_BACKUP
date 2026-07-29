@@ -1778,6 +1778,74 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .sx-modal-overlay { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; background: rgba(0,0,0,0.6); backdrop-filter: blur(6px); }
 .sx-modal { max-height: 86vh; overflow-y: auto; background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 30px 70px rgba(0,0,0,0.6); }
 
+/* ══ Waiter sections — "Who serves which table" (mig 222) ══════════════════════
+   Settings → Tables. Two views of one thing: by waiter (how a manager thinks about
+   a rota) and by table (how you spot the table nobody is serving). */
+.sec-views { display: flex; gap: 8px; margin: 0 0 12px; }
+.sec-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 11px 13px; margin-bottom: 8px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; }
+.sec-row.sec-off { opacity: .55; }
+.sec-who { display: flex; align-items: center; gap: 8px; min-width: 150px; font-size: 13.5px; }
+.sec-who .muted { font-size: 12px; }
+.sec-dis { font-size: 10.5px; color: var(--red, #ef4444); font-weight: 700; }
+.sec-chips { display: flex; flex-wrap: wrap; gap: 5px; flex: 1; min-width: 120px; }
+.sec-chip { font-size: 11.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--gold) 20%, transparent); border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent); }
+/* A waiter with nothing assigned is a real operational problem, not a neutral state. */
+.sec-chip-none { background: none; border-style: dashed; border-color: var(--red, #ef4444); color: var(--red, #ef4444); }
+
+/* By-table view: one cell per table showing who holds it. A cell nobody holds is red — that
+   table is invisible on every tablet, which is the failure mode this whole card guards. */
+.sec-tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(122px, 1fr)); gap: 8px; max-height: 340px; overflow-y: auto; padding-right: 4px; }
+.sec-tcell { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; text-align: left;
+  padding: 9px 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2);
+  color: var(--text); font: inherit; cursor: pointer; }
+.sec-tcell b { font-size: 13px; }
+.sec-tcell span { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.sec-tcell:hover { border-color: var(--gold); }
+.sec-tcell-gap { border-color: var(--red, #ef4444); border-style: dashed; }
+.sec-tcell-gap span { color: var(--red, #ef4444); font-weight: 700; }
+
+/* The two warnings. Amber = someone's tablet is empty; red = a table nobody serves. */
+.sec-warn { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 13px; margin: 0 0 12px;
+  border-radius: 11px; font-size: 13px; line-height: 1.5;
+  background: color-mix(in srgb, var(--gold) 12%, transparent); border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent); }
+.sec-warn b { font-size: 13px; }
+.sec-warn span { color: var(--muted); flex: 1; min-width: 160px; }
+.sec-warn-bad { background: color-mix(in srgb, var(--red, #ef4444) 12%, transparent); border-color: color-mix(in srgb, var(--red, #ef4444) 45%, transparent); }
+.sec-warn-bad b { color: var(--red, #ef4444); }
+.sec-bulk { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+
+/* The picker modal (shared shell classes: .sx-modal-overlay handles the back button). */
+.sec-modal { max-width: 620px; width: 94%; display: flex; flex-direction: column; }
+/* The whole card in a modal (opened from the live Table view) needs more room than the
+   single-waiter picker — the by-table grid is the point of it. */
+.sec-modal-wide { max-width: 880px; }
+/* Inside the modal the card is already framed, so drop its own chrome. */
+.sec-modal-wide .card { background: none; border: 0; padding: 0; margin: 0; box-shadow: none; }
+.sec-modal-wide .card h3 { display: none; }
+.sx-modal-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.sx-modal-head h3 { margin: 0; font-size: 16px; flex: 1; }
+.sx-x { background: none; border: none; color: var(--muted); font-size: 17px; cursor: pointer; padding: 4px 6px; line-height: 1; }
+.sx-x:hover { color: var(--text); }
+.sx-modal-body { padding: 14px 16px 18px; }
+.sec-pickbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.sec-pickrange { display: flex; align-items: center; gap: 6px; }
+.sec-pickgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; max-height: 46vh; overflow-y: auto; padding-right: 4px; }
+.sec-pick { display: flex; flex-direction: column; gap: 1px; align-items: flex-start; text-align: left;
+  padding: 10px 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2);
+  color: var(--text); font: inherit; cursor: pointer; }
+.sec-pick b { font-size: 13.5px; }
+.sec-pick-nm, .sec-pick-oth { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+/* Who ELSE holds this table — so sharing is a deliberate choice, never a surprise. */
+.sec-pick-oth { font-style: italic; }
+.sec-pick.on { background: color-mix(in srgb, var(--gold) 22%, transparent); border-color: var(--gold); }
+.sec-holds { display: flex; flex-direction: column; gap: 7px; }
+.sec-hold { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; cursor: pointer; }
+.sec-hold.on { background: color-mix(in srgb, var(--gold) 20%, transparent); border-color: var(--gold); }
+.sec-hold .muted { margin-left: auto; font-size: 12px; }
+
 /* Unified per-dish edit modal: allergen toggle chips (standard + custom) + note. */
 .dish-edit-modal { max-width: 440px; width: 92%; display: flex; flex-direction: column; }
 .dish-edit-body { padding: 14px 16px 4px; }

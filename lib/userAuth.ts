@@ -48,6 +48,10 @@ export type StaffUser = {
   // Absent key = inherit the restaurant-wide default. Rides free on the select("*")
   // row reads below — no extra query anywhere.
   permissions: Record<string, string> | null;
+  // Waiter sections (migration 222): the table numbers this tablet login may see and act
+  // on. Rides free on the same select("*") as `permissions` — see lib/tableAssign.ts, which
+  // also explains why an empty array only restricts anyone while the module is on.
+  assigned_tables: number[] | null;
 };
 
 // Normalize a typed "Name" into the canonical login key stored in `username`:

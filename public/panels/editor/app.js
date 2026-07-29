@@ -1292,6 +1292,353 @@ function tableQrLinksCardHtml(s) {
   </div>`;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// WAITER SECTIONS — "Who serves which table" (mig 222, owner 2026-07-29)
+// ══════════════════════════════════════════════════════════════════════════════
+// Splits the floor into sections: a waiter's tablet then shows ONLY the tables they
+// were given. A table can be given to two waiters (they share it) or to one.
+//
+// Its own small endpoint (/api/editor/table-sections) rather than the full staff roster:
+// a manager who may hand out sections shouldn't thereby gain everyone's phone number and
+// permission map. The payload is just id + name + assigned_tables per waiter.
+//
+// The DANGEROUS state this card exists to prevent: a table given to NOBODY is invisible
+// on every tablet — guests sit there and no waiter ever sees the call. So the gap warning
+// is the first thing in the card, not a footnote.
+async function loadTableSections() {
+  state.sectionsLoading = true;
+  try {
+    const r = await fetch(ridQ("/api/editor/table-sections"), { cache: "no-store" });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { state.sectionsDenied = d.error || "Couldn't load waiter sections."; state.sections = null; }
+    else { state.sectionsDenied = null; state.sections = d; }
+  } catch (e) { state.sectionsDenied = "Couldn't reach the server."; }
+  state.sectionsLoaded = true; state.sectionsLoading = false;
+  if (state.tab === "general") renderEditor();
+}
+
+// Replace ONE waiter's whole list. The server re-sanitises and clamps to the real table
+// count, so a stale panel can never write a table that doesn't exist.
+async function saveWaiterTables(userId, tables) {
+  const w = (state.sections?.waiters || []).find((x) => x.id === userId);
+  const before = w ? (w.assigned_tables || []).slice() : null;
+  if (w) w.assigned_tables = tables.slice();           // optimistic — the grid feels instant
+  renderEditor(); repaintSectionPicker(); repaintSectionsModal();
+  try {
+    const r = await fetch(ridQ("/api/editor/table-sections"), {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, tables }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `Save failed (${r.status})`);
+    if (w && d.user) w.assigned_tables = d.user.assigned_tables || [];
+  } catch (e) {
+    if (w && before) w.assigned_tables = before;       // put it back — never lie about what's saved
+    toast(e.message || "Couldn't save that change.", "err");
+  }
+  renderEditor(); repaintSectionPicker(); repaintSectionsModal();
+}
+
+const secTables = (w) => (w.assigned_tables || []).map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+const secName = (w) => (w.name || w.username || "Waiter").trim();
+// Which waiters hold table i (used by the by-table view and the gap warning).
+function secHolders(i) {
+  return (state.sections?.waiters || []).filter((w) => secTables(w).includes(Number(i)));
+}
+// Tables nobody serves — the state that silently loses orders.
+function secGaps() {
+  const n = state.sections?.tableCount || 0;
+  const out = [];
+  for (let i = 1; i <= n; i++) if (!secHolders(i).length) out.push(i);
+  return out;
+}
+// "1 2 3 4 6" → "1–4, 6". Same compaction the waiter sees on their own tablet.
+function secRangeText(nums) {
+  const xs = nums.slice().sort((a, b) => a - b);
+  if (!xs.length) return "";
+  const parts = []; let start = xs[0], prev = xs[0];
+  for (let i = 1; i <= xs.length; i++) {
+    const cur = xs[i];
+    if (cur === prev + 1) { prev = cur; continue; }
+    parts.push(start === prev ? `T${start}` : `T${start}–T${prev}`);
+    start = cur; prev = cur;
+  }
+  return parts.join(", ");
+}
+
+function tableSectionsCardHtml() {
+  const wrap = (inner) => `<div class="card" data-mgr-hide="table_sections"><h3>Who serves which table</h3>${inner}</div>`;
+  if (state.sectionsDenied) return wrap(`<p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">${esc(state.sectionsDenied)}</p>`);
+  if (!state.sectionsLoaded || !state.sections) return wrap(`<p class="muted" style="font-size:13px;margin:0">Loading…</p>`);
+
+  const s = state.sections;
+  const waiters = s.waiters || [];
+  const view = state.sectionsView === "table" ? "table" : "waiter";
+  const gaps = secGaps();
+  const empties = waiters.filter((w) => w.active !== false && !secTables(w).length);
+
+  const intro = `<p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
+      Give each waiter their own part of the floor. Their tablet then shows <b>only</b> those
+      tables — everything else is hidden, and the server turns down anything they try on a
+      table that isn't theirs. The same table can be given to <b>two</b> waiters if they share it.
+    </p>`;
+
+  // The two warnings, most dangerous first. A gap loses orders; an empty waiter just
+  // stares at a blank tablet — bad, but recoverable.
+  let warn = "";
+  if (gaps.length) {
+    warn += `<div class="sec-warn sec-warn-bad">
+      <b>⚠ ${gaps.length} table${gaps.length === 1 ? "" : "s"} nobody serves</b>
+      <span>${esc(secRangeText(gaps))} won't appear on any waiter's tablet, so a guest sitting there is never seen.</span>
+      <button class="btn small" type="button" data-sec-fixgaps>Give them to everyone</button>
+    </div>`;
+  }
+  if (empties.length) {
+    warn += `<div class="sec-warn">
+      <b>${empties.length} waiter${empties.length === 1 ? " has" : "s have"} no tables</b>
+      <span>${esc(empties.map(secName).join(", "))} — their tablet will be empty until you give them a section.</span>
+    </div>`;
+  }
+  if (!s.moduleOn) {
+    warn = `<div class="sec-warn">
+      <b>Sections aren't switched on for this restaurant</b>
+      <span>Every waiter still sees the whole floor. What you set here is saved and starts working the moment Aevidine turns the feature on.</span>
+    </div>` + warn;
+  }
+
+  const toggle = `<div class="sec-views">
+      <button class="btn small ${view === "waiter" ? "primary" : ""}" type="button" data-sec-view="waiter">By waiter</button>
+      <button class="btn small ${view === "table" ? "primary" : ""}" type="button" data-sec-view="table">By table</button>
+    </div>`;
+
+  let list = "";
+  if (view === "waiter") {
+    list = waiters.length ? waiters.map((w) => {
+      const ts = secTables(w);
+      const chips = ts.length
+        ? ts.map((i) => `<span class="sec-chip">T${i}</span>`).join("")
+        : `<span class="sec-chip sec-chip-none">no tables — empty tablet</span>`;
+      return `<div class="sec-row${w.active === false ? " sec-off" : ""}">
+        <div class="sec-who">
+          <b>${esc(secName(w))}</b>
+          ${w.active === false ? `<span class="sec-dis">disabled</span>` : ""}
+          <span class="muted">${ts.length} table${ts.length === 1 ? "" : "s"}</span>
+        </div>
+        <div class="sec-chips">${chips}</div>
+        <button class="btn small" type="button" data-sec-edit="${esc(w.id)}">Edit ▸</button>
+      </div>`;
+    }).join("") : `<div class="sx-empty">No waiter logins yet — add one in <b>Users</b>, then give them tables here.</div>`;
+  } else {
+    const n = s.tableCount || 0;
+    let cells = "";
+    for (let i = 1; i <= n; i++) {
+      const hold = secHolders(i);
+      cells += `<button class="sec-tcell${hold.length ? "" : " sec-tcell-gap"}" type="button" data-sec-table="${i}">
+        <b>T${i}</b>
+        <span>${hold.length ? esc(hold.map(secName).join(", ")) : "nobody"}</span>
+      </button>`;
+    }
+    list = `<div class="sec-tgrid">${cells}</div>`;
+  }
+
+  const bulk = waiters.length ? `<div class="sec-bulk">
+      <button class="btn small" type="button" data-sec-all>Give every table to everyone</button>
+      <button class="btn small" type="button" data-sec-clear>Clear all</button>
+      <span class="muted" style="font-size:12px">Changes save straight away and reach the tablets without a re-login.</span>
+    </div>` : "";
+
+  return wrap(intro + warn + toggle + list + bulk);
+}
+
+// Escape-to-close for the three section overlays. The panel's overlay watcher already wires
+// the phone's hardware BACK button to any .sx-modal-overlay; this is the desktop half.
+// Registered per overlay and removed by that overlay's own close(), so no listener outlives
+// the popup it belongs to however it was dismissed (✕, backdrop, Escape or Back).
+const secEscMap = new WeakMap();
+function secEscOn(ov, close) {
+  const fn = (e) => {
+    if (e.key !== "Escape") return;
+    // Close ONLY the top layer. The single-waiter picker opens ON TOP of the sections
+    // modal, and both hold a listener — without this, one Escape closed the picker AND
+    // the card behind it, which is not what "back one step" means (and is exactly what
+    // LFH_BACK gets right for the phone button).
+    const all = document.querySelectorAll(".sx-modal-overlay");
+    if (all.length && all[all.length - 1] !== ov) return;
+    close();
+  };
+  secEscMap.set(ov, fn);
+  document.addEventListener("keydown", fn);
+}
+function secEscOff(ov) {
+  const fn = secEscMap.get(ov);
+  if (fn) { document.removeEventListener("keydown", fn); secEscMap.delete(ov); }
+}
+
+// The SAME card, opened as a modal from the live Table view — because the Settings tab it
+// otherwise lives in is gated by `edit_settings`, a power a section-granting manager may
+// not have. One builder, two doors: no chance of the two drifting apart.
+function openSectionsModal() {
+  const ov = document.createElement("div");
+  ov.className = "sx-modal-overlay";
+  ov.innerHTML = `<div class="sx-modal sec-modal sec-modal-wide">
+      <div class="sx-modal-head"><h3>Who serves which table</h3><button class="sx-x" type="button" data-sec-close>✕</button></div>
+      <div class="sx-modal-body" data-sec-card>${tableSectionsCardHtml()}</div>
+    </div>`;
+  const close = () => { sectionsModalOpen = false; secEscOff(ov); ov.remove(); };
+  ov.__lfhClose = close;
+  secEscOn(ov, close);
+  sectionsModalOpen = true;
+  ov.addEventListener("click", (e) => {
+    if (e.target === ov || e.target.closest("[data-sec-close]")) return close();
+    const v = e.target.closest("[data-sec-view]");
+    if (v) { state.sectionsView = v.dataset.secView; return repaintSectionsModal(); }
+    const ed2 = e.target.closest("[data-sec-edit]");
+    if (ed2) return openSectionPicker(ed2.dataset.secEdit);
+    const tc = e.target.closest("[data-sec-table]");
+    if (tc) return openTableHolderPicker(Number(tc.dataset.secTable));
+    const fx = e.target.closest("[data-sec-fixgaps]");
+    if (fx) return (async () => {
+      const gaps = secGaps(); if (!gaps.length) return;
+      for (const w of (state.sections?.waiters || [])) {
+        await saveWaiterTables(w.id, Array.from(new Set(secTables(w).concat(gaps))).sort((a, b) => a - b));
+      }
+      toast(`${gaps.length} table${gaps.length === 1 ? "" : "s"} now covered.`);
+    })();
+    const al = e.target.closest("[data-sec-all]");
+    if (al) return (async () => {
+      if (!(await confirmDialog("Give every table to every waiter? They'll each see the whole floor again — you can then take tables away one by one.", "Give all"))) return;
+      const all = Array.from({ length: state.sections?.tableCount || 0 }, (_, k) => k + 1);
+      for (const w of (state.sections?.waiters || [])) await saveWaiterTables(w.id, all);
+    })();
+    const cl = e.target.closest("[data-sec-clear]");
+    if (cl) return (async () => {
+      if (!(await confirmDialog("Clear every section? Every waiter will be left with NO tables — while sections are switched on, their tablets will be empty until you give them tables again.", "Clear all", { floorwide: true }))) return;
+      for (const w of (state.sections?.waiters || [])) await saveWaiterTables(w.id, []);
+    })();
+  });
+  document.body.appendChild(ov);
+  if (!state.sectionsLoaded && !state.sectionsLoading) loadTableSections().then(repaintSectionsModal);
+}
+let sectionsModalOpen = false;
+function repaintSectionsModal() {
+  const host = document.querySelector("[data-sec-card]");
+  if (host && sectionsModalOpen) host.innerHTML = tableSectionsCardHtml();
+}
+
+// ── The picker: tap tables on/off for ONE waiter ─────────────────────────────
+// Uses the .sx-modal-overlay class, which the panel's overlay watcher (wireOverlayBack)
+// already registers with LFH_BACK — so the phone's hardware Back closes the picker
+// instead of leaving the panel, with no hand-rolled history here.
+let sectionPickerId = null;
+function repaintSectionPicker() {
+  const host = document.querySelector("[data-sec-picker-body]");
+  if (host && sectionPickerId) host.innerHTML = sectionPickerBodyHtml(sectionPickerId);
+}
+function sectionPickerBodyHtml(userId) {
+  const s = state.sections || {};
+  const w = (s.waiters || []).find((x) => x.id === userId);
+  if (!w) return `<div class="sx-empty">That waiter is no longer on the team.</div>`;
+  const mine = secTables(w);
+  const n = s.tableCount || 0;
+  const names = s.tableNames || {};
+  let cells = "";
+  for (let i = 1; i <= n; i++) {
+    const on = mine.includes(i);
+    // Who ELSE holds this table: shown so sharing is a deliberate choice, not a surprise.
+    const others = secHolders(i).filter((x) => x.id !== userId).map(secName);
+    const nm = (names[String(i)] || "").trim();
+    cells += `<button class="sec-pick${on ? " on" : ""}" type="button" data-sec-toggle="${i}"
+      title="${on ? "Tap to take this table away" : "Tap to give this table"}">
+      <b>${on ? "✓ " : ""}T${i}</b>
+      ${nm ? `<span class="sec-pick-nm">${esc(nm)}</span>` : ""}
+      ${others.length ? `<span class="sec-pick-oth">${esc(others.join(", "))}</span>` : ""}
+    </button>`;
+  }
+  return `<div class="sec-pickbar">
+      <button class="btn small" type="button" data-sec-pickall>All tables</button>
+      <button class="btn small" type="button" data-sec-picknone>None</button>
+      <span class="sec-pickrange">
+        <input type="number" min="1" max="${n}" placeholder="from" data-sec-from style="width:74px" />
+        <input type="number" min="1" max="${n}" placeholder="to" data-sec-to style="width:74px" />
+        <button class="btn small" type="button" data-sec-pickrange>Add range</button>
+      </span>
+      <span class="muted" style="margin-left:auto;font-size:12px">${mine.length} of ${n} · ${esc(secRangeText(mine)) || "none"}</span>
+    </div>
+    <div class="sec-pickgrid">${cells}</div>`;
+}
+function openSectionPicker(userId) {
+  const w = (state.sections?.waiters || []).find((x) => x.id === userId);
+  if (!w) return;
+  sectionPickerId = userId;
+  const ov = document.createElement("div");
+  ov.className = "sx-modal-overlay";
+  ov.innerHTML = `<div class="sx-modal sec-modal">
+      <div class="sx-modal-head"><h3>${esc(secName(w))} · tables</h3><button class="sx-x" type="button" data-sec-close>✕</button></div>
+      <div class="sx-modal-body" data-sec-picker-body>${sectionPickerBodyHtml(userId)}</div>
+    </div>`;
+  const close = () => { sectionPickerId = null; secEscOff(ov); ov.remove(); };
+  ov.__lfhClose = close;
+  secEscOn(ov, close);
+  ov.addEventListener("click", async (e) => {
+    if (e.target === ov || e.target.closest("[data-sec-close]")) return close();
+    const cell = e.target.closest("[data-sec-toggle]");
+    if (cell) {
+      const i = Number(cell.dataset.secToggle);
+      const cur = secTables(w);
+      return saveWaiterTables(userId, cur.includes(i) ? cur.filter((x) => x !== i) : cur.concat(i));
+    }
+    if (e.target.closest("[data-sec-pickall]")) {
+      return saveWaiterTables(userId, Array.from({ length: state.sections.tableCount || 0 }, (_, k) => k + 1));
+    }
+    if (e.target.closest("[data-sec-picknone]")) return saveWaiterTables(userId, []);
+    if (e.target.closest("[data-sec-pickrange]")) {
+      const from = parseInt(ov.querySelector("[data-sec-from]")?.value, 10);
+      const to = parseInt(ov.querySelector("[data-sec-to]")?.value, 10);
+      if (!Number.isFinite(from) || !Number.isFinite(to)) return toast("Type a first and last table number.", "err");
+      const lo = Math.min(from, to), hi = Math.max(from, to);
+      const add = []; for (let i = lo; i <= hi; i++) add.push(i);
+      const merged = Array.from(new Set(secTables(w).concat(add))).sort((a, b) => a - b);
+      return saveWaiterTables(userId, merged);
+    }
+  });
+  document.body.appendChild(ov);
+}
+
+// Tapping a table in the "By table" view: choose which waiters hold THAT table — the
+// same data from the other side, for when you're thinking "who's on table 7?".
+function openTableHolderPicker(i) {
+  const s = state.sections || {};
+  const ov = document.createElement("div");
+  ov.className = "sx-modal-overlay";
+  const rows = () => (s.waiters || []).map((w) => {
+    const on = secTables(w).includes(Number(i));
+    return `<button class="sec-hold${on ? " on" : ""}" type="button" data-sec-hold="${esc(w.id)}">
+      <span>${on ? "✓" : "○"}</span><b>${esc(secName(w))}</b>
+      <span class="muted">${secTables(w).length} table${secTables(w).length === 1 ? "" : "s"}</span>
+    </button>`;
+  }).join("") || `<div class="sx-empty">No waiter logins yet.</div>`;
+  const nm = ((s.tableNames || {})[String(i)] || "").trim();
+  ov.innerHTML = `<div class="sx-modal sec-modal">
+      <div class="sx-modal-head"><h3>Table ${i}${nm ? ` · ${esc(nm)}` : ""}</h3><button class="sx-x" type="button" data-sec-close>✕</button></div>
+      <div class="sx-modal-body"><p class="muted" style="font-size:13px;margin:0 0 12px">Who serves this table? Tick more than one if they share it.</p><div class="sec-holds">${rows()}</div></div>
+    </div>`;
+  const close = () => { secEscOff(ov); ov.remove(); };
+  ov.__lfhClose = close;
+  secEscOn(ov, close);
+  ov.addEventListener("click", async (e) => {
+    if (e.target === ov || e.target.closest("[data-sec-close]")) return close();
+    const b = e.target.closest("[data-sec-hold]");
+    if (!b) return;
+    const w = (s.waiters || []).find((x) => x.id === b.dataset.secHold);
+    if (!w) return;
+    const cur = secTables(w);
+    await saveWaiterTables(w.id, cur.includes(Number(i)) ? cur.filter((x) => x !== Number(i)) : cur.concat(Number(i)));
+    const host = ov.querySelector(".sec-holds");
+    if (host) host.innerHTML = rows();
+  });
+  document.body.appendChild(ov);
+}
+
 // ---------- Settings SECTIONS (owner, 2026-07-03) ----------
 // The Settings tab is organized into sidebar sections instead of one long scroll.
 // Each section groups related cards; renderList() draws the sidebar from this same
@@ -1429,6 +1776,7 @@ function formGeneral(s) {
     <div style="max-width:200px">${tf("Number of tables", "table_count", s.table_count ?? 12, { type: "number", min: 1, max: 500, step: 1 })}</div>
   </div>
   ${tableSeatingCardHtml(s)}
+  ${tableSectionsCardHtml()}
   ${tableQrLinksCardHtml(s)}
   <div class="card"><h3>Auto close / restart tables</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
@@ -4198,6 +4546,35 @@ function bindEditor() {
   // ---- "User setting" card (Settings tab): the manager's own team ----
   if (state.tab === "general" && !state.staffLoaded) loadStaffTeam();
 
+  // ---- "Who serves which table" card (Settings → Tables): waiter sections, mig 222 ----
+  // Loaded lazily, and ONLY when its own section is open, so a manager who never opens
+  // Tables never pays for the roster fetch.
+  if (state.tab === "general" && state.settingsSection === "tables" && !state.sectionsLoaded && !state.sectionsLoading) loadTableSections();
+  ed.querySelectorAll("[data-sec-view]").forEach((b) => (b.onclick = () => { state.sectionsView = b.dataset.secView; renderEditor(); }));
+  ed.querySelectorAll("[data-sec-edit]").forEach((b) => (b.onclick = () => openSectionPicker(b.dataset.secEdit)));
+  ed.querySelectorAll("[data-sec-table]").forEach((b) => (b.onclick = () => openTableHolderPicker(Number(b.dataset.secTable))));
+  // "Give them to everyone" on the gap warning: the fastest way out of the one state that
+  // silently loses orders. Only the UNSERVED tables are added — it never disturbs a section
+  // someone has already set up deliberately.
+  { const gb = ed.querySelector("[data-sec-fixgaps]"); if (gb) gb.onclick = async () => {
+      const gaps = secGaps(); if (!gaps.length) return;
+      for (const w of (state.sections?.waiters || [])) {
+        await saveWaiterTables(w.id, Array.from(new Set(secTables(w).concat(gaps))).sort((a, b) => a - b));
+      }
+      toast(`${gaps.length} table${gaps.length === 1 ? "" : "s"} now covered.`);
+    }; }
+  { const ab = ed.querySelector("[data-sec-all]"); if (ab) ab.onclick = async () => {
+      if (!(await confirmDialog("Give every table to every waiter? They'll each see the whole floor again — you can then take tables away one by one.", "Give all"))) return;
+      const all = Array.from({ length: state.sections?.tableCount || 0 }, (_, k) => k + 1);
+      for (const w of (state.sections?.waiters || [])) await saveWaiterTables(w.id, all);
+    }; }
+  { const cb2 = ed.querySelector("[data-sec-clear]"); if (cb2) cb2.onclick = async () => {
+      // floorwide: this is the scarier look, and it earns it — while sections are on, every
+      // waiter's tablet goes blank the moment this lands.
+      if (!(await confirmDialog("Clear every section? Every waiter will be left with NO tables — while sections are switched on, their tablets will be empty until you give them tables again.", "Clear all", { floorwide: true }))) return;
+      for (const w of (state.sections?.waiters || [])) await saveWaiterTables(w.id, []);
+    }; }
+
   // ---- Access section: per-user permission selects (owner, 2026-07-03) ----
   // Each change saves IMMEDIATELY via /api/owner/staff set_permissions ("" = back to
   // Default → the server deletes the key). staffCall reloads nothing itself, so we
@@ -5592,7 +5969,13 @@ function floorHtml() {
   // any table. Opens the take-order picker in parcel mode → a takeaway Platform order
   // (owner, 2026-07-25). Gated by the take_orders x-ray + server (hidden for staff without it).
   const parcelBtn = `<button class="btn primary ed-parcel-btn" data-new-parcel="1" title="Start a takeaway / parcel order — no table needed">🥡 New&nbsp;Parcel</button>`;
-  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${parcelBtn}${collapsedNow ? "" : densityBtnsHtml()}</div>${statsStrip}${legend}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${tiles}</div></div>`;
+  // Waiter sections (mig 222) — the entry point that ACTUALLY works for a manager.
+  // The full editor also sits in Settings → Tables, but that whole tab is gated by the
+  // SEPARATE `edit_settings` power, so a manager granted only `table_assign` could never
+  // reach it (caught in live testing 2026-07-29). Sections belong to the floor anyway, so
+  // the live Table view is the natural home. Same builder → one source of truth.
+  const sectionsBtn = `<button class="btn" id="floorSections" data-mgr-hide="table_sections" title="Give each waiter their own tables">👥 Who serves what</button>`;
+  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${sectionsBtn}${parcelBtn}${collapsedNow ? "" : densityBtnsHtml()}</div>${statsStrip}${legend}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${tiles}</div></div>`;
 
   // side panel — everyday floor work only (whole-floor open/close, requests, needs,
   // blocked). The old "Features · rarely changed" card that used to sit at the bottom
@@ -5908,6 +6291,8 @@ function bindFloor() {
   // New Parcel → the take-order dish picker in PARCEL mode (no table → a takeaway
   // order in the Platform system). Gated by the take_orders x-ray (below) + server.
   ed.querySelectorAll("[data-new-parcel]").forEach((b) => (b.onclick = () => openTakeOrder(null, null, { parcel: true })));
+  // Waiter sections (mig 222) — same editor as Settings → Tables, reachable from the floor.
+  { const sb = ed.querySelector("#floorSections"); if (sb) sb.onclick = () => openSectionsModal(); }
   const oa = document.getElementById("floorOpenAll");
   if (oa) oa.onclick = () => openAllTables();
   const ca = document.getElementById("floorCloseAll");
@@ -9409,6 +9794,11 @@ const XRAY_CONTROLS = [
   { selector: '.list-item[data-settings-section="sessions"]', flag: "admin_only_setting", label: "Dining sessions" },
   { selector: '[data-mgr-hide="table_count"]', flag: "admin_only_setting", label: "Number of tables" },
   { selector: '[data-mgr-hide="table_qr"]', flag: "admin_only_setting", label: "Guest QR links per table" },
+  // Waiter sections (mig 222) — a REAL manager power, so it follows the normal rule:
+  // hidden when the owner hasn't granted it (or the admin hasn't turned the module on,
+  // which whoami already folds into effectivePowers), tinted-but-working for a higher
+  // role looking in. Same shape as #sxKot / table_ops above.
+  { selector: '[data-mgr-hide="table_sections"]', flag: "table_assign", label: "Who serves which table" },
   // TODAY-ONLY dashboard for a real manager (owner 2026-07-29): the 30-day and 12-month
   // views are admin/owner reporting surfaces, so their sub-nav rows disappear for a manager
   // (and in the actual-manager-view mode). "higher_only_view" has NO admin switch on purpose
